@@ -11,6 +11,8 @@ import sys
 import unittest
 from unittest import mock
 
+import numpy as np
+
 import torch
 import torch._dynamo.testing
 import torch._inductor.test_case
@@ -4443,6 +4445,120 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         f(torch.randn(8, device=GPU_TYPE))
         f(torch.randn(16, device=GPU_TYPE))
+
+    @requires_gpu
+    def test_triton_grid_numpy_integer_scalar_array_range(self):
+        def f(x, y):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                num_programs = np.array(triton.cdiv(n_elements, meta["BLOCK_SIZE"]))
+                total = 0
+                for _ in range(num_programs):
+                    total += 1
+                return (total,)
+
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+            return output
+
+        x = torch.randn(33, device=GPU_TYPE)
+        y = torch.randn(33, device=GPU_TYPE)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x, y), f(x, y))
+
+    @requires_gpu
+    @dynamo_config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
+    def test_triton_grid_numpy_data_dependent_range(self):
+        @triton.jit
+        def add_kernel_with_lengths(
+            in_ptr0,
+            in_ptr1,
+            lengths,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x, y, lengths):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            seqlens = np.diff(lengths.cpu())
+
+            def grid(meta):
+                nums = -(-seqlens // meta["BLOCK_SIZE"])
+                offsets = []
+                for num in nums:
+                    offsets.extend(range(num))
+                return (len(offsets),)
+
+            add_kernel_with_lengths[grid](
+                x, y, lengths, output, n_elements, BLOCK_SIZE=16
+            )
+            return output
+
+        x = torch.randn(33, device=GPU_TYPE)
+        y = torch.randn(33, device=GPU_TYPE)
+        compiled = torch.compile(f, fullgraph=True)
+        for lengths in (
+            torch.tensor([0, 33, 33, 33, 33], device=GPU_TYPE),
+            torch.tensor([0, 8, 16, 24, 33], device=GPU_TYPE),
+        ):
+            self.assertEqual(compiled(x, y, lengths), f(x, y, lengths))
+
+    @requires_gpu
+    @dynamo_config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
+    def test_triton_grid_torch_data_dependent_arange(self):
+        @triton.jit
+        def add_kernel_with_lengths(
+            in_ptr0,
+            in_ptr1,
+            lengths,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x, y, lengths):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            seqlens = torch.diff(lengths.cpu())
+
+            def grid(meta):
+                nums = -(-seqlens // meta["BLOCK_SIZE"])
+                offsets = []
+                for num in nums:
+                    offsets.extend(torch.arange(num))
+                return (len(offsets),)
+
+            add_kernel_with_lengths[grid](
+                x, y, lengths, output, n_elements, BLOCK_SIZE=16
+            )
+            return output
+
+        x = torch.randn(33, device=GPU_TYPE)
+        y = torch.randn(33, device=GPU_TYPE)
+        compiled = torch.compile(f, fullgraph=True)
+        for lengths in (
+            torch.tensor([0, 33, 33, 33, 33], device=GPU_TYPE),
+            torch.tensor([0, 8, 16, 24, 33], device=GPU_TYPE),
+        ):
+            self.assertEqual(compiled(x, y, lengths), f(x, y, lengths))
 
     @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_capture_triton_meta(self):

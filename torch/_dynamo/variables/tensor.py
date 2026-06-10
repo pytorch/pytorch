@@ -3126,6 +3126,40 @@ class NumpyNdarrayVariable(TensorVariable):
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 
+    def nb_index_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        # NumPy only allows integer scalar arrays in index contexts.  Bypass
+        # ndarray.item() here: it can return a Python scalar, while Dynamo
+        # needs a symbolic scalar proxy for range/operator.index.
+        if (
+            self.ndim != 0
+            or self.dtype is torch.bool
+            or (
+                self.dtype is not None
+                and (self.dtype.is_floating_point or self.dtype.is_complex)
+            )
+        ):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=["only integer scalar arrays can be converted to a scalar index"],
+            )
+
+        item = TensorVariable.call_method(self, tx, "item", [], {})
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                sym_int,
+                (item.as_proxy(),),
+                {},
+            ),
+        )
+
     def python_type(self) -> type:
         if np is not None:
             return np.ndarray

@@ -2661,6 +2661,234 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         )
 
     @make_test
+    def test_numpy_integer_scalar_array_range(x):
+        n = np.array(x.shape[0])
+        total = 0
+        for i in range(n):
+            total += i
+        return x + total
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True,
+        capture_dynamic_output_shape_ops=True,
+        recompile_limit=1,
+        fail_on_recompile_limit_hit=True,
+    )
+    def test_numpy_data_dependent_range_extend_len(self):
+        def fn(x, lengths):
+            seqlens = np.diff(lengths.cpu())
+            offsets = []
+            for num in -(-seqlens // 16):
+                offsets.extend(range(num))
+            return x + len(offsets)
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+        x = torch.ones(())
+        for lengths in (
+            torch.tensor([0, 33, 33, 33, 33]),
+            torch.tensor([0, 8, 16, 24, 33]),
+        ):
+            self.assertEqual(compiled(x, lengths), fn(x, lengths))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True,
+        capture_dynamic_output_shape_ops=True,
+        recompile_limit=1,
+        fail_on_recompile_limit_hit=True,
+    )
+    def test_torch_data_dependent_arange_extend_len(self):
+        def fn(x, lengths):
+            seqlens = torch.diff(lengths.cpu())
+            offsets = []
+            for num in -(-seqlens // 16):
+                offsets.extend(torch.arange(num))
+            return x + len(offsets)
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+        x = torch.ones(())
+        for lengths in (
+            torch.tensor([0, 33, 33, 33, 33]),
+            torch.tensor([0, 8, 16, 24, 33]),
+        ):
+            self.assertEqual(compiled(x, lengths), fn(x, lengths))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True,
+        capture_dynamic_output_shape_ops=True,
+        recompile_limit=1,
+        fail_on_recompile_limit_hit=True,
+    )
+    def test_list_symbolic_length_extend_from_list(self):
+        def make_src(lengths):
+            seqlens = torch.diff(lengths.cpu())
+            src = []
+            for num in -(-seqlens // 16):
+                src.extend(torch.arange(num))
+            return src
+
+        def fn_extend(x, lengths):
+            dst = []
+            dst.extend(make_src(lengths))
+            return x + len(dst)
+
+        def fn_iadd(x, lengths):
+            dst = []
+            dst += make_src(lengths)
+            return x + len(dst)
+
+        x = torch.ones(())
+        for fn in (fn_extend, fn_iadd):
+            compiled = torch.compile(fn, fullgraph=True, backend="eager")
+            for lengths in (
+                torch.tensor([0, 33, 33, 33, 33]),
+                torch.tensor([0, 8, 16, 24, 33]),
+            ):
+                self.assertEqual(compiled(x, lengths), fn(x, lengths))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True,
+        capture_dynamic_output_shape_ops=True,
+        recompile_limit=1,
+        fail_on_recompile_limit_hit=True,
+    )
+    def test_list_symbolic_length_clear(self):
+        def fn(x, lengths):
+            seqlens = torch.diff(lengths.cpu())
+            offsets = []
+            for num in -(-seqlens // 16):
+                offsets.extend(torch.arange(num))
+            offsets.clear()
+            return x + len(offsets)
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+        x = torch.ones(())
+        for lengths in (
+            torch.tensor([0, 33, 33, 33, 33]),
+            torch.tensor([0, 8, 16, 24, 33]),
+        ):
+            self.assertEqual(compiled(x, lengths), fn(x, lengths))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True,
+        capture_dynamic_output_shape_ops=True,
+        recompile_limit=1,
+        fail_on_recompile_limit_hit=True,
+    )
+    def test_list_symbolic_length_init(self):
+        def fn_clear_to_concrete(x, lengths):
+            seqlens = torch.diff(lengths.cpu())
+            offsets = []
+            for num in -(-seqlens // 16):
+                offsets.extend(torch.arange(num))
+            offsets.__init__([1, 2, 3])
+            return x + len(offsets)
+
+        def fn_init_from_symbolic_range(x, lengths):
+            num = torch.diff(lengths.cpu())[0]
+            offsets = [1, 2, 3]
+            offsets.__init__(range(num))
+            return x + len(offsets)
+
+        x = torch.ones(())
+        for fn in (fn_clear_to_concrete, fn_init_from_symbolic_range):
+            compiled = torch.compile(fn, fullgraph=True, backend="eager")
+            for lengths in (
+                torch.tensor([0, 33, 33, 33, 33]),
+                torch.tensor([0, 8, 16, 24, 33]),
+            ):
+                self.assertEqual(compiled(x, lengths), fn(x, lengths))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True,
+        capture_dynamic_output_shape_ops=True,
+    )
+    def test_list_symbolic_length_materialize_graph_breaks(self):
+        def make_offsets(lengths):
+            seqlens = torch.diff(lengths.cpu())
+            offsets = []
+            for num in -(-seqlens // 16):
+                offsets.extend(torch.arange(num))
+            return offsets
+
+        def fn_pop(lengths):
+            offsets = make_offsets(lengths)
+            offsets.pop()
+            return len(offsets)
+
+        def fn_repeat(lengths):
+            offsets = make_offsets(lengths)
+            offsets *= 2
+            return len(offsets)
+
+        def fn_delete(lengths):
+            offsets = make_offsets(lengths)
+            del offsets[0]
+            return len(offsets)
+
+        def fn_contains(lengths):
+            return 0 in make_offsets(lengths)
+
+        def fn_eq(lengths):
+            return make_offsets(lengths) == []
+
+        def fn_tree_map(lengths):
+            return torch.utils._pytree.tree_map(lambda x: x + 1, make_offsets(lengths))
+
+        def fn_tree_map_with_path(lengths):
+            return torch.utils._pytree.tree_map_with_path(
+                lambda keypath, x: x + 1, make_offsets(lengths)
+            )
+
+        def fn_repr(lengths):
+            return repr(make_offsets(lengths))
+
+        def fn_reversed(lengths):
+            return list(reversed(make_offsets(lengths)))
+
+        lengths = torch.tensor([0, 33, 33, 33, 33])
+        for fn in (
+            fn_pop,
+            fn_repeat,
+            fn_delete,
+            fn_contains,
+            fn_eq,
+            fn_tree_map,
+            fn_tree_map_with_path,
+            fn_repr,
+            fn_reversed,
+        ):
+            with self.assertRaisesRegex(Unsupported, "symbolic length"):
+                torch.compile(fn, fullgraph=True, backend="eager")(lengths)
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True,
+        capture_dynamic_output_shape_ops=True,
+    )
+    def test_range_symbolic_materialize_graph_breaks(self):
+        def make_range(lengths):
+            return range(torch.diff(lengths.cpu())[0])
+
+        def fn_contains(lengths):
+            return 0 in make_range(lengths)
+
+        def fn_getitem(lengths):
+            return make_range(lengths)[0]
+
+        def fn_count(lengths):
+            return make_range(lengths).count(0)
+
+        def fn_eq(lengths):
+            return make_range(lengths) == range(1)
+
+        def fn_repr(lengths):
+            return repr(make_range(lengths))
+
+        lengths = torch.tensor([0, 33])
+        for fn in (fn_contains, fn_getitem, fn_count, fn_eq, fn_repr):
+            with self.assertRaisesRegex(Unsupported, "symbolic range"):
+                torch.compile(fn, fullgraph=True, backend="eager")(lengths)
+
+    @make_test
     def test_mean_sum_np(x: torch.Tensor):
         x_mean = np.mean(x.numpy(), 1)
         x_sum = np.sum(x_mean)
