@@ -452,8 +452,8 @@ def _shard_non_reduction_dim(
             continue
         out_d = d if keep_dim or d < dim else d - 1
         strategies.append(
-            [_ShardingPlaceholder(out_d)]
-            * n_outputs  # pyrefly: ignore[bad-argument-type]
+            [_ShardingPlaceholder(out_d)]  # pyrefly: ignore[bad-argument-type]
+            * n_outputs
             + [_ShardingPlaceholder(d)]
         )
     return strategies
