@@ -451,9 +451,15 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, co
     }
   } else {
     TORCH_CHECK(has_running_mean);
-    at::native::resize_output(save_mean, running_mean_opt->sizes());
-    save_mean.copy_(*running_mean_opt, /*non_blocking=*/true);
-    batch_norm_calc_invstd(save_invstd, running_var_opt.value(), epsilon);
+    // In eval mode, compute the forward pass using running stats directly,
+    // then return empty save_mean/save_invstd to match CPU behavior (they
+    // are not needed for the backward pass in eval mode).
+    auto invstd = at::empty_like(running_var_opt.value());
+    batch_norm_calc_invstd(invstd, running_var_opt.value(), epsilon);
+    batch_norm_elementwise(output, self, weight_opt, bias_opt, *running_mean_opt, invstd);
+    at::native::resize_output(save_mean, {0});
+    at::native::resize_output(save_invstd, {0});
+    return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_invstd);
   }
 
   batch_norm_elementwise(output, self, weight_opt, bias_opt, save_mean, save_invstd);
@@ -465,8 +471,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const std
   int64_t n_input = self.size(1);
   auto options = self.options().dtype(
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
-  auto save_mean = at::empty({n_input}, options);
-  auto save_invstd = at::empty({n_input}, options);
+  // In eval mode, save_mean/save_invstd will be resized to {0} by
+  // batch_norm_cuda_out, so avoid unnecessary allocation.
+  auto save_mean = train ? at::empty({n_input}, options) : at::empty({0}, options);
+  auto save_invstd = train ? at::empty({n_input}, options) : at::empty({0}, options);
 
   at::native::batch_norm_cuda_out(
       self,
