@@ -1827,6 +1827,12 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(result.full_tensor(), expected)
         self.assertTrue(result.placements[0].is_shard(0))
 
+        # group_norm with weight=None, bias=None (affine=False)
+        expected_no_affine = F.group_norm(inp, num_groups)
+        result_no_affine = F.group_norm(dt_inp, num_groups)
+        self.assertEqual(result_no_affine.full_tensor(), expected_no_affine)
+        self.assertTrue(result_no_affine.placements[0].is_shard(0))
+
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest,
