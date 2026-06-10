@@ -31,6 +31,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -129,6 +130,8 @@ enum class GuardSubtreeProbeTokenKind : uint8_t {
   BoundMethod,
   FrameGlobals,
 };
+
+constexpr size_t kGuardSubtreeProbeTokenKindCount = 12;
 
 enum class GuardFastPlanCandidateKind : uint8_t {
   Unknown,
@@ -272,6 +275,21 @@ struct GuardLastSuccessStats {
   std::atomic<uint64_t> actual_partial_disabled{0};
   std::atomic<uint64_t> actual_partial_residual_fail{0};
   std::atomic<uint64_t> actual_partial_hot_token_count_sum{0};
+  std::atomic<uint64_t> actual_partial_hot_token_unique_count_sum{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_count_sum{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_object_only{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_exact_dict{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_exact_list{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_exact_tuple{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_tensor_match{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_default_device{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_global_state{0};
+  std::atomic<uint64_t>
+      actual_partial_hot_token_duplicate_torch_function_mode_stack{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_no_tensor_aliasing{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_object_aliasing{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_bound_method{0};
+  std::atomic<uint64_t> actual_partial_hot_token_duplicate_frame_globals{0};
   std::atomic<uint64_t> actual_partial_token_check_ns{0};
   std::atomic<uint64_t> actual_partial_residual_ns{0};
   std::atomic<uint64_t> actual_partial_train_ns{0};
@@ -688,6 +706,25 @@ void reset_guard_lookup_stats() {
   store_zero(last_success_stats.actual_partial_disabled);
   store_zero(last_success_stats.actual_partial_residual_fail);
   store_zero(last_success_stats.actual_partial_hot_token_count_sum);
+  store_zero(last_success_stats.actual_partial_hot_token_unique_count_sum);
+  store_zero(last_success_stats.actual_partial_hot_token_duplicate_count_sum);
+  store_zero(last_success_stats.actual_partial_hot_token_duplicate_object_only);
+  store_zero(last_success_stats.actual_partial_hot_token_duplicate_exact_dict);
+  store_zero(last_success_stats.actual_partial_hot_token_duplicate_exact_list);
+  store_zero(last_success_stats.actual_partial_hot_token_duplicate_exact_tuple);
+  store_zero(last_success_stats.actual_partial_hot_token_duplicate_tensor_match);
+  store_zero(
+      last_success_stats.actual_partial_hot_token_duplicate_default_device);
+  store_zero(last_success_stats.actual_partial_hot_token_duplicate_global_state);
+  store_zero(
+      last_success_stats
+          .actual_partial_hot_token_duplicate_torch_function_mode_stack);
+  store_zero(
+      last_success_stats.actual_partial_hot_token_duplicate_no_tensor_aliasing);
+  store_zero(
+      last_success_stats.actual_partial_hot_token_duplicate_object_aliasing);
+  store_zero(last_success_stats.actual_partial_hot_token_duplicate_bound_method);
+  store_zero(last_success_stats.actual_partial_hot_token_duplicate_frame_globals);
   store_zero(last_success_stats.actual_partial_token_check_ns);
   store_zero(last_success_stats.actual_partial_residual_ns);
   store_zero(last_success_stats.actual_partial_train_ns);
@@ -972,6 +1009,41 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(last_success_stats.actual_partial_residual_fail);
   result["guard_last_success_actual_partial_hot_token_count_sum"] =
       load_relaxed(last_success_stats.actual_partial_hot_token_count_sum);
+  result["guard_last_success_actual_partial_hot_token_unique_count_sum"] =
+      load_relaxed(
+          last_success_stats.actual_partial_hot_token_unique_count_sum);
+  result["guard_last_success_actual_partial_hot_token_duplicate_count_sum"] =
+      load_relaxed(
+          last_success_stats.actual_partial_hot_token_duplicate_count_sum);
+  py::dict actual_partial_duplicate_kind_counts;
+  actual_partial_duplicate_kind_counts["ObjectOnly"] = load_relaxed(
+      last_success_stats.actual_partial_hot_token_duplicate_object_only);
+  actual_partial_duplicate_kind_counts["ExactDict"] = load_relaxed(
+      last_success_stats.actual_partial_hot_token_duplicate_exact_dict);
+  actual_partial_duplicate_kind_counts["ExactList"] = load_relaxed(
+      last_success_stats.actual_partial_hot_token_duplicate_exact_list);
+  actual_partial_duplicate_kind_counts["ExactTuple"] = load_relaxed(
+      last_success_stats.actual_partial_hot_token_duplicate_exact_tuple);
+  actual_partial_duplicate_kind_counts["TensorMatch"] = load_relaxed(
+      last_success_stats.actual_partial_hot_token_duplicate_tensor_match);
+  actual_partial_duplicate_kind_counts["DefaultDevice"] = load_relaxed(
+      last_success_stats.actual_partial_hot_token_duplicate_default_device);
+  actual_partial_duplicate_kind_counts["GlobalState"] = load_relaxed(
+      last_success_stats.actual_partial_hot_token_duplicate_global_state);
+  actual_partial_duplicate_kind_counts["TorchFunctionModeStack"] = load_relaxed(
+      last_success_stats
+          .actual_partial_hot_token_duplicate_torch_function_mode_stack);
+  actual_partial_duplicate_kind_counts["NoTensorAliasing"] = load_relaxed(
+      last_success_stats.actual_partial_hot_token_duplicate_no_tensor_aliasing);
+  actual_partial_duplicate_kind_counts["ObjectAliasing"] = load_relaxed(
+      last_success_stats.actual_partial_hot_token_duplicate_object_aliasing);
+  actual_partial_duplicate_kind_counts["BoundMethod"] = load_relaxed(
+      last_success_stats.actual_partial_hot_token_duplicate_bound_method);
+  actual_partial_duplicate_kind_counts["FrameGlobals"] = load_relaxed(
+      last_success_stats.actual_partial_hot_token_duplicate_frame_globals);
+  result
+      ["guard_last_success_actual_partial_hot_token_duplicate_kind_counts"] =
+          actual_partial_duplicate_kind_counts;
   result["guard_last_success_actual_partial_token_check_ns"] =
       load_relaxed(last_success_stats.actual_partial_token_check_ns);
   result["guard_last_success_actual_partial_residual_ns"] =
@@ -1768,6 +1840,81 @@ static void record_guard_last_success_actual_partial_hot_tokens(
   add_relaxed(
       guard_last_success_stats().actual_partial_hot_token_count_sum,
       token_count);
+}
+
+static void add_guard_last_success_actual_partial_duplicate_kind_count(
+    GuardLastSuccessStats& stats,
+    GuardSubtreeProbeTokenKind kind,
+    uint64_t count) {
+  switch (kind) {
+    case GuardSubtreeProbeTokenKind::ObjectOnly:
+      add_relaxed(
+          stats.actual_partial_hot_token_duplicate_object_only, count);
+      break;
+    case GuardSubtreeProbeTokenKind::ExactDict:
+      add_relaxed(stats.actual_partial_hot_token_duplicate_exact_dict, count);
+      break;
+    case GuardSubtreeProbeTokenKind::ExactList:
+      add_relaxed(stats.actual_partial_hot_token_duplicate_exact_list, count);
+      break;
+    case GuardSubtreeProbeTokenKind::ExactTuple:
+      add_relaxed(stats.actual_partial_hot_token_duplicate_exact_tuple, count);
+      break;
+    case GuardSubtreeProbeTokenKind::TensorMatch:
+      add_relaxed(stats.actual_partial_hot_token_duplicate_tensor_match, count);
+      break;
+    case GuardSubtreeProbeTokenKind::DefaultDevice:
+      add_relaxed(
+          stats.actual_partial_hot_token_duplicate_default_device, count);
+      break;
+    case GuardSubtreeProbeTokenKind::GlobalState:
+      add_relaxed(stats.actual_partial_hot_token_duplicate_global_state, count);
+      break;
+    case GuardSubtreeProbeTokenKind::TorchFunctionModeStack:
+      add_relaxed(
+          stats
+              .actual_partial_hot_token_duplicate_torch_function_mode_stack,
+          count);
+      break;
+    case GuardSubtreeProbeTokenKind::NoTensorAliasing:
+      add_relaxed(
+          stats.actual_partial_hot_token_duplicate_no_tensor_aliasing, count);
+      break;
+    case GuardSubtreeProbeTokenKind::ObjectAliasing:
+      add_relaxed(
+          stats.actual_partial_hot_token_duplicate_object_aliasing, count);
+      break;
+    case GuardSubtreeProbeTokenKind::BoundMethod:
+      add_relaxed(stats.actual_partial_hot_token_duplicate_bound_method, count);
+      break;
+    case GuardSubtreeProbeTokenKind::FrameGlobals:
+      add_relaxed(stats.actual_partial_hot_token_duplicate_frame_globals, count);
+      break;
+  }
+}
+
+static void record_guard_last_success_actual_partial_hot_token_duplicates(
+    size_t unique_count,
+    size_t duplicate_count,
+    const std::array<uint64_t, kGuardSubtreeProbeTokenKindCount>&
+        duplicate_kind_counts) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_last_success_stats();
+  add_relaxed(
+      stats.actual_partial_hot_token_unique_count_sum, unique_count);
+  add_relaxed(
+      stats.actual_partial_hot_token_duplicate_count_sum, duplicate_count);
+  for (size_t i = 0; i < duplicate_kind_counts.size(); ++i) {
+    if (duplicate_kind_counts[i] == 0) {
+      continue;
+    }
+    add_guard_last_success_actual_partial_duplicate_kind_count(
+        stats,
+        static_cast<GuardSubtreeProbeTokenKind>(i),
+        duplicate_kind_counts[i]);
+  }
 }
 
 static void record_guard_last_success_actual_partial_residual_fail(
@@ -3151,6 +3298,88 @@ static std::vector<GuardSubtreeEntryToken> guard_subtree_make_hot_tokens(
     }
   }
   return hot_tokens;
+}
+
+static uintptr_t guard_subtree_duplicate_hash_combine(
+    uintptr_t seed,
+    uintptr_t value) {
+  return seed ^ (value + static_cast<uintptr_t>(0x9e3779b97f4a7c15ULL) +
+                 (seed << 6) + (seed >> 2));
+}
+
+static uintptr_t guard_subtree_duplicate_bucket_key(
+    const GuardSubtreeEntryToken& token) {
+  uintptr_t key = static_cast<uintptr_t>(token.kind);
+  key = guard_subtree_duplicate_hash_combine(
+      key, reinterpret_cast<uintptr_t>(token.type));
+  if (token.kind == GuardSubtreeProbeTokenKind::BoundMethod) {
+    key = guard_subtree_duplicate_hash_combine(
+        key, reinterpret_cast<uintptr_t>(token.bound_method_self));
+    key = guard_subtree_duplicate_hash_combine(
+        key, reinterpret_cast<uintptr_t>(token.bound_method_func));
+    key = guard_subtree_duplicate_hash_combine(
+        key, reinterpret_cast<uintptr_t>(token.bound_c_method_class));
+    key = guard_subtree_duplicate_hash_combine(
+        key, static_cast<uintptr_t>(token.bound_c_method_flags));
+    return key;
+  }
+  if (token.kind == GuardSubtreeProbeTokenKind::GlobalState) {
+    return guard_subtree_duplicate_hash_combine(
+        key, reinterpret_cast<uintptr_t>(token.global_state_guard));
+  }
+  if (token.kind == GuardSubtreeProbeTokenKind::TorchFunctionModeStack) {
+    return guard_subtree_duplicate_hash_combine(
+        key,
+        reinterpret_cast<uintptr_t>(token.torch_function_mode_stack_guard));
+  }
+  if (token.kind == GuardSubtreeProbeTokenKind::NoTensorAliasing) {
+    key = guard_subtree_duplicate_hash_combine(
+        key, reinterpret_cast<uintptr_t>(token.object));
+    return guard_subtree_duplicate_hash_combine(
+        key, reinterpret_cast<uintptr_t>(token.no_tensor_aliasing_guard));
+  }
+  if (token.kind == GuardSubtreeProbeTokenKind::ObjectAliasing) {
+    key = guard_subtree_duplicate_hash_combine(
+        key, reinterpret_cast<uintptr_t>(token.object));
+    return guard_subtree_duplicate_hash_combine(
+        key, reinterpret_cast<uintptr_t>(token.object_aliasing_guard));
+  }
+  return guard_subtree_duplicate_hash_combine(
+      key, reinterpret_cast<uintptr_t>(token.object));
+}
+
+static void record_guard_last_success_actual_partial_hot_token_duplicate_stats(
+    const std::vector<GuardSubtreeEntryToken>& tokens) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  ska::flat_hash_map<uintptr_t, std::vector<size_t>> buckets;
+  buckets.reserve(tokens.size());
+  size_t unique_count = 0;
+  size_t duplicate_count = 0;
+  std::array<uint64_t, kGuardSubtreeProbeTokenKindCount>
+      duplicate_kind_counts{};
+  for (size_t i = 0; i < tokens.size(); ++i) {
+    const auto& token = tokens[i];
+    const uintptr_t bucket_key = guard_subtree_duplicate_bucket_key(token);
+    auto& bucket = buckets[bucket_key];
+    bool duplicate = false;
+    for (size_t existing_index : bucket) {
+      if (token.matches(tokens[existing_index])) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate) {
+      duplicate_count += 1;
+      duplicate_kind_counts[static_cast<size_t>(token.kind)] += 1;
+    } else {
+      bucket.push_back(i);
+      unique_count += 1;
+    }
+  }
+  record_guard_last_success_actual_partial_hot_token_duplicates(
+      unique_count, duplicate_count, duplicate_kind_counts);
 }
 
 static bool guard_subtree_token_vectors_match(
@@ -9419,6 +9648,12 @@ static bool guard_last_success_actual_enabled() {
   return C10_UNLIKELY(guard_fast_plan_enabled());
 }
 
+static bool guard_last_success_full_actual_enabled() {
+  // Keep the full-root last-success fast path disabled for now: unlike the
+  // partial path below, it would skip the entire root guard on token match.
+  return false;
+}
+
 bool run_root_guard_manager_with_last_success_receipt(
     void* receipt,
     void* entry_key,
@@ -9430,9 +9665,12 @@ bool run_root_guard_manager_with_last_success_receipt(
   }
 
   record_guard_last_success_shadow_attempt();
-  record_guard_last_success_actual_attempt();
   GuardLastSuccessReceipt* state =
       static_cast<GuardLastSuccessReceipt*>(receipt);
+  const bool full_actual_enabled = guard_last_success_full_actual_enabled();
+  if (full_actual_enabled) {
+    record_guard_last_success_actual_attempt();
+  }
   if (is_skip_guard_eval_unsafe) {
     record_guard_last_success_incomplete("skip_guard_eval_unsafe");
     state->reset();
@@ -9447,8 +9685,8 @@ bool run_root_guard_manager_with_last_success_receipt(
   RootGuardManager* root_mgr = static_cast<RootGuardManager*>(root);
   static const std::string self_source = "L['self']";
 
-  if (state->actual_enabled && state->actual_entry_key == entry_key &&
-      state->actual_root_key == root) {
+  if (full_actual_enabled && state->actual_enabled &&
+      state->actual_entry_key == entry_key && state->actual_root_key == root) {
     const bool collect_stats = guard_lookup_stats_enabled();
     const uint64_t token_start_ns =
         collect_stats ? guard_lookup_time_ns() : 0;
@@ -9502,7 +9740,8 @@ bool run_root_guard_manager_with_last_success_receipt(
 
   GuardSubtreeMemoSupportAnalysis analysis;
   analysis.collect_all = guard_lookup_stats_enabled();
-  const bool should_train_actual = !state->actual_disabled;
+  const bool should_train_actual =
+      full_actual_enabled && !state->actual_disabled;
   const uint64_t support_start_ns =
       guard_lookup_stats_enabled() ? guard_lookup_time_ns() : 0;
   const bool supported = should_train_actual &&
@@ -9617,9 +9856,12 @@ bool run_root_guard_manager_with_last_success_receipt(
     actual_disabled_now = true;
     record_guard_last_success_actual_disabled();
   }
-  record_guard_last_success_actual_train(
-      guard_lookup_stats_enabled() ? guard_lookup_time_ns() - actual_train_start_ns
-                                   : 0);
+  if (full_actual_enabled) {
+    record_guard_last_success_actual_train(
+        guard_lookup_stats_enabled()
+            ? guard_lookup_time_ns() - actual_train_start_ns
+            : 0);
+  }
 
   const uint64_t partial_train_start_ns =
       guard_lookup_stats_enabled() ? guard_lookup_time_ns() : 0;
@@ -9641,6 +9883,8 @@ bool run_root_guard_manager_with_last_success_receipt(
     std::vector<GuardSubtreeEntryToken> partial_stability_tokens =
         partial_tokens;
     partial_tokens = guard_subtree_make_hot_tokens(partial_tokens);
+    record_guard_last_success_actual_partial_hot_token_duplicate_stats(
+        partial_tokens);
     record_guard_last_success_actual_partial_hot_tokens(partial_tokens.size());
     if (state->actual_partial_entry_key == entry_key &&
         state->actual_partial_root_key == root &&

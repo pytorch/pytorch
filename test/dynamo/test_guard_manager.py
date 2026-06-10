@@ -2271,7 +2271,7 @@ print(json.dumps({
         self.assertGreaterEqual(stats["actual_token_check_ns"], 0)
         self.assertGreaterEqual(stats["actual_train_ns"], 0)
 
-    def test_guard_last_success_actual_hits_after_stable_self_receipt(self):
+    def test_guard_last_success_full_actual_stays_disabled(self):
         script = r"""
 import json
 import torch
@@ -2316,9 +2316,9 @@ print(json.dumps({
         )
         stats = json.loads(out.splitlines()[-1])
 
-        self.assertGreater(stats["actual_attempt"], 0)
-        self.assertGreater(stats["actual_enable"], 0)
-        self.assertGreater(stats["actual_hit"], 0)
+        self.assertEqual(stats["actual_attempt"], 0)
+        self.assertEqual(stats["actual_enable"], 0)
+        self.assertEqual(stats["actual_hit"], 0)
         self.assertEqual(stats["actual_miss"], 0)
         self.assertEqual(stats["actual_disabled"], 0, stats["disabled_reasons"])
 
@@ -2356,6 +2356,18 @@ print(json.dumps({
     "partial_hit": stats["guard_last_success_actual_partial_hit"],
     "partial_miss": stats["guard_last_success_actual_partial_miss"],
     "partial_disabled": stats["guard_last_success_actual_partial_disabled"],
+    "partial_hot_tokens": stats[
+        "guard_last_success_actual_partial_hot_token_count_sum"
+    ],
+    "partial_hot_token_unique": stats[
+        "guard_last_success_actual_partial_hot_token_unique_count_sum"
+    ],
+    "partial_hot_token_duplicate": stats[
+        "guard_last_success_actual_partial_hot_token_duplicate_count_sum"
+    ],
+    "partial_hot_token_duplicate_kinds": stats[
+        "guard_last_success_actual_partial_hot_token_duplicate_kind_counts"
+    ],
     "partial_residual_fail": stats[
         "guard_last_success_actual_partial_residual_fail"
     ],
@@ -2379,8 +2391,18 @@ print(json.dumps({
         self.assertEqual(stats["partial_miss"], 0)
         self.assertEqual(stats["partial_disabled"], 0)
         self.assertEqual(stats["partial_residual_fail"], 0)
+        self.assertGreater(stats["partial_hot_tokens"], 0)
+        self.assertGreater(stats["partial_hot_token_unique"], 0)
+        self.assertLessEqual(
+            stats["partial_hot_token_unique"], stats["partial_hot_tokens"]
+        )
+        self.assertEqual(
+            stats["partial_hot_token_unique"] + stats["partial_hot_token_duplicate"],
+            stats["partial_hot_tokens"],
+        )
+        self.assertIsInstance(stats["partial_hot_token_duplicate_kinds"], dict)
 
-    def test_guard_last_success_actual_hits_with_stable_global_dict(self):
+    def test_guard_last_success_full_actual_disabled_with_stable_global_dict(self):
         script = r"""
 import json
 import torch
@@ -2431,12 +2453,13 @@ print(json.dumps({
         )
         stats = json.loads(out.splitlines()[-1])
 
-        self.assertGreater(stats["actual_attempt"], 0)
-        self.assertGreater(stats["actual_enable"], 0)
-        self.assertGreater(stats["actual_hit"], 0)
+        self.assertEqual(stats["actual_attempt"], 0)
+        self.assertEqual(stats["actual_enable"], 0)
+        self.assertEqual(stats["actual_hit"], 0)
         self.assertEqual(stats["actual_miss"], 0)
         self.assertEqual(stats["actual_disabled"], 0, stats["disabled_reasons"])
-        self.assertGreater(stats["actual_hot_token_count_sum"], 0)
+        self.assertEqual(stats["actual_hot_token_count_sum"], 0)
+        self.assertGreaterEqual(stats["partial_hit"], 0)
 
     def test_guard_last_success_respects_global_tensor_replacement(self):
         script = r"""
