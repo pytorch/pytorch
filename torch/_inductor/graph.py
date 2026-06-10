@@ -1362,6 +1362,40 @@ class GraphLowering(torch.fx.Interpreter):
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
+        if target is operator.getitem and isinstance(args[0], ir.IRNode):
+            # Handle operator.getitem on IR nodes (non-container types).
+            # This occurs when a multi-output operation is lowered to a single
+            # IR node with MultiOutputLayout rather than a Python container.
+            # The AFG backend preprocesses these away via get_remove_none_outputs,
+            # but the standard inductor backend needs to handle them here.
+            source = args[0]
+            index = args[1]
+
+            # Unwrap TensorBox/StorageBox to reach the underlying buffer
+            buf = source
+            if isinstance(buf, TensorBox):
+                buf = buf.data
+            if isinstance(buf, StorageBox):
+                buf = buf.data
+
+            if isinstance(getattr(buf, "layout", None), ir.MultiOutputLayout):
+                example_val = self.current_node.meta["val"]
+                if isinstance(example_val, torch.Tensor):
+                    layout = FixedLayout(
+                        example_val.device,
+                        example_val.dtype,
+                        [sympy.Integer(s) for s in example_val.size()],
+                        [sympy.Integer(s) for s in example_val.stride()],
+                    )
+                    result = ir.MultiOutput(layout, buf, [(list, index)])
+                    return TensorBox.create(result)
+                elif isinstance(example_val, (int, float)):
+                    return example_val
+                elif isinstance(example_val, torch.SymInt):
+                    return example_val.node.expr
+                elif example_val is None:
+                    return None
+
         # hasattr on OpOverloadPacket is slow, check isinstance first
         if not isinstance(target, torch._ops.OpOverloadPacket) and hasattr(
             target, "_inductor_lowering_function"
