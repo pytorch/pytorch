@@ -873,10 +873,11 @@ struct HelperInterpBase {
     scalar_t support;
     int max_interp_size = 0;
     if (antialias) {
-        support = (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
+        support = (scale >= scalar_t(1.0)) ? (scalar_t(interp_size) * scalar_t(0.5)) * scale
+                                           : scalar_t(interp_size) * scalar_t(0.5);
         max_interp_size = (int) std::ceil(support) * 2 + 1;
     } else {
-        support = interp_size * 0.5;
+        support = scalar_t(interp_size) * scalar_t(0.5);
         max_interp_size = interp_size;
     }
 
@@ -911,12 +912,12 @@ struct HelperInterpBase {
     scalar_t* wt_ptr = output[3].data_ptr<scalar_t>();
     int64_t* wt_idx_ptr = output[4].data_ptr<int64_t>();
 
-    scalar_t wt_max = 0.0;
+    scalar_t wt_max = scalar_t(0.0);
     for (const auto i : c10::irange(output_size)) {
       int64_t xmin = 0, xsize = 0;
       scalar_t wt_max_i;
       if (antialias) {
-        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights_aa(
+        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights_aa<scalar_t>(
             i,
             input_size,
             scale,
@@ -927,7 +928,7 @@ struct HelperInterpBase {
             xmin,
             xsize);
       } else {
-        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights(
+        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights<scalar_t>(
             i,
             input_size,
             scale,
@@ -1236,7 +1237,8 @@ struct HelperInterpLinear : public HelperInterpBase {
   ) {
 
     std::vector<Tensor> indices_weights;
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf,
       scalar_type, "compute_index_ranges_weights", [&] {
 
         scalar_t scale = area_pixel_compute_scale<scalar_t>(
@@ -1344,7 +1346,7 @@ struct HelperInterpCubic : public HelperInterpBase {
     // a = -0.5 was proposed by R. Keys in "Cubic convolution interpolation for digital image processing"
     // We are using -0.5 for bicubic, antialiasing=true (compatibility with PIL)
     // and using -0.75 for bicubic, antialiasing=false (compatibility with Opencv)
-    constexpr scalar_t a = use_keys_cubic ? -0.5 : -0.75;
+    const scalar_t a = use_keys_cubic ? scalar_t(-0.5) : scalar_t(-0.75);
 
     x = std::abs(x);
     if (x < 1.0) {
@@ -1369,7 +1371,8 @@ struct HelperInterpCubic : public HelperInterpBase {
   ) {
 
     std::vector<Tensor> indices_weights;
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf,
       scalar_type, "compute_index_ranges_weights", [&] {
 
         scalar_t scale = area_pixel_compute_scale<scalar_t>(
@@ -1650,8 +1653,9 @@ void upsample_separable_1d(
 
   // Dispatch name should be "upsample_separable_1d" but we keep the old
   // name for internal BC.
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::Byte, iter.dtype(), "upsample_generic_Nd_aa", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND3(
+      kByte, kBFloat16, kHalf,
+      iter.dtype(), "upsample_generic_Nd_aa", [&] {
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           if constexpr (is_horizontal) {
             // Strides are : X 0 | 8 8 8 0 8  (Channels first)
@@ -2092,27 +2096,27 @@ void upsample_separable_Nd_backward_aa(
           h * input_width + w;
     };
 
-    const scalar_t support_h = (height_scale >= 1.0)
-        ? (interp_size * 0.5) * height_scale
-        : interp_size * 0.5;
-    const scalar_t support_w = (width_scale >= 1.0)
-        ? (interp_size * 0.5) * width_scale
-        : interp_size * 0.5;
+    const scalar_t support_h = (height_scale >= scalar_t(1.0))
+        ? (scalar_t(interp_size) * scalar_t(0.5)) * height_scale
+        : scalar_t(interp_size) * scalar_t(0.5);
+    const scalar_t support_w = (width_scale >= scalar_t(1.0))
+        ? (scalar_t(interp_size) * scalar_t(0.5)) * width_scale
+        : scalar_t(interp_size) * scalar_t(0.5);
 
-    const int interp_height = (int)ceilf(support_h) * 2 + 1;
-    const int interp_width = (int)ceilf(support_w) * 2 + 1;
+    const int interp_height = (int)std::ceil(support_h) * 2 + 1;
+    const int interp_width = (int)std::ceil(support_w) * 2 + 1;
 
-    std::vector<scalar_t> wx(interp_width, 0.0);
-    std::vector<scalar_t> wy(interp_height, 0.0);
+    std::vector<scalar_t> wx(interp_width, scalar_t(0));
+    std::vector<scalar_t> wy(interp_height, scalar_t(0));
 
     int64_t xmin = 0, ymin = 0;
     int64_t xsize = 0, ysize = 0;
 
     typedef scalar_t (*aa_filter_fn_t)(scalar_t);
-    aa_filter_fn_t filter_fn = &F::aa_filter;
+    aa_filter_fn_t filter_fn = &F::template aa_filter<scalar_t>;
 
     for (const auto oh : c10::irange(output_height)) {
-      F::_compute_indices_min_size_weights_aa(
+      F::template _compute_indices_min_size_weights_aa<scalar_t>(
           oh,
           input_height,
           height_scale,
@@ -2124,7 +2128,7 @@ void upsample_separable_Nd_backward_aa(
           ysize);
 
       for (const auto ow : c10::irange(output_width)) {
-        F::_compute_indices_min_size_weights_aa(
+        F::template _compute_indices_min_size_weights_aa<scalar_t>(
             ow,
             input_width,
             width_scale,
@@ -2169,7 +2173,7 @@ void upsample_bilinear2d_aa_backward_kernel_impl(
     bool align_corners,
     std::optional<double> scales_h,
     std::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf,
       grad_output.scalar_type(), "upsample_bilinear2d_aa_backward_cpu", [&] {
         upsample_separable_Nd_backward_aa<scalar_t, scale_t, HelperInterpLinear>(
             grad_input, grad_output, align_corners, {scales_h, scales_w});
@@ -2182,7 +2186,7 @@ void upsample_bicubic2d_aa_backward_kernel_impl(
     bool align_corners,
     std::optional<double> scales_h,
     std::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf,
       grad_output.scalar_type(), "upsample_bicubic2d_aa_backward_cpu", [&] {
         upsample_separable_Nd_backward_aa<scalar_t, scale_t, HelperInterpCubic>(
             grad_input, grad_output, align_corners, {scales_h, scales_w});
