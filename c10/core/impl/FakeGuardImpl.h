@@ -57,7 +57,7 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
     return kFakeGuardImplMaxDevices;
   }
 
-  // Event-related functions
+  // Event-related functions (legacy void* API)
   void record(
       void** /*event*/,
       const Stream& /*stream*/,
@@ -69,6 +69,22 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
   }
   void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
       const noexcept override {}
+
+  // Event-related functions (new InlineEventBase API)
+  void record(InlineEventBase& /*event*/, const Stream& /*stream*/)
+      const override {}
+  void block(const InlineEventBase& /*event*/, const Stream& /*stream*/)
+      const override {}
+  bool queryEvent(const InlineEventBase& /*event*/) const override {
+    return true;
+  }
+  void destroyEvent(InlineEventBase& /*event*/) const noexcept override {}
+  void synchronizeEvent(const InlineEventBase& /*event*/) const override {}
+  double elapsedTime(
+      const InlineEventBase& /*event1*/,
+      const InlineEventBase& /*event2*/) const override {
+    return 0.0;
+  }
 
   // Convenience methods for testing
   static DeviceIndex getDeviceIndex() {
