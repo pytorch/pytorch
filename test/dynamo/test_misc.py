@@ -775,6 +775,7 @@ graph():
             unpack4,
             2,
             expected_ops=5,
+            expected_ops_dynamic=6,
         )
 
     def test_unpack5(self):
@@ -791,6 +792,7 @@ graph():
             unpack5,
             2,
             expected_ops=5,
+            expected_ops_dynamic=6,
         )
 
     def test_matmul1(self):

@@ -1339,9 +1339,25 @@ def _padded_dense_to_jagged_forward(
 
 
 def _compute_slice_index(size: IntLikeType, index: IntLikeType) -> IntLikeType | None:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        statically_known_true,
+        sym_and,
+    )
 
-    if guard_or_false(sym_and(index >= 0, index <= size)):
+    if statically_known_true(sym_and(index >= 0, index <= size)):
+        return index
+    elif statically_known_true(sym_and(index < 0, index >= -size)):
+        return index + size
+    elif statically_known_true(index < -size):
+        return 0
+    elif statically_known_true(index > size):
+        return size
+    elif not isinstance(index, torch.SymInt) and index >= 0:
+        return torch.sym_min(index, size)
+    elif not isinstance(index, torch.SymInt) and index < 0:
+        return torch.sym_max(index + size, 0)
+    elif guard_or_false(sym_and(index >= 0, index <= size)):
         return index
     elif guard_or_false(sym_and(index < 0, index >= -size)):
         return index + size
@@ -1355,6 +1371,13 @@ def _compute_slice_index(size: IntLikeType, index: IntLikeType) -> IntLikeType |
         return torch.sym_max(index + size, 0)
 
     return None
+
+
+def _is_plain_symbol(index: IntLikeType | None) -> bool:
+    if not isinstance(index, torch.SymInt):
+        return False
+
+    return index.node.expr.is_Symbol
 
 
 @register_op_impl(torch.ops.aten.slice.Tensor)
@@ -1394,16 +1417,23 @@ def slice_forward(
     # size
     new_size: IntLikeType | None = None
     if start_index is not None and end_index is not None:
-        if guard_or_false(end_index >= start_index):
-            new_size = (end_index - start_index + step - 1) // step
-        elif guard_or_false(start_index >= end_index):
-            new_size = 0
+        if _is_plain_symbol(start) or _is_plain_symbol(end):
+            if guard_or_false(end_index >= start_index):
+                new_size = (end_index - start_index + step - 1) // step
+            elif guard_or_false(start_index >= end_index):
+                new_size = 0
         else:
-            # Both indices are resolved but we can't statically determine their
-            # ordering (e.g., when they involve Min/Max). Compute the size via
-            # max(end - start, 0) to avoid creating an unbacked symint.
-            diff = torch.sym_max(end_index - start_index, 0)
-            new_size = (diff + step - 1) // step
+            if statically_known_true(end_index >= start_index):
+                new_size = (end_index - start_index + step - 1) // step
+            elif statically_known_true(start_index >= end_index):
+                new_size = 0
+            else:
+                # Both indices are resolved but we can't statically determine
+                # their ordering (e.g., when they involve Min/Max). Compute the
+                # size via max(end - start, 0) to avoid creating an unbacked
+                # symint.
+                diff = torch.sym_max(end_index - start_index, 0)
+                new_size = (diff + step - 1) // step
 
     # create unbacked if case unknown
     if new_size is None:

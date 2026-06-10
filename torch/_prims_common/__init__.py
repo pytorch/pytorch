@@ -265,16 +265,23 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
     """
 
     from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_or_true,
         is_nested_int,
+        statically_known_false,
+        statically_known_true,
     )
 
     def eval_eager(x):
         return bool(x)
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
-    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
+    if false_if_dde:
+        maybe_guard_or_false = statically_known_true
+
+        def maybe_guard_or_true(x):
+            return not statically_known_false(x)
+
+    else:
+        maybe_guard_or_false = eval_eager
+        maybe_guard_or_true = eval_eager
 
     expected_stride = 1
     expected_stride_max = 1
@@ -309,15 +316,12 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     Tensors are contiguous when they have no elements,
     one element, or when they have "nested" strides.
     """
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_size_oblivious,
-    )
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
     def eval_eager(x):
         return bool(x)
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
+    maybe_guard_or_false = statically_known_true if false_if_dde else eval_eager
 
     if maybe_guard_or_false(a.numel() < 2):
         return True
