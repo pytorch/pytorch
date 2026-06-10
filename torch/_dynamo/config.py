@@ -493,6 +493,16 @@ assume_dunder_attributes_remain_unchanged = True
 # tags to avoid full guard execution.
 use_recursive_dict_tags_for_guards = False
 
+# Normalize large specialized nn.Module guard sets by keeping a structural
+# fingerprint guard at the module root instead of building repeated child
+# module/training/hook/key-order leaf guards.
+use_nn_module_structural_guards = True
+
+# Minimum number of nn.Module guards before structural guard normalization runs.
+# This keeps small guard trees in the fully explicit form used by guard-manager
+# tests while collapsing pathological nested-module cases.
+nn_module_structural_guard_min_module_count = 64
+
 # Maximum number of objects for which we check dict pointers tags. This is
 # useful for regional compilation.
 max_saved_pointers_for_recursive_dict_tags_check = 256

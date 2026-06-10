@@ -1616,6 +1616,343 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
                 opt_fn(x)
 
 
+class NNModuleStructuralGuardTests(RecursiveDictTagTests):
+    def _make_nested_module(self, depth=2, width=4):
+        class NestedModule(torch.nn.Module):
+            def __init__(self, depth, width):
+                super().__init__()
+                self.relu_a = torch.nn.ReLU()
+                self.relu_b = torch.nn.ReLU()
+                if depth > 0:
+                    sub_mods = [NestedModule(depth - 1, width) for _ in range(width)]
+                else:
+                    sub_mods = [torch.nn.ReLU() for _ in range(width)]
+                self.sub_mods = torch.nn.Sequential(*sub_mods)
+                self.a = 2
+
+            def forward(self, x):
+                x = self.relu_a(x)
+                x = x + self.sub_mods(x)
+                return x + self.relu_b(x) + self.a
+
+        return NestedModule(depth, width)
+
+    def test_nested_module_guard_count_uses_structural_fingerprint(self):
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        from torch._dynamo import utils as dynamo_utils
+
+        def guard_count_and_structural_guard_seen(enabled):
+            seen_structural_guard = False
+
+            def hook(guard_wrapper, f_locals, builder):
+                nonlocal seen_structural_guard
+                seen_structural_guard = seen_structural_guard or (
+                    "nn.Module structural fingerprint changed" in str(guard_wrapper)
+                )
+
+            torch._dynamo.reset()
+            dynamo_utils.clear_compilation_metrics()
+            mod = self._make_nested_module()
+            with torch._dynamo.config.patch(use_nn_module_structural_guards=enabled):
+                opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+                with install_guard_manager_testing_hook(hook):
+                    opt_mod(torch.ones(4))
+
+            metrics = [
+                metric
+                for metric in dynamo_utils.get_compilation_metrics()
+                if metric.guard_count is not None
+            ]
+            self.assertTrue(metrics)
+            guard_count = metrics[-1].guard_count
+            self.assertIsNotNone(guard_count)
+            return guard_count, seen_structural_guard
+
+        enabled_guard_count, seen_structural_guard = (
+            guard_count_and_structural_guard_seen(True)
+        )
+        disabled_guard_count, disabled_seen_structural_guard = (
+            guard_count_and_structural_guard_seen(False)
+        )
+
+        self.assertTrue(seen_structural_guard)
+        self.assertFalse(disabled_seen_structural_guard)
+        self.assertGreater(enabled_guard_count, 0)
+        self.assertLess(enabled_guard_count, disabled_guard_count)
+
+    def test_nested_module_structural_guard_respects_config(self):
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        seen_structural_guard = False
+
+        def hook(guard_wrapper, f_locals, builder):
+            nonlocal seen_structural_guard
+            seen_structural_guard = seen_structural_guard or (
+                "nn.Module structural fingerprint changed" in str(guard_wrapper)
+            )
+
+        torch._dynamo.reset()
+        mod = self._make_nested_module()
+        with torch._dynamo.config.patch(use_nn_module_structural_guards=False):
+            opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+            with install_guard_manager_testing_hook(hook):
+                opt_mod(torch.ones(4))
+
+        self.assertFalse(seen_structural_guard)
+
+    def test_structural_fingerprint_recompiles_on_child_training_mutation(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x + (1 if self.training else 2)
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer_count = (
+                    torch._dynamo.config.nn_module_structural_guard_min_module_count + 6
+                )
+                self.layers = torch.nn.ModuleList(
+                    [Leaf() for _ in range(self.layer_count)]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        torch._dynamo.reset()
+        from torch._dynamo.testing import CompileCounter
+
+        counter = CompileCounter()
+        mod = Parent()
+        opt_mod = torch.compile(mod, backend=counter, fullgraph=True)
+
+        x = torch.ones(4)
+        expected = torch.full((4,), float(mod.layer_count + 1))
+        self.assertEqual(opt_mod(x), expected)
+        self.assertEqual(opt_mod(x), expected)
+        self.assertEqual(counter.frame_count, 1)
+
+        mod.layers[0].eval()
+        self.assertEqual(opt_mod(x), expected + 1)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_structural_fingerprint_recompiles_on_child_module_add(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer_count = (
+                    torch._dynamo.config.nn_module_structural_guard_min_module_count + 6
+                )
+                self.layers = torch.nn.ModuleList(
+                    [Leaf() for _ in range(self.layer_count)]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        torch._dynamo.reset()
+        from torch._dynamo.testing import CompileCounter
+
+        counter = CompileCounter()
+        mod = Parent()
+        opt_mod = torch.compile(mod, backend=counter, fullgraph=True)
+
+        x = torch.ones(4)
+        expected = torch.full((4,), float(mod.layer_count + 1))
+        self.assertEqual(opt_mod(x), expected)
+        self.assertEqual(opt_mod(x), expected)
+        self.assertEqual(counter.frame_count, 1)
+
+        mod.layers.append(Leaf())
+        self.assertEqual(opt_mod(x), expected + 1)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_normalization_preserves_child_forward_monkeypatch_guard(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer_count = (
+                    torch._dynamo.config.nn_module_structural_guard_min_module_count + 6
+                )
+                self.layers = torch.nn.ModuleList(
+                    [Leaf() for _ in range(self.layer_count)]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        torch._dynamo.reset()
+        from torch._dynamo.testing import CompileCounter
+
+        counter = CompileCounter()
+        mod = Parent()
+        opt_mod = torch.compile(mod, backend=counter, fullgraph=True)
+
+        x = torch.ones(4)
+        expected = torch.full((4,), float(mod.layer_count + 1))
+        self.assertEqual(opt_mod(x), expected)
+        self.assertEqual(opt_mod(x), expected)
+        self.assertEqual(counter.frame_count, 1)
+
+        def patched_forward(self, x):
+            return x + 3
+
+        mod.layers[0].forward = patched_forward.__get__(mod.layers[0], Leaf)
+        self.assertEqual(opt_mod(x), expected + 2)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_normalization_preserves_leaf_value_guards(self):
+        class Leaf(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.offset = 1
+
+            def forward(self, x):
+                return x + self.offset
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer_count = (
+                    torch._dynamo.config.nn_module_structural_guard_min_module_count + 6
+                )
+                self.layers = torch.nn.ModuleList(
+                    [Leaf() for _ in range(self.layer_count)]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        torch._dynamo.reset()
+        from torch._dynamo.testing import CompileCounter
+
+        counter = CompileCounter()
+        mod = Parent()
+        opt_mod = torch.compile(mod, backend=counter, fullgraph=True)
+
+        x = torch.ones(4)
+        expected = torch.full((4,), float(mod.layer_count + 1))
+        self.assertEqual(opt_mod(x), expected)
+        self.assertEqual(opt_mod(x), expected)
+        self.assertEqual(counter.frame_count, 1)
+
+        # The structural fingerprint only covers nn.Module structure. The
+        # recompile here comes from the surviving EQUALS_MATCH guard on
+        # `offset`, which is accessed in forward.
+        mod.layers[0].offset = 3
+        self.assertEqual(opt_mod(x), expected + 2)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_structural_fingerprint_ignores_unused_child_attr_mutation(self):
+        class Leaf(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.offset = 1
+                self.unused = 0
+
+            def forward(self, x):
+                return x + self.offset
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer_count = (
+                    torch._dynamo.config.nn_module_structural_guard_min_module_count + 6
+                )
+                self.layers = torch.nn.ModuleList(
+                    [Leaf() for _ in range(self.layer_count)]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        torch._dynamo.reset()
+        from torch._dynamo.testing import CompileCounter
+
+        counter = CompileCounter()
+        mod = Parent()
+        opt_mod = torch.compile(mod, backend=counter, fullgraph=True)
+
+        x = torch.ones(4)
+        expected = torch.full((4,), float(mod.layer_count + 1))
+        self.assertEqual(opt_mod(x), expected)
+        self.assertEqual(opt_mod(x), expected)
+        self.assertEqual(counter.frame_count, 1)
+
+        # The structural guard intentionally ignores ordinary child __dict__
+        # writes. Accessed attributes still have their own leaf guards, while
+        # unused attributes do not force recompilation.
+        mod.layers[0].unused = 1
+        self.assertEqual(opt_mod(x), expected)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_structural_fingerprint_visits_shared_child_once(self):
+        class Branch(torch.nn.Module):
+            def __init__(self, child):
+                super().__init__()
+                self.child = child
+
+            def forward(self, x):
+                return self.child(x)
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                shared = torch.nn.Sequential(torch.nn.ReLU())
+                self.left = Branch(shared)
+                self.right = Branch(shared)
+                self.shared_modules = object.__getattribute__(shared, "__dict__")[
+                    "_modules"
+                ]
+
+            def forward(self, x):
+                return self.left(x) + self.right(x)
+
+        from torch._dynamo import guards as dynamo_guards
+
+        mod = Parent()
+        visit_count = 0
+        original_fingerprint = dynamo_guards._structural_attr_fingerprint
+
+        def counted_fingerprint(value):
+            nonlocal visit_count
+            if value is mod.shared_modules:
+                visit_count += 1
+            return original_fingerprint(value)
+
+        dynamo_guards._structural_attr_fingerprint = counted_fingerprint
+        try:
+            dynamo_guards._make_nn_module_structural_fingerprint(mod)
+        finally:
+            dynamo_guards._structural_attr_fingerprint = original_fingerprint
+
+        self.assertEqual(visit_count, 1)
+
+
 class SourceCloneTests(torch._dynamo.test_case.TestCase):
     def test_clone_identity_transform(self):
         """Identity transform should produce a source with the same name."""
