@@ -843,13 +843,6 @@ def _unregister_external_nccl_comm(group_name: str, device: torch.device) -> Non
 
 class _SymmetricMemory:
     @staticmethod
-    def set_group_info(
-        group_name: str,
-        rank: int,
-        world_size: int,
-        store: Store,
-    ) -> None: ...
-    @staticmethod
     def empty_strided_p2p(
         size: torch.types._size,
         stride: torch.types._size,

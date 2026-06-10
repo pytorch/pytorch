@@ -133,26 +133,6 @@ C10_EXPORT bool has_allocator(c10::DeviceType device_type);
 C10_EXPORT c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
     c10::DeviceType device_type);
 
-// Set a store for rendezvousing symmetric allocations on a group of devices
-// identified by `group_name`. The concept of groups is logical; users can
-// utilize predefined groups (e.g., a group of device identified by a
-// ProcessGroup) or create custom ones. Note that a SymmetricMemoryAllocator
-// backends might employ a more efficient communication channel for the actual
-// rendezvous process and only use the store for bootstrapping purposes.
-TORCH_API void set_group_info(
-    const std::string& group_name,
-    int rank,
-    int world_size,
-    c10::intrusive_ptr<Store> store);
-
-struct GroupInfo {
-  int rank;
-  int world_size;
-  c10::intrusive_ptr<c10d::Store> store;
-};
-
-C10_EXPORT GroupInfo& get_group_info(const std::string& group_name);
-
 // Identical to empty_strided, but allows symmetric memory access to be
 // established for the allocated tensor via SymmetricMemory::rendezvous(). This
 // function itself is not a collective operation. It invokes

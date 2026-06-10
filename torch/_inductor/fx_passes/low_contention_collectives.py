@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-import warnings
+import typing
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -45,9 +45,13 @@ def replace_collectives_with_low_contention(
         return
 
     # Some group names can't be resolved at compile time — skip them.
+    from torch.distributed._symmetric_memory import is_symm_mem_enabled_for_group
+    from torch.distributed.distributed_c10d import GroupName
+
     valid_groups: OrderedSet[str] = OrderedSet()
     for group_name in groups:
-        if _enable_symm_mem(group_name):
+        group_name_ = typing.cast(GroupName, group_name)
+        if is_symm_mem_enabled_for_group(group_name_):
             valid_groups.add(group_name)
 
     # Filter to collectives whose groups we can actually resolve
@@ -119,25 +123,6 @@ def replace_collectives_with_low_contention(
         min_bytes,
         skip_overlap_check,
     )
-
-
-def _enable_symm_mem(group_name):
-    """Try to enable symmetric memory for a group. Returns True on success."""
-    from torch.distributed._symmetric_memory import (
-        enable_symm_mem_for_group,
-        is_symm_mem_enabled_for_group,
-    )
-
-    if is_symm_mem_enabled_for_group(group_name):
-        return True
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FutureWarning)
-            enable_symm_mem_for_group(group_name)
-        return True
-    except (TypeError, RuntimeError, KeyError) as e:
-        log.debug("LC: cannot enable symm_mem for group %s: %s", group_name, e)
-        return False
 
 
 def _replace_collective(node, graph, symm_mem, is_ag, group_name):
