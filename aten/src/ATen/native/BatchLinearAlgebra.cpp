@@ -3470,7 +3470,7 @@ static void linalg_lstsq_out_info(
   if (m > n && driver != "gelsy") {
     // if the driver is gelss or gelsd then the residuals are available only if rank == n
     bool compute_residuals = true;
-    if (driver == "gelss" || driver == "gelsd") {
+    if ((driver == "gelss" || driver == "gelsd") && solution.device().is_cpu()) {
       if (input.dim() == 2) {
         compute_residuals = (rank.item().toInt() == n);
       } else {
@@ -3516,19 +3516,22 @@ static std::string get_default_lstsq_driver(std::optional<std::string_view> driv
     // convert `driver_str` to lower case inplace.
     std::transform(driver_str.begin(), driver_str.end(), driver_str.begin(),
       [](unsigned char c) { return std::tolower(c); });
-    static std::unordered_set<std::string_view> allowed_drivers = {
-      "gels", "gelsy", "gelsd", "gelss"
-    };
     if (input.device() == at::kCPU) {
+      static std::unordered_set<std::string_view> allowed_drivers_cpu = {
+        "gels", "gelsy", "gelsd", "gelss"
+      };
       TORCH_CHECK(
-        allowed_drivers.find(driver_str) != allowed_drivers.end(),
+        allowed_drivers_cpu.find(driver_str) != allowed_drivers_cpu.end(),
         "torch.linalg.lstsq: parameter `driver` should be one of "
         "(gels, gelsy, gelsd, gelss)"
       );
     } else { // else if (input.is_cuda())
+      static std::unordered_set<std::string_view> allowed_drivers_cuda = {
+        "gels", "gelsd"
+      };
       TORCH_CHECK(
-        driver_str == "gels",
-        "torch.linalg.lstsq: `driver` other than `gels` is not supported on CUDA"
+        allowed_drivers_cuda.find(driver_str) != allowed_drivers_cuda.end(),
+        "torch.linalg.lstsq: `driver` other than `gels` or `gelsd` is not supported on CUDA"
       );
     }
   } else {

@@ -737,7 +737,7 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
 
     drivers: tuple[str, ...]
     if device.type == "cuda":
-        drivers = ("gels",)
+        drivers = ("gels", "gelsd")
     else:
         drivers = ("gels", "gelsy", "gelss", "gelsd")
 
