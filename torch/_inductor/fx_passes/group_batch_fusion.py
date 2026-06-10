@@ -349,7 +349,8 @@ class GroupLinearFusion(GroupFusion):
             if CallFunctionVarArgs(aten.addmm.default).match(node):
                 bias, input, weight = node.args
             else:
-                assert CallFunctionVarArgs(aten.mm.default).match(node)
+                if not CallFunctionVarArgs(aten.mm.default).match(node):
+                    raise AssertionError(f"expected aten.mm node, got {node}")
                 input, weight = node.args
                 bias = None
 
@@ -519,7 +520,10 @@ class BatchLinearLHSFusion(BatchFusion):
             if batch_input is None:
                 batch_input = input
             else:
-                assert batch_input is input
+                if batch_input is not input:
+                    raise AssertionError(
+                        f"expected batch_input to be input, got {batch_input}"
+                    )
             batch_weights.append(weight)
             batch_weights_meta.append(weight.meta["example_value"])
             if bias:
@@ -803,9 +807,8 @@ class BatchLayernormFusion(BatchFusion):
             group_biases = None  # type: ignore[assignment]
         if all(weight is None for weight in group_weights):
             group_weights = None  # type: ignore[assignment]
-        assert all(eps == group_epss[0] for eps in group_epss), (
-            "all epsilon values must be equal"
-        )
+        if not all(eps == group_epss[0] for eps in group_epss):
+            raise AssertionError("all epsilon values must be equal")
 
         with graph.inserting_before(subset[0]):  # type: ignore[operator]
             stack_input = graph.call_function(  # type: ignore[operator]
@@ -1381,7 +1384,8 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
         if isinstance(gm, _LazyGraphModule):
             _LazyGraphModule.recompile()
         else:
-            assert isinstance(gm, torch.fx.GraphModule)
+            if not isinstance(gm, torch.fx.GraphModule):
+                raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
             gm.recompile()
         graph_str = gm.print_readable(
             print_output=False, include_stride=True, include_device=True

@@ -344,7 +344,10 @@ def binary_folding_init():
         return res
 
     def _create_new_conv_node(graph, conv_node, binary_node, other):
-        assert conv_node.target is aten.convolution.default
+        if conv_node.target is not aten.convolution.default:
+            raise AssertionError(
+                f"expected aten.convolution.default, got {conv_node.target}"
+            )
         conv_args = list(conv_node.args)
         weight_meta_value = conv_node.args[1].meta.get("val")
         bias = conv_args[2]
@@ -362,7 +365,10 @@ def binary_folding_init():
             )
             conv_args[2] = new_bias
         else:
-            assert binary_node.target in [aten.mul.Tensor, aten.div.Tensor]
+            if binary_node.target not in [aten.mul.Tensor, aten.div.Tensor]:
+                raise AssertionError(
+                    f"expected mul or div binary node, got {binary_node.target}"
+                )
             weight_broadcast_shape = [1 for _ in range(len(weight_meta_value.shape))]
             weight_broadcast_shape[0] = weight_meta_value.size(0)
             other_reshape1 = resize_scalar_or_tensor_to_shape(
@@ -391,7 +397,8 @@ def binary_folding_init():
         return graph.create_node("call_function", conv_node.target, tuple(conv_args))
 
     def _create_new_linear_node(graph, linear_node, binary_node, other):
-        assert linear_node.target in [aten.addmm.default, aten.mm.default]
+        if linear_node.target not in [aten.addmm.default, aten.mm.default]:
+            raise AssertionError(f"expected addmm or mm, got {linear_node.target}")
         input_node = (
             linear_node.args[1]
             if linear_node.target is aten.addmm.default
@@ -424,7 +431,10 @@ def binary_folding_init():
                 (new_bias_node, input_node, weight_node),
             )
         else:
-            assert binary_node.target in [aten.mul.Tensor, aten.div.Tensor]
+            if binary_node.target not in [aten.mul.Tensor, aten.div.Tensor]:
+                raise AssertionError(
+                    f"expected mul or div binary node, got {binary_node.target}"
+                )
             weight_broadcast_shape = [1, weight_meta_value.size(1)]
             other_reshape1 = resize_scalar_or_tensor_to_shape(
                 graph,
@@ -482,7 +492,10 @@ def binary_folding_init():
                 reshape_node = binary_node.args[1]
             graph = match.graph
             with graph.inserting_before(reshape_node if reshape_node else binary_node):
-                assert computation_node.target in _computation_ops
+                if computation_node.target not in _computation_ops:
+                    raise AssertionError(
+                        f"expected a computation op, got {computation_node.target}"
+                    )
                 if computation_node.target is aten.convolution.default:
                     counters["inductor"]["binary_folding_conv"] += 1
                     new_computation_node = _create_new_conv_node(
@@ -494,7 +507,10 @@ def binary_folding_init():
                     )
                 new_computation_node.meta.update(computation_node.meta)
                 if reshape_node:
-                    assert reshape_node.target is aten.reshape.default
+                    if reshape_node.target is not aten.reshape.default:
+                        raise AssertionError(
+                            f"expected aten.reshape.default, got {reshape_node.target}"
+                        )
                     computation_node.replace_all_uses_with(new_computation_node)
                     binary_node.replace_all_uses_with(reshape_node)
                 else:
