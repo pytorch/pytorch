@@ -1743,6 +1743,14 @@ class _InProcessFxCompile(FxCompile):
                             )
                         )
 
+                    if (
+                        cudagraphs
+                        and not V.graph.disable_cudagraphs_reason
+                        and graph.scheduler.count_kernel_nodes(graph.scheduler.nodes)
+                        == 0
+                    ):
+                        V.graph.disable_cudagraphs_reason = "no CUDA kernel invocations"
+
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
                     if (
@@ -2857,6 +2865,9 @@ def compile_fx(
                     ignore_shape_env=ignore_shape_env,
                     get_decomp_fn=get_decomp_fn,
                     compile_region_name=compile_region_name,
+                    use_conditional_lstm_decompositions=(
+                        use_conditional_lstm_decompositions
+                    ),
                 )
 
     return _maybe_wrap_and_compile_fx_main(
@@ -2866,6 +2877,7 @@ def compile_fx(
         ignore_shape_env,
         get_decomp_fn=get_decomp_fn,
         compile_region_name=compile_region_name,
+        use_conditional_lstm_decompositions=use_conditional_lstm_decompositions,
     )
 
 
@@ -2908,6 +2920,7 @@ def _maybe_wrap_and_compile_fx_main(
     *,
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
     compile_region_name: str | None = None,
+    use_conditional_lstm_decompositions: bool = False,
 ) -> CompileFxOutput:
     """
     Part of compile_fx, called after patching configs.
@@ -2924,6 +2937,7 @@ def _maybe_wrap_and_compile_fx_main(
         ignore_shape_env=ignore_shape_env,
         get_decomp_fn=get_decomp_fn,
         compile_region_name=compile_region_name,
+        use_conditional_lstm_decompositions=use_conditional_lstm_decompositions,
     )
     if not graph_returns_tuple(model_):
         return make_graph_return_tuple(model_, example_inputs_, compile_gm)
@@ -2947,6 +2961,7 @@ def _maybe_wrap_and_compile_fx_main(
         ignore_shape_env,
         get_decomp_fn=get_decomp_fn,
         compile_region_name=compile_region_name,
+        use_conditional_lstm_decompositions=use_conditional_lstm_decompositions,
     )
 
 
@@ -2958,6 +2973,7 @@ def _compile_fx_main(
     *,
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
     compile_region_name: str | None = None,
+    use_conditional_lstm_decompositions: bool = False,
 ) -> CompileFxOutput:
     """
     Main part of compile_fx, called after wrapping is done.
@@ -2989,9 +3005,10 @@ def _compile_fx_main(
         compiler_config_extra = create_compiler_config_extra(model_)
 
         decompositions = get_decomp_fn()
-        override_lstm_cia_ops = _contains_lstm_op(
-            model_
-        ) and _uses_conditional_lstm_decompositions(decompositions)
+        override_lstm_cia_ops = (
+            use_conditional_lstm_decompositions
+            and _uses_conditional_lstm_decompositions(decompositions)
+        )
         inner_compile = functools.partial(inner_compile, get_decomp_fn=get_decomp_fn)
 
         def fw_compiler_base(
