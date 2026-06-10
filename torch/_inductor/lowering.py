@@ -8770,14 +8770,14 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     # rename chain forces readers after the subgraph boundary.
     input_ids = OrderedSet([id(a) for a in args])
     for op in subgraph_ops:
-        if not isinstance(op, ir.OperationBuffer):
+        if not isinstance(op, ir.ExternKernel):
             continue
 
-        def _add_passthrough_mutations(val):
+        def _add_passthrough_mutations(val, op=op):
             if id(val) not in input_ids or not isinstance(val, IRNode):
                 return
             val.realize()
-            op.mutation_outputs.append(  # pyrefly: ignore[missing-attribute]
+            op.mutation_outputs.append(
                 ir.MutationOutput(
                     ir.NoneLayout(device=val.get_device()),
                     val,
