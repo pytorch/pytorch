@@ -775,14 +775,6 @@ def check_shape(
         buffer.writeline(f"tl.static_assert({var}.shape == ({shape_str}))")
 
 
-def check_nan(buffer: IndentedBuffer, var: CSEVariableType) -> None:
-    backend = get_current_backend()
-    if backend == "triton":
-        msg = "NaN or Inf found"
-        buffer.writeline(
-            f"tl.device_assert(({var} == {var}) & ({var} != float('inf')) & ({var} != float('-inf')), '{msg}')"
-        )
-
 
 class DataTypePropagation:
     def __init__(self, body: LoopBody) -> None:
@@ -2745,9 +2737,6 @@ class CSEProxy(DefaultHandler):
                 shape_to_check = csevar.shape if csevar.shape is not None else var_shape
                 if shape_to_check is not None:
                     check_shape(V.kernel.compute, csevar, shape_to_check)
-
-            if config.runtime_triton_nan_asserts:
-                check_nan(V.kernel.compute, csevar)
 
             return csevar
 
