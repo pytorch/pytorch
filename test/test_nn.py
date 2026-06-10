@@ -4903,6 +4903,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         out2 = nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target)
         self.assertTrue(torch.isfinite(out2).all().item())
 
+    def test_bce_with_logits_target_range(self):
+        output = torch.randn(25, 25)
+        target_valid = torch.rand(25, 25)
+        target_too_negative = target_valid - 1.0
+        target_too_positive = target_valid + 1.0
+
+        loss_valid = nn.BCEWithLogitsLoss()(output, target_valid)
+        with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
+            nn.BCEWithLogitsLoss()(output, target_too_negative)
+        with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
+            nn.BCEWithLogitsLoss()(output, target_too_positive)
+
     def test_bce_loss_broadcasts_weights(self):
         sigmoid = nn.Sigmoid()
         target = torch.rand(16, 4)
