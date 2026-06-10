@@ -316,9 +316,13 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
                 manifest, args.toolkit_version, arch=int(arch)
             )
         else:
-            raise NotImplementedError(
-                "Arch " + arch + " is not supported by current cutlass lib."
+            log.warning(
+                "GenerateIntelXe not available in CUTLASS library. "
+                "Skipping CUTLASS gemm ops for XPU arch %s. "
+                "Set TORCHINDUCTOR_CUTLASS_DIR to a CUTLASS with Intel Xe support.",
+                arch,
             )
+            return {}
 
     elif arch == "100":
         if hasattr(cutlass_generator, "GenerateSM100"):
