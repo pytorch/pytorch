@@ -202,12 +202,9 @@ Range constraints: {u0: VR[0, int_oo]}""",
     def test_params_spec_matched_by_name_across_positional_kwargs_and_call_order(
         self,
     ):
-        """A spec entry binds to an input by *name* (the forward param name)
-        whether the value is passed positionally or as a kwarg, and regardless
-        of kwarg order vs the signature (placeholders follow call order, not
-        signature order). Inputs absent from the spec stay static: a non-spec
-        tensor keeps its literal shape; a non-spec scalar stays a plain input
-        with its value baked into the graph."""
+        """Spec entries bind by forward-param *name* — for positional and
+        kwarg inputs alike, and regardless of kwarg order (placeholders
+        follow call order). Inputs not in the spec stay static."""
 
         class M(torch.nn.Module):
             def forward(self, x, y, z, n):
