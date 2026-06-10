@@ -219,11 +219,10 @@ def skip_if_no_gpu(func):
         if not (TEST_CUDA or TEST_HPU or TEST_XPU):
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
-        if TEST_CUDA and torch.cuda.device_count() < world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
-        if TEST_HPU and torch.hpu.device_count() < world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
-        if TEST_XPU and torch.xpu.device_count() < world_size:
+        if (
+            torch.accelerator.is_available()
+            and torch.accelerator.device_count() < world_size
+        ):
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
@@ -290,13 +289,7 @@ def import_transformers_or_skip():
 
 
 def at_least_x_gpu(x):
-    if TEST_CUDA and torch.cuda.device_count() >= x:
-        return True
-    if TEST_HPU and torch.hpu.device_count() >= x:
-        return True
-    if TEST_XPU and torch.xpu.device_count() >= x:
-        return True
-    return False
+    return torch.accelerator.is_available() and torch.accelerator.device_count() >= x
 
 
 def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
@@ -318,13 +311,12 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
+            if (
+                torch.accelerator.is_available()
+                and torch.accelerator.device_count() >= x
+            ):
                 return func(*args, **kwargs)
-            if TEST_HPU and torch.hpu.device_count() >= x:
-                return func(*args, **kwargs)
-            if TEST_XPU and torch.xpu.device_count() >= x:
-                return func(*args, **kwargs)
-            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
+            if allow_cpu and not torch.accelerator.is_available():
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
@@ -783,11 +775,7 @@ def init_multigpu_helper(world_size: int, backend: str):
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
-    nGPUs = torch.cuda.device_count()
-    if TEST_HPU:
-        nGPUs = torch.hpu.device_count()
-    if TEST_XPU:
-        nGPUs = torch.xpu.device_count()
+    nGPUs = torch.accelerator.device_count()
     visible_devices = range(nGPUs)
 
     # If rank is less than or equal to number of available GPU's
