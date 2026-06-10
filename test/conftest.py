@@ -45,6 +45,13 @@ def pytest_addoption(parser: Parser) -> None:
     group.addoption("--scs", action="store", default=None, dest="stepcurrent_skip")
     group.addoption("--sc", action="store", default=None, dest="stepcurrent")
     group.addoption("--rs", action="store", default=None, dest="run_single")
+    parser.addoption(
+        "--hw-classification",
+        nargs="+",
+        default=None,
+        metavar="SCOPE",
+        help="filter tests by hardware classification categories (e.g., GENERIC DEVICE_GENERIC CUDA XPU MPS)",
+    )
 
     parser.addoption("--use-main-module", action="store_true")
     group = parser.getgroup("terminal reporting")
@@ -92,8 +99,52 @@ def pytest_addoption(parser: Parser) -> None:
     shard_addoptions(parser)
 
 
+class HardwareClassificationPytestPlugin:
+    """Pytest plugin to filter collected tests by hw_classification."""
+
+    def __init__(self, requirement):
+        self.requirement = requirement
+
+    def pytest_collection_modifyitems(self, items):
+        if self.requirement is None:
+            return
+        import torch.testing._internal.common_utils as _cu
+
+        filtered = []
+        for item in items:
+            # hw_classification is a class-level attribute. Function-based tests
+            # do not have item.cls and are therefore not filtered.
+            cls = getattr(item, "cls", None)
+            if cls is not None:
+                req = _cu._get_hw_classification(cls)
+                if req is not None and req in self.requirement:
+                    filtered.append(item)
+            else:
+                filtered.append(item)
+        items[:] = filtered
+
+
 def pytest_configure(config: Config) -> None:
     parse_cmd_line_args()
+
+    # Some pytest jobs (e.g. tools/* tests) run directly from the source tree
+    # without a built torch package. In that environment importing
+    # torch.testing._internal.common_utils may fail because generated files such
+    # as torch.version are not available yet. Skip hardware classification plugin
+    # registration in that case.
+    try:
+        import torch.testing._internal.common_utils as _cu
+    except ImportError:
+        _cu = None
+
+    # Use getattr to handle the case where this conftest.py runs against a nightly
+    # torch that doesn't yet have HW_CLASSIFICATION in common_utils.
+    if _cu is not None and getattr(_cu, "HW_CLASSIFICATION", None) is not None:
+        config.pluginmanager.register(
+            HardwareClassificationPytestPlugin(_cu.HW_CLASSIFICATION),
+            "hw_classification_plugin",
+        )
+
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
     if xmlpath and not hasattr(config, "workerinput"):
