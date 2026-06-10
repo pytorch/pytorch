@@ -931,6 +931,28 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_xor_impl(tx, args[0], reverse=True)
         elif name == "__ixor__":
             return self.nb_inplace_xor_impl(tx, args[0])
+        elif name == "__floordiv__":
+            return self.nb_floor_divide_impl(tx, args[0])
+        elif name == "__rfloordiv__":
+            return self.nb_floor_divide_impl(tx, args[0], reverse=True)
+        elif name == "__ifloordiv__":
+            return self.nb_inplace_floor_divide_impl(tx, args[0])
+        elif name == "__truediv__":
+            return self.nb_true_divide_impl(tx, args[0])
+        elif name == "__rtruediv__":
+            return self.nb_true_divide_impl(tx, args[0], reverse=True)
+        elif name == "__itruediv__":
+            return self.nb_inplace_true_divide_impl(tx, args[0])
+        elif name == "__mod__":
+            return self.nb_remainder_impl(tx, args[0])
+        elif name == "__rmod__":
+            return self.nb_remainder_impl(tx, args[0], reverse=True)
+        elif name == "__imod__":
+            return self.nb_inplace_remainder_impl(tx, args[0])
+        elif name == "__divmod__":
+            return self.nb_divmod_impl(tx, args[0])
+        elif name == "__rdivmod__":
+            return self.nb_divmod_impl(tx, args[0], reverse=True)
         elif name == "__pow__":
             z = args[1] if len(args) == 2 else None
             return self.nb_power_impl(tx, args[0], z, reverse=False)
@@ -1489,6 +1511,82 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_xor slot. Default: returns NotImplemented."""
         return variables.ConstantVariable(NotImplemented)
+
+    def nb_floor_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_floor_divide slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rfloordiv__`` instead of ``__floordiv__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_floor_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_floor_divide slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_true_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_true_divide slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rtruediv__`` instead of ``__truediv__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_true_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_true_divide slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_remainder_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_remainder slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rmod__`` instead of ``__mod__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_remainder_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_remainder slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_divmod_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_divmod slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rdivmod__`` instead of ``__divmod__``). divmod has no
+        in-place form.
+        """
 
     def nb_power_impl(
         self,
