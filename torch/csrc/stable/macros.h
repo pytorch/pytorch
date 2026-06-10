@@ -8,6 +8,16 @@
 #include <stdexcept>
 
 #if defined(_WIN32)
+// Keep windows.h lean and stop it from defining the min()/max() macros, which
+// would otherwise clobber std::min/std::max (and numeric_limits::max) in the
+// torch headers that include this one. Guarded so we never redefine a flag the
+// including translation unit already set.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #else
 #include <dlfcn.h>
@@ -154,10 +164,10 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 }
 HIDDEN_NAMESPACE_END(torch, stable, detail)
 
-// This macro is similar to the header-only macro TORCH_ERROR_CODE_CHECK, but
-// this macro is NOT header-only! It depends on the stable ABI but provides more
-// info in the exception, including the error message as retrieved through the c
-// shims from the original error message.
+// This macro is similar to the header-only macro TORCH_ERROR_CODE_CHECK,
+// but this macro is NOT header-only! It depends on the stable ABI but
+// provides more info in the exception, including the error message as
+// retrieved through the c shims from the original error message.
 #define STABLE_TORCH_ERROR_CODE_CHECK(call)                            \
   if ((call) != TORCH_SUCCESS) {                                       \
     torch::stable::detail::throw_exception(#call, __FILE__, __LINE__); \
