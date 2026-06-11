@@ -4,6 +4,7 @@ import os
 import random
 import tempfile
 import weakref
+from types import SimpleNamespace
 from unittest import mock
 
 import torch
@@ -22,6 +23,10 @@ from torch._inductor.runtime.triton_compat import (
     triton,
 )
 from torch._inductor.runtime.triton_helpers import libdevice
+from torch._inductor.runtime.triton_heuristics import (
+    CachingAutotuner,
+    StaticTritonCompileResult,
+)
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
@@ -75,6 +80,25 @@ class TestStaticTritonLauncherUnit(TestCase):
         launcher.close()
         self.assertIsNone(launcher.function)
         self.assertIsNone(launcher.module)
+
+    @staticmethod
+    def _autotuner_with_static_cubin(cubin_raw):
+        autotuner = object.__new__(CachingAutotuner)
+        result = object.__new__(StaticTritonCompileResult)
+        result.kernel = SimpleNamespace(cubin_raw=cubin_raw)
+        autotuner.compile_results = [result]
+        return autotuner, result
+
+    def test_prepare_for_caching_drops_cubin_raw_by_default(self):
+        autotuner, result = self._autotuner_with_static_cubin(b"cubin")
+        autotuner.prepare_for_caching()
+        self.assertIsNone(result.kernel.cubin_raw)
+
+    @torch._inductor.config.patch("keep_static_cubin_raw", True)
+    def test_prepare_for_caching_keeps_cubin_raw_when_configured(self):
+        autotuner, result = self._autotuner_with_static_cubin(b"cubin")
+        autotuner.prepare_for_caching()
+        self.assertEqual(result.kernel.cubin_raw, b"cubin")
 
 
 @requires_gpu_and_triton
