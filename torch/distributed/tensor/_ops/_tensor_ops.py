@@ -723,7 +723,11 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     return op_strategy
 
 
-@register_single_dim_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
+@register_single_dim_strategy(
+    aten.cat.default,
+    RuntimeSchemaInfo(1, needs_pytree=True),
+    allow_unbacked_sharding=False,
+)
 def cat_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
