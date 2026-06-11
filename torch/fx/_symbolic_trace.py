@@ -733,6 +733,14 @@ class Tracer(TracerBase):
                 args.append(proxy_placeholder("*" + next(names_iter)))
             if co.co_flags & inspect.CO_VARKEYWORDS:
                 args.append(proxy_placeholder("**" + next(names_iter)))
+            # Use fn_for_analysis as the base for patching, not root_fn:
+            # when root_fn is a functools.wraps wrapper its co_varnames
+            # covers only its own (*args, **kwargs) parameters, which are
+            # fewer than the named args derived from fn_for_analysis.
+            # Patching root_fn would violate the CPython invariant
+            # len(co_varnames) >= co_argcount. root_fn is intentionally
+            # reassigned to the patched inner function; any behavior added
+            # by the wrapper is not traced when forward has variadic args.
             root_fn = _patch_function(fn_for_analysis, len(args))
 
         flat_args, in_spec = pytree.tree_flatten(tuple(args))
