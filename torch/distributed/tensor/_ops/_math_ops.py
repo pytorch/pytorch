@@ -645,6 +645,7 @@ _SOFTMAX_BWD_N_PLACEMENTS = 3
     [aten.cumsum.default, aten.cumprod.default, aten.logcumsumexp.default],
     schema_info=RuntimeSchemaInfo(1),
     allow_uneven_sharding=True,
+    allow_unbacked_sharding=False,
 )
 def scan_single_dim_strategy(
     op: torch._ops.OpOverload,
