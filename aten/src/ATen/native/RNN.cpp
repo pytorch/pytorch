@@ -758,7 +758,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       bool pre_compute_input = false) const override {
     const auto& [hx, cx] = hidden;
 
-    if (input.is_cuda() || input.is_xpu() || input.is_privateuseone()) {
+    if (input.is_cuda() || input.is_xpu()) {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hx);
@@ -794,7 +794,7 @@ struct GRUCell : Cell<Tensor, cell_params> {
       const hidden_type& hidden,
       const cell_params& params,
       bool pre_compute_input = false) const override {
-    if (input.is_cuda() || input.is_xpu() || input.is_privateuseone()) {
+    if (input.is_cuda() || input.is_xpu()) {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hidden);
@@ -1467,6 +1467,18 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  if (_input.is_privateuseone()) {
+    check_attributes(_input, _params, hx);
+    auto input = batch_first ? _input.transpose(0, 1) : _input;
+    bool has_projections = (hx[0].sym_size(2) != hx[1].sym_size(2));
+    auto params = gather_params(_params, has_biases, has_projections);
+    auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+        input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional);
+    if (batch_first) {
+      std::get<0>(results) = std::get<0>(results).transpose(0, 1);
+    }
+    return results;
+  }
   if (use_cudnn(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
@@ -1531,6 +1543,17 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  if (data.is_privateuseone()) {
+    bool has_projections = (hx[0].size(2) != hx[1].size(2));
+    PackedSequence input { data, batch_sizes };
+    auto params = gather_params(_params, has_biases, has_projections);
+    auto result = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
+        input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional);
+    auto & packed_output = std::get<0>(result);
+    return std::make_tuple(std::move(packed_output.data),
+                           std::move(std::get<1>(result)),
+                           std::move(std::get<2>(result)));
+  }
   if (use_cudnn(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
