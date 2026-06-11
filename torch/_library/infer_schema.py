@@ -335,13 +335,19 @@ def derived_types(
             (typing.Optional[seq_typ], f"{cpp_type}[]?")  # noqa: UP045
             for seq_typ in derived_seq_types(base_type)
         )
+    if optional_base_list and optional_list_base:
+        result.extend(
+            (typing.Optional[seq_typ], f"{cpp_type}?[]?")  # noqa: UP045
+            # pyrefly: ignore [not-a-type]
+            for seq_typ in derived_seq_types(typing.Optional[base_type])  # noqa: UP045
+        )
     return result
 
 
 def get_supported_param_types():
     data: list[tuple[type | typing._SpecialForm, str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
-        (Tensor, "Tensor", True, True, False),
+        (Tensor, "Tensor", True, True, True),
         (int, "SymInt", True, False, True),
         (float, "float", True, False, True),
         (bool, "bool", True, False, True),

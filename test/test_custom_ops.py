@@ -831,6 +831,27 @@ class TestCustomOp(CustomOpTestCaseBase):
             infer_schema(d, mutates_args=()), """(Tensor x) -> (Tensor[], Tensor)"""
         )
 
+        def d2(
+            x: list[Tensor],
+            y: Optional[list[Tensor]],
+            z: List[Tensor],
+            w: Optional[List[Tensor]],
+            q: Optional[Sequence[Tensor]],
+            r: list[Optional[Tensor]],
+            s: Optional[list[Optional[Tensor]]],
+        ) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(
+            infer_schema(d2, mutates_args=()),
+            """(Tensor[] x, Tensor[]? y, Tensor[] z, Tensor[]? w, Tensor[]? q, Tensor?[] r, Tensor?[]? s) -> Tensor""",
+        )
+
+        self.assertExpectedInline(
+            infer_schema(d2, mutates_args={"y", "w", "s"}),
+            """(Tensor[] x, Tensor(a1!)[]? y, Tensor[] z, Tensor(a3!)[]? w, Tensor[]? q, Tensor?[] r, Tensor(a6!)?[]? s) -> Tensor""",
+        )
+
         def e() -> Tensor:
             return torch.empty([])
 
@@ -3852,6 +3873,39 @@ class TestCustomOpAPI(TestCase):
             if prev is None and after is None:
                 continue
             self.assertGreater(after, prev)
+
+    @skipIfTorchDynamo("recursive dynamo")
+    @requires_compile
+    def test_mutated_optional_list(self):
+        @torch.library.custom_op(
+            "_torch_testing::mutated_optional_list", mutates_args={"y"}
+        )
+        def g(x: Tensor, y: Optional[List[Tensor]]) -> None:
+            if y is not None:
+                y[1].copy_(x + 1)
+            return None
+
+        x = torch.randn(3)
+        y = [torch.randn(3), torch.randn(3)]
+        initial_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y)
+        )
+        g(x, y)
+        new_versions = pytree.tree_map_only(torch.Tensor, lambda x: x._version, (x, y))
+        self.assertEqual(initial_versions[0], new_versions[0])
+        for prev, after in zip(initial_versions[1], new_versions[1]):
+            self.assertGreater(after, prev)
+        self.assertEqual(y[1], x + 1)
+
+        g(x, None)
+        new_versions = pytree.tree_map_only(torch.Tensor, lambda x: x._version, (x, y))
+        self.assertEqual(initial_versions[0], new_versions[0])
+
+        compiled_g = torch.compile(g, backend="aot_eager", fullgraph=True)
+        x = torch.randn(3)
+        y = [torch.randn(3), torch.randn(3)]
+        compiled_g(x, y)
+        self.assertEqual(y[1], x + 1)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_mutated_optional_arg_default_none(self):
