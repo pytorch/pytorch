@@ -2966,7 +2966,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from torch._higher_order_ops.scan import _extract_carry_and_out
+        from torch._higher_order_ops.scan import _extract_carry_and_out, _FULL_UNROLL
         from torch._higher_order_ops.utils import first_slice_copy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -3003,10 +3003,17 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             init: VariableTracker,
             xs: VariableTracker,
             additional_inputs: VariableTracker,
-        ) -> tuple[VariableTracker, VariableTracker, VariableTracker, VariableTracker]:
-            return combine_fn, init, xs, additional_inputs
+            unroll: VariableTracker = ConstantVariable.create(1),
+        ) -> tuple[
+            VariableTracker,
+            VariableTracker,
+            VariableTracker,
+            VariableTracker,
+            VariableTracker,
+        ]:
+            return combine_fn, init, xs, additional_inputs, unroll
 
-        combine_fn, init, xs, additional_inputs = arg_extractor(*args, **kwargs)
+        combine_fn, init, xs, additional_inputs, unroll = arg_extractor(*args, **kwargs)
         init_vars = unpack_iterable(tx, init)
         xs_vars = unpack_iterable(tx, xs)
         additional_inputs_vars = unpack_iterable(tx, additional_inputs)
@@ -3078,6 +3085,44 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 hints=[
                     *graph_break_hints.USER_ERROR,
                     *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        if unroll.is_python_constant():
+            unroll_value = unroll.as_python_constant()
+        elif isinstance(unroll, SymNodeVariable) and unroll.python_type() is int:
+            # Unroll controls code structure, so it must be specialized at
+            # trace time if a symbolic integer is passed in.
+            unroll_value = int(unroll.sym_num)
+        else:
+            unimplemented(
+                gb_type="torch.scan: improper unroll",
+                context=str(unroll),
+                explanation="Expected unroll to be a bool or a positive int.",
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
+        match unroll_value:
+            case bool():
+                unroll_value = _FULL_UNROLL if unroll_value else 1
+            case int() if unroll_value >= 1:
+                pass
+            case _:
+                unimplemented(
+                    gb_type="torch.scan: improper unroll",
+                    context=str(unroll),
+                    explanation="Expected unroll to be a bool or a positive int.",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
+        if not isinstance(unroll_value, int):
+            unimplemented(
+                gb_type="torch.scan: improper unroll",
+                context=str(unroll),
+                explanation="Expected unroll to be a bool or a positive int.",
+                hints=[
+                    *graph_break_hints.USER_ERROR,
                 ],
             )
         _check_all_tensorvariable(init_vars)
@@ -3188,6 +3233,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             init_proxy,
             xs_proxy,
             additional_inputs_proxy,
+            unroll_value,
         )
 
         return _call_function_and_unflatten_output(

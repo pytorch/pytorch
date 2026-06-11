@@ -21,7 +21,7 @@ from torch._higher_order_ops.cudagraph_conditional_nodes import (
     CUDAGraphCaptureControlFlowOpDispatchMode,
 )
 from torch._higher_order_ops.map import _fake_map
-from torch._higher_order_ops.scan import _fake_scan, scan
+from torch._higher_order_ops.scan import _fake_scan, _FULL_UNROLL, scan
 from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
@@ -1659,6 +1659,59 @@ def forward(self, pred_1, x_1):
         exp_out = _fake_scan(combine_fn, init, xs, dim=dim)
         self.assertEqual(out, exp_out)
 
+    @parametrize("reverse", [False, True])
+    @parametrize("unroll", [False, 1, 2, 3, True])
+    def test_scan_unroll(self, reverse, unroll):
+        def combine_fn(carry, x):
+            next_carry = carry + x
+            return next_carry, next_carry.sin()
+
+        init = torch.randn(2, 3)
+        xs = torch.randn(5, 2, 3)
+        out = scan(combine_fn, init, xs, reverse=reverse, unroll=unroll)
+        exp_out = _fake_scan(combine_fn, init, xs, reverse=reverse, unroll=unroll)
+        self.assertEqual(out, exp_out)
+
+    def test_scan_unroll_validation(self):
+        def combine_fn(carry, x):
+            next_carry = carry + x
+            return next_carry, next_carry.clone()
+
+        init = torch.randn(2, 3)
+        xs = torch.randn(5, 2, 3)
+        for unroll in (0, -1, 1.5, "2"):
+            with self.assertRaisesRegex(RuntimeError, "Unroll must be"):
+                scan(combine_fn, init, xs, unroll=unroll)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @skipIfNoDynamoSupport
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_scan_unroll_graph(self):
+        def combine_fn(carry, x):
+            next_carry = carry + x
+            return next_carry, next_carry.clone()
+
+        def f(init, xs):
+            return scan(combine_fn, init, xs, unroll=2)
+
+        def f_full(init, xs):
+            return scan(combine_fn, init, xs, unroll=True)
+
+        init = torch.randn(2, 3)
+        xs = torch.randn(5, 2, 3)
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend)(init, xs)
+        self.assertIn(
+            "torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [], 2)",
+            backend.graphs[0].code,
+        )
+        backend = EagerAndRecordGraphs()
+        torch.compile(f_full, backend=backend)(init, xs)
+        self.assertIn(
+            f"torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [], {_FULL_UNROLL})",
+            backend.graphs[0].code,
+        )
+
     # TODO: provide an implementation for all compile modes and re-enable all test
     @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
@@ -2879,7 +2932,7 @@ class GraphModule(torch.nn.Module):
 
         flip: "f32[3, 10, 2]" = torch.flip(l_xs_, [0]);  l_xs_ = None
         scan_combine_fn_0 = self.scan_combine_fn_0
-        scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_0_, l_init_1_], [flip], []);  scan_combine_fn_0 = l_init_0_ = l_init_1_ = flip = None
+        scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_0_, l_init_1_], [flip], [], 1);  scan_combine_fn_0 = l_init_0_ = l_init_1_ = flip = None
         getitem: "f32[1, 10, 2]" = scan[0]
         getitem_1: "f32[1, 10, 2]" = scan[1]
         out: "f32[3, 1, 10, 2]" = scan[2];  scan = None
@@ -3612,7 +3665,7 @@ def forward(self, fct_1, init_1, xs_1):
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
     sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4));  scan_combine_graph_0 = init_1 = flip = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4), 1);  scan_combine_graph_0 = init_1 = flip = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None
@@ -3632,7 +3685,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_xs_ = L_xs_
     flip = torch.flip(l_xs_, [0]);  l_xs_ = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [flip], []);  scan_combine_fn_0 = l_init_ = flip = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [flip], [], 1);  scan_combine_fn_0 = l_init_ = flip = None
     carry = scan[0]
     out = scan[1];  scan = None
     out_1 = out.flip([0]);  out = None
@@ -8375,7 +8428,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
     l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_], 1);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     carry = scan[0]
     out = scan[1];  scan = None
     return (carry, out)""",
@@ -8390,7 +8443,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
     l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_], 1);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     carry = scan[0]
     out = scan[1];  scan = None
     return (carry, out)""",
@@ -10428,7 +10481,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor xs0) -> (Tensor, Tensor)""",
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, int unroll=1) -> (Tensor, Tensor)""",
         )
 
     def test_scan_gen_schema_with_additional_inputs(self):
@@ -10443,7 +10496,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0) -> (Tensor, Tensor)""",
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0, int unroll=1) -> (Tensor, Tensor)""",
         )
 
     def test_scan_gen_schema_multiple_inputs(self):
@@ -10458,7 +10511,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1) -> (Tensor, Tensor, Tensor, Tensor)""",
+            """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1, int unroll=1) -> (Tensor, Tensor, Tensor, Tensor)""",
         )
 
     def test_scan_gen_schema_with_additional_input_mutation(self):
@@ -10474,7 +10527,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor(a3!) additional_input0) -> (Tensor, Tensor)""",
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor(a3!) additional_input0, int unroll=1) -> (Tensor, Tensor)""",
         )
 
     def test_scan_gen_schema_with_multiple_additional_input_mutation(self):
@@ -10505,7 +10558,7 @@ class TestHopSchema(TestCase):
             return (
                 "scan(Any combine_fn, Tensor init0, Tensor xs0, "
                 + ", ".join(parts)
-                + ") -> (Tensor, Tensor)"
+                + ", int unroll=1) -> (Tensor, Tensor)"
             )
 
         cases = [

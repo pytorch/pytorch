@@ -2824,6 +2824,16 @@
       "Hints": []
     }
   ],
+  "GB5827": [
+    {
+      "Gb_type": "torch.scan: improper unroll",
+      "Context": "str(unroll)",
+      "Explanation": "Expected unroll to be a bool or a positive int.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB6215": [
     {
       "Gb_type": "Unresolved GetAttrVariable comparison",
