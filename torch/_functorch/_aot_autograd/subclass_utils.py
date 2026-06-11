@@ -15,6 +15,7 @@ from torch._library.fake_class_registry import maybe_unwrap_fake_script_object
 from torch._library.opaque_object import is_opaque_reference_type
 from torch._opaque_base import OpaqueBase
 from torch._subclasses.fake_tensor import get_plain_tensors
+from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 from torch.types import IntLikeType
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -77,6 +78,34 @@ def maybe_suggest_memory_format(
         return None
 
     return MemoryFormatMeta.from_tensor(t)
+
+
+def _safe_metadata_eq(
+    outer: Iterable[IntLikeType],
+    inner: Iterable[IntLikeType],
+) -> bool:
+    return guard_or_false(sym_eq(tuple(outer), tuple(inner)))
+
+
+def _find_attr_matching_outer_metadata(
+    a: Tensor,
+    inner_keys: Sequence[str],
+    *,
+    metadata_fn: Callable[[Tensor], Iterable[IntLikeType]],
+) -> str | None:
+    tensor_attrs = [key for key in inner_keys if isinstance(getattr(a, key), Tensor)]
+    if not tensor_attrs:
+        return None
+
+    outer_metadata = tuple(metadata_fn(a))
+    # Only use an attr as the runtime source when every tensor attr agrees
+    # with the wrapper metadata; otherwise there is no single attr to trust.
+    if all(
+        _safe_metadata_eq(outer_metadata, metadata_fn(getattr(a, key)))
+        for key in tensor_attrs
+    ):
+        return tensor_attrs[0]
+    return None
 
 
 def get_subclass_typing_container(
@@ -178,6 +207,12 @@ def create_subclass_metadata(
             outer_stride=a.stride(),  # type: ignore[arg-type]
             original_subclass=a,
             memory_format=maybe_suggest_memory_format(a, with_memory_format),
+            outer_size_from_attr=_find_attr_matching_outer_metadata(
+                a, inner_keys, metadata_fn=lambda t: t.size()
+            ),
+            outer_stride_from_attr=_find_attr_matching_outer_metadata(
+                a, inner_keys, metadata_fn=lambda t: t.stride()
+            ),
         ),
         new_start_idx,
     )
