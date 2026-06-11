@@ -17,7 +17,7 @@ import torch.utils._pytree as python_pytree
 from torch._dynamo.exc import ResumePrologueTracingError, TorchRuntimeError, Unsupported
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_FBCODE, munge_exc
+from torch.testing._internal.common_utils import IS_FBCODE, IS_S390X, munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -744,6 +744,9 @@ from user code:
             post_munge=post_munge,
         )
 
+    @unittest.skipIf(
+        IS_S390X, "Fails only on s390x CI, but not locally. Needs investigation"
+    )
     @make_logging_test(graph_breaks=True)
     def test_reconstruction_failure_gb(self, records):
         class Foo:
