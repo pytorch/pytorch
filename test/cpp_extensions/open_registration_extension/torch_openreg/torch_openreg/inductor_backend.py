@@ -11,23 +11,6 @@ from torch._inductor.codegen.common import (
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 
-import torch_openreg._C  # type: ignore[import]
-
-
-class OpenRegMemoryGuard:
-    def unprotect(self, args):
-        for arg in args:
-            if isinstance(arg, torch.Tensor) and arg.device.type == "openreg":
-                torch_openreg._C._memory_unprotect(arg)
-
-    def protect(self, args):
-        for arg in args:
-            if isinstance(arg, torch.Tensor) and arg.device.type == "openreg":
-                torch_openreg._C._memory_protect(arg)
-
-
-openreg_memory_guard = OpenRegMemoryGuard()
-
 
 class OpenRegDeviceOpOverrides(DeviceOpOverrides):
     def import_get_raw_stream_as(self, name):
@@ -61,23 +44,6 @@ class OpenRegWrapperCodegen(PythonWrapperCodegen):
                 subgraph_name, parent_wrapper, partition_signatures
             )
         return OpenRegWrapperCodegen()
-
-    def write_header(self):
-        super().write_header()
-        self.header.splice(
-            "from torch_openreg.inductor_backend import openreg_memory_guard"
-        )
-
-    def generate_kernel_call(self, kernel_name, call_args, *, device=None, **kwargs):
-        from torch._inductor.virtualized import V
-
-        device = device or V.graph.get_current_device_or_throw()
-        if device.type == "openreg":
-            self.writeline(f"openreg_memory_guard.unprotect([{', '.join(call_args)}])")
-        kwargs["device"] = device
-        super().generate_kernel_call(kernel_name, call_args, **kwargs)
-        if device.type == "openreg":
-            self.writeline(f"openreg_memory_guard.protect([{', '.join(call_args)}])")
 
     def _generate_kernel_call_helper(
         self, kernel_name, call_args, *, device=None, **kwargs
