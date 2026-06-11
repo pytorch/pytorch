@@ -3699,6 +3699,497 @@ inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
     return (T(0.5) * (b - p) / std::sqrt(x));
 } // T scaled_modified_bessel_k1_forward(T x)
 
+// Helper: Sign of Gamma(x) for x < 0, non-integer
+template<typename T>
+inline C10_HOST_DEVICE int bessel_gamma_sign(T x) {
+    if (x >= T(0.0)) {
+        return 1;
+    }
+    T n = std::floor(-x + T(1.0));
+    if (!std::isfinite(n)) {
+        return 1;
+    }
+    return (std::fmod(n, T(2.0)) == T(0.0)) ? 1 : -1;
+}
+
+template<typename T>
+inline C10_HOST_DEVICE bool bessel_is_integer(T x) {
+    return std::isfinite(x) && std::floor(x) == x;
+}
+
+// DLMF 10.40.2 asymptotic expansion for K_nu(x), optimally truncated
+template<typename T>
+inline C10_HOST_DEVICE T bessel_k_asymptotic(T x, T nu) {
+    const T pi = c10::pi<T>;
+    T mu = T(4.0) * nu * nu;
+
+    T sum_val = T(1.0);
+    T term = T(1.0);
+    T prev_abs_term = T(1.0);
+
+    for (int64_t k = 1; k < 30; k++) {
+        T factor = (mu - T((2*k - 1) * (2*k - 1))) / (T(8.0) * T(k) * x);
+        term *= factor;
+
+        T abs_term = std::abs(term);
+        if (abs_term > prev_abs_term) break;
+        if (abs_term < std::numeric_limits<T>::epsilon() * std::abs(sum_val)) {
+            break;
+        }
+
+        sum_val += term;
+        prev_abs_term = abs_term;
+    }
+
+    return std::sqrt(pi / (T(2.0) * x)) * std::exp(-x) * sum_val;
+}
+
+// Temme series for K_mu(x) and K_{mu+1}(x) when |mu| <= 0.5
+// Based on N.M. Temme, "On the numerical evaluation of the modified Bessel
+// function of the third kind", J. Comput. Phys. 19, 324-337 (1975)
+// Valid for |mu| <= 0.5 (convergence condition from Temme Eq 3.1)
+// Converges for all x, but cost grows as ~(x/2)^2 terms.
+// Threshold x <= 2.0 follows Boost.Math (bessel_ik.hpp) and GSL (bessel_Knu.c).
+template<typename T>
+inline C10_HOST_DEVICE void temme_ik(T mu, T x, T* K_mu, T* K_mu1) {
+    const T pi = c10::pi<T>;
+    const T euler_gamma = c10::euler<T>;
+    const int max_iter = 100;
+    const T tol = std::numeric_limits<T>::epsilon() * T(10.0);
+
+    // Gamma(1+v) - 1 via expm1(lgamma) to avoid cancellation near v=0.
+    T gp = std::expm1(std::lgamma(T(1.0) + mu));
+    T gm = std::expm1(std::lgamma(T(1.0) - mu));
+
+    T a = std::log(x / T(2.0));
+    T b = std::exp(mu * a);
+    T sigma = -a * mu;
+
+    // Use type-aware threshold: must exceed the zone where T(1.0) + mu
+    // loses mu entirely (i.e., > ULP(1.0) for the type), so that
+    // tgamma1pm1 produces nonzero results for the gamma1/gamma2 path.
+    const T mu_thresh = sizeof(T) >= 8 ? T(1e-10) : T(1e-6);
+
+    T c;
+    if (std::abs(mu) < mu_thresh) {
+        c = T(1.0);
+    } else {
+        c = std::sin(pi * mu) / (mu * pi);
+    }
+
+    T d;
+    if (std::abs(sigma) < T(1e-5)) {
+        T sigma2 = sigma * sigma;
+        d = T(1.0) + sigma2 / T(6.0) + sigma2 * sigma2 / T(120.0);
+    } else {
+        d = std::sinh(sigma) / sigma;
+    }
+
+    T gamma1, gamma2;
+    if (std::abs(mu) < mu_thresh) {
+        gamma1 = -euler_gamma;
+        gamma2 = T(1.0);
+    } else {
+        T inv_gp = T(1.0) / (T(1.0) + gp);
+        T inv_gm = T(1.0) / (T(1.0) + gm);
+        gamma1 = (inv_gm - inv_gp) / (T(2.0) * mu);
+        gamma2 = (inv_gm + inv_gp) / T(2.0);
+    }
+
+    T p = (T(1.0) + gp) / (T(2.0) * b);
+    T q = (T(1.0) + gm) * b / T(2.0);
+    T f = (std::cosh(sigma) * gamma1 + d * (-a) * gamma2) / c;
+    T h = p;
+    T coef = T(1.0);
+    T sum = coef * f;
+    T sum1 = coef * h;
+
+    T x2_4 = x * x / T(4.0);
+    const T denom_floor = sizeof(T) >= 8 ? T(1e-300) : T(1e-38);
+
+    for (int k = 1; k < max_iter; k++) {
+        T k_T = T(k);
+        T denom = k_T * k_T - mu * mu;
+        if (std::abs(denom) < denom_floor) break;
+
+        f = (k_T * f + p + q) / denom;
+        p /= (k_T - mu);
+        q /= (k_T + mu);
+        h = p - k_T * f;
+        coef *= x2_4 / k_T;
+
+        T delta_sum = coef * f;
+        T delta_sum1 = coef * h;
+
+        sum += delta_sum;
+        sum1 += delta_sum1;
+
+        if (std::abs(delta_sum) < tol * std::abs(sum) &&
+            std::abs(delta_sum1) < tol * std::abs(sum1)) {
+            break;
+        }
+    }
+
+    *K_mu = sum;
+    *K_mu1 = T(2.0) * sum1 / x;
+}
+
+// Steed's continued fraction for K_mu(x) and K_{mu+1}(x), |mu| <= 0.5, x > 1
+// Ref: Thompson & Barnett, Comp. Phys. Comm. 47 (1987) 245-257
+// Convergent (unlike DLMF 10.40.2 asymptotic), same as Boost.Math CF2_ik()
+template<typename T>
+inline C10_HOST_DEVICE void CF2_ik(T mu, T x, T* K_mu, T* K_mu1) {
+    constexpr T pi = c10::pi<T>;
+    constexpr T tol = std::numeric_limits<T>::epsilon();
+    constexpr int max_iter = 1000;
+
+    T a = mu * mu - T(0.25);
+    T b = T(2.0) * (x + T(1.0));
+    T d = T(1.0) / b;
+    T f = d;
+    T delta = d;
+    T prev = T(0.0);
+    T current = T(1.0);
+    T C = -a;
+    T Q = C;
+    T S = T(1.0) + Q * delta;
+
+    for (int k = 2; k < max_iter; k++) {
+        a -= T(2 * (k - 1));
+        b += T(2.0);
+        d = T(1.0) / (b + a * d);
+        delta *= (b * d - T(1.0));
+        f += delta;
+
+        T q = (prev - (b - T(2.0)) * current) / a;
+        prev = current;
+        current = q;
+
+        C *= -a / T(k);
+        Q += C * q;
+        S += Q * delta;
+
+        if (q < tol) {
+            C *= q;
+            prev /= q;
+            current /= q;
+            q = T(1.0);
+        }
+
+        if (std::abs(Q * delta) < std::abs(S) * tol) {
+            break;
+        }
+    }
+
+    if (-x < std::log(std::numeric_limits<T>::min())) {
+        *K_mu = std::exp(T(0.5) * std::log(pi / (T(2.0) * x)) - x - std::log(S));
+    } else {
+        *K_mu = std::sqrt(pi / (T(2.0) * x)) * std::exp(-x) / S;
+    }
+    *K_mu1 = *K_mu * (T(0.5) + mu + x + (mu * mu - T(0.25)) * f) / x;
+}
+
+// DLMF 10.40.1 asymptotic expansion for I_nu(x), optimally truncated
+template<typename T>
+inline C10_HOST_DEVICE T bessel_i_asymptotic(T x, T nu) {
+    const T pi = c10::pi<T>;
+    T mu = T(4.0) * nu * nu;
+
+    T sum_val = T(1.0);
+    T term = T(1.0);
+    T prev_abs_term = T(1.0);
+
+    for (int64_t k = 1; k < 30; k++) {
+        T factor = -(mu - T((2*k - 1) * (2*k - 1))) / (T(8.0) * T(k) * x);
+        term *= factor;
+
+        T abs_term = std::abs(term);
+        if (abs_term > prev_abs_term) break;
+        if (abs_term < std::numeric_limits<T>::epsilon() * std::abs(sum_val)) {
+            break;
+        }
+
+        sum_val += term;
+        prev_abs_term = abs_term;
+    }
+
+    return std::exp(x) / std::sqrt(T(2.0) * pi * x) * sum_val;
+}
+
+// DLMF 10.41.3: uniform asymptotic expansion for I_nu(x) at large positive nu,
+// with eta and p from 10.41.7-10.41.8 and U_1..U_3 from 10.41.10.
+template<typename T>
+inline C10_HOST_DEVICE T bessel_i_uniform_asymptotic(T x, T nu) {
+    const T pi = c10::pi<T>;
+    T z = x / nu;
+    T z2 = z * z;
+    T w = std::sqrt(T(1.0) + z2);
+    T p = T(1.0) / w;
+    T eta = w + std::log(z / (T(1.0) + w));
+
+    T p2 = p * p;
+    T p3 = p2 * p;
+    T p4 = p2 * p2;
+    T p5 = p4 * p;
+    T p6 = p3 * p3;
+    T p7 = p6 * p;
+    T p9 = p7 * p2;
+
+    T U1 = (T(3.0) * p - T(5.0) * p3) / T(24.0);
+    T U2 = (T(81.0) * p2 - T(462.0) * p4 + T(385.0) * p6) / T(1152.0);
+    T U3 = (T(30375.0) * p3 - T(369603.0) * p5 + T(765765.0) * p7 - T(425425.0) * p9) / T(414720.0);
+
+    T inv_nu = T(1.0) / nu;
+    T series = T(1.0) + inv_nu * (U1 + inv_nu * (U2 + inv_nu * U3));
+
+    T log_I = nu * eta
+              - T(0.5) * std::log(T(2.0) * pi * nu)
+              - T(0.25) * std::log(T(1.0) + z2)
+              + std::log(series);
+    return std::exp(log_I);
+}
+
+// Power series for I_nu(x) (small to medium x)
+// I_nu(x) = sum_{k=0}^inf (x/2)^{nu+2k} / (k! * Gamma(nu+k+1))
+template<typename T>
+inline C10_HOST_DEVICE T bessel_i_series(T x, T nu) {
+    if (x == T(0.0)) {
+        // Handled by caller; guard against direct calls
+        if (nu == T(0.0)) return T(1.0);
+        if (nu > T(0.0)) return T(0.0);
+        return std::numeric_limits<T>::infinity();
+    }
+
+    const T log_min = std::log(std::numeric_limits<T>::min());
+
+    T half_x = x / T(2.0);
+    T ln_half_x = std::log(half_x);
+    T result = T(0.0);
+
+    for (int64_t k = 0; k < 300; k++) {
+        T gamma_arg = nu + T(k) + T(1.0);
+
+        T log_numerator = (nu + T(2 * k)) * ln_half_x;
+        T log_k_fact = std::lgamma(T(k + 1));
+        T log_gamma = std::lgamma(gamma_arg);
+        int gamma_sgn = bessel_gamma_sign(gamma_arg);
+
+        T log_abs_term = log_numerator - log_k_fact - log_gamma;
+
+        if (log_abs_term < log_min) {
+            break;
+        }
+        T term = T(gamma_sgn) * std::exp(log_abs_term);
+
+        T prev_result = result;
+        result += term;
+
+        if (k > 10 && (result == prev_result || std::abs(term) < std::numeric_limits<T>::epsilon() * std::abs(result))) {
+            break;
+        }
+    }
+
+    return result;
+}
+
+// Forward recurrence for K
+// K_{n+1}(x) = K_{n-1}(x) + (2n/x) * K_n(x)
+template<typename T>
+inline C10_HOST_DEVICE T bessel_k_recurrence(T K_mu, T K_mu1, T mu, int64_t N, T x) {
+    if (N == 0) return K_mu;
+    if (N == 1) return K_mu1;
+
+    T K_prev = K_mu;
+    T K_curr = K_mu1;
+    T log_scale = T(0.0);
+    const T overflow_thresh = sizeof(T) >= 8 ? T(1e300) : T(1e30);
+
+    for (int64_t n = 1; n < N; n++) {
+        T order = mu + T(n);
+        T K_next = K_prev + (T(2.0) * order / x) * K_curr;
+        K_prev = K_curr;
+        K_curr = K_next;
+
+        if (std::abs(K_curr) > overflow_thresh) {
+            T s = std::abs(K_curr);
+            K_prev /= s;
+            K_curr /= s;
+            log_scale += std::log(s);
+        }
+    }
+
+    if (log_scale > T(0.0)) {
+        if (log_scale > std::log(std::numeric_limits<T>::max())) {
+            return std::numeric_limits<T>::infinity();
+        }
+        return K_curr * std::exp(log_scale);
+    }
+    return K_curr;
+}
+
+// Modified Bessel I_nu(x) for arbitrary real order
+template<typename T, bool is_cuda=false> inline C10_HOST_DEVICE T modified_bessel_k_forward(T x, T nu);
+
+template<typename T, bool is_cuda=false>
+inline C10_HOST_DEVICE T modified_bessel_i_forward(T x, T nu) {
+    if (std::isnan(x) || std::isnan(nu)) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    if (std::isinf(nu)) {
+        return std::isinf(x) ? std::numeric_limits<T>::quiet_NaN() : T(0.0);
+    }
+
+    // I_n(-x) = (-1)^n * I_n(|x|) for integer n (DLMF 10.27.1)
+    // Non-integer nu with x < 0 has no real-valued result.
+    if (x < T(0.0)) {
+        T nu_abs = std::abs(nu);
+        if (bessel_is_integer(nu_abs)) {
+            T val = modified_bessel_i_forward(std::abs(x), nu_abs);
+            // For finite x and huge nu, val underflows to 0; guard int64 cast.
+            if (nu_abs > T(9e18)) {
+                return val;
+            }
+            int64_t n = static_cast<int64_t>(nu_abs);
+            return (n % 2 == 0) ? val : -val;
+        }
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    if (x == T(0.0)) {
+        if (nu == T(0.0)) {
+            return T(1.0);
+        }
+        if (nu > T(0.0)) {
+            return T(0.0);
+        }
+        T nu_abs = std::abs(nu);
+        if (bessel_is_integer(nu_abs)) {
+            return T(0.0);
+        }
+        return std::numeric_limits<T>::infinity();
+    }
+
+    T nu_abs = std::abs(nu);
+    if (nu < T(0.0) && bessel_is_integer(nu_abs)) {
+        nu = nu_abs;
+    } else if (nu < T(0.0)) {
+        const double pi = c10::pi<double>;
+        const double x_acc = static_cast<double>(x);
+        const double nu_acc = static_cast<double>(nu_abs);
+        const double nearest = std::floor(nu_acc + 0.5);
+        return static_cast<T>(modified_bessel_i_forward<double, is_cuda>(x_acc, nu_acc) +
+            2.0 * (std::fmod(std::abs(nearest), 2.0) == 0.0 ? 1.0 : -1.0) *
+            std::sin(pi * (nu_acc - nearest)) *
+            modified_bessel_k_forward<double, is_cuda>(x_acc, nu_acc) / pi);
+    }
+    if (nu_abs < T(1e-10)) {
+        return modified_bessel_i0_forward(x);
+    }
+    if (std::abs(nu_abs - T(1.0)) < T(1e-10)) {
+        return modified_bessel_i1_forward(x);
+    }
+
+    if (x > std::max(T(20.0), nu_abs * nu_abs / T(2.0)) + nu_abs) {
+        return bessel_i_asymptotic(x, nu_abs);
+    }
+
+    if (nu >= T(50.0)) {
+        return bessel_i_uniform_asymptotic(x, nu);
+    }
+
+    return bessel_i_series(x, nu);
+}
+
+// DLMF 10.41.4: uniform asymptotic expansion for K_nu(x) at large nu,
+// with eta and p from 10.41.7-10.41.8 and U_1..U_3 from 10.41.10.
+template<typename T>
+inline C10_HOST_DEVICE T bessel_k_uniform_asymptotic(T x, T nu) {
+    const T pi = c10::pi<T>;
+    T z = x / nu;
+    T z2 = z * z;
+    T w = std::sqrt(T(1.0) + z2);
+    T p = T(1.0) / w;
+    T eta = w + std::log(z / (T(1.0) + w));
+
+    T p2 = p * p;
+    T p3 = p2 * p;
+    T p4 = p2 * p2;
+    T p5 = p4 * p;
+    T p6 = p3 * p3;
+    T p7 = p6 * p;
+    T p9 = p7 * p2;
+
+    T U1 = (T(3.0) * p - T(5.0) * p3) / T(24.0);
+    T U2 = (T(81.0) * p2 - T(462.0) * p4 + T(385.0) * p6) / T(1152.0);
+    T U3 = (T(30375.0) * p3 - T(369603.0) * p5 + T(765765.0) * p7 - T(425425.0) * p9) / T(414720.0);
+
+    T inv_nu = T(1.0) / nu;
+    T series = T(1.0) + inv_nu * (-U1 + inv_nu * (U2 + inv_nu * (-U3)));
+
+    T log_K = T(0.5) * std::log(pi / (T(2.0) * nu))
+              - nu * eta
+              - T(0.25) * std::log(T(1.0) + z2)
+              + std::log(series);
+    return std::exp(log_K);
+}
+
+template<typename T, bool is_cuda>
+inline C10_HOST_DEVICE T modified_bessel_k_forward(T x, T nu) {
+    if constexpr (std::is_same_v<T, float>) { return static_cast<T>(modified_bessel_k_forward<double, is_cuda>(x, nu)); }
+    if (std::isnan(x) || std::isnan(nu)) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    if (x <= T(0.0)) {
+        if (x == T(0.0)) {
+            return std::numeric_limits<T>::infinity();
+        }
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    nu = std::abs(nu);
+
+    if (nu < T(1e-10)) {
+        return modified_bessel_k0_forward(x);
+    }
+    if (std::abs(nu - T(1.0)) < T(1e-10)) {
+        return modified_bessel_k1_forward(x);
+    }
+
+    if (x > std::max(T(20.0), nu * nu / T(2.0)) + nu) {
+        return bessel_k_asymptotic(x, nu);
+    }
+
+    if (std::isinf(nu)) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    // Large nu: uniform asymptotic (DLMF 10.41). This avoids both O(nu)
+    // recurrence and base-case underflow before recurrence can rescale.
+    if (nu >= T(50.0)) {
+        return bessel_k_uniform_asymptotic(x, nu);
+    }
+
+    int64_t N = static_cast<int64_t>(std::floor(nu + T(0.5)));
+    T mu = nu - T(N);
+    if (mu > T(0.5)) {
+        mu -= T(1.0);
+        N += 1;
+    } else if (mu < T(-0.5)) {
+        mu += T(1.0);
+        N -= 1;
+    }
+
+    T K_mu, K_mu1;
+    if (x <= T(2.0)) {
+        temme_ik(mu, x, &K_mu, &K_mu1);
+    } else {
+        CF2_ik(mu, x, &K_mu, &K_mu1);
+    }
+    return bessel_k_recurrence(K_mu, K_mu1, mu, N, x);
+}
+
 template<typename T>
 inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
     if (n < 0) {

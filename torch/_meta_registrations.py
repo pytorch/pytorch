@@ -9094,6 +9094,9 @@ _create_unary_float_meta_func(aten.special_scaled_modified_bessel_k0)
 _create_unary_float_meta_func(aten.special_scaled_modified_bessel_k1)
 
 
+_create_binary_float_meta_func(aten.special_modified_bessel_i)
+_create_binary_float_meta_func(aten.special_modified_bessel_k)
+
 _create_binary_float_meta_func(aten.special_chebyshev_polynomial_t)
 _create_binary_float_meta_func(aten.special_chebyshev_polynomial_u)
 _create_binary_float_meta_func(aten.special_chebyshev_polynomial_v)

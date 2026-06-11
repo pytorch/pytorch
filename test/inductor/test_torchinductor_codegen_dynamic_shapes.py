@@ -266,6 +266,8 @@ test_failures = {
     "test_pointwise_i1e_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_modified_bessel_k0_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_modified_bessel_k1_dynamic_shapes": TestFailure(("cuda", "xpu")),
+    "test_pointwise_modified_bessel_i_dynamic_shapes": TestFailure(("cuda", "xpu")),
+    "test_pointwise_modified_bessel_k_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_ndtri_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_polygamma_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_psi_dynamic_shapes": TestFailure(("cuda", "xpu")),

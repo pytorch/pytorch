@@ -15453,6 +15453,104 @@
   variants: function
   tags: pointwise
 
+- func: special_modified_bessel_i(Tensor x, Tensor nu) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_modified_bessel_i.out
+  variants: function
+  tags: pointwise
+
+- func: special_modified_bessel_i.x_scalar(Scalar x, Tensor nu) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_modified_bessel_i
+  device_check: NoCheck
+  python_module: special
+  variants: function
+  tags: pointwise
+
+- func: special_modified_bessel_i.nu_scalar(Tensor x, Scalar nu) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_modified_bessel_i
+  device_check: NoCheck
+  python_module: special
+  variants: function
+  tags: pointwise
+
+- func: special_modified_bessel_i.out(Tensor x, Tensor nu, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_modified_bessel_i_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+  tags: pointwise
+
+- func: special_modified_bessel_i.x_scalar_out(Scalar x, Tensor nu, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_modified_bessel_i_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+  tags: pointwise
+
+- func: special_modified_bessel_i.nu_scalar_out(Tensor x, Scalar nu, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_modified_bessel_i_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+  tags: pointwise
+
+- func: special_modified_bessel_k(Tensor x, Tensor nu) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_modified_bessel_k.out
+  variants: function
+  tags: pointwise
+
+- func: special_modified_bessel_k.x_scalar(Scalar x, Tensor nu) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_modified_bessel_k
+  device_check: NoCheck
+  python_module: special
+  variants: function
+  tags: pointwise
+
+- func: special_modified_bessel_k.nu_scalar(Tensor x, Scalar nu) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: special_modified_bessel_k
+  device_check: NoCheck
+  python_module: special
+  variants: function
+  tags: pointwise
+
+- func: special_modified_bessel_k.out(Tensor x, Tensor nu, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_modified_bessel_k_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+  tags: pointwise
+
+- func: special_modified_bessel_k.x_scalar_out(Scalar x, Tensor nu, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_modified_bessel_k_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+  tags: pointwise
+
+- func: special_modified_bessel_k.nu_scalar_out(Tensor x, Scalar nu, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_modified_bessel_k_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+  tags: pointwise
+
 - func: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
   python_module: special
   structured_delegate: special_scaled_modified_bessel_k0.out

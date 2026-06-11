@@ -62,6 +62,28 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(t)
 
 
+def sample_inputs_modified_bessel(op_info, device, dtype, requires_grad, **kwargs):
+    make_x = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        low=0.1,
+        high=10,
+        requires_grad=requires_grad,
+    )
+    make_nu = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        low=-5,
+        high=5,
+        requires_grad=False,
+    )
+
+    for shape in ((S,), ()):
+        yield SampleInput(make_x(shape), args=(make_nu(shape),))
+
+
 def sample_inputs_polygamma(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(
         make_tensor,
@@ -746,6 +768,51 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.k1 if TEST_SCIPY else None,
         supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
+        "special.modified_bessel_i",
+        aten_name="special_modified_bessel_i",
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
+        backward_dtypes=floating_types(),
+        sample_inputs_func=sample_inputs_modified_bessel,
+        supports_one_python_scalar=True,
+        ref=(lambda x, nu: scipy.special.iv(nu, x)) if TEST_SCIPY else None,
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=1e-03, rtol=5e-06),
+                    torch.float64: tol(atol=1e-05, rtol=1e-07),
+                }
+            ),
+        ),
+        lhs_make_tensor_kwargs=dict(low=0),
+        rhs_make_tensor_kwargs=dict(low=-30, high=30),
+    ),
+    BinaryUfuncInfo(
+        "special.modified_bessel_k",
+        aten_name="special_modified_bessel_k",
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
+        backward_dtypes=floating_types(),
+        sample_inputs_func=sample_inputs_modified_bessel,
+        supports_one_python_scalar=True,
+        ref=(lambda x, nu: scipy.special.kv(nu, x)) if TEST_SCIPY else None,
+        decorators=(precisionOverride({torch.float32: 1e-03, torch.float64: 1e-05}),),
+        lhs_make_tensor_kwargs=dict(low=0.1),
+        rhs_make_tensor_kwargs=dict(low=-30, high=30),
     ),
     UnaryUfuncInfo(
         "special.scaled_modified_bessel_k0",

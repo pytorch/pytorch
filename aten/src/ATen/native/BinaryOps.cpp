@@ -123,6 +123,10 @@
 #include <ATen/ops/special_laguerre_polynomial_l_native.h>
 #include <ATen/ops/special_legendre_polynomial_p.h>
 #include <ATen/ops/special_legendre_polynomial_p_native.h>
+#include <ATen/ops/special_modified_bessel_i.h>
+#include <ATen/ops/special_modified_bessel_i_native.h>
+#include <ATen/ops/special_modified_bessel_k.h>
+#include <ATen/ops/special_modified_bessel_k_native.h>
 #include <ATen/ops/special_shifted_chebyshev_polynomial_t.h>
 #include <ATen/ops/special_shifted_chebyshev_polynomial_t_native.h>
 #include <ATen/ops/special_shifted_chebyshev_polynomial_u.h>
@@ -242,6 +246,14 @@ TORCH_META_FUNC(special_shifted_chebyshev_polynomial_v) (const Tensor& self, con
 
 TORCH_META_FUNC(special_shifted_chebyshev_polynomial_w) (const Tensor& self, const Tensor& n) {
   build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_modified_bessel_i) (const Tensor& x, const Tensor& nu) {
+  build_borrowing_binary_float_op(maybe_get_output(), x, nu);
+}
+
+TORCH_META_FUNC(special_modified_bessel_k) (const Tensor& x, const Tensor& nu) {
+  build_borrowing_binary_float_op(maybe_get_output(), x, nu);
 }
 
 TORCH_META_FUNC2(copysign, Tensor) (
@@ -425,6 +437,8 @@ DEFINE_DISPATCH(hermite_polynomial_h_stub);
 DEFINE_DISPATCH(hermite_polynomial_he_stub);
 DEFINE_DISPATCH(laguerre_polynomial_l_stub);
 DEFINE_DISPATCH(legendre_polynomial_p_stub);
+DEFINE_DISPATCH(modified_bessel_i_stub);
+DEFINE_DISPATCH(modified_bessel_k_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_t_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_u_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_v_stub);
@@ -506,6 +520,14 @@ TORCH_IMPL_FUNC(special_laguerre_polynomial_l_out) (const Tensor& self, const Te
 
 TORCH_IMPL_FUNC(special_legendre_polynomial_p_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
   legendre_polynomial_p_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_modified_bessel_i_out) (const Tensor& x, const Tensor& nu, const Tensor& result) {
+  modified_bessel_i_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_modified_bessel_k_out) (const Tensor& x, const Tensor& nu, const Tensor& result) {
+  modified_bessel_k_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(special_shifted_chebyshev_polynomial_t_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
@@ -774,6 +796,38 @@ Tensor& special_shifted_chebyshev_polynomial_w_out(const Scalar& self, const Ten
 
 Tensor& special_shifted_chebyshev_polynomial_w_out(const Tensor& self, const Scalar& n, Tensor& result) {
   return at::special_shifted_chebyshev_polynomial_w_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_modified_bessel_i(const Scalar& x, const Tensor& nu) {
+  return at::special_modified_bessel_i(wrapped_scalar_tensor(x), nu);
+}
+
+Tensor special_modified_bessel_i(const Tensor& x, const Scalar& nu) {
+  return at::special_modified_bessel_i(x, wrapped_scalar_tensor(nu));
+}
+
+Tensor& special_modified_bessel_i_out(const Scalar& x, const Tensor& nu, Tensor& result) {
+  return at::special_modified_bessel_i_out(result, wrapped_scalar_tensor(x), nu);
+}
+
+Tensor& special_modified_bessel_i_out(const Tensor& x, const Scalar& nu, Tensor& result) {
+  return at::special_modified_bessel_i_out(result, x, wrapped_scalar_tensor(nu));
+}
+
+Tensor special_modified_bessel_k(const Scalar& x, const Tensor& nu) {
+  return at::special_modified_bessel_k(wrapped_scalar_tensor(x), nu);
+}
+
+Tensor special_modified_bessel_k(const Tensor& x, const Scalar& nu) {
+  return at::special_modified_bessel_k(x, wrapped_scalar_tensor(nu));
+}
+
+Tensor& special_modified_bessel_k_out(const Scalar& x, const Tensor& nu, Tensor& result) {
+  return at::special_modified_bessel_k_out(result, wrapped_scalar_tensor(x), nu);
+}
+
+Tensor& special_modified_bessel_k_out(const Tensor& x, const Scalar& nu, Tensor& result) {
+  return at::special_modified_bessel_k_out(result, x, wrapped_scalar_tensor(nu));
 }
 
 Tensor& special_gammainc_out(const Tensor& self, const Tensor& other, Tensor& result) {

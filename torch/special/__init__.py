@@ -38,8 +38,10 @@ __all__ = [
     "log_softmax",
     "logit",
     "logsumexp",
+    "modified_bessel_i",
     "modified_bessel_i0",
     "modified_bessel_i1",
+    "modified_bessel_k",
     "modified_bessel_k0",
     "modified_bessel_k1",
     "multigammaln",
@@ -1333,6 +1335,72 @@ Args:
 Keyword args:
     {out}
 """.format(**common_args),
+)
+
+modified_bessel_i = _add_docstr(
+    _special.special_modified_bessel_i,
+    r"""
+modified_bessel_i(x, nu, *, out=None) -> Tensor
+
+Computes the modified Bessel function of the first kind :math:`I_{\nu}(x)` for
+arbitrary real order :math:`\nu`.
+
+.. math::
+    I_{\nu}(x) = \sum_{k=0}^{\infty}
+        \frac{(x/2)^{\nu+2k}}{k! \Gamma(\nu+k+1)}
+
+Supports arbitrary real orders (not just integers 0 and 1).
+For integer orders, negative x is supported: :math:`I_n(-x) = (-1)^n I_n(x)`.
+For non-integer orders, x must be non-negative.
+
+Args:
+    x (Tensor): the input tensor (x >= 0 for non-integer nu; any real x for integer nu)
+    nu (Tensor): the order (can be any real number)
+
+Keyword args:
+    out (Tensor, optional): the output tensor.
+
+Example::
+
+    >>> x = torch.tensor([1.0, 2.0, 3.0])
+    >>> nu = torch.tensor([2.5, 2.5, 2.5])
+    >>> torch.special.modified_bessel_i(x, nu)
+    tensor([0.0571, 0.3970, 1.5153])
+""",
+)
+
+modified_bessel_k = _add_docstr(
+    _special.special_modified_bessel_k,
+    r"""
+modified_bessel_k(x, nu, *, out=None) -> Tensor
+
+Computes the modified Bessel function of the second kind :math:`K_{\nu}(x)` for
+arbitrary real order :math:`\nu`.
+
+Also known as the Macdonald function or Basset function.
+
+.. math::
+    K_{\nu}(x) = \frac{\pi}{2}
+        \frac{I_{-\nu}(x) - I_{\nu}(x)}{\sin(\nu\pi)}
+
+This identity holds for non-integer :math:`\nu`; integer orders are defined by
+continuity. This function supports arbitrary real orders (not just integers 0
+and 1). Note that :math:`K_{-\nu}(x) = K_{\nu}(x)`.
+
+Args:
+    x (Tensor): the input tensor (x > 0)
+    nu (Tensor): the order of the Bessel function (can be any real number)
+
+Keyword args:
+    out (Tensor, optional): the output tensor.
+
+Example::
+
+    >>> x = torch.tensor([1.0, 2.0, 3.0])
+    >>> nu = torch.tensor([2.5, 2.5, 2.5])
+    >>> torch.special.modified_bessel_k(x, nu)
+    tensor([3.2275, 0.3898, 0.0841])
+""",
 )
 
 scaled_modified_bessel_k0 = _add_docstr(

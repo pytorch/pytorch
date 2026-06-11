@@ -3180,6 +3180,32 @@
 - name: special_modified_bessel_k1(Tensor self) -> Tensor
   self: non_differentiable
 
+# dI_nu/dx = 0.5 * (I_{nu-1} + I_{nu+1})
+# dK_nu/dx = -0.5 * (K_{nu-1} + K_{nu+1})
+- name: special_modified_bessel_i(Tensor x, Tensor nu) -> Tensor
+  x: 0.5 * (at::special_modified_bessel_i(x, nu - 1) + at::special_modified_bessel_i(x, nu + 1)) * grad
+  nu: non_differentiable
+  result: 0.5 * (at::special_modified_bessel_i(x_p, nu - 1) + at::special_modified_bessel_i(x_p, nu + 1)) * x_t
+
+- name: special_modified_bessel_i.x_scalar(Scalar x, Tensor nu) -> Tensor
+  nu: non_differentiable
+
+- name: special_modified_bessel_i.nu_scalar(Tensor x, Scalar nu) -> Tensor
+  x: 0.5 * (at::special_modified_bessel_i(x, nu.toDouble() - 1) + at::special_modified_bessel_i(x, nu.toDouble() + 1)) * grad
+  result: 0.5 * (at::special_modified_bessel_i(x_p, nu.toDouble() - 1) + at::special_modified_bessel_i(x_p, nu.toDouble() + 1)) * x_t
+
+- name: special_modified_bessel_k(Tensor x, Tensor nu) -> Tensor
+  x: -0.5 * (at::special_modified_bessel_k(x, nu - 1) + at::special_modified_bessel_k(x, nu + 1)) * grad
+  nu: non_differentiable
+  result: -0.5 * (at::special_modified_bessel_k(x_p, nu - 1) + at::special_modified_bessel_k(x_p, nu + 1)) * x_t
+
+- name: special_modified_bessel_k.x_scalar(Scalar x, Tensor nu) -> Tensor
+  nu: non_differentiable
+
+- name: special_modified_bessel_k.nu_scalar(Tensor x, Scalar nu) -> Tensor
+  x: -0.5 * (at::special_modified_bessel_k(x, nu.toDouble() - 1) + at::special_modified_bessel_k(x, nu.toDouble() + 1)) * grad
+  result: -0.5 * (at::special_modified_bessel_k(x_p, nu.toDouble() - 1) + at::special_modified_bessel_k(x_p, nu.toDouble() + 1)) * x_t
+
 - name: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
   x: non_differentiable
 
