@@ -2781,6 +2781,19 @@ class _MakefxTracer:
                             shape_env=ShapeEnv(),
                             static_shapes=True,
                         )
+                # dynamic_shapes wires unbacked symbols into the shape env, so
+                # it requires one. The fake mode we create above always has it;
+                # a detected ambient fake mode might not, and mutating a
+                # borrowed mode is unsafe, so reject it with a clear error.
+                if (
+                    self.dynamic_shapes is not None
+                    and fake_tensor_mode.shape_env is None
+                ):
+                    raise ValueError(
+                        "make_fx(dynamic_shapes=...) requires the active "
+                        "FakeTensorMode to have a shape_env, but the detected "
+                        "fake mode has none."
+                    )
                 self.fake_tensor_mode = fake_tensor_mode
             elif self.tracing_mode == "symbolic":
                 import torch._dynamo
