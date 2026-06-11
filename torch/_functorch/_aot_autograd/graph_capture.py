@@ -19,7 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .descriptors import AOTInput, BackwardTokenAOTInput
+from .descriptors import AOTInput, BackwardTokenAOTInput, PlainAOTInput
 from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
@@ -89,9 +89,25 @@ def _extract_tangent_source_stack_traces(
         fw_metadata.tangent_source_stack_traces = stack_traces
 
 
+def _set_missing_plain_input_meta_val(
+    n: torch.fx.Node, desc: AOTInput, arg: Any
+) -> None:
+    # make_fx intentionally skips primitive values in track_tensor_tree(), but
+    # descriptor consumers need the same plain-input placeholder metadata that
+    # torch.export fills in with set_missing_meta_vals(). Keep this scoped to
+    # missing PlainAOTInput metadata so existing tensor/SymInt and non-user
+    # descriptor metadata is preserved.
+    if (
+        "val" not in n.meta
+        and isinstance(desc, PlainAOTInput)
+        and not isinstance(arg, torch.Tensor)
+    ):
+        n.meta["val"] = arg
+
+
 def _create_graph(
     f: Callable[..., Any],
-    args: list[torch.Tensor],
+    args: Any,
     args_descs: list[AOTInput]
     | None = None,  # keep compat with old clients; maybe we should split into two impls
     *,
@@ -136,6 +152,7 @@ def _create_graph(
         )(*args)
 
         if args_descs is not None:
+            flat_args, _ = pytree.tree_flatten(args)
             flat_args_descs, _ = pytree.tree_flatten(args_descs)
             flat_out_descs, _ = pytree.tree_flatten(out_descs)
 
@@ -175,6 +192,9 @@ def _create_graph(
                                 f"placeholders={[n for n in fx_g.graph.nodes if n.op == 'placeholder']}"
                             )
                         n.meta["desc"] = flat_args_descs[i]
+                        _set_missing_plain_input_meta_val(
+                            n, flat_args_descs[i], flat_args[i]
+                        )
                         i += 1
                 elif n.op == "output":
                     n.meta["desc"] = flat_out_descs

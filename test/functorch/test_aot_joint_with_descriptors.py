@@ -139,6 +139,30 @@ class inner_f(torch.nn.Module):
         )
         self.assertEqual(expected_output, actual_output)
 
+    def test_non_tensor_input_meta_val(self):
+        class ChunkModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(8, 8)
+
+            def forward(self, x, input_dim: int):
+                return self.linear(x).chunk(2, dim=input_dim)
+
+        model = ChunkModule()
+        inputs = (torch.randn(4, 8), 1)
+
+        with ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack, model, inputs, decompositions=decomposition_table
+            )
+
+        non_tensor_input = next(
+            node
+            for node in joint_with_descriptors.graph_module.graph.nodes
+            if node.op == "placeholder" and node.meta.get("desc") == PlainAOTInput(1)
+        )
+        self.assertEqual(non_tensor_input.meta["val"], 1)
+
     def test_conv_bn_module(self):
         """Test convolutional + batch norm module"""
 
