@@ -202,9 +202,9 @@ namespace impl {
 inline Tensor applySlice(
     const Tensor& self,
     int64_t dim,
-    c10::SymInt start,
-    c10::SymInt stop,
-    c10::SymInt step,
+    const c10::SymInt& start,
+    const c10::SymInt& stop,
+    const c10::SymInt& step,
     bool disable_slice_optimization,
     const at::Device& self_device,
     const std::optional<SymIntArrayRef>& self_sizes) {
@@ -227,8 +227,7 @@ inline Tensor applySlice(
       return self;
     }
   }
-  return self.slice_symint(
-      dim, std::move(start), std::move(stop), std::move(step));
+  return self.slice_symint(dim, start, stop, step);
 }
 
 inline Tensor applySelect(
@@ -330,7 +329,7 @@ inline void recordTensorIndex(
 
 inline c10::List<::std::optional<Tensor>> typeConvertIndices(
     const Tensor& /*self*/,
-    std::vector<Tensor>&& indices) {
+    std::vector<Tensor> indices) {
   c10::List<::std::optional<Tensor>> converted_inds;
   converted_inds.reserve(indices.size());
   for (auto&& i : std::move(indices)) {
@@ -518,7 +517,7 @@ inline Tensor handleDimInMultiDimIndexing(
         result = impl::applySelect(
             result,
             *dim_ptr,
-            tensor.item<int64_t>(),
+            tensor.item().toSymInt(),
             real_dim,
             original_tensor_device,
             prev_dim_result_sizes);
@@ -591,9 +590,7 @@ inline Tensor applySlicing(
 }
 } // namespace impl
 
-inline Tensor dispatch_index(
-    const Tensor& self,
-    std::vector<Tensor>&& indices) {
+inline Tensor dispatch_index(const Tensor& self, std::vector<Tensor> indices) {
   // Remove trailing null elements from indices
   while (!indices.empty() && !indices.back().defined()) {
     indices.pop_back();
@@ -603,7 +600,7 @@ inline Tensor dispatch_index(
 
 inline Tensor dispatch_index_put_(
     Tensor& self,
-    std::vector<Tensor>&& indices,
+    std::vector<Tensor> indices,
     const Tensor& value) {
   // Remove trailing null elements from indices
   while (!indices.empty() && !indices.back().defined()) {

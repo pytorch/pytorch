@@ -21,6 +21,7 @@
 #include <ATen/ops/bernoulli_native.h>
 #include <ATen/ops/clamp.h>
 #include <ATen/ops/cumsum.h>
+#include <ATen/ops/poisson_native.h>
 #include <ATen/ops/rand.h>
 #include <ATen/ops/randperm.h>
 #include <ATen/ops/randperm_native.h>
@@ -358,6 +359,46 @@ Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
         auto computeEncoder = stream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, ret, alpha_contig, std::array<long, 2>{seed, base_offset});
+        mtl_dispatch1DJob(computeEncoder, pso, ret.numel());
+      }
+    });
+  }
+
+  return ret;
+}
+
+Tensor _s_poisson_mps(const Tensor& lambda, std::optional<Generator> gen) {
+  if (lambda.numel() == 0) {
+    return at::empty_like(lambda);
+  }
+
+  using namespace mps;
+
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+  Tensor ret = at::empty_like(lambda, lambda.options(), at::MemoryFormat::Contiguous);
+  auto lambda_contig = lambda.contiguous();
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc("poisson_" + scalarToMetalTypeString(ret));
+
+    int64_t seed;
+    int64_t base_offset;
+    // Each thread may consume up to POISSON_RANDOMS_STRIDE random numbers
+    constexpr int64_t POISSON_RANDOMS_STRIDE = 32;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      seed = static_cast<int64_t>(mps_gen->current_seed());
+      base_offset = static_cast<int64_t>(mps_gen->get_offset());
+      mps_gen->set_offset(base_offset + POISSON_RANDOMS_STRIDE * ret.numel());
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        mtl_setArgs(computeEncoder, ret, lambda_contig, std::array<long, 2>{seed, base_offset});
         mtl_dispatch1DJob(computeEncoder, pso, ret.numel());
       }
     });
