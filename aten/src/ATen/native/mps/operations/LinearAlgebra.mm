@@ -380,6 +380,10 @@ static void lu_factor_panel_encode(const Tensor& LU,
   auto trsm8PSO = lib.getPipelineStateForFunc("trsmPanelLU_8");
   auto trsm16PSO = lib.getPipelineStateForFunc("trsmPanelLU_16");
   auto trsm32PSO = lib.getPipelineStateForFunc("trsmPanelLU_32");
+  uint32_t maxG = static_cast<uint32_t>(std::min({factorW32PSO.maxTotalThreadsPerThreadgroup,
+                                                  factorW16PSO.maxTotalThreadsPerThreadgroup,
+                                                  factorW8PSO.maxTotalThreadsPerThreadgroup}));
+  maxG = std::max(32u, maxG / 32 * 32);
   auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
   auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
   auto gemmSimdPSO = useMpp ? nil : lib.getPipelineStateForFunc("gemmSimdLU");
@@ -392,7 +396,7 @@ static void lu_factor_panel_encode(const Tensor& LU,
   const uint32_t NBo = mn <= 1024 ? 32 : mn <= 2048 ? 64 : 128;
   // panels taller than this use the streaming kernels (256 argmax partials
   // and the 32-float U row per batch in scratch)
-  constexpr uint32_t kStreamMinRows = 4096;
+  const uint32_t kStreamMinRows = 4 * maxG;
   Tensor scratch;
   if (uM > kStreamMinRows) {
     scratch = at::empty({B, 2 * 256 + 32}, LU.options());
@@ -495,9 +499,13 @@ static void lu_factor_panel_encode(const Tensor& LU,
           factorStream(c0);
           return;
         }
-        const uint32_t R = H <= 1024 ? 1 : H <= 2048 ? 2 : 4;
+        // smallest R (widest panel) whose per-thread row count fits in maxG
+        uint32_t R = 1;
+        while (R < 4 && (H + R - 1) / R > maxG) {
+          R *= 2;
+        }
         const uint32_t W = 32 / R;
-        const uint32_t G = std::min(1024u, (((H + R - 1) / R) + 31) / 32 * 32);
+        const uint32_t G = std::min(maxG, (((H + R - 1) / R) + 31) / 32 * 32);
         const auto pso = R == 1 ? factorW32PSO : R == 2 ? factorW16PSO : factorW8PSO;
         if (W >= sw) {
           factorSub(c0, pso, G);
