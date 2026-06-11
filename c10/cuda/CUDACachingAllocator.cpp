@@ -4349,6 +4349,13 @@ class DeviceCachingAllocator {
     stream_set streams(std::move(block->stream_uses));
     AT_ASSERT(block->stream_uses.empty());
     for (auto& stream : streams) {
+#ifdef USE_ROCM
+      // The stream was synchronized before destruction, so no event is
+      // needed to order its work. See Note [HIP Non-pooled Streams]
+      if (c10::cuda::isDestroyedNonPooledStream(stream)) {
+        continue;
+      }
+#endif
       C10_CUDA_CHECK(c10::cuda::SetDevice(stream.device_index()));
 
       EventPool::Event event = create_event_internal(stream.device_index());

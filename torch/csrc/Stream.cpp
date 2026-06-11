@@ -12,6 +12,10 @@
 #include <structmember.h>
 #include <cstdint>
 
+#ifdef USE_ROCM
+#include <c10/cuda/CUDAStream.h>
+#endif
+
 PyTypeObject* THPStreamClass = nullptr;
 
 static PyObject* THPStream_pynew(
@@ -93,6 +97,16 @@ static PyObject* THPStream_pynew(
   self->device_type = static_cast<int64_t>(stream_opt->device_type());
   self->context = nullptr;
   self->weakreflist = nullptr;
+  self->holds_non_pooled_stream_ref = false;
+#ifdef USE_ROCM
+  // See Note [HIP Non-pooled Streams]: getNewStream transfers the creator's
+  // reference to this object; a wrapper of an existing stream takes its own.
+  if (stream_opt->device_type() == c10::DeviceType::CUDA) {
+    self->holds_non_pooled_stream_ref = (r.idx == 0) ||
+        c10::cuda::retainNonPooledStream(c10::cuda::CUDAStream(
+            c10::cuda::CUDAStream::UNCHECKED, *stream_opt));
+  }
+#endif
 
   return static_cast<PyObject*>(ptr.release());
   END_HANDLE_TH_ERRORS
@@ -113,11 +127,30 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   self->device_type = static_cast<int64_t>(stream.device_type());
   self->context = nullptr;
   self->weakreflist = nullptr;
+  self->holds_non_pooled_stream_ref = false;
+#ifdef USE_ROCM
+  // See Note [HIP Non-pooled Streams]
+  if (stream.device_type() == c10::DeviceType::CUDA) {
+    self->holds_non_pooled_stream_ref = c10::cuda::retainNonPooledStream(
+        c10::cuda::CUDAStream(c10::cuda::CUDAStream::UNCHECKED, stream));
+  }
+#endif
   return ptr.release();
   END_HANDLE_TH_ERRORS
 }
 
 void THPStream_dealloc_common(THPStream* self) {
+#ifdef USE_ROCM
+  // See Note [HIP Non-pooled Streams]
+  if (self->holds_non_pooled_stream_ref) {
+    c10::cuda::releaseNonPooledStream(c10::cuda::CUDAStream(
+        c10::cuda::CUDAStream::UNCHECKED,
+        c10::Stream::unpack3(
+            self->stream_id,
+            static_cast<c10::DeviceIndex>(self->device_index),
+            static_cast<c10::DeviceType>(self->device_type))));
+  }
+#endif
   PyObject_ClearWeakRefs((PyObject*)self);
   Py_CLEAR(self->context);
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));

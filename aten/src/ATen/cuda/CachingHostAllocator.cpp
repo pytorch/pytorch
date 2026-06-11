@@ -137,6 +137,13 @@ struct CUDACachingHostAllocatorImpl
   void record_stream(
       std::optional<std::vector<CUDAEventPool::Event>>& events,
       CUDAStream stream) override {
+#ifdef USE_ROCM
+    // The stream was synchronized before destruction, so no event is needed
+    // to order its work. See Note [HIP Non-pooled Streams]
+    if (c10::cuda::isDestroyedNonPooledStream(stream)) {
+      return;
+    }
+#endif
     auto event = create_event_internal(stream.device_index());
     event->record(stream);
     events->push_back(std::move(event));

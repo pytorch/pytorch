@@ -13,6 +13,10 @@ struct TORCH_PYTHON_API THPStream {
   // Used to switch stream context management, initialized lazily.
   PyObject* context;
   PyObject* weakreflist;
+  // True when this object holds a reference on the underlying stream in
+  // ROCm's non-pooled debug mode, either as its creator or as a wrapper
+  // that successfully retained it. See Note [HIP Non-pooled Streams]
+  bool holds_non_pooled_stream_ref;
 };
 extern TORCH_PYTHON_API PyTypeObject* THPStreamClass;
 

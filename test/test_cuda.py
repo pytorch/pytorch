@@ -1390,6 +1390,101 @@ print(t.is_pinned())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
+    @unittest.skipUnless(TEST_WITH_ROCM, "ROCm-only non-pooled stream debug mode")
+    def test_hip_non_pooled_streams(self):
+        # See Note [HIP Non-pooled Streams]: with PYTORCH_HIP_NO_STREAM_POOL=1
+        # every torch.cuda.Stream() must be a freshly created HIP stream
+        # (no round-robin aliasing past 32 streams) that is destroyed when the
+        # owning Python object is deallocated.
+        test_script = """\
+import torch
+
+# the pool holds 32 streams per priority; 40 live streams would alias
+streams = [torch.cuda.Stream() for _ in range(40)]
+ptrs = [s.cuda_stream for s in streams]
+assert len(set(ptrs)) == len(ptrs), "stream handles aliased; pool still active"
+
+x = torch.ones(64, device="cuda")
+with torch.cuda.stream(streams[0]):
+    y = x * 2
+streams[0].synchronize()
+assert (y == 2).all().item()
+
+# a weak wrapper from current_stream() must not destroy the owned stream
+with torch.cuda.stream(streams[1]):
+    wrapper = torch.cuda.current_stream()
+del wrapper
+with torch.cuda.stream(streams[1]):
+    z = x + 1
+streams[1].synchronize()
+assert (z == 2).all().item()
+
+# dealloc destroys the streams; later work must be unaffected
+del streams
+torch.cuda.synchronize()
+w = x + 3
+torch.cuda.synchronize()
+assert (w == 4).all().item()
+
+# the current-stream slot holds a reference: dropping the only Python
+# reference must keep the stream alive until it is displaced
+s = torch.cuda.Stream()
+torch.cuda.set_stream(s)
+del s
+q = x * 5
+torch.cuda.current_stream().synchronize()
+assert (q == 5).all().item()
+torch.cuda.set_stream(torch.cuda.default_stream())
+
+# allocator-cached streams: record_stream on device and pinned blocks must
+# tolerate the stream being destroyed before the blocks are freed
+s = torch.cuda.Stream()
+h = torch.randn(1024, pin_memory=True)
+with torch.cuda.stream(s):
+    d = h.to("cuda", non_blocking=True)
+t = torch.ones(1024, device="cuda")
+t.record_stream(s)
+s.synchronize()
+del s
+del h, d, t
+torch.cuda.synchronize()
+
+# generic torch.Stream owners destroy their stream on dealloc as well;
+# any handle reuse across create/delete cycles proves destruction happens
+gptrs = []
+for _ in range(50):
+    g = torch.Stream("cuda")
+    gptrs.append(g.stream_id)
+    del g
+assert len(set(gptrs)) < 50, "generic torch.Stream streams were not destroyed"
+
+# a stream whose last reference drops during graph capture must have its
+# destruction deferred (sync/destroy would invalidate the capture)
+graph = torch.cuda.CUDAGraph()
+cap = torch.cuda.Stream()
+y = torch.zeros(64, device="cuda")
+with torch.cuda.stream(cap):
+    with torch.cuda.graph(graph):
+        side = torch.cuda.Stream()
+        y += 1
+        del side
+graph.replay()
+graph.replay()
+torch.cuda.synchronize()
+assert (y == 2).all().item()
+print("OK")
+"""
+        env = os.environ.copy()
+        env["PYTORCH_HIP_NO_STREAM_POOL"] = "1"
+        r = subprocess.run(
+            [sys.executable, "-c", test_script],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertIn("OK", r.stdout)
+
     def test_stream_invalid_device_index(self):
         # Regression test for #184034: constructing a CUDAStream with an
         # out-of-range device_index must not OOB-index the static stream pool.

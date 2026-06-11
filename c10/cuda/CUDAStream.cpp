@@ -1,14 +1,19 @@
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <mutex>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace c10::cuda {
 
@@ -269,6 +274,176 @@ CUDAStream CUDAStreamForId(DeviceIndex device_index, StreamId stream_id) {
           stream_id));
 }
 
+#ifdef USE_ROCM
+// Note [HIP Non-pooled Streams]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Debug mode, enabled via PYTORCH_HIP_NO_STREAM_POOL=1. Bypasses the stream
+// pool entirely: every getStreamFromPool call immediately creates a fresh
+// stream with cudaStreamCreateWithPriority and returns it as a
+// pointer-encoded StreamId (the same encoding used for external streams).
+// Nothing is ever recycled back into a pool; a stream is destroyed as soon
+// as it is no longer needed. Need is reference-counted, with references held
+// by: the creator (the Python Stream object that called getStreamFromPool;
+// C++ callers have no release point, so their streams stay alive for the
+// process lifetime just like pool streams), every other Python Stream object
+// wrapping the stream (taken at construction, dropped at dealloc, so the
+// save/restore pattern around torch.cuda.stream() keeps the saved previous
+// stream alive), and each thread/device current-stream slot (taken and
+// dropped in setCurrentCUDAStream). The last release synchronizes the stream,
+// destroys it, and tombstones the handle; the caching allocators consult the
+// tombstones (isDestroyedNonPooledStream) to skip recording events against
+// destroyed handles, which is safe because the destroy-time synchronize
+// already ordered all of the stream's work. A stream whose last reference
+// drops during graph capture cannot be synchronized or destroyed yet; its
+// destruction is deferred until after the capture ends and is drained on
+// subsequent stream activity. Remaining caveats: a thread that
+// exits while a non-pooled stream is its current stream pins that stream's
+// reference forever; C++ StreamGuards hold only a borrowed Stream value, so
+// a guard that displaces and later restores a stream whose other references
+// all dropped in between will restore a destroyed handle; and consumers that
+// cache the raw handle elsewhere and call into HIP with it after destruction
+// will crash. Don't drop all Python references to a stream while such uses
+// are pending.
+std::mutex non_pooled_mutex;
+// stream -> outstanding references (creator + current-stream slots)
+std::unordered_map<cudaStream_t, int64_t> non_pooled_refs;
+// handles destroyed by this mode; cleared if the runtime reuses the address
+std::unordered_set<cudaStream_t> destroyed_non_pooled_streams;
+
+bool noStreamPool() {
+  static bool enabled =
+      c10::utils::check_env("PYTORCH_HIP_NO_STREAM_POOL") == true;
+  return enabled;
+}
+
+void drainDeferredNonPooledDestroys();
+
+CUDAStream getNonPooledStream(const int priority, DeviceIndex device_index) {
+  drainDeferredNonPooledDestroys();
+  CUDAGuard device_guard(device_index);
+  cudaStream_t stream = nullptr;
+  auto pri = -std::clamp(-priority, 0, max_stream_priorities - 1);
+  C10_CUDA_CHECK(cudaStreamCreateWithPriority(&stream, kDefaultFlags, pri));
+  // Pointer-encoded StreamIds rely on the low bit being zero, see
+  // Note [StreamId assignment]
+  TORCH_INTERNAL_ASSERT(
+      !(reinterpret_cast<uintptr_t>(stream) & 1),
+      "Misaligned stream handle cannot be encoded as a StreamId");
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_stream_creation(
+        c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
+  }
+  {
+    std::lock_guard<std::mutex> lock(non_pooled_mutex);
+    non_pooled_refs.emplace(stream, 1);
+    destroyed_non_pooled_streams.erase(stream);
+  }
+  return CUDAStreamForId(device_index, reinterpret_cast<StreamId>(stream));
+}
+
+// The helpers below assume the mode is enabled; callers check noStreamPool().
+bool retainNonPooledStreamId(StreamId stream_id) {
+  if (!streamIdType(stream_id).isExt()) {
+    return false;
+  }
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  auto raw_stream = reinterpret_cast<cudaStream_t>(stream_id);
+  std::lock_guard<std::mutex> lock(non_pooled_mutex);
+  auto it = non_pooled_refs.find(raw_stream);
+  if (it == non_pooled_refs.end()) {
+    return false;
+  }
+  it->second++;
+  return true;
+}
+
+// Streams whose last reference dropped during graph capture; destroying or
+// synchronizing a capturing stream is illegal, so destruction is deferred
+// until after the capture ends (drained on subsequent stream activity).
+std::vector<std::pair<DeviceIndex, cudaStream_t>> deferred_non_pooled_destroys;
+
+// Conservatively treats a failed capture-status query as capturing.
+cudaStreamCaptureStatus queryCaptureStatus(cudaStream_t raw_stream) {
+  cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+  cudaError_t err =
+      C10_CUDA_ERROR_HANDLED(cudaStreamIsCapturing(raw_stream, &status));
+  if (err != cudaSuccess) {
+    (void)cudaGetLastError();
+    return cudaStreamCaptureStatusActive;
+  }
+  return status;
+}
+
+void destroyNonPooledStreamHandle(
+    DeviceIndex device_index,
+    cudaStream_t raw_stream) {
+  CUDAGuard device_guard(device_index);
+  // Defer if the stream joined an ongoing capture, or if this thread's
+  // current stream is capturing: synchronization APIs called during capture
+  // invalidate it even when the synchronized stream is not the captured one.
+  auto status = queryCaptureStatus(raw_stream);
+  if (status == cudaStreamCaptureStatusNone) {
+    status = queryCaptureStatus(getCurrentCUDAStream(device_index).stream());
+  }
+  if (status != cudaStreamCaptureStatusNone) {
+    std::lock_guard<std::mutex> lock(non_pooled_mutex);
+    deferred_non_pooled_destroys.emplace_back(device_index, raw_stream);
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(non_pooled_mutex);
+    destroyed_non_pooled_streams.insert(raw_stream);
+  }
+  // Relaxed mode so a global-mode capture on another thread is not
+  // invalidated by this synchronize/destroy.
+  CUDAStreamCaptureModeGuard mode_guard{cudaStreamCaptureModeRelaxed};
+  // Synchronize before destroying so that skipping allocator events recorded
+  // against this handle (see isDestroyedNonPooledStream) is safe. This can
+  // run inside dealloc paths, so swallow errors rather than throw.
+  try {
+    c10::cuda::stream_synchronize(raw_stream);
+  } catch (const c10::Error& e) {
+    TORCH_WARN(
+        "Failed to synchronize non-pooled stream before destruction: ",
+        e.what_without_backtrace());
+  }
+  C10_CUDA_CHECK_WARN(cudaStreamDestroy(raw_stream));
+}
+
+void drainDeferredNonPooledDestroys() {
+  std::vector<std::pair<DeviceIndex, cudaStream_t>> pending;
+  {
+    std::lock_guard<std::mutex> lock(non_pooled_mutex);
+    if (deferred_non_pooled_destroys.empty()) {
+      return;
+    }
+    pending.swap(deferred_non_pooled_destroys);
+  }
+  for (auto& [device_index, raw_stream] : pending) {
+    destroyNonPooledStreamHandle(device_index, raw_stream);
+  }
+}
+
+void releaseNonPooledStreamId(DeviceIndex device_index, StreamId stream_id) {
+  drainDeferredNonPooledDestroys();
+  if (!streamIdType(stream_id).isExt()) {
+    return;
+  }
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  auto raw_stream = reinterpret_cast<cudaStream_t>(stream_id);
+  {
+    std::lock_guard<std::mutex> lock(non_pooled_mutex);
+    auto it = non_pooled_refs.find(raw_stream);
+    if (it == non_pooled_refs.end() || --it->second > 0) {
+      return;
+    }
+    non_pooled_refs.erase(it);
+  }
+  destroyNonPooledStreamHandle(device_index, raw_stream);
+}
+#endif
+
 } // anonymous namespace
 
 bool CUDAStream::query() const {
@@ -348,7 +523,12 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
     c10::cuda::SetTargetDevice();
   }
   check_gpu(device_index);
-#if !defined(USE_ROCM)
+#ifdef USE_ROCM
+  // See Note [HIP Non-pooled Streams]
+  if (noStreamPool()) {
+    return getNonPooledStream(priority, device_index);
+  }
+#else
   // See Note [HIP Lazy Streams]
   // CUDA-only: Initializes the stream pools (once)
   c10::call_once(
@@ -369,9 +549,48 @@ CUDAStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
 CUDAStream getStreamFromExternal(
     cudaStream_t ext_stream,
     DeviceIndex device_index) {
+#ifdef USE_ROCM
+  // A live external stream proves the runtime reused a destroyed handle's
+  // address, so the tombstone is stale. See Note [HIP Non-pooled Streams]
+  if (noStreamPool()) {
+    std::lock_guard<std::mutex> lock(non_pooled_mutex);
+    destroyed_non_pooled_streams.erase(ext_stream);
+  }
+#endif
   // The stream pointer will be the actual id
   return CUDAStreamForId(device_index, reinterpret_cast<int64_t>(ext_stream));
 }
+
+#ifdef USE_ROCM
+// See Note [HIP Non-pooled Streams]
+bool retainNonPooledStream(CUDAStream stream) {
+  if (!noStreamPool()) {
+    return false;
+  }
+  return retainNonPooledStreamId(stream.id());
+}
+
+void releaseNonPooledStream(CUDAStream stream) {
+  if (!noStreamPool()) {
+    return;
+  }
+  releaseNonPooledStreamId(stream.device_index(), stream.id());
+}
+
+bool isDestroyedNonPooledStream(CUDAStream stream) {
+  if (!noStreamPool()) {
+    return false;
+  }
+  StreamId stream_id = stream.id();
+  if (!streamIdType(stream_id).isExt()) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(non_pooled_mutex);
+  return destroyed_non_pooled_streams.count(
+             // NOLINTNEXTLINE(performance-no-int-to-ptr)
+             reinterpret_cast<cudaStream_t>(stream_id)) > 0;
+}
+#endif
 
 CUDAStream getDefaultCUDAStream(DeviceIndex device_index) {
   initCUDAStreamsOnce();
@@ -397,6 +616,20 @@ void setCurrentCUDAStream(CUDAStream stream) {
   initCUDAStreamsOnce();
   auto device_index = stream.device_index();
   check_gpu(device_index);
+#ifdef USE_ROCM
+  // The current-stream slot holds a reference; the displaced stream may be
+  // destroyed here if this was its last one. See Note [HIP Non-pooled Streams]
+  if (noStreamPool()) {
+    StreamId old_id = current_streams[device_index];
+    StreamId new_id = stream.id();
+    if (old_id != new_id) {
+      retainNonPooledStreamId(new_id);
+      current_streams[device_index] = new_id;
+      releaseNonPooledStreamId(device_index, old_id);
+    }
+    return;
+  }
+#endif
   current_streams[device_index] = stream.id();
 }
 
