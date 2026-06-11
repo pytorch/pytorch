@@ -18,6 +18,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_cholesky_solve_helper_native.h>
+#include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
@@ -353,6 +354,200 @@ void map_mps_decomposition_error_code_to_blas(const Tensor& status) {
 
 } // anonymous namespace
 
+static bool lu_has_matmul2d() {
+  // matmul2d needs macOS 26.2+; below that the simdgroup gemm fallback is used
+  return is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_2_PLUS);
+}
+
+// Blocked right-looking LU with partial pivoting, factored in place on a
+// row-major fp32 (B, M, N) buffer; pivots are 1-based, info follows LAPACK.
+static void lu_factor_panel_encode(const Tensor& LU,
+                                   const Tensor& pivots,
+                                   const Tensor& info,
+                                   int64_t M,
+                                   int64_t N,
+                                   int64_t B,
+                                   bool transposeResult) {
+  auto stream = getCurrentMPSStream();
+  const bool useMpp = lu_has_matmul2d();
+
+  auto factorW32PSO = lib.getPipelineStateForFunc("factorPanelLU_1_32");
+  auto factorW16PSO = lib.getPipelineStateForFunc("factorPanelLU_2_16");
+  auto factorW8PSO = lib.getPipelineStateForFunc("factorPanelLU_4_8");
+  auto streamUpdatePSO = lib.getPipelineStateForFunc("luStreamUpdate");
+  auto streamPivotPSO = lib.getPipelineStateForFunc("luStreamPivot");
+  auto laswpPSO = lib.getPipelineStateForFunc("laswpGatherLU");
+  auto trsm8PSO = lib.getPipelineStateForFunc("trsmPanelLU_8");
+  auto trsm16PSO = lib.getPipelineStateForFunc("trsmPanelLU_16");
+  auto trsm32PSO = lib.getPipelineStateForFunc("trsmPanelLU_32");
+  auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
+  auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
+  auto gemmSimdPSO = useMpp ? nil : lib.getPipelineStateForFunc("gemmSimdLU");
+  auto transposePSO = transposeResult ? lib.getPipelineStateForFunc("transposeInPlaceLU") : nil;
+
+  const auto uM = static_cast<uint32_t>(M);
+  const auto uN = static_cast<uint32_t>(N);
+  const auto uB = static_cast<uint32_t>(B);
+  const uint32_t mn = std::min(uM, uN);
+  const uint32_t NBo = mn <= 1024 ? 32 : mn <= 2048 ? 64 : 128;
+  // panels taller than this use the streaming kernels (256 argmax partials
+  // and the 32-float U row per batch in scratch)
+  constexpr uint32_t kStreamMinRows = 4096;
+  Tensor scratch;
+  if (uM > kStreamMinRows) {
+    scratch = at::empty({B, 2 * 256 + 32}, LU.options());
+  }
+
+  @autoreleasepool {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      auto enc = stream->commandEncoder();
+      mtl_setArgs(enc, LU, pivots, info);
+      const uint32_t dims[2] = {uM, uN};
+      [enc setBytes:dims length:8 atIndex:3];
+      if (scratch.defined()) {
+        mtl_setArgs<6>(enc, scratch);
+      }
+
+      auto setP4 = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+        const uint32_t p[4] = {a, b, c, d};
+        [enc setBytes:p length:16 atIndex:4];
+      };
+      auto setP5 = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+        const uint32_t p[4] = {a, b, c, d};
+        [enc setBytes:p length:16 atIndex:5];
+      };
+      auto laswp = [&](uint32_t d0, uint32_t nb, uint32_t cs0, uint32_t ce0, uint32_t cs1, uint32_t ce1) {
+        const uint32_t W = (ce0 - cs0) + (ce1 - cs1);
+        if (W == 0) {
+          return;
+        }
+        setP5(cs0, ce0, cs1, ce1);
+        [enc setComputePipelineState:laswpPSO];
+        for (uint32_t s0 = 0; s0 < nb; s0 += 32) {
+          setP4(d0 + s0, std::min(32u, nb - s0), 0, 0);
+          [enc dispatchThreadgroups:MTLSizeMake((W + 63) / 64, uB, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        }
+      };
+      auto trsm = [&](uint32_t d0, uint32_t cs, uint32_t ce, id<MTLComputePipelineState> pso, uint32_t nr) {
+        if (cs >= ce) {
+          return;
+        }
+        setP4(d0, cs, ce, nr);
+        [enc setComputePipelineState:pso];
+        [enc dispatchThreadgroups:MTLSizeMake(uB, (ce - cs + 127) / 128, 1)
+            threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+      };
+      auto gemm = [&](uint32_t rs, uint32_t re, uint32_t cs, uint32_t ce, uint32_t kc, uint32_t kw) {
+        if (rs >= re || cs >= ce) {
+          return;
+        }
+        setP4(rs, re, cs, ce);
+        setP5(kc, kw, 0, 0);
+        const uint32_t Tm = re - rs;
+        const uint32_t Tn = ce - cs;
+        if (!useMpp) {
+          [enc setComputePipelineState:gemmSimdPSO];
+          [enc dispatchThreadgroups:MTLSizeMake((Tn + 63) / 64, (Tm + 31) / 32, uB)
+              threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+          return;
+        }
+        const bool big = Tm >= 1024 && Tn >= 64;
+        const uint32_t BM = big ? 64 : 32;
+        const uint32_t BN = 64;
+        const uint32_t NSG = big ? 4 : 2;
+        [enc setComputePipelineState:(big ? gemmBigPSO : gemmSmallPSO)];
+        [enc dispatchThreadgroups:MTLSizeMake((Tn + BN - 1) / BN, (Tm + BM - 1) / BM, uB)
+            threadsPerThreadgroup:MTLSizeMake(NSG * 32, 1, 1)];
+      };
+      auto factorSub = [&](uint32_t d0, id<MTLComputePipelineState> pso, uint32_t G) {
+        setP4(d0, 0, 0, 0);
+        [enc setComputePipelineState:pso];
+        [enc dispatchThreadgroups:MTLSizeMake(uB, 1, 1) threadsPerThreadgroup:MTLSizeMake(G, 1, 1)];
+      };
+      auto factorStream = [&](uint32_t c0) {
+        const uint32_t H = uM - c0;
+        const uint32_t nb = std::min(32u, mn - c0);
+        auto update = [&](uint32_t j, bool searchOnly) -> uint32_t {
+          const uint32_t rowStart = searchOnly ? j : j + 1;
+          if (rowStart >= H) {
+            return 0;
+          }
+          const uint32_t n = H - rowStart;
+          const uint32_t RPT = std::max(1u, (n + 8 * 256 - 1) / (8 * 256));
+          const uint32_t nTG = (n + 8 * RPT - 1) / (8 * RPT);
+          setP4(c0, j, RPT, searchOnly ? 1 : 0);
+          [enc setComputePipelineState:streamUpdatePSO];
+          [enc dispatchThreadgroups:MTLSizeMake(nTG, uB, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+          return nTG;
+        };
+        uint32_t npart = update(0, true);
+        for (uint32_t j = 0; j < nb; j++) {
+          setP4(c0, j, npart, 0);
+          [enc setComputePipelineState:streamPivotPSO];
+          [enc dispatchThreadgroups:MTLSizeMake(uB, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+          npart = update(j, false);
+        }
+      };
+      // factor the 32-wide block at c0 via W-wide register panels
+      auto factor = [&](uint32_t c0, uint32_t sw) {
+        const uint32_t H = uM - c0;
+        if (H > kStreamMinRows) {
+          factorStream(c0);
+          return;
+        }
+        const uint32_t R = H <= 1024 ? 1 : H <= 2048 ? 2 : 4;
+        const uint32_t W = 32 / R;
+        const uint32_t G = std::min(1024u, (((H + R - 1) / R) + 31) / 32 * 32);
+        const auto pso = R == 1 ? factorW32PSO : R == 2 ? factorW16PSO : factorW8PSO;
+        if (W >= sw) {
+          factorSub(c0, pso, G);
+          return;
+        }
+        const auto tpso = W == 16 ? trsm16PSO : trsm8PSO;
+        for (uint32_t q0 = c0; q0 < c0 + sw; q0 += W) {
+          const uint32_t qw = std::min(W, c0 + sw - q0);
+          factorSub(q0, pso, G);
+          laswp(q0, qw, c0, q0, q0 + qw, c0 + sw);
+          if (q0 + qw < c0 + sw) {
+            trsm(q0, q0 + qw, c0 + sw, tpso, W);
+            gemm(q0 + qw, uM, q0 + qw, c0 + sw, q0, qw);
+          }
+        }
+      };
+
+      for (uint32_t p0 = 0; p0 < mn; p0 += NBo) {
+        const uint32_t pw = std::min(NBo, mn - p0);
+        for (uint32_t c0 = p0; c0 < p0 + pw; c0 += 32) {
+          const uint32_t sw = std::min(32u, mn - c0);
+          factor(c0, sw);
+          laswp(c0, sw, p0, c0, c0 + sw, p0 + pw);
+          if (c0 + sw < p0 + pw) {
+            trsm(c0, c0 + sw, p0 + pw, trsm32PSO, 32);
+            gemm(c0 + sw, uM, c0 + sw, p0 + pw, c0, sw);
+          }
+        }
+        laswp(p0, pw, 0, p0, p0 + pw, uN);
+        if (p0 + pw < uN) {
+          for (uint32_t b0 = p0; b0 < p0 + pw; b0 += 32) {
+            trsm(b0, p0 + pw, uN, trsm32PSO, std::min(32u, mn - b0));
+            if (b0 + 32 < p0 + pw) {
+              gemm(b0 + 32, std::min(p0 + pw, uM), p0 + pw, uN, b0, 32);
+            }
+          }
+        }
+        if (p0 + pw < mn) {
+          gemm(p0 + pw, uM, p0 + pw, uN, p0, pw);
+        }
+      }
+      if (transposeResult) {
+        [enc setComputePipelineState:transposePSO];
+        const uint32_t nt = (uN + 31) / 32;
+        [enc dispatchThreadgroups:MTLSizeMake(nt, nt, uB) threadsPerThreadgroup:MTLSizeMake(32, 8, 1)];
+      }
+    });
+  }
+}
+
 static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool pivot,
                                              const Tensor& LU,
@@ -365,112 +560,49 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
               "linalg.lu_factor(): MPS doesn't support complex types.");
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
 
-  Tensor A_t = A.contiguous();
-  uint64_t aRows = A_t.size(-2);
-  uint64_t aCols = A_t.size(-1);
-  uint64_t aElemSize = A_t.element_size();
-  uint64_t numPivots = std::min(aRows, aCols);
-  std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
+  int64_t aRows = A.size(-2);
+  int64_t aCols = A.size(-1);
+  int64_t numPivots = std::min(aRows, aCols);
+  std::vector<int64_t> pivot_sizes(A.sizes().begin(), A.sizes().end() - 2);
   resize_output(info, pivot_sizes);
   pivot_sizes.push_back(numPivots);
   resize_output(pivots, pivot_sizes);
 
-  if (A_t.numel() == 0) {
+  if (A.numel() == 0) {
+    info.zero_();
     return;
   }
 
-  Tensor A_ = A_t.dim() > 3 ? A_t.flatten(0, -3) : A_t;
-
-  uint64_t batchSize = A_.dim() > 2 ? A_.size(0) : 1;
-  std::vector<Tensor> status_tensors;
-  std::vector<Tensor> pivots_list;
-
-  status_tensors.reserve(batchSize);
-  pivots_list.reserve(batchSize);
-  for ([[maybe_unused]] const auto i : c10::irange(batchSize)) {
-    status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
-    pivots_list.push_back(at::zeros(numPivots, kInt, std::nullopt, kMPS, std::nullopt));
-  }
-
-  // Since the MPSMatrixDecompositionLU functions in-place if the result matrix completely aliases the source matrix,
-  // We copy LU from A as the new A.
-  resize_output(LU, A_.sizes());
-  if (!LU.is_same(A_)) {
-    A_ = LU.copy_(A_);
+  // kernels factor row-major, the LU output is column-major: square factors
+  // in the LU.mT() view and transposes in place, the rest go via a scratch
+  resize_output(LU, A.sizes());
+  const bool inPlace = aRows == aCols && !LU.is_same(A) && LU.mT().is_contiguous();
+  Tensor work_full;
+  if (inPlace) {
+    work_full = LU.mT();
   } else {
-    A_ = LU;
+    work_full = at::empty(A.sizes(), A.options());
   }
+  work_full.copy_(A);
+  Tensor work = work_full.dim() > 3 ? work_full.flatten(0, -3) : work_full;
+  TORCH_INTERNAL_ASSERT(work.is_contiguous())
+  int64_t batchSize = work.dim() > 2 ? work.size(0) : 1;
 
-  TORCH_INTERNAL_ASSERT(A_.is_contiguous())
-
-  id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
-
-  MPSStream* mpsStream = getCurrentMPSStream();
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
-
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      auto filter = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device rows:aRows columns:aCols] autorelease];
-
-      auto sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
-                                                                    columns:aCols
-                                                                   matrices:1
-                                                                   rowBytes:aCols * aElemSize
-                                                                matrixBytes:aRows * aCols * aElemSize
-                                                                   dataType:getMPSDataType(A_)];
-      auto pivotsMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:1
-                                                                    columns:numPivots
-                                                                   matrices:1
-                                                                   rowBytes:numPivots * sizeof(uint32_t)
-                                                                matrixBytes:numPivots * sizeof(uint32_t)
-                                                                   dataType:MPSDataTypeUInt32];
-
-      for (const auto i : c10::irange(batchSize)) {
-        const uint64_t aBatchOffset = i * aRows * aCols;
-        auto sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
-                                                        offset:(A_.storage_offset() + aBatchOffset) * aElemSize
-                                                    descriptor:sourceMatrixDesc] autorelease];
-        auto pivotIndices = [[[MPSMatrix alloc] initWithBuffer:getMTLBufferStorage(pivots_list[i])
-                                                        offset:0
-                                                    descriptor:pivotsMatrixDesc] autorelease];
-        auto solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
-                                                          offset:(A_.storage_offset() + aBatchOffset) * aElemSize
-                                                      descriptor:sourceMatrixDesc] autorelease];
-        id<MTLBuffer> statusBuffer = getMTLBufferStorage(status_tensors[i]);
-        [filter encodeToCommandBuffer:commandBuffer
-                         sourceMatrix:sourceMatrix
-                         resultMatrix:solutionMatrix
-                         pivotIndices:pivotIndices
-                               status:statusBuffer];
-      }
-    }
-  });
-  auto stacked_pivots = A_.dim() > 2 ? at::stack(pivots_list) : pivots_list[0];
-  auto stacked_status = A_.dim() > 2 ? at::stack(status_tensors) : status_tensors[0];
-  if (A_t.dim() > 3) {
-    resize_output(LU, A_t.sizes());
-    pivots.copy_(stacked_pivots.view(pivot_sizes));
-  } else {
-    pivots.copy_(stacked_pivots);
+  Tensor pivots_ = pivots.is_contiguous() ? pivots : at::empty(pivots.sizes(), pivots.options());
+  Tensor info_ = info.is_contiguous() ? info : at::empty(info.sizes(), info.options());
+  lu_factor_panel_encode(work, pivots_, info_, aRows, aCols, batchSize, inPlace);
+  if (!inPlace) {
+    LU.copy_(work_full);
   }
-  pivot_sizes.pop_back();
-  info.copy_(stacked_status.view(pivot_sizes));
-  pivots.add_(1); // PyTorch's `pivots` is 1-index.
+  if (!pivots_.is_same(pivots)) {
+    pivots.copy_(pivots_);
+  }
+  if (!info_.is_same(info)) {
+    info.copy_(info_);
+  }
   if (check_errors) {
-    for (const auto i : c10::irange(status_tensors.size())) {
-      int status = status_tensors[i].item<int>();
-      TORCH_CHECK(
-          status == 0,
-          "lu_factor(): LU factorization failure at the ",
-          i + 1,
-          " sample with status: ",
-          status,
-          ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
-    }
+    at::_linalg_check_errors(info, "linalg.lu_factor_ex", A.dim() == 2);
   }
-
-  map_mps_decomposition_error_code_to_blas(info);
 }
 
 static void linalg_solve_out_mps_impl(const Tensor& A,

@@ -2302,6 +2302,11 @@ class TestMPS(TestCaseMPS):
         run_lu_factor_ex_test(32, 2, 2, 10, 10, check_errors=True)
         # big matrix check with batch size > 1
         run_lu_factor_ex_test(256, 2, check_errors=False, atol=3e-5, rtol=5e-6)
+        # sizes exercising the Metal panel kernels: ragged last panel, batched,
+        # and the width-split sub-panels used for taller matrices
+        run_lu_factor_ex_test(513, 3, check_errors=False, atol=2e-4, rtol=2e-5)
+        run_lu_factor_ex_test(1024, 1, check_errors=False, atol=5e-4, rtol=5e-5)
+        run_lu_factor_ex_test(2049, 1, check_errors=False, atol=2e-3, rtol=2e-4)
 
     def test_linalg_lu_factor_singular(self):
         # Explicit singular matrix
