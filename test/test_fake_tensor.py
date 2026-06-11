@@ -422,6 +422,72 @@ class FakeTensorTest(TestCase):
             y = torch.nn.parameter.Parameter(x)
             self.assertTrue(isinstance(y, torch.nn.Parameter))
 
+    def test_parameter_state_reconstruction_from_dict(self):
+        with FakeTensorMode():
+            param = torch.nn.Conv2d(3, 4, 1).weight
+
+        fake_device = param.fake_device
+        param_cls = type(param)
+        kwargs = dict(param.__dict__)
+        kwargs["requires_grad"] = param.requires_grad
+
+        reconstructed = param_cls(param.to("meta"), **kwargs)
+
+        self.assertIsInstance(reconstructed, FakeTensor)
+        self.assertIsInstance(reconstructed, torch.nn.Parameter)
+        self.assertEqual(reconstructed.requires_grad, param.requires_grad)
+        self.assertEqual(reconstructed.fake_device, fake_device)
+        self.assertEqual(reconstructed.device, fake_device)
+        self.assertIs(reconstructed.fake_mode, param.fake_mode)
+        self.assertIn("_fake_device", reconstructed.__dict__)
+        self.assertNotIn("fake_device", reconstructed.__dict__)
+        self.assertEqual(reconstructed.to("meta").fake_device, torch.device("meta"))
+
+    def test_parameter_state_reconstruction_rejects_device_conflict(self):
+        with FakeTensorMode() as mode:
+            elem = torch.empty(2, 2, device="meta")
+            with self.assertRaisesRegex(ValueError, "conflicting device values"):
+                FakeTensor(
+                    mode,
+                    elem,
+                    device=torch.device("cpu"),
+                    fake_device=torch.device("cuda:0"),
+                )
+
+    def test_parameter_state_reconstruction_accepts_normalized_device_aliases(self):
+        with FakeTensorMode() as mode:
+            elem = torch.empty(2, 2, device="meta")
+            fake = FakeTensor(
+                mode,
+                elem,
+                device=torch.device("cuda"),
+                fake_device=torch.device("cuda:0"),
+            )
+
+        self.assertEqual(fake.fake_device, torch.device("cuda:0"))
+
+    @parametrize("device_kwarg_name", ["fake_device", "device"])
+    def test_parameter_state_reconstruction_device_names(self, device_kwarg_name):
+        with FakeTensorMode():
+            param = torch.nn.Conv2d(3, 4, 1).weight
+
+        kwargs = dict(param.__dict__)
+        fake_device = kwargs.pop("_fake_device")
+        kwargs[device_kwarg_name] = fake_device
+        kwargs["requires_grad"] = param.requires_grad
+
+        reconstructed = type(param)(param.to("meta"), **kwargs)
+
+        self.assertIsInstance(reconstructed, FakeTensor)
+        self.assertIsInstance(reconstructed, torch.nn.Parameter)
+        self.assertEqual(reconstructed.requires_grad, param.requires_grad)
+        self.assertEqual(reconstructed.fake_device, fake_device)
+        self.assertEqual(reconstructed.device, fake_device)
+        self.assertIs(reconstructed.fake_mode, param.fake_mode)
+        self.assertIn("_fake_device", reconstructed.__dict__)
+        self.assertNotIn("fake_device", reconstructed.__dict__)
+        self.assertEqual(reconstructed.to("meta").fake_device, torch.device("meta"))
+
     @unittest.skipIf(not dist.is_available(), "requires distributed")
     def test_fsdp_flat_param(self):
         from torch.distributed.fsdp._flat_param import FlatParameter
@@ -478,6 +544,10 @@ class FakeTensorTest(TestCase):
             cpu_tensor = torch.empty(2, 2, device="meta")
             fake_cpu = FakeTensor(mode, cpu_tensor, torch.device("cpu"))
             self.assertEqual(fake_cpu.fake_device, torch.device("cpu"))
+            fake_cpu_from_alias = FakeTensor(
+                mode, cpu_tensor, fake_device=torch.device("cpu")
+            )
+            self.assertEqual(fake_cpu_from_alias.fake_device, torch.device("cpu"))
 
             # Test device with explicit index - should remain unchanged
             cuda_device_with_index = torch.device("cuda:0")
@@ -1294,6 +1364,17 @@ class FakeTensorTest(TestCase):
 
         self.assertEqual(out.shape, (4 * 2 * (seq // 2), 256))
         self.assertTrue(free_unbacked_symbols(out.shape[0]))
+
+    def test_meta_storage_trace_uses_hint_for_symbolic_size(self):
+        from torch._subclasses.meta_utils import MetaStorageDesc, MetaStorageId
+
+        shape_env = ShapeEnv()
+        size = shape_env.create_unbacked_symint()
+        torch._dynamo.override_optimization_hint(size, 16)
+
+        metadata = MetaStorageDesc(MetaStorageId(0), 3 * size, None).as_json(1)
+        self.assertEqual(metadata["size"], "3*u0")
+        self.assertEqual(metadata["size_hint"], 48)
 
     def test_matmul_rank4_unbacked_batch_dim(self):
         fake_mode, (q, k) = self.fake_with_unbacked_batch(
