@@ -969,7 +969,12 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
             should_pad_addmm,
         ),
     ]:
-        assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
+        if not isinstance(
+            workaround, dict
+        ):  # mypy is unable to infer the type properly
+            raise AssertionError(
+                f"expected workaround to be a dict, got {type(workaround)}"
+            )
         name = pattern.__name__
 
         gen_register_replacement(
