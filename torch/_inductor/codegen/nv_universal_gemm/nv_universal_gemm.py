@@ -505,8 +505,8 @@ def _add_nv_gemm_choices_impl(
     cc_int = int(cc)
 
     # Single-pass partition over the ~390K-entry kernel cache. The two-pass
-    # form below called `kernel.supports(args)` once per bucket — i.e. twice
-    # per non-EFC-class kernel — across the full cache.
+    # form below called `kernel.supports(args)` once per bucket -- i.e. twice
+    # per non-EFC-class kernel -- across the full cache.
     def _classify(metadata) -> int:
         if _include_efc_kernels_only(metadata):
             return 1  # efc bucket (with tile_M >= 128)
@@ -516,9 +516,12 @@ def _add_nv_gemm_choices_impl(
         # broadcast bug. Tracking: https://github.com/pytorch/pytorch/issues/181901
         return -1
 
+    include_efc = config.epilogue_fusion
     non_efc_kernels, efc_kernels = partition_compatible_kernels(
         args, cc_int, _classify, num_buckets=2
     )
+    if not include_efc:
+        efc_kernels = []
     if not non_efc_kernels and not efc_kernels:
         log.debug("No compatible %s kernels found", variant.op_name)
         return
