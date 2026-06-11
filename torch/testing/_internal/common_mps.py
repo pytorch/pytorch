@@ -365,7 +365,6 @@ if torch.backends.mps.is_available():
             "linalg.norm": [torch.float32],
             "linalg.normsubgradients_at_zero": [torch.float32],
             "linalg.svdvals": None,
-            "masked.median": None,
             "matrix_exp": None,
             "max_pool2d_with_indices_backward": [
                 torch.int8,
