@@ -592,6 +592,24 @@ def forward(self, L_x_ : torch.Tensor):
 
         self.assertEqual(result, expected)
 
+    def test_output_hook_on_dependent_view_output_after_return_aot_eager(self):
+        def fn(x):
+            y = x.view(2, 2)
+            z = y.view(4)
+            return y, z
+
+        x0 = torch.arange(4.0, requires_grad=True)
+        y0, z0 = fn(x0)
+        y0.register_hook(lambda grad: 3.14 * grad)
+        (expected,) = torch.autograd.grad(z0.sum(), x0)
+
+        x1 = torch.arange(4.0, requires_grad=True)
+        y1, z1 = torch.compile(fn, backend="aot_eager")(x1)
+        y1.register_hook(lambda grad: 3.14 * grad)
+        (result,) = torch.autograd.grad(z1.sum(), x1)
+
+        self.assertEqual(result, expected)
+
     def test_output_hook_on_dependent_output_gm_wrapper_aot_autograd(self):
         from torch._dynamo.backends.common import aot_autograd
         from torch._dynamo.utils import GmWrapper

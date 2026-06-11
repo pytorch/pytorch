@@ -54,28 +54,45 @@ def _node_requires_grad(node: torch.fx.Node) -> bool:
     return True
 
 
+def _node_is_view(node: torch.fx.Node) -> bool:
+    example_value = node.meta.get("example_value")
+    if isinstance(example_value, torch.Tensor):
+        return example_value._is_view()
+    return False
+
+
 def _has_output_node_dependency(gm: torch.fx.GraphModule) -> bool:
     # AOTAutograd wraps the FX graph in a custom autograd.Function. When one
     # differentiable output is also an ancestor of another output, a hook
     # registered on the ancestor after this graph returns would need to observe
     # the descendant's internal gradient. Sibling outputs of a custom Function
     # cannot represent that edge, so this graph must run without AOTAutograd.
+    # Pure view chains from a non-view output are okay: AOTAutograd handles
+    # output aliases specially and preserves hook behavior for the regenerated
+    # aliases. But if the ancestor output is itself a view, the same hook can
+    # be lost, so fall back.
     outputs = [node for node in _output_nodes(gm) if _node_requires_grad(node)]
     if len(outputs) < 2:
         return False
 
     output_set = set(outputs)
     for output in outputs:
-        seen: set[torch.fx.Node] = set()
-        stack = list(output.all_input_nodes)
+        seen: set[tuple[torch.fx.Node, bool]] = set()
+        stack = [(node, not _node_is_view(output)) for node in output.all_input_nodes]
         while stack:
-            node = stack.pop()
+            node, saw_non_view = stack.pop()
             if node in output_set and node is not output:
-                return True
-            if node in seen:
+                if saw_non_view or _node_is_view(node):
+                    return True
                 continue
-            seen.add(node)
-            stack.extend(node.all_input_nodes)
+            state = (node, saw_non_view)
+            if state in seen:
+                continue
+            seen.add(state)
+            next_saw_non_view = saw_non_view or not _node_is_view(node)
+            stack.extend(
+                (input_node, next_saw_non_view) for input_node in node.all_input_nodes
+            )
 
     return False
 
@@ -115,8 +132,6 @@ class AotAutograd:
 
         fallback_reason = _aot_autograd_fallback_reason(gm)
         if fallback_reason is not None:
-            # NB: don't delete counter increment
-            counters["aot_autograd"]["total"] += 1
             log.debug("Unable to use AOT Autograd because %s", fallback_reason)
             counters["aot_autograd"]["not_ok"] += 1
             return _make_aot_autograd_fallback(gm)
