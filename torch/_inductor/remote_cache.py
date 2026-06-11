@@ -211,7 +211,8 @@ class RemoteCache(Generic[_T]):
     # between `None` and a missing cache entry).
     def put(self, key: str, value: _T) -> None:
         with _WaitCounter("pytorch.remote_cache.put").guard():
-            assert value is not None
+            if value is None:
+                raise AssertionError("cannot put None into the cache")
             sample = self._create_sample()
             try:
                 self._put(key, value, sample)
@@ -305,7 +306,8 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return None
 
         # In theory redis.get() can return an Awaitable as well...
-        assert value is None or isinstance(value, bytes)
+        if not (value is None or isinstance(value, bytes)):
+            raise AssertionError(f"expected bytes or None, got {type(value)}")
         return value
 
     @override
@@ -414,13 +416,15 @@ def create_cache(
             cache_cls = getattr(this_module, local_cache_cls)
             return cache_cls(key)
         elif is_fbcode:
-            assert fb_cache_cls is not None
+            if fb_cache_cls is None:
+                raise AssertionError("fb_cache_cls must not be None in fbcode")
             import torch._inductor.fb.remote_cache
 
             cache_cls = getattr(torch._inductor.fb.remote_cache, fb_cache_cls)
             return cache_cls(key)
         else:
-            assert oss_cache_cls is not None
+            if oss_cache_cls is None:
+                raise AssertionError("oss_cache_cls must not be None")
             cache_cls = getattr(this_module, oss_cache_cls)
             return cache_cls(key)
 
