@@ -945,15 +945,16 @@ struct TORCH_API {self.classname} : public ViewMeta {{
         return f"{opname}({arguments}){maybe_index}"
 
     def impl(self) -> list[str]:
-        functions = [
-            f"""
+        forward = f"""
 at::Tensor {self.classname}::forward(const at::Tensor& base) {{
   if (reapply_views) {{
     return {self.opcall(is_reverse=False, reapply_views=True)};
   }} else {{
     return {self.opcall(is_reverse=False, reapply_views=False)};
   }}
-}}""",
+}}"""
+        functions = [
+            forward,
             f"""
 at::Tensor {self.classname}::reverse(const at::Tensor& base, const Tensor& mutated_view) {{
   return {self.opcall(is_reverse=True, reapply_views=True)};

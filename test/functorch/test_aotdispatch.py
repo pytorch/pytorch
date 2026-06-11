@@ -2359,9 +2359,42 @@ def forward(self, primals_1):
             out.t_()
             return out
 
-        # TODO: fix this test.
-        # See https://github.com/pytorch/pytorch/issues/90507
-        # self.verify_aot_autograd(f, inp, test_mutation=True)
+        inp = [torch.ones(2, 4, requires_grad=False)]
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+        inp = [torch.ones(2, 4, requires_grad=True)]
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+
+    def test_output_aliases_intermediate_inplace_unsqueeze(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            out.unsqueeze_(0)
+            return out
+
+        inp = torch.ones(2, requires_grad=True)
+        ref = f(inp)
+        self.assertFalse(ref._is_view())
+        ref.mul_(2)
+
+        compiled_f = aot_function(f, nop)
+        test = compiled_f(torch.ones(2, requires_grad=True))
+        self.assertFalse(test._is_view())
+        test.mul_(2)
+
+    def test_output_aliases_intermediate_view_then_inplace_view(self):
+        def f(a):
+            out = torch.mul(a, 3).view(-1)
+            out.unsqueeze_(0)
+            return out
+
+        inp = torch.ones(2, 4, requires_grad=True)
+        ref = f(inp)
+        self.assertTrue(ref._is_view())
+        ref.mul_(2)
+
+        compiled_f = aot_function(f, nop)
+        test = compiled_f(torch.ones(2, 4, requires_grad=True))
+        self.assertTrue(test._is_view())
+        test.mul_(2)
 
     def test_output_aliases_intermediate_inplace_view_with_detach(self):
         def f(a):
