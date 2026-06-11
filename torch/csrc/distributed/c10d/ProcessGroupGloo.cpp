@@ -1033,6 +1033,11 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce(
 
   work = GlooAllreduceRegistry()->Create(
       device.type(), context, inputs, opts.reduceOp, tag, seq_, opts.timeout);
+  TORCH_CHECK(
+      work,
+      "ProcessGroupGloo::allreduce: no creator registered for device type ",
+      device.type(),
+      ". If you are on Windows, ensure ProcessGroupGlooCuda.cpp is compiled.");
 
   enqueue(work);
   return work;
