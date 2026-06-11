@@ -1,9 +1,49 @@
+--- a/cache/__init__.py
++++ b/cache/__init__.py
+@@ -75,2 +75,3 @@
+ import types
++from contextlib import contextmanager
+ from pathlib import Path
+@@ -78 +79 @@
+-from typing import List, Optional
++from typing import Iterator, List, Optional
+@@ -96 +97,19 @@
+-CACHE_DIR: Optional[str] = os.getenv("QUACK_CACHE_DIR", None)
++CACHE_DIR: Optional[str] = os.getenv("QUACK_CACHE_DIR", None)
++_CACHE_DIR_OVERRIDE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
++    "quack_cache_dir_override", default=None
++)
++
++
++@contextmanager
++def cache_dir_override(cache_dir: Optional[str]) -> Iterator[None]:
++    token = _CACHE_DIR_OVERRIDE.set(cache_dir)
++    try:
++        yield
++    finally:
++        _CACHE_DIR_OVERRIDE.reset(token)
++
++
++def get_cache_dir() -> Optional[str]:
++    override = _CACHE_DIR_OVERRIDE.get()
++    return CACHE_DIR if override is None else override
++
+@@ -210 +229,3 @@
+-    "get_cache_path",
++    "get_cache_path",
++    "cache_dir_override",
++    "get_cache_dir",
 --- a/cache/jit.py
 +++ b/cache/jit.py
 @@ -36 +36 @@
 -import quack.cache as _state  # noqa: E402  (intentional partial-import; see __init__.py)
 +import torch._vendor.quack.cache as _state  # noqa: E402  (intentional partial-import; see __init__.py)
-@@ -52 +52 @@
+@@ -50,2 +50,2 @@
+-    if _state.CACHE_DIR is not None:
+-        cache_dir = Path(_state.CACHE_DIR)
++    if (cache_dir_override := _state.get_cache_dir()) is not None:
++        cache_dir = Path(cache_dir_override)
+@@ -53 +53 @@
 -        cache_dir = Path(tempfile.gettempdir()) / getuser() / "quack_cache"
 +        cache_dir = Path(tempfile.gettempdir()) / getuser() / "torch_vendor_quack_cache"
 @@ -78 +78 @@

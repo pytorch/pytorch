@@ -8693,10 +8693,6 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             f"FlexGEMM QUACK backend currently supports only aten.{_SUPPORTED_FLEX_GEMM_OP_NAMES}"
         )
     tuned = kernel_options.get("tuned", False)
-    if tuned:
-        raise NotImplementedError(
-            "FlexGEMM generated epilogues do not support tuned=True yet"
-        )
     unsupported_options = OrderedSet(kernel_options) - OrderedSet(["backend", "tuned"])
     if unsupported_options:
         raise NotImplementedError(
@@ -8711,7 +8707,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     from torch._inductor.kernel.flex_gemm.template import flex_gemm_epilogue_template
     from torch._inductor.select_algorithm import autotune_select_algorithm
 
-    mat1_index, _ = FLEX_GEMM_OP_INPUT_INDICES[gemm_op]
+    mat1_index, mat2_index = FLEX_GEMM_OP_INPUT_INDICES[gemm_op]
     unsupported_gemm_kwargs = OrderedSet(gemm_kwargs) - OrderedSet(["alpha", "beta"])
     if unsupported_gemm_kwargs:
         raise NotImplementedError(
@@ -8747,23 +8743,44 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         subgraph.graph_module, gemm_op
     )
     input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args]
+    if tuned:
+        from torch._inductor.kernel.flex_gemm.runtime import (
+            candidate_gemm_configs_for_device,
+            gemm_config_key,
+        )
+
+        quack_config_keys = tuple(
+            gemm_config_key(config)
+            for config in candidate_gemm_configs_for_device(layout.device)
+        )
+    else:
+        from torch._inductor.kernel.flex_gemm.runtime import default_gemm_config_key
+
+        quack_config_keys = (
+            default_gemm_config_key(
+                layout.device,
+                gemm_args[mat1_index].get_size()[0],
+                gemm_args[mat2_index].get_size()[1],
+            ),
+        )
     choices: list[Any] = []
-    error = flex_gemm_epilogue_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=layout,
-        config=ir.FlexGemmEpilogueConfig(
-            epilogue_name=epilogue_name,
-            epilogue_source=epilogue_source,
-            gemm_op=gemm_op.name().removeprefix("aten::"),
-            alpha=float(alpha),
-            beta=float(beta),
-            tuned=tuned,
-            out_dtype=output_meta.dtype,
-        ),
-    )
-    if error is not None:
-        raise error
+    for quack_config_key in quack_config_keys:
+        error = flex_gemm_epilogue_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=layout,
+            config=ir.FlexGemmEpilogueConfig(
+                epilogue_name=epilogue_name,
+                epilogue_source=epilogue_source,
+                gemm_op=gemm_op.name().removeprefix("aten::"),
+                alpha=float(alpha),
+                beta=float(beta),
+                out_dtype=output_meta.dtype,
+                quack_config_key=quack_config_key,
+            ),
+        )
+        if error is not None:
+            raise error
     result, _ = autotune_select_algorithm(
         "flex_gemm_epilogue", choices, input_nodes, layout
     )

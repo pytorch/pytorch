@@ -5888,8 +5888,8 @@ class FlexGemmEpilogueConfig:
     gemm_op: str
     alpha: float
     beta: float
-    tuned: bool = False
     out_dtype: Any | None = None
+    quack_config_key: tuple[Any, ...] | None = None
 
 
 class TritonTemplateBuffer(TemplateBuffer):

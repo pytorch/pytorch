@@ -56,6 +56,12 @@ from .rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_out_sr_
 _tensor_epilogue_fns: dict[str, Callable] = {}
 
 
+def register_tensor_epilogue_fn(
+    tensor_epilogue_key: str, tensor_epilogue_fn: Callable
+) -> None:
+    _tensor_epilogue_fns[tensor_epilogue_key] = tensor_epilogue_fn
+
+
 class GemmActMixin(ComposableEpiMixin):
     _epi_ops = (
         Scalar("alpha"),
@@ -591,6 +597,7 @@ def gemm_act(
     tensor_epilogue_tile_biases: tuple[Tensor, ...] = (),
     alpha: float | Tensor = 1.0,
     beta: float | Tensor = 1.0,
+    device_capacity_override: tuple[int, int] | None = None,
 ) -> None:
     if tensor_epilogue_fn is not None:
         assert activation is None, "tensor_epilogue_fn and activation are mutually exclusive"
@@ -599,7 +606,7 @@ def gemm_act(
             if tensor_epilogue_key is not None
             else repr(tensor_epilogue_fn)
         )
-        _tensor_epilogue_fns[tensor_epilogue_key] = tensor_epilogue_fn
+        register_tensor_epilogue_fn(tensor_epilogue_key, tensor_epilogue_fn)
         gemm_cls_name = "act"
     elif activation in gate_fn_map:
         gemm_cls_name = "gated"
@@ -665,7 +672,11 @@ def gemm_act(
     )
     colvec_ndim = colvec_bias.ndim if colvec_bias is not None else 0
 
-    device_capacity = get_device_capacity(A.device)
+    device_capacity = (
+        device_capacity_override
+        if device_capacity_override is not None
+        else get_device_capacity(A.device)
+    )
     assert device_capacity[0] in [8, 9, 10, 11, 12], (
         "Only SM8x, SM90, SM100, SM110, and SM120 are supported"
     )

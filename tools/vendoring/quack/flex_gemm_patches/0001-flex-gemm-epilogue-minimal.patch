@@ -237,7 +237,7 @@ index a02a4e7..9633276 100644
  def vec_multiply(gemm, tRS_rD, tDrColVec, tDrRowVec):
      """Multiply tRS_rD by colvec and/or rowvec in-place. Uses packed f32x2 on SM100."""
 diff --git a/gemm_act.py b/gemm_act.py
-index f2bf896..bb51674 100644
+index f2bf896..5b6ed06 100644
 --- a/gemm_act.py
 +++ b/gemm_act.py
 @@ -20,7 +20,15 @@ from quack.cute_dsl_utils import (
@@ -257,17 +257,23 @@ index f2bf896..bb51674 100644
  from quack.gemm_sm80 import GemmSm80
  from quack.gemm_sm90 import GemmSm90
  from quack.gemm_sm100 import GemmSm100
-@@ -45,6 +53,9 @@ from quack.activation import act_fn_map, gate_fn_map
+@@ -45,6 +53,15 @@ from quack.activation import act_fn_map, gate_fn_map
  from quack.rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_out_sr_seed
 
 
 +_tensor_epilogue_fns: dict[str, Callable] = {}
 +
 +
++def register_tensor_epilogue_fn(
++    tensor_epilogue_key: str, tensor_epilogue_fn: Callable
++) -> None:
++    _tensor_epilogue_fns[tensor_epilogue_key] = tensor_epilogue_fn
++
++
  class GemmActMixin(ComposableEpiMixin):
      _epi_ops = (
          Scalar("alpha"),
-@@ -52,18 +63,32 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -52,18 +69,32 @@ class GemmActMixin(ComposableEpiMixin):
          Scalar("sr_seed", dtype=Int32),
          RowVecLoad("mRowVecBroadcast"),
          ColVecLoad("mColVecBroadcast"),
@@ -301,7 +307,7 @@ index f2bf896..bb51674 100644
          rounding_mode: cutlass.Constexpr[int] = RoundingMode.RN
          sr_seed: Optional[Int32 | cute.Tensor] = None
 
-@@ -76,6 +101,9 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -76,6 +107,9 @@ class GemmActMixin(ComposableEpiMixin):
          self.cta_tile_shape_aux_out_mn = self.cta_tile_shape_mnk[:2]
          d = self._epi_ops_to_params_dict(args)
          d["act_fn"] = args.act_fn
@@ -311,7 +317,7 @@ index f2bf896..bb51674 100644
          for key in ("mRowVecBroadcast", "mColVecBroadcast"):
              if key in self.concat_layout and key in d:
                  d[key] = layout_utils.concat_to_interleave(d[key], 1)
-@@ -165,10 +193,41 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -165,10 +199,41 @@ class GemmActMixin(ComposableEpiMixin):
          tRS_rD: cute.Tensor,
          tRS_rC: Optional[cute.Tensor] = None,
      ) -> Optional[cute.Tensor]:
@@ -357,7 +363,7 @@ index f2bf896..bb51674 100644
              tRS_rAuxOut = cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype)
              if const_expr(self.arch != 100):
                  for i in cutlass.range(cute.size(tRS_rAuxOut), unroll_full=True):
-@@ -206,6 +265,7 @@ def _gated_epi_tile_fn(gemm, epi_tile):
+@@ -206,6 +271,7 @@ def _gated_epi_tile_fn(gemm, epi_tile):
      return (epi_tile[0], epi_tile[1] // 2)
 
 
@@ -365,7 +371,7 @@ index f2bf896..bb51674 100644
  class GemmGatedMixin(GemmActMixin):
      _epi_ops = (
          Scalar("alpha"),
-@@ -348,6 +408,16 @@ def _compile_gemm_act(
+@@ -348,6 +414,16 @@ def _compile_gemm_act(
      persistent,
      is_dynamic_persistent,
      activation,
@@ -382,7 +388,7 @@ index f2bf896..bb51674 100644
      rowvec_dtype,
      colvec_dtype,
      colvec_ndim,
-@@ -397,14 +467,43 @@ def _compile_gemm_act(
+@@ -397,14 +473,43 @@ def _compile_gemm_act(
      mAuxOut = fake_tensor(postact_dtype, pa_shape, leading_dim=pa_leading_dim, divisibility=div_pa)
 
      mRowVec = fake_tensor(rowvec_dtype, (l, n), leading_dim=1, divisibility=4)
@@ -427,7 +433,7 @@ index f2bf896..bb51674 100644
 
      def fake_scalar(mode, dtype=Int32):
          if mode == 0:
-@@ -417,15 +516,25 @@ def _compile_gemm_act(
+@@ -417,15 +522,25 @@ def _compile_gemm_act(
      epi_args = GemmCls.EpilogueArguments(
          mAuxOut,
          act_fn,
@@ -454,7 +460,7 @@ index f2bf896..bb51674 100644
      return compile_gemm_kernel(
          GemmCls,
          a_dtype,
-@@ -473,8 +582,26 @@ def gemm_act(
+@@ -473,8 +588,26 @@ def gemm_act(
      sr_seed: int | Tensor = 0,
      use_tma_gather: bool = False,
      concat_layout: tuple | None = None,
@@ -476,13 +482,13 @@ index f2bf896..bb51674 100644
 +            if tensor_epilogue_key is not None
 +            else repr(tensor_epilogue_fn)
 +        )
-+        _tensor_epilogue_fns[tensor_epilogue_key] = tensor_epilogue_fn
++        register_tensor_epilogue_fn(tensor_epilogue_key, tensor_epilogue_fn)
 +        gemm_cls_name = "act"
 +    elif activation in gate_fn_map:
          gemm_cls_name = "gated"
      else:
          assert activation in act_fn_map, f"Unsupported activation {activation}"
-@@ -489,7 +616,7 @@ def gemm_act(
+@@ -489,7 +622,7 @@ def gemm_act(
              assert D.stride(-1) == 1, "varlen_m requires D to be n-major"
          assert PostAct.stride(-1) == 1, "varlen_m requires PostAct to be n-major"
      if gather_A:
@@ -491,7 +497,7 @@ index f2bf896..bb51674 100644
          assert cluster_N == 1, "gather_A requires cluster_N=1"
 
      A_p = perm3d_single(A, varlen_m)
-@@ -497,6 +624,9 @@ def gemm_act(
+@@ -497,6 +630,9 @@ def gemm_act(
      D_p = perm3d_single(D, varlen_m)
      C_p = perm3d_single(C, varlen_m)
      PostAct_p = perm3d_single(PostAct, varlen_m)
@@ -501,7 +507,7 @@ index f2bf896..bb51674 100644
 
      a_major = get_major(A_p, "m", "k")
      b_major = get_major(B_p, "n", "k")
-@@ -509,6 +639,30 @@ def gemm_act(
+@@ -509,6 +645,30 @@ def gemm_act(
      d_dtype = torch2cute_dtype_map[D.dtype] if D is not None else None
      c_dtype = torch2cute_dtype_map[C.dtype] if C is not None else None
      postact_dtype = torch2cute_dtype_map[PostAct.dtype]
@@ -532,7 +538,7 @@ index f2bf896..bb51674 100644
      colvec_ndim = colvec_bias.ndim if colvec_bias is not None else 0
 
      device_capacity = get_device_capacity(A.device)
-@@ -526,6 +680,12 @@ def gemm_act(
+@@ -526,6 +686,12 @@ def gemm_act(
      sr_seed_mode = (
          2 if isinstance(sr_seed, Tensor) else (1 if rounding_mode == RoundingMode.RS else 0)
      )
@@ -545,7 +551,7 @@ index f2bf896..bb51674 100644
      concat_layout = tuple(sorted(concat_layout)) if concat_layout else ()
      compiled_fn = _compile_gemm_act(
          a_dtype,
-@@ -544,6 +704,16 @@ def gemm_act(
+@@ -544,6 +710,16 @@ def gemm_act(
          persistent,
          is_dynamic_persistent,
          activation,
@@ -562,7 +568,7 @@ index f2bf896..bb51674 100644
          torch2cute_dtype_map[rowvec_bias.dtype] if rowvec_bias is not None else None,
          torch2cute_dtype_map[colvec_bias.dtype] if colvec_bias is not None else None,
          colvec_ndim,
-@@ -574,9 +744,17 @@ def gemm_act(
+@@ -574,9 +750,17 @@ def gemm_act(
 
      epi_args = GemmActMixin.EpilogueArguments(
          PostAct_p,
