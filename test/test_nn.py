@@ -14784,23 +14784,32 @@ if __name__ == '__main__':
         # the input/weight caps for the same combo.
         expected_linear_bias_grad_max_ulp_diff = 0
         if prob_target:
-            # Probability-target caps. The prob loop is dense (no
-            # gather/index_add cancellation regime) and the generator's
-            # softmax targets are well-spread, so caps are expected to
-            # land tighter than the index-target ones. The block below
-            # is intentionally generous so the cross-host sweep can run;
-            # read per-host values from the ``[prob calibration]`` print
-            # and tighten per (policy, dtype, device).
-            # TODO(prob-target calibration): replace with measured caps.
-            # fp32 ULP counts run larger than fp16/bf16 (smaller eps, and
-            # the near-zero floor threshold feps*max barely bites), in
-            # line with the index-target fp32 caps below.
-            expected_max_ulp_diff = 8
-            expected_input_grad_max_ulp_diff = (
-                16384 if dtype == torch.float32 else 4096
-            )
-            expected_weight_grad_max_ulp_diff = 8192
-            expected_linear_bias_grad_max_ulp_diff = 4096 if bias else 0
+            # Probability-target caps with the near-zero ULP floor (see
+            # ``grad_max_ulp``). Measured on A100-host CPU/CUDA and
+            # x86_64 + RTX 2060; ROCm / aarch64 / MPS pending (the
+            # ``[prob calibration]`` print stays until they report).
+            # fp32 takes the all-input-dtype path, so its caps are
+            # policy-independent and the ULP counts run larger (smaller
+            # eps; the floor threshold feps*max barely bites), in line
+            # with the index-target fp32 caps below. Observed maxima:
+            # fp32 ig 173-4619 / w 16-914; fp16 balanced/compact ig
+            # 60-93 / w 17-58; bf16 balanced/compact ig 6 / w 3;
+            # accurate fp16/bf16 all 0. No bias=True prob samples, so
+            # the bias-grad cap stays 0.
+            expected_max_ulp_diff = 4
+            if dtype == torch.float32:
+                expected_input_grad_max_ulp_diff = 8192
+                expected_weight_grad_max_ulp_diff = 2048
+            elif _resolved_policy == "accurate":
+                expected_input_grad_max_ulp_diff = 4
+                expected_weight_grad_max_ulp_diff = 4
+            elif dtype == torch.bfloat16:  # balanced / compact, bf16
+                expected_input_grad_max_ulp_diff = 16
+                expected_weight_grad_max_ulp_diff = 8
+            else:  # balanced / compact, fp16
+                expected_input_grad_max_ulp_diff = 192
+                expected_weight_grad_max_ulp_diff = 128
+            expected_linear_bias_grad_max_ulp_diff = 0
         elif none_reduction:
             # reduction='none' caps. The per-element ULP uses a near-zero
             # floor (see ``grad_max_ulp``) so these track drift in the
