@@ -909,208 +909,6 @@ def op_overload_wrapper({", ".join(arg_list)}):
     return inner
 
 
-def _dynamo_graph_capture_for_export(
-    mod: Callable[..., Any],
-    *,
-    constraints: list[Constraint] | None = None,
-    dynamic_shapes: _DynamicShapesInput = None,
-) -> Callable[..., torch.fx.GraphModule]:
-    """
-    Improved dynamo graph capture using transformer approach with proper fake tensor handling.
-
-    This function creates a capture instance that handles:
-    1. PyTree flattening/unflattening with proper input ordering
-    2. Dynamo graph capture with export-specific context
-    3. FX graph transformation for export compatibility
-    4. Proper fake tensor metadata preservation
-    5. Dynamic dimension constraint handling
-
-    Notable improvements over manual approach:
-    - Uses FX Transformer for cleaner graph manipulation
-    - Properly handles fake tensor metadata and dynamic dimensions
-    - Preserves all necessary metadata for export
-    - More robust error handling and edge case management
-
-    TODO:
-    1. Are we actually gonna run the bytecode?
-    2. Need to attach guards
-    """
-
-    _constraints = constraints
-
-    def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
-        # This sets the is_exporting flag when building guards.
-        with _compiling_state_context():
-            # Only a ShapesSpec/ParamsSpec object opts into the new spec API.
-            # A bare dict/tuple in export's `dynamic_shapes` is the legacy
-            # format (Dim/tuple/None) and must NOT be routed through
-            # _bind_spec_to_args.
-            user_spec: ShapesSpec | None = None
-            if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
-                user_spec = _coerce_to_shapes_spec(dynamic_shapes)
-            flattened_spec: ShapesSpec | None = None
-            if user_spec is not None:
-                # _bind_spec_to_args also flattens (args, kwargs) for us.
-                leaf_specs, flat_inputs, in_spec = _bind_spec_to_args(
-                    mod, args, kwargs, user_spec
-                )
-                flattened_spec = ShapesSpec(
-                    # leaf_specs is list[LeafSpec]; cast around list invariance
-                    # (ParamsSpec wants list[IntermediateSpec] and copies it).
-                    ParamsSpec({"*args": cast(list[IntermediateSpec], leaf_specs)}),
-                    assumptions=user_spec._assumptions or None,
-                )
-            else:
-                flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
-            check_user_input_output(flat_inputs, UserErrorType.INVALID_INPUT)
-            module_to_trace = ModuleToTrace(mod, in_spec)
-            orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
-
-            constraints: list[Constraint] | None = _constraints
-
-            from . import reset  # type: ignore[attr-defined]
-
-            reset()
-
-            dynamo_config_ctx = torch._dynamo.config.patch(
-                specialize_int=True,
-                specialize_float=True,
-                assume_static_by_default=True,
-                automatic_dynamic_shapes=False,
-                capture_dynamic_output_shape_ops=True,
-                capture_scalar_outputs=True,
-                constant_fold_autograd_profiler_enabled=True,
-                log_graph_in_out_metadata=True,
-                # install_free_tensors ensures that params and buffers are still
-                # added as graph attributes, and makes Dynamo emits graphs that
-                # follow export pytree-able input requirements In future, if we
-                # fully rely on bytecode for the runtime, we can turn this flag
-                # off.
-                install_free_tensors=torch._dynamo.config.install_free_tensors_for_export,
-            )
-
-            # If a user spec was supplied, re-key it to the intermediate
-            # ModuleToTrace.forward(*flat_args) layout and expose via
-            # ``torch._dynamo.config._shapes_spec`` for the variable
-            # builder. Assumptions are carried through unchanged: binding
-            # only changes *which positional slot* each TensorSpec lands
-            # in; the ShapeVar/IntVar symbols inside the assumption
-            # expressions are the same Python objects.
-            shapes_spec_in_use = user_spec is not None
-            shapes_spec_ctx = nullcontext()
-            if flattened_spec is not None:
-                shapes_spec_ctx = torch._dynamo.config.patch(
-                    _shapes_spec=flattened_spec
-                )
-
-            with (
-                get_metrics_context(),
-                dynamo_timed("fullgraph_capture"),
-                dynamo_config_ctx,
-                shapes_spec_ctx,
-            ):
-                out = fullgraph_capture(
-                    module_to_trace,
-                    tuple(flat_inputs),
-                    constraints=_constraints,
-                    _is_export_deprecated_do_not_use=True,
-                )
-
-                if out.graph_capture_output.output_graph is None:
-                    raise AssertionError(
-                        "output_graph must not be None after fullgraph_capture"
-                    )
-
-                example_inputs: list[Any] = []
-                if out.backend_input is not None:
-                    graph = out.backend_input.graph_module
-                    fake_mode = out.backend_input.fake_mode
-                    example_inputs = out.backend_input.example_inputs
-                else:
-                    graph = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
-                    graph.graph.output(None)
-                    graph.recompile()
-                    fake_mode = None
-
-                # ShapesSpec is unbacked based, constraint violations are not
-                # relevant.
-                if not shapes_spec_in_use:
-                    _suggest_or_raise_constraint_violation(
-                        module_to_trace,
-                        orig_callable,
-                        fake_mode,
-                        out,
-                        args,
-                        kwargs,
-                        dynamic_shapes,  # type: ignore[arg-type]
-                    )
-
-                # Extract export metadata from the new location
-                export_metadata = out.graph_capture_output.output_graph.export_metadata
-                graph_inputs = export_metadata.graph_input_idx_to_local_source
-                graph_output_map = export_metadata.output_return_type
-                out_spec = export_metadata.out_spec
-                module_call_spec = export_metadata.module_call_spec
-
-            # Compute dynamic dimensions for each input based on constraints
-            flat_args_dynamic_dims = [
-                {
-                    c.dim
-                    for c in (constraints or ())
-                    if (
-                        c.t_id == id(x)
-                        and not isinstance(c, _RelaxedConstraint)
-                        and c.constraint_range.vr.lower != c.constraint_range.vr.upper
-                    )
-                }
-                for x in flat_inputs
-            ]
-
-            # Create input order mapping from dynamo's internal order to user order
-            # Only process inputs that come from function arguments (GetItemSource).
-            # Skip inputs that come from other sources like closures (e.g., captured
-            # opaque objects like DeviceMesh).
-            graph_input_order: dict[int, int] = {}
-            for inp in graph_inputs:
-                source = graph_inputs[inp]
-                if isinstance(source, torch._dynamo.source.GetItemSource):
-                    graph_input_order[source.index] = len(graph_input_order)
-
-            for real_idx, graph_idx in graph_input_order.items():
-                flat_inputs[real_idx] = example_inputs[graph_idx]
-
-            # Use FX transformer to rebuild the graph cleanly
-            transformed_graph = DynamoGraphTransformer(
-                graph,
-                flat_inputs,
-                flat_args_dynamic_dims,
-                graph_input_order,
-                graph_output_map,
-                fake_mode,
-                graph_inputs,
-            ).transform()
-
-            # Set up PyTree codegen for proper input/output handling
-            transformed_graph.graph._codegen = _PyTreeCodeGen(
-                _PyTreeInfo(
-                    argument_names(inspect.signature(orig_callable), args, kwargs),  # type: ignore[attr-defined, arg-type]
-                    in_spec,
-                    out_spec,
-                )
-            )
-            transformed_graph.recompile()
-
-            clean_nn_module_stack_and_source_fn(transformed_graph, True)
-            clean_export_root(transformed_graph)
-
-            transformed_graph.meta["module_call_specs"] = module_call_spec
-            transformed_graph.meta["fake_mode"] = fake_mode
-
-            return transformed_graph
-
-    return inner
-
-
 # ---------------------------------------------------------------------------
 # Binding: aligning a user ShapesSpec to a concrete call's flat input layout.
 # Used by the strict export tracer (this file) and by make_fx
@@ -1464,3 +1262,205 @@ def _bind_spec_to_args(
         )
 
     return out_leaf_specs, flat_args, in_spec
+
+
+def _dynamo_graph_capture_for_export(
+    mod: Callable[..., Any],
+    *,
+    constraints: list[Constraint] | None = None,
+    dynamic_shapes: _DynamicShapesInput = None,
+) -> Callable[..., torch.fx.GraphModule]:
+    """
+    Improved dynamo graph capture using transformer approach with proper fake tensor handling.
+
+    This function creates a capture instance that handles:
+    1. PyTree flattening/unflattening with proper input ordering
+    2. Dynamo graph capture with export-specific context
+    3. FX graph transformation for export compatibility
+    4. Proper fake tensor metadata preservation
+    5. Dynamic dimension constraint handling
+
+    Notable improvements over manual approach:
+    - Uses FX Transformer for cleaner graph manipulation
+    - Properly handles fake tensor metadata and dynamic dimensions
+    - Preserves all necessary metadata for export
+    - More robust error handling and edge case management
+
+    TODO:
+    1. Are we actually gonna run the bytecode?
+    2. Need to attach guards
+    """
+
+    _constraints = constraints
+
+    def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
+        # This sets the is_exporting flag when building guards.
+        with _compiling_state_context():
+            # Only a ShapesSpec/ParamsSpec object opts into the new spec API.
+            # A bare dict/tuple in export's `dynamic_shapes` is the legacy
+            # format (Dim/tuple/None) and must NOT be routed through
+            # _bind_spec_to_args.
+            user_spec: ShapesSpec | None = None
+            if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
+                user_spec = _coerce_to_shapes_spec(dynamic_shapes)
+            flattened_spec: ShapesSpec | None = None
+            if user_spec is not None:
+                # _bind_spec_to_args also flattens (args, kwargs) for us.
+                leaf_specs, flat_inputs, in_spec = _bind_spec_to_args(
+                    mod, args, kwargs, user_spec
+                )
+                flattened_spec = ShapesSpec(
+                    # leaf_specs is list[LeafSpec]; cast around list invariance
+                    # (ParamsSpec wants list[IntermediateSpec] and copies it).
+                    ParamsSpec({"*args": cast(list[IntermediateSpec], leaf_specs)}),
+                    assumptions=user_spec._assumptions or None,
+                )
+            else:
+                flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
+            check_user_input_output(flat_inputs, UserErrorType.INVALID_INPUT)
+            module_to_trace = ModuleToTrace(mod, in_spec)
+            orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
+
+            constraints: list[Constraint] | None = _constraints
+
+            from . import reset  # type: ignore[attr-defined]
+
+            reset()
+
+            dynamo_config_ctx = torch._dynamo.config.patch(
+                specialize_int=True,
+                specialize_float=True,
+                assume_static_by_default=True,
+                automatic_dynamic_shapes=False,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+                constant_fold_autograd_profiler_enabled=True,
+                log_graph_in_out_metadata=True,
+                # install_free_tensors ensures that params and buffers are still
+                # added as graph attributes, and makes Dynamo emits graphs that
+                # follow export pytree-able input requirements In future, if we
+                # fully rely on bytecode for the runtime, we can turn this flag
+                # off.
+                install_free_tensors=torch._dynamo.config.install_free_tensors_for_export,
+            )
+
+            # If a user spec was supplied, re-key it to the intermediate
+            # ModuleToTrace.forward(*flat_args) layout and expose via
+            # ``torch._dynamo.config._shapes_spec`` for the variable
+            # builder. Assumptions are carried through unchanged: binding
+            # only changes *which positional slot* each TensorSpec lands
+            # in; the ShapeVar/IntVar symbols inside the assumption
+            # expressions are the same Python objects.
+            shapes_spec_in_use = user_spec is not None
+            shapes_spec_ctx = nullcontext()
+            if flattened_spec is not None:
+                shapes_spec_ctx = torch._dynamo.config.patch(
+                    _shapes_spec=flattened_spec
+                )
+
+            with (
+                get_metrics_context(),
+                dynamo_timed("fullgraph_capture"),
+                dynamo_config_ctx,
+                shapes_spec_ctx,
+            ):
+                out = fullgraph_capture(
+                    module_to_trace,
+                    tuple(flat_inputs),
+                    constraints=_constraints,
+                    _is_export_deprecated_do_not_use=True,
+                )
+
+                if out.graph_capture_output.output_graph is None:
+                    raise AssertionError(
+                        "output_graph must not be None after fullgraph_capture"
+                    )
+
+                example_inputs: list[Any] = []
+                if out.backend_input is not None:
+                    graph = out.backend_input.graph_module
+                    fake_mode = out.backend_input.fake_mode
+                    example_inputs = out.backend_input.example_inputs
+                else:
+                    graph = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
+                    graph.graph.output(None)
+                    graph.recompile()
+                    fake_mode = None
+
+                # ShapesSpec is unbacked based, constraint violations are not
+                # relevant.
+                if not shapes_spec_in_use:
+                    _suggest_or_raise_constraint_violation(
+                        module_to_trace,
+                        orig_callable,
+                        fake_mode,
+                        out,
+                        args,
+                        kwargs,
+                        dynamic_shapes,  # type: ignore[arg-type]
+                    )
+
+                # Extract export metadata from the new location
+                export_metadata = out.graph_capture_output.output_graph.export_metadata
+                graph_inputs = export_metadata.graph_input_idx_to_local_source
+                graph_output_map = export_metadata.output_return_type
+                out_spec = export_metadata.out_spec
+                module_call_spec = export_metadata.module_call_spec
+
+            # Compute dynamic dimensions for each input based on constraints
+            flat_args_dynamic_dims = [
+                {
+                    c.dim
+                    for c in (constraints or ())
+                    if (
+                        c.t_id == id(x)
+                        and not isinstance(c, _RelaxedConstraint)
+                        and c.constraint_range.vr.lower != c.constraint_range.vr.upper
+                    )
+                }
+                for x in flat_inputs
+            ]
+
+            # Create input order mapping from dynamo's internal order to user order
+            # Only process inputs that come from function arguments (GetItemSource).
+            # Skip inputs that come from other sources like closures (e.g., captured
+            # opaque objects like DeviceMesh).
+            graph_input_order: dict[int, int] = {}
+            for inp in graph_inputs:
+                source = graph_inputs[inp]
+                if isinstance(source, torch._dynamo.source.GetItemSource):
+                    graph_input_order[source.index] = len(graph_input_order)
+
+            for real_idx, graph_idx in graph_input_order.items():
+                flat_inputs[real_idx] = example_inputs[graph_idx]
+
+            # Use FX transformer to rebuild the graph cleanly
+            transformed_graph = DynamoGraphTransformer(
+                graph,
+                flat_inputs,
+                flat_args_dynamic_dims,
+                graph_input_order,
+                graph_output_map,
+                fake_mode,
+                graph_inputs,
+            ).transform()
+
+            # Set up PyTree codegen for proper input/output handling
+            transformed_graph.graph._codegen = _PyTreeCodeGen(
+                _PyTreeInfo(
+                    argument_names(inspect.signature(orig_callable), args, kwargs),  # type: ignore[attr-defined, arg-type]
+                    in_spec,
+                    out_spec,
+                )
+            )
+            transformed_graph.recompile()
+
+            clean_nn_module_stack_and_source_fn(transformed_graph, True)
+            clean_export_root(transformed_graph)
+
+            transformed_graph.meta["module_call_specs"] = module_call_spec
+            transformed_graph.meta["fake_mode"] = fake_mode
+
+            return transformed_graph
+
+    return inner

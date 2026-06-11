@@ -2948,9 +2948,7 @@ class _MakefxTracer:
         if type(x) is int:
             if isinstance(leaf_spec, (IntVar, SymInt)):
                 shape_env: ShapeEnv = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
-                sym_node: torch.SymInt = shape_env.create_unbacked_symint(
-                    source=source
-                )
+                sym_node: torch.SymInt = shape_env.create_unbacked_symint(source=source)
                 _wire_spec_slot(leaf_spec, sym_node)
                 return sym_node
             if self.tracing_mode == "symbolic":
