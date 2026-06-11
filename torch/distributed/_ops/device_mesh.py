@@ -10,7 +10,9 @@ from ..device_mesh import DeviceMesh
 torch.library.define(
     "device_mesh::_runtime_compute_coordinate_on_dim",
     "(Tensor full_mesh, int index) -> SymInt",
-    tags=torch.Tag.pt2_compliant_tag,
+    # This depends on the current rank, so do not constant-fold it from one
+    # rank's value into graphs compiled for other ranks.
+    tags=(torch.Tag.pt2_compliant_tag, torch.Tag.nondeterministic_seeded),
 )
 
 

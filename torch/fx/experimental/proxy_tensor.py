@@ -1329,11 +1329,6 @@ def proxy_call(
             constant = args[0].clone()
     elif (
         torch.Tag.nondeterministic_seeded not in func.tags
-        # DeviceMesh coordinates depend on the current rank, so folding them
-        # would bake one rank's value into graphs compiled for every rank.
-        and not func.name().startswith(
-            "device_mesh::_runtime_compute_coordinate_on_dim"
-        )
         and all_constant
         and any_constant
         and pytree.tree_all_only(Tensor, tensor_numel_in_limit, out)

@@ -795,6 +795,11 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
         # also accept keyword call sites. See pytorch/pytorch#184746.
         from torch.distributed._ops import device_mesh as _dm_ops  # noqa: F401
 
+        self.assertIn(
+            torch.Tag.nondeterministic_seeded,
+            torch.ops.device_mesh._runtime_compute_coordinate_on_dim.default.tags,
+        )
+
         with LocalTensorMode(self.world_size):
             mesh = self.build_device_mesh()
             full_mesh = mesh._layout.remap_to_tensor(mesh._rank_map)
