@@ -452,7 +452,7 @@ std::string InplaceConverter::ValueTracker::toString() const {
     ss << " map to " << it.second->debugName() << '\n';
   }
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void InplaceConverter::ValueTracker::recordSetValue(

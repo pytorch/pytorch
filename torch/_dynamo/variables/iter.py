@@ -61,7 +61,9 @@ class ItertoolsVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
@@ -229,23 +231,6 @@ class ItertoolsVariable(VariableTracker):
                     mutation_type=ValueMutationNew(),
                 )
             return super().call_function(tx, args, kwargs)
-        elif (
-            self.value is itertools.permutations
-            and (len(args) == 1 or (len(args) == 2 and args[1].is_python_constant()))
-            and not kwargs
-        ):
-            if len(args) == 2:
-                r = args[1].as_python_constant()
-            else:
-                r = None
-            items = [
-                variables.TupleVariable(list(item))
-                for item in itertools.permutations(unpack_iterable(tx, args[0]), r)
-            ]
-            return variables.ListIteratorVariable(
-                items,  # type: ignore[arg-type]
-                mutation_type=ValueMutationNew(),
-            )
         else:
             return super().call_function(tx, args, kwargs)
 
@@ -254,7 +239,9 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -472,9 +459,6 @@ class MapVariable(IteratorVariable):
 
     def python_type(self) -> type:
         return map
-
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return False
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L1409-L1450

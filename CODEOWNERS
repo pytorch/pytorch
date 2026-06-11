@@ -46,8 +46,10 @@ nn/qat/ @jerryzh168
 
 # Distributed
 # c10d backend APIs
+/torch/csrc/distributed/c10d @d4l3k @fduwjj @kapilsh
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
+/torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
 # FSDP, DDP
 /torch/distributed/_composable/fsdp/ @weifengpy
 /torch/distributed/_composable/replicate.py @weifengpy

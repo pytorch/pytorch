@@ -7,6 +7,7 @@ import torch
 from torch._inductor.virtualized import V
 
 from ...ir import FixedLayout, TensorBox
+from ...lowering import empty_strided
 from ...select_algorithm import realize_inputs
 from .common import infer_dense_strides, maybe_realize
 
@@ -30,12 +31,6 @@ def lower_mps(
         _generate_metal_shader,
         MetalFlexAttentionNode,
     )
-
-    if score_mod_other_buffers or mask_mod_other_buffers:
-        raise NotImplementedError(
-            "flex_attention on MPS does not yet support score_mod / mask_mod "
-            "with captured buffers"
-        )
 
     (
         _,  # q_length
@@ -146,6 +141,30 @@ def lower_mps(
 
     scale_val = float(scale)
 
+    # Captured tensors become extra Metal buffers; their sizes/strides are baked
+    # into the index offset math. maybe_realize passes SymInts through untouched;
+    # SymInt captures (from dynamic-shape closures) are not supported yet.
+    def _capture_meta(items):
+        metas, tensors = [], []
+        for cap in maybe_realize(list(items)):
+            if isinstance(cap, sympy.Expr):
+                raise NotImplementedError(
+                    "flex_attention on MPS does not yet support SymInt captures "
+                    "in score_mod/mask_mod (dynamic-shape closures)"
+                )
+            metas.append(
+                (
+                    [sizevars.guard_int(s) for s in cap.get_size()],
+                    [sizevars.guard_int(s) for s in cap.get_stride()],
+                    cap.get_dtype(),
+                )
+            )
+            tensors.append(cap)
+        return metas, tensors
+
+    score_meta, score_tensors = _capture_meta(score_mod_other_buffers)
+    mask_meta, mask_tensors = _capture_meta(mask_mod_other_buffers)
+
     shader_source = _generate_metal_shader(
         dtype=dtype,
         d_qk=d_qk,
@@ -155,6 +174,8 @@ def lower_mps(
         has_full_blocks=has_full_blocks,
         block_m=BLOCK_M,
         scale=scale_val,
+        score_captured=score_meta,
+        mask_captured=mask_meta,
     )
 
     out_size = [B, Hq, seq_len_q, v_head_dim]
@@ -172,10 +193,12 @@ def lower_mps(
     full_kv_idx_strides = _get_strides(full_kv_indices) if has_full_blocks else []
 
     # Buffer order: 0=Out, 1=Q, 2=K, 3=V, 4=kv_num_blocks, 5=kv_indices,
-    # 6=(full_kv_num_blocks), 7=(full_kv_indices), then packed scalar buffer.
+    # 6=(full_kv_num_blocks), 7=(full_kv_indices), then score/mask captured
+    # buffers, then the packed scalar buffer.
     input_nodes = [query, key, value, kv_num_blocks, kv_indices]
     if has_full_blocks:
         input_nodes += [full_kv_num_blocks, full_kv_indices]
+    input_nodes += [*score_tensors, *mask_tensors]
 
     realized_inputs = realize_inputs(*input_nodes)
 
@@ -227,7 +250,15 @@ def lower_mps(
         block_m=BLOCK_M,
     )
 
-    return (TensorBox.create(node),)
+    lse_shape = [B, Hq, seq_len_q]
+    logsumexp = empty_strided(
+        lse_shape, None, dtype=torch.float32, device=query.get_device()
+    )
+    max_scores = empty_strided(
+        lse_shape, None, dtype=torch.float32, device=query.get_device()
+    )
+
+    return (TensorBox.create(node), logsumexp, max_scores)
 
 
 def _get_strides(node):
