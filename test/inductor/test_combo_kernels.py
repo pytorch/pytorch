@@ -234,6 +234,31 @@ class ComboKernelTests(TestCase):
         ).run(code[0])
         self.assertEqual(out_eager, out_compiled)
 
+    @requires_cuda_and_triton
+    @unittest.skipIf(
+        not SM90OrLater or torch.version.hip,
+        "TMA requires SM90 or later (Hopper+), not supported on ROCm",
+    )
+    @torch._inductor.config.patch(
+        {
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    def test_combo_kernel_tma_descriptor_block_name(self):
+        def fn(a, b):
+            return a.sum(dim=-1), b.sum(dim=-1)
+
+        inps = [
+            torch.randn(1024, 128, device=GPU_TYPE),
+            torch.randn(1024, 256, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        torch.testing.assert_close(out_eager, out_compiled, atol=1e-4, rtol=1e-4)
+        FileCheck().check("make_tensor_descriptor").run(code[0])
+
     @requires_gpu_and_triton
     def test_sort_in_combo_kernel_forces_persistent_reduction(self):
         # ops.sort only works under persistent reduction. Combo kernel codegen
@@ -786,6 +811,108 @@ class ComboKernelTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_autotune": 0,
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_combo_kernel_no_bench_stitched_config(self):
+        import re
+
+        def fn(a, b, c):
+            return a * 2.0, b + 1.0, c - 1.0
+
+        inps = [
+            torch.rand(256, device=GPU_TYPE),
+            torch.rand(256, device=GPU_TYPE),
+            torch.rand(256, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        combined = " ".join(code)
+        # Count emitted kernels by their async_compile.triton(...) calls;
+        # generated_kernel_count is inflated by throwaway probe codegen so
+        # is not a reliable count of real kernels.
+        self.assertEqual(combined.count("async_compile.triton("), 1)
+
+        default_match = re.search(r"'default_config':\s*\{([^}]*)\}", combined)
+        self.assertIsNotNone(default_match, "default_config not emitted")
+        default_kvs = dict(
+            re.findall(r"'(XBLOCK_\d+)':\s*(\d+)", default_match.group(1))
+        )
+        body_kvs = dict(
+            re.findall(r"(XBLOCK_\d+):\s*tl\.constexpr\s*=\s*(\d+)", combined)
+        )
+        # Grid and kernel body must agree on every XBLOCK_i.
+        self.assertEqual(default_kvs, body_kvs)
+        self.assertEqual(set(default_kvs), {"XBLOCK_0", "XBLOCK_1", "XBLOCK_2"})
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_autotune": 0,
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_combo_kernel_no_bench_persistent_reduction(self):
+        import re
+
+        def fn(a, b, c):
+            return a.sum(-1), b.sum(-1), c.sum(-1)
+
+        inps = [torch.randn(64, 1024, device=GPU_TYPE) for _ in range(3)]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        combined = " ".join(code)
+        self.assertEqual(combined.count("async_compile.triton("), 1)
+
+        default_match = re.search(r"'default_config':\s*\{([^}]*)\}", combined)
+        self.assertIsNotNone(default_match)
+        default_body = default_match.group(1)
+        # default_config must only carry XBLOCK_i; R*_BLOCK_i is body-baked.
+        self.assertNotIn("R0_BLOCK", default_body)
+        xblocks = re.findall(r"'(XBLOCK_\d+)'", default_body)
+        self.assertEqual(set(xblocks), {"XBLOCK_0", "XBLOCK_1", "XBLOCK_2"})
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_autotune": 0,
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_combo_kernel_no_bench_carve_out(self):
+        # torch.bucketize triggers carve-out under both gate variants:
+        #   CUDA: pointwise heuristic returns 3 configs (>2) -> carve out
+        #   ROCm: lowering sets AutotuneHint.ONE_ELEMENT_PER_THREAD -> carve out
+        # Simple pointwise (b*2.0, c+1.0) passes both gates -> fuses into combo.
+        # Expect 1 combo + 1 standalone on both backends.
+        def fn(a, b, c, boundaries):
+            return torch.bucketize(a, boundaries), b * 2.0, c + 1.0
+
+        a = torch.rand(1024, device=GPU_TYPE)
+        b = torch.rand(1024, device=GPU_TYPE)
+        c = torch.rand(1024, device=GPU_TYPE)
+        boundaries = torch.tensor([0.25, 0.5, 0.75], device=GPU_TYPE)
+
+        out_eager = fn(a, b, c, boundaries)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        with fresh_cache():
+            out_compiled, code = run_and_get_code(
+                torch.compile(fn), a, b, c, boundaries
+            )
+        self.assertEqual(out_eager, out_compiled)
+        combined = " ".join(code)
+        # 1 combo (b*2, c+1) + 1 standalone (bucketize) = 2 real kernels.
+        self.assertEqual(combined.count("async_compile.triton("), 2)
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu
@@ -1088,10 +1215,10 @@ class ComboKernelDynamicShapesTests(TestCase):
         ]
 
         out_eager = test_activations(*inps)
-        out_compiled = torch.compile(test_activations)(*inps)
+        out_compiled, code = run_and_get_code(torch.compile(test_activations), *inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        self.assertEqual(sum(s.count("async_compile.triton(") for s in code), 1)
 
     @requires_gpu_and_triton
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
