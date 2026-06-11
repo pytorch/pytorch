@@ -792,7 +792,6 @@ class TestAutograd(TestCase):
             unpack_hook_ref = scope()
             self.assertIsNone(unpack_hook_ref())
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_will_engine_execute_node(self):
         counter = [0]
 
@@ -5265,7 +5264,6 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         for h in all_hooks:
             h.remove()
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @skipIfWindows(msg="node name demangling inconsistent on windows")
     def test_backward_hook_relative_ordering(self):
         order = []
@@ -10208,7 +10206,6 @@ for shape in [(1,), ()]:
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO and sys.version_info >= (3, 14), "Fails in python 3.14.2"
     )
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_custom_function_saving_mutated_view_no_leak(self):
         class Test(torch.autograd.Function):
             @staticmethod
