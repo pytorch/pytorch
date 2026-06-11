@@ -1034,7 +1034,6 @@ class ClassThatUsesBuildInstructionSomeSlots(ClassThatUsesBuildInstructionAllSlo
 
 class TestBothSerialization(TestCase):
     @parametrize("weights_only", (True, False))
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_serialization_new_format_old_format_compat(self, device, weights_only):
         x = [torch.ones(200, 200, device=device) for i in range(30)]
 
