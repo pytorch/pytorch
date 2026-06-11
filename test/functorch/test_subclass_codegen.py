@@ -91,9 +91,15 @@ def inner_fn(args):
     unwrapped_args.extend(args[1:])
     args.clear()
     unwrapped_outs = compiled_fn(unwrapped_args)
-    _out_inner_2 = {'a': unwrapped_outs[0], 'b': unwrapped_outs[1]}
-    _out_5 = _subclass_type_3.__tensor_unflatten__(_out_inner_2, _meta_4, unwrapped_outs[0].size(), unwrapped_outs[0].stride())
-    return (_out_5,)""",
+    _out_idx = 0
+    _has_subclass_symint_outputs = len(unwrapped_outs) == 2
+    _out_attr_3 = unwrapped_outs[_out_idx]
+    _out_idx += 1
+    _out_attr_4 = unwrapped_outs[_out_idx]
+    _out_idx += 1
+    _out_inner_2 = {'a': _out_attr_3, 'b': _out_attr_4}
+    _out_7 = _subclass_type_5.__tensor_unflatten__(_out_inner_2, _meta_6, _out_attr_3.size(), _out_attr_3.stride())
+    return (_out_7,)""",
         )
 
     def test_compile_nested_subclass(self):
@@ -136,13 +142,23 @@ def inner_fn(args):
     unwrapped_args.extend(args[1:])
     args.clear()
     unwrapped_outs = compiled_fn(unwrapped_args)
-    _out_inner_5 = {'a': unwrapped_outs[0], 'b': unwrapped_outs[1]}
-    _out_8 = _subclass_type_6.__tensor_unflatten__(_out_inner_5, _meta_7, unwrapped_outs[0].size(), unwrapped_outs[0].stride())
-    _out_inner_9 = {'a': unwrapped_outs[2], 'b': unwrapped_outs[3]}
-    _out_12 = _subclass_type_10.__tensor_unflatten__(_out_inner_9, _meta_11, unwrapped_outs[2].size(), unwrapped_outs[2].stride())
-    _out_inner_4 = {'a': _out_8, 'b': _out_12}
-    _out_15 = _subclass_type_13.__tensor_unflatten__(_out_inner_4, _meta_14, _out_8.size(), _out_8.stride())
-    return (_out_15,)""",
+    _out_idx = 0
+    _has_subclass_symint_outputs = len(unwrapped_outs) == 4
+    _out_attr_6 = unwrapped_outs[_out_idx]
+    _out_idx += 1
+    _out_attr_7 = unwrapped_outs[_out_idx]
+    _out_idx += 1
+    _out_inner_5 = {'a': _out_attr_6, 'b': _out_attr_7}
+    _out_10 = _subclass_type_8.__tensor_unflatten__(_out_inner_5, _meta_9, _out_attr_6.size(), _out_attr_6.stride())
+    _out_attr_12 = unwrapped_outs[_out_idx]
+    _out_idx += 1
+    _out_attr_13 = unwrapped_outs[_out_idx]
+    _out_idx += 1
+    _out_inner_11 = {'a': _out_attr_12, 'b': _out_attr_13}
+    _out_16 = _subclass_type_14.__tensor_unflatten__(_out_inner_11, _meta_15, _out_attr_12.size(), _out_attr_12.stride())
+    _out_inner_4 = {'a': _out_10, 'b': _out_16}
+    _out_19 = _subclass_type_17.__tensor_unflatten__(_out_inner_4, _meta_18, _out_10.size(), _out_10.stride())
+    return (_out_19,)""",
         )
 
     def test_trailing_args_forwarded(self):
