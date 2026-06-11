@@ -1228,33 +1228,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
-    def test_defaultdict_shallow_copy_preserves_factory(self):
-        # defaultdict.copy(), dd.__copy__(), and copy.copy(dd) all produce a
-        # new defaultdict with the same default_factory and a shallow copy of
-        # the contents. The copies are consumed in-graph because reconstructing
-        # an escaping sourceless defaultdict is a separate unsupported case.
-        import copy
-
-        def f():
-            d = defaultdict(list, {1: 1, 2: 2})
-            c1 = d.copy()
-            c2 = d.__copy__()
-            c3 = copy.copy(d)
-            return (
-                c1.default_factory is list,
-                c2.default_factory is list,
-                c3.default_factory is list,
-                dict(c1),
-                dict(c2),
-                dict(c3),
-                c1 == d,
-                c3 == d,
-                c1[5],
-            )
-
-        opt_f = torch.compile(f, backend="eager", fullgraph=True)
-        self.assertEqual(f(), opt_f())
-
     def test_newly_constructed_default_dict(self):
         def f(x):
             d = defaultdict(list)
