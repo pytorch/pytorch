@@ -260,6 +260,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         torch.library.opcheck(f, args=[example])
 
     # https://github.com/pytorch/pytorch/issues/150472
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_single_element_tuple_output(self, device):
         # Helper function to register id_tuple custom and the fake tensor implementation
         # so that Dynamo has the fake tensor implementation
@@ -3881,6 +3882,7 @@ class TestCustomOpAPI(TestCase):
         script = """\
 import warnings
 import torch
+import torch._dynamo.config
 from torch import Tensor
 
 with warnings.catch_warnings(record=True) as w:

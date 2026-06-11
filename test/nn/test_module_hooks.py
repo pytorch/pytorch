@@ -12,6 +12,7 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 
 import torch
+import torch._dynamo.config
 import torch.nn as nn
 from torch.testing._internal.common_nn import _create_basic_net, NNTestCase
 from torch.testing._internal.common_utils import (
@@ -185,6 +186,7 @@ class DummyContextManager:
         self.input.append(-1)
 
 
+@torch._dynamo.config.patch(nested_graph_breaks=False)
 class TestModuleHooks(TestCase):
     @parametrize_test("named_tuple", (True, False))
     def test_forward_hooks(self, named_tuple):
@@ -1253,6 +1255,7 @@ class TestModuleGlobalHooks(TestCase):
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
 
+@torch._dynamo.config.patch(nested_graph_breaks=False)
 class TestModuleHookNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
