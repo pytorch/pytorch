@@ -3406,42 +3406,42 @@
   dispatch:
     CompositeExplicitAutograd: ldexp_out
 
-- func: linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: linspace(Scalar start, Scalar end, SymInt steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: linspace
 
-- func: linspace.Tensor_Tensor(Tensor start, Tensor end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: linspace.Tensor_Tensor(Tensor start, Tensor end, SymInt steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace
 
-- func: linspace.Tensor_Scalar(Tensor start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: linspace.Tensor_Scalar(Tensor start, Scalar end, SymInt steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace
 
-- func: linspace.Scalar_Tensor(Scalar start, Tensor end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: linspace.Scalar_Tensor(Scalar start, Tensor end, SymInt steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace
 
-- func: linspace.out(Scalar start, Scalar end, int steps, *, Tensor(a!) out) -> Tensor(a!)
+- func: linspace.out(Scalar start, Scalar end, SymInt steps, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: linspace_out
     CUDA: linspace_cuda_out
     MPS: linspace_out_mps
 
-- func: linspace.Tensor_Tensor_out(Tensor start, Tensor end, int steps, *, Tensor(a!) out) -> Tensor(a!)
+- func: linspace.Tensor_Tensor_out(Tensor start, Tensor end, SymInt steps, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace_out
 
-- func: linspace.Tensor_Scalar_out(Tensor start, Scalar end, int steps, *, Tensor(a!) out) -> Tensor(a!)
+- func: linspace.Tensor_Scalar_out(Tensor start, Scalar end, SymInt steps, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace_out
 
-- func: linspace.Scalar_Tensor_out(Scalar start, Tensor end, int steps, *, Tensor(a!) out) -> Tensor(a!)
+- func: linspace.Scalar_Tensor_out(Scalar start, Tensor end, SymInt steps, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace_out
@@ -3615,41 +3615,41 @@
     CompositeExplicitAutograd: xlogy_out
   tags: pointwise
 
-- func: logspace(Scalar start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: logspace(Scalar start, Scalar end, SymInt steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: logspace
 
-- func: logspace.Tensor_Tensor(Tensor start, Tensor end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: logspace.Tensor_Tensor(Tensor start, Tensor end, SymInt steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace
 
-- func: logspace.Tensor_Scalar(Tensor start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: logspace.Tensor_Scalar(Tensor start, Scalar end, SymInt steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace
 
-- func: logspace.Scalar_Tensor(Scalar start, Tensor end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: logspace.Scalar_Tensor(Scalar start, Tensor end, SymInt steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace
 
-- func: logspace.out(Scalar start, Scalar end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+- func: logspace.out(Scalar start, Scalar end, SymInt steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: logspace_out
     CUDA: logspace_cuda_out
 
-- func: logspace.Tensor_Tensor_out(Tensor start, Tensor end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+- func: logspace.Tensor_Tensor_out(Tensor start, Tensor end, SymInt steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace_out
 
-- func: logspace.Tensor_Scalar_out(Tensor start, Scalar end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+- func: logspace.Tensor_Scalar_out(Tensor start, Scalar end, SymInt steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace_out
 
-- func: logspace.Scalar_Tensor_out(Scalar start, Tensor end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+- func: logspace.Scalar_Tensor_out(Scalar start, Tensor end, SymInt steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace_out
