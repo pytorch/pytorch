@@ -75,6 +75,7 @@
 #include <ATen/ops/imag.h>
 #include <ATen/ops/isnan_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
+#include <ATen/ops/linalg_vector_norm_native.h>
 #include <ATen/ops/logcumsumexp.h>
 #include <ATen/ops/logcumsumexp_native.h>
 #include <ATen/ops/logical_xor.h>
@@ -1602,6 +1603,16 @@ Tensor sparse_dtype_norm(
     bool keepdim,
     ScalarType dtype) {
   return at::native_norm(self, p, dim, keepdim, dtype);
+}
+
+Tensor linalg_vector_norm_sparse(
+    const Tensor& self,
+    const Scalar& ord,
+    OptionalIntArrayRef opt_dim,
+    bool keepdim,
+    std::optional<ScalarType> opt_dtype) {
+  return at::native_norm(
+      self, ord, opt_dim.value_or(IntArrayRef{}), keepdim, opt_dtype);
 }
 
 Tensor norm(const Tensor& self, const std::optional<Scalar>& p, ScalarType dtype) {
