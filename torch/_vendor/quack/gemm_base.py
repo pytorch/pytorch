@@ -23,10 +23,8 @@ from .tile_scheduler import (
     TileSchedulerArguments,
     VarlenMTileScheduler,
     VarlenMTileSchedulerArguments,
-    VarlenNTileScheduler,
-    VarlenNTileSchedulerArguments,
 )
-from .varlen_utils import VarlenManager, cu_seqlens_n_arg
+from .varlen_utils import VarlenManager
 
 
 class NamedBarrierGemm(enum.IntEnum):
@@ -258,10 +256,8 @@ class GemmBase:
 
         return epi_read_state, epi_producer_state
 
-    def get_scheduler_class(self, varlen_m: bool = False, varlen_n: bool = False):
+    def get_scheduler_class(self, varlen_m: bool = False):
         """Return the scheduler class to use. Override in subclasses for custom schedulers."""
-        if varlen_n:
-            return VarlenNTileScheduler
         return TileScheduler if not varlen_m else VarlenMTileScheduler
 
     def resolve_epi_m_major(self, epilogue_args: EpilogueArguments):
@@ -286,27 +282,7 @@ class GemmBase:
                 persistence_mode = PersistenceMode.DYNAMIC
             else:
                 persistence_mode = PersistenceMode.STATIC
-        cu_seqlens_n = cu_seqlens_n_arg(varlen_args)
-        if const_expr(cu_seqlens_n is not None):
-            output_tensor = mD if const_expr(mD is not None) else epilogue_args.mAuxOut
-            assert output_tensor is not None
-            problem_shape_ntile_mnl = (
-                cute.ceil_div(cute.size(mA, mode=[0]), self.cta_tile_shape_mnk[0]),
-                None,
-                cu_seqlens_n.shape[0] - 1,
-            )
-            tile_sched_args = VarlenNTileSchedulerArguments(
-                problem_shape_ntile_mnl=problem_shape_ntile_mnl,
-                total_n=output_tensor.shape[1],
-                cu_seqlens_n=cu_seqlens_n,
-                raster_order=scheduler_args.raster_order,
-                group_size=scheduler_args.max_swizzle_size,
-                tile_shape_mn=self.cta_tile_shape_mnk[:2],
-                cluster_shape_mnk=self.cluster_shape_mnk,
-                tile_count_semaphore=scheduler_args.tile_count_semaphore,
-                persistence_mode=persistence_mode,
-            )
-        elif const_expr(varlen_args.mCuSeqlensM is None):
+        if const_expr(varlen_args.mCuSeqlensM is None):
             num_problems = (
                 mD.shape[2]
                 if mD is not None
@@ -592,7 +568,6 @@ class GemmTmaBase(GemmBase):
         mC: Optional[cute.Tensor],
         epilogue_args,
         varlen_m: bool,
-        varlen_n: bool = False,
     ):
         tma_atom_d, tma_tensor_d = None, None
         if const_expr(mD is not None):
