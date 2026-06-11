@@ -75,20 +75,16 @@ void upsample_set_value(
   data[offset] = value;
 }
 
-// Unpack the UpsampleParams stride/size arrays into the vector types the 1D/2D
-// kernel bodies index with (.x/.y/.z/.w). Overloaded on the array length so the
-// 1D (<3>) and 2D (<4>) kernels share the same call.
-inline long3 upsample_strides(::c10::metal::array<int64_t, 3> s) {
-  return long3(s[0], s[1], s[2]);
-}
-inline long4 upsample_strides(::c10::metal::array<int64_t, 4> s) {
-  return long4(s[0], s[1], s[2], s[3]);
-}
-inline long3 upsample_sizes(::c10::metal::array<int64_t, 3> s) {
-  return long3(s[0], s[1], s[2]);
-}
-inline long4 upsample_sizes(::c10::metal::array<int64_t, 4> s) {
-  return long4(s[0], s[1], s[2], s[3]);
+// Unpack a UpsampleParams stride/size array into the Metal vector the 1D/2D
+// kernel bodies index with (.x/.y/.z/.w). One template covers the 1D (<3>) and
+// 2D (<4>) ranks; the per-lane copy unrolls since N is a compile-time constant.
+template <typename T, size_t N>
+inline vec<T, N> to_vec(constant ::c10::metal::array<T, N>& a) {
+  vec<T, N> v;
+  for (size_t i = 0; i < N; i++) {
+    v[i] = a[i];
+  }
+  return v;
 }
 
 template <typename scalar_t, uint N>
@@ -449,10 +445,10 @@ kernel void upsample_linear1d(
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<3>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
-  const auto input_strides = upsample_strides(params.input_strides);
-  const auto output_strides = upsample_strides(params.output_strides);
-  const auto input_sizes = upsample_sizes(params.input_sizes);
-  const auto output_sizes = upsample_sizes(params.output_sizes);
+  const auto input_strides = to_vec(params.input_strides);
+  const auto output_strides = to_vec(params.output_strides);
+  const auto input_sizes = to_vec(params.input_sizes);
+  const auto output_sizes = to_vec(params.output_sizes);
   const float2 scales = float2(params.scales[0], 0.0f);
   const bool align_corners = params.align_corners;
   auto output_x = thread_index;
@@ -481,10 +477,10 @@ kernel void upsample_bilinear2d(
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
-  const auto input_strides = upsample_strides(params.input_strides);
-  const auto output_strides = upsample_strides(params.output_strides);
-  const auto input_sizes = upsample_sizes(params.input_sizes);
-  const auto output_sizes = upsample_sizes(params.output_sizes);
+  const auto input_strides = to_vec(params.input_strides);
+  const auto output_strides = to_vec(params.output_strides);
+  const auto input_sizes = to_vec(params.input_sizes);
+  const auto output_sizes = to_vec(params.output_sizes);
   const float2 scales = float2(params.scales[0], params.scales[1]);
   const bool align_corners = params.align_corners;
   auto output_x = thread_index % static_cast<uint>(output_sizes.w);
@@ -544,10 +540,10 @@ kernel void upsample_nearest1d(
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<3>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
-  const auto input_strides = upsample_strides(params.input_strides);
-  const auto output_strides = upsample_strides(params.output_strides);
-  const auto input_sizes = upsample_sizes(params.input_sizes);
-  const auto output_sizes = upsample_sizes(params.output_sizes);
+  const auto input_strides = to_vec(params.input_strides);
+  const auto output_strides = to_vec(params.output_strides);
+  const auto input_sizes = to_vec(params.input_sizes);
+  const auto output_sizes = to_vec(params.output_sizes);
   const float2 scales = float2(params.scales[0], 0.0f);
   const auto output_x = thread_index;
   const auto src_x = nearest_src_index<exact>(scales.x, output_x);
@@ -569,10 +565,10 @@ kernel void upsample_nearest2d(
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
-  const auto input_strides = upsample_strides(params.input_strides);
-  const auto output_strides = upsample_strides(params.output_strides);
-  const auto input_sizes = upsample_sizes(params.input_sizes);
-  const auto output_sizes = upsample_sizes(params.output_sizes);
+  const auto input_strides = to_vec(params.input_strides);
+  const auto output_strides = to_vec(params.output_strides);
+  const auto input_sizes = to_vec(params.input_sizes);
+  const auto output_sizes = to_vec(params.output_sizes);
   const float2 scales = float2(params.scales[0], params.scales[1]);
   const auto output_x = thread_index % static_cast<uint>(output_sizes.w);
   const auto output_y = thread_index / static_cast<uint>(output_sizes.w);
@@ -622,10 +618,10 @@ kernel void upsample_2d_aa(
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
-  const auto input_strides = upsample_strides(params.input_strides);
-  const auto output_strides = upsample_strides(params.output_strides);
-  const auto input_sizes = upsample_sizes(params.input_sizes);
-  const auto output_sizes = upsample_sizes(params.output_sizes);
+  const auto input_strides = to_vec(params.input_strides);
+  const auto output_strides = to_vec(params.output_strides);
+  const auto input_sizes = to_vec(params.input_sizes);
+  const auto output_sizes = to_vec(params.output_sizes);
   const float2 scales = float2(params.scales[0], params.scales[1]);
   auto output_x = thread_index % static_cast<uint>(output_sizes.w);
   auto output_y = thread_index / static_cast<uint>(output_sizes.w);
@@ -679,10 +675,10 @@ kernel void upsample_bicubic2d(
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
-  const auto input_strides = upsample_strides(params.input_strides);
-  const auto output_strides = upsample_strides(params.output_strides);
-  const auto input_sizes = upsample_sizes(params.input_sizes);
-  const auto output_sizes = upsample_sizes(params.output_sizes);
+  const auto input_strides = to_vec(params.input_strides);
+  const auto output_strides = to_vec(params.output_strides);
+  const auto input_sizes = to_vec(params.input_sizes);
+  const auto output_sizes = to_vec(params.output_sizes);
   const float2 scales = float2(params.scales[0], params.scales[1]);
   const bool align_corners = params.align_corners;
   auto output_x = thread_index % static_cast<uint>(output_sizes.w);
@@ -741,10 +737,10 @@ kernel void upsample_bicubic2d_backward(
     constant T* gradOutputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
-  const auto input_strides = upsample_strides(params.input_strides);
-  const auto output_strides = upsample_strides(params.output_strides);
-  const auto input_sizes = upsample_sizes(params.input_sizes);
-  const auto output_sizes = upsample_sizes(params.output_sizes);
+  const auto input_strides = to_vec(params.input_strides);
+  const auto output_strides = to_vec(params.output_strides);
+  const auto input_sizes = to_vec(params.input_sizes);
+  const auto output_sizes = to_vec(params.output_sizes);
   const float2 scales = float2(params.scales[0], params.scales[1]);
   const bool align_corners = params.align_corners;
   auto output_x = thread_index % output_sizes.w;
