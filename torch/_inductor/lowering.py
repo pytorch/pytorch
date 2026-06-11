@@ -586,6 +586,17 @@ def promote_constants(
     round_scalar_constants: bool = False,
     round_scalars_to_tensor_dtype: bool = False,
 ) -> Sequence[_T | BaseView | BaseConstant]:
+    """Convert raw Python scalars and sympy expressions in inputs to IR constants.
+
+    When a tensor input is present, scalars become Constants of the tensor's
+    dtype, broadcast to its size. For bf16/fp16 tensors, the scalar value is
+    additionally rounded to the tensor dtype to match eager kernels that cast
+    scalar operands to the common dtype: always for comparison ops
+    (override_return_dtype == torch.bool) and for callers passing
+    round_scalar_constants (e.g. remainder); on CPU and MPS only for ops
+    passing round_scalars_to_tensor_dtype (e.g. add/sub, whose CUDA eager
+    kernels keep scalars at opmath precision).
+    """
     if not (override_return_dtype is None or type_promotion_kind is None):
         raise AssertionError(
             "only one of override_return_dtype or type_promotion_kind may be given"
@@ -615,11 +626,7 @@ def promote_constants(
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     tensor_dtype = ex.get_dtype()
 
-    # Round scalars to the tensor's dtype to match eager: comparison ops and
-    # callers passing round_scalar_constants (e.g. remainder) round on all
-    # devices, and ops like add/sub round on CPU and MPS, whose eager kernels
-    # cast scalar operands to the common dtype (CUDA and the CPU mul/div
-    # kernels keep scalars at opmath precision instead).
+    # Round scalars to the tensor's dtype where eager does; see docstring.
     if tensor_dtype in (
         torch.bfloat16,
         torch.float16,
