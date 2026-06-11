@@ -393,8 +393,10 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.min.out: "min",
     aten.amax.default: "max",
     aten.amax.out: "max",
+    prims.amax.default: "max",
     aten.amin.default: "min",
     aten.amin.out: "min",
+    prims.amin.default: "min",
     aten.nansum.default: "sum",
 }
 
