@@ -64,6 +64,26 @@ def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
     return isinstance(t, FakeTensor)
 
 
+def _unwrap_python_functional_tensor(t: torch.Tensor) -> torch.Tensor:
+    # Avoid a top-level import cycle: functional_tensor imports this module.
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(t, FunctionalTensor):
+        return t.from_functional()
+    return t
+
+
+def _clone_real_storage_from_tensor(t: torch.Tensor) -> torch.UntypedStorage:
+    t = _unwrap_python_functional_tensor(t)
+    if _is_fake_tensor(t):
+        if t.real_tensor is None:
+            raise AssertionError(
+                "t.real_tensor must not be None when copy_data is True"
+            )
+        t = t.real_tensor
+    return t.untyped_storage().clone()
+
+
 DimList = list
 _TensorLikeT = TypeVar("_TensorLikeT", "MetaTensorDesc[Any]", torch.Tensor)
 _T = TypeVar("_T")
@@ -263,14 +283,18 @@ class MetaTensorDescriber:
         return self.lookup_storage[s]
 
     def describe_storage(
-        self, s: torch.UntypedStorage, *, trace: bool = False
+        self,
+        s: torch.UntypedStorage,
+        *,
+        data: torch.Tensor | None = None,
+        trace: bool = False,
     ) -> MetaStorageDesc:
         r = MetaStorageDesc(
             id=self.get_storage_id(s),
             size=s.size(),
             # NB: We don't do the copy yet; copy happens when we start
             # creating the new storages
-            data=s if self.copy_data else None,
+            data=data if data is not None else s if self.copy_data else None,
         )
         if trace and r.id not in self.traced_storages:
             trace_structured(
@@ -283,6 +307,7 @@ class MetaTensorDescriber:
     def describe_tensor(
         self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
     ) -> MetaTensorDesc[Any]:
+        data = _unwrap_python_functional_tensor(t) if self.copy_data else None
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
         is_sparse = t.is_sparse
@@ -313,7 +338,7 @@ class MetaTensorDescriber:
         ):
             # NB: We actually don't use storage to do views, but might as well
             # put it in for accuracy
-            storage = self.describe_storage(t.untyped_storage(), trace=trace)
+            storage = self.describe_storage(t.untyped_storage(), data=data, trace=trace)
             storage_offset = t.storage_offset()  # type: ignore[assignment]
 
         stride = None
@@ -508,7 +533,7 @@ class MetaTensorDescriber:
             functorch_stack=maybe_functorch_stack,
             autograd_meta_from=autograd_meta_from,
             current_level=current_level,
-            data=t if self.copy_data else None,
+            data=data,
         )
         if trace and r.id not in self.traced_tensors:
             trace_structured(
@@ -525,14 +550,22 @@ class MetaStorageDesc:
     size: int
     # NB: this is only populated with copy_data True, it is not directly
     # serializable in JSON, you want to do something special here anyway
-    data: torch.UntypedStorage | None
+    data: torch.UntypedStorage | torch.Tensor | None
 
     def as_json(self, describer_id: _DescriberId) -> dict[str, object]:
-        return {
+        metadata: dict[str, object] = {
             "id": self.id,
             "describer_id": describer_id,
             "size": self.size if isinstance(self.size, int) else repr(self.size),
         }
+        if isinstance(self.size, torch.SymInt):
+            node = self.size.node
+            free_symbols = node.expr.free_symbols
+            if free_symbols and all(
+                symbol in node.shape_env.var_to_hint_override for symbol in free_symbols
+            ):
+                metadata["size_hint"] = node.shape_env.optimization_hint(node.expr)
+        return metadata
 
 
 @dataclass(frozen=True)
@@ -932,7 +965,11 @@ class MetaConverter(Generic[_TensorT]):
                         raise AssertionError(
                             "s.data must not be None when copy_data is True"
                         )
-                    _set_real_storage(r_s, s.data.clone())
+                    if isinstance(s.data, torch.Tensor):
+                        real_storage = _clone_real_storage_from_tensor(s.data)
+                    else:
+                        real_storage = s.data.clone()
+                    _set_real_storage(r_s, real_storage)
             self.set_storage_memo(s, r_s)
             return r_s
         else:
@@ -2114,16 +2151,9 @@ class MetaConverter(Generic[_TensorT]):
                                         "t.data must not be None when copy_data is True"
                                     )
                                 with torch.no_grad(), no_dispatch():
-                                    if _is_fake_tensor(t.data):
-                                        if t.data.real_tensor is None:
-                                            raise AssertionError(
-                                                "t.data.real_tensor must not be None when copy_data is True"
-                                            )
-                                        real_storage = (
-                                            t.data.real_tensor.untyped_storage().clone()
-                                        )
-                                    else:
-                                        real_storage = t.data.untyped_storage().clone()
+                                    real_storage = _clone_real_storage_from_tensor(
+                                        t.data
+                                    )
                                     _set_real_storage(r.untyped_storage(), real_storage)
                                     r.real_tensor.set_(
                                         real_storage,
