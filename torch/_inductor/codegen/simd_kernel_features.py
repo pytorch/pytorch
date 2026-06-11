@@ -113,6 +113,7 @@ class EnablePointwiseLoop(NodeScheduleMarker):
 
     The loop_numel parameter specifies the inner dimension size to loop over.
     """
+
     def __init__(self, loop_numel: sympy.Expr):
         super().__init__()
         self.loop_numel = loop_numel

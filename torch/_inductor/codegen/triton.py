@@ -6671,7 +6671,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {block_size}):"
                     )
                     with self.body.indent():
-                        self.body.writeline(f"{r_tree.name} = {prefix}offset + {prefix}base")
+                        self.body.writeline(
+                            f"{r_tree.name} = {prefix}offset + {prefix}base"
+                        )
                         self.body.writeline(
                             f"{r_tree.mask_name()} = {r_tree.name} < {loop_end}"
                         )

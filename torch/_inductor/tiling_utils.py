@@ -448,9 +448,7 @@ class NodeSplitGetter:
             try:
                 groups = pw + red
                 lengths = (n_pw, n_red)
-                splits, getters = SIMDKernel._split_iteration_ranges(
-                    groups, lengths
-                )
+                splits, getters = SIMDKernel._split_iteration_ranges(groups, lengths)
             except CantSplit:
                 return None
 
