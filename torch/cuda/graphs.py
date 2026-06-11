@@ -25,6 +25,7 @@ except ImportError:
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
     from torch.cuda import _POOL_HANDLE
+    from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
 
 from .._utils import _dummy_type
 
@@ -101,11 +102,26 @@ class CUDAGraph(_CUDAGraph):
 
     """
 
+    _tracker: _CUDAGraphInputLivenessTracker | None
+
     def __new__(cls, keep_graph: bool = False) -> Self:
-        return super().__new__(cls, keep_graph)
+        instance = super().__new__(cls, keep_graph)
+        instance._tracker = None
+        return instance
+
+    def __del__(self) -> None:
+        try:
+            tracker, self._tracker = self._tracker, None
+            if tracker is not None:
+                tracker.stop()
+        except Exception:
+            pass  # don't raise under GC
 
     def capture_begin(
-        self, pool: _POOL_HANDLE | None = None, capture_error_mode: str = "global"
+        self,
+        pool: _POOL_HANDLE | None = None,
+        capture_error_mode: str = "global",
+        check_input_liveness: bool = False,
     ) -> None:
         r"""Begin capturing CUDA work on the current stream.
 
@@ -122,8 +138,24 @@ class CUDAGraph(_CUDAGraph):
                 may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
                 actions in the current thread, and "relaxed" will not error on these actions. Do NOT change this setting
                 unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
+            check_input_liveness (bool, optional):
+                If ``True``, tracks external tensor inputs during graph capture and
+                raises an error if any are deallocated before replay. This helps debug "use after free" errors
+                where input tensors are garbage collected between capture and replay. Default: ``False``.
+
+                .. note::
+                    Custom CUDA kernels added outside PyTorch (e.g., via cuLaunchKernel or DLPack) are not
+                    tracked by this mechanism.
         """
+        if self._tracker is not None:
+            self._tracker.stop()
+            self._tracker = None
         super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
+        if check_input_liveness:
+            from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
+
+            self._tracker = _CUDAGraphInputLivenessTracker()
+            self._tracker.start()
 
     def capture_end(self) -> None:
         r"""End CUDA graph capture on the current stream.
@@ -135,6 +167,8 @@ class CUDAGraph(_CUDAGraph):
         which call ``capture_end`` internally.
         """
         super().capture_end()
+        if self._tracker is not None:
+            self._tracker.stop()
 
     def instantiate(self) -> None:
         r"""Instantiate the CUDA graph. Will be called by
@@ -147,10 +181,15 @@ class CUDAGraph(_CUDAGraph):
 
     def replay(self) -> None:
         r"""Replay the CUDA work captured by this graph."""
+        if self._tracker is not None:
+            self._tracker.check_alive(self.pool())
         super().replay()
 
     def reset(self) -> None:
         r"""Delete the graph currently held by this instance."""
+        if self._tracker is not None:
+            self._tracker.stop()
+            self._tracker = None
         super().reset()
 
     def pool(self) -> _POOL_HANDLE:
@@ -347,6 +386,13 @@ class graph:
             the capture ends.  Annotations are **not** cleared on exit so that multiple
             graphs in the same workload can accumulate annotations.
             Requires ``cuda.bindings`` package and cuda-compat >= 13.1 or CUDA driver >= 13.1.
+        check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
+            raises an error if any are deallocated before replay. This helps debug "use after free" errors
+            where input tensors are garbage collected between capture and replay. Default: ``False``.
+
+            .. note::
+                Custom CUDA kernels added outside PyTorch (e.g., via cuLaunchKernel or DLPack) are not
+                tracked by this mechanism.
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
@@ -368,6 +414,7 @@ class graph:
         stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
         enable_annotations: bool = False,
+        check_input_liveness: bool = False,
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
@@ -385,6 +432,7 @@ class graph:
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
         self._enable_annotations = enable_annotations
+        self.check_input_liveness = check_input_liveness
 
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
@@ -416,6 +464,8 @@ class graph:
             *self.pool,
             # pyrefly: ignore [bad-keyword-argument]
             capture_error_mode=self.capture_error_mode,
+            # pyrefly: ignore [bad-keyword-argument]
+            check_input_liveness=self.check_input_liveness,
         )
 
     def __exit__(self, *args: object) -> None:
@@ -496,6 +546,7 @@ def make_graphed_callables(
         pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
             :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
             with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
+
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
         that's expected for the corresponding real input in the training loop.

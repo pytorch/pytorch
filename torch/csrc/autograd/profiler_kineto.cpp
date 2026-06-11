@@ -97,6 +97,15 @@ inline bool isExternalTracerState(ProfilerState state) {
       state == ProfilerState::PRIVATEUSE1;
 }
 
+inline bool hasRequestedDeviceActivity(
+    const std::set<torch::profiler::impl::ActivityType>& activities) {
+  return activities.count(ActivityType::CUDA) ||
+      activities.count(ActivityType::XPU) ||
+      activities.count(ActivityType::MTIA) ||
+      activities.count(ActivityType::HPU) ||
+      activities.count(ActivityType::PrivateUse1);
+}
+
 struct OpArgData {
   bool hasData;
   std::vector<shape> shapes;
@@ -288,7 +297,7 @@ struct AddGenericMetadata : public MetadataBase {
         continue;
       }
 
-      // Until needed, lets limit the kwargs to only ints, doubles, strings,
+      // Until needed, let's limit the kwargs to only ints, doubles, strings,
       // bools, and list of strings
       bool isValidType =
           val.isInt() || val.isDouble() || val.isString() || val.isBool();
@@ -375,6 +384,57 @@ struct AddGenericMetadata : public MetadataBase {
   /* To get names of the performance events */
   const torch::profiler::impl::ProfilerConfig* config_;
 };
+
+// Lightweight metadata pass for trace_only mode: annotates Kineto activities
+// with the same metadata as materializeOpEvents but without creating
+// KinetoEvent wrappers or building eventTree.
+void addTraceMetadata(
+    std::vector<std::shared_ptr<Result>>& events,
+    const torch::profiler::impl::ProfilerConfig& config,
+    int64_t trace_end_ns) {
+  for (auto& e : events) {
+    // Unfinished events automatically have end time set to trace end time
+    if (!e->finished_) {
+      e->visit(c10::overloaded(
+          [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
+            i.end_time_ns_ = trace_end_ns;
+          },
+          [](auto&) {}));
+    }
+
+    if (!e->kineto_activity_) {
+      continue;
+    }
+    AddGenericMetadata add_generic(e, &config);
+
+    // Subset of AddTensorboardFields that doesn't require KinetoEvent or
+    // parent chain (no python_stack_, no Python parent id).
+    MetadataBase tb(e);
+    e->visit(c10::overloaded(
+        [&](const ExtraFields<EventType::TorchOp>& i) {
+          tb.addMetadata("Module Hierarchy", stacksToStr(i.jit_modules_, "."));
+          tb.addMetadata("Call stack", stacksToStr(i.jit_stack_, ";"));
+        },
+        [&](const ExtraFields<EventType::Backend>& i) {
+          tb.addMetadata("Module Hierarchy", stacksToStr(i.jit_modules_, "."));
+          tb.addMetadata("Call stack", stacksToStr(i.jit_stack_, ";"));
+        },
+        [](const auto&) {}));
+    e->visit_if_base<PyExtraFieldsBase>([&](const auto& i) {
+      tb.addMetadata("Python id", std::to_string(i.id_));
+    });
+    e->visit(c10::overloaded(
+        [&](const ExtraFields<EventType::PyCall>& py_call) {
+          if (py_call.module_.has_value()) {
+            tb.addMetadata(
+                "Python module id", std::to_string(py_call.module_->id_));
+          }
+        },
+        [](const auto&) {}));
+
+    e->kineto_activity_ = nullptr;
+  }
+}
 
 struct KinetoThreadLocalState : public ProfilerStateBase {
   explicit KinetoThreadLocalState(
@@ -463,7 +523,11 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     auto records_and_trace =
         recordQueue.getRecords(std::move(converter), startTime, end_time);
 
-    materializeOpEvents(records_and_trace.first, end_time);
+    if (config_.experimental_config.trace_only) {
+      addTraceMetadata(records_and_trace.first, config_, end_time);
+    } else {
+      materializeOpEvents(records_and_trace.first, end_time);
+    }
 
     return std::move(records_and_trace.second);
   }
@@ -663,9 +727,7 @@ void prepareProfiler(
       isKinetoCompatibleState(config.state),
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!(
-          at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
-          c10::get_privateuse1_backend() != "privateuseone"),
+      /*cpuOnly=*/!hasRequestedDeviceActivity(activities),
       activities,
       config.experimental_config,
       config.trace_id,
@@ -1305,6 +1367,16 @@ ProfilerResult::~ProfilerResult() = default;
 void ProfilerResult::save(const std::string& path) {
   trace_->save(path);
 }
+
+#ifdef USE_KINETO
+const std::vector<const libkineto::ITraceActivity*>* ProfilerResult::
+    traceActivities() {
+  if (trace_) {
+    return trace_->get()->activities();
+  }
+  return nullptr;
+}
+#endif
 
 } // namespace autograd::profiler
 

@@ -54,7 +54,7 @@ def bundle_inputs(
 
     If inputs is passed in as a list then the inputs will be bundled for 'forward'.
     If inputs is instead passed in as a map then all the methods specified in the map
-    will have their corresponding inputs bundled. Info should match watchever type is
+    will have their corresponding inputs bundled. Info should match whatever type is
     chosen for the inputs.
 
     The returned model will support the following methods:
