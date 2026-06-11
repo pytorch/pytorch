@@ -3328,16 +3328,6 @@
       ]
     }
   ],
-  "GB7151": [
-    {
-      "Gb_type": "generator function over a skipped function",
-      "Context": "str(self.vt)",
-      "Explanation": "Cannot trace a generator whose underlying function is skipped by Dynamo (e.g. defined in a skip-listed module), since its body cannot be symbolically traced.",
-      "Hints": [
-        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
-      ]
-    }
-  ],
   "GB0233": [
     {
       "Gb_type": "Attempted to use strided NestedTensor",

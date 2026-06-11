@@ -1657,6 +1657,7 @@ class TestBinaryUfuncsDevice(TestCase):
             .requires_grad_()
         )
         gradcheck(lambda a: torch.pow(2, a), (a,))
+        gradcheck(lambda a: torch.pow(True, a), (a,))
 
     # Tests pow() for integral, floating-type tensors, with integral, floating-type
     # exponents (tensor or scalar), respectively. noncontiguous tensors are also tested.
