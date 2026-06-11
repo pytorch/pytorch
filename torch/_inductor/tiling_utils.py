@@ -301,9 +301,7 @@ def get_pw_red_splits(
     node_numel = get_hint(sympy_product(n._body.sizes[0]))
     expected_numel = get_hint(pointwise_numel * red_numel)  # type: ignore[operator]
 
-    # Handle chunk pattern: pointwise consumer with different iteration space
-    # E.g., reduction output [2048] consumed by pointwise [2048, 4096]
-    # where 4096 < 8192 (reduction dim)
+    # Handle pointwise consumer with different iteration space
     if node_numel != expected_numel:
         if none_if_not_divisible:
             return None
@@ -450,7 +448,9 @@ class NodeSplitGetter:
             try:
                 groups = pw + red
                 lengths = (n_pw, n_red)
-                splits, getters = SIMDKernel._split_iteration_ranges(groups, lengths)
+                splits, getters = SIMDKernel._split_iteration_ranges(
+                    groups, lengths
+                )
             except CantSplit:
                 return None
 
@@ -603,8 +603,7 @@ def extract_normalized_read_writes(
             n, pointwise_numel, red_numel, none_if_not_divisible=True
         )
         if maybe_splits is None:
-            # Chunk pattern: node has incompatible iteration space
-            # Skip normalization for this node
+            # node has incompatible iteration space, skip normalization
             continue
         (iter_vars, n_pw_splits), (red_vars, n_red_splits) = maybe_splits
 

@@ -60,7 +60,6 @@ class NodeScheduleMarker:
     @staticmethod
     def only_nodes(it: Iterable[NodeScheduleEntry]) -> Iterable[SchedulerNode]:
         for item in it:
-            # Filter out all marker types
             if not (
                 item is DisableReduction
                 or item is EnableReduction
@@ -110,7 +109,7 @@ class EnableReduction(NodeScheduleMarker):
 class EnablePointwiseLoop(NodeScheduleMarker):
     """
     Marker to enable a loop for multi-dimensional pointwise nodes after DisableReduction.
-    Used for chunk pattern where pointwise has different iteration space than reduction.
+    Used for patterns where pointwise has different iteration space than reduction.
 
     The loop_numel parameter specifies the inner dimension size to loop over.
     """
@@ -434,14 +433,11 @@ class MemoryEstimator:
                 self.loops.append(MemoryEstimate())
                 continue
             elif isinstance(node, EnablePointwiseLoop):
-                # Pointwise loop after reduction - set kernel sizes to include loop dimension
-                # kernel_sizes: (outer_x_dim, pointwise_loop_dim)
                 self.inside_reduction = False
-                # Use the outer x dimension and the pointwise loop dimension
                 self.kernel_sizes = (self.groups[0], node.loop_numel)
+                self.loops.append(MemoryEstimate())
                 continue
             elif node is DisablePointwiseLoop:
-                # Exit pointwise loop - restore to outside reduction state
                 self.inside_reduction = False
                 self.kernel_sizes = kernel_size_outside_loop
                 continue
