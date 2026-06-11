@@ -1635,12 +1635,15 @@ class _LocalDeviceMesh:
         # Note that we are caching the result based on the set of ranks,
         # so that different LocalTensorModes with different ranks will not interfere with each other's cache.
         with contextlib.suppress(AttributeError, KeyError):
+            # pyrefly: ignore [missing-attribute]
             return self._local_coordinates_cache[ranks]
         # Acquire lock for thread safety in MPMD contexts
         with lm._coordinate_cache_lock:
             try:
+                # pyrefly: ignore [missing-attribute]
                 return self._local_coordinates_cache[ranks]
             except AttributeError:
+                # pyrefly: ignore [missing-attribute]
                 self._local_coordinates_cache = {}
             except KeyError:
                 pass
@@ -1657,6 +1660,7 @@ class _LocalDeviceMesh:
                     coords[d][r] = c
 
             out = [torch.SymInt(LocalIntNode(c)) for c in coords]
+            # pyrefly: ignore [missing-attribute]
             self._local_coordinates_cache[ranks] = out
             # The output contains coordinates for each of the ranks with respect to
             # their meshes formed from root mesh and selecting the same dimensions
