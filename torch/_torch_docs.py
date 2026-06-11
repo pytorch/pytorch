@@ -11559,11 +11559,7 @@ The boolean option :attr:`sorted` if ``True``, will make sure that the returned
 
 .. note::
     When using `torch.topk`, the indices of tied elements are not guaranteed to be stable
-    and may vary across different invocations unless
-    :func:`torch.use_deterministic_algorithms` is enabled. In deterministic mode,
-    lower indices are selected before higher indices for tied values. If
-    :attr:`sorted` is ``False``, the returned elements are still not guaranteed
-    to appear in sorted order.
+    and may vary across different invocations.
 
 Args:
     {input}
