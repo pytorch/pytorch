@@ -1060,6 +1060,37 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
             self.assertEqual(output, torch.zeros_like(output))
 
+    @onlyOn("cpu")
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize_test("mode", ["sum", "mean", "max"])
+    def test_embedding_bag_empty_offsets(self, device, dtype, mode):
+        # used to segfault, see https://github.com/pytorch/pytorch/issues/175370
+        weight = torch.randn(3, 5, device=device, dtype=dtype)
+        indices = torch.tensor([0, 1, 2, 1], device=device)
+        offsets = torch.zeros(0, device=device, dtype=torch.long)
+        expected = torch.zeros(0, 5, device=device, dtype=dtype)
+        output = F.embedding_bag(indices, weight, offsets, mode=mode)
+        self.assertEqual(output, expected)
+        # offsets=[0] with include_last_offset=True also yields zero bags
+        output = F.embedding_bag(
+            indices,
+            weight,
+            torch.zeros(1, device=device, dtype=torch.long),
+            mode=mode,
+            include_last_offset=True,
+        )
+        self.assertEqual(output, expected)
+        if mode == "sum":
+            per_sample_weights = torch.randn(4, device=device, dtype=dtype)
+            output = F.embedding_bag(
+                indices,
+                weight,
+                offsets,
+                mode=mode,
+                per_sample_weights=per_sample_weights,
+            )
+            self.assertEqual(output, expected)
+
     @skipCUDAIf(True, "no out-of-bounds check on CUDA for perf.")
     @skipXPUIf(True, "no out-of-bounds check on XPU for perf.")
     @dtypes(*itertools.product((torch.float, torch.double), (torch.int, torch.long)))
