@@ -134,21 +134,22 @@ def _concrete_value(val: None | int | SymInt) -> int:
 def _codegen_wrap_subclass(
     state: _CodegenState,
     meta: SubclassCreationMeta,
-    out_idx_ref: list[int],
 ) -> str:
     """Emit code to reconstruct one subclass output. Returns the variable name."""
     inner_dict_var = state.fresh_name("_out_inner")
     entries: list[str] = []
+    attr_exprs: dict[str, str] = {}
 
     for attr, attr_meta in meta.attrs.items():
         match attr_meta:
             case PlainTensorMeta() | OpaqueMeta():
-                idx = out_idx_ref[0]
-                out_idx_ref[0] += 1
-                entries.append(f"{attr!r}: unwrapped_outs[{idx}]")
+                attr_expr = state.fresh_name("_out_attr")
+                state.emit(f"{attr_expr} = unwrapped_outs[_out_idx]")
+                state.emit("_out_idx += 1")
             case SubclassCreationMeta():
-                nested_var = _codegen_wrap_subclass(state, attr_meta, out_idx_ref)
-                entries.append(f"{attr!r}: {nested_var}")
+                attr_expr = _codegen_wrap_subclass(state, attr_meta)
+        attr_exprs[attr] = attr_expr
+        entries.append(f"{attr!r}: {attr_expr}")
 
     state.emit(f"{inner_dict_var} = {{{', '.join(entries)}}}")
 
@@ -162,17 +163,35 @@ def _codegen_wrap_subclass(
         parts: list[str] = []
         for val, is_sym in zip(outer, placeholders):
             if is_sym:
-                idx = out_idx_ref[0]
-                out_idx_ref[0] += 1
-                parts.append(f"unwrapped_outs[{idx}]")
+                sym_expr = state.fresh_name("_out_sym")
+                state.emit(f"{sym_expr} = unwrapped_outs[_out_idx]")
+                state.emit("_out_idx += 1")
+                parts.append(sym_expr)
             else:
                 parts.append(repr(_concrete_value(val)))
         if len(parts) == 1:
             return f"({parts[0]},)"
         return f"({', '.join(parts)})"
 
-    size_expr = _build_tuple(meta.outer_size, size_placeholders)
-    stride_expr = _build_tuple(meta.outer_stride, stride_placeholders)
+    def _consume_placeholders(placeholders: list[bool]) -> None:
+        num_placeholders = sum(placeholders)
+        if num_placeholders:
+            state.emit("if _has_subclass_symint_outputs:")
+            state.emit(f"_out_idx += {num_placeholders}", indent=2)
+
+    outer_size_from_attr = meta.outer_size_from_attr
+    outer_stride_from_attr = meta.outer_stride_from_attr
+    if outer_size_from_attr is not None:
+        size_expr = f"{attr_exprs[outer_size_from_attr]}.size()"
+        _consume_placeholders(size_placeholders)
+    else:
+        size_expr = _build_tuple(meta.outer_size, size_placeholders)
+
+    if outer_stride_from_attr is not None:
+        stride_expr = f"{attr_exprs[outer_stride_from_attr]}.stride()"
+        _consume_placeholders(stride_placeholders)
+    else:
+        stride_expr = _build_tuple(meta.outer_stride, stride_placeholders)
 
     type_name = state.add_global(
         state.fresh_name("_subclass_type"),
@@ -188,26 +207,61 @@ def _codegen_wrap_subclass(
     return result_var
 
 
+def _count_output_args(
+    meta: PlainTensorMeta | SubclassCreationMeta,
+    *,
+    include_subclass_symints: bool,
+) -> int:
+    if isinstance(meta, PlainTensorMeta):
+        return 1
+
+    total = 0
+    for attr_meta in meta.attrs.values():
+        if isinstance(attr_meta, OpaqueMeta):
+            total += 1
+        else:
+            total += _count_output_args(
+                attr_meta, include_subclass_symints=include_subclass_symints
+            )
+
+    if include_subclass_symints:
+        total += sum(_compute_placeholders(meta.outer_size))
+        total += sum(_compute_placeholders(meta.outer_stride))
+    return total
+
+
 def _emit_output_wrapping(
     state: _CodegenState,
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
+    num_fw_outs_saved_for_bw: int | None,
 ) -> tuple[list[str], int]:
     """Emit wrapping code for output metas.
 
     Returns (result_exprs, num_args_tallied) where result_exprs are Python
     expression strings referencing each wrapped output.
     """
-    out_idx_ref = [0]
     result_exprs: list[str] = []
     num_args_tallied = 0
+    saved_for_bw = num_fw_outs_saved_for_bw or 0
+    expected_with_symints = (
+        sum(
+            _count_output_args(meta, include_subclass_symints=True)
+            for meta in out_metas
+        )
+        + saved_for_bw
+    )
+    state.emit("_out_idx = 0")
+    state.emit(
+        f"_has_subclass_symint_outputs = len(unwrapped_outs) == {expected_with_symints}"
+    )
 
     for meta in out_metas:
         if isinstance(meta, PlainTensorMeta):
             result_exprs.append(f"unwrapped_outs[{meta.unwrapped_idx}]")
             num_args_tallied += 1
-            out_idx_ref[0] = max(out_idx_ref[0], meta.unwrapped_idx + 1)
+            state.emit(f"_out_idx = max(_out_idx, {meta.unwrapped_idx + 1})")
         else:
-            result_var = _codegen_wrap_subclass(state, meta, out_idx_ref)
+            result_var = _codegen_wrap_subclass(state, meta)
             result_exprs.append(result_var)
             num_args_tallied += meta.arg_count
 
@@ -284,12 +338,13 @@ def _codegen_subclass_wrapper_source(
     state.emit("unwrapped_outs = compiled_fn(unwrapped_args)")
 
     # --- Output wrapping ---
-    result_exprs, num_args_tallied = _emit_output_wrapping(state, out_metas)
+    result_exprs, _ = _emit_output_wrapping(state, out_metas, num_fw_outs_saved_for_bw)
     result_tuple = f"({', '.join(result_exprs)},)" if result_exprs else "()"
     if num_fw_outs_saved_for_bw is not None:
         state.emit(
-            f"return {result_tuple} + tuple(unwrapped_outs[{num_args_tallied}:])"
+            f"_activation_start = len(unwrapped_outs) - {num_fw_outs_saved_for_bw}"
         )
+        state.emit(f"return {result_tuple} + tuple(unwrapped_outs[_activation_start:])")
     else:
         state.emit(f"return {result_tuple}")
 
@@ -307,7 +362,9 @@ def _codegen_subclass_wrap_source(
     """
     state = _CodegenState()
     state.emit("def wrap_fn(unwrapped_outs):", indent=0)
-    result_exprs, _ = _emit_output_wrapping(state, out_metas)
+    result_exprs, _ = _emit_output_wrapping(
+        state, out_metas, num_fw_outs_saved_for_bw=None
+    )
     result_tuple = f"({', '.join(result_exprs)},)" if result_exprs else "()"
     state.emit(f"return {result_tuple}")
     source = "\n".join(state.lines)
