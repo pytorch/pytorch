@@ -342,10 +342,8 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
                 # Clear cached modules imported from the tmp symlink paths
                 saved_modules = {}
                 for mod_name in list(_sys.modules):
-                    if (
-                        mod_name.startswith("cutlass_library")
-                        or mod_name.startswith("cutlass_cppgen")
-                        or mod_name.startswith("pycute")
+                    if mod_name.startswith(
+                        ("cutlass_library", "cutlass_cppgen", "pycute")
                     ):
                         saved_modules[mod_name] = _sys.modules.pop(mod_name)
                 import cutlass_library.generator as sys_gen  # type: ignore[no-redef]
