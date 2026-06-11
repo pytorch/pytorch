@@ -455,6 +455,7 @@ class EnterDeviceContextManagerLine(WrapperLine):
             code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
             code.do_indent()
             code.writeline(V.graph.device_ops.set_device(self.device_idx))
+            code.writeline(f"stream{self.device_idx} = get_raw_stream({self.device_idx})")
 
 
 class ExitDeviceContextManagerLine(WrapperLine):
@@ -1009,7 +1010,6 @@ class PythonWrapperCodegen(CodeGen):
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return name
-        self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
     def get_codegened_graph(self):
