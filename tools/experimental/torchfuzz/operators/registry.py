@@ -26,6 +26,7 @@ _OPERATOR_MODULES: list[str] = [
     "matrix_multiply",
     "nn_functional",
     "nonzero",
+    "reduction",
     "scalar_pointwise",
     "tensor_creation",
     "tensor_pointwise",
