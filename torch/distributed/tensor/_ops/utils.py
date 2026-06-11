@@ -399,7 +399,7 @@ def expand_to_full_mesh_op_strategy(
     inplace_op: bool = False,
     allow_unbacked_sharding: bool | None = None,
     allow_uneven_sharding: bool = False,
-    is_valid_strategy_cb: Callable[
+    full_mesh_strategy_filter: Callable[
         [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
@@ -418,7 +418,8 @@ def expand_to_full_mesh_op_strategy(
         output_tensor_meta: tensor metadata for the output(s), used to populate DTensorSpec.tensor_meta field
         input_index: the number of outputs of the op, defaults to 1
         inplace_op: whether the op is inplace or not, defaults to False
-        is_valid_strategy_cb: a callback function to filter out invalid sharding rules, defaults to None.
+        full_mesh_strategy_filter: callback to filter invalid full-mesh strategy
+            candidates, defaults to None.
 
     Example: Let's say `my_op(tensor_x, tensor_y) - > output_tensor`  can support sharding or replicating tensor_x,
     but always requires tensor_y to be replicated.  We can specify these valid combinations ignoring mesh dims.
@@ -647,8 +648,8 @@ def expand_to_full_mesh_op_strategy(
 
         # perform additional op-specific filtering
         # Skip callback for no-output ops (output_specs is None)
-        if is_valid_strategy_cb is not None and output_specs is not None:
-            if not is_valid_strategy_cb(input_specs, output_specs):
+        if full_mesh_strategy_filter is not None and output_specs is not None:
+            if not full_mesh_strategy_filter(input_specs, output_specs):
                 continue
 
         redistribute_cost = [
