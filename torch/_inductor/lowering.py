@@ -103,6 +103,7 @@ from .utils import (
     pad_listlike,
     register_op_dtype_propagation_rules,
     register_op_requires_libdevice_fp64,
+    shape_to_rng_offset,
     sympy_product,
     use_scatter_fallback,
 )
@@ -2950,6 +2951,12 @@ fallback_rand_default = fallback_handler(aten.rand.default)
 fallback_rand_generator = fallback_handler(aten.rand.generator)
 fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
+fallback_bernoulli_default = fallback_handler(
+    aten.bernoulli.default, add_to_fallback_set=False
+)
+fallback_rand_eager_offset = fallback_handler(
+    inductor_prims.rand_eager_offset, add_to_fallback_set=False
+)
 make_fallback(aten.randint)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
@@ -3087,6 +3094,75 @@ def inductor_random(
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=[*size],
+    )
+    result.realize()
+    return result
+
+
+@register_lowering(aten.bernoulli.default, type_promotion_kind=None)
+def bernoulli_default(
+    x: TensorBox,
+    *,
+    generator=None,
+):
+    if generator is not None or config.fallback_random:
+        return fallback_bernoulli_default(x, generator=generator)
+
+    dtype = x.get_dtype()
+    device = x.get_device_or_error()
+    random_pos = ir.FixedLayout(
+        device,
+        torch.float32,
+        x.get_size(),
+        ir.FlexibleLayout.contiguous_strides(x.get_size()),
+    ).make_indexer()
+    x_loader = x.make_loader()
+    msg = "Expected p_in >= 0 && p_in <= 1 to be true, but got false."
+
+    if config.align_random_eager and device.type == "cuda":
+        seed = fallback_rand_eager_offset(
+            shape_to_rng_offset(x.get_size(), device), device
+        )
+        threads_per_round = get_threads_per_round(device)
+        seed_loader = seed.make_loader()
+
+        def rand_fn(index):
+            return ops.rand_eager(
+                seed_loader([0]),
+                seed_loader([1]),
+                threads_per_round,
+                ops.index_expr(random_pos(index), torch.int32),
+                vec=4,
+            )
+
+    else:
+        warn_triton_random()
+        seed = TensorBox.create(ir.RandomSeeds(1, device))
+        seed_loader = seed.make_loader()
+
+        def rand_fn(index):
+            return ops.rand(
+                seed_loader([0]),
+                ops.index_expr(random_pos(index), torch.int32),
+            )
+
+    def inner_fn(index):
+        p = ops.to_dtype(x_loader(index), torch.float32)
+        if device.type != "cpu" or config.cpu_backend == "cpp":
+            ops.device_assert_async(
+                ops.and_(
+                    ops.le(ops.constant(0, torch.float32), p),
+                    ops.le(p, ops.constant(1, torch.float32)),
+                ),
+                msg,
+            )
+        return ops.to_dtype(ops.lt(rand_fn(index), p), dtype)
+
+    result = Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=x.get_size(),
     )
     result.realize()
     return result

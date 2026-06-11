@@ -4510,6 +4510,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         exit_stack.close()
 
     def device_assert_async(self, cond, msg) -> None:
+        if hasattr(cond, "mask_vars"):
+            mask_vars = cond.mask_vars.copy()
+            self.filter_masks(mask_vars)
+            if mask_vars:
+                mask = IndexingOptions("", mask_vars, None, False, sympy.S.Zero, None).mask_str
+                cond = f"({cond}) | ~({mask})"
         self.compute.writeline(f"tl.device_assert({cond}, {repr(msg)})")
 
     def guard_cooperative_store(self, name, buffer):

@@ -3,7 +3,6 @@ import collections
 import logging
 
 import torch
-from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
@@ -14,46 +13,13 @@ from ..pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from ..utils import shape_to_rng_offset
 from ..virtualized import V
 
 
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass(subsystem="joint_graph_passes")
 aten = torch.ops.aten
-
-
-def _shape_to_offset(shape, device: torch.device):
-    # Modified from torch/_prims/rng_prims.py:philox_rand_offset
-    nelem = 1
-    for s in shape:
-        nelem *= s
-
-    # Empty tensor: no random numbers are generated/consumed.
-    is_empty = nelem == 0
-    if statically_known_true(is_empty) or guard_or_false(is_empty):
-        return 0
-
-    if device is None:
-        device = torch.device("cpu")
-    elif isinstance(device, str):
-        device = torch.device(device)
-
-    if device.type != "cuda":
-        return 0
-
-    block_size = 256
-    unroll = 4
-    curand4_engine_calls = 4
-
-    device_property = torch.cuda.get_device_properties(device)
-
-    blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
-    max_grid = device_property.multi_processor_count * blocks_per_sm
-    grid_size = (nelem + block_size - 1) // block_size
-    grid_size = -torch.sym_min(-grid_size, -1)
-    grid_size = torch.sym_min(grid_size, max_grid)
-
-    return ((nelem - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
 
 
 def replace_random_passes(gm: torch.fx.GraphModule):
@@ -215,7 +181,7 @@ def replace_random(
     if mode == "rand" and config.align_random_eager and device.type == "cuda":
         # Only enable when align_random_eager is on.
         def replacement_align(size):
-            offset = _shape_to_offset(size, device)
+            offset = shape_to_rng_offset(size, device)
 
             align_dtype = dtype
             if isinstance(align_dtype, (tuple, list)):

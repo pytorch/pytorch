@@ -10714,6 +10714,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=0.06,
         )
 
+    def test_bernoulli_invalid_probability(self):
+        if self.device != "cpu" or config.cpu_backend != "cpp":
+            raise unittest.SkipTest("requires CPU cpp backend")
+
+        def fn(a):
+            return aten.bernoulli(a)
+
+        num_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(1)
+            opt_fn = torch.compile(fn, backend="inductor")
+            a = torch.full((4,), 2.0, device=self.device)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected p_in >= 0 && p_in <= 1 to be true, but got false",
+            ):
+                opt_fn(a)
+        finally:
+            torch.set_num_threads(num_threads)
+
+    @requires_gpu_and_triton
+    @config.patch(force_disable_caches=True)
+    def test_bernoulli_probability_check_codegen(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU_TYPE")
+
+        def fn(p):
+            return aten.bernoulli(p)
+
+        p = torch.full((5,), 0.5, device=self.device)
+        _, code = run_and_get_code(torch.compile(fn, backend="inductor"), p)
+        self.assertEqual(sum(src.count("tl.device_assert") for src in code), 1)
+
     def test_narrow(self):
         def fn(x):
             return (
