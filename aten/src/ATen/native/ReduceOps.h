@@ -15,6 +15,8 @@ class Tensor;
 
 namespace at::native {
 
+constexpr int64_t kInnerTreeThreshold = 8192;
+
 using reduce_fn = void(*)(TensorIterator &);
 
 DECLARE_DISPATCH(reduce_fn, sum_stub)

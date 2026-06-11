@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/ReduceOps.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
@@ -257,6 +258,10 @@ PyObject* THCPModule_setStream_wrap(
   at::cuda::setCurrentCUDAStream(stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_getInnerTreeThreshold(PyObject* self, PyObject* noargs) {
+  return THPUtils_packInt64(at::native::kInnerTreeThreshold);
 }
 
 PyObject* THCPModule_getCompiledVersion(PyObject* self, PyObject* noargs) {
@@ -2195,6 +2200,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_getCompiledVersion",
      THCPModule_getCompiledVersion,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_getInnerTreeThreshold",
+     THCPModule_getInnerTreeThreshold,
      METH_NOARGS,
      nullptr},
     {"_cuda_getHipblasltVersion",

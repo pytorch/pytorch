@@ -1,6 +1,7 @@
 # Owner(s): ["module: tests"]
 
 import contextlib
+import os
 import torch
 import numpy as np
 
@@ -18,6 +19,7 @@ from torch.testing._internal.common_dtype import (
     integral_types, complex_types, floating_types_and,
     integral_types_and, floating_and_complex_types_and, all_types_and, all_types,
 )
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     parametrize,
@@ -26,7 +28,8 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyNativeDeviceTypes, onlyCUDA, onlyOn, largeTensorTest, ops, precisionOverride)
+    dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyNativeDeviceTypes, onlyCUDA, onlyOn, largeTensorTest, ops, precisionOverride,
+    skipCUDAIfRocm)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
@@ -3939,6 +3942,239 @@ as the input tensor excluding its innermost dimension'):
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
 instantiate_device_type_tests(TestReductions, globals(), allow_xpu=True, allow_mps=True)
+
+
+class TestInnerTreeSum(TestCase):
+    """Tests for the triton-style inner tree reduction sum kernel.
+
+    Bitwise equivalence tests: each test generates a deterministic input
+    pattern and verifies the sum output matches a precomputed SHA-256
+    hash. This catches bitwise output changes without depending on CUDA RNG
+    launch geometry.
+    The expected hashes are generated from the deterministic row sums.
+    """
+
+    _ACC_DTYPES = {
+        torch.float8_e4m3fn: torch.float32,
+        torch.float16: torch.float32,
+        torch.float32: torch.float32,
+        torch.float64: torch.float64,
+    }
+
+    _SHAPES = [
+        (1, 32), (1, 8192), (1, 16384),
+        (128, 32), (128, 8192), (128, 16384),
+        (4096, 32), (4096, 8192), (4096, 16384),
+        (1, 27), (1, 6561), (1, 19683),
+        (128, 27), (128, 6561), (128, 19683),
+        (4096, 27), (4096, 6561), (4096, 19683),
+        (1, 36), (1, 7776), (1, 46656),
+        (128, 36), (128, 7776), (128, 46656),
+        (4096, 36), (4096, 7776), (4096, 46656),
+    ]
+
+    # fmt: off
+    _EXPECTED = {
+        ("float8_e4m3fn", 1, 32): "a45ac05a656a8875",
+        ("float8_e4m3fn", 1, 8192): "06ea8a36f314c923",
+        ("float8_e4m3fn", 1, 16384): "f478d806af112794",
+        ("float8_e4m3fn", 128, 32): "f428ef9e3fbd9469",
+        ("float8_e4m3fn", 128, 8192): "4834001f0135cd23",
+        ("float8_e4m3fn", 128, 16384): "76e9b171932d1f9f",
+        ("float8_e4m3fn", 4096, 32): "a5c21039e21a5323",
+        ("float8_e4m3fn", 4096, 8192): "e34643d4c484ef9c",
+        ("float8_e4m3fn", 4096, 16384): "289c5f23e410c913",
+        ("float8_e4m3fn", 1, 27): "367b47dab54c37bb",
+        ("float8_e4m3fn", 1, 6561): "d73ae3781e5ca460",
+        ("float8_e4m3fn", 1, 19683): "cd8c76d0d9168c38",
+        ("float8_e4m3fn", 128, 27): "2252a0a2c19ada94",
+        ("float8_e4m3fn", 128, 6561): "6bf0fe73bdad39f5",
+        ("float8_e4m3fn", 128, 19683): "03b2636d8210d4d0",
+        ("float8_e4m3fn", 4096, 27): "41896635bfcb0c7c",
+        ("float8_e4m3fn", 4096, 6561): "990ad1490c767a17",
+        ("float8_e4m3fn", 4096, 19683): "c3cc65b050631480",
+        ("float8_e4m3fn", 1, 36): "e00aac4936c5c80e",
+        ("float8_e4m3fn", 1, 7776): "971576b2cb015314",
+        ("float8_e4m3fn", 1, 46656): "4c4c5480a498b2c6",
+        ("float8_e4m3fn", 128, 36): "927688b93e357722",
+        ("float8_e4m3fn", 128, 7776): "e46696a8a4613062",
+        ("float8_e4m3fn", 128, 46656): "a10c4d305d19a761",
+        ("float8_e4m3fn", 4096, 36): "efe1cee0d5e0bf4e",
+        ("float8_e4m3fn", 4096, 7776): "d5588816762acbd4",
+        ("float8_e4m3fn", 4096, 46656): "27fc2749145207e3",
+        ("float16", 1, 32): "a45ac05a656a8875",
+        ("float16", 1, 8192): "06ea8a36f314c923",
+        ("float16", 1, 16384): "f478d806af112794",
+        ("float16", 128, 32): "f428ef9e3fbd9469",
+        ("float16", 128, 8192): "4834001f0135cd23",
+        ("float16", 128, 16384): "76e9b171932d1f9f",
+        ("float16", 4096, 32): "a5c21039e21a5323",
+        ("float16", 4096, 8192): "e34643d4c484ef9c",
+        ("float16", 4096, 16384): "289c5f23e410c913",
+        ("float16", 1, 27): "367b47dab54c37bb",
+        ("float16", 1, 6561): "d73ae3781e5ca460",
+        ("float16", 1, 19683): "cd8c76d0d9168c38",
+        ("float16", 128, 27): "2252a0a2c19ada94",
+        ("float16", 128, 6561): "6bf0fe73bdad39f5",
+        ("float16", 128, 19683): "03b2636d8210d4d0",
+        ("float16", 4096, 27): "41896635bfcb0c7c",
+        ("float16", 4096, 6561): "990ad1490c767a17",
+        ("float16", 4096, 19683): "c3cc65b050631480",
+        ("float16", 1, 36): "e00aac4936c5c80e",
+        ("float16", 1, 7776): "971576b2cb015314",
+        ("float16", 1, 46656): "4c4c5480a498b2c6",
+        ("float16", 128, 36): "927688b93e357722",
+        ("float16", 128, 7776): "e46696a8a4613062",
+        ("float16", 128, 46656): "a10c4d305d19a761",
+        ("float16", 4096, 36): "efe1cee0d5e0bf4e",
+        ("float16", 4096, 7776): "d5588816762acbd4",
+        ("float16", 4096, 46656): "27fc2749145207e3",
+        ("float32", 1, 32): "a45ac05a656a8875",
+        ("float32", 1, 8192): "06ea8a36f314c923",
+        ("float32", 1, 16384): "f478d806af112794",
+        ("float32", 128, 32): "f428ef9e3fbd9469",
+        ("float32", 128, 8192): "4834001f0135cd23",
+        ("float32", 128, 16384): "76e9b171932d1f9f",
+        ("float32", 4096, 32): "a5c21039e21a5323",
+        ("float32", 4096, 8192): "e34643d4c484ef9c",
+        ("float32", 4096, 16384): "289c5f23e410c913",
+        ("float32", 1, 27): "367b47dab54c37bb",
+        ("float32", 1, 6561): "d73ae3781e5ca460",
+        ("float32", 1, 19683): "cd8c76d0d9168c38",
+        ("float32", 128, 27): "2252a0a2c19ada94",
+        ("float32", 128, 6561): "6bf0fe73bdad39f5",
+        ("float32", 128, 19683): "03b2636d8210d4d0",
+        ("float32", 4096, 27): "41896635bfcb0c7c",
+        ("float32", 4096, 6561): "990ad1490c767a17",
+        ("float32", 4096, 19683): "c3cc65b050631480",
+        ("float32", 1, 36): "e00aac4936c5c80e",
+        ("float32", 1, 7776): "971576b2cb015314",
+        ("float32", 1, 46656): "4c4c5480a498b2c6",
+        ("float32", 128, 36): "927688b93e357722",
+        ("float32", 128, 7776): "e46696a8a4613062",
+        ("float32", 128, 46656): "a10c4d305d19a761",
+        ("float32", 4096, 36): "efe1cee0d5e0bf4e",
+        ("float32", 4096, 7776): "d5588816762acbd4",
+        ("float32", 4096, 46656): "27fc2749145207e3",
+        ("float64", 1, 32): "324ec9c64be3f30c",
+        ("float64", 1, 8192): "dc9370f900f1a3cd",
+        ("float64", 1, 16384): "5a605c9d9ba6193e",
+        ("float64", 128, 32): "35a0993dedd64659",
+        ("float64", 128, 8192): "05102af99bde7f20",
+        ("float64", 128, 16384): "c54af6a4a43a21d4",
+        ("float64", 4096, 32): "a5e02a44cc2dd361",
+        ("float64", 4096, 8192): "e9ba5b9f0409fec2",
+        ("float64", 4096, 16384): "6d8144f96bb8a210",
+        ("float64", 1, 27): "68bba302a18ac2b5",
+        ("float64", 1, 6561): "748bacbfcbd12732",
+        ("float64", 1, 19683): "b319981dbe7abf34",
+        ("float64", 128, 27): "86e9b1f2d6fd4504",
+        ("float64", 128, 6561): "e761055386fc7295",
+        ("float64", 128, 19683): "3ce4cdd14e0b152f",
+        ("float64", 4096, 27): "4926c5d5541728d1",
+        ("float64", 4096, 6561): "417525b3b5d3de87",
+        ("float64", 4096, 19683): "cd8ef6c48ad2c67f",
+        ("float64", 1, 36): "c30b92d65afb35e8",
+        ("float64", 1, 7776): "1b338a3fcaf52b05",
+        ("float64", 1, 46656): "6794b0cbbf7e129d",
+        ("float64", 128, 36): "f00a064b84ba50b4",
+        ("float64", 128, 7776): "c227b341b6240d30",
+        ("float64", 128, 46656): "af1f2b32fdaf1f62",
+        ("float64", 4096, 36): "5cb245154bac020c",
+        ("float64", 4096, 7776): "751916d8d6b9dcba",
+        ("float64", 4096, 46656): "498bc246ba0b069a",
+    }
+    # fmt: on
+
+    _DTYPE_MAP = {
+        "float8_e4m3fn": torch.float8_e4m3fn,
+        "float16": torch.float16,
+        "float32": torch.float32,
+        "float64": torch.float64,
+    }
+
+    def _make_input(self, M, N, dtype, device):
+        compute_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        cols = torch.arange(N, device=device, dtype=compute_dtype)
+        values = ((cols % 2) * 2 - 1).reshape(1, N)
+        if M > 1:
+            rows = torch.arange(M, device=device, dtype=compute_dtype).reshape(M, 1)
+            values = values + ((rows % 5) - 2) / 4
+        return values.to(dtype)
+
+    @contextlib.contextmanager
+    def _inner_tree_sum_enabled(self):
+        old_value = os.environ.get("PYTORCH_SUM_INNER_TREE")
+        os.environ["PYTORCH_SUM_INNER_TREE"] = "1"
+        try:
+            yield
+        finally:
+            if old_value is None:
+                os.environ.pop("PYTORCH_SUM_INNER_TREE", None)
+            else:
+                os.environ["PYTORCH_SUM_INNER_TREE"] = old_value
+
+    def _eager_sum(self, x):
+        acc_dtype = self._ACC_DTYPES[x.dtype]
+        if x.dtype == torch.float8_e4m3fn:
+            return x.to(torch.float32).sum(dim=1).to(acc_dtype)
+        return x.to(acc_dtype).sum(dim=1)
+
+    def _sha(self, t):
+        import hashlib
+        return hashlib.sha256(t.cpu().contiguous().numpy().tobytes()).hexdigest()[:16]
+
+    @onlyCUDA
+    def test_inner_tree_strided_outer_input(self, device):
+        base = torch.ones(256, 32, device=device, dtype=torch.float32)
+        base[1::2, :] = 5
+        x = base[::2, :]
+
+        with self._inner_tree_sum_enabled():
+            result = x.sum(dim=1)
+
+        self.assertEqual(result, torch.full((128,), 32, device=device))
+
+    @onlyCUDA
+    def test_inner_tree_looped_kernel_partial_last_block(self, device):
+        x = torch.ones(129, 256, device=device, dtype=torch.float32)
+
+        with self._inner_tree_sum_enabled():
+            result = x.sum(dim=1)
+
+        self.assertEqual(result, torch.full((129,), 256, device=device))
+
+    @onlyCUDA
+    @parametrize("dtype", [torch.int64, torch.complex64])
+    def test_inner_tree_integer_and_complex_dtypes(self, device, dtype):
+        x = torch.ones(17, 8192, device=device, dtype=dtype)
+
+        with self._inner_tree_sum_enabled():
+            result = x.sum(dim=1)
+
+        self.assertEqual(result, torch.full((17,), 8192, device=device, dtype=dtype))
+
+    @skipCUDAIfRocm
+    @onlyCUDA
+    def test_inner_tree_bitwise(self, device):
+        for dtype_name, dtype in self._DTYPE_MAP.items():
+            if dtype == torch.float8_e4m3fn and not PLATFORM_SUPPORTS_FP8:
+                continue
+            for M, N in self._SHAPES:
+                with self.subTest(dtype_name=dtype_name, M=M, N=N):
+                    x = self._make_input(M, N, dtype, device)
+                    with self._inner_tree_sum_enabled():
+                        result = self._eager_sum(x)
+                    sha = self._sha(result)
+                    expected = self._EXPECTED[(dtype_name, M, N)]
+                    self.assertEqual(
+                        sha,
+                        expected,
+                        f"{dtype_name} M={M} N={N}: got {sha}, expected {expected}",
+                    )
+
+
+instantiate_device_type_tests(TestInnerTreeSum, globals())
 
 if __name__ == '__main__':
     run_tests()
