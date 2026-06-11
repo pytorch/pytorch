@@ -35,6 +35,17 @@ class TestUtils(TestCase):
         res = utils.same(a, b, fp64_ref=fp64_ref, equal_nan=True)
         self.assertTrue(res)
 
+    def test_same_iou_for_bool_propagates_to_instances(self):
+        Instances = type("Instances", (), {})
+        ref = Instances()
+        res = Instances()
+        ref.pred_masks = torch.ones((4, 16, 16), dtype=torch.bool)
+        res.pred_masks = ref.pred_masks.clone()
+        res.pred_masks[0, 0, 0] = False
+
+        self.assertFalse(utils.same(ref, res))
+        self.assertTrue(utils.same(ref, res, use_iou_for_bool=True))
+
     def test_larger_multiplier_for_smaller_tensor(self):
         """
         Tensor numel between (10, 500]
@@ -554,6 +565,7 @@ class TestDynamoTimed(TestCase):
  'pass.post_grad_passes.decompose_map_to_while_loop': [0.0, 0.0],
  'pass.post_grad_passes.decompose_scan_to_while_loop': [0.0, 0.0],
  'pass.post_grad_passes.decompose_triton_kernel_wrapper_functional': [0.0, 0.0],
+ 'pass.post_grad_passes.fix_auto_functionalized_dtype_views': [0.0, 0.0],
  'pass.post_grad_passes.move_constructors_to_cuda': [0.0, 0.0],
  'pass.post_grad_passes.pass_pattern_0': [0.0, 0.0],
  'pass.post_grad_passes.pass_pattern_1': [0.0, 0.0],
@@ -609,6 +621,7 @@ class TestDynamoTimed(TestCase):
  'pass.post_grad_passes.decompose_map_to_while_loop': [0.0, 0.0],
  'pass.post_grad_passes.decompose_scan_to_while_loop': [0.0, 0.0],
  'pass.post_grad_passes.decompose_triton_kernel_wrapper_functional': [0.0, 0.0],
+ 'pass.post_grad_passes.fix_auto_functionalized_dtype_views': [0.0, 0.0],
  'pass.post_grad_passes.move_constructors_to_cuda': [0.0, 0.0],
  'pass.post_grad_passes.pass_pattern_0': [0.0, 0.0],
  'pass.post_grad_passes.pass_pattern_1': [0.0, 0.0],
