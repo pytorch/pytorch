@@ -205,10 +205,7 @@ TEST(TestCustomOperator, OperatorGeneratorUndeclared) {
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::not_exist(float a, Tensor b) -> Tensor"),
       [](Stack& stack) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        double a;
-        at::Tensor b;
-        pop(stack, a, b);
+        auto [a, b] = pop<double, at::Tensor>(stack);
         push(stack, a + b);
       },
       aliasAnalysisFromSchema())});
@@ -224,10 +221,7 @@ TEST(TestCustomOperator, OperatorGeneratorBasic) {
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::bar.template(float a, Tensor b) -> Tensor"),
       [](Stack& stack) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        double a;
-        at::Tensor b;
-        pop(stack, a, b);
+        auto [a, b] = pop<double, at::Tensor>(stack);
         push(stack, a + b);
       },
       aliasAnalysisFromSchema())});

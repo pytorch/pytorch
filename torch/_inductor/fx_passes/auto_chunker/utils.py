@@ -21,7 +21,10 @@ def use_tangent(node: Node) -> bool:
     Whether the fx node uses tangent input.
     """
 
-    return any(is_tangent_node(arg) for arg in get_args_of_node_type(node))
+    return any(
+        is_tangent_node(arg)  # type: ignore[operator]
+        for arg in get_args_of_node_type(node)
+    )
 
 
 def compute_tensor_size(*args: Any, count_bytes: bool = True, **kwargs: Any) -> int:
@@ -139,7 +142,8 @@ def get_node_is_scalar(nodes: Sequence[Node]) -> dict[Node, bool]:
     node_is_scalar = {}
     for node in nodes:
         ft = get_fake_tensor_from_node_arg(node)
-        assert ft is not None
+        if ft is None:
+            raise AssertionError(f"expected a fake tensor for node {node}, got None")
         node_is_scalar[node] = ft.numel() == 1
     return node_is_scalar
 
@@ -151,7 +155,8 @@ def get_node_ndim(nodes: Sequence[Node]) -> dict[Node, int]:
     node_ndim = {}
     for node in nodes:
         ft = get_fake_tensor_from_node_arg(node)
-        assert ft is not None
+        if ft is None:
+            raise AssertionError(f"expected a fake tensor for node {node}, got None")
         node_ndim[node] = ft.ndim
     return node_ndim
 
