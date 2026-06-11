@@ -2155,6 +2155,14 @@ class triton:
     # into a single kernel with two sequential reduction passes.
     nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
 
+    # Prototype: keep full reduction tiles resident across a following mixed
+    # reduction suffix when a full RBLOCK is already profitable. This avoids
+    # storing and reloading full-size scratch values for BN-backward-shaped
+    # same-channel reductions. Disabled by default pending broader validation.
+    channel_resident_reduction_suffix = (
+        os.environ.get("TORCHINDUCTOR_CHANNEL_RESIDENT_REDUCTION_SUFFIX", "0") == "1"
+    )
+
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
     debug_dump_kernel_inputs: dict[str, int] = {}

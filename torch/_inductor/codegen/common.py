@@ -2232,6 +2232,11 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.min_elem_per_thread = 1
         self.kernel_name: str | None = None
 
+    def should_elide_store(
+        self, name: str, value: CSEVariable, mode: StoreMode = None
+    ) -> bool:
+        return False
+
     @contextlib.contextmanager
     def set_current_node(self, node: SchedulerNode) -> Iterator[None]:
         prior = self.current_node
@@ -2935,10 +2940,12 @@ class CSEProxy(DefaultHandler):
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
-        self.kernel.store_buffer_names.add(name)
         # Update store cache when mode is None or "tma"
         if mode != "atomic_add":
             self._update_store_cache(name, value)
+        if self.kernel.should_elide_store(name, value, mode=mode):
+            return
+        self.kernel.store_buffer_names.add(name)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1

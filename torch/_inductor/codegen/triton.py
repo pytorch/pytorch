@@ -119,6 +119,7 @@ from .simd import (
     SIMDKernel,
     SIMDScheduling,
 )
+from .simd_kernel_features import DisableReduction, EnableReduction
 from .triton_utils import (
     config_of,
     equal_1_arg_indices,
@@ -3185,6 +3186,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._pdl_load_index = 0
         self._pdl_has_wait = False
+        self._elided_channel_resident_store = False
+        self._channel_resident_store_vars: OrderedSet[CSEVariable] = OrderedSet()
+        self._initialized_channel_resident_vars: OrderedSet[CSEVariable] = OrderedSet()
+        self._emitted_channel_resident_reduction_loop = False
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
@@ -3377,6 +3382,136 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def should_use_persistent_reduction(self) -> bool:
         return self.inside_reduction and V.choices.should_use_persistent_reduction(
             self.features, self.cooperative_reduction
+        )
+
+    @functools.cached_property
+    def channel_resident_reduction_suffix(self) -> bool:
+        if (
+            not config.triton.channel_resident_reduction_suffix
+            or not self.features.is_reduction()
+            or self.persistent_reduction
+            or self.cooperative_reduction
+            or self.mix_order_reduction
+            or self.num_reduction_dims != 1
+        ):
+            return False
+        if len(self.features.reduction_nodes()) < 2:
+            return False
+        node_schedule = self.features.node_schedule
+        if (
+            DisableReduction not in node_schedule
+            or EnableReduction not in node_schedule
+        ):
+            return False
+        # Reusing loop-local full tiles is only correct when every R loop is
+        # forced to a single iteration. Reuse the existing persistent-RBLOCK
+        # profitability signal, then pin autotuning/dynamic scaling to that floor.
+        if not self.add_persistent_rblock:
+            return False
+        persistent_rblock = self._get_persistent_RBLOCK(self.features.reduction_numel)
+        if persistent_rblock > self.max_block("r0_"):
+            return False
+        if not V.graph.sizevars.statically_known_leq(
+            self.features.reduction_numel, 8192
+        ):
+            return False
+        self.min_rblock = max(self.min_rblock or 1, persistent_rblock)
+        return True
+
+    def _has_full_reduction_tile_shape(self, value: CSEVariable) -> bool:
+        if value.shape is None:
+            return False
+        reduction_blocks = OrderedSet(
+            tree.block_size_str() for tree in self.range_trees if tree.is_reduction
+        )
+        return any(str(dim) in reduction_blocks for dim in value.shape)
+
+    def _all_users_are_in_this_kernel(self, name: str) -> bool:
+        if self.current_node is None:
+            return False
+        try:
+            output = self.current_node.get_output(name)
+        except KeyError:
+            return False
+        if not output.users:
+            return False
+        scheduled_names = OrderedSet(
+            node.get_name()
+            for node in self.features.scheduler_nodes()
+            if isinstance(node, SchedulerNode)
+        )
+        for user in output.users:
+            if type(user.node).__name__ == "OutputNode":
+                return False
+            get_name = getattr(user.node, "get_name", None)
+            if get_name is None or get_name() not in scheduled_names:
+                return False
+        return True
+
+    def should_elide_store(
+        self, name: str, value: CSEVariable, mode: StoreMode = None
+    ) -> bool:
+        if (
+            mode is not None
+            or not self.inside_reduction
+            or not self.channel_resident_reduction_suffix
+            or not self._has_full_reduction_tile_shape(value)
+            or not self._all_users_are_in_this_kernel(name)
+        ):
+            return False
+        self._elided_channel_resident_store = True
+        self._channel_resident_store_vars.add(value)
+        return True
+
+    def codegen_channel_resident_initializers(self) -> None:
+        resident_vars = OrderedSet(self._channel_resident_store_vars)
+        resident_vars.update(
+            value
+            for value in self.cse._cache.values()
+            if self._has_full_reduction_tile_shape(value)
+        )
+        pending = resident_vars - self._initialized_channel_resident_vars
+        for value in pending:
+            assert value.shape is not None
+            dtype = value.dtype or torch.float32
+            zero = (
+                "0.0"
+                if dtype.is_floating_point
+                else "False"
+                if dtype is torch.bool
+                else "0"
+            )
+            shape = f"[{', '.join(map(str, value.shape))}]"
+            self.body.writeline(
+                f"{value} = tl.full({shape}, {zero}, {triton_type(dtype)})"
+            )
+        self._initialized_channel_resident_vars |= pending
+
+    def codegen_channel_resident_suffix_indices(
+        self, loop_trees: list[IterationRangesRoot]
+    ) -> None:
+        for tree in loop_trees:
+            self.body.writeline(f"{tree.prefix}offset = 0")
+            self.iteration_ranges_codegen_header(tree, self.body)
+        self.codegen_reduction_indices(self.body)
+
+    def _channel_resident_keep_vars(self) -> OrderedSet[CSEVariable]:
+        keep_vars: OrderedSet[CSEVariable] = OrderedSet(self.outside_loop_vars)
+        # R0_BLOCK is pinned to cover the full reduction domain for this
+        # prototype, so values materialized inside the loop remain valid after
+        # the single loop iteration and may feed the following full-output
+        # suffix.
+        keep_vars.update(self.cse._cache.values())
+        keep_vars.update(self.cse.store_cache.values())
+        return keep_vars
+
+    def _can_emit_channel_resident_suffix_without_loop(self) -> bool:
+        return (
+            self.channel_resident_reduction_suffix
+            and self._elided_channel_resident_store
+            and self._emitted_channel_resident_reduction_loop
+            and not self.post_loop_combine
+            and not self.post_loop_store
         )
 
     def want_no_x_dim(self):
@@ -6000,68 +6135,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
 
         elif self.inside_reduction and len(loop_trees) > 0:
-            # Write the loop headers.
-            for level, tree in enumerate(loop_trees):
-                with self.body.indent(offset=level):
-                    prefix = tree.prefix
-                    loop_start = "rsplit_start" if self.cooperative_reduction else "0"
-                    loop_end = (
-                        "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
-                    )
-                    # Conditionalize pipelining on HIP for Triton due to
-                    # reports of numerical inaccuracies on older Triton
-                    if torch.version.hip and get_triton_version() > (3, 2):
-                        num_stages = ", num_stages = 2"
-                    else:
-                        num_stages = ""
-                    self.body.writeline(
-                        f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages}):"
-                    )
-                with self.body.indent(offset=level + 1):
-                    self.iteration_ranges_codegen_header(tree, self.body)
-
-            # The innermost loop performs the reduction.
-            with self.body.indent(offset=len(loop_trees)):
-                self.codegen_reduction_indices(self.body)
+            if self._can_emit_channel_resident_suffix_without_loop():
+                self.codegen_channel_resident_suffix_indices(loop_trees)
                 self.body.splice(self.indexing_code)
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
                 self.body.splice(self.stores)
-
-            # Write loop suffixes.
-            for level, tree in reversed([*enumerate(loop_trees)]):
-                with self.body.indent(offset=level + 1):
-                    # Advance pointers at the end of each loop.
-                    for block_ptr, advancement in self.pointer_advancements[
-                        tree.symt
-                    ].items():
-                        # Subtract any advancements made in the previous loop level.
-                        if level < len(loop_trees) - 1:
-                            prev_tree = loop_trees[level + 1]
-                            prev_advancements = self.pointer_advancements[
-                                prev_tree.symt
-                            ]
-                            # block_ptr may not exist in the inner loop's advancements
-                            # if its advancement was identity (zero) and was skipped
-                            if block_ptr in prev_advancements:
-                                prev_advancement = prev_advancements[block_ptr]
-                                prev_block = TritonSymbols.get_block_size(prev_tree)
-                                prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
-                                advancement = [
-                                    cur - prev * prev_num_iter
-                                    for cur, prev in zip(advancement, prev_advancement)
-                                ]
-
-                        self.body.writeline(
-                            DeferredLine(
-                                self.block_ptr_to_buffer[block_ptr],
-                                f"{block_ptr} = tl.advance({block_ptr}, {V.kernel.index_to_str(advancement)})",
-                            )
-                        )
-
-                # Invalidate any cache entries that came from inside the loop.
-                self.cse.invalidate(self.outside_loop_vars)
-                tree.cache_clear()
+            else:
+                self._codegen_reduction_loop_body(loop_trees)
         else:
             self.body.splice(self.indexing_code)
             self.body.splice(self.loads)
@@ -6088,6 +6169,86 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.stores.clear()
         self.post_loop_combine.clear()
         self.post_loop_store.clear()
+
+    def _codegen_reduction_loop_body(self, loop_trees: list[IterationRangesRoot]):
+        if (
+            self.channel_resident_reduction_suffix
+            and self._elided_channel_resident_store
+        ):
+            self.codegen_channel_resident_initializers()
+        # Write the loop headers.
+        for level, tree in enumerate(loop_trees):
+            with self.body.indent(offset=level):
+                prefix = tree.prefix
+                loop_start = "rsplit_start" if self.cooperative_reduction else "0"
+                loop_end = (
+                    "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
+                )
+                # Conditionalize pipelining on HIP for Triton due to
+                # reports of numerical inaccuracies on older Triton
+                if torch.version.hip and get_triton_version() > (3, 2):
+                    num_stages = ", num_stages = 2"
+                else:
+                    num_stages = ""
+                self.body.writeline(
+                    f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages}):"
+                )
+            with self.body.indent(offset=level + 1):
+                self.iteration_ranges_codegen_header(tree, self.body)
+
+        # The innermost loop performs the reduction.
+        with self.body.indent(offset=len(loop_trees)):
+            self.codegen_reduction_indices(self.body)
+            self.body.splice(self.indexing_code)
+            self.body.splice(self.loads)
+            self.body.splice(self.compute)
+            self.body.splice(self.stores)
+
+        # Write loop suffixes.
+        for level, tree in reversed([*enumerate(loop_trees)]):
+            with self.body.indent(offset=level + 1):
+                # Advance pointers at the end of each loop.
+                for block_ptr, advancement in self.pointer_advancements[
+                    tree.symt
+                ].items():
+                    # Subtract any advancements made in the previous loop level.
+                    if level < len(loop_trees) - 1:
+                        prev_tree = loop_trees[level + 1]
+                        prev_advancements = self.pointer_advancements[prev_tree.symt]
+                        # block_ptr may not exist in the inner loop's advancements
+                        # if its advancement was identity (zero) and was skipped
+                        if block_ptr in prev_advancements:
+                            prev_advancement = prev_advancements[block_ptr]
+                            prev_block = TritonSymbols.get_block_size(prev_tree)
+                            prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
+                            advancement = [
+                                cur - prev * prev_num_iter
+                                for cur, prev in zip(advancement, prev_advancement)
+                            ]
+
+                    self.body.writeline(
+                        DeferredLine(
+                            self.block_ptr_to_buffer[block_ptr],
+                            f"{block_ptr} = tl.advance({block_ptr}, {V.kernel.index_to_str(advancement)})",
+                        )
+                    )
+
+            # Invalidate any cache entries that came from inside the loop.
+            # The channel-resident suffix prototype keeps loop-local values
+            # resident only when the full reduction domain fits in one tile.
+            keep_vars = self.outside_loop_vars
+            if (
+                self.channel_resident_reduction_suffix
+                and self._elided_channel_resident_store
+            ):
+                keep_vars = self._channel_resident_keep_vars()
+            self.cse.invalidate(keep_vars)
+            tree.cache_clear()
+        if (
+            self.channel_resident_reduction_suffix
+            and self._elided_channel_resident_store
+        ):
+            self._emitted_channel_resident_reduction_loop = True
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         args = []
@@ -6391,6 +6552,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["native_matmul_persistent_rblock"] = rblock
         if self.add_persistent_rblock:
             out["add_persistent_rblock"] = True
+        if self.channel_resident_reduction_suffix:
+            out["channel_resident_reduction_suffix"] = True
         if (
             config.benchmark_kernel
             or config.profile_bandwidth
