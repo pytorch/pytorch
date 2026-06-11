@@ -604,7 +604,7 @@ class GraphModule(torch.nn.Module):
             return wrap(lambda x: wrap(lambda x: x + y, x), x)
 
         # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 7)
         self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_inlined_functions(self):
@@ -3931,6 +3931,14 @@ class GraphModule(torch.nn.Module):
         return (unflatten,)
 """,
         )
+
+    def test_hessian_with_default_device(self):
+        def wrapper_fn(x):
+            return torch.func.hessian(torch.sin)(x)
+
+        x = torch.randn(4, 3)
+        with torch.device("cpu"):
+            self._compile_check(wrapper_fn, (x,))
 
     def test_hessian_argnums(self):
         counters.clear()

@@ -3072,7 +3072,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                expected_size = "torch.Size([s75, s75])"
+                expected_size = "torch.Size([s75, s96])"
                 if str(n.meta["val"].size()) != expected_size:
                     raise AssertionError(
                         f"Expected size {expected_size}, got {n.meta['val'].size()}"

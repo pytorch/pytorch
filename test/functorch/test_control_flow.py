@@ -8207,13 +8207,13 @@ def forward(self, l_inp_, l_tmp_):
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             """\
-def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
+def forward(self, s97 : torch.SymInt, s98 : torch.SymInt, L_a_ : torch.Tensor, s52 : torch.SymInt, s20 : torch.SymInt, L_b_ : torch.Tensor):
     l_a_ = L_a_
     l_b_ = L_b_
     tensor = torch.tensor([True])
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(tensor, cond_true_0, cond_false_0, (l_a_, l_b_, s97));  tensor = cond_true_0 = cond_false_0 = l_a_ = l_b_ = s97 = None
+    cond = torch.ops.higher_order.cond(tensor, cond_true_0, cond_false_0, (l_a_, l_b_, s20, s52, s97, s98));  tensor = cond_true_0 = cond_false_0 = l_a_ = l_b_ = s20 = s52 = s97 = s98 = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
         )

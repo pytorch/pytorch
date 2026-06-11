@@ -2466,13 +2466,12 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(g(torch.randn(1)), Multistreamable)
 
     @parametrize("dynamic", [False, True])
+    @torch.fx.experimental._config.patch(use_duck_shape=True)
     def test_subclass_views(self, dynamic):
         def _get_views(t):  # returns (view: Tensor, expects_raises_false)
             # Note that any closed-over SymInts will be symbolicized during fake-ification.
             yield t.narrow(dim=-1, start=3, length=8), False
-            # Without duck sizing, this currently exposes a compound storage
-            # offset whose symbols are not yet cached by the root tracer.
-            yield t.split(5, -1)[2], dynamic
+            yield t.split(5, -1)[2], False
             yield t.split_with_sizes([9, 6], -1)[1], False
             yield t.unsqueeze(-1).expand(4, 15, 10), False
             yield t.select(-1, 6), False
@@ -3288,11 +3287,13 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(
         self,
-        primals_1: "f32[24]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a')
-        primals_2: "f32[24]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b')
+        primals_1: "Sym(24)",  # PlainAOTInput(idx=0)
+        primals_2: "f32[24]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=1), attr='a')
+        primals_3: "f32[24]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=1), attr='b')
+        primals_4: "Sym(24)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=1), idx=0)
     ):
-        clone: "f32[24]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-        clone_1: "f32[24]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+        clone: "f32[24]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+        clone_1: "f32[24]" = torch.ops.aten.clone.default(primals_3);  primals_3 = None
 
         view: "f32[3, 2, 4]" = torch.ops.aten.view.default(clone, [3, 2, 4]);  clone = None
         view_1: "f32[3, 2, 4]" = torch.ops.aten.view.default(clone_1, [3, 2, 4]);  clone_1 = None
@@ -3315,8 +3316,9 @@ class GraphModule(torch.nn.Module):
         view_2: "f32[24]" = torch.ops.aten.view.default(tangents_1, [24]);  tangents_1 = None
         view_3: "f32[24]" = torch.ops.aten.view.default(tangents_2, [24]);  tangents_2 = None
         return (
-            view_2,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='a')
-            view_3,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='b')
+            None,  # None
+            view_2,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=1)), attr='a')
+            view_3,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=1)), attr='b')
         )
 """,
         )
