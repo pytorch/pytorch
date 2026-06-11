@@ -1528,10 +1528,12 @@ void run_cudnn_SDP_fprop_nestedtensor(
     softmaxstats = at::empty({h_q, q.size(0)}, q.options().dtype(kFloat));
   }
   auto softmaxstats_ = softmaxstats;
-  if (softmaxstats.dim() == 2) {
-    softmaxstats_ = softmaxstats.unsqueeze(-1).transpose(0, 1);
-  } else {
-    TORCH_CHECK(softmaxstats.dim() == 3);
+  if (return_softmaxstats) {
+    if (softmaxstats.dim() == 2) {
+      softmaxstats_ = softmaxstats.unsqueeze(-1).transpose(0, 1);
+    } else {
+      TORCH_CHECK(softmaxstats.dim() == 3);
+    }
   }
 
   MHACacheKeyWrapper key(
