@@ -402,7 +402,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         with torch.cuda.graph(graph_all_reduce):
             c10d.all_reduce(out)
         graph_all_reduce.replay()
-        torch.cuda.synchronize()
         self.assertEqual(
             out, torch.full_like(out, (self.world_size - 1) * self.world_size / 2)
         )
@@ -427,6 +426,74 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             graph_one_shot_all_reduce.replay()
             self.assertEqual(out, torch.full_like(out, expected_sum))
             self.assertEqual(res, out)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_tensor_creation_and_collective_cuda_graph(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+        capture_offset = torch.tensor(1, dtype=dtype, device=self.device)
+        capture_stream = torch.cuda.Stream(device=self.device)
+
+        # Warm up on the same stream that will be captured. This establishes
+        # NCCL window metadata for the symmetric block that capture reuses.
+        with torch.cuda.stream(capture_stream):
+            inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+            out = torch.empty(numel, dtype=dtype, device=self.device)
+            for warmup_idx in range(3):
+                offset = 1 + warmup_idx
+                capture_offset.fill_(self.rank + offset)
+                inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+                out = torch.empty(numel, dtype=dtype, device=self.device)
+                inp.fill_(capture_offset)
+                out.fill_(0.0)
+                torch.ops.symm_mem.one_shot_all_reduce_out(
+                    inp, "sum", group_name, out
+                )
+                expected_sum = float(
+                    self.world_size * offset
+                    + self.world_size * (self.world_size - 1) / 2
+                )
+                self.assertEqual(out, torch.full_like(out, expected_sum))
+            del inp, out
+        capture_stream.synchronize()
+
+        graph = torch.cuda.CUDAGraph()
+        offset = 13
+        capture_offset.fill_(self.rank + offset)
+        with torch.cuda.graph(graph, stream=capture_stream):
+            inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+            out = torch.empty(numel, dtype=dtype, device=self.device)
+            inp.fill_(capture_offset)
+            out.fill_(0.0)
+            torch.ops.symm_mem.one_shot_all_reduce_out(
+                inp, "sum", group_name, out
+            )
+
+        graph.replay()
+        expected_sum = float(
+            self.world_size * offset + self.world_size * (self.world_size - 1) / 2
+        )
+        self.assertEqual(out, torch.full_like(out, expected_sum))
+
+        for repeat in range(3):
+            offset = 20 + repeat
+            capture_offset.fill_(self.rank + offset)
+            graph.replay()
+            expected_sum = float(
+                self.world_size * offset
+                + self.world_size * (self.world_size - 1) / 2
+            )
+            self.assertEqual(out, torch.full_like(out, expected_sum))
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")

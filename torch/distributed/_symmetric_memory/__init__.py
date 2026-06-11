@@ -1966,12 +1966,13 @@ def empty(  # type: ignore[misc]
     stride = torch._prims_common.make_contiguous_strides_for(size)
 
     if _should_use_implicit_mempool() and device.type == "cuda":
-        # Allocate tensor from an implicit memory pool
+        # Allocate through the CUDACachingAllocator so symmetric allocations
+        # can participate in MemPool and CUDAGraph private-pool reuse.
         mempool = get_mem_pool(device)
         # TODO: this path can be made device-agnostic if `use_mem_pool` is
         # elevated from torch.cuda to torch accelerator.
-        with torch.cuda.use_mem_pool(mempool):
-            return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
+        with torch.cuda.use_mem_pool(mempool, device=device):
+            return torch.empty_strided(size, stride, dtype=dtype, device=device)
     else:
         return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
 
