@@ -150,6 +150,36 @@ def rebuild_meta_tensor(
     return t
 
 
+def rebuild_xpu_tensor(
+    tensor_cls,
+    raw_bytes,
+    metadata,
+):
+    """
+    Rebuild a tensor that was originally on XPU from serialized raw bytes.
+
+    XPU lacks IPC support (no cudaIpcMemHandle equivalent), so XPU tensors
+    are serialized as raw bytes of a CPU copy and reconstructed here before
+    being copied back to XPU.  The resulting tensor is an independent copy —
+    mutations do NOT propagate across processes (unlike CUDA IPC which
+    produces shared-memory-backed tensors).
+    """
+    size, requires_grad, device, dtype = metadata
+    if len(raw_bytes) == 0:
+        # torch.frombuffer rejects zero-length buffers; construct empty tensor directly
+        t = torch.empty(size, dtype=dtype, device="cpu")
+    else:
+        t = torch.frombuffer(raw_bytes, dtype=torch.uint8).view(dtype).reshape(size)
+    t = t.to(device)
+    if tensor_cls == torch.nn.parameter.Parameter:
+        # It is crucial for integer tensors to receive
+        # the requires_grad=False as an argument in the constructor
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
+    return t
+
+
 def rebuild_cuda_tensor(
     tensor_cls,
     tensor_size,
@@ -386,6 +416,30 @@ def reduce_tensor(tensor):
                 tensor.requires_grad,
             ),
         )
+    elif storage._untyped_storage.device.type == "xpu":
+        # XPU lacks IPC support (no shareIpcHandle equivalent).
+        # Copy the tensor to CPU for serialization; the receiving end
+        # will copy it back to XPU in rebuild_xpu_tensor.
+        #
+        # IMPORTANT: We serialize the raw bytes directly instead of passing
+        # the CPU storage object.  Passing a storage would trigger the
+        # standard CPU fd-sharing path (_share_fd_cpu_ / _new_shared_fd_cpu)
+        # which can fail with EINVAL in spawn child processes when the
+        # shm fd is transferred via SCM_RIGHTS and then ftruncate'd.
+        # Always contiguous after .contiguous(), so we don't need
+        # storage_offset or stride in metadata.
+        cpu_tensor = tensor.detach().cpu().contiguous()
+        # Use untyped_storage bytes directly instead of numpy().tobytes()
+        # so that bfloat16, float8, and complex32 (not supported by numpy)
+        # serialize correctly.
+        raw_bytes = bytes(cpu_tensor.untyped_storage())  # noqa: PYREFLY
+        metadata = (
+            tuple(cpu_tensor.size()),
+            tensor.requires_grad,
+            tensor.device,
+            cpu_tensor.dtype,
+        )
+        return (rebuild_xpu_tensor, (type(tensor), raw_bytes, metadata))
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
     metadata = (
