@@ -332,6 +332,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(Unsupported, fn)
         self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
         self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], -1)
 
     @make_test
     def test_itertools_permutations_various_iterators(a, b):
@@ -538,6 +539,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         itertools.combinations(map(lambda x: x, [1, 2]), 1)
         itertools.combinations(filter(lambda x: True, [1, 2]), 1)
         return a
+
+    @make_test
+    def test_itertools_combinations_with_replacement(a, b):
+        combs = []
+        for size in itertools.combinations_with_replacement((1, 2, 3, 4), 2):
+            combs.append(torch.ones(size))
+        return combs
+
+    if sys.version_info >= (3, 12):
+
+        @make_test
+        def test_itertools_batched(a):
+            batches = []
+            for size in itertools.batched((1, 2, 3, 4, 5), 2):
+                batches.append(torch.ones(size))
+            return batches
 
     @make_test
     def test_itertools_pairwise(a):
