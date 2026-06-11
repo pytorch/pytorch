@@ -59,6 +59,7 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
+    DictViewVariable,
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
@@ -117,6 +118,7 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
@@ -140,7 +142,6 @@ from .misc import (
     RandomVariable,
     StringFormatVariable,
     SuperVariable,
-    TorchVersionVariable,
     TracebackVariable,
     TypingVariable,
     UnknownVariable,
@@ -269,7 +270,6 @@ __all__ = [
     "TMADescriptorStableVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
-    "TorchVersionVariable",
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",

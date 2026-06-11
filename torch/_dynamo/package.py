@@ -22,7 +22,6 @@ import logging
 import os
 import pickle
 import platform
-import re
 import shutil
 import sys
 import types
@@ -36,7 +35,11 @@ from torch._dynamo.exc import PackageError
 from torch._dynamo.graph_utils import _graph_device_type
 from torch.utils.weak import WeakIdKeyDictionary
 
-from .bytecode_transformation import get_code_keys
+from .bytecode_transformation import (
+    COMPILED_FN_PREFIX,
+    get_code_keys,
+    is_compiled_fn_name,
+)
 from .utils import counters, dynamo_timed, increment_frame
 
 
@@ -149,15 +152,11 @@ def load_guard_manager(
 
 _BackendId = NewType("_BackendId", str)  # __compiled_fn
 _FunctionId = NewType("_FunctionId", str)  # __resume_at
-_BACKEND_ID_RE = re.compile(
-    r"^__compiled_fn_\d+_"
-    r"[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}$"
-)
 
 
 def _backend_ids_from_code(code: types.CodeType) -> Iterator[_BackendId]:
     for name in code.co_names:
-        if _BACKEND_ID_RE.fullmatch(name):
+        if is_compiled_fn_name(name):
             yield _BackendId(name)
     for const in code.co_consts:
         if isinstance(const, types.CodeType):
@@ -835,9 +834,9 @@ class CompilePackage:
             self._cached_backends[backend_id] = backend
 
     def add_backend_id(self, backend_id: str, backend: Any | None = None) -> None:
-        if not backend_id.startswith("__compiled_fn_"):
+        if not backend_id.startswith(f"{COMPILED_FN_PREFIX}_"):
             raise AssertionError(
-                f"backend_id must start with '__compiled_fn_', got '{backend_id}'"
+                f"backend_id must start with '{COMPILED_FN_PREFIX}_', got '{backend_id}'"
             )
         self._add_backend_id(_BackendId(backend_id), backend)
 

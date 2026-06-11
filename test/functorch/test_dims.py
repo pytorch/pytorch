@@ -5,6 +5,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import gc
+import unittest
 from unittest import skip, skipIf
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
@@ -14,9 +15,13 @@ import functorch.dim
 import torch
 from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor
 from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TEST_CUDA,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TestCase,
 )
 
@@ -285,6 +290,10 @@ class TestMin(TestCase):
         for _ in range(10):
             f()
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/86710",
+    )
     @skipIf(not TEST_CUDA, "no CUDA")
     def test_attn_cuda(self):
         # size from the BERT paper, 90% pretraining of sequence length 128
