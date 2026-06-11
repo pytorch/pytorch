@@ -39,11 +39,49 @@ def _disable_remat_for_regional_subcompile() -> Iterator[None]:
         yield
 
 
+def _contains_list_value(value: object) -> bool:
+    if isinstance(value, list):
+        return True
+    if isinstance(value, tuple):
+        return any(_contains_list_value(v) for v in value)
+    if isinstance(value, dict):
+        return any(_contains_list_value(v) for v in value.values())
+    return False
+
+
+def _output_contains_list_value(output: object) -> bool:
+    if isinstance(output, torch.fx.Node):
+        return _contains_list_value(output.meta.get("val"))
+    if isinstance(output, list):
+        return True
+    if isinstance(output, tuple):
+        return any(_output_contains_list_value(v) for v in output)
+    if isinstance(output, dict):
+        return any(_output_contains_list_value(v) for v in output.values())
+    return False
+
+
+def _has_list_output(gm: torch.fx.GraphModule) -> bool:
+    output_node = next(iter(reversed(gm.graph.nodes)))
+    if output_node.op != "output":
+        raise AssertionError(f"Expected output node, got {output_node.op}")
+    return any(_output_contains_list_value(arg) for arg in output_node.args)
+
+
 def _compile_submod(gm: torch.fx.GraphModule, prefix: str) -> torch.fx.GraphModule:
     from torch._inductor.standalone_compile import AOTCompiledArtifact
 
     for node in gm.graph.nodes:
         if node.op == "call_module" and node.target.startswith(prefix):
+            submod = getattr(gm, node.target)
+            if _has_list_output(submod):
+                logger.info(
+                    "Skipping regional inductor compilation for submodule %s "
+                    "because it has list-valued outputs",
+                    node.target,
+                )
+                continue
+
             fake_inputs = []
             for inp_node in node.all_input_nodes:
                 if hasattr(inp_node, "meta") and "val" in inp_node.meta:
@@ -52,8 +90,6 @@ def _compile_submod(gm: torch.fx.GraphModule, prefix: str) -> torch.fx.GraphModu
                     raise RuntimeError(
                         f"Partition is bad because non fake tensor value is seen {inp_node}"
                     )
-
-            submod = getattr(gm, node.target)
 
             # Get inductor configs from annotation
             # TODO we should change partition when there are multiple differently
