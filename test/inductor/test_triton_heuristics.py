@@ -90,6 +90,7 @@ def get_autotuned_amd_sqr_kernel():
         key=[],
     )(amd_sqr_kernel)
 
+
 @instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
@@ -1115,9 +1116,7 @@ class TestFastLauncherDeviceSupport(TestCase):
         return CachingAutotuner(
             fn=triton_,
             triton_meta=triton_meta,
-            configs=[
-                triton_config({"x": 1}, 1, warp_size=device.warp_size_or_default)
-            ],
+            configs=[triton_config({"x": 1}, 1, warp_size=device.warp_size_or_default)],
             save_cache_hook=False,
             mutated_arg_names=[],
             reset_to_zero_arg_names=[],
