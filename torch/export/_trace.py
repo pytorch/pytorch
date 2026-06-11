@@ -609,8 +609,8 @@ def _add_input_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
     if (shape_env := _get_shape_env_from_gm(gm)) is None:
         return
 
-    for node in gm.graph.nodes:
-        if node.op != "placeholder" or node.meta.get("unbacked_bindings"):
+    for node in gm.graph.find_nodes(op="placeholder"):
+        if node.meta.get("unbacked_bindings"):
             continue
         if (val := node.meta.get("val")) is None:
             continue
