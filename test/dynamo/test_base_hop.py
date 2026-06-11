@@ -344,7 +344,7 @@ class <lambda>(torch.nn.Module):
 
     class auto_functionalized_subgraph_0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
-            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            add: "f32[3, 3]" = torch.ops.aten.add.Scalar(arg0_1, 1)
             add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, arg1_1);  arg1_1 = None
             copy_: "f32[3, 3]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
             return (add_1,)

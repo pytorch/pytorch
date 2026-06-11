@@ -799,7 +799,7 @@ def forward(self, tangents_0):
                 """\
 def forward(self, primals_0, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_0, primals_1)
-    add = torch.ops.aten.add.Tensor(mul, 1);  mul = None
+    add = torch.ops.aten.add.Scalar(mul, 1);  mul = None
     return (add, primals_0, primals_1)""",
                 ignore_comments=True,
                 ignore_empty_lines=True,
@@ -908,7 +908,7 @@ def forward(self, primals_1, getitem_9, getitem_8, getitem, sin_1, getitem_11, g
                 captured_gms[0].code.strip(),
                 """\
 def forward(self, arg0_1):
-    mul = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+    mul = torch.ops.aten.mul.Scalar(arg0_1, 2);  arg0_1 = None
     return (mul,)""",
                 ignore_comments=True,
                 ignore_empty_lines=True,
@@ -918,8 +918,8 @@ def forward(self, arg0_1):
                 captured_gms[1].code.strip(),
                 """\
 def forward(self, arg0_1, arg1_1):
-    mul = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
-    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+    mul = torch.ops.aten.mul.Scalar(arg0_1, 2);  arg0_1 = None
+    mul_1 = torch.ops.aten.mul.Scalar(arg1_1, 2);  arg1_1 = None
     return (mul_1, mul)""",
                 ignore_comments=True,
                 ignore_empty_lines=True,

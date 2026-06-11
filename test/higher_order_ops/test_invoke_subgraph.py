@@ -490,7 +490,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, primals_0: "f32[8]", primals_1: "f32[8]", primals_2: "f32[8]"):
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(primals_0, primals_1)
             sin: "f32[8]" = torch.ops.aten.sin.default(mul);  mul = None
-            mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(sin, 5);  sin = None
+            mul_1: "f32[8]" = torch.ops.aten.mul.Scalar(sin, 5);  sin = None
             mul_2: "f32[8]" = torch.ops.aten.mul.Tensor(mul_1, primals_2);  mul_1 = None
             return (mul_2, primals_0, primals_1, primals_2)
 """,
@@ -516,7 +516,7 @@ class GraphModule(torch.nn.Module):
     class partitioned_bw_subgraph_0_0(torch.nn.Module):
         def forward(self, primals_0: "f32[8]", primals_1: "f32[8]", primals_2: "f32[8]", tangents_0: "f32[8]"):
             mul_3: "f32[8]" = torch.ops.aten.mul.Tensor(tangents_0, primals_2);  tangents_0 = primals_2 = None
-            mul_4: "f32[8]" = torch.ops.aten.mul.Tensor(mul_3, 5);  mul_3 = None
+            mul_4: "f32[8]" = torch.ops.aten.mul.Scalar(mul_3, 5);  mul_3 = None
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(primals_0, primals_1)
             cos: "f32[8]" = torch.ops.aten.cos.default(mul);  mul = None
             mul_5: "f32[8]" = torch.ops.aten.mul.Tensor(mul_4, cos);  mul_4 = cos = None
@@ -807,7 +807,7 @@ class GraphModule(torch.nn.Module):
             inductor_random_default: "f32[8]" = torch.ops.prims.inductor_random.default([8], inductor_lookup_seed_default, 'rand');  inductor_lookup_seed_default = None
             gt: "b8[8]" = torch.ops.aten.gt.Scalar(inductor_random_default, 0.5);  inductor_random_default = None
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(gt, sin);  sin = None
-            mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(mul, 2.0);  mul = None
+            mul_1: "f32[8]" = torch.ops.aten.mul.Scalar(mul, 2.0);  mul = None
             return (mul_1, primals_0, gt)
 
     class partitioned_fw_subgraph_1_0(torch.nn.Module):
