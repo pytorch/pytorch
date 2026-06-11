@@ -1336,7 +1336,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         )
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
-            dist.all_gather_into_tensor(output_tensor, tensor)
+            dist.all_gather_single(output_tensor, tensor)
 
         self.assertTrue("c10d::_allgather_base_" in debug_mode.debug_string())
 
@@ -1364,7 +1364,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
             # Call with async_op=True returns a work handle
-            work = dist.all_gather_into_tensor(output_tensor, tensor, async_op=True)
+            work = dist.all_gather_single(output_tensor, tensor, async_op=True)
             # Wait for the async operation to complete
             work.wait()
 
@@ -1394,7 +1394,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         # Use functional collectives which return AsyncCollectiveTensor
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
-            result = _functional_collectives.all_gather_tensor(
+            result = _functional_collectives.all_gather_single(
                 tensor, gather_dim=0, group=dist.group.WORLD
             )
 
