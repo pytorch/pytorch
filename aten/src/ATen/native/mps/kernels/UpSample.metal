@@ -522,17 +522,16 @@ kernel void upsample_nearest1d(
     constant long3& input_sizes [[buffer(4)]],
     constant long3& output_sizes [[buffer(5)]],
     constant float2& scales [[buffer(6)]],
-    constant bool& align_corners [[buffer(7)]],
     uint thread_index [[thread_position_in_grid]]) {
-  (void)align_corners; // nearest never uses align_corners
   const auto output_x = thread_index;
   const auto src_x = nearest_src_index<exact>(scales.x, output_x);
   for (int n = 0; n < output_sizes.x; n++) {
     for (int c = 0; c < output_sizes.y; c++) {
       outputData
           [n * output_strides.x + c * output_strides.y +
-           output_x * output_strides.z] = upsample_get_value_bounded<T>(
-          inputData, input_sizes.z, input_strides, n, c, src_x);
+           output_x * output_strides.z] =
+              upsample_get_value_bounded<T>(
+                  inputData, input_sizes.z, input_strides, n, c, src_x);
     }
   }
 }
@@ -546,9 +545,7 @@ kernel void upsample_nearest2d(
     constant long4& input_sizes [[buffer(4)]],
     constant long4& output_sizes [[buffer(5)]],
     constant float2& scales [[buffer(6)]],
-    constant bool& align_corners [[buffer(7)]],
     uint thread_index [[thread_position_in_grid]]) {
-  (void)align_corners; // nearest never uses align_corners
   const auto output_x = thread_index % static_cast<uint>(output_sizes.w);
   const auto output_y = thread_index / static_cast<uint>(output_sizes.w);
   const auto src_x = nearest_src_index<exact>(scales.x, output_x);
@@ -558,8 +555,8 @@ kernel void upsample_nearest2d(
       outputData
           [n * output_strides.x + c * output_strides.y +
            output_y * output_strides.z + output_x * output_strides.w] =
-          upsample_get_value_bounded<T>(
-              inputData, input_sizes.wz, input_strides, n, c, src_y, src_x);
+              upsample_get_value_bounded<T>(
+                  inputData, input_sizes.wz, input_strides, n, c, src_y, src_x);
     }
   }
 }
@@ -821,30 +818,28 @@ kernel void upsample_bicubic2d_backward(
       constant bool& align_corners [[buffer(7)]],                 \
       uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_UPSAMPLE_NEAREST_1D(NAME, EXACT, DTYPE)       \
+#define INSTANTIATE_UPSAMPLE_NEAREST_1D(NAME, EXACT, DTYPE)        \
   template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
   upsample_nearest1d<DTYPE, EXACT>(                                \
       constant DTYPE * inputData [[buffer(0)]],                    \
       device DTYPE * outputData [[buffer(1)]],                     \
-      constant ulong3 & input_strides [[buffer(2)]],              \
-      constant ulong3 & output_strides [[buffer(3)]],             \
-      constant long3 & input_sizes [[buffer(4)]],                 \
-      constant long3 & output_sizes [[buffer(5)]],                \
-      constant float2 & scales [[buffer(6)]],                     \
-      constant bool& align_corners [[buffer(7)]],                 \
+      constant ulong3 & input_strides [[buffer(2)]],               \
+      constant ulong3 & output_strides [[buffer(3)]],              \
+      constant long3 & input_sizes [[buffer(4)]],                  \
+      constant long3 & output_sizes [[buffer(5)]],                 \
+      constant float2 & scales [[buffer(6)]],                      \
       uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_UPSAMPLE_NEAREST_2D(NAME, EXACT, DTYPE)       \
+#define INSTANTIATE_UPSAMPLE_NEAREST_2D(NAME, EXACT, DTYPE)        \
   template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
   upsample_nearest2d<DTYPE, EXACT>(                                \
       constant DTYPE * inputData [[buffer(0)]],                    \
       device DTYPE * outputData [[buffer(1)]],                     \
-      constant ulong4 & input_strides [[buffer(2)]],              \
-      constant ulong4 & output_strides [[buffer(3)]],             \
-      constant long4 & input_sizes [[buffer(4)]],                 \
-      constant long4 & output_sizes [[buffer(5)]],                \
-      constant float2 & scales [[buffer(6)]],                     \
-      constant bool& align_corners [[buffer(7)]],                 \
+      constant ulong4 & input_strides [[buffer(2)]],               \
+      constant ulong4 & output_strides [[buffer(3)]],              \
+      constant long4 & input_sizes [[buffer(4)]],                  \
+      constant long4 & output_sizes [[buffer(5)]],                 \
+      constant float2 & scales [[buffer(6)]],                      \
       uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_NEAREST(DTYPE)                      \
@@ -910,8 +905,8 @@ INSTANTIATE_UPSAMPLE_ALL(float);
 INSTANTIATE_UPSAMPLE_ALL(half);
 INSTANTIATE_UPSAMPLE_ALL(bfloat);
 
-// Nearest 1d/2d forward is a pure gather, so cover every dtype the MPSGraph path
-// supported to avoid a coverage regression.
+// Nearest 1d/2d forward is a pure gather, so cover every dtype the MPSGraph
+// path supported to avoid a coverage regression.
 INSTANTIATE_UPSAMPLE_NEAREST(float);
 INSTANTIATE_UPSAMPLE_NEAREST(half);
 INSTANTIATE_UPSAMPLE_NEAREST(bfloat);
