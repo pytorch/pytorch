@@ -135,7 +135,7 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
 
         def _handle_container(obj, elements, make_container):
             """Handle container types with object identity preservation."""
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore [invalid-argument]
             mapped = list(map(to_map, elements))
             # Preserve object identity when all elements are unchanged (single-device case)
             if all(len(m) == 1 for m in mapped):
