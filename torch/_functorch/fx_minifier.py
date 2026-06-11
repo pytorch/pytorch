@@ -96,6 +96,40 @@ def is_load_tensor_node(node: fx.Node) -> bool:
     )
 
 
+# Accuracy minification should not compare direct outputs from these ops because
+# their values are undefined until a later write initializes them.
+_UNINITIALIZED_TENSOR_FACTORY_TARGETS = {
+    torch.ops.aten.empty.memory_format,
+    torch.ops.aten.empty.out,
+    torch.ops.aten.empty_strided.default,
+    torch.ops.aten.empty_strided.out,
+    torch.ops.aten.empty_like.default,
+    torch.ops.aten.empty_like.out,
+    torch.ops.aten.empty_permuted.default,
+    torch.ops.aten.empty_permuted.out,
+    torch.ops.aten.empty_quantized.default,
+    torch.ops.aten.empty_quantized.out,
+    torch.ops.aten._empty_affine_quantized.default,
+    torch.ops.aten._empty_affine_quantized.out,
+    torch.ops.aten._empty_per_channel_affine_quantized.default,
+    torch.ops.aten._empty_per_channel_affine_quantized.out,
+    torch.ops.aten.new_empty.default,
+    torch.ops.aten.new_empty.out,
+    torch.ops.aten.new_empty_strided.default,
+    torch.ops.aten.new_empty_strided.out,
+    torch.ops.prims.empty.default,
+    torch.ops.prims.empty_strided.default,
+    torch.ops.prims.empty_permuted.default,
+}
+
+
+def is_uninitialized_tensor_factory_node(node: fx.Node) -> bool:
+    return (
+        node.op == "call_function"
+        and node.target in _UNINITIALIZED_TENSOR_FACTORY_TARGETS
+    )
+
+
 # inplace modifies node/inps
 def _convert_node_to_placeholder(
     graph: fx.Graph, node: fx.Node, inps: list[torch.Tensor]
@@ -203,6 +237,7 @@ def minifier(
     skip_offload: bool = False,
     skip_sanity: bool = False,
     max_granularity: int | None = None,
+    skip_output_node: Callable[[fx.Node], bool] | None = None,
 ) -> tuple[fx.GraphModule, Sequence[torch.Tensor]]:
     """
     Minimizes a FX graph with given inputs, such that the resulting FX graph still returns True for module_fails.
@@ -217,6 +252,9 @@ def minifier(
     >>> minimize(failing_function, [torch.randn(5)], lambda fx_g, inps: fx_g(*inps))
 
     note: module_fails returns True if it fails.
+
+    skip_output_node: optional predicate for nodes that suffix truncation should
+        not use as candidate graph outputs.
     """
 
     failing_graph = fail_f.graph
@@ -324,7 +362,9 @@ def minifier(
         env: dict[fx.Node, fx.Node] = {}
         for idx, node in enumerate(cur_graph.nodes):
             new_node = new_graph.node_copy(node, lambda x: env[x])
-            if node.op not in ["placeholder", "output"]:
+            if node.op not in ["placeholder", "output"] and not (
+                skip_output_node and skip_output_node(node)
+            ):
                 # If idx is divisible by (granularity * 2), it would have been checked already.
                 if (
                     idx % granularity == 0

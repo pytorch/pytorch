@@ -47,6 +47,7 @@ from torch._dynamo.debug_utils import (
     run_fwd_maybe_bwd,
     same_two_models,
 )
+from torch._functorch.fx_minifier import is_uninitialized_tensor_factory_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_targets
 from torch.hub import tqdm
 
@@ -386,6 +387,7 @@ def dynamo_accuracy_minifier_backend(
             example_inputs,
             module_fails=fails_fn,
             dump_state=dump_state_fn,
+            skip_output_node=is_uninitialized_tensor_factory_node,
         )
     else:
         log.error("Input graph does not fail accuracy testing")
