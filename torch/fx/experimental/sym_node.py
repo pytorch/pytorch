@@ -228,6 +228,9 @@ class SymNode:
         self._expr_cache = result
         return result
 
+    def raw_expr(self) -> sympy.Basic:
+        return self._expr
+
     @property
     def hint(self) -> HintType | SymInt | SymFloat | SymBool:
         return self._hint
