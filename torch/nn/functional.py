@@ -3552,6 +3552,21 @@ def cross_entropy(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
+    # Fused cross-entropy for MPS: single Metal kernel replaces
+    # log_softmax + nll_loss, eliminating the [B, V] intermediate tensor.
+    if (
+        input.device.type == "mps"
+        and input.dim() == 2
+        and input.is_contiguous()
+        and target.dim() == 1
+        and target.dtype in (torch.int32, torch.int64)
+        and weight is None
+        and (input.dtype in (torch.float32, torch.float16, torch.bfloat16))
+    ):
+        return _mps_fused_cross_entropy(
+            input, target, ignore_index, label_smoothing, reduction
+        )
+
     return torch._C._nn.cross_entropy_loss(
         input,
         target,
@@ -3561,6 +3576,38 @@ def cross_entropy(
         ignore_index,
         label_smoothing,
     )
+
+
+def _mps_fused_cross_entropy(input, target, ignore_index, label_smoothing, reduction):
+    class _Fn(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, logits, target, ignore_index, label_smoothing):  # type: ignore[override]
+            loss, lse = torch.ops.aten._mps_fused_cross_entropy_forward(
+                logits, target, ignore_index, label_smoothing
+            )
+            ctx.save_for_backward(logits, target, lse)
+            ctx.ignore_index = ignore_index
+            ctx.label_smoothing = label_smoothing
+            return loss
+
+        @staticmethod
+        def backward(ctx, grad_output):  # type: ignore[override]
+            logits, target, lse = ctx.saved_tensors
+            grad_output = grad_output.contiguous()
+            grad_input = torch.ops.aten._mps_fused_cross_entropy_backward(
+                grad_output, logits, target, lse,
+                ctx.ignore_index, ctx.label_smoothing
+            )
+            return grad_input, None, None, None
+
+    loss = _Fn.apply(input, target, ignore_index, label_smoothing)
+    if reduction == "none":
+        return loss
+    elif reduction == "sum":
+        return loss.sum()
+    else:  # "mean"
+        count = (target != ignore_index).sum()
+        return loss.sum() / count.clamp(min=1)
 
 
 def binary_cross_entropy(
