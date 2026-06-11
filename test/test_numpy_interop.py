@@ -528,7 +528,6 @@ class TestNumPyInterop(TestCase):
                 lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
             )  # type: ignore[call-overload]
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @onlyCPU
     def test_parse_numpy_int(self, device):
         # https://github.com/pytorch/pytorch/issues/29252
