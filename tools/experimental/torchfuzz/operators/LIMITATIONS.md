@@ -161,3 +161,11 @@ model and affect all or most operators.
   element-wise form (`torch.max(a, b)`) are never tested.
 
 - `torch.cumprod` `dtype=` kwarg is never exercised.
+
+## Special Functions
+
+- Chebyshev polynomial degree `n` is limited to `[0, 5]` and input
+  `x` is not constrained to `[-1, 1]`. Higher degrees with
+  unclamped `x` cause rapid numerical overflow in fp16/bf16.
+
+- `torch.igammac` (upper incomplete gamma function) is absent.

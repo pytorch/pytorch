@@ -28,6 +28,7 @@ _OPERATOR_MODULES: list[str] = [
     "nonzero",
     "reduction",
     "scalar_pointwise",
+    "special_functions",
     "tensor_creation",
     "tensor_pointwise",
     "unique",
