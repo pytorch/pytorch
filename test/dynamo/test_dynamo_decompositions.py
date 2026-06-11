@@ -5,6 +5,7 @@ import unittest
 import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -599,6 +600,126 @@ class TestDynamoDecompositionsNumerics(TestCase):
         expected = fn(x.clone(), tensor1, tensor2, value)
         actual = torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value)
         self.assertEqual(expected, actual)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addc_ops_low_precision_cuda_opmath(self, device):
+        if torch.device(device).type != "cuda":
+            self.skipTest("requires CUDA")
+
+        def addcmul_scalar(x, tensor1, tensor2, value):
+            return x.addcmul_(tensor1, tensor2, value=0.5)
+
+        def addcmul_tensor(x, tensor1, tensor2, value):
+            return x.addcmul_(tensor1, tensor2, value=value)
+
+        def addcdiv_scalar(x, tensor1, tensor2, value):
+            return x.addcdiv_(tensor1, tensor2, value=-0.01)
+
+        def addcdiv_tensor(x, tensor1, tensor2, value):
+            return x.addcdiv_(tensor1, tensor2, value=value)
+
+        for dtype in (torch.float16, torch.bfloat16):
+            torch.manual_seed(42)
+            x = torch.randn(128, device=device, dtype=dtype)
+            tensor1 = torch.randn(128, device=device, dtype=dtype)
+            tensor2 = torch.randn(128, device=device, dtype=dtype).abs() + 0.1
+            value = torch.tensor(-0.01)
+
+            for fn in (
+                addcmul_scalar,
+                addcmul_tensor,
+                addcdiv_scalar,
+                addcdiv_tensor,
+            ):
+                expected = fn(x.clone(), tensor1, tensor2, value)
+                actual = torch.compile(fn, backend="eager", fullgraph=True)(
+                    x.clone(), tensor1, tensor2, value
+                )
+                self.assertEqual(expected, actual, atol=0, rtol=0)
+
+        x = torch.randn(128, device=device, dtype=torch.float32)
+        tensor1 = torch.randn(128, device=device, dtype=torch.float16)
+        tensor2 = torch.randn(128, device=device, dtype=torch.float16).abs() + 0.1
+        value = torch.tensor(-0.01)
+
+        for fn in (
+            addcmul_scalar,
+            addcmul_tensor,
+            addcdiv_scalar,
+            addcdiv_tensor,
+        ):
+            expected = fn(x.clone(), tensor1, tensor2, value)
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(
+                x.clone(), tensor1, tensor2, value
+            )
+            self.assertEqual(expected, actual, atol=1e-7, rtol=1e-6)
+
+        x = torch.randn(128, device=device, dtype=torch.float16)
+        tensor1 = torch.randn(128, device=device, dtype=torch.complex64)
+        tensor2 = torch.randn(128, device=device, dtype=torch.float16).abs() + 0.1
+        value = torch.tensor(-0.01)
+
+        for fn in (addcmul_tensor, addcdiv_tensor):
+            with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+                fn(x.clone(), tensor1, tensor2, value)
+            with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    x.clone(), tensor1, tensor2, value
+                )
+
+        tensor1 = torch.randn(128, device=device, dtype=torch.float16)
+        value = torch.tensor(-0.01 + 1j)
+
+        for fn in (addcmul_tensor, addcdiv_tensor):
+            with self.assertRaisesRegex(RuntimeError, "cannot be converted"):
+                fn(x.clone(), tensor1, tensor2, value)
+            with self.assertRaisesRegex(
+                (RuntimeError, Unsupported),
+                "cannot be converted|UnsupportedFakeTensorException",
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    x.clone(), tensor1, tensor2, value
+                )
+
+        for fn in (addcmul_tensor, addcdiv_tensor):
+            with self.assertRaisesRegex(RuntimeError, "cannot be converted"):
+                fn(x.clone(), tensor1, tensor2, 1 + 2j)
+            with self.assertRaisesRegex(RuntimeError, "cannot be converted"):
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    x.clone(), tensor1, tensor2, 1 + 2j
+                )
+
+        vector_value = torch.tensor([-0.01, -0.02], device=device)
+        for fn in (addcmul_tensor, addcdiv_tensor):
+            with self.assertRaisesRegex(TypeError, "must be Number"):
+                fn(x.clone(), tensor1, tensor2, vector_value)
+            with self.assertRaisesRegex((TypeError, Unsupported), "must be Number"):
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    x.clone(), tensor1, tensor2, vector_value
+                )
+
+        for dtype in (torch.int32, torch.bool):
+            x = torch.ones(128, device=device, dtype=dtype)
+            for fn in (addcmul_scalar, addcdiv_scalar):
+                with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+                    fn(x.clone(), tensor1, tensor2, value)
+                with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+                    torch.compile(fn, backend="eager", fullgraph=True)(
+                        x.clone(), tensor1, tensor2, value
+                    )
+
+        x = torch.ones(128, device=device, dtype=torch.complex32)
+        tensor1 = torch.randn(128, device=device, dtype=torch.complex32)
+        tensor2 = torch.randn(128, device=device, dtype=torch.complex32)
+
+        for fn in (addcmul_scalar, addcdiv_scalar):
+            with self.assertRaisesRegex(NotImplementedError, "ComplexHalf"):
+                fn(x.clone(), tensor1, tensor2, value)
+            with self.assertRaisesRegex(NotImplementedError, "ComplexHalf"):
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    x.clone(), tensor1, tensor2, value
+                )
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
