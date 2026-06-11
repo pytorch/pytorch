@@ -298,3 +298,19 @@ FastSet
 
 # torch/headeronly/util/SmallBuffer.h
 SmallBuffer
+
+# torch/headeronly/util/irange.h
+irange
+integer_range
+
+# torch/headeronly/util/Load.h
+load
+
+# torch/headeronly/util/Unroll.h
+ForcedUnroll
+
+# torch/headeronly/util/python_stub.h
+# PyObject is a global forward declaration (struct _object), no namespaced symbol
+
+# torch/headeronly/util/static_tracepoint_elfx86.h
+# TORCH_SDT_* are preprocessor macros, not tested at runtime
