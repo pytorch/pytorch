@@ -6338,9 +6338,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"Constraints violated.*"
-            r"\n.*You marked 2\*dx as dynamic but your code specialized it to be a constant \(2\).*"
-            r"\n.*You marked dx \+ 1 as dynamic but your code specialized it to be a constant \(2\).*",
+            r"Expected input.*to be equal to dx \+ 1, but this equality "
+            r"would specialize dx to the example value",
         ):
             export(m, (x, y), dynamic_shapes=conflicting)
 
@@ -7538,6 +7537,11 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         new_x = torch.randn(3)
         self.assertEqual(ep.module()(new_x), new_x + 1)
+
+        for dim in (2 * n, n + 1):
+            ep = export(Foo(), (torch.randn(2),), dynamic_shapes={"x": {0: dim}})
+            new_x = torch.randn(4)
+            self.assertEqual(ep.module()(new_x), new_x + 1)
 
     def test_derived_dim_root_unbacked_before_derived_runtime_assert(self):
         class Foo(torch.nn.Module):
@@ -19310,6 +19314,22 @@ def forward(self, x, y):
     return (select,)""",
             ignore_empty_lines=True,
         )
+
+    def test_scalar_tensor_index(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x[y]
+
+        x = torch.randn((3, 4))
+        for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            with self.subTest(dtype=dtype):
+                y = torch.tensor(1, dtype=dtype)
+                traced = export(MyModel(), (x, y))
+                y2 = torch.tensor(2, dtype=dtype)
+                self.assertEqual(
+                    traced.module()(x, y2),
+                    MyModel()(x, y2),
+                )
 
     def test_is_fx_tracing(self):
         class M(torch.nn.Module):

@@ -6146,6 +6146,17 @@ class ShapeEnv:
                 # - Raise when the equation was violated by the given input shape values.
                 # - Otherwise issue a guard to constrain them.
                 eq = sympy.Eq(expr1, expr2_)
+                simplified_eq = sympy.simplify(eq)
+                if (
+                    not (simplified_eq is sympy.S.true or simplified_eq is True)
+                    and expr1.free_symbols
+                    and expr1.free_symbols <= expr2_.free_symbols
+                ):
+                    raise ConstraintViolationError(
+                        f"Expected input {srcEq.name} to be equal to "
+                        f"{fn(sympy.Symbol(debug_name))}, but this equality "
+                        f"would specialize {debug_name} to the example value"
+                    )
                 try:
                     concrete_val = self.evaluate_expr(eq)
                 except GuardOnDataDependentSymNode:

@@ -467,6 +467,7 @@ class _PhantomRoot:
     name: str
     constraint_range: "StrictMinMaxConstraint"
     val: int
+    do_not_specialize_zero_one: bool
 
 
 @dataclasses.dataclass
@@ -577,7 +578,7 @@ def _process_equalities(
                     source=torch._dynamo.source.ConstantSource(constraint.root.name),
                     dynamic_dim=torch.fx.experimental.symbolic_shapes.DimDynamic.DYNAMIC,
                     constraint_dim=constraint.root.constraint_range,
-                    do_not_specialize_zero_one=True,
+                    do_not_specialize_zero_one=constraint.root.do_not_specialize_zero_one,
                 )
                 phantom_symbols[constraint.root.name] = root
 
@@ -1139,13 +1140,15 @@ def _process_dynamic_shapes(
                 )
             elif dim_root.__name__ not in phantom_roots:
                 # create a phantom root
+                root_val = root_value()
                 root = _PhantomRoot(  # type: ignore[assignment]
                     name=dim_root.__name__,
                     constraint_range=StrictMinMaxConstraint(
                         vr=ValueRanges(lower=dim_root.min, upper=dim_root.max),
                         warn_only=False,
                     ),
-                    val=root_value(),
+                    val=root_val,
+                    do_not_specialize_zero_one=root_val in (0, 1),
                 )
                 phantom_roots[dim_root.__name__] = root  # type: ignore[assignment]
             else:
