@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import \
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
+    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
      skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver,
      skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
@@ -2041,10 +2041,10 @@ class TestLinalg(TestCase):
         test_cases = [
             # shape, error_ords, np_only_ords, dim
             ((0, 0), [-1, -2, -inf], [inf, 1, 2], None),
-            ((0, S), [-2, -inf],     [inf, 2],    None),
-            ((S, 0), [-1, -2],       [1, 2],      None),
-            ((S, S, 0), [], [],      (0, 1)),
-            ((1, S, 0), [], [],      (0, 1)),
+            ((0, S), [-2, -inf], [inf, 2], None),
+            ((S, 0), [-1, -2], [1, 2], None),
+            ((S, S, 0), [], [], (0, 1)),
+            ((1, S, 0), [], [], (0, 1)),
             ((0, 0, S), [-1, -2, -inf], [inf, 1, 2], (0, 1)),
             ((0, 0, S), [-1, -2, -inf], [inf, 1, 2], (1, 0)),
         ]
