@@ -2,6 +2,7 @@
 
 
 import functools
+import operator
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager, ExitStack
@@ -17,6 +18,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.variables.higher_order_ops import LocalMapWrappedHigherOrderVariable
+from torch._functorch._aot_autograd.functional_utils import _is_functional_graph
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -36,9 +38,23 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHINDUCTOR,
     TestCase,
 )
+from torch.utils._triton import has_triton_package
 
 
 nested_compile_region = torch.compiler.nested_compile_region
+
+if has_triton_package():
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def add_scalar_inplace_kernel(Y_ptr, addend, n_elems, BLOCK: tl.constexpr):
+        pid = tl.program_id(0)
+        offs = pid * BLOCK + tl.arange(0, BLOCK)
+        mask = offs < n_elems
+        y = tl.load(Y_ptr + offs, mask=mask)
+        y = y + addend
+        tl.store(Y_ptr + offs, y, mask=mask)
 
 
 @contextmanager
@@ -686,6 +702,116 @@ class GraphModule(torch.nn.Module):
             return (torch.randn(80, 80),)
 
         ap_style_initial_capture(model, inputs_fn)
+
+    @unittest.skipIf(*get_skip_reasons())
+    @unittest.skipIf(not has_triton_package(), "requires triton package")
+    def test_mutations_triton_deferred_inlining(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional,
+            triton_kernel_wrapper_mutation,
+        )
+
+        def triton_add_inplace_(y, addend=10000):
+            n = y.numel()
+            block = 1024
+
+            def grid(meta):
+                return (triton.cdiv(n, meta["BLOCK"]),)
+
+            add_scalar_inplace_kernel[grid](y, addend, n, BLOCK=block)
+            return y
+
+        @local_map(
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def replicate_linear(w, x):
+            y = torch.matmul(x, w.t())
+            triton_add_inplace_(y)
+            return y
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Linear(80, 80)
+
+            def forward(self, x):
+                return replicate_linear(self.w.weight, x)
+
+        joint = ap_style_initial_capture(MyModule(), lambda: (torch.randn(80, 80),))
+        local_map_gms = []
+        for node in joint.graph.nodes:
+            if "call_local_map" not in node.name:
+                continue
+            closure = node.target.__closure__
+            self.assertIsNotNone(closure)
+            gms = [
+                cell.cell_contents
+                for cell in closure
+                if isinstance(cell.cell_contents, torch.fx.GraphModule)
+            ]
+            self.assertEqual(len(gms), 1)
+            local_map_gms.append(gms[0])
+
+        self.assertEqual(len(local_map_gms), 2)
+        fw_gm = next(gm for gm in local_map_gms if not gm.meta["is_backward"])
+        fw_call_nodes = [
+            node for node in fw_gm.graph.nodes if node.op == "call_function"
+        ]
+        fw_targets = {node.target for node in fw_call_nodes}
+        functional_nodes = [
+            node
+            for node in fw_call_nodes
+            if node.target is triton_kernel_wrapper_functional
+        ]
+        self.assertEqual(len(functional_nodes), 1)
+        self.assertNotIn(triton_kernel_wrapper_mutation, fw_targets)
+
+        output_node = next(node for node in fw_gm.graph.nodes if node.op == "output")
+        fw_returns = output_node.args[0]
+        self.assertIsInstance(fw_returns, tuple)
+        self.assertEqual(fw_returns[0].target, operator.getitem)
+        self.assertIs(fw_returns[0].args[0], functional_nodes[0])
+        self.assertEqual(fw_returns[0].args[1], "Y_ptr")
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_mutations_index_put_deferred_inlining(self):
+        @local_map(
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def replicate_routing(w, x):
+            y = torch.matmul(x, w.t())
+            idx = torch.argsort(x[:, 0])
+            out = torch.empty_like(y)
+            out[idx] = y
+            return out
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Linear(80, 80)
+
+            def forward(self, x):
+                return replicate_routing(self.w.weight, x)
+
+        joint = ap_style_initial_capture(
+            MyModule(), lambda: (torch.randn(80, 80, requires_grad=True),)
+        )
+        error, _ = _is_functional_graph(joint.graph)
+        self.assertIsNone(error)
 
     @unittest.skipIf(*get_skip_reasons())
     def test_none_placements(self):
