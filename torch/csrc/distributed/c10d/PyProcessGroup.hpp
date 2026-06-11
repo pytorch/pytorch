@@ -341,6 +341,35 @@ class PyProcessGroup : public ProcessGroup {
         srcRank,
         tag);
   }
+
+  // startCoalescing/endCoalescing dispatch into the Python ProcessGroup so a
+  // C++ caller (e.g. functional collectives in Functional.cpp) and the Python
+  // _start_coalescing/_end_coalescing bindings both reach the Python
+  // start_coalescing/end_coalescing overrides; without them the base
+  // ProcessGroup routes through getBackend(), which a backend-less Python PG
+  // does not have. The override is passed a c10::Device (torch.device) rather
+  // than the bare DeviceType, matching the device the bindings accept.
+  void startCoalescing(c10::DeviceType deviceType) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function override = pybind11::get_override(
+        static_cast<const ProcessGroup*>(this), "start_coalescing");
+    if (override) {
+      override(c10::Device(deviceType));
+      return;
+    }
+    return ProcessGroup::startCoalescing(deviceType);
+  }
+
+  c10::intrusive_ptr<Work> endCoalescing(c10::DeviceType deviceType) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function override = pybind11::get_override(
+        static_cast<const ProcessGroup*>(this), "end_coalescing");
+    if (override) {
+      auto o = override(c10::Device(deviceType));
+      return c10::make_intrusive<PyWorkHolder>(o);
+    }
+    return ProcessGroup::endCoalescing(deviceType);
+  }
 };
 
 class TORCH_PYTHON_API PythonOnCompletionHook {
