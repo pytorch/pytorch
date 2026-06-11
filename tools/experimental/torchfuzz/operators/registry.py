@@ -20,6 +20,7 @@ _OPERATOR_MODULES: list[str] = [
     "nn_functional",
     "nonzero",
     "scalar_pointwise",
+    "tensor_creation",
     "tensor_pointwise",
     "unique",
 ]
