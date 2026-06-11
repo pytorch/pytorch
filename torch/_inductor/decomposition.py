@@ -61,6 +61,8 @@ quantized_decomposed = torch.ops.quantized_decomposed
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
+        aten.adaptive_max_pool2d,
+        aten.adaptive_max_pool3d,
         aten.index_select,
         aten.addmv,
         aten.arange,
@@ -319,7 +321,13 @@ def convolution_backward(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if not output_mask[2] or not is_gpu(grad_output.device.type):
         return NotImplemented
-    grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
+    if statically_known_true(input.size(1) == 0) and statically_known_true(
+        bias_sizes[0] != 0
+    ):
+        # deal with the `input_channel=0` case
+        grad_bias = grad_output.new_zeros(bias_sizes)
+    else:
+        grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
     grad_inp, grad_weight, _ = aten.convolution_backward(
         grad_output,
         input,
@@ -728,7 +736,8 @@ def full_like(
         return result.to(memory_format=memory_format)
 
     else:
-        assert layout == torch.strided
+        if layout != torch.strided:
+            raise AssertionError(f"expected torch.strided layout, got {layout}")
         shape, permutation = _get_shape_permutation_like(self)
         result = torch.full(
             shape,
@@ -1201,24 +1210,6 @@ def max_pool3d_with_indices(
     )
 
 
-@register_decomposition(aten.adaptive_max_pool2d)
-def adaptive_max_pool2d(
-    x: torch.Tensor, output_size: list[int]
-) -> tuple[torch.Tensor, torch.Tensor]:
-    *batch, h_in, w_in = x.shape
-    h_out, w_out = output_size
-
-    if h_out == 0 or w_out == 0:
-        o_size = [*batch, h_out, w_out]
-        return x.new_empty(o_size), x.new_empty(o_size, dtype=torch.int64)
-
-    if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
-        return aten.max_pool2d_with_indices(x, kernel_size)
-
-    return NotImplemented
-
-
 @register_decomposition(aten.searchsorted.Scalar)
 def searchsorted_scalar(
     sorted_sequence: torch.Tensor,
@@ -1255,7 +1246,7 @@ def bucketize_scalar(
     ).squeeze(0)
 
 
-@register_decomposition(aten.rrelu_with_noise_functional)
+@decomp.register_decomposition(aten.rrelu_with_noise_functional, extra_random_decomps)
 def rrelu_with_noise_functional(
     self: torch.Tensor,
     noise: torch.Tensor,
@@ -1288,8 +1279,12 @@ def repeat_interleave_Tensor(
         return NotImplemented
     if repeat.device.type == "mps":
         return NotImplemented
-    assert repeat.dtype in [torch.int32, torch.int64]
-    assert repeat.ndim == 1
+    if repeat.dtype not in [torch.int32, torch.int64]:
+        raise AssertionError(
+            f"expected repeat dtype int32 or int64, got {repeat.dtype}"
+        )
+    if repeat.ndim != 1:
+        raise AssertionError(f"expected repeat.ndim == 1, got {repeat.ndim}")
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
     indices = torch.searchsorted(
@@ -1312,9 +1307,8 @@ def conv1d_to_conv2d(
     # input:  (N, C_in, L_in)
     # weight: (C_out, C_in // groups, K)
     # bias:   (C_out,)
-    assert input.dim() == 3 and weight.dim() == 3, (
-        "Expect (N,C_in,L) and (C_out,C_in//groups,K)"
-    )
+    if not (input.dim() == 3 and weight.dim() == 3):
+        raise AssertionError("Expect (N,C_in,L) and (C_out,C_in//groups,K)")
 
     # pyrefly: ignore [bad-assignment]
     stride = stride[0]

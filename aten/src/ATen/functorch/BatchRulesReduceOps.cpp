@@ -75,6 +75,14 @@ static Tensor any_decomp(const Tensor& self) {
   return at::any(self.flatten(), 0, false);
 }
 
+static Tensor count_nonzero_decomp(
+  const Tensor& self, std::optional<int64_t> dim) {
+if (dim.has_value()) {
+  return at::count_nonzero(self, IntArrayRef{*dim});
+}
+return at::count_nonzero(self, range(0, self.dim()));
+}
+
 enum class ReductionCase:uint8_t { DimArray, Dim };
 
 // Macros and templates have a difficult time dealing with enums,
@@ -373,7 +381,8 @@ static std::tuple<Tensor, std::optional<int64_t>> searchsorted_batch_rule(
       auto self_ = reshape_dim_into(*self_bdim, -1, self);
       auto result = at::searchsorted(buckets, self_, out_int32, right, side, sorter_);
       result = reshape_dim_outof(-1, bdim_size, result);
-      return std::make_tuple(result, result.dim() - 2);
+      auto result_bdim = result.dim() - 2;
+      return std::make_tuple(std::move(result), result_bdim);
     }
     TORCH_INTERNAL_ASSERT(false);
   }
@@ -464,6 +473,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_WITH_KEEPDIM_ARG(argmin);
   m.impl("bucketize.Tensor", bucketize_decomp_Tensor);
   m.impl("bucketize.Scalar", bucketize_decomp_Scalar);
+  m.impl("count_nonzero", count_nonzero_decomp);
   REDUCTION_BOXED_ARGS(count_nonzero.dim_IntList, 1, KEEPDIM_CASE_FALSE, -1);
   REDUCTION_NO_KEEPDIM_ARG(cummax);
   REDUCTION_NO_KEEPDIM_ARG(cummin);
