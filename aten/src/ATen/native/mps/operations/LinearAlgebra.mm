@@ -1329,6 +1329,45 @@ static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size
   });
 }
 
+static void cholesky_panel_impl(const Tensor& out, const Tensor& info_, int64_t N, int64_t B, bool upper) {
+  auto stream = getCurrentMPSStream();
+
+  constexpr auto NB = 96;
+  auto diagPanelPSO = lib.getPipelineStateForFunc(upper ? "factorDiagonalPanelU" : "factorDiagonalPanelL");
+  auto trsmPSO = lib.getPipelineStateForFunc(upper ? "applyPanelTRSMU" : "applyPanelTRSML");
+  const auto big = N - NB >= 1024;
+  const auto BM = big ? 64 : 32;
+  const auto BN = 64;
+  const auto NSG = big ? 4 : 2;
+  auto syrkPSO =
+      lib.getPipelineStateForFunc(fmt::format("applySYRKTrailing{}_{}_{}_{}", upper ? "U" : "L", BM, BN, NSG));
+
+  auto numPanels = (N + NB - 1) / NB;
+
+  @autoreleasepool {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      auto computeEncoder = stream->commandEncoder();
+      mtl_setArgs(computeEncoder, out, info_, N, NB);
+      for (auto k = 0; k < numPanels; k++) {
+        mtl_setArgs<4>(computeEncoder, k);
+        [computeEncoder setComputePipelineState:diagPanelPSO];
+        [computeEncoder dispatchThreadgroups:MTLSizeMake(B, 1, 1) threadsPerThreadgroup:MTLSizeMake(96, 1, 1)];
+
+        auto T = N - (k + 1) * NB;
+        if (T > 0) {
+          [computeEncoder setComputePipelineState:trsmPSO];
+          [computeEncoder dispatchThreadgroups:MTLSizeMake(B, (T + 31) / 32, 1)
+                         threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+
+          [computeEncoder setComputePipelineState:syrkPSO];
+          [computeEncoder dispatchThreadgroups:MTLSizeMake((T + BN - 1) / BN, (T + BM - 1) / BM, B)
+                         threadsPerThreadgroup:MTLSizeMake(NSG * 32, 1, 1)];
+        }
+      }
+    });
+  }
+}
+
 static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper) {
   auto input_sizes = out.sizes();
 
@@ -1338,6 +1377,12 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
+  auto info_ = info.dim() >= 2 ? info.view({B}) : info;
+  auto info_sizes = info.sizes();
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_2_PLUS)) {
+    return cholesky_panel_impl(out, info_, N, B, upper);
+  }
+  info_.fill_(0);
 
   auto factorDiagonalPSO = lib.getPipelineStateForFunc(upper ? "factorDiagonalBlockU" : "factorDiagonalBlockL");
   auto applyTRSMPSO = lib.getPipelineStateForFunc(upper ? "applyTRSMU" : "applyTRSML");
@@ -1345,10 +1390,6 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
 
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;
-
-  auto info_ = info.dim() >= 2 ? info.view({B}) : info;
-  auto info_sizes = info.sizes();
-  info_.fill_(0);
 
   MTLSize threadGroupSize = MTLSizeMake(32, 8, 1);
 
