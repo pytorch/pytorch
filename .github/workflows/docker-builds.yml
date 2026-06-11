@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: docker-builds
 
 on:
@@ -110,11 +111,19 @@ jobs:
           username: pytorch
           password: ${{ secrets.GHCR_PAT }}
 
-      - name: Set up Docker Buildx (remote)
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: remote
-          endpoint: ${{ matrix.buildkit_addr }}
+      - name: Set up Docker Buildx (remote, no bootstrap)
+        shell: bash
+        # NOT docker/setup-buildx-action: it runs `buildx inspect --bootstrap`,
+        # whose ~20s connect timeout fails on a cold/burst start before the
+        # autoscaled pool can add a pod. `create` (no --bootstrap) just registers
+        # the builder; build.sh retries the build to wait out scale-up.
+        run: |
+          set -ex
+          docker buildx create \
+            --name remote-buildkit \
+            --driver remote \
+            --use \
+            "${{ matrix.buildkit_addr }}"
 
       - name: Compute image tag
         id: tag
