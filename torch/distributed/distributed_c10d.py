@@ -39,6 +39,7 @@ from torch._C._distributed_c10d import (
     get_debug_level,
     PrefixStore,
     ProcessGroup,
+    ReconfigureOptions,
     ReduceOp,
     ReduceOptions,
     ReduceScatterOptions,
@@ -2075,23 +2076,17 @@ def _new_process_group_helper(
         group_size,
     )
     backend_config = BackendConfig(backend)
+    pg_backend_set = False
     # Set the default backend when single backend is passed in.
     if "," not in str(backend) and ":" not in str(backend):
         if backend not in Backend.backend_type_map:
             raise AssertionError(f"Unknown backend type {backend}")
-        if backend == Backend.UNDEFINED:
-            # Currently when backend is UNDEFINED, only one backend will be initialized
-            # we use nccl (if cuda is available) or gloo as default backend
-            # so we can correctly call getDefaultBackend which in ProcessGroup.
-            if Backend.NCCL in backend_config.get_device_backend_map().values():
-                pg._set_default_backend(ProcessGroup.BackendType.NCCL)
-            else:
-                pg._set_default_backend(ProcessGroup.BackendType.GLOO)
-        else:
+        if backend != Backend.UNDEFINED:
             pg._set_default_backend(Backend.backend_type_map[backend])
+            pg_backend_set = True
     # In order to correctly call pg._has_hooks(), we should set the default backend
     # when multi backend is passed in
-    else:
+    if not pg_backend_set:
         if Backend.NCCL in backend_config.device_backend_map.values():
             pg._set_default_backend(ProcessGroup.BackendType.NCCL)
         elif Backend._plugins.keys():
@@ -5848,16 +5843,31 @@ def new_group(
     default group's bound device).
     """
     if _use_torchcomms_enabled():
-        return _new_group_via_split_group(
-            ranks=ranks,
-            timeout=timeout,
-            backend=backend,
-            pg_options=pg_options,
-            use_local_synchronization=use_local_synchronization,
-            group_desc=group_desc,
-            device_id=device_id,
-            sort_ranks=sort_ranks,
+        # split_group can only split the parent's existing communicator, so it
+        # cannot produce a child whose backend differs from the parent's. A
+        # "fake" subgroup of a real parent -- how DeviceMesh creates disabled /
+        # unflattened dims, with use_local_synchronization for hashed names -- is
+        # exactly that case: route it through the normal path, which builds the
+        # FakeProcessGroup directly (see ``_new_group_with_tag``). When the
+        # requested backend matches the parent (including a fake parent), split
+        # delegation is fine.
+        parent_backend, _ = _world.pg_map[_get_default_group()]
+        is_fake_subgroup = (
+            backend is not None
+            and str(backend).lower() == "fake"
+            and str(backend).lower() != str(parent_backend).lower()
         )
+        if not is_fake_subgroup:
+            return _new_group_via_split_group(
+                ranks=ranks,
+                timeout=timeout,
+                backend=backend,
+                pg_options=pg_options,
+                use_local_synchronization=use_local_synchronization,
+                group_desc=group_desc,
+                device_id=device_id,
+                sort_ranks=sort_ranks,
+            )
 
     return _new_group_with_tag(
         ranks,
@@ -6905,3 +6915,66 @@ def record_comm(name: str):
         yield
     finally:
         torch._C._distributed_c10d._set_comm_profiling_name(prev)
+
+
+def _supports_reconfigure(group: ProcessGroup | None = None) -> bool:
+    """
+    Return whether ``group`` supports the reconfigure-based fault tolerance API.
+
+    Args:
+        group (ProcessGroup, optional): The process group to query. If ``None``,
+            the default process group is used.
+    """
+    pg = group or _get_default_group()
+    return pg.supports_reconfigure
+
+
+def _get_reconfigure_handle(group: ProcessGroup | None = None) -> str:
+    """
+    Return an opaque reconfigure handle for ``group``.
+
+    The handle encodes the information peers exchange out-of-band to
+    (re)initialize the communicator via :func:`_reconfigure`.
+
+    Args:
+        group (ProcessGroup, optional): The process group to query. If ``None``,
+            the default process group is used.
+    """
+    pg = group or _get_default_group()
+    return pg.get_reconfigure_handle()
+
+
+def _reconfigure(
+    uuid: int,
+    handles: set[str] | list[str],
+    group: ProcessGroup | None = None,
+    timeout: timedelta | None = None,
+    hints: dict[str, str] | None = None,
+) -> Work:
+    """
+    Reconfigure ``group`` with a new set of peers for fault tolerance.
+
+    Args:
+        uuid (int): Uniquely identifies this instance of the communicator. Pass
+            a fresh value on every (re)initialization.
+        handles (set[str] or list[str]): One reconfigure handle per peer, as
+            returned by :func:`_get_reconfigure_handle`. A list assigns ranks by
+            position; a set lets the backend choose the rank assignment.
+        group (ProcessGroup, optional): The process group to reconfigure. If
+            ``None``, the default process group is used.
+        timeout (timedelta, optional): How long to allow reconfiguration before
+            failing. ``None`` uses the backend's default timeout.
+        hints (dict[str, str], optional): Backend-specific configuration.
+
+    Returns:
+        Work: An async work handle for the reconfigure operation.
+    """
+    pg = group or _get_default_group()
+    opts = ReconfigureOptions()
+    opts.uuid = uuid
+    opts.handles = handles
+    if timeout is not None:
+        opts.timeout = timeout
+    if hints is not None:
+        opts.hints = hints
+    return pg.reconfigure(opts)
