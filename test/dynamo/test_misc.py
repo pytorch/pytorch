@@ -2278,6 +2278,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.tensor([1.0, 2.0, 3.0])
         self.assertEqual(f(x), x + 1)
 
+    def test_check_tensor_predicate_raises_clear_error(self):
+        @torch.compile(backend="eager")
+        def f(x):
+            torch._check(x > 0)
+            return torch.log(x)
+
+        with self.assertRaisesRegex(
+            TypeError, r"cond must be a bool.*torch[.]_check_tensor_all"
+        ) as cm:
+            f(torch.rand(1))
+
+        self.assertNotIn("FakeTensor", str(cm.exception))
+
     def test_check_with_closure_constant(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(x):
@@ -10105,6 +10118,93 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(counter.frame_count, 1)
 
+    @torch.compiler.config.patch(dynamic_values="1111")
+    def test_dynamic_values_int(self):
+        builder._DYNAMIC_VALUES = None
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        # Warm up with the sentinel value 1111 → the int gets marked dynamic.
+        fn(1111)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_values="1111")
+    def test_dynamic_values_tensor(self):
+        builder._DYNAMIC_VALUES = None
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Warm up with a tensor whose dim equals 1111 → that dim becomes dynamic.
+        fn(torch.randn(1111))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(assume_static_by_default=True)
+    @torch.compiler.config.patch(dynamic_values="1111")
+    def test_dynamic_values_no_match_specializes(self):
+        builder._DYNAMIC_VALUES = None
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        fn(2)
+        fn(3)
+        fn(4)
+
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(dynamic_values="1111")
+    def test_dynamic_values_graph_break(self):
+        """Motivating use case: graph breaks drop dynamic-ness in eager code,
+        but the sentinel value lets the second compiled region re-mark dynamic."""
+        builder._DYNAMIC_VALUES = None
+        counter = CompileCounter()
+
+        def foo(x):
+            return x * x
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            x = x * x
+            torch._dynamo.graph_break()
+            return foo(x)
+
+        fn(torch.randn(1111))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        # 2 frames (one per side of the graph break), no recompiles on either.
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(dynamic_values="1111, 2222")
+    def test_dynamic_values_multiple(self):
+        builder._DYNAMIC_VALUES = None
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Both sentinel values trigger dynamic marking.
+        fn(torch.randn(2222))
+        fn(torch.randn(7))
+        fn(torch.randn(9))
+
+        self.assertEqual(counter.frame_count, 1)
+
     @torch.compiler.config.patch(unbacked_sources="L['x']")
     def test_unbacked_sources_tensor(self):
         counter = CompileCounter()
@@ -15166,6 +15266,71 @@ fn
             "Reconstruct user defined class without a source",
         ):
             fn(t)
+
+    @expectedFailureDynamic
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_over_nonconstant(self):
+        class Outer:
+            def __init__(self):
+                self.scale = 3
+
+        outer = Outer()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(t):
+            class Wrapper:
+                def __init__(self, t):
+                    self.t = t
+
+                def compute(self):
+                    return self.t.sin() * outer.scale
+
+            obj = Wrapper(t)
+            return obj.compute()
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), t.sin() * outer.scale)
+        # Same value: the EQUALS_MATCH guard on outer.scale holds, no recompile.
+        self.assertEqual(fn(t), t.sin() * outer.scale)
+        self.assertEqual(cnt.frame_count, 1)
+        # Mutating the closed-over non-constant trips the guard -> recompile with
+        # the new value (proves scale is guarded, not baked in as a constant).
+        outer.scale = 5
+        self.assertEqual(fn(t), t.sin() * outer.scale)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @expectedFailureDynamic
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_over_nonconstant_method(self):
+        class Outer:
+            def __init__(self):
+                self.scale = 2
+
+            def get_scale(self):
+                return self.scale
+
+        outer = Outer()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(t):
+            class Wrapper:
+                def keys(self):
+                    return outer.get_scale()
+
+            return Wrapper().keys() + t.sum()
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), outer.get_scale() + t.sum())
+        self.assertEqual(fn(t), outer.get_scale() + t.sum())
+        self.assertEqual(cnt.frame_count, 1)
+        # Mutating the closed-over value re-guards and recompiles.
+        outer.scale = 7
+        self.assertEqual(fn(t), outer.get_scale() + t.sum())
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_dunder_weakref(self):
         class Foo:
