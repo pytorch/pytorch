@@ -10834,6 +10834,46 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
+    def test_swap_allows_tensor_weakref(self):
+        from torch.utils.weak import TensorWeakRef
+
+        t1 = torch.nn.Parameter(torch.zeros(2))
+        t2 = torch.nn.Parameter(torch.ones(2))
+        t2.foo = "bar"
+
+        t1_ref = TensorWeakRef(t1)
+        t2_ref = TensorWeakRef(t2)
+        self.assertIs(t1_ref.ref, t1_ref)
+        self.assertIs(t1_ref(), t1)
+        self.assertIs(t2_ref(), t2)
+        self.assertTrue(
+            all(isinstance(wr, TensorWeakRef) for wr in weakref.getweakrefs(t1))
+        )
+        self.assertTrue(
+            all(isinstance(wr, TensorWeakRef) for wr in weakref.getweakrefs(t2))
+        )
+
+        torch.utils.swap_tensors(t1, t2)
+
+        self.assertIs(t1_ref(), t1)
+        self.assertIs(t2_ref(), t2)
+        self.assertEqual(t1, torch.ones(2))
+        self.assertEqual(t2, torch.zeros(2))
+        self.assertEqual(t1.foo, "bar")
+
+        _wr = weakref.ref(t1)
+        with self.assertRaisesRegex(RuntimeError, "has weakref"):
+            torch.utils.swap_tensors(t1, t2)
+
+        t3 = torch.nn.Parameter(torch.zeros(2))
+        t4 = torch.nn.Parameter(torch.ones(2))
+        _ = TensorWeakRef(t3)
+        _ = TensorWeakRef(t4)
+        _wr = weakref.ref(t4)
+        with self.assertRaisesRegex(RuntimeError, "has weakref"):
+            torch.utils.swap_tensors(t3, t4)
+
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_fail_slots(self):
