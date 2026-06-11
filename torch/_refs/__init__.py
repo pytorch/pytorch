@@ -5413,9 +5413,7 @@ def arange(
         xend = sym_int(end)
         xstep = sym_int(step)
 
-    # For int64 we truncate arguments to int before calculating length, but
-    # other integral dtypes we don't. Weird... but needed to match ATen shapes.
-    if dtype == torch.int64 or integer_args:
+    if integer_args:
         torch._check_value(xstep != 0, lambda: "step must be nonzero")  # type: ignore[possibly-undefined]
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
@@ -5423,7 +5421,7 @@ def arange(
     else:
         length = math.ceil((end - start) / step)
 
-    if is_integer:
+    if is_integer and integer_args:
         return prims.iota(
             length,
             start=xstart,  # type: ignore[possibly-undefined]
@@ -5432,6 +5430,17 @@ def arange(
             device=device,
             requires_grad=requires_grad,
         )
+
+    if is_integer and not integer_args:
+        index = prims.iota(
+            length,
+            start=0,
+            step=1,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+        return xstart + xstep * index  # type: ignore[possibly-undefined]
 
     index = prims.iota(
         length,
