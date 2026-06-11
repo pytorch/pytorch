@@ -68,6 +68,7 @@ from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
+from .xpu_dual_gemm import xpu_dual_gemm_pass
 
 
 _T = TypeVar("_T")
@@ -190,6 +191,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
             # Concat linear optimization for WOQ int4
             concat_linear_woq_int4(gm)
+
+    # XPU-specific fusions (applied before pattern passes)
+    if config.pattern_matcher:
+        GraphTransformObserver(gm, "xpu_dual_gemm_pass").apply_graph_pass(
+            xpu_dual_gemm_pass
+        )
 
     # Remove profiler ops (record_function) to prevent them blocking fusion
     GraphTransformObserver(gm, "remove_profiler_ops").apply_graph_pass(
