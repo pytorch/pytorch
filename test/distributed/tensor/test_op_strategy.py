@@ -946,6 +946,95 @@ class TestOpSchemaMetaProperties(TestCase):
             )
         )
 
+    def test_nll_loss_backward_single_dim_strategy(self):
+        from torch.distributed.tensor._ops._math_ops import (
+            nll_loss_backward_single_dim_strategy,
+            Reduction,
+        )
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _ShardingPlaceholder,
+        )
+
+        grad_out_none_meta = TensorMeta(
+            shape=torch.Size([8, 12]), stride=(12, 1), dtype=torch.float32
+        )
+        grad_out_scalar_meta = TensorMeta(
+            shape=torch.Size([]), stride=(), dtype=torch.float32
+        )
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 16, 12]), stride=(192, 12, 1), dtype=torch.float32
+        )
+        target_meta = TensorMeta(
+            shape=torch.Size([8, 12]), stride=(12, 1), dtype=torch.int64
+        )
+        weight_meta = TensorMeta(
+            shape=torch.Size([16]), stride=(1,), dtype=torch.float32
+        )
+        total_weight_meta = TensorMeta(
+            shape=torch.Size([]), stride=(), dtype=torch.float32
+        )
+
+        strategies = nll_loss_backward_single_dim_strategy(
+            torch.ops.aten.nll_loss2d_backward.default,
+            (
+                grad_out_none_meta,
+                input_meta,
+                target_meta,
+                weight_meta,
+                Reduction.NONE.value,
+                -100,
+                total_weight_meta,
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 3)
+        self.assertEqual(len(strategies[0]), 6)
+        out, grad_out, inp, target, weight, total_weight = strategies[0]
+        self.assertIsInstance(out, _ShardingPlaceholder)
+        self.assertEqual(out.dim, 0)
+        self.assertEqual(grad_out.dim, 0)
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(target.dim, 0)
+        self.assertIsInstance(weight, Replicate)
+        self.assertIsInstance(total_weight, Replicate)
+
+        out, grad_out, inp, target, weight, total_weight = strategies[1]
+        self.assertEqual(out.dim, 2)
+        self.assertEqual(grad_out.dim, 1)
+        self.assertEqual(inp.dim, 2)
+        self.assertEqual(target.dim, 1)
+        self.assertIsInstance(weight, Replicate)
+        self.assertIsInstance(total_weight, Replicate)
+
+        strategies = nll_loss_backward_single_dim_strategy(
+            torch.ops.aten.nll_loss2d_backward.default,
+            (
+                grad_out_scalar_meta,
+                input_meta,
+                target_meta,
+                None,
+                Reduction.SUM.value,
+                -100,
+                total_weight_meta,
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 5)
+        self.assertEqual(len(strategies[0]), 5)
+        out, grad_out, inp, target, total_weight = strategies[0]
+        self.assertEqual(out.dim, 0)
+        self.assertIsInstance(grad_out, Replicate)
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(target.dim, 0)
+        self.assertIsInstance(total_weight, Replicate)
+
+        out, grad_out, inp, target, total_weight = strategies[1]
+        self.assertEqual(out.dim, 0)
+        self.assertIsInstance(grad_out, Replicate)
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(target.dim, 0)
+        self.assertEqual(total_weight, Partial("sum"))
+
     def test_layer_norm_fwd_single_dim_strategy(self):
         """layer_norm produces sharding rules for each outer dim."""
         from torch.distributed.tensor._ops._math_ops import (
