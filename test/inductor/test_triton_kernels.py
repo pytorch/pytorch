@@ -2799,9 +2799,10 @@ def forward(self, arg0_1, arg1_1):
         # kwarg; it would create duplicate keyword arguments at launch.
         add_kernel = triton.autotune(
             configs=[
+                triton.Config({"BLOCK_SIZE": 128}, num_warps=4),
                 triton.Config(
                     {"BLOCK_SIZE": 128, "enable_fp_fusion": True}, num_warps=4
-                )
+                ),
             ],
             key=[],
         )(_get_backend_options_kernel(with_enable_fp_fusion=True))

@@ -2256,11 +2256,10 @@ class TritonHOPifier:
         backend_option_kwargs = dict(kwargs)
 
         if isinstance(variable.kernel, Autotuner):
-            config_conflicts = sorted(
-                set(backend_option_kwargs).intersection(
-                    *(set(config.kwargs) for config in variable.kernel.configs)
-                )
+            config_kwarg_names = set().union(
+                *(set(config.kwargs) for config in variable.kernel.configs)
             )
+            config_conflicts = sorted(set(backend_option_kwargs) & config_kwarg_names)
             if config_conflicts:
                 self.raise_unsupported(
                     "Triton launch kwargs conflict with autotune config kwargs: "
