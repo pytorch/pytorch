@@ -9148,8 +9148,6 @@ def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
     emitted (i.e. every spec IntVar referenced by a derived expression or
     user assumption has been bound by some bare-IntVar input slot).
     """
-    import re as _re
-
     pending = shape_env._shape_spec_pending_assumptions
     if not pending:
         return
@@ -9161,7 +9159,7 @@ def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
     # form ("a#0"). Works on both single sympy.Symbols and stringified
     # expressions (e.g. "a#0 > b#1" -> "a > b").
     def _pretty(s: object) -> str:
-        return _re.sub(r"#\d+", "", str(s))
+        return re.sub(r"#\d+", "", str(s))
 
     # Build a "expr (unbound: [...])" line per pending check that still
     # has unbound deps.

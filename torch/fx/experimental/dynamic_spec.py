@@ -9,8 +9,6 @@ import itertools
 import threading
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
-import sympy
-
 from torch import SymBool, SymInt
 
 
@@ -170,6 +168,8 @@ class IntVar(SymInt):
         max: int | None = None,
         optimization_hint: int | None = None,
     ) -> None:
+        import sympy
+
         from torch.fx.experimental.sym_node import _NO_HINT, SymNode
         from torch.utils._sympy.numbers import int_oo
         from torch.utils._sympy.value_ranges import ValueRanges
