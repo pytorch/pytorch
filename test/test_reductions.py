@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     parametrize,
     skipIfMPS,
-    skipIfXPU,
+    skipIfXpu,
     skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
@@ -2571,7 +2571,7 @@ class TestReductionsDevice(TestCase):
 
     @onlyAccelerator
     @skipIfMPS
-    @skipIfXPU
+    @skipIfXpu
     # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
     def test_reduction_vectorize_along_output(self, device, dtype):
