@@ -8130,6 +8130,17 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         compiled = torch.compile(m, backend="aot_eager", fullgraph=True)
         self.assertEqual(compiled(x), m(x))
 
+    def test_inference_mode_wrapping_compile_with_view(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.view(2, 20, 8, 64).transpose(1, 2)
+
+        m = M().eval()
+        x = torch.randn(2, 20, 512)
+        compiled = torch.compile(m, backend="aot_eager", fullgraph=True)
+        with torch.inference_mode():
+            self.assertEqual(compiled(x), m(x))
+
     def test_if_cond_nn_mod1(self):
         class MockModule(torch.nn.Module):
             def __init__(self, output_relu=True):

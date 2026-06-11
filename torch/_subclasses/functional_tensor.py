@@ -457,7 +457,6 @@ class FunctionalTensorMode(TorchDispatchMode):
 
         if _get_prev_mode() is None:
             self.enter_stack.append(True)
-            self._inference_mode_on_entry = torch.is_inference_mode_enabled()
             return super().__enter__()
         else:
             self.enter_stack.append(False)
@@ -487,20 +486,16 @@ class FunctionalTensorMode(TorchDispatchMode):
             return NotImplemented
 
         # C++ functionalization cannot operate on inference tensors because
-        # they lack a version counter.  When inference_mode() is used inside
-        # the user's forward (entered via _enter_inference_mode nodes in the
-        # graph), we must temporarily exit it so tensors created during
-        # functionalization are normal tensors.  However, if inference mode
-        # was already active when FunctionalTensorMode was entered (i.e. the
-        # caller wrapped compilation in inference_mode), we must NOT exit it
-        _inference_mode_ctx = None
-        if torch.is_inference_mode_enabled() and not self._inference_mode_on_entry:
-            _inference_mode_ctx = torch.autograd.grad_mode._enter_inference_mode(False)
-        try:
-            return self._torch_dispatch_impl(func, types, args, kwargs)
-        finally:
-            if _inference_mode_ctx is not None:
-                torch.autograd.grad_mode._exit_inference_mode(_inference_mode_ctx)
+        # they lack a version counter.  Temporarily exit inference mode so
+        # tensors created during functionalization are normal tensors.  Since
+        # c10::InferenceMode(false) also sets grad_mode=true as a side effect,
+        # pair it with no_grad() to keep grad off -- this ensures output
+        # requires_grad stays False and AOT Autograd's inference-only graph
+        # decision is not disturbed.
+        if torch.is_inference_mode_enabled():
+            with torch.inference_mode(False), torch.no_grad():
+                return self._torch_dispatch_impl(func, types, args, kwargs)
+        return self._torch_dispatch_impl(func, types, args, kwargs)
 
     def _torch_dispatch_impl(
         self,
