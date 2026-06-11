@@ -19148,6 +19148,22 @@ def forward(self, x, y):
             ignore_empty_lines=True,
         )
 
+    def test_scalar_tensor_index(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x[y]
+
+        x = torch.randn((3, 4))
+        for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            with self.subTest(dtype=dtype):
+                y = torch.tensor(1, dtype=dtype)
+                traced = export(MyModel(), (x, y))
+                y2 = torch.tensor(2, dtype=dtype)
+                self.assertEqual(
+                    traced.module()(x, y2),
+                    MyModel()(x, y2),
+                )
+
     def test_is_fx_tracing(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
