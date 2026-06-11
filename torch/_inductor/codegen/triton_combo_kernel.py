@@ -4,6 +4,7 @@ import textwrap
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cache
 from typing import Any, cast, TYPE_CHECKING
 
 import sympy
@@ -25,7 +26,12 @@ from ..runtime.triton_heuristics import (
 )
 from ..scheduler import BaseSchedulerNode
 from ..stream_utils import get_raw_stream_name
-from ..utils import DeferredLineBase, Placeholder, triton_version_uses_attrs_dict
+from ..utils import (
+    clear_on_fresh_cache,
+    DeferredLineBase,
+    Placeholder,
+    triton_version_uses_attrs_dict,
+)
 from ..virtualized import V
 from .common import (
     ArgName,
@@ -53,6 +59,70 @@ log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 LARGE_NUMELS = 512e5
 BLOCK_UTILIZATION = 0.8
+
+
+def _size_hint(expr: Any) -> int:
+    return V.graph.sizevars.optimization_hint(expr, fallback=1)
+
+
+def _node_partition_log_context(
+    node: BaseSchedulerNode, node_info_map: dict[BaseSchedulerNode, NodeInfo]
+) -> tuple[Any, ...]:
+    node_info = node_info_map[node]
+    tiling_hints = tuple(
+        (str(dim), _size_hint(numel))
+        for dim, numel in sorted(
+            node_info.tiling.items(), key=lambda item: str(item[0])
+        )
+    )
+    return (
+        bool(node_info.features.is_reduction()),
+        node_info.is_persistent_reduction,
+        tiling_hints,
+        _size_hint(node_info.numel),
+        _size_hint(node_info.rnumel),
+    )
+
+
+def _partition_separation_log_context(
+    separated_nodes: list[BaseSchedulerNode],
+    companion_nodes: list[BaseSchedulerNode],
+    node_info_map: dict[BaseSchedulerNode, NodeInfo],
+) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    return (
+        tuple(_node_partition_log_context(n, node_info_map) for n in separated_nodes),
+        tuple(_node_partition_log_context(n, node_info_map) for n in companion_nodes),
+    )
+
+
+def _log_partition_separation(
+    log_message: str,
+    separated_nodes: list[BaseSchedulerNode],
+    companion_nodes: list[BaseSchedulerNode],
+    node_info_map: dict[BaseSchedulerNode, NodeInfo],
+) -> None:
+    if log.isEnabledFor(logging.DEBUG):
+        _log_partition_separation_once(
+            log_message,
+            len(separated_nodes),
+            _partition_separation_log_context(
+                separated_nodes, companion_nodes, node_info_map
+            ),
+        )
+
+
+# This diagnostic is otherwise repeated once per equivalent recompile.
+@clear_on_fresh_cache
+@cache
+def _log_partition_separation_once(
+    log_message: str,
+    num_nodes: int,
+    partition_context: tuple[tuple[Any, ...], tuple[Any, ...]],
+) -> None:
+    log.debug(
+        log_message,
+        num_nodes,
+    )
 
 
 def _default_custom_combo_kernel_horizontal_partition(
@@ -103,9 +173,11 @@ def _default_custom_combo_kernel_horizontal_partition(
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
-            log.debug(
+            _log_partition_separation(
                 "ComboKernels: %d long reduction nodes are separated",
-                len(long_reduction),
+                long_reduction,
+                not_reduction + short_reduction,
+                node_info_map,
             )
         large_pointwise = [
             n
@@ -118,12 +190,17 @@ def _default_custom_combo_kernel_horizontal_partition(
             > LARGE_NUMELS  # type: ignore[arg-type]
         ]
         if large_pointwise:
+            companion_nodes = [n for n in not_reduction if n not in large_pointwise]
             # TODO benchmark the performance when large pointwise nodes combining with others
-            log.debug(
+            # Include the non-large pointwise companions because the diagnostic
+            # describes a partition decision for the current candidate group.
+            _log_partition_separation(
                 "ComboKernels: %d large pointwise nodes are separated",
-                len(large_pointwise),
+                large_pointwise,
+                companion_nodes,
+                node_info_map,
             )
-            not_reduction = [n for n in not_reduction if n not in large_pointwise]
+            not_reduction = companion_nodes
             nodes_per_ndim.extend([node] for node in large_pointwise)
 
         nodes_per_ndim.extend(
