@@ -520,6 +520,43 @@ class FakeTensorTest(TestCase):
             self.checkType(out, "cuda", [36])
             self.assertEqual(out.dtype, dtype)
 
+    @skipIfTorchDynamo("test directly checks FakeTensorMode outputs")
+    def test_scalar_tensor_index(self):
+        for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            with self.subTest(dtype=dtype):
+                with FakeTensorMode() as mode:
+                    x, idx = map(
+                        mode.from_tensor,
+                        (torch.empty(3, 4), torch.tensor(0, dtype=dtype)),
+                    )
+                    out = x[idx]
+                self.checkType(out, "cpu", [4])
+
+    def test_static_scalar_tensor_with_shape_env_has_no_concrete_item_memo(self):
+        shape_env = ShapeEnv()
+        for dtype in (torch.int64, torch.float64):
+            with self.subTest(dtype=dtype):
+                scalar = torch.tensor(0, dtype=dtype)
+                with FakeTensorMode(shape_env=shape_env) as mode:
+                    scalar = mode.from_tensor(
+                        scalar,
+                        static_shapes=True,
+                    )
+                    self.assertIsNone(scalar.item_memo)
+
+    def test_scalar_tensor_item_memo_invalidates_on_epoch(self):
+        shape_env = ShapeEnv()
+        scalar = torch.tensor(2, dtype=torch.int64)
+        with FakeTensorMode(shape_env=shape_env) as mode:
+            scalar = mode.from_tensor(scalar, source=LocalSource("scalar"))
+            item_memo = scalar.item_memo
+            self.assertIsInstance(item_memo, torch.SymInt)
+            self.assertEqual(int(item_memo), 2)
+
+            mode.epoch += 1
+
+            self.assertIsNone(scalar.item_memo)
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
         with FakeTensorMode():
@@ -1364,6 +1401,17 @@ class FakeTensorTest(TestCase):
 
         self.assertEqual(out.shape, (4 * 2 * (seq // 2), 256))
         self.assertTrue(free_unbacked_symbols(out.shape[0]))
+
+    def test_meta_storage_trace_uses_hint_for_symbolic_size(self):
+        from torch._subclasses.meta_utils import MetaStorageDesc, MetaStorageId
+
+        shape_env = ShapeEnv()
+        size = shape_env.create_unbacked_symint()
+        torch._dynamo.override_optimization_hint(size, 16)
+
+        metadata = MetaStorageDesc(MetaStorageId(0), 3 * size, None).as_json(1)
+        self.assertEqual(metadata["size"], "3*u0")
+        self.assertEqual(metadata["size_hint"], 48)
 
     def test_matmul_rank4_unbacked_batch_dim(self):
         fake_mode, (q, k) = self.fake_with_unbacked_batch(

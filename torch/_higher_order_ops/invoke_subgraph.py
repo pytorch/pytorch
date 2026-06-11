@@ -951,6 +951,15 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
 
 @invoke_subgraph.py_autograd_impl
 def _(subgraph, identifier, *operands):
+    from torch._guards import detect_fake_mode
+
+    # Eager backends run the captured HOP with real tensors and no AOTAutograd
+    # fake mode. Let regular autograd record through the subgraph in that case.
+    if detect_fake_mode(operands) is None:
+        if getattr(subgraph, "_boxed_call", False):
+            return subgraph(list(operands))
+        return subgraph(*operands)
+
     # Check if we have already traced the subgraph.
     invoke_subgraph_cache = get_invoke_subgraph_cache()
     if invoke_subgraph_cache:

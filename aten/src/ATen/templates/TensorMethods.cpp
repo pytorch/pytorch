@@ -1,5 +1,6 @@
 #include <c10/core/Scalar.h>
 #include <ATen/core/TensorBody.h>
+#include <torch/headeronly/core/Dispatch_v2.h>
 
 #include <string_view>
 
@@ -42,20 +43,24 @@ T* TensorBase::data_ptr() const {
    template TORCH_API T* TensorBase::mutable_data_ptr() const;              \
    template TORCH_API T* TensorBase::data_ptr() const;
 
- AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CAST)
+ AT_FORALL_SCALAR_TYPES_V2(
+   AT_WRAP(DEFINE_CAST),
+   AT_EXPAND(AT_ALL_SCALAR_TYPES_WITH_COMPLEX),
+   kUInt16,
+   kUInt32,
+   kUInt64)
  AT_FORALL_QINT_TYPES(DEFINE_CAST)
- DEFINE_CAST(uint16_t, UInt16)
- DEFINE_CAST(uint32_t, UInt32)
- DEFINE_CAST(uint64_t, UInt64)
  #undef DEFINE_CAST
 
  #define DEFINE_ITEM(T, name)      \
    template <>                     \
    TORCH_API T Tensor::item() const { \
-     return item().to##name();     \
+     return item().to<T>();     \
    }
 
- AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ITEM)
+   AT_FORALL_SCALAR_TYPES_V2(
+     AT_WRAP(DEFINE_ITEM),
+     AT_EXPAND(AT_ALL_SCALAR_TYPES_WITH_COMPLEX))
  #undef DEFINE_ITEM
 
  } //namespace at
