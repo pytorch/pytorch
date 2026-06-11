@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import functools
 import itertools
 import logging
 import os
@@ -121,6 +122,16 @@ def caching_allocator_disabled():
             yield
     else:
         yield
+
+
+def requires_autotune_at_compile_time(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if config.triton.autotune_at_compile_time is False:
+            raise unittest.SkipTest("requires triton.autotune_at_compile_time=True")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
 
 
 @contextlib.contextmanager
@@ -2704,11 +2715,11 @@ class AOTInductorTestsTemplate:
         model = CondModelWithViewAndLinear().to(device=self.device)
         exported_program = torch.export.export(model, example_input)
         program = exported_program.run_decompositions()
-        gm = ReplaceViewOpsWithViewCopyOpsPass()(program.graph_module).graph_module
+        program = program._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
         with config.patch(
             {"max_autotune": True, "max_autotune_gemm_backends": "TRITON,ATEN"}
         ):
-            _ = torch._inductor.aot_compile(gm, example_input)
+            torch._inductor.aoti_compile_and_package(program)
 
     def test_cond_with_multiple_outputs(self):
         inputs = (
@@ -6040,7 +6051,8 @@ class AOTInductorTestsTemplate:
         config.triton.native_matmul, "different kernel name when native matmul"
     )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
-    def test_aoti_profiler(self, enable_kernel_profile):
+    @common_utils.parametrize("enable_kernel_context_guard", (True, False))
+    def test_aoti_profiler(self, enable_kernel_context_guard, enable_kernel_profile):
         # basic addmm model
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -6068,15 +6080,26 @@ class AOTInductorTestsTemplate:
             if self.device == GPU_TYPE
             else "aoti_torch_cpu_addmm_out"
         )
-        with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
+        with config.patch(
+            {
+                "cpp.enable_kernel_profile": enable_kernel_profile,
+                "cpp.enable_kernel_context_guard": enable_kernel_context_guard,
+            }
+        ):
             _, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             shim_fn_codes = f'RAIIAtenRecordFunctionHandle .*\\("{kernel_calls}"'
             if enable_kernel_profile:
+                if enable_kernel_context_guard:
+                    FileCheck().check("KernelContextGuard").run(code)
+                else:
+                    FileCheck().check_not("KernelContextGuard").run(code)
                 FileCheck().check_regex(shim_fn_codes).run(code)
             else:
-                FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+                FileCheck().check_not("RAIIAtenRecordFunctionHandle").check_not(
+                    "KernelContextGuard"
+                ).run(code)
 
             self.check_model(Model(N, K, self.device), example_inputs)
 
@@ -7837,6 +7860,7 @@ class AOTInductorTestsTemplate:
             )
 
     @runOnRocm
+    @requires_autotune_at_compile_time
     def test_rocm_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7878,6 +7902,7 @@ class AOTInductorTestsTemplate:
         ):
             torch._export.aot_compile(Model(), (x, y, m))
 
+    @requires_autotune_at_compile_time
     def test_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7925,6 +7950,7 @@ class AOTInductorTestsTemplate:
                 f"grid_0={actual_grid} not in expected {expected_grids} from kernel configs",
             )
 
+    @requires_autotune_at_compile_time
     def test_triton_mutated_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7984,6 +8010,7 @@ class AOTInductorTestsTemplate:
             )
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
+    @requires_autotune_at_compile_time
     def test_triton_dynamic_launcher_grid(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -8029,6 +8056,7 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
+    @requires_autotune_at_compile_time
     def test_triton_dynamic_launcher_grid_infer_from_tensor(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -8643,6 +8671,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
     @requires_gpu
+    @requires_autotune_at_compile_time
     def test_constant_int_kernel_input(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -9050,6 +9079,9 @@ GPU_TEST_FAILURES = {
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
     "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
+    # This test forces lazy dual-wrapper mode; torch.cond support for that
+    # mode is covered by AOTInductorTestDualWrapper skips below.
+    "test_cond_symint_input_disable_one_pass": fail_gpu(("cuda", "xpu"), is_skip=True),
 }
 
 MPS_TEST_FAILURES = {
@@ -9152,6 +9184,40 @@ copy_tests(
     AOTInductorTestABICompatibleGpu,
     GPU_TYPE,
     GPU_TEST_FAILURES,
+)
+
+
+# Lazy-autotune-mode-specific failures go here. Inherits regular GPU failures.
+GPU_LAZY_AUTOTUNE_TEST_FAILURES = {
+    **GPU_TEST_FAILURES,
+}
+
+
+@unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
+class AOTInductorTestDualWrapper(TestCase):
+    """Run AOTInductor tests with autotune_at_compile_time=False, exercising
+    the lazy Triton compile + dual-wrapper-mode codegen path."""
+
+    device = GPU_TYPE
+    device_type = GPU_TYPE
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
+
+    def setUp(self):
+        super().setUp()
+        ctx = torch._inductor.config.patch("triton.autotune_at_compile_time", False)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestDualWrapper,
+    GPU_TYPE,
+    GPU_LAZY_AUTOTUNE_TEST_FAILURES,
 )
 
 
