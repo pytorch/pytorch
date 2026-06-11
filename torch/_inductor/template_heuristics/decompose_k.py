@@ -4,11 +4,11 @@ from typing import Any, TYPE_CHECKING
 
 import sympy
 
-from ...ir import get_free_symbols
-from ...kernel.mm import decompose_k_subgraph_template
-from ...kernel_inputs import KernelInputs, MMKernelInputs
-from ...utils import get_k_splits
-from ...virtualized import V
+from ..ir import get_free_symbols
+from ..kernel.mm import decompose_k_subgraph_template
+from ..kernel_inputs import KernelInputs, MMKernelInputs
+from ..utils import get_k_splits
+from ..virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
@@ -47,9 +47,8 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         """
         Get all the valid k_splits for the given m, n, k.
         """
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            f"{self.__class__.__name__} requires MMKernelInputs"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
 
         # Check for unbacked symbols - if found, yield nothing
         unbacked_symbols = any(
