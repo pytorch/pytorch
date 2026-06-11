@@ -16,7 +16,7 @@ from ..cpu_vec_isa import (
     VecAVX512VNNI,
     VecISA,
     VecNEON,
-    VecSVE256,
+    VecSVE,
 )
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
@@ -84,7 +84,8 @@ inline void {{kernel_name}}(
     ) -> None:
         self.name = name
         self.input_dtype = input_dtype
-        assert input2_dtype is not None
+        if input2_dtype is None:
+            raise AssertionError("expected input2_dtype to be set, got None")
         self.input2_dtype = input2_dtype
         self.output_dtype = output_dtype
         self.compute_dtype = compute_dtype
@@ -94,9 +95,18 @@ inline void {{kernel_name}}(
 
     def get_common_options(self):
         if self.input_dtype in [torch.uint8, torch.int8]:
-            assert self.compute_dtype == torch.int32
-            assert self.output_dtype == torch.int32
-            assert self.input2_dtype == torch.int8
+            if self.compute_dtype != torch.int32:
+                raise AssertionError(
+                    f"expected compute_dtype == torch.int32, got {self.compute_dtype}"
+                )
+            if self.output_dtype != torch.int32:
+                raise AssertionError(
+                    f"expected output_dtype == torch.int32, got {self.output_dtype}"
+                )
+            if self.input2_dtype != torch.int8:
+                raise AssertionError(
+                    f"expected input2_dtype == torch.int8, got {self.input2_dtype}"
+                )
         return {
             "torch": torch,
             "kernel_name": self.name,
@@ -240,10 +250,10 @@ micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
 
 def register_micro_gemm(*configs):
     def inner(cls):
-        assert cls not in micro_gemm_configs, (
-            f"Duplicate micro_gemm registration for {cls}"
-        )
-        assert len(configs) > 0, f"No micro_gemm configs provided for {cls}"
+        if cls in micro_gemm_configs:
+            raise AssertionError(f"Duplicate micro_gemm registration for {cls}")
+        if len(configs) <= 0:
+            raise AssertionError(f"No micro_gemm configs provided for {cls}")
         micro_gemm_configs[cls] = list(configs)
         return cls
 
@@ -426,7 +436,7 @@ def do_not_use_with_small_m_for_int8_woq(config, m, n, k, alpha, num_threads, **
         compute_dtype=torch.float,
     ),
     *generate_gemm_config(
-        VecSVE256,
+        VecSVE,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
         input2_dtype=torch.float,
@@ -909,9 +919,13 @@ inline void {{kernel_name}}_transpose_b_kernel(
         # only implemented on these platforms
         if trans_b:
             vec_isa = pick_vec_isa()
-            assert issubclass(vec_isa.__class__, VecAVX512) or issubclass(
-                vec_isa.__class__, VecAVX2
-            )
+            if not (
+                issubclass(vec_isa.__class__, VecAVX512)
+                or issubclass(vec_isa.__class__, VecAVX2)
+            ):
+                raise AssertionError(
+                    f"trans_b requires AVX512 or AVX2 vec ISA, got {vec_isa.__class__}"
+                )
         self.trans_b = trans_b
 
     def codegen_define(self, kernel: CppTemplateKernel) -> str:
@@ -959,7 +973,11 @@ inline void {{kernel_name}}_transpose_b_kernel(
 
 
 def check_vnni_extra(config, m, n, k, alpha, num_threads, **kwargs):
-    assert config.input_dtype == torch.uint8 and config.input2_dtype == torch.int8
+    if not (config.input_dtype == torch.uint8 and config.input2_dtype == torch.int8):
+        raise AssertionError(
+            "expected input_dtype == torch.uint8 and input2_dtype == torch.int8, "
+            f"got {config.input_dtype}, {config.input2_dtype}"
+        )
     vnni_size = 4
     return k % vnni_size == 0
 
@@ -1110,9 +1128,10 @@ inline void {{kernel_name}}_kernel(
             register_blocking,
             alpha,
         )
-        assert input_dtype == torch.uint8 and input2_dtype == torch.int8, (
-            f"Only u8s8s32 GEMM is supported by AVX512VNNI microkernel, got A:{input_dtype}, B:{input2_dtype}, C:{output_dtype}."
-        )
+        if not (input_dtype == torch.uint8 and input2_dtype == torch.int8):
+            raise AssertionError(
+                f"Only u8s8s32 GEMM is supported by AVX512VNNI microkernel, got A:{input_dtype}, B:{input2_dtype}, C:{output_dtype}."
+            )
 
     def codegen_define(self, kernel: CppTemplateKernel) -> str:
         options = {
@@ -1142,7 +1161,8 @@ def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
 def check_int8_bf16_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
     # We need avx512_bf16 to dequant int8 to bf16
     vec_isa = kwargs.get("vec_isa")
-    assert vec_isa is not None
+    if vec_isa is None:
+        raise AssertionError("expected vec_isa to be set, got None")
     return vec_isa.is_avx512_bf16_supported() and check_amx_extra(
         config, m, n, k, alpha, num_threads, **kwargs
     )
@@ -1150,9 +1170,14 @@ def check_int8_bf16_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
 
 # amx_fp16 need to be checked separately since it is not always supported when amx is supported
 def check_amx_fp16_extra(config, m, n, k, alpha, num_threads, **kwargs):
-    assert config.input_dtype == torch.float16 and config.output_dtype == torch.float
+    if not (config.input_dtype == torch.float16 and config.output_dtype == torch.float):
+        raise AssertionError(
+            "expected input_dtype == torch.float16 and output_dtype == torch.float, "
+            f"got {config.input_dtype}, {config.output_dtype}"
+        )
     vec_isa = kwargs.get("vec_isa")
-    assert vec_isa is not None
+    if vec_isa is None:
+        raise AssertionError("expected vec_isa to be set, got None")
     vnni_size = 2
     return vec_isa.is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
 
@@ -1451,12 +1476,18 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
     def codegen_define(self, kernel: CppTemplateKernel) -> str:
         block_m, block_n, block_k = self.register_blocking
-        assert block_m % 16 == 0, "Only support block_m % 16 == 0 for AMX"
-        assert block_n % 16 == 0, "Only support block_n % 16 == 0 for AMX"
+        if block_m % 16 != 0:
+            raise AssertionError("Only support block_m % 16 == 0 for AMX")
+        if block_n % 16 != 0:
+            raise AssertionError("Only support block_n % 16 == 0 for AMX")
         if self.input_dtype in [torch.uint8, torch.int8]:
-            assert block_k == 64, "Only support block_k = 64 for AMX INT8"
+            if block_k != 64:
+                raise AssertionError("Only support block_k = 64 for AMX INT8")
         else:
-            assert block_k == 32, "Only support block_k = 32 for AMX Bfloat16/Float16"
+            if block_k != 32:
+                raise AssertionError(
+                    "Only support block_k = 32 for AMX Bfloat16/Float16"
+                )
         num_columns = block_n // 16
         options = {
             "declare_kernel": self.get_kernel_declaration(),
@@ -1510,7 +1541,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
 # extra check for CppMicroBrgemm
 def check_brgemm_extra(config, m, n, k, alpha, num_threads, **kwargs):
-    assert config.input_dtype == torch.half and config.output_dtype == torch.float
+    if not (config.input_dtype == torch.half and config.output_dtype == torch.float):
+        raise AssertionError(
+            "expected input_dtype == torch.half and output_dtype == torch.float, "
+            f"got {config.input_dtype}, {config.output_dtype}"
+        )
     vnni_size = 2
     # use brgemm for Half when amx_fp16 is supported
     return torch.cpu._is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
@@ -1579,7 +1614,11 @@ class CppMicroBrgemm(CppMicroGemm):
         return "at::native::cpublas::brgemm_release();"
 
     def get_b_layout(self):
-        assert self.input_dtype == torch.half and torch.cpu._is_amx_fp16_supported()
+        if not (self.input_dtype == torch.half and torch.cpu._is_amx_fp16_supported()):
+            raise AssertionError(
+                "expected input_dtype == torch.half and AMX fp16 support, "
+                f"got {self.input_dtype}"
+            )
         return LayoutType.VNNI2
 
 
@@ -1587,7 +1626,8 @@ def check_woq_int4_extra(config, m, n, k, alpha, num_threads, **kwargs):
     if alpha != 1:
         return False
     q_group_size = kwargs.get("q_group_size")
-    assert q_group_size is not None
+    if q_group_size is None:
+        raise AssertionError("expected q_group_size to be set, got None")
     if (
         q_group_size not in [32, 64, 128]
         or k % q_group_size != 0
@@ -1831,8 +1871,10 @@ inline void {{kernel_name}}_kernel(
         )
 
     def get_kernel_extra_args(self, **kwargs) -> list[str]:
-        assert "kernel" in kwargs
-        assert "qscale_and_zeros" in kwargs
+        if "kernel" not in kwargs:
+            raise AssertionError("expected 'kernel' in kwargs")
+        if "qscale_and_zeros" not in kwargs:
+            raise AssertionError("expected 'qscale_and_zeros' in kwargs")
         kernel = kwargs["kernel"]
         qscale_and_zeros = kwargs["qscale_and_zeros"]
         return [
@@ -2076,8 +2118,10 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
         )
 
     def get_kernel_extra_args(self, **kwargs) -> list[str]:
-        assert "kernel" in kwargs
-        assert "qscale_and_zeros" in kwargs
+        if "kernel" not in kwargs:
+            raise AssertionError("expected 'kernel' in kwargs")
+        if "qscale_and_zeros" not in kwargs:
+            raise AssertionError("expected 'qscale_and_zeros' in kwargs")
         kernel = kwargs["kernel"]
         qscale_and_zeros = kwargs["qscale_and_zeros"]
         return [
@@ -2134,13 +2178,16 @@ def create_micro_gemm(
         m_threshold = 5
         return m < m_threshold
 
-    assert isinstance(n, int) or n.is_number, n
-    assert isinstance(k, int) or k.is_number, k
+    if not (isinstance(n, int) or n.is_number):
+        raise AssertionError(n)
+    if not (isinstance(k, int) or k.is_number):
+        raise AssertionError(k)
     from ..utils import has_free_symbols
 
     dynamic_M = has_free_symbols((m,))
     m = V.graph.sizevars.optimization_hint(m, fallback=1)
-    assert isinstance(m, int) or m.is_number, m
+    if not (isinstance(m, int) or m.is_number):
+        raise AssertionError(m)
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
