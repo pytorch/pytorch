@@ -315,6 +315,7 @@ from .user_defined import (
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
     OrderedDictVariable,
+    ProtobufEnumWrapperVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
@@ -1294,6 +1295,9 @@ class VariableBuilder:
             items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.EQUALS_MATCH)
             return FrozensetVariable(items, source=self.source)
+        elif ProtobufEnumWrapperVariable.is_matching_object(value):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ProtobufEnumWrapperVariable(value, source=self.source)
         elif isinstance(
             value,
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
@@ -5168,6 +5172,8 @@ class SourcelessBuilder:
         elif is_function_or_wrapper(value):
             # pyrefly: ignore[not-callable, bad-argument-count]
             return trace_rules.lookup(value)(value)
+        elif ProtobufEnumWrapperVariable.is_matching_object(value):
+            return ProtobufEnumWrapperVariable(value)
         elif isinstance(
             value,
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),

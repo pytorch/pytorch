@@ -4300,6 +4300,37 @@ _constant_base_methods: dict[type, set[Any]] = {
 }
 
 
+class ProtobufEnumWrapperVariable(UserDefinedObjectVariable):
+    """Protobuf EnumTypeWrapper instances -- immutable name-to-int mappings.
+
+    Attribute access (e.g. MyEnum.MEMBER) resolves through __getattr__
+    which calls into C extension code (_ByNameMap) that Dynamo cannot
+    trace.  Since the wrapper is immutable once constructed, we resolve
+    all attribute access eagerly at trace time.
+    """
+
+    @staticmethod
+    def is_matching_object(obj: object) -> bool:
+        mod = sys.modules.get("google.protobuf.internal.enum_type_wrapper")
+        return mod is not None and isinstance(obj, mod.EnumTypeWrapper)
+
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        source = AttrSource(self.source, name) if self.source else None
+        try:
+            result = getattr(self.value, name)
+        except AttributeError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                ],
+            )
+        return VariableTracker.build(tx, result, source)
+
+
 class UserDefinedConstantVariable(UserDefinedObjectVariable):
     """
     Represents user-defined objects that subclass immutable constant types
