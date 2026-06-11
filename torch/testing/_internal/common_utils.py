@@ -1384,12 +1384,24 @@ def run_tests(argv=None):
         import pytest
         os.environ["NO_COLOR"] = "1"
         exit_code = pytest.main(args=pytest_args)
+        print(
+            f"DEBUG_EXIT_CODE: pytest.main() returned {exit_code} "
+            f"(type={type(exit_code).__name__}, int_value={int(exit_code)})",
+            file=sys.stderr,
+            flush=True,
+        )
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
 
+        final_code = 0 if exit_code == 5 else exit_code
+        print(
+            f"DEBUG_EXIT_CODE: calling sys.exit({final_code})",
+            file=sys.stderr,
+            flush=True,
+        )
         # exitcode of 5 means no tests were found, which happens since some test configs don't
         # run tests from certain files
-        sys.exit(0 if exit_code == 5 else exit_code)
+        sys.exit(final_code)
     elif TEST_SAVE_XML:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]

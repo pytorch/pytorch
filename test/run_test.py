@@ -785,6 +785,10 @@ def run_test_retries(
             retries=0,  # no retries here, we do it ourselves, this is because it handles timeout exceptions well
         )
         ret_code = 0 if ret_code == 5 else ret_code
+        print_to_stderr(
+            f"DEBUG_EXIT_CODE: retry_shell returned {ret_code}, "
+            f"sc_command={sc_command!r}"
+        )
         if ret_code == 0 and not sc_command.startswith("--rs="):
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
@@ -1238,6 +1242,11 @@ def handle_log_file(
         f"{test}_{os.urandom(8).hex()}_.log"
     )
     os.rename(file_path, REPO_ROOT / new_file)
+
+    if "DEBUG_EXIT_CODE" in full_text:
+        for line in full_text.splitlines():
+            if "DEBUG_EXIT_CODE" in line:
+                print_to_stderr(f"  [from pipe_log] {line.rstrip()}")
 
     if not failed and not was_rerun and "=== RERUNS ===" not in full_text:
         # If success + no retries (idk how else to check for test level retries

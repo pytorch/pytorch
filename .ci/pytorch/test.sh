@@ -402,12 +402,62 @@ test_python_shard() {
     exit 1
   fi
 
+  # Diagnostic: detect nondeterministic exit code override from ROCm runtime
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    set +e
+    echo "=== ROCm exit code diagnostic ==="
+    python -c "import torch; print('torch import OK')" 2>&1
+    if [ $? -eq 0 ]; then
+      echo "--- Phase 1: 20 trials with import torch + sys.exit(1) ---"
+      override_count=0
+      for i in $(seq 1 20); do
+        python -c "import torch; import sys; sys.exit(1)" 2>/dev/null
+        ec=$?
+        if [ "$ec" -ne 1 ]; then
+          echo "  trial $i: UNEXPECTED exit code $ec (expected 1)"
+          override_count=$((override_count + 1))
+        fi
+      done
+      if [ "$override_count" -gt 0 ]; then
+        echo "  WARNING: $override_count/20 trials had exit code overridden"
+      else
+        echo "  All 20 trials returned exit code 1 as expected"
+      fi
+      echo "--- Phase 2: 20 trials WITHOUT import torch (control) ---"
+      control_override=0
+      for i in $(seq 1 20); do
+        python -c "import sys; sys.exit(1)" 2>/dev/null
+        ec=$?
+        if [ "$ec" -ne 1 ]; then
+          echo "  control trial $i: UNEXPECTED exit code $ec (expected 1)"
+          control_override=$((control_override + 1))
+        fi
+      done
+      if [ "$control_override" -gt 0 ]; then
+        echo "  WARNING: $control_override/20 control trials had exit code overridden"
+      else
+        echo "  All 20 control trials returned exit code 1 as expected"
+      fi
+    else
+      echo "  SKIP: import torch failed, cannot run diagnostic"
+    fi
+    echo "=== end ROCm exit code diagnostic ==="
+    set -e
+  fi
+
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
 
   # modify LD_LIBRARY_PATH to ensure it has the conda env.
   # This set of tests has been shown to be buggy without it for the split-build
+  set +e
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  python_exit_code=$?
+  set -e
+  echo "DEBUG_SHELL: python test/run_test.py exited with code $python_exit_code" >&2
+  if [ "$python_exit_code" -ne 0 ]; then
+    exit "$python_exit_code"
+  fi
 
   assert_git_not_dirty
 }
