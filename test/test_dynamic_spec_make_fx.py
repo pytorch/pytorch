@@ -4,8 +4,11 @@ import itertools
 
 import torch
 from torch.fx.experimental.dynamic_spec import (
+    DictSpec as DICT,
     IntVar,
+    ObjectSpec as OBJ,
     ParamsSpec as PARAMS,
+    SeqSpec as L,
     ShapesSpec,
     ShapeVar as VAR,
     STATIC,
@@ -49,11 +52,6 @@ class _ModX(torch.nn.Module):
         return x.sum(0)
 
 
-class _ModXY(torch.nn.Module):
-    def forward(self, x, y):
-        return x + y
-
-
 class _ModXYIndep(torch.nn.Module):
     """Two-input model whose ops don't unify the input shapes (no broadcast)."""
 
@@ -74,15 +72,13 @@ class TestMakeFxDynamicSpec(TestCase):
         _reset_uid_counter()
 
     def test_function_tensorspec_shape_var_produces_symint(self):
-        """A dim marked with ShapeVar becomes an unbacked SymInt in the graph."""
-
         def f(x):
             return x.sum(0)
 
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": T([VAR("batch"), None])},
+            _dynamic_spec={"x": T([VAR("batch"), STATIC])},
         )(torch.randn(8, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -103,27 +99,24 @@ class f(torch.nn.Module):
         )
 
     def test_module_paramsspec_shape_var_produces_symint(self):
-        """Same as above but driving make_fx with an nn.Module."""
         gm = make_fx(
             _ModX(),
             tracing_mode="fake",
-            _dynamic_spec={"x": T([VAR("batch"), None])},
+            _dynamic_spec={"x": T([VAR("batch"), STATIC])},
         )(torch.randn(8, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
         self.assertIsInstance(shape[0], torch.SymInt)
         self.assertTrue(free_unbacked_symbols(shape[0]))
 
-    def test_all_none_spec_keeps_dims_static(self):
-        """A TensorSpec with all-None dims (= all static) yields concrete ints."""
-
+    def test_all_static_spec_keeps_dims_static(self):
         def f(x):
             return x + 1
 
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": T([None, None])},
+            _dynamic_spec={"x": T([STATIC, STATIC])},
         )(torch.randn(4, 5))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -131,8 +124,6 @@ class f(torch.nn.Module):
         self.assertEqual(int(shape[1]), 5)
 
     def test_static_dim_mismatch_raises(self):
-        """Declaring a tensor dim as static=3 but passing 5 errors out."""
-
         def f(x):
             return x + 1
 
@@ -147,8 +138,6 @@ class f(torch.nn.Module):
             )(torch.randn(4, 5))
 
     def test_no_params_spec_short_circuits(self):
-        """ShapesSpec with no ParamsSpec should not change tracing behavior."""
-
         def f(x):
             return x + 1
 
@@ -171,8 +160,8 @@ class f(torch.nn.Module):
             _ModXYIndep(),
             tracing_mode="fake",
             _dynamic_spec={
-                "x": T([VAR("a"), None]),
-                "y": T([VAR("b"), None]),
+                "x": T([VAR("a"), STATIC]),
+                "y": T([VAR("b"), STATIC]),
             },
         )(torch.randn(4, 3), torch.randn(7, 3))
 
@@ -196,7 +185,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             _ModXYIndep(),
             tracing_mode="fake",
-            _dynamic_spec={"x": T([a, None]), "y": T([a, None])},
+            _dynamic_spec={"x": T([a, STATIC]), "y": T([a, STATIC])},
         )(torch.randn(5, 3), torch.randn(5, 3))
 
         self.assertExpectedInline(
@@ -211,53 +200,14 @@ class <lambda>(torch.nn.Module):
             ignore_empty_lines=True,
         )
 
-    def test_shared_shape_var_links_dims(self):
-        """Original add-model: shared ShapeVar -> shared symbol."""
-        B = VAR("batch")
-        gm = make_fx(
-            _ModXY(),
-            tracing_mode="fake",
-            _dynamic_spec={"x": T([B, None]), "y": T([B, None])},
-        )(torch.randn(5, 3), torch.randn(5, 3))
-
-        tensor_shapes = []
-        for val in _user_input_placeholder_vals(gm):
-            if isinstance(val, torch.Tensor):
-                tensor_shapes.append(val.shape)
-        self.assertEqual(len(tensor_shapes), 2)
-        s0 = tensor_shapes[0][0]
-        s1 = tensor_shapes[1][0]
-        self.assertIsInstance(s0, torch.SymInt)
-        self.assertIsInstance(s1, torch.SymInt)
-        self.assertTrue(free_unbacked_symbols(s0))
-        self.assertTrue(free_unbacked_symbols(s1))
-        self.assertEqual(str(s0), str(s1))
-
     def test_int_input_with_intvar_spec(self):
-        """An int input with an IntVar spec becomes a symbolic int."""
+        """An int input declared via ``IntVar`` becomes an *unbacked* SymInt
+        (``u0``), not a backed one (``s0``) — the ShapesSpec path is
+        unbacked-only for soundness."""
         gm = make_fx(
             _ModXN(),
             tracing_mode="fake",
-            _dynamic_spec={"x": T([None]), "n": IntVar("n")},
-        )(torch.randn(4), 7)
-
-        sym_placeholders = [
-            val
-            for val in _user_input_placeholder_vals(gm)
-            if isinstance(val, torch.SymInt)
-        ]
-        self.assertEqual(len(sym_placeholders), 1)
-        self.assertTrue(free_unbacked_symbols(sym_placeholders[0]))
-
-    def test_int_input_marked_dynamic_is_unbacked(self):
-        """An int input declared dynamic via ``IntVar`` must become an
-        *unbacked* symbol (``u0``), not a backed one (``s0``): the ShapesSpec
-        path is unbacked-only for soundness (no 0/1 or ``size>=2``
-        assumptions)."""
-        gm = make_fx(
-            _ModXN(),
-            tracing_mode="fake",
-            _dynamic_spec={"x": T([None]), "n": IntVar("n")},
+            _dynamic_spec={"x": T([STATIC]), "n": IntVar("n")},
         )(torch.randn(4), 7)
 
         sym_placeholders = [
@@ -267,16 +217,10 @@ class <lambda>(torch.nn.Module):
         ]
         self.assertEqual(len(sym_placeholders), 1)
         sym = sym_placeholders[0]
-
-        # Print the traced graph and the symbol for visibility.
-        graph_str = gm.print_readable(print_output=False)
-        print(graph_str)
-        print("int-input symbol:", sym, "expr:", sym.node.expr)
-
-        # Core check: the symbol is unbacked (u-prefixed), not backed (s0).
         self.assertTrue(free_unbacked_symbols(sym))
         self.assertEqual(str(sym.node.expr), "u0")
-        self.assertIn("u0", graph_str)
+
+    def test_dict_shorthand_accepted(self):
         """A bare ``dict`` is accepted as shorthand for
         ``ShapesSpec(PARAMS(dict))``."""
 
@@ -286,7 +230,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": T([VAR("batch"), None])},
+            _dynamic_spec={"x": T([VAR("batch"), STATIC])},
         )(torch.randn(8, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -295,8 +239,6 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(int(shape[1]), 3)
 
     def test_requires_tracing_mode_fake(self):
-        """``_dynamic_spec`` is only meaningful with tracing_mode='fake'."""
-
         def f(x):
             return x + 1
 
@@ -308,12 +250,10 @@ class <lambda>(torch.nn.Module):
                 make_fx(
                     f,
                     tracing_mode=bad_mode,
-                    _dynamic_spec={"x": T([VAR("batch"), None])},
+                    _dynamic_spec={"x": T([VAR("batch"), STATIC])},
                 )(torch.randn(4, 5))
 
     def test_invalid_spec_type_raises(self):
-        """Passing an unsupported object raises TypeError."""
-
         def f(x):
             return x
 
@@ -337,7 +277,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": T([VAR("batch"), None])},
+            _dynamic_spec={"x": T([VAR("batch"), STATIC])},
         )(torch.randn(6, 4))
 
         self.assertExpectedInline(
@@ -355,15 +295,13 @@ class f(torch.nn.Module):
         gm(torch.randn(13, 4))
 
     def test_shape_var_min_bound_constrains_range(self):
-        """A ``VAR(min=...)`` is reflected in the shape env's range."""
-
         def f(x):
             return x + 1
 
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": T([VAR("batch", min=4, max=128), None])},
+            _dynamic_spec={"x": T([VAR("batch", min=4, max=128), STATIC])},
         )(torch.randn(10, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -394,12 +332,13 @@ class f(torch.nn.Module):
             make_fx(
                 f,
                 tracing_mode="fake",
-                _dynamic_spec={"x": T([VAR("batch"), None])},
+                _dynamic_spec={"x": T([VAR("batch"), STATIC])},
             )(torch.randn(8, 3))
 
     def test_derived_dim_in_traced_graph(self):
         """Derived expressions (``B * 2``) materialize as derived dim
-        expressions in the traced graph and emit a runtime assertion."""
+        expressions in the traced graph. The ``add`` (not ``sub``) proves the
+        relation ``2*u0 == y.size(0)`` held at trace time."""
         B = VAR("batch")
 
         class M(torch.nn.Module):
@@ -419,20 +358,17 @@ class f(torch.nn.Module):
             },
         )(torch.randn(4, 3), torch.randn(8, 5))
 
-        # y dim 0 should be the derived expression 2*u0.
-        graph_str = gm.print_readable(print_output=False)
-        self.assertRegex(graph_str, r'arg1_1: "f32\[2\*u\d+, 5\]"')
-        # Note: ``make_fx`` itself does not insert runtime asserts for spec
-        # assumptions / derived dims at the top-level (that's a separate
-        # pass; ``insert_deferred_runtime_asserts`` only runs for HOP
-        # subgraphs). The derived relation IS however enforced symbolically
-        # — the in-trace branch resolved (``+`` taken), proving the
-        # ShapeEnv knows ``2*u0 == y.size(0)``.
-        self.assertTrue(
-            any(
-                node.op == "call_function" and "aten.add" in str(node.target)
-                for node in gm.graph.nodes
-            )
+        self.assertExpectedInline(
+            gm.print_readable(print_output=False).strip(),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[u0, 3]", arg1_1: "f32[2*u0, 5]"):
+        sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+        sum_2: "f32[]" = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+        add: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+        return add""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
         )
 
     def test_assumption_runtime_enforced(self):
@@ -473,6 +409,84 @@ class f(torch.nn.Module):
                 node.op == "call_function" and "aten.sub" in str(node.target)
                 for node in gm.graph.nodes
             )
+        )
+
+    def test_tensor_dim_optimization_hint(self):
+        """A ShapeVar's ``optimization_hint`` lands in the shape env's
+        ``var_to_hint_override`` for the tensor dim's symbol."""
+        b = VAR("batch", optimization_hint=32)
+        gm = make_fx(
+            _ModX(),
+            tracing_mode="fake",
+            _dynamic_spec={"x": T([b, STATIC])},
+        )(torch.randn(8, 3))
+
+        sym = _first_tensor_placeholder_shape(gm)[0]
+        self.assertIsInstance(sym, torch.SymInt)
+        self.assertEqual(
+            sym.node.shape_env.var_to_hint_override.get(sym.node.expr), 32
+        )
+
+    def test_scalar_input_optimization_hint(self):
+        """An ``IntVar``'s ``optimization_hint`` lands in the shape env's
+        ``var_to_hint_override`` for a scalar input's symbol."""
+        gm = make_fx(
+            _ModXN(),
+            tracing_mode="fake",
+            _dynamic_spec={"x": T([STATIC]), "n": IntVar("n", optimization_hint=512)},
+        )(torch.randn(4), 7)
+
+        sym = next(
+            v
+            for v in _user_input_placeholder_vals(gm)
+            if isinstance(v, torch.SymInt)
+        )
+        self.assertEqual(
+            sym.node.shape_env.var_to_hint_override.get(sym.node.expr), 512
+        )
+
+    def test_container_specs_dict_seq_object(self):
+        """DictSpec / SeqSpec / ObjectSpec each mark a nested tensor dim
+        dynamic (``u0``/``u1``/``u2``); unspecified entries stay static."""
+        from collections import namedtuple
+
+        Pair = namedtuple("Pair", ["first", "second"])
+
+        class M(torch.nn.Module):
+            def forward(self, d, xs, p):
+                return d["b"].sum(0) + xs[1].sum(0) + p.second.sum(0)
+
+        gm = make_fx(
+            M(),
+            tracing_mode="fake",
+            _dynamic_spec={
+                "d": DICT({"b": T([VAR("B"), STATIC])}),  # "a" omitted -> static
+                "xs": L([STATIC, T([VAR("X"), STATIC])]),  # pos 0 static
+                "p": OBJ({"second": T([VAR("P"), STATIC])}),  # "first" -> static
+            },
+        )(
+            {"a": torch.randn(7, 3), "b": torch.randn(8, 3)},
+            [torch.randn(4, 3), torch.randn(5, 3)],
+            Pair(torch.randn(6, 3), torch.randn(9, 3)),
+        )
+
+        # d["b"], xs[1], p.second -> unbacked (u0/u1/u2); the rest stay static.
+        self.assertExpectedInline(
+            gm.print_readable(print_output=False).strip(),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0, arg1, arg2):
+        arg0_1: "f32[7, 3]"; arg0_2: "f32[u0, 3]"; arg1_1: "f32[4, 3]"; arg1_2: "f32[u1, 3]"; arg2_1: "f32[6, 3]"; arg2_2: "f32[u2, 3]";
+
+        arg0_1, arg0_2, arg1_1, arg1_2, arg2_1, arg2_2, = fx_pytree.tree_flatten_spec([arg0, arg1, arg2], self._in_spec)
+        sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(arg0_2, [0]);  arg0_2 = None
+        sum_2: "f32[3]" = torch.ops.aten.sum.dim_IntList(arg1_2, [0]);  arg1_2 = None
+        add: "f32[3]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+        sum_3: "f32[3]" = torch.ops.aten.sum.dim_IntList(arg2_2, [0]);  arg2_2 = None
+        add_1: "f32[3]" = torch.ops.aten.add.Tensor(add, sum_3);  add = sum_3 = None
+        return pytree.tree_unflatten([add_1], self._out_spec)""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
         )
 
 
