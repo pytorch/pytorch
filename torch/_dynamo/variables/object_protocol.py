@@ -281,6 +281,12 @@ def type_implements_tp_repr(obj_type: type) -> bool:
     return has_slot(type_slot, PyTypeSlots.TP_REPR)
 
 
+def type_implements_tp_str(obj_type: type) -> bool:
+    """Check whether obj_type implements the tp_str slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_STR)
+
+
 def pyiter_check(obj_type: type) -> bool:
     # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L2891-L2897
     # CPython checks if tp_iternext != _PyObject_NextNotImplemented
@@ -444,6 +450,36 @@ def generic_repr(
         return result
 
     raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
+
+
+def generic_str(
+    tx: "InstructionTranslatorBase", obj: "VariableTracker"
+) -> "VariableTracker":
+    """Mirrors PyObject_Str semantics in Dynamo.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L781-L829
+
+    Resolution order: str identity check -> tp_str (str_impl) -> tp_repr fallback.
+    """
+    if maybe_get_python_type(obj) is str:
+        return obj
+
+    obj_type = maybe_get_python_type(obj)
+    if (
+        type_implements_tp_str(obj_type)
+        and type(obj).str_impl is not VariableTracker.str_impl
+    ):
+        result = obj.str_impl(tx)
+    else:
+        result = generic_repr(tx, obj)
+
+    result_type = maybe_get_python_type(result)
+    if not issubclass(result_type, str):
+        raise_type_error(
+            tx,
+            f"__str__ returned non-string (type {result_type.__name__})",
+        )
+    return result
 
 
 def vt_getitem(
@@ -859,6 +895,8 @@ NB_SLOT_MAPPING = {
     "nb_remainder": PyNumberSlots.NB_REMAINDER,
     "nb_inplace_remainder": PyNumberSlots.NB_INPLACE_REMAINDER,
     "nb_divmod": PyNumberSlots.NB_DIVMOD,
+    "nb_power": PyNumberSlots.NB_POWER,
+    "nb_inplace_power": PyNumberSlots.NB_INPLACE_POWER,
 }
 
 
@@ -971,6 +1009,91 @@ def binary_op(
     if is_nb_not_implemented(result):
         binop_type_error(tx, v, w, op_symbol)
     return result
+
+
+def ternary_op(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+    z: VariableTracker | None,
+    op_slot: str,
+    op_name: str,
+) -> VariableTracker:
+    impl_attr = f"{op_slot}_impl"
+    nb_slot_bit = NB_SLOT_MAPPING[op_slot]
+
+    v_type = maybe_get_python_type(v)
+    w_type = maybe_get_python_type(w)
+
+    v_slot = (
+        getattr(type(v), impl_attr, None)
+        if type_implements_nb_slot(v_type, nb_slot_bit)
+        else None
+    )
+
+    w_slot = (
+        getattr(type(w), impl_attr, None)
+        if type_implements_nb_slot(w_type, nb_slot_bit)
+        else None
+    )
+
+    if v_slot is w_slot:
+        w_slot = None
+
+    if v_slot:
+        if w_slot and is_python_subtype(w, v):
+            result = w_slot(w, tx, v, z, True)
+            if not is_nb_not_implemented(result):
+                return result
+            w_slot = None
+        result = v_slot(v, tx, w, z, False)
+        if not is_nb_not_implemented(result):
+            return result
+    if w_slot:
+        result = w_slot(w, tx, v, z, True)
+        if not is_nb_not_implemented(result):
+            return result
+
+    if z:
+        z_type = maybe_get_python_type(z)
+        if type_implements_nb_slot(z_type, nb_slot_bit):
+            z_impl_attr = f"{op_slot}_z_impl"
+            z_slot = getattr(type(z), z_impl_attr, None)
+            if z_slot in (v_slot, w_slot):
+                z_slot = None
+            if z_slot:
+                result = z_slot(z, tx, v, w)
+                if not is_nb_not_implemented(result):
+                    return result
+
+    if z is None:
+        binop_type_error(tx, v, w, op_name)
+    else:
+        raise_type_error(
+            tx,
+            f"unsupported operand type(s) for {op_name}: "
+            f"'{v.python_type_name()}', '{w.python_type_name()}', '{z.python_type_name()}'",
+        )
+
+
+def ternary_iop(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+    z: VariableTracker | None,
+    iop_slot: str,
+    op_slot: str,
+    op_name: str,
+) -> VariableTracker:
+    v_type = maybe_get_python_type(v)
+    if type_implements_nb_slot(v_type, NB_SLOT_MAPPING[iop_slot]):
+        impl_attr = f"{iop_slot}_impl"
+        slot = getattr(type(v), impl_attr)
+        result = slot(v, tx, w, z)
+        if not is_nb_not_implemented(result):
+            return result
+
+    return ternary_op(tx, v, w, z, op_slot, op_name)
 
 
 #  Binary in-place operators
