@@ -15,6 +15,7 @@ from torch.cuda._graph_annotations import (
     mark_kernels,
     mark_stream,
     remap_to_exec_graph,
+    resolve_and_remap,
     resolve_pending_annotations,
 )
 from torch.testing._internal.common_utils import (
@@ -526,6 +527,33 @@ class TestMarkKernels(TestCase):
         # both -- not just the last -- were remapped correctly.
         self.assertEqual(graph_ids_by_name["graph_a"], {exec_a})
         self.assertEqual(graph_ids_by_name["graph_b"], {exec_b})
+
+    def test_resolve_and_remap_sequence(self):
+        """resolve_and_remap called once per graph handles a whole sequence.
+
+        Uses default (keep_graph=False) graphs to show the capture id is
+        recovered from the graph itself, not the (destroyed) graph template.
+        """
+        graphs = [torch.cuda.CUDAGraph() for _ in range(3)]
+        x = torch.randn(8, device="cuda")
+
+        for i, graph in enumerate(graphs):
+            with torch.cuda.graph(graph):
+                with mark_kernels(f"graph_{i}"):
+                    _ = x + i
+
+        # First call resolves all pending scopes; every call remaps its graph.
+        for graph in graphs:
+            resolve_and_remap(graph)
+
+        graph_ids_by_name: dict[str, set] = {}
+        for tools_id, anns in get_kernel_annotations().items():
+            self.assertEqual(len(anns), 1)
+            graph_ids_by_name.setdefault(anns[0]["str"], set()).add(tools_id >> 32)
+
+        for i, graph in enumerate(graphs):
+            exec_id = self._exec_graph_id(graph)
+            self.assertEqual(graph_ids_by_name[f"graph_{i}"], {exec_id})
 
     def test_mark_kernels_skips_preexisting_dependents_on_entry_frontier(self):
         graph = torch.cuda.CUDAGraph()

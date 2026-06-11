@@ -24,8 +24,7 @@ Usage during capture::
     from torch.cuda._graph_annotations import (
         enable_annotations,
         mark_kernels,
-        resolve_pending_annotations,
-        remap_to_exec_graph,
+        resolve_and_remap,
     )
 
     enable_annotations()
@@ -35,9 +34,12 @@ Usage during capture::
             y = workload_a(x)
         with mark_kernels("phase_B"):
             z = workload_b(y)
-        resolve_pending_annotations()
 
-    remap_to_exec_graph(graph)
+    resolve_and_remap(graph)
+
+``resolve_and_remap`` is shorthand for ``resolve_pending_annotations()``
+followed by ``remap_to_exec_graph(graph)``; call those directly for finer
+control (e.g. resolving once before remapping several graphs).
 """
 
 import importlib.metadata
@@ -418,6 +420,16 @@ def _rekey_annotations(
         else:
             remapped[new_tools_id] = list(ann_list)
     return remapped
+
+
+def resolve_and_remap(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
+    """Resolve any pending scopes and remap one graph in a single call.
+
+    Shorthand for ``resolve_pending_annotations()`` followed by
+    ``remap_to_exec_graph(graph)``; the pair normally run after a capture.
+    """
+    resolve_pending_annotations()
+    remap_to_exec_graph(torch_cuda_graph)
 
 
 def get_kernel_annotations() -> dict[int, list[Any]]:
