@@ -266,21 +266,31 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_i_values: "f32[4, 4]"):
         l_i_values = L_i_values
 
-        # code: x = torch.sin(i.values)
-        x: "f32[4, 4]" = torch.sin(l_i_values)
-
         # code: y, z_result1, z_result2 = gn(i.count, i.values)
         gn_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.gn_callable
         gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+
+        # code: x = torch.sin(i.values)
+        sin: "f32[4, 4]" = torch.sin(l_i_values)
+
+        # code: y, z_result1, z_result2 = gn(i.count, i.values)
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = l_i_values = None
-        y: "f32[4, 4]" = flat_apply_capture[0]
-        z_result1: "f32[4, 4]" = flat_apply_capture[1]
-        z_result2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+        getitem: "f32[4, 4]" = flat_apply_capture[0]
 
         # code: return x + y + z_result1 + z_result2
-        add: "f32[4, 4]" = x + y;  x = y = None
-        add_1: "f32[4, 4]" = add + z_result1;  add = z_result1 = None
-        add_2: "f32[4, 4]" = add_1 + z_result2;  add_1 = z_result2 = None
+        add: "f32[4, 4]" = sin + getitem;  sin = getitem = None
+
+        # code: y, z_result1, z_result2 = gn(i.count, i.values)
+        getitem_1: "f32[4, 4]" = flat_apply_capture[1]
+
+        # code: return x + y + z_result1 + z_result2
+        add_1: "f32[4, 4]" = add + getitem_1;  add = getitem_1 = None
+
+        # code: y, z_result1, z_result2 = gn(i.count, i.values)
+        getitem_2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+
+        # code: return x + y + z_result1 + z_result2
+        add_2: "f32[4, 4]" = add_1 + getitem_2;  add_1 = getitem_2 = None
         return (add_2,)
 """,
         )
@@ -319,21 +329,31 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_i_values: "f32[4, 4]"):
         l_i_values = L_i_values
 
-        # code: x = torch.sin(i.values)
-        x: "f32[4, 4]" = torch.sin(l_i_values)
-
         # code: y, z_result1, z_result2 = gn(i)
         gn_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.gn_callable
         gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+
+        # code: x = torch.sin(i.values)
+        sin: "f32[4, 4]" = torch.sin(l_i_values)
+
+        # code: y, z_result1, z_result2 = gn(i)
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = l_i_values = None
-        y: "f32[4, 4]" = flat_apply_capture[0]
-        z_result1: "f32[4, 4]" = flat_apply_capture[1]
-        z_result2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+        getitem: "f32[4, 4]" = flat_apply_capture[0]
 
         # code: return x + y + z_result1 + z_result2
-        add: "f32[4, 4]" = x + y;  x = y = None
-        add_1: "f32[4, 4]" = add + z_result1;  add = z_result1 = None
-        add_2: "f32[4, 4]" = add_1 + z_result2;  add_1 = z_result2 = None
+        add: "f32[4, 4]" = sin + getitem;  sin = getitem = None
+
+        # code: y, z_result1, z_result2 = gn(i)
+        getitem_1: "f32[4, 4]" = flat_apply_capture[1]
+
+        # code: return x + y + z_result1 + z_result2
+        add_1: "f32[4, 4]" = add + getitem_1;  add = getitem_1 = None
+
+        # code: y, z_result1, z_result2 = gn(i)
+        getitem_2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+
+        # code: return x + y + z_result1 + z_result2
+        add_2: "f32[4, 4]" = add_1 + getitem_2;  add_1 = getitem_2 = None
         return (add_2,)
 """,
         )
@@ -401,21 +421,31 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_i_values: "f32[4, 4]"):
         l_i_values = L_i_values
 
-        # code: x = torch.sin(i.values)
-        x: "f32[4, 4]" = torch.sin(l_i_values)
-
         # code: y, z = gn(i.count, i.values)
         gn_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.gn_callable
         gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+
+        # code: x = torch.sin(i.values)
+        sin: "f32[4, 4]" = torch.sin(l_i_values)
+
+        # code: y, z = gn(i.count, i.values)
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = l_i_values = None
-        y: "f32[4, 4]" = flat_apply_capture[0]
-        value: "f32[4, 4]" = flat_apply_capture[1]
-        value_1: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+        getitem: "f32[4, 4]" = flat_apply_capture[0]
 
         # code: return x + y + z.result1 + z.result2
-        add: "f32[4, 4]" = x + y;  x = y = None
-        add_1: "f32[4, 4]" = add + value;  add = value = None
-        add_2: "f32[4, 4]" = add_1 + value_1;  add_1 = value_1 = None
+        add: "f32[4, 4]" = sin + getitem;  sin = getitem = None
+
+        # code: y, z = gn(i.count, i.values)
+        getitem_1: "f32[4, 4]" = flat_apply_capture[1]
+
+        # code: return x + y + z.result1 + z.result2
+        add_1: "f32[4, 4]" = add + getitem_1;  add = getitem_1 = None
+
+        # code: y, z = gn(i.count, i.values)
+        getitem_2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+
+        # code: return x + y + z.result1 + z.result2
+        add_2: "f32[4, 4]" = add_1 + getitem_2;  add_1 = getitem_2 = None
         return (add_2,)
 """,
         )
