@@ -1159,7 +1159,6 @@ at::Tensor _weight_int4pack_mm_cuda(
       qGroupSize == 256);
 
   TORCH_CHECK(qScaleAndZeros.dim() == 3);
-  auto numQGroups = qScaleAndZeros.size(0);
   TORCH_CHECK(
       kTiles * kKTileSize >= qGroupSize &&
       isEvenDivisor(kTiles * kKTileSize, qGroupSize));

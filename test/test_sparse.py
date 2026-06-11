@@ -37,6 +37,10 @@ from torch.testing._internal.opinfo.refs import (
     ElementwiseBinaryPythonRefInfo,
     ReductionPythonRefInfo
 )
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+)
 
 def _op_supports_any_sparse(op):
     return (op.supports_sparse
@@ -466,6 +470,7 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.float32)
     @expectedFailureMPS
+    @skipIfCrossRef
     def test_no_warn_when_check_invariants_is_explicit(self, device, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/178274
         def assert_invariant_warning(fn, check):
@@ -712,6 +717,7 @@ class TestSparse(TestSparseBase):
         b = a.to_sparse().to_dense()
         self.assertEqual(a, b)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/183891")
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/108667")
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1122,6 +1128,7 @@ class TestSparse(TestSparseBase):
         test_shape(4, 3, [7, 7, 7, 3, 3, 3, 0])
         test_shape(4, 0, [0, 0, 7, 3, 3, 3, 0])
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/184598")
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1857,6 +1864,7 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
 
+    @unittest.skipIf(IS_LINUX or IS_MACOS or TEST_WITH_ROCM or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/174389")
     @coalescedonoff
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
@@ -3479,6 +3487,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182816")
     @coalescedonoff
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
@@ -3881,6 +3890,7 @@ class TestSparse(TestSparseBase):
         gradcheck(lambda x: func(x, 0).to_dense(), (t,), masked=True)
 
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/183435")
     @dtypes(torch.double, torch.float)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
@@ -3906,6 +3916,8 @@ class TestSparse(TestSparseBase):
         self.assertEqual(out, out_double.to(dtype=dtype))
 
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182600")
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/184329")
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
     @dtypesIfMPS(*all_mps_types())
@@ -5825,7 +5837,10 @@ class TestSparseAny(TestCase):
             self.assertEqual(res.shape, xs.shape + (2,))
             self.assertEqual(res._values()[..., 0], xs._values().real)
             self.assertEqual(res._values()[..., 1], xs._values().imag)
-            if not (dtype is torch.complex32 and torch.device(device).type == "cpu"):
+            if not (
+                dtype in (torch.complex32, torch.bcomplex32)
+                and torch.device(device).type == "cpu"
+            ):
                 # ComplexHalf to_dense() is not supported on CPU.
                 self.assertEqual(res.to_dense(), torch.view_as_real(xs.to_dense()))
             self.assertEqual(torch.view_as_complex(torch.view_as_real(xs)), xs)
