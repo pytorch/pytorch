@@ -222,8 +222,11 @@ class TestFFT(TestCase):
                 }
 
                 y = backward(forward(x, **kwargs), **kwargs)
-                if x.dtype is torch.half and y.dtype is torch.complex32:
-                    # Since type promotion currently doesn't work with complex32
+                if (
+                    (x.dtype is torch.half and y.dtype is torch.complex32) or
+                    (x.dtype is torch.bfloat16 and y.dtype is torch.bcomplex32)
+                ):
+                    # Since type promotion currently doesn't work with [b]complex32
                     # manually promote `x` to complex32
                     x = x.to(torch.complex32)
                 # For real input, ifft(fft(x)) will convert to complex
@@ -1175,6 +1178,7 @@ class TestFFT(TestCase):
                                 center=center, normalized=normalized)
             self.assertEqual(expected, actual)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @skipCPUIfNoFFT
     @dtypes(torch.cdouble)
     def test_complex_istft_real_equiv(self, device, dtype):

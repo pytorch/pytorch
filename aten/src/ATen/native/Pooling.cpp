@@ -26,6 +26,7 @@
 #endif
 
 #include <tuple>
+#include <utility>
 
 namespace at::native {
 
@@ -102,7 +103,7 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
   output  = output.squeeze(-2);
   indices = indices.squeeze(-2);
 
-  return std::make_tuple(output, indices);
+  return std::make_tuple(std::move(output), std::move(indices));
 }
 
 Tensor avg_pool1d(
