@@ -2850,6 +2850,189 @@ def forward(self, arg0_1, arg1_1):
         self.assertNotIn("backend_options", code)
 
     @requires_gpu
+    def test_capture_triton_backend_options_exclude_kernel_args(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pass
+
+        def f(x, y):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            capture_triton(add_kernel)[grid](
+                in_ptr0=x,
+                in_ptr1=y,
+                out_ptr=output,
+                n_elements=n_elements,
+                BLOCK_SIZE=16,
+                enable_fp_fusion=False,
+            )
+            return output
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        gm = make_fx(f, tracing_mode="symbolic")(x, y)
+        hop_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function"
+            and node.target is triton_kernel_wrapper_mutation
+        )
+
+        # capture_triton sees the original launch kwargs, including tensor and
+        # symbolic kernel args. Dynamic kernel args must remain only in kwargs,
+        # not backend_options, while concrete launch kwargs such as BLOCK_SIZE
+        # and enable_fp_fusion stay visible to backend.parse_options().
+        self.assertEqual(
+            set(hop_node.kwargs["kwargs"]),
+            {"in_ptr0", "in_ptr1", "out_ptr", "n_elements", "BLOCK_SIZE"},
+        )
+        self.assertEqual(
+            hop_node.kwargs["backend_options"],
+            {"BLOCK_SIZE": 16, "enable_fp_fusion": False},
+        )
+
+    @requires_gpu
+    def test_capture_triton_backend_options_also_kernel_kwarg(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            enable_fp_fusion: "tl.constexpr",
+        ):
+            pass
+
+        def f(x):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            capture_triton(add_kernel)[grid](
+                x,
+                output,
+                n_elements,
+                BLOCK_SIZE=16,
+                enable_fp_fusion=False,
+            )
+            return output
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        gm = make_fx(f)(torch.randn(4, device=GPU_TYPE))
+        hop_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function"
+            and node.target is triton_kernel_wrapper_mutation
+        )
+
+        # Direct Triton gives a kwarg such as enable_fp_fusion two meanings
+        # when the kernel also has a parameter with that name: it binds the
+        # tl.constexpr parameter and backend.parse_options() still sees it as
+        # a backend option. The tracing path should preserve that concrete
+        # kwarg instead of dropping it just because it is also a kernel arg.
+        self.assertEqual(
+            hop_node.kwargs["backend_options"],
+            {"BLOCK_SIZE": 16, "enable_fp_fusion": False},
+        )
+
+    @requires_gpu
+    def test_capture_triton_autotune_config_does_not_materialize_default_args(self):
+        @triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 16}, num_warps=4)],
+            key=[],
+        )
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr" = 2,
+        ):
+            pass
+
+        def f(x):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            capture_triton(add_kernel)[grid](
+                x,
+                output,
+                n_elements,
+            )
+            return output
+
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        gm = make_fx(f)(torch.randn(4, device=GPU_TYPE))
+        hop_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function"
+            and node.target is triton_kernel_wrapper_mutation
+        )
+
+        # Omitted Python defaults should stay omitted from the HOP payload.
+        # The autotune config still provides BLOCK_SIZE to grid(meta), giving a
+        # single-program grid for four elements. This prevents the default
+        # BLOCK_SIZE=2 from being recorded as an explicit constant argument and
+        # competing with the config's BLOCK_SIZE=16 downstream.
+        constant_args = kernel_side_table.get_constant_args(
+            hop_node.kwargs["constant_args_idx"]
+        )
+        self.assertEqual(
+            set(hop_node.kwargs["kwargs"]), {"in_ptr0", "out_ptr", "n_elements"}
+        )
+        self.assertNotIn("BLOCK_SIZE", hop_node.kwargs["kwargs"])
+        self.assertNotIn("BLOCK_SIZE", constant_args)
+        self.assertEqual(hop_node.kwargs["grid"], [(1, 1, 1)])
+        self.assertEqual(hop_node.kwargs["backend_options"], {})
+
+    @requires_gpu
+    def test_capture_triton_dynamic_backend_options_error(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pass
+
+        def f(x):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            capture_triton(add_kernel)[grid](
+                in_ptr0=x,
+                out_ptr=output,
+                n_elements=n_elements,
+                BLOCK_SIZE=16,
+                maxnreg=n_elements,
+            )
+            return output
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # Unlike n_elements above, maxnreg is not a kernel parameter. If it
+        # contains a symbolic value, it cannot be represented as a concrete
+        # compile-time backend option.
+        with self.assertRaisesRegex(
+            RuntimeError, "Triton backend options must be concrete values"
+        ):
+            make_fx(f, tracing_mode="symbolic")(torch.randn(4, device=GPU_TYPE))
+
+    @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
     def test_triton_kernel_restore_value(self, backend, autotune_at_compile_time):
@@ -4665,96 +4848,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         out = f(x, y)
         expected = torch.empty_like(x)
         self.assertEqual(out, expected)
-
-    @unittest.skipIf(not has_triton_package(), "requires triton")
-    def test_capture_triton_backend_options_exclude_kernel_args(self):
-        import triton
-        import triton.language as tl
-
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pass
-
-        def f(x, y):
-            output = torch.empty_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            capture_triton(add_kernel)[grid](
-                in_ptr0=x,
-                in_ptr1=y,
-                out_ptr=output,
-                n_elements=n_elements,
-                BLOCK_SIZE=16,
-                enable_fp_fusion=False,
-            )
-            return output
-
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        x = torch.randn(4)
-        y = torch.randn(4)
-        gm = make_fx(f, tracing_mode="symbolic")(x, y)
-        hop_node = next(
-            node
-            for node in gm.graph.nodes
-            if node.op == "call_function"
-            and node.target is triton_kernel_wrapper_mutation
-        )
-
-        # capture_triton sees the original launch kwargs, including tensor and
-        # symbolic kernel args. Those names must remain in kwargs, not in
-        # backend_options, because backend_options are later parsed as compiler
-        # options.
-        self.assertEqual(
-            set(hop_node.kwargs["kwargs"]),
-            {"in_ptr0", "in_ptr1", "out_ptr", "n_elements", "BLOCK_SIZE"},
-        )
-        self.assertEqual(
-            hop_node.kwargs["backend_options"], {"enable_fp_fusion": False}
-        )
-
-    @unittest.skipIf(not has_triton_package(), "requires triton")
-    def test_capture_triton_dynamic_backend_options_error(self):
-        import triton
-        import triton.language as tl
-
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pass
-
-        def f(x):
-            output = torch.empty_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            capture_triton(add_kernel)[grid](
-                in_ptr0=x,
-                out_ptr=output,
-                n_elements=n_elements,
-                BLOCK_SIZE=16,
-                grid_launch_partition=(n_elements,),
-            )
-            return output
-
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        # Unlike n_elements above, grid_launch_partition is not a kernel
-        # parameter. If it contains a symbolic value, it cannot be represented
-        # as a concrete compile-time backend option.
-        with self.assertRaisesRegex(
-            RuntimeError, "Triton backend options must be concrete values"
-        ):
-            make_fx(f, tracing_mode="symbolic")(torch.randn(4))
 
     @requires_gpu
     def test_wrap_triton_disabled_in_triton_op(self):

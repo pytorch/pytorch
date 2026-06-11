@@ -3372,7 +3372,6 @@ class DynamoTritonHOPifier(TritonHOPifier):
         grids: Any,
         combined_args: dict[str, Any],
         backend_option_kwargs: dict[str, Any],
-        default_args: dict[str, Any],
         tx: "InstructionTranslatorBase",
     ) -> ConstantVariable | None:
         from .dicts import ConstDictVariable
@@ -3409,12 +3408,10 @@ class DynamoTritonHOPifier(TritonHOPifier):
             for k, v in combined_args.items()
             if isinstance(v, VariableTracker) and v.is_python_constant()
         }
-        constant_args.update(default_args)
         non_constant_args = {
             k: v
             for k, v in combined_args_vt.items()
             if not (isinstance(v, VariableTracker) and v.is_python_constant())
-            and k.as_python_constant() not in default_args
         }
         backend_options = {
             k: v.as_python_constant()

@@ -1405,9 +1405,17 @@ def triton_kernel_wrapper_mutation_dense(
             # Preserve the single-kwarg form for names that are both kernel
             # parameters and backend options. Triton's binder uses that kwarg
             # to bind the kernel parameter, and _pack_args still exposes it to
-            # backend.parse_options(). Moving it into positional args here
-            # would reconstruct the invalid duplicate form:
+            # backend.parse_options(). Moving this parameter into positional
+            # args would reconstruct the invalid duplicate form:
             # kernel(..., False, enable_fp_fusion=False).
+            #
+            # Stop positional packing entirely at this point. A later kernel
+            # parameter cannot be safely packed positionally after an earlier
+            # parameter is intentionally left in kwargs/constant_args; doing so
+            # would shift it into the wrong argument slot. Triton accepts the
+            # remaining parameters by keyword, so the only trade-off is that
+            # the triton#5082 workaround no longer applies after this first
+            # backend-option/kernel-parameter overlap.
             break
         if name in kwargs:
             args.append(kwargs.pop(name))
@@ -1826,7 +1834,6 @@ class TritonHOPifier:
         grids,
         combined_args: dict[str, Any],
         backend_option_kwargs: dict[str, Any],
-        default_args: dict[str, Any],
         tx,
     ) -> Optional["ConstantVariable"]:
         raise NotImplementedError("abstract method")
@@ -2290,14 +2297,6 @@ class TritonHOPifier:
         # adding them to the bound argument map.
 
         combined_args_raw = {**dict(zip(iter_kernel.arg_names, args)), **kwargs}
-        default_args = {}
-        for name, param in iter_kernel.signature.parameters.items():
-            if (
-                name not in combined_args_raw
-                and param.default is not inspect.Parameter.empty
-            ):
-                default_args[name] = param.default
-                combined_args_raw[name] = param.default
 
         # precompute the grid for the kernel
         configs = (
@@ -2361,7 +2360,7 @@ class TritonHOPifier:
                         combined_args_raw[arg_name]
                     )
         return self.call_HOP(
-            variable, grids, combined_args_raw, backend_option_kwargs, default_args, tx
+            variable, grids, combined_args_raw, backend_option_kwargs, tx
         )
 
 
@@ -2466,8 +2465,8 @@ class TracingTritonHOPifier(TritonHOPifier):
     def is_dynamic_backend_option(self, value: Any) -> bool:
         # Backend options are compile-time values. In proxy tracing, a value can
         # be a Proxy/Node directly or be nested inside a tuple/list option such
-        # as grid_launch_partition=(sym_size,). Reject those unless the name is
-        # later identified as a real kernel parameter.
+        # as backend_option=(sym_size,). Reject those unless the name is later
+        # identified as a real kernel parameter.
         leaves, _ = pytree.tree_flatten(value)
         return any(
             isinstance(
@@ -2490,7 +2489,6 @@ class TracingTritonHOPifier(TritonHOPifier):
         grids: list["TritonGridTupleType"],
         combined_args: dict[str, Any],
         backend_option_kwargs: dict[str, Any],
-        default_args: dict[str, Any],
         tx: None,
     ) -> None:
         if tx is not None:
@@ -2503,14 +2501,16 @@ class TracingTritonHOPifier(TritonHOPifier):
         graphable_args, constant_args_idx = self.store_non_graphable_args(combined_args)
         # backend_option_kwargs starts as the original launch kwargs because
         # direct Triton exposes that dict to backend.parse_options(). In the
-        # tracing HOP, real kernel arguments already live in combined_args and
-        # must be carried through kwargs/constant_args instead. Drop every
-        # bound kernel parameter, including tensor/proxy args and Python
-        # constants, then validate that the remaining backend options are
-        # concrete compile-time values.
+        # tracing HOP, tensor/proxy kernel arguments already live in
+        # combined_args and must be carried through kwargs/constant_args
+        # instead. Drop only those dynamic bound kernel parameters. Keep
+        # concrete kwargs, including the dual-meaning case where a kwarg both
+        # binds a tl.constexpr kernel parameter and is parsed as a backend
+        # option, to match Dynamo and direct Triton.
         backend_options = dict(backend_option_kwargs)
-        for name in combined_args:
-            backend_options.pop(name, None)
+        for name, value in combined_args.items():
+            if name in backend_options and self.is_dynamic_backend_option(value):
+                backend_options.pop(name)
         dynamic_backend_options = [
             k for k, v in backend_options.items() if self.is_dynamic_backend_option(v)
         ]
