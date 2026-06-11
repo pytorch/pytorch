@@ -2,7 +2,7 @@
 
 ## Intro / Motivation
 
-**Pruning** is the technique of removing parameters from a model to reduce the computational cost. The goal of pruning is to improve the performance of the model while maintaining it's accuracy.
+**Pruning** is the technique of removing parameters from a model to reduce the computational cost. The goal of pruning is to improve the performance of the model while maintaining its accuracy.
 
 ### Unstructured vs. Structured Pruning
 One way to do this is to consider each parameter individually. This gives us the greatest granularity when pruning and is called **unstructured pruning**.
