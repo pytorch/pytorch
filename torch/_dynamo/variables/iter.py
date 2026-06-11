@@ -36,6 +36,7 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker
 from .object_protocol import generic_getiter, generic_iternext
 
+
 # chain.from_iterable is a method descriptor that creates a new object on each
 # attribute access (a is b → False). Capture once at import time for stable
 # identity comparisons in ItertoolsVariable.call_function.
@@ -124,29 +125,6 @@ class ItertoolsVariable(VariableTracker):
                 iterables,
                 fillvalue=fillvalue_vt,
                 mutation_type=ValueMutationNew(),
-            )
-        elif self.value is itertools.islice and not kwargs and 2 <= len(args) <= 4:
-            slice_args = args[1:]
-            if not all(a.is_python_constant() for a in slice_args):
-                return super().call_function(tx, args, kwargs)
-            py_vals = [a.as_python_constant() for a in slice_args]
-            s = slice(*py_vals)
-            start = 0 if s.start is None else s.start
-            stop = s.stop
-            step = 1 if s.step is None else s.step
-            if start < 0 or (stop is not None and stop < 0) or step <= 0:
-                raise_value_error(
-                    tx,
-                    "Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.",
-                )
-            # Fast path: list/tuple literal — nobody holds a reference to the fresh iterator,
-            # so we can slice items directly without advancing any shared state.
-            if isinstance(args[0], (variables.ListVariable, variables.TupleVariable)):
-                sliced = list(args[0].items[start:stop:step])
-                return variables.ListIteratorVariable(sliced, mutation_type=ValueMutationNew())
-            it = generic_getiter(tx, args[0])
-            return IsliceVariable(
-                it, start=start, stop=stop, step=step, mutation_type=ValueMutationNew()
             )
         elif self.value is itertools.product:
             if any(kw != "repeat" for kw in kwargs):
@@ -608,7 +586,9 @@ class ZipLongestVariable(IteratorVariable):
         super().__init__(**kwargs)
         self.iterables = iterables
         self.fillvalue = fillvalue
-        self.exhausted = exhausted if exhausted is not None else [False] * len(iterables)
+        self.exhausted = (
+            exhausted if exhausted is not None else [False] * len(iterables)
+        )
 
     def python_type(self) -> type:
         return itertools.zip_longest
@@ -658,9 +638,14 @@ class ZipLongestVariable(IteratorVariable):
                     )
                 )
                 codegen.extend_output(
-                    [create_instruction("BUILD_TUPLE", arg=0), *create_call_function(1, False)]
+                    [
+                        create_instruction("BUILD_TUPLE", arg=0),
+                        *create_call_function(1, False),
+                    ]
                 )
-        codegen.extend_output([create_instruction("BUILD_TUPLE", arg=len(self.iterables))])
+        codegen.extend_output(
+            [create_instruction("BUILD_TUPLE", arg=len(self.iterables))]
+        )
         codegen.extend_output([codegen.create_load_const("fillvalue")])
         codegen(self.fillvalue)
         codegen.extend_output(
@@ -669,104 +654,6 @@ class ZipLongestVariable(IteratorVariable):
                 *create_call_function_ex(True, False),
             ]
         )
-
-
-class IsliceVariable(IteratorVariable):
-    """
-    Represents itertools.islice(iterable, [start,] stop [, step])
-    """
-
-    # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L937-L1020
-    _cpython_type = itertools.islice
-
-    _nonvar_fields = {
-        "current_pos",  # items consumed from underlying iterator
-        "next_i",       # absolute index of next item to yield
-        "stop",         # absolute stop (None = unlimited)
-        "step",
-        *IteratorVariable._nonvar_fields,
-    }
-
-    def __init__(
-        self,
-        iterable: "VariableTracker",
-        *,
-        start: int = 0,
-        stop: "int | None" = None,
-        step: int = 1,
-        current_pos: "int | None" = None,
-        next_i: "int | None" = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.iterable = iterable
-        self.stop = stop
-        self.step = step
-        self.current_pos = current_pos if current_pos is not None else 0
-        self.next_i = next_i if next_i is not None else start
-
-    def python_type(self) -> type:
-        return itertools.islice
-
-    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L937-L1020
-        if not self.is_mutable():
-            raise AssertionError("IsliceVariable must be mutable for next()")
-        if self.stop is not None and self.next_i >= self.stop:
-            # CPython drains to stop before returning StopIteration so the underlying
-            # iterator is advanced to the stop position.
-            tx.output.side_effects.mutation(self)
-            while self.current_pos < self.stop:
-                try:
-                    generic_iternext(tx, self.iterable)
-                    self.current_pos += 1
-                except ObservedUserStopIteration:
-                    handle_observed_exception(tx)
-                    break
-            raise_observed_exception(StopIteration, tx)
-        tx.output.side_effects.mutation(self)
-        # Skip from current_pos to next_i
-        while self.current_pos < self.next_i:
-            try:
-                generic_iternext(tx, self.iterable)
-                self.current_pos += 1
-            except ObservedUserStopIteration:
-                handle_observed_exception(tx)
-                raise_observed_exception(StopIteration, tx)
-        # Yield item at next_i
-        try:
-            item = generic_iternext(tx, self.iterable)
-        except ObservedUserStopIteration:
-            handle_observed_exception(tx)
-            raise_observed_exception(StopIteration, tx)
-        self.current_pos += 1
-        # Clamp next_i to stop (CPython: overshoot → stop, triggers drain on next call)
-        new_next_i = self.next_i + self.step
-        if self.stop is not None and new_next_i > self.stop:
-            new_next_i = self.stop
-        self.next_i = new_next_i
-        return item
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_python_module(itertools),
-                    codegen.create_load_attr("islice"),
-                ]
-            )
-        )
-        codegen(self.iterable)
-        new_start = self.next_i - self.current_pos
-        new_stop = self.stop - self.current_pos if self.stop is not None else None
-        codegen.extend_output(
-            [
-                codegen.create_load_const(new_start),
-                codegen.create_load_const(new_stop),
-                codegen.create_load_const(self.step),
-            ]
-        )
-        codegen.extend_output(create_call_function(4, False))
 
 
 class MapVariable(IteratorVariable):

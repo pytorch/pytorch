@@ -2646,6 +2646,16 @@
       ]
     }
   ],
+  "GB2483": [
+    {
+      "Gb_type": "str_impl not implemented",
+      "Context": "{type(self).__name__} has no str_impl override for {self.python_type_name()}",
+      "Explanation": "Dynamo does not implement __str__ for {self.python_type_name()} in {type(self).__name__}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0187": [
     {
       "Gb_type": "functools.wraps",
@@ -2803,6 +2813,16 @@
       "Hints": [
         "Use a mapping proxy constructed in the same `torch.compile` region.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9192": [
+    {
+      "Gb_type": "Unsupported kwargs for itertools.zip_longest",
+      "Context": "call_function {self} {args} {kwargs}",
+      "Explanation": "Expected kwargs: 'fillvalue', but got {','.join(set(kwargs.keys()) - {'fillvalue'})}",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
