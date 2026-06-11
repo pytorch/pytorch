@@ -186,6 +186,25 @@ class ReconfigurableProcessGroup(dist.ProcessGroup):
         return create_work(None)
 
 
+class WindowProcessGroup(dist.ProcessGroup):
+    """
+    A Python ProcessGroup that records new_window calls. Used to verify the
+    torch.distributed window helpers delegate to ProcessGroup.
+    """
+
+    def __init__(self, rank, world):
+        super().__init__(rank, world)
+        self.new_window_tensor = "unset"
+
+    @property
+    def supports_window(self):
+        return True
+
+    def new_window(self, tensor=None):
+        self.new_window_tensor = tensor
+        return "fake-window"
+
+
 # We cannot use parametrize as some tests are defined on the base class and use _get_process_group
 class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
     def setUp(self):
@@ -340,6 +359,20 @@ class TestPyProcessGroup(TestCase):
         self.assertEqual(opts.handles, ["a", "b"])
         self.assertEqual(opts.timeout, timeout)
         self.assertEqual(opts.hints, {"k": "v"})
+
+    def test_window_delegation(self) -> None:
+        pg = WindowProcessGroup(0, 1)
+
+        self.assertTrue(dist._supports_window(group=pg))
+
+        # With no tensor, new_window is called with tensor=None.
+        self.assertEqual(dist._new_window(group=pg), "fake-window")
+        self.assertIsNone(pg.new_window_tensor)
+
+        # A tensor is forwarded through to ProcessGroup.new_window.
+        t = torch.zeros(4)
+        self.assertEqual(dist._new_window(t, group=pg), "fake-window")
+        self.assertIs(pg.new_window_tensor, t)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
     def test_block_current_stream(self) -> None:

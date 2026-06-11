@@ -217,4 +217,20 @@ struct ReconfigureOptions {
   std::unordered_map<std::string, std::string> hints;
 };
 
+// One-sided (RMA) window operation options. See Window.hpp.
+struct PutOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
+};
+
+struct SignalOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
+};
+
+struct WaitSignalOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
+};
+
 } // namespace c10d

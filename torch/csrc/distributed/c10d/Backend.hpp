@@ -12,6 +12,7 @@
 
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Window.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
 
@@ -20,6 +21,11 @@
 // get_reconfigure_handle / reconfigure). Downstream backends can guard their
 // overrides with #ifdef so they build against both old and new c10d headers.
 #define C10D_BACKEND_HAS_RECONFIGURE 1
+
+// Feature macro: when defined, c10d::Backend (and ProcessGroup) expose the
+// one-sided window APIs (supportsWindow / new_window) and the c10d::Window
+// interface. Downstream backends can guard their overrides with #ifdef.
+#define C10D_BACKEND_HAS_WINDOW 1
 
 constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
@@ -159,6 +165,22 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         false,
         c10::str(
             "Backend ", getBackendName(), " does not support reconfigure"));
+  }
+
+  // Window & One-sided (RMA) API
+  //
+  // Backends that support one-sided operations advertise it via supportsWindow
+  // and return a concrete c10d::Window from new_window. The optional tensor, if
+  // provided, is registered with the new window.
+  virtual bool supportsWindow() const {
+    return false;
+  }
+
+  virtual c10::intrusive_ptr<Window> new_window(
+      const std::optional<at::Tensor>& /* tensor */ = std::nullopt) {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), " does not support new_window"));
   }
 
   virtual void startCoalescing() {
