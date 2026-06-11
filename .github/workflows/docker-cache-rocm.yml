@@ -18,9 +18,9 @@ on:
         description: Workflow run id to pull artifacts from
         required: true
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
-  cancel-in-progress: true
+# concurrency:
+#   group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
+#   cancel-in-progress: true
 
 permissions:
   id-token: write
@@ -58,7 +58,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [linux.rocm.mi210.docker-cache]
+        runner: [linux.rocm.mi350.docker-cache]
+
         docker-image: [
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}"
@@ -112,6 +113,7 @@ jobs:
           else
             echo "Unexpected branch in ref_name: ${ref_name}" && exit 1
           fi
+          mkdir -p ~/pytorch-data/docker
           docker tag "${GHCR_IMAGE}" "${ECR_IMAGE}"
           # mv is atomic operation, so we use intermediate tar.tmp file to prevent read-write contention
           docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp "${ECR_IMAGE}"
