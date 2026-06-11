@@ -3998,6 +3998,20 @@ class CommonTemplate:
                 b = torch.full((8,), b_val, dtype=dtype, device=self.device)
                 self.common(fn, (a, b))
 
+    def test_batchnorm_groupnorm_eval_folding(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181696
+        # BN+GN in eval mode must produce correct output under compile.
+        bn = torch.nn.BatchNorm1d(10).eval()
+        gn = torch.nn.GroupNorm(10, 10).eval()
+
+        def fn(x):
+            t = bn(x)
+            t = gn(t)
+            return t
+
+        x = torch.ones([6, 10, 12], device=self.device)
+        self.common(fn, (x,))
+
     def test_div_precision(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/101039
 

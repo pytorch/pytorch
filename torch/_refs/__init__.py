@@ -3385,9 +3385,8 @@ def native_group_norm(
         [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
     )
     reduction_dims = utils.canonicalize_dims(input_reshaped.ndim, reduction_dims)
-    biased_var, mean = torch.var_mean(
-        input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
-    )
+    mean = input_reshaped.mean(dim=reduction_dims, keepdim=True)
+    biased_var = ((input_reshaped - mean) ** 2).mean(dim=reduction_dims, keepdim=True)
     rstd = torch.rsqrt(biased_var + eps)
     if input.device.type == "cpu" and weight is not None:
         weight_reshaped = torch.reshape(
