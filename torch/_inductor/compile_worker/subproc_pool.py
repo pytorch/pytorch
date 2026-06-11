@@ -177,15 +177,18 @@ class SubprocPool:
             # pyrefly: ignore [bad-assignment]
             self.log_file = open(log_path, "w")  # noqa:SIM115
 
+        subproc_env = {
+            **python_subprocess_env(),
+            # Safeguard against creating a SubprocPool in the subprocess.
+            "TORCH_WARM_POOL": "0",
+            # Some internal usages need a modified LD_LIBRARY_PATH.
+            "LD_LIBRARY_PATH": get_ld_library_path(),
+        }
+        if config.compile_worker_malloc_conf:
+            subproc_env["MALLOC_CONF"] = config.compile_worker_malloc_conf
         self.process = subprocess.Popen(
             cmd,
-            env={
-                **python_subprocess_env(),
-                # Safeguard against creating a SubprocPool in the subprocess.
-                "TORCH_WARM_POOL": "0",
-                # Some internal usages need a modified LD_LIBRARY_PATH.
-                "LD_LIBRARY_PATH": get_ld_library_path(),
-            },
+            env=subproc_env,
             pass_fds=(subproc_read_fd, subproc_write_fd),
             stdout=self.log_file,
             stderr=self.log_file,

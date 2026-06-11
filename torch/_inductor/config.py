@@ -1137,6 +1137,16 @@ worker_suppress_logging: bool = Config(
     default=True,
 )
 
+
+def _compile_worker_malloc_conf_default() -> str:
+    env = os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_MALLOC_CONF")
+    if env is not None:
+        return env
+    return "dirty_decay_ms:0,narenas:4"
+
+
+compile_worker_malloc_conf: str = _compile_worker_malloc_conf_default()
+
 # Log per-operation runtime estimates for TLParse analysis.
 log_tlparse: bool = Config(
     env_name_force="LOG_TLPARSE",
