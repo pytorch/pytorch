@@ -2,10 +2,15 @@
 
 #include <include/openreg.h>
 
+#include <cstdlib>
 #include <map>
 #include <mutex>
 
 namespace {
+
+bool skip_mprotect() {
+  return std::getenv("OPENREG_SKIP_MPROTECT") != nullptr;
+}
 
 struct Block {
   orMemoryType type = orMemoryType::orMemoryTypeUnmanaged;
@@ -38,9 +43,11 @@ class MemoryManager {
       mem = openreg::mmap(aligned_size);
       if (mem == nullptr)
         return orErrorUnknown;
-      if (openreg::mprotect(mem, aligned_size, F_PROT_NONE) != 0) {
-        openreg::munmap(mem, aligned_size);
-        return orErrorUnknown;
+      if (!skip_mprotect()) {
+        if (openreg::mprotect(mem, aligned_size, F_PROT_NONE) != 0) {
+          openreg::munmap(mem, aligned_size);
+          return orErrorUnknown;
+        }
       }
     } else {
       if (openreg::alloc(&mem, page_size, aligned_size) != 0) {
@@ -64,7 +71,9 @@ class MemoryManager {
 
     const auto& info = it->second;
     if (info.type == orMemoryType::orMemoryTypeDevice) {
-      openreg::mprotect(info.pointer, info.size, F_PROT_READ | F_PROT_WRITE);
+      if (!skip_mprotect()) {
+        openreg::mprotect(info.pointer, info.size, F_PROT_READ | F_PROT_WRITE);
+      }
       openreg::munmap(info.pointer, info.size);
     } else {
       openreg::free(info.pointer);
@@ -155,7 +164,7 @@ class MemoryManager {
 
   orError_t unprotectNoLock(Block* info) {
     if (info && info->type == orMemoryType::orMemoryTypeDevice) {
-      if (info->refcount == 0) {
+      if (!skip_mprotect() && info->refcount == 0) {
         if (openreg::mprotect(
                 info->pointer, info->size, F_PROT_READ | F_PROT_WRITE) != 0) {
           return orErrorUnknown;
@@ -170,7 +179,7 @@ class MemoryManager {
 
   orError_t protectNoLock(Block* info) {
     if (info && info->type == orMemoryType::orMemoryTypeDevice) {
-      if (info->refcount == 1) {
+      if (!skip_mprotect() && info->refcount == 1) {
         if (openreg::mprotect(info->pointer, info->size, F_PROT_NONE) != 0) {
           return orErrorUnknown;
         }
