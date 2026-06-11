@@ -642,6 +642,7 @@
     XPU: addmv_out_xpu
     SparseCsrCPU: addmv_out_sparse_compressed
     SparseCsrCUDA: addmv_out_sparse_compressed_cuda
+    SparseCsrXPU: addmv_out_sparse_compressed_xpu
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -1057,6 +1058,7 @@
     MTIA: baddbmm_out_mtia
     XPU: baddbmm_out_xpu
     SparseCsrCUDA: baddbmm_out_sparse_csr_cuda
+    SparseCsrXPU: baddbmm_out_sparse_csr_xpu
 
 - func: baddbmm.dtype(Tensor self, Tensor batch1, Tensor batch2, ScalarType out_dtype, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
@@ -1376,7 +1378,9 @@
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
     SparseMPS: bmm_out_sparse_mps
+    SparseXPU: bmm_out_sparse_xpu
     SparseCsrCUDA: bmm_out_sparse_csr_cuda
+    SparseCsrXPU: bmm_out_sparse_csr_xpu
 
 - func: bmm.dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor
   variants: function
@@ -4151,8 +4155,8 @@
     MTIA: mm_out_mtia
     MPS: mm_out_mps
     XPU: mm_out_xpu
-    SparseCPU, SparseCUDA, SparseMPS: _sparse_mm_out
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: _sparse_csr_mm_out
+    SparseCPU, SparseCUDA, SparseMPS, SparseXPU: _sparse_mm_out
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: _sparse_csr_mm_out
 
 - func: mm.dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor
   dispatch:
@@ -7023,12 +7027,14 @@
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_out_sparse_csr_cuda
     SparseCsrCPU: sparse_sampled_addmm_out_sparse_csr_cpu
+    SparseCsrXPU: sparse_sampled_addmm_out_sparse_csr_xpu
 
 - func: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   python_module: sparse
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_sparse_csr_cuda
     SparseCsrCPU: sparse_sampled_addmm_sparse_csr_cpu
+    SparseCsrXPU: sparse_sampled_addmm_sparse_csr_xpu
 
 - func: _sparse_mm_reduce_impl(Tensor self, Tensor other, str reduce) -> (Tensor, Tensor)
   python_module: sparse
@@ -7051,8 +7057,10 @@
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
     SparseMPS: addmm_out_sparse_dense_mps
+    SparseXPU: addmm_out_sparse_dense_xpu
     SparseCsrCPU: addmm_out_sparse_compressed_cpu
     SparseCsrCUDA: addmm_out_sparse_compressed_cuda
+    SparseCsrXPU: addmm_out_sparse_compressed_xpu
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   structured_delegate: addmm.out
@@ -7507,11 +7515,13 @@
   dispatch:
     SparseCPU: hspmm_out_sparse_cpu
     SparseCUDA: hspmm_out_sparse_cuda
+    SparseXPU: hspmm_out_sparse_xpu
 
 - func: hspmm(Tensor mat1, Tensor mat2) -> Tensor
   dispatch:
     SparseCPU: hspmm_sparse_cpu
     SparseCUDA: hspmm_sparse_cuda
+    SparseXPU: hspmm_sparse_xpu
 
 - func: copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   device_check: NoCheck  # Allows copy into different device
