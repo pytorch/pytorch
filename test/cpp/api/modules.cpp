@@ -5514,7 +5514,7 @@ TEST_F(ModulesTest, PrettyPrintBCEWithLogitsLoss) {
 }
 
 TEST_F(ModulesTest, MultiheadAttentionRejectsZeroNumHeads) {
-  EXPECT_THROW(MultiheadAttention(MultiheadAttentionOptions(0,0)), c10::Error);
+  EXPECT_THROW(MultiheadAttention(MultiheadAttentionOptions(0, 0)), c10::Error);
 }
 
 TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
