@@ -4,10 +4,11 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 
 import functools
 import inspect
+import threading
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
-from types import TracebackType
+from types import CodeType, TracebackType
 from typing import Any, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -1733,10 +1734,35 @@ class CudagraphOverrideContextManager:
         self.fwd = fwd
         self.bwd = bwd
 
-    __call__ = wrap_dunder_call_ctx_manager
+    def __call__(self, fn: Any) -> Any:
+        # When used as a decorator, also register the wrapped function's code
+        # object so OutputGraph.__init__ can rehydrate the annotation even if
+        # the wrapper frame itself never reaches `compile_subgraph` — e.g.
+        # because tracing the wrapper fell back to eager. Without this, only
+        # the wrapper's OG sees the annotation, and the wrapped function later
+        # compiles (as a separate frame) with `cudagraph_annotation=None`.
+        code = getattr(fn, "__code__", None)
+        if code is not None:
+            from torch._inductor import _CudagraphAnnotation
+
+            _CUDAGRAPH_ANNOTATION_BY_CODE[code] = _CudagraphAnnotation(
+                fwd=self.fwd, bwd=self.bwd
+            )
+        return wrap_dunder_call_ctx_manager(self, fn)
 
     def __enter__(self) -> None:
-        pass
+        # Python-level enter: also push onto a thread-local stack so any
+        # Dynamo compile that fires WHILE this CM is active (whether by
+        # eager-fallback of the wrapper, or by a nested `with` block in user
+        # code) inherits the annotation. Dynamo's symbolic-tracing path does
+        # NOT go through this __enter__ (it intercepts the bytecode), so this
+        # is purely a runtime fallback for the cases where Dynamo can't trace
+        # the wrapper itself.
+        from torch._inductor import _CudagraphAnnotation
+
+        _push_active_cudagraph_override(
+            _CudagraphAnnotation(fwd=self.fwd, bwd=self.bwd)
+        )
 
     def __exit__(
         self,
@@ -1744,7 +1770,55 @@ class CudagraphOverrideContextManager:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        pass
+        _pop_active_cudagraph_override()
+
+
+# Per-thread stack of currently-active override_cudagraphs annotations,
+# pushed by `__enter__` and popped by `__exit__`. Lets OutputGraph.__init__
+# inherit the annotation when a Dynamo compile fires for code that is
+# DYNAMICALLY inside an active CM scope at runtime — i.e. the wrapper frame
+# fell back to eager and is now invoking the wrapped function as Python, and
+# Dynamo intercepts that nested call. This is the "we don't know all graph
+# breaks in advance" fallback: covers any failure mode of the wrapper that
+# Dynamo would otherwise route around.
+_active_cudagraph_overrides: threading.local = threading.local()
+
+
+def _push_active_cudagraph_override(annotation: Any) -> None:
+    stack = getattr(_active_cudagraph_overrides, "stack", None)
+    if stack is None:
+        stack = []
+        _active_cudagraph_overrides.stack = stack
+    stack.append(annotation)
+
+
+def _pop_active_cudagraph_override() -> None:
+    stack = getattr(_active_cudagraph_overrides, "stack", None)
+    if stack:
+        stack.pop()
+
+
+def get_active_cudagraph_annotation() -> Any:
+    """Return the innermost active annotation, or None if no CM is active."""
+    stack = getattr(_active_cudagraph_overrides, "stack", None)
+    if stack:
+        return stack[-1]
+    return None
+
+
+# Registry of code-object → cudagraph annotation, populated by the decorator
+# form of `override_cudagraphs`. `OutputGraph.__init__` consults this to seed
+# `self.cudagraph_annotation` whenever it constructs an OG for a registered
+# code object. `CodeType` is not weakref-able, so this is a strong-ref dict;
+# entries leak if the decorated function is itself garbage-collected, but in
+# practice decorated functions are module-level or class-level and outlive the
+# process.
+_CUDAGRAPH_ANNOTATION_BY_CODE: dict[CodeType, Any] = {}
+
+
+def get_cudagraph_annotation_for_code(code: CodeType) -> Any:
+    """Lookup the override annotation for a code object, or None."""
+    return _CUDAGRAPH_ANNOTATION_BY_CODE.get(code)
 
 
 def override_cudagraphs(

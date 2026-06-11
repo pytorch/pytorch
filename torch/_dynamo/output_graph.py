@@ -30,6 +30,7 @@ import logging
 import operator
 import re
 import sys
+import threading
 import time
 import traceback
 import types
@@ -197,6 +198,34 @@ graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
+
+
+# Per-thread carry slot for the `override_cudagraphs` CM annotation. When a
+# RestartAnalysis discards an OutputGraph mid-trace (e.g. because the CM-wrapped
+# frame contains a `torch._dynamo.disable`'d call), `convert_frame` deposits the
+# dying OG's annotation here so the next attempt's OutputGraph rehydrates it in
+# __init__. Without this, the annotation dies with the discarded OG and the
+# eventual finalized OG never carries it into `gm.meta["cudagraph_annotation"]`.
+_cudagraph_annotation_carry: threading.local = threading.local()
+
+
+def carry_cudagraph_annotation_across_restart(
+    annotation: "_CudagraphAnnotation | None",
+) -> None:
+    """Stash an annotation for the next OutputGraph constructed on this thread."""
+    if annotation is None:
+        if hasattr(_cudagraph_annotation_carry, "value"):
+            del _cudagraph_annotation_carry.value
+    else:
+        _cudagraph_annotation_carry.value = annotation
+
+
+def _consume_carried_cudagraph_annotation() -> "_CudagraphAnnotation | None":
+    """Pop and return the carried annotation, or None if nothing is pending."""
+    annotation = getattr(_cudagraph_annotation_carry, "value", None)
+    if annotation is not None:
+        del _cudagraph_annotation_carry.value
+    return annotation
 
 RootGuardManager = guards.RootGuardManager
 
@@ -709,8 +738,35 @@ class OutputGraph(OutputGraphCommon):
 
         # Cudagraph annotation is set during inlining in
         # InliningInstructionTranslator.build_inline_tracer when a decorated
-        # function is inlined.
-        self.cudagraph_annotation: _CudagraphAnnotation | None = None
+        # function is inlined. We also rehydrate from three side channels so
+        # the override survives failure modes that destroy the wrapper's OG
+        # before `compile_subgraph` can copy the annotation to `gm.meta`:
+        #   1. Per-thread carry slot: covers `SpeculationRestartAnalysis` — the
+        #      dying OG's annotation is stashed by `convert_frame.compile_frame`
+        #      and consumed here on the retry.
+        #   2. Per-code-object registry: covers eager-fallback and
+        #      compile-as-separate-frame — when `override_cudagraphs` was used
+        #      as a decorator, the wrapped function's code object is registered
+        #      so any OG constructed for that code picks up the annotation,
+        #      even if the wrapper frame never reaches `compile_subgraph`.
+        #   3. Per-thread active-CM stack: covers ANY dynamically-nested
+        #      compile triggered while the CM is active at the Python level
+        #      (wrapper fell back to eager and called the wrapped function,
+        #      or user wrote `with override_cudagraphs(...): some_call_dynamo_compiles`).
+        #      The CM's `__enter__` pushes the annotation on the stack; any
+        #      OG constructed before the matching `__exit__` inherits it.
+        self.cudagraph_annotation: _CudagraphAnnotation | None = (
+            _consume_carried_cudagraph_annotation()
+        )
+        if self.cudagraph_annotation is None:
+            from torch._dynamo.decorators import (
+                get_active_cudagraph_annotation,
+                get_cudagraph_annotation_for_code,
+            )
+
+            self.cudagraph_annotation = get_cudagraph_annotation_for_code(f_code)
+            if self.cudagraph_annotation is None:
+                self.cudagraph_annotation = get_active_cudagraph_annotation()
 
         self.region_tracker = GraphRegionTracker()
         self._emit_debugger_breakpoint: bool = False
