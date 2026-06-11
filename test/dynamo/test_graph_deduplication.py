@@ -904,6 +904,7 @@ class <lambda>(torch.nn.Module):
         repeated_subgraph0_1 = self.repeated_subgraph0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', arg0_1, arg1_1);  repeated_subgraph0_1 = arg1_1 = None
         getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+
         sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
         sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
         return (add_2,)
@@ -912,7 +913,6 @@ class <lambda>(torch.nn.Module):
         view_1: "f32[10, 10]" = torch.ops.aten.view.default(arg0_1, [10, 10]);  arg0_1 = None
 
         view_2: "f32[10, 10]" = torch.ops.aten.view.default(view, [10, 10]);  view = None
-
         view_3: "f32[10, 10]" = torch.ops.aten.view.default(view_1, [10, 10]);  view_1 = None
 
         add: "f32[10, 10]" = torch.ops.aten.add.Tensor(view_2, view_3);  view_2 = view_3 = None
@@ -943,6 +943,7 @@ class <lambda>(torch.nn.Module):
         repeated_subgraph0_1 = self.repeated_subgraph0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', arg0_1, arg1_1);  repeated_subgraph0_1 = arg1_1 = None
         getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+
         sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
         sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
 
@@ -950,7 +951,6 @@ class <lambda>(torch.nn.Module):
         view_1: "f32[10, 10]" = torch.ops.aten.view.default(arg0_1, [10, 10]);  arg0_1 = None
 
         view_2: "f32[10, 10]" = torch.ops.aten.view.default(view, [10, 10]);  view = None
-
         view_3: "f32[10, 10]" = torch.ops.aten.view.default(view_1, [10, 10]);  view_1 = None
 
         add: "f32[10, 10]" = torch.ops.aten.add.Tensor(view_2, view_3);  view_2 = view_3 = None
