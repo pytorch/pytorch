@@ -34,9 +34,21 @@ struct PythonHooks final : public at::PrivateUse1HooksInterface {
         bool, at::PrivateUse1HooksInterface, "is_available", isBuilt, );
   }
 
-  // TODO(qihqi): these is not supported from python yet
   const at::Generator& getDefaultGenerator(
       c10::DeviceIndex device_index) const override {
+    py::gil_scoped_acquire gil;
+    py::function py_method = py::get_override(this, "get_default_generator");
+    // Allow Python-only backends to provide a generator implementation.
+    // Falls back to base class (which throws) if no Python override exists.
+    if (py_method) {
+      auto it = default_generators_.find(device_index);
+      if (it == default_generators_.end()) {
+        auto [inserted, _] = default_generators_.emplace(
+            device_index, py_method(device_index).cast<at::Generator>());
+        return inserted->second;
+      }
+      return it->second;
+    }
     return at::PrivateUse1HooksInterface::getDefaultGenerator(device_index);
   }
 
@@ -56,6 +68,11 @@ struct PythonHooks final : public at::PrivateUse1HooksInterface {
   at::Allocator* getPinnedMemoryAllocator() const override {
     return at::PrivateUse1HooksInterface::getPinnedMemoryAllocator();
   }
+
+  // Cache for getDefaultGenerator: must return a reference, so we store the
+  // result here. Mutable because getDefaultGenerator is const.
+  mutable std::unordered_map<c10::DeviceIndex, at::Generator>
+      default_generators_;
 };
 
 struct PythonDeviceGuard final : public c10::impl::DeviceGuardImplInterface {
@@ -179,7 +196,10 @@ void initModule(PyObject* module) {
           "has_primary_context",
           &at::PrivateUse1HooksInterface::hasPrimaryContext)
       .def("is_built", &at::PrivateUse1HooksInterface::isBuilt)
-      .def("is_available", &at::PrivateUse1HooksInterface::isAvailable);
+      .def("is_available", &at::PrivateUse1HooksInterface::isAvailable)
+      .def(
+          "get_default_generator",
+          &at::PrivateUse1HooksInterface::getDefaultGenerator);
 
   py::class_<c10::impl::DeviceGuardImplInterface, PythonDeviceGuard>(
       _acc.ptr(), "DeviceGuard")

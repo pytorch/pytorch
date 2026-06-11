@@ -533,6 +533,10 @@ class _DummyPrivateUse1Hook(torch._C._acc.PrivateUse1Hooks):
     def is_built(self) -> bool:
         return True
 
+    def get_default_generator(self, dev_id) -> torch._C.Generator:
+        # Dummy backend has no device-specific generator; reuse the CPU one.
+        return torch._C.default_generator
+
 
 class _DummyDeviceGuard(torch._C._acc.DeviceGuard):
     def type_(self):
