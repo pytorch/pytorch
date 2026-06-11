@@ -36,6 +36,7 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker
 from .object_protocol import generic_getiter, generic_iternext
 
+
 # chain.from_iterable is a method descriptor that creates a new object on each
 # attribute access (a is b → False). Capture once at import time for stable
 # identity comparisons in ItertoolsVariable.call_function.
@@ -585,7 +586,9 @@ class ZipLongestVariable(IteratorVariable):
         super().__init__(**kwargs)
         self.iterables = iterables
         self.fillvalue = fillvalue
-        self.exhausted = exhausted if exhausted is not None else [False] * len(iterables)
+        self.exhausted = (
+            exhausted if exhausted is not None else [False] * len(iterables)
+        )
 
     def python_type(self) -> type:
         return itertools.zip_longest
@@ -635,9 +638,14 @@ class ZipLongestVariable(IteratorVariable):
                     )
                 )
                 codegen.extend_output(
-                    [create_instruction("BUILD_TUPLE", arg=0), *create_call_function(1, False)]
+                    [
+                        create_instruction("BUILD_TUPLE", arg=0),
+                        *create_call_function(1, False),
+                    ]
                 )
-        codegen.extend_output([create_instruction("BUILD_TUPLE", arg=len(self.iterables))])
+        codegen.extend_output(
+            [create_instruction("BUILD_TUPLE", arg=len(self.iterables))]
+        )
         codegen.extend_output([codegen.create_load_const("fillvalue")])
         codegen(self.fillvalue)
         codegen.extend_output(
