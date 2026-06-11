@@ -35,7 +35,10 @@ def _get_default_gpu_device_type() -> str:
         for device_type in GPU_BENCHMARK_DEVICE_TYPES
         if getattr(torch, device_type).is_available()
     ]
-    assert len(avail_gpus) <= 1
+    if len(avail_gpus) > 1:
+        raise AssertionError(
+            f"expected at most one available GPU type, got {avail_gpus}"
+        )
     return "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
 
 
@@ -134,7 +137,8 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
             return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
 
         distort_method = config.test_configs.distort_benchmarking_result
-        assert isinstance(ms, float)
+        if not isinstance(ms, float):
+            raise AssertionError(f"Expected float, got {type(ms)}")
         if distort_method == "inverse":
             return 1.0 / ms if ms else 0.0
         elif distort_method == "random":
@@ -158,12 +162,12 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
 def may_ban_benchmarking() -> None:
     if torch._inductor.config.deterministic:
         raise RuntimeError("""In the deterministic mode of Inductor, we will avoid those
-        benchmarkings that would cause non deterministic results. Only benchmarkings in the vetted
-        scenarios are allowed. Example include autotuning for triton configs of pointwise kernels.
+        benchmarkings that would cause non-deterministic results. Only benchmarkings in the vetted
+        scenarios are allowed. Examples include autotuning for triton configs of pointwise kernels.
 
         When you see this exception, you can do one of the following two things:
         1. if the benchmarking you are doing does not introduce any non-determinism, you can just
-        add is_vetted_benchmarking=True to you benchmark_gpu call. That would solve the issue.
+        add is_vetted_benchmarking=True to your benchmark_gpu call. That would solve the issue.
 
         2. if the benchmarking you are doing indeed introduces non-determinism, you'll need to disable
         such feature in deterministic mode or find an alternative implementation that is deterministic.
@@ -276,7 +280,8 @@ class Benchmarker:
             fn_kwargs = fn_kwargs or {}
             inferred_device = self.infer_device(*fn_args, **fn_kwargs)
 
-        assert isinstance(inferred_device, torch.device)
+        if not isinstance(inferred_device, torch.device):
+            raise AssertionError(f"Expected torch.device, got {type(inferred_device)}")
 
         fn_args = fn_args or tuple()
         fn_kwargs = fn_kwargs or {}
