@@ -1174,7 +1174,9 @@ def scaled_dot_product_cudnn_attention_backward_single_dim_strategy(
         arg = args_schema[arg_index]
         if isinstance(arg, TensorMeta):
             cum_seq_placements.append(None)
-        elif not isinstance(arg, torch.Tensor):
+        elif arg is None or isinstance(arg, torch.Tensor):
+            pass
+        else:
             raise AssertionError(f"Expected TensorMeta or Tensor, got {type(arg)}")
 
     num_heads_dim_sharding: list[Placement | _ShardingPlaceholder | None] = [
