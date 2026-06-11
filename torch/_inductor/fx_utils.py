@@ -382,6 +382,8 @@ def _extract_subgraphs_and_args(
             yield from _extract_subgraphs_and_args(
                 wrapped_node, valid_subgraphs, *wrapped_args, **wrapped_kwargs
             )
+    elif node.target is torch.ops.higher_order.flex_gemm:
+        yield args[1], tuple(args[2])
     else:
         warnings.warn(
             f"Please add support for subgraph args to function {node.target}!"
