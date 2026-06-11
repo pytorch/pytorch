@@ -29,8 +29,10 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_functionref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_headeronlyarrayref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_idwrapper.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_irange.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_layout.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_lazy.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_load.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_macros.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_math.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_memoryformat.cpp
@@ -39,6 +41,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scopeexit.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_smallbuffer.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_synchronized.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_unroll.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scalartype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_typelist.cpp
