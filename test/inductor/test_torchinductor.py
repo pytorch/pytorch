@@ -4004,6 +4004,7 @@ class CommonTemplate:
         # The fix is Triton-specific (tl.minimum vs triton_helpers.minimum).
         if self.device == "cpu":
             raise unittest.SkipTest("signed zero fix is Triton-specific")
+
         def fn(a, b):
             return torch.minimum(a, b)
 
