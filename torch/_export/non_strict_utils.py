@@ -1082,7 +1082,9 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
-        if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
+        if getattr(func, "__name__", None) == "__getitem__" and isinstance(
+            args[0], torch.Tensor
+        ):
 
             def is_scalar_tensor_index(item):
                 if not isinstance(item, torch.Tensor) or item.ndim != 0:

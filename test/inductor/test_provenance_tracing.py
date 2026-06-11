@@ -939,11 +939,38 @@ class ProvenanceTracingKernelContextTemplate:
         _, code = run_and_get_cpp_code(torch._inductor.aoti_compile_and_package, ep)
 
         self.assertTrue("KernelContextGuard" not in code)
+        FileCheck().check_not(
+            "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+        ).check_not("thread_local KernelContext* tls_kernel_context = nullptr;").run(
+            code
+        )
 
         with config.patch(
             {
                 "trace.provenance_tracking_level": 1,
                 "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": False,
+            }
+        ):
+            package_path, code = run_and_get_cpp_code(
+                torch._inductor.aoti_compile_and_package, ep
+            )
+
+            FileCheck().check_not(
+                "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+            ).check_not(
+                "thread_local KernelContext* tls_kernel_context = nullptr;"
+            ).check_not("KernelContextGuard").run(code)
+
+            compiled_model = torch._inductor.aoti_load_package(package_path)
+            result = compiled_model(*example_inputs)
+            self.assertEqual(result, model(*example_inputs))
+
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 1,
+                "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": True,
             }
         ):
             package_path, code = run_and_get_cpp_code(

@@ -3867,7 +3867,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(dst, dst2, atol=0, rtol=0)
 
         # test non-contiguous case
-        dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
+        dst = make_tensor(
+            (num_dest, num_dest, num_dest), dtype=dtype, device=device, low=-30, high=30
+        ).permute((2, 0, 1))
         dst2 = dst.contiguous()
         if dtype.is_complex:
             mask = dst.abs() > 0
@@ -9186,6 +9188,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch.float8_e8m0fnu: "f8e8m0fnu",
             torch.float4_e2m1fn_x2: "f4e2m1fnx2",
             torch.complex32: "c32",
+            torch.bcomplex32: "bc32",
             torch.complex64: "c64",
             torch.complex128: "c128",
             torch.int8: "i8",
@@ -9215,7 +9218,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch.uint8, torch.uint16, torch.uint32, torch.uint64,
             torch.int8, torch.int16, torch.int32, torch.int64,
             torch.float16, torch.float32, torch.float64, torch.bfloat16,
-            torch.complex32, torch.complex64, torch.complex128,
+            torch.complex32, torch.bcomplex32, torch.complex64, torch.complex128,
             torch.bool,
             torch.float8_e5m2, torch.float8_e4m3fn,
             torch.float8_e5m2fnuz, torch.float8_e4m3fnuz,
