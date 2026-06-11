@@ -4331,6 +4331,25 @@ def run(runner, args, original_dir=None):
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
+        if (
+            args.training
+            and args.only is not None
+            and args.only
+            in {
+                "DistillGPT2",
+            }
+        ):
+            # With the harness-wide fallback_random=True, inductor falls back
+            # to ATen rng for the dropout decomposition. That fallback Philox
+            # path indexes randoms by flat element offset, whereas eager CUDA
+            # rng indexes by (thread_id, intra_thread_iter), so the two produce
+            # different dropout masks for the same seed and trip DistillGPT2's
+            # tight accuracy tolerance (observed on gfx942). Setting
+            # fallback_random=False re-enables inductor's replace_random passes,
+            # which align the masks with eager. This is correct/harmless on
+            # other backends since it only changes how inductor lowers rng.
+            inductor_config.fallback_random = False
+
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ and not args.multiprocess:
             args.device_index = "0"
@@ -4702,6 +4721,42 @@ def run(runner, args, original_dir=None):
                 )
             else:
                 name = model_name
+                if (
+                    args.accuracy
+                    and name in runner.skip_accuracy_checks_large_models_dashboard
+                ):
+                    mode = "train" if args.training else "eval"
+                    print(f"{device:4} {mode:5} {name:34} ", flush=True)
+
+                    current_name = name
+                    current_device = device
+                    current_batch_size = batch_size
+                    current_backend = args.backend
+                    current_mode = (
+                        "training"
+                        if args.training
+                        else "inference"
+                        if args.inference
+                        else ""
+                    )
+                    if args.float16:
+                        current_dtype = "float16"
+                    elif args.bfloat16:
+                        current_dtype = "bfloat16"
+                    elif args.float32:
+                        current_dtype = "float32"
+                    elif args.amp:
+                        current_dtype = "amp"
+                    else:
+                        current_dtype = ""
+                    current_quantization = args.quantization
+                    current_settings = vars(args)
+
+                    runner._write_accuracy_row(
+                        "pass_due_to_skip", get_dynamo_stats(), args.tag
+                    )
+                    print("pass_due_to_skip")
+                    continue
                 try:
                     with tqdm(desc="loading model"):
                         extra_args = []

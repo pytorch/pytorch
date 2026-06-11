@@ -1002,22 +1002,26 @@ TEST_F(LazyOpsTest, TestSVD) {
   }
 }
 
-TEST_F(LazyOpsTest, TestCholesky) {
+TEST_F(LazyOpsTest, TestQR) {
   static const int dims[] = {4, 7};
   for (auto m : dims) {
-    for (bool upper : {true, false}) {
+    for (auto n : dims) {
       torch::Tensor a = torch::rand(
-          {3, m, m},
-          torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-      torch::Tensor pd_a =
-          torch::matmul(a, torch::transpose(a, 1, 2)) +
-          torch::eye(
-              m, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-      auto b = torch::cholesky(pd_a, upper);
+          {m, n}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+      auto b = torch::qr(a);
       ForEachDevice([&](const torch::Device& device) {
-        torch::Tensor lazy_a = CopyToDevice(pd_a, device);
-        auto lazy_b = torch::cholesky(lazy_a, upper);
-        AllClose(b, lazy_b, /*rtol=*/1e-3, /*atol=*/1e-4);
+        torch::Tensor lazy_a = CopyToDevice(a, device);
+        auto lazy_b = torch::qr(lazy_a);
+        AllClose(
+            std::get<0>(b).abs(),
+            std::get<0>(lazy_b).abs(),
+            /*rtol=*/1e-3,
+            /*atol=*/1e-4);
+        AllClose(
+            std::get<1>(b).abs(),
+            std::get<1>(lazy_b).abs(),
+            /*rtol=*/1e-3,
+            /*atol=*/1e-4);
       });
     }
   }
