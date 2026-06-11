@@ -28,7 +28,12 @@ from torch._dynamo.testing import (
 )
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, skipIfHpu, skipIfXpu
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    parametrize,
+    skipIfHpu,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
@@ -1923,7 +1928,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         fwd_graph = aot_graphs[0]
         # Determine which fused attention backend is expected based on the
         # prioritization logic in sdp_utils.cpp:check_prefer_cudnn_attention.
-        dprops = torch.cuda.get_device_properties(device)
+        dprops = torch.get_device_module(device_type).get_device_properties(device)
         cudnn_version = (
             torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
         )
@@ -3490,7 +3495,7 @@ def forward(self, arg0_1, arg1_1):
 
 
 class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase):
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_checkpoint_recompute_preserves_nested_fx_trace_policy(self):
         from torch._guards import tracing, TracingContext
         from torch._subclasses import FakeTensorMode
@@ -3515,8 +3520,8 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
             def block(self, x):
                 return compiled_f(x)
 
-        m = M().cuda()
-        x = torch.randn(8, device="cuda", requires_grad=True)
+        m = getattr(M(), device_type)
+        x = torch.randn(8, device=device_type, requires_grad=True)
 
         def fn(x):
             y = m(x).sum()
