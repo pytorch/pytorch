@@ -145,6 +145,10 @@ if HAS_GPU:
         tl.store(out_ptr + offsets, output, mask=mask)
 
     def _get_backend_options_kernel(*, with_enable_fp_fusion):
+        # These kernels are intentionally illustrative. `enable_fp_fusion` is a
+        # real backend option name, but the branch below only makes the kwarg's
+        # kernel-argument binding observable; it is not modeling the compiler
+        # option's normal optimization behavior.
         if with_enable_fp_fusion:
 
             @triton.jit
