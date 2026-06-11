@@ -812,6 +812,7 @@ static PyMethodDef _methods[] = {
      dynamo_set_code_exec_strategy,
      METH_VARARGS,
      NULL},
+    {"set_skip_code_override", dynamo_set_skip_code_override, METH_O, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},

@@ -25,6 +25,7 @@ extern PyObject* guard_complete_hook;
 namespace {
 PyObject* bytecode_debugger_callback_obj = nullptr;
 std::unordered_set<PyCodeObject*> breakpoint_code_objects;
+thread_local PyObject* skip_code_override_obj = nullptr;
 
 // RAII guard that calls __exit__ on a Python context manager when destroyed.
 struct DebugContextGuard {
@@ -57,6 +58,10 @@ struct DebugContextGuard {
   DebugContextGuard(DebugContextGuard&&) = delete;
   DebugContextGuard& operator=(DebugContextGuard&&) = delete;
 };
+
+bool should_override_skip(PyCodeObject* code) {
+  return skip_code_override_obj == reinterpret_cast<PyObject*>(code);
+}
 
 } // namespace
 
@@ -525,6 +530,11 @@ PyObject* dynamo__custom_eval_frame(
   recursive_callback =
       _callback_from_action(recursive_callback, strategy.recursive_action);
 
+  if (strategy.cur_action == FrameAction::SKIP &&
+      should_override_skip(F_CODE(frame))) {
+    strategy.cur_action = FrameAction::DEFAULT;
+  }
+
   if (strategy.cur_action == FrameAction::SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     eval_default();
@@ -737,6 +747,22 @@ PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
 
   extra_state_set_exec_strategy(extra, strategy);
   Py_RETURN_NONE;
+}
+
+PyObject* dynamo_set_skip_code_override(PyObject* dummy, PyObject* arg) {
+  if (arg != Py_None && !PyCode_Check(arg)) {
+    PyErr_SetString(PyExc_TypeError, "expected a code object or None");
+    return nullptr;
+  }
+
+  PyObject* old =
+      skip_code_override_obj == nullptr ? Py_None : skip_code_override_obj;
+  Py_INCREF(old);
+  PyObject* new_obj = arg == Py_None ? nullptr : arg;
+  Py_XINCREF(new_obj);
+  Py_XDECREF(skip_code_override_obj);
+  skip_code_override_obj = new_obj;
+  return old;
 }
 
 void dynamo_skip_code_recursive(PyCodeObject* code) {
