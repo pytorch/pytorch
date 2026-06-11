@@ -108,6 +108,33 @@ void min_kernel_impl(
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
 
   AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
+    // Fast path for size-2 reductions: avoid per-element strided access
+    // along the reduction dim by directly comparing the two values.
+    // Reuses compare_base_kernel_core for TensorIterator setup,
+    // parallelization, and keepdim handling.
+    if (self_dim_size == 2) {
+      auto self_dim_stride = ensure_nonempty_stride(self, dim);
+      compare_base_kernel_core<scalar_t>(result, indice, self, dim, keepdim,
+          [self_dim_stride](char** data, const int64_t* strides, int64_t n) {
+            auto* result_data_bytes = data[0];
+            auto* indice_data_bytes = data[1];
+            const auto* self_data_bytes = data[2];
+            for ([[maybe_unused]] const auto i : c10::irange(n)) {
+              scalar_t v0 = c10::load((scalar_t*)self_data_bytes);
+              scalar_t v1 = c10::load((scalar_t*)(self_data_bytes + self_dim_stride * sizeof(scalar_t)));
+              // NaN semantics: !(v1 < v0) is true when v0 is NaN (first wins),
+              // matching the generic path's behavior.
+              bool first_wins = !(v1 < v0);
+              *(scalar_t*)result_data_bytes = first_wins ? v0 : v1;
+              *(int64_t*)indice_data_bytes = first_wins ? 0 : 1;
+              result_data_bytes += strides[0];
+              indice_data_bytes += strides[1];
+              self_data_bytes += strides[2];
+            }
+          });
+      return;
+    }
+
     compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -141,6 +168,29 @@ void max_kernel_impl(
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
 
   AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
+    // Fast path for size-2 reductions (see min_kernel_impl for details).
+    if (self_dim_size == 2) {
+      auto self_dim_stride = ensure_nonempty_stride(self, dim);
+      compare_base_kernel_core<scalar_t>(result, indice, self, dim, keepdim,
+          [self_dim_stride](char** data, const int64_t* strides, int64_t n) {
+            auto* result_data_bytes = data[0];
+            auto* indice_data_bytes = data[1];
+            const auto* self_data_bytes = data[2];
+            for ([[maybe_unused]] const auto i : c10::irange(n)) {
+              scalar_t v0 = c10::load((scalar_t*)self_data_bytes);
+              scalar_t v1 = c10::load((scalar_t*)(self_data_bytes + self_dim_stride * sizeof(scalar_t)));
+              // NaN semantics: !(v1 > v0) is true when v0 is NaN (first wins).
+              bool first_wins = !(v1 > v0);
+              *(scalar_t*)result_data_bytes = first_wins ? v0 : v1;
+              *(int64_t*)indice_data_bytes = first_wins ? 0 : 1;
+              result_data_bytes += strides[0];
+              indice_data_bytes += strides[1];
+              self_data_bytes += strides[2];
+            }
+          });
+      return;
+    }
+
     compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
