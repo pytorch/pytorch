@@ -7866,6 +7866,7 @@
 
 # PackedSequence utilities
 - func: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
+  tags: dynamic_output_shape
   dispatch:
     CompositeExplicitAutograd: _pack_padded_sequence
   autogen: _pack_padded_sequence.out
@@ -7875,6 +7876,7 @@
     CompositeImplicitAutograd: _pack_padded_sequence_backward_symint
 
 - func: _pad_packed_sequence(Tensor data, Tensor batch_sizes, bool batch_first, Scalar padding_value, int total_length) -> (Tensor, Tensor)
+  tags: dynamic_output_shape
 
 # wrappers for legacy TH methods
 

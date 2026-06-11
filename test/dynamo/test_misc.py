@@ -11370,6 +11370,48 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 2)
         self.assertEqual(counter.op_count, 2)
 
+    def test_pack_padded_sequence_graph_breaks(self):
+        def fn(x, lengths):
+            x = x + 1
+            packed = torch.nn.utils.rnn.pack_padded_sequence(
+                x, lengths.tolist(), batch_first=True
+            )
+            return packed.data + 1
+
+        x = torch.rand((4, 4, 4))
+        lengths = torch.ones([4], dtype=torch.int64)
+        counter = CompileCounter()
+        real_out = fn(x, lengths)
+        comp_out = torch.compile(fn, backend=counter)(x, lengths)
+        self.assertEqual(comp_out, real_out)
+        self.assertGreater(counter.frame_count, 1)
+
+    def test_pack_padded_sequence_fullgraph_graph_breaks(self):
+        def fn(x, lengths):
+            return torch.ops.aten._pack_padded_sequence.default(x, lengths, True)
+
+        x = torch.rand((4, 4, 4))
+        lengths = torch.tensor([4, 3, 2, 1], dtype=torch.int64)
+        with self.assertRaisesRegex(Unsupported, "Dynamic shape operator"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, lengths)
+
+    def test_pad_packed_sequence_graph_breaks(self):
+        def fn(x, lengths):
+            x = x + 1
+            packed = torch.nn.utils.rnn.pack_padded_sequence(
+                x, lengths, batch_first=True, enforce_sorted=False
+            )
+            padded, _ = torch.nn.utils.rnn.pad_packed_sequence(packed, batch_first=True)
+            return padded + 1
+
+        x = torch.randn(3, 5, 4)
+        lengths = torch.tensor([3, 5, 2])
+        counter = CompileCounter()
+        real_out = fn(x, lengths)
+        comp_out = torch.compile(fn, backend=counter)(x, lengths)
+        self.assertEqual(comp_out, real_out)
+        self.assertGreater(counter.frame_count, 1)
+
     def test_jacfwd_one_hot_dynamic_compile(self):
         import torch.nn.functional as F
 
