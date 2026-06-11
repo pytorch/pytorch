@@ -261,3 +261,20 @@ enumerate
 # torch/headeronly/util/ConstexprCrc.h
 crc64
 crc64_t
+
+# torch/headeronly/util/ScopeExit.h
+scope_exit
+make_scope_exit
+
+# torch/headeronly/util/CallOnce.h
+call_once
+once_flag
+
+# torch/headeronly/util/Synchronized.h
+Synchronized
+
+# torch/headeronly/util/Lazy.h
+OptimisticLazy
+LazyValue
+OptimisticLazyValue
+PrecomputedLazyValue
