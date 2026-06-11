@@ -413,13 +413,12 @@ T* toDLPackImpl(const Tensor& src) {
   atDLMTensor->handle = src;
   atDLMTensor->tensor.manager_ctx = atDLMTensor.get();
   atDLMTensor->tensor.deleter = &deleter<T>;
-  if (src.device().type()  == kMPS) {
-      atDLMTensor->tensor.dl_tensor.data = src.storage().mutable_data();
-      atDLMTensor->tensor.dl_tensor.byte_offset = src.storage_offset() * c10::elementSize(src.scalar_type());
-  } else {
-      atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
-      atDLMTensor->tensor.dl_tensor.byte_offset = 0;
-  }
+  // Encode the storage base in `data` and the element offset in `byte_offset`.
+  // Required for MPS (where DLTensor.data is an opaque id<MTLBuffer>) and is
+  // also valid for CPU/CUDA per the DLPack spec; consumers must add byte_offset.
+  atDLMTensor->tensor.dl_tensor.data = src.storage().mutable_data();
+  atDLMTensor->tensor.dl_tensor.byte_offset =
+      src.storage_offset() * c10::elementSize(src.scalar_type());
   atDLMTensor->tensor.dl_tensor.device = torchDeviceToDLDevice(src.device());
   atDLMTensor->tensor.dl_tensor.ndim = static_cast<int32_t>(src.dim());
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
@@ -477,10 +476,14 @@ template at::Tensor fromDLPackImpl<DLManagedTensorVersioned>(DLManagedTensorVers
 } // namespace
 
 void toDLPackNonOwning(const Tensor& src, DLTensor* out) {
-  // Fill in the pre-allocated DLTensor struct with direct pointers
+  // Fill in the pre-allocated DLTensor struct with direct pointers.
   // This is a non-owning conversion - the caller owns the tensor
-  // and must keep it alive for the duration of DLTensor usage
-  out->data = src.data_ptr();
+  // and must keep it alive for the duration of DLTensor usage.
+  // Encoding matches toDLPackImpl: storage base in `data`, element offset in
+  // `byte_offset`. Required for MPS (opaque id<MTLBuffer>) and valid for all
+  // other backends per the DLPack spec.
+  out->data = src.storage().mutable_data();
+  out->byte_offset = src.storage_offset() * c10::elementSize(src.scalar_type());
   out->device = torchDeviceToDLDevice(src.device());
   out->ndim = static_cast<int32_t>(src.dim());
   out->dtype = getDLDataType(src);
@@ -488,7 +491,6 @@ void toDLPackNonOwning(const Tensor& src, DLTensor* out) {
   // which remains valid as long as the tensor is alive
   out->shape = const_cast<int64_t*>(src.sizes().data());
   out->strides = const_cast<int64_t*>(src.strides().data());
-  out->byte_offset = 0;
 }
 
 DLManagedTensor* toDLPack(const Tensor& src) {
