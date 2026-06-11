@@ -1105,8 +1105,6 @@ def _bind_spec_to_args(
     ``ShapesSpec``; the non-strict tracer and ``make_fx`` iterate it and
     pair each entry with its flat input.
     """
-    import inspect
-
     params_spec = shapes_spec._params
     kwargs = kwargs or {}
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
@@ -1335,10 +1333,7 @@ def _dynamo_graph_capture_for_export(
             # If a user spec was supplied, re-key it to the intermediate
             # ModuleToTrace.forward(*flat_args) layout and expose via
             # ``torch._dynamo.config._shapes_spec`` for the variable
-            # builder. Assumptions are carried through unchanged: binding
-            # only changes *which positional slot* each TensorSpec lands
-            # in; the ShapeVar/IntVar symbols inside the assumption
-            # expressions are the same Python objects.
+            # builder.
             shapes_spec_in_use = user_spec is not None
             shapes_spec_ctx = nullcontext()
             if flattened_spec is not None:
