@@ -26,7 +26,7 @@ basic_modules_ListOfLinears_inductor,compile_time_instruction_count,15640000000,
 
 
 
-basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,11320000000,0.1
+basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,17660000000,0.1
 
 
 
@@ -119,3 +119,43 @@ dtensor_dispatch_random,instruction_count,592800,0.1
 
 
 dtensor_dispatch_custom_handler,instruction_count,34910,0.1
+
+
+
+float_args,compile_time_instruction_count,464506939,0.1
+
+
+
+runtime_overhead_inductor,instruction_count,281156,0.1
+
+
+
+runtime_overhead_inductor_inference_mode,instruction_count,294360,0.1
+
+
+
+runtime_overhead_inductor_requires_grad,instruction_count,381894,0.1
+
+
+
+runtime_overhead_inductor_requires_grad_backward,instruction_count,120504,0.1
+
+
+
+runtime_overhead_inductor_dynamic,instruction_count,277177,0.1
+
+
+
+runtime_overhead_inductor_inference_mode_dynamic,instruction_count,291092,0.1
+
+
+
+runtime_overhead_inductor_requires_grad_dynamic,instruction_count,380220,0.1
+
+
+
+runtime_overhead_inductor_requires_grad_backward_dynamic,instruction_count,121187,0.1
+
+
+
+unbind_split_flip_cat_iter40_batch128,instruction_count,269757598547,0.1
