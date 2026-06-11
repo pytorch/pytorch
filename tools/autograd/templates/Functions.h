@@ -13,7 +13,7 @@
 
 #include <c10/core/SymIntArrayRef.h>
 
-namespace torch { namespace autograd { namespace generated {
+namespace torch::autograd::generated {
 
 using at::Scalar;
 using at::Tensor;
@@ -48,4 +48,4 @@ using torch::autograd::TypeAndSize;
 
 ${autograd_function_declarations}
 
-}}} // namespace torch::autograd::generated
+} // namespace torch::autograd::generated

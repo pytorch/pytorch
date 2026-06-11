@@ -176,7 +176,7 @@ struct CollectiveFingerPrint {
             ss << std::get<1>(diff_result);
           }
 
-          TORCH_CHECK(false, ss.str());
+          TORCH_CHECK(false, std::move(ss).str());
         }
       }
     }
@@ -277,9 +277,9 @@ struct CollectiveFingerPrint {
 
     check("Tensor devices", other_devices, this_devices);
     if (!found_diff) {
-      return std::make_pair(false, ss.str());
+      return std::make_pair(false, std::move(ss).str());
     } else {
-      return std::make_pair(true, ss.str());
+      return std::make_pair(true, std::move(ss).str());
     }
   }
 
@@ -715,7 +715,7 @@ void ProcessGroupWrapper::runCollectiveChecks(
     // Attach collective info to the exception and re-raise.
     std::stringstream ss;
     ss << finger_print;
-    auto collective_info = ss.str();
+    auto collective_info = std::move(ss).str();
     auto err_msg = c10::str(
         "ProcessGroupWrapper: Monitored Barrier encountered error running collective: ",
         collective_info,

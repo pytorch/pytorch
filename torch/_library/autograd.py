@@ -106,6 +106,17 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
+        if utils.is_out(op):
+            if _C.is_grad_enabled() and _C._any_requires_grad(
+                *args, **keyword_only_args
+            ):
+                raise RuntimeError(
+                    f"{op._opname}(): functions with out=... arguments don't "
+                    "support automatic differentiation, but one of the arguments "
+                    "requires grad."
+                )
+            return forward_no_grad(*args, Metadata(keyset, keyword_only_args))
+
         if _C.is_grad_enabled() and _C._any_requires_grad(*args):
             result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
         else:
