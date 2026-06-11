@@ -142,20 +142,29 @@ class CUDACombinedScheduling(BaseScheduling):
         prologue_nodes: Sequence[BaseSchedulerNode],
     ) -> str | None:
         if self._cutlass_scheduling.is_cutlass_template(template_node):
-            assert not prologue_nodes
+            if prologue_nodes:
+                raise AssertionError("cutlass template does not support prologue nodes")
             return self._cutlass_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
         elif self._rocm_cpp_scheduling.is_rocm_cpp_template(template_node):
-            assert not epilogue_nodes
-            assert not prologue_nodes
+            if epilogue_nodes:
+                raise AssertionError(
+                    "rocm cpp template does not support epilogue nodes"
+                )
+            if prologue_nodes:
+                raise AssertionError(
+                    "rocm cpp template does not support prologue nodes"
+                )
             return self._rocm_cpp_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
         elif self._cutedsl_scheduling.is_cutedsl_template(template_node):
             # TODO remove this when we add epilogue support
-            assert not epilogue_nodes
-            assert not prologue_nodes
+            if epilogue_nodes:
+                raise AssertionError("cutedsl template does not support epilogue nodes")
+            if prologue_nodes:
+                raise AssertionError("cutedsl template does not support prologue nodes")
             return self._cutedsl_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
