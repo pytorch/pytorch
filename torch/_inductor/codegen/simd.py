@@ -966,9 +966,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(
-            V.graph.sizevars.statically_known_leq(1, s) for s in remaining
-        ), f"over-allocated iteration space: remaining={remaining}, groups may be smaller than node ranges"
+        assert all(V.graph.sizevars.statically_known_leq(1, s) for s in remaining), (
+            f"over-allocated iteration space: remaining={remaining}, groups may be smaller than node ranges"
+        )
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
@@ -2239,18 +2239,28 @@ class SIMDScheduling(BaseScheduling):
                     return is_reduction_tiling_valid
                 return True
 
-            reduction_writes = [w for w in node2.read_writes.writes if isinstance(w, MemoryDep)]
+            reduction_writes = [
+                w for w in node2.read_writes.writes if isinstance(w, MemoryDep)
+            ]
             pointwise_reads = list(node1.read_writes.reads)
 
-            reduction_output_names = {w.name for w in reduction_writes}
-            consuming_reads = [r for r in pointwise_reads if isinstance(r, MemoryDep) and r.name in reduction_output_names]
+            reduction_output_names = OrderedSet([w.name for w in reduction_writes])
+            consuming_reads = [
+                r
+                for r in pointwise_reads
+                if isinstance(r, MemoryDep) and r.name in reduction_output_names
+            ]
 
             if consuming_reads:
                 for read_dep in consuming_reads:
-                    write_dep = next(w for w in reduction_writes if w.name == read_dep.name)
+                    write_dep = next(
+                        w for w in reduction_writes if w.name == read_dep.name
+                    )
 
                     if not self._check_index_compatibility(write_dep, read_dep):
-                        why("index incompatibility between reduction output and pointwise consumer")
+                        why(
+                            "index incompatibility between reduction output and pointwise consumer"
+                        )
                         return False
 
                 return True
@@ -2284,15 +2294,20 @@ class SIMDScheduling(BaseScheduling):
             read_var = read_vars[i]
             if read_var not in read_dep.index.free_symbols:
                 return False
-            if not V.graph.sizevars.statically_known_leq(read_ranges[read_var], write_ranges[write_var]):
+            if not V.graph.sizevars.statically_known_leq(
+                read_ranges[read_var], write_ranges[write_var]
+            ):
                 return False
 
         return True
 
     def _node_reads_subset_of_reduction(self, node, reduction_write_deps):
         """Check that node's reads from reduction outputs have ranges <= the write ranges."""
-        reads = [r for r in node.read_writes.reads
-                 if isinstance(r, MemoryDep) and r.name in reduction_write_deps]
+        reads = [
+            r
+            for r in node.read_writes.reads
+            if isinstance(r, MemoryDep) and r.name in reduction_write_deps
+        ]
         if not reads:
             return False
         for read_dep in reads:
@@ -2302,6 +2317,7 @@ class SIMDScheduling(BaseScheduling):
         return True
 
     def generate_node_schedule(self, nodes, numel, rnumel):
+        """Order nodes into a linear schedule with reduction/pointwise loop markers."""
         node_schedule: list[Any] = []
         done = OrderedSet[scheduler.BaseSchedulerNode]()
         # Writes with a reduced shape, meaning they are only present once the
@@ -2406,11 +2422,11 @@ class SIMDScheduling(BaseScheduling):
                 schedule_node_in_loop(node)
             elif fits_outside_reduction(node):
                 with end_current_reduction_loop():
-                    node_ranges = node.get_ranges()
-                    pointwise_dims = node_ranges[0] if len(node_ranges) > 0 else ()
                     _, (node_numel_here, _) = node.group
                     inner_numel = V.graph.sizevars.simplify(node_numel_here // numel)
-                    if not V.graph.sizevars.statically_known_equals(inner_numel, sympy.S.One):
+                    if not V.graph.sizevars.statically_known_equals(
+                        inner_numel, sympy.S.One
+                    ):
                         node_schedule.append(EnablePointwiseLoop(inner_numel))
                         node_schedule.append(node)
                         node_schedule.append(DisablePointwiseLoop)
@@ -5061,4 +5077,3 @@ class CantSplit(Exception):
 
     def __str__(self):
         return f"{self.expr} not divisible by {self.remaining}"
-remaining}"
