@@ -2280,10 +2280,13 @@ def get_all_device_types() -> list[str]:
     return ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
 
 
-# skip since currently flex attention requires at least `avx2` support on CPU.
+# skip since currently flex attention requires at least `avx2` or SVE256 support on CPU.
 IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
     not IS_MACOS
-    and torch.cpu._is_avx2_supported()
+    and (
+        torch.cpu._is_avx2_supported()
+        or torch.backends.cpu.get_cpu_capability() == "SVE256"
+    )
     and os.getenv("ATEN_CPU_CAPABILITY") != "default"
 )
 IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED = (
@@ -2304,7 +2307,7 @@ flex_attention_supported_platform = unittest.skipUnless(
     )
     or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
     or IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED,
-    "Requires CUDA and Triton, Intel GPU and triton, MPS, or CPU with avx2 and later",
+    "Requires CUDA and Triton, Intel GPU and triton, MPS, or CPU with avx2 and later or SVE256",
 )
 if (
     torch.version.hip
