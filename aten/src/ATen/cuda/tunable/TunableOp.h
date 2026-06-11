@@ -171,25 +171,7 @@ class TunableOp {
         op = GetOp(result.GetKey());
       }
       TORCH_CHECK(op != nullptr);
-      auto status = op->Call(params);
-      if (status != OK && result != ResultEntry::Default()) {
-        auto& mgr = ctx->GetTuningResultsManager();
-        auto op_sig = Signature();
-        auto params_sig = params->Signature();
-        TUNABLE_LOG2(
-            "candidate ",
-            result,
-            " failed for ",
-            op_sig,
-            '(',
-            params_sig,
-            "), deleting and using default");
-        mgr.Delete(op_sig, params_sig);
-        auto* default_op = GetOp(ResultEntry::Default().GetKey());
-        TORCH_CHECK(default_op != nullptr);
-        return default_op->Call(params);
-      }
-      return status;
+      return op->Call(params);
     }
 
     virtual std::string Signature() {
