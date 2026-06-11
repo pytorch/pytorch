@@ -909,13 +909,6 @@ def op_overload_wrapper({", ".join(arg_list)}):
     return inner
 
 
-# ---------------------------------------------------------------------------
-# Binding: aligning a user ShapesSpec to a concrete call's flat input layout.
-# Used by the strict export tracer (this file) and by make_fx
-# (torch.fx.experimental.proxy_tensor).
-# ---------------------------------------------------------------------------
-
-
 def _walk_spec(
     user_spec: IntermediateSpec | None,
     arg_value: Any,
@@ -1022,6 +1015,11 @@ def _walk_spec(
                 f"or `pytree.register_pytree_node(...)`."
             )
         if handler.flatten_with_keys_fn is None:
+            # Note: this requirement is not ObjectSpec-specific — plain
+            # export() and the legacy dynamic_shapes API also fail on
+            # types registered without a `flatten_with_keys_fn` (their
+            # input-path construction uses `tree_flatten_with_path`).
+            # We just catch it earlier here with a clearer message.
             raise ValueError(
                 f"{where}: export requires "
                 f"`flatten_with_keys_fn` to be registered for type "
@@ -1031,6 +1029,8 @@ def _walk_spec(
                 f"or use `torch.export.register_dataclass` for dataclasses."
             )
         key_children, _ = handler.flatten_with_keys_fn(arg_value)
+        # Fail-fast on unmatched attrs before recursing. Non-attribute
+        # keys (SequenceKey / MappingKey) contribute no matchable names.
         available_names = {
             ke.name for ke, _ in key_children if isinstance(ke, pytree.GetAttrKey)
         }
@@ -1044,6 +1044,9 @@ def _walk_spec(
             )
         consumed = 0
         for key_entry, child in key_children:
+            # Only ``GetAttrKey`` entries can match an ObjectSpec entry
+            # (ObjectSpec addresses by attribute name); any other key
+            # shape contributes a static subtree.
             if isinstance(key_entry, pytree.GetAttrKey) and key_entry.name in user_spec:
                 consumed += _walk_spec(
                     user_spec._fields[key_entry.name],
@@ -1053,6 +1056,7 @@ def _walk_spec(
                     where=f"{where}.{key_entry.name}",
                 )
             else:
+                # No spec for this attribute — count its leaves as static.
                 consumed += len(pytree.tree_leaves(child))
         return consumed
 
@@ -1097,19 +1101,9 @@ def _bind_spec_to_args(
     The leaf-spec list has length equal to the flat leaf count, with
     ``None`` at every position that should be treated as static.
 
-    Export strict tracer wraps the spec list back into a ``ShapesSpec``: it
-    traces an intermediate ``ModuleToTrace.forward(*flat_args)`` whose
-    only signature is varargs, and dynamo's variable builder consumes
-    ``ShapesSpec`` from ``config._shapes_spec``. So strict wraps the
-    result as::
-
-        ShapesSpec(
-            ParamsSpec({"*args": _bind_spec_to_args(...)[0]}),
-            assumptions=user_spec._assumptions or None,
-        )
-
-    The export non-strict tracer and ``make_fx`` iterate the list and
-    pair each entry with the matching flat input.
+    Consumers: the strict export tracer re-wraps this list into a
+    ``ShapesSpec``; the non-strict tracer and ``make_fx`` iterate it and
+    pair each entry with its flat input.
     """
     import inspect
 
