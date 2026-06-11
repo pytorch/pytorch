@@ -1,10 +1,13 @@
 # Owner(s): ["module: dynamo"]
+import sys
+import types
 import unittest
 from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo
 import torch._dynamo.backends
+import torch._dynamo.backends.tvm as tvm_backend
 import torch._dynamo.test_case
 from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.backends.registry import lookup_backend
@@ -13,6 +16,7 @@ from torch._dynamo.testing import same
 from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCPU,
     onlyHPU,
 )
 from torch.testing._internal.common_utils import skipIfHpu
@@ -162,6 +166,103 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("tvm", device)
         self._check_backend_works("tvm", device, options={"scheduler": None})
         self._check_backend_works("tvm", device, options={"opt_level": 0})
+
+    @onlyCPU
+    def test_tvm_sets_scalar_tensor_inputs(self, device):
+        class FakePassContext:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeOutput:
+            dtype = "float32"
+
+            def __init__(self):
+                self.tensor = torch.zeros(1, device=device)
+
+            def to_dlpack(self):
+                return torch.utils.dlpack.to_dlpack(self.tensor)
+
+        class FakeRuntimeModule:
+            def __init__(self):
+                self.set_inputs = []
+
+            def get_input_info(self):
+                return {"inp_0": (), "inp_1": (2,)}, {}
+
+            def set_input(self, name, value):
+                self.set_inputs.append((name, value))
+
+            def run(self):
+                pass
+
+            def get_num_outputs(self):
+                return 1
+
+            def get_output(self, idx):
+                return FakeOutput()
+
+        class Module(torch.nn.Module):
+            def forward(self, scalar, vector, inactive):
+                return (scalar + vector,)
+
+        runtime_module = FakeRuntimeModule()
+        fake_tvm = types.ModuleType("tvm")
+        fake_relay = types.ModuleType("tvm.relay")
+        fake_contrib = types.ModuleType("tvm.contrib")
+        fake_graph_executor = types.ModuleType("tvm.contrib.graph_executor")
+        fake_graph_executor.GraphModule = lambda rt_mod: runtime_module
+        fake_contrib.graph_executor = fake_graph_executor
+        fake_relay.frontend = types.SimpleNamespace(
+            from_pytorch=lambda jit_mod, shape_list: ("mod", {})
+        )
+        fake_relay.build = lambda mod, target=None, params=None: {
+            "default": lambda dev: "runtime"
+        }
+        fake_tvm.relay = fake_relay
+        fake_tvm.contrib = fake_contrib
+        fake_tvm.transform = types.SimpleNamespace(PassContext=FakePassContext)
+        fake_tvm.target = types.SimpleNamespace(Target=lambda target: target)
+        fake_tvm.nd = types.SimpleNamespace(
+            array=lambda value: value,
+            from_dlpack=lambda tensor: tensor.detach(),
+        )
+        fake_tvm.cpu = lambda index: ("cpu", index)
+        fake_tvm.cuda = lambda index: ("cuda", index)
+        fake_modules = {
+            "tvm": fake_tvm,
+            "tvm.relay": fake_relay,
+            "tvm.contrib": fake_contrib,
+            "tvm.contrib.graph_executor": fake_graph_executor,
+        }
+
+        example_inputs = [
+            torch.tensor(1.0, device=device),
+            torch.ones(2, device=device),
+            torch.ones(2, device=device),
+        ]
+        runtime_inputs = [
+            torch.tensor(3.0, device=device, requires_grad=True),
+            torch.ones(2, device=device, requires_grad=True),
+            torch.full((2,), 9.0, device=device),
+        ]
+
+        with patch.dict(sys.modules, fake_modules):
+            compiled = tvm_backend.tvm(Module(), example_inputs)
+            compiled(*runtime_inputs)
+
+        self.assertEqual(
+            ["inp_0", "inp_1"], [name for name, _ in runtime_module.set_inputs]
+        )
+        scalar_input = runtime_module.set_inputs[0][1]
+        self.assertEqual(0, scalar_input.dim())
+        self.assertEqual(3.0, scalar_input.item())
+        self.assertFalse(scalar_input.requires_grad)
 
     @onlyHPU
     def test_intel_gaudi_backend(self, device):
