@@ -6770,7 +6770,9 @@ class TestTorch(TestCase):
             with self.assertRaisesRegex(TypeError, 'cond must be a bool'):
                 check_fn('wrong type')
 
-            with self.assertRaisesRegex(TypeError, 'cond must be a bool'):
+            with self.assertRaisesRegex(
+                TypeError, r'cond must be a bool.*torch[.]_check_tensor_all'
+            ):
                 check_fn(torch.tensor(True))
 
     # FIXME: move to indexing test suite
@@ -6935,10 +6937,6 @@ class TestTorch(TestCase):
         # test invalid args: tensor, str, sizes
         with self.assertRaisesRegex(TypeError, r"unflatten\(\): argument 'dim' \(position 1\) must be int, not str"):
             torch.tensor([1]).unflatten('A', (1, 1))
-
-        # test invalid args: tensor, str, namedshape
-        with self.assertRaisesRegex(RuntimeError, r"Name 'A' not found in Tensor\[None\]."):
-            torch.ones(4).unflatten('A', (('A', 2), ('B', 2)))
 
         # test other invalid arguments
         with self.assertRaisesRegex(RuntimeError, r"sizes must be non-empty"):
@@ -9188,6 +9186,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch.float8_e8m0fnu: "f8e8m0fnu",
             torch.float4_e2m1fn_x2: "f4e2m1fnx2",
             torch.complex32: "c32",
+            torch.bcomplex32: "bc32",
             torch.complex64: "c64",
             torch.complex128: "c128",
             torch.int8: "i8",
@@ -9217,7 +9216,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch.uint8, torch.uint16, torch.uint32, torch.uint64,
             torch.int8, torch.int16, torch.int32, torch.int64,
             torch.float16, torch.float32, torch.float64, torch.bfloat16,
-            torch.complex32, torch.complex64, torch.complex128,
+            torch.complex32, torch.bcomplex32, torch.complex64, torch.complex128,
             torch.bool,
             torch.float8_e5m2, torch.float8_e4m3fn,
             torch.float8_e5m2fnuz, torch.float8_e4m3fnuz,

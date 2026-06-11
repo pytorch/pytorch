@@ -606,6 +606,7 @@ class NNModuleVariable(VariableTracker):
                     variables.UserFunctionVariable(fn, source=fn_source),
                     args,
                     kwargs,
+                    allow_nested_graph_breaks=True,
                 )
 
     def mp_subscript_impl(
@@ -650,6 +651,7 @@ class NNModuleVariable(VariableTracker):
                 variables.UserFunctionVariable(fn, source=src),
                 [self, key],
                 {},
+                allow_nested_graph_breaks=True,
             )
 
         if isinstance(key, SliceVariable):

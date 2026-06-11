@@ -18,7 +18,7 @@ from torch._inductor.utils import (
     fresh_inductor_cache,
     run_and_get_triton_code,
 )
-from torch.distributed._functional_collectives import all_gather_tensor
+from torch.distributed._functional_collectives import all_gather_single
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
@@ -26,6 +26,10 @@ from torch.distributed._symmetric_memory import (
     _test_mode,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
+)
+from torch.distributed._symmetric_memory._nccl import (
+    NcclCommRegistration,
+    register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_cuda import (
@@ -1184,7 +1188,7 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
 
         res = torch.ops.symm_mem.multimem_one_shot_all_reduce(inp, "sum", group_name)
 
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, -1)
         # Only verify that the results are close to the sum of inputs across
         # ranks (see Note [multimem_one_shot_all_reduce]).
         torch.testing.assert_close(
@@ -1214,7 +1218,7 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             inp, "sum", root, group_name, out
         )
 
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, -1)
         # Only verify that the results are close to the sum of inputs across
         # ranks (see Note [multimem_one_shot_all_reduce]).
         if self.rank == root:
@@ -1295,14 +1299,14 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             self._verify_all_reduce_result(inp, res if inplace else out)
 
     def _verify_all_reduce_result(self, inp, res):
-        gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, -1)
+        gathered_res = all_gather_single(res, 0, "0").view(self.world_size, -1)
         # Verify that the results across ranks are identical
         self.assertEqual(
             (gathered_res == gathered_res[0, :]).all(dim=0).sum(), inp.numel()
         )
 
         # Verify that the result are close to the sum of inputs across ranks
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, -1)
         torch.testing.assert_close(
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
@@ -1371,8 +1375,8 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             torch.ops.symm_mem.reduce_scatter_out(res, group_name, True, out)
 
     def _verify_reduce_scatter_result(self, inp, res):
-        gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, *res.shape)
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, *inp.shape)
+        gathered_res = all_gather_single(res, 0, "0").view(self.world_size, *res.shape)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, *inp.shape)
         sum_inps = gathered_inps.sum(0)
         slice_width = sum_inps.shape[-1] // self.world_size
         for i in range(self.world_size):
@@ -2000,8 +2004,9 @@ class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 class ExternalNcclCommRegistrationTest(TestCase):
     """Tests for the external NCCL comm registration API
-    (``symm_mem._register_external_nccl_comm`` and the ``_NcclCommRegistration``
-    handle), exercised against a *real* ``ncclComm_t``.
+    (``register_external_nccl_comm`` and the ``NcclCommRegistration`` handle
+    from ``torch.distributed._symmetric_memory._nccl``), exercised against a
+    *real* ``ncclComm_t``.
 
     The comm is created in-process via NCCL's ``ncclCommInitAll`` (single
     rank, single GPU) through ctypes, so no live multi-rank job is needed.
@@ -2050,10 +2055,8 @@ class ExternalNcclCommRegistrationTest(TestCase):
 
     def test_register_unregister_real_comm(self) -> None:
         comm_ptr = self._make_real_comm()
-        reg = symm_mem._register_external_nccl_comm(
-            "ext_nccl_reg_basic", comm_ptr, "cuda:0"
-        )
-        self.assertIsInstance(reg, symm_mem._NcclCommRegistration)
+        reg = register_external_nccl_comm("ext_nccl_reg_basic", comm_ptr, "cuda:0")
+        self.assertIsInstance(reg, NcclCommRegistration)
         self.assertTrue(reg._active)
         self.assertEqual(reg._group_name, "ext_nccl_reg_basic")
         self.assertEqual(reg._device, torch.device("cuda:0"))
@@ -2068,7 +2071,7 @@ class ExternalNcclCommRegistrationTest(TestCase):
         # and releases it on unregister.
         comm_ptr = self._make_real_comm()
         sentinel = object()
-        reg = symm_mem._register_external_nccl_comm(
+        reg = register_external_nccl_comm(
             "ext_nccl_reg_ref", comm_ptr, "cuda:0", comm=sentinel
         )
         self.assertIs(reg._comm, sentinel)
@@ -2077,9 +2080,7 @@ class ExternalNcclCommRegistrationTest(TestCase):
 
     def test_context_manager_real_comm(self) -> None:
         comm_ptr = self._make_real_comm()
-        reg = symm_mem._register_external_nccl_comm(
-            "ext_nccl_reg_cm", comm_ptr, "cuda:0"
-        )
+        reg = register_external_nccl_comm("ext_nccl_reg_cm", comm_ptr, "cuda:0")
         with reg as entered:
             self.assertIs(entered, reg)
             self.assertTrue(reg._active)
@@ -2096,7 +2097,7 @@ class ExternalNcclCommRegistrationTest(TestCase):
         except ImportError:
             self.skipTest("PyTorch built without NCCL symmetric-memory device support")
         with self.assertRaises(RuntimeError):
-            symm_mem._register_external_nccl_comm("ext_nccl_reg_null", 0, "cuda:0")
+            register_external_nccl_comm("ext_nccl_reg_null", 0, "cuda:0")
 
 
 if __name__ == "__main__":

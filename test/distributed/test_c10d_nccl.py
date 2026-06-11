@@ -609,11 +609,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Note: using all-gather here bc some NCCL/SM version does not support
         # FP8 reduction
         # temporarily skip due to https://github.com/pytorch/pytorch/issues/153479
-        # pg._allgather_base(output, nan_tensor)
+        # pg.all_gather_single(output, nan_tensor)
 
         backend._set_enable_nan_check(True)
         try:
-            pg._allgather_base(output, nan_tensor)
+            pg.all_gather_single(output, nan_tensor)
         except Exception:
             sys.exit(signal.SIGABRT)
 

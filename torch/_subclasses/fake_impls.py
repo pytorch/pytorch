@@ -217,9 +217,6 @@ def constructors(
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    if "names" in kwargs:
-        # REASON: "torch.compile doesn't support named tensors"
-        raise UnsupportedOperatorException(func)
 
     if func in _like_tensor_constructors:
         default_device = new_kwargs["input"].device
@@ -526,6 +523,32 @@ def _spdiags(
     )
 
 
+@register_op_impl(aten._to_dense.default)
+def _to_dense(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dtype: torch.dtype | None = None,
+    masked_grad: bool | None = None,
+) -> FakeTensor:
+    if self.layout is torch.sparse_coo:
+        if dtype is not None:
+            raise RuntimeError("dtype argument is not supported by sparse_to_dense")
+        with in_kernel_invocation_manager(fake_mode):
+            out = torch.empty(
+                tuple(self.shape),
+                dtype=self.dtype,
+                device="meta",
+            )
+        return FakeTensor(fake_mode, out, self.fake_device)
+
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(self, dtype=dtype, masked_grad=masked_grad)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, self.fake_device
+    )
+
+
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags
@@ -630,6 +653,20 @@ def unique2(
     return_counts: bool = False,
 ) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
+
+
+@register_op_impl(aten._unique.default)
+def unique(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    arg: FakeTensor,
+    sorted: bool = True,
+    return_inverse: bool = False,
+) -> tuple[FakeTensor, FakeTensor]:
+    uniques, inverse, _counts = _unique(
+        fake_mode, func, arg, None, sorted, return_inverse, False
+    )
+    return uniques, inverse
 
 
 @register_op_impl(aten.select.int)
@@ -1604,6 +1641,28 @@ def embedding_bag(
         return meta_embedding_bag(*args, **kwargs)
 
 
+@register_op_impl(aten.embedding.default)
+def embedding(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> Any:
+    from torch._meta_registrations import embedding as meta_embedding
+
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    weight = new_kwargs["weight"]
+    indices = new_kwargs["indices"]
+    if (
+        weight.device != indices.device
+        and weight.device.type != "meta"
+        and indices.device.type != "meta"
+    ):
+        return NotImplemented
+
+    with fake_mode:
+        return typing_cast(FakeTensor, meta_embedding(*args, **kwargs))
+
+
 # takes in multiple-devices, don't default to default device handling
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
@@ -1684,7 +1743,14 @@ def nyi(fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any) 
         raise AssertionError(f"NYI: {func}")
 
 
-@register_op_impl([aten.convolution.default, aten.convolution_backward.default])
+@register_op_impl(
+    [
+        aten.convolution.default,
+        aten._convolution.default,
+        aten._convolution.deprecated,
+        aten.convolution_backward.default,
+    ]
+)
 def conv(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor | tuple[FakeTensor | None, FakeTensor | None, FakeTensor | None]:
@@ -1696,7 +1762,12 @@ def conv(
     # Internal passes such as Inductor freezing may run fake propagation over
     # folded convs that do not need to match eager's public input checks.
     if (
-        func is aten.convolution.default
+        func
+        in (
+            aten.convolution.default,
+            aten._convolution.default,
+            aten._convolution.deprecated,
+        )
         and input_.dtype != weight.dtype
         and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
@@ -1767,7 +1838,11 @@ def conv(
     with in_kernel_invocation_manager(fake_mode):
         out = func(**new_kwargs)
 
-        if func is aten.convolution.default:
+        if func in (
+            aten.convolution.default,
+            aten._convolution.default,
+            aten._convolution.deprecated,
+        ):
             return convert(out, mem_fmt)  # type: ignore[return]
         else:
             return (
