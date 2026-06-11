@@ -3,7 +3,7 @@
 
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import Any, Literal, overload, TypeAlias
+from typing import Any, Literal, Optional, overload, TypeAlias
 
 from torch import Tensor
 from torch.types import _dtype, _int, _size
@@ -633,6 +633,7 @@ def multi_head_attention_forward(
     static_v: Tensor | None = None,
     average_attn_weights: bool = True,
     is_causal: bool = False,
+    rotary_pos_emb: Optional[Callable[[Tensor], Tensor]] = None,
 ) -> tuple[Tensor, Tensor | None]: ...
 
 __all__ += ["multi_head_attention_forward"]
