@@ -686,6 +686,41 @@ IntArrayRef MPSHeapAllocatorImpl::getBufferShape(const void* ptr) {
   return IntArrayRef();
 }
 
+void MPSHeapAllocatorImpl::beginCapture(std::vector<void*>* held_set) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  TORCH_CHECK(m_active_held_set == nullptr,
+              "MPSHeapAllocatorImpl::beginCapture called while another capture is active");
+  TORCH_CHECK(held_set != nullptr,
+              "MPSHeapAllocatorImpl::beginCapture: held_set must be non-null");
+  m_active_held_set = held_set;
+}
+
+void MPSHeapAllocatorImpl::endCapture() {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  m_active_held_set = nullptr;
+}
+
+void MPSHeapAllocatorImpl::releaseHeldBuffer(void* buf) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  // Look up the still-tracked block for this MTLBuffer. During capture the
+  // block was deflected out of pool.available_buffers but stays in
+  // m_allocated_buffers (we never erased it). Now return it to its pool so
+  // it can be recycled normally, and drop the +1 retain we took on free().
+  auto it = m_allocated_buffers.find(buf);
+  if (it == m_allocated_buffers.end()) {
+    // Block was somehow already released — drop our retain anyway.
+    [(__bridge id<MTLBuffer>)buf release];
+    return;
+  }
+  BufferBlock* block = it->second;
+  BufferPool& pool = *block->heap->pool;
+  TORCH_INTERNAL_ASSERT(!block->in_use,
+                        "releaseHeldBuffer on a block still marked in_use");
+  pool.available_buffers.insert(block);
+  pool.available_size += block->size;
+  [(__bridge id<MTLBuffer>)buf release];
+}
+
 void MPSHeapAllocatorImpl::free(void* ptr) {
   BufferBlock* buffer_block = nullptr;
   {
@@ -694,6 +729,28 @@ void MPSHeapAllocatorImpl::free(void* ptr) {
     buffer_block = get_allocated_buffer_block(ptr);
     TORCH_INTERNAL_ASSERT(buffer_block);
     const BufferPool& pool = *buffer_block->heap->pool;
+
+    // Capture-mode intercept: while a graph is capturing, do NOT return the
+    // block to its pool's available_buffers — that would let the MTLBuffer
+    // be recycled for a different tensor, breaking ICB-replay. Instead,
+    // retain the MTLBuffer into the active held_set; the graph's destructor
+    // calls releaseHeldBuffer() to return it to circulation later.
+    if (m_active_held_set != nullptr && !(pool.usage & UsageFlags::SCALAR)) {
+      TORCH_INTERNAL_ASSERT(buffer_block->in_use);
+      // Block bookkeeping: keep it in m_allocated_buffers (still referenced
+      // by held_set entry) but adjust accounting so it counts as "released"
+      // from the user's perspective.
+      m_current_allocated_memory -= buffer_block->size;
+      buffer_block->shape.clear();
+      if (buffer_block->event) {
+        buffer_block->event.reset(nullptr);
+      }
+      buffer_block->in_use = false;
+      [buffer_block->buffer retain];                // retain for graph lifetime
+      m_active_held_set->push_back(buffer_block->buffer);
+      return;
+    }
+
     if (!(pool.usage & UsageFlags::SCALAR)) {
       free_buffer(buffer_block);
       return;
@@ -883,6 +940,15 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
   bool waitForEvents(c10::ArrayRef<const void*> buffers) const override {
     return _getAllocImpl().waitForEvents(buffers);
+  }
+  void beginCapture(void* held_set_ptr) override {
+    _getAllocImpl().beginCapture(static_cast<std::vector<void*>*>(held_set_ptr));
+  }
+  void endCapture() override {
+    _getAllocImpl().endCapture();
+  }
+  void releaseHeldBuffer(void* buf) const override {
+    _getAllocImpl().releaseHeldBuffer(buf);
   }
   std::string formatSize(size_t size) const override {
     return _getAllocImpl().format_size(size);

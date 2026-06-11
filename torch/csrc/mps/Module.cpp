@@ -18,6 +18,11 @@
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #endif
 
+// Defined in torch/csrc/mps/StreamGraph.cpp — registers _MPSStreamGraph
+// pybind class onto the torch._C module. Global scope to mirror
+// CUDA's THCPGraph_init pattern.
+void THMPGraph_init(PyObject* module);
+
 namespace torch::mps {
 
 static PyObject* MPSModule_isInBadFork(PyObject* self, PyObject* noargs) {
@@ -422,6 +427,8 @@ struct OptionalArgCaster {
 
 void initModule(PyObject* module) {
   using namespace at::native::mps;
+  // Register MPSStreamGraph bindings (torch._C._MPSStreamGraph).
+  ::THMPGraph_init(module);
   auto m = py::handle(module).cast<py::module>();
   py::class_<
       DynamicMetalShaderLibrary,

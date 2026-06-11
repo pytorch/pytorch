@@ -887,7 +887,18 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
   NSError* error = nil;
   id<MTLFunction> func = [lib newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
   TORCH_CHECK(func, "Failed to create function state object for: ", fname);
-  auto cpl = [[lib device] newComputePipelineStateWithFunction:func error:&error];
+  // Use descriptor-based creation so we can set supportIndirectCommandBuffers,
+  // required for kernels to be bindable in an MTLIndirectCommandBuffer (see
+  // torch.mps.MPSGraph capture, pytorch/pytorch#180397). Modest perf cost
+  // per Apple docs.
+  MTLComputePipelineDescriptor* psoDesc = [[MTLComputePipelineDescriptor alloc] init];
+  psoDesc.computeFunction = func;
+  psoDesc.supportIndirectCommandBuffers = YES;
+  auto cpl = [[lib device] newComputePipelineStateWithDescriptor:psoDesc
+                                                         options:MTLPipelineOptionNone
+                                                      reflection:nil
+                                                           error:&error];
+  [psoDesc release];
   TORCH_CHECK(cpl, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
 
   cplMap[key] = std::make_pair(cpl, func);

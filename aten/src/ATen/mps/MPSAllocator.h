@@ -269,6 +269,16 @@ class MPSHeapAllocatorImpl {
   id<MTLBuffer> malloc(size_t size, uint32_t usage);
   // frees a buffer and returns it into buffer pool
   void free(void* ptr);
+
+  // ─── Capture-mode hooks (used by MPSStreamGraph) ────────────────────────
+  // While capture is active, free() defers the underlying MTLBuffer into
+  // `held_set` instead of returning the block to pool.available_buffers.
+  // This keeps the MTLBuffer out of recycling — so ICB-replay reads stay
+  // valid. Released back to the pool via releaseHeldBuffer() when the
+  // graph is destroyed.
+  void beginCapture(std::vector<void*>* held_set);
+  void endCapture();
+  void releaseHeldBuffer(void* buf);
   // releases all the cached buffers and their associated heaps
   void emptyCache();
   // free inactive buffers that are pending to be freed
@@ -394,6 +404,11 @@ class MPSHeapAllocatorImpl {
   MPSStream* m_stream;
   // we hold a reference to MPSEventPool so it could get destroyed after MPSAllocator
   std::shared_ptr<MPSEventPool> m_event_pool;
+
+  // Active capture-time held-buffer set. Non-null between beginCapture() and
+  // endCapture(). When non-null, free() deflects freed blocks into this set
+  // rather than recycling them. See MPSStreamGraph for ownership.
+  std::vector<void*>* m_active_held_set = nullptr;
 
   void init_allocator();
   void init_buffer_pools();

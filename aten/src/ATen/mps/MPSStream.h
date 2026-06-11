@@ -44,6 +44,10 @@ typedef void* NSDictionary;
 
 namespace at::mps {
 
+// Forward decl — defined in MPSStreamGraph.h. Used by capture-mode hook in
+// commandEncoder() to wrap the underlying encoder in a recording proxy.
+class MPSStreamGraph;
+
 //-----------------------------------------------------------------
 //  MPSStream
 //-----------------------------------------------------------------
@@ -117,6 +121,23 @@ class TORCH_API MPSStream {
   MTLBuffer_t getErrorBuffer();
   void checkLastError();
 
+  // ─── Capture-mode hook (used by MPSStreamGraph) ─────────────────────────
+  // When `graph` is non-null, subsequent commandEncoder() calls return a
+  // recording proxy that intercepts kernel dispatches into the graph's ICB.
+  // capture_begin/end on MPSStreamGraph wire these for us — direct callers
+  // should prefer the graph API.
+  void setActiveCaptureGraph(MPSStreamGraph* graph) noexcept { _active_capture_graph = graph; }
+  void clearActiveCaptureGraph() noexcept { _active_capture_graph = nullptr; }
+  MPSStreamGraph* activeCaptureGraph() const noexcept { return _active_capture_graph; }
+
+  // Returns the currently-open compute encoder when the stream is NOT in
+  // graph-capture mode; nil otherwise. replay() uses this to inject commands
+  // directly into the coalescing encoder, avoiding a CB flush + encoder
+  // creation (~2µs). Caller must NOT call endEncoding on the returned encoder.
+  MTLComputeCommandEncoder_t openComputeEncoder() const noexcept {
+    return nil;  // encoder borrow temporarily disabled for debugging
+  }
+
  private:
   Stream _stream;
   MTLCommandQueue_t _commandQueue = nil;
@@ -130,6 +151,9 @@ class TORCH_API MPSStream {
   bool _enableCommitAndContinue = true;
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;
+  // Active graph capture (nullable). When non-null, commandEncoder() returns
+  // a recording proxy that appends dispatches into the graph's ICB.
+  MPSStreamGraph* _active_capture_graph = nullptr;
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();

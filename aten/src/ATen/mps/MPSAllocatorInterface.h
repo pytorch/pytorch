@@ -48,6 +48,17 @@ class IMPSAllocator : public c10::DeviceAllocator {
       const c10::Storage& mps_storage) const = 0;
   virtual bool recordEvents(c10::ArrayRef<const void*> buffers) const = 0;
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
+
+  // ─── Capture-mode hooks (used by MPSStreamGraph for torch.mps.graph()) ───
+  // While capture is active on the current stream, freeBlock() defers the
+  // underlying MTLBuffer into `held_set` (a vector<id<MTLBuffer>>* pointer)
+  // instead of returning it to the cache. Prevents the recycle-during-capture
+  // issue where ICB-replay would read from a buffer since reassigned to a
+  // different tensor. `held_set` is owned by the MPSStreamGraph and the
+  // buffers are released via releaseHeldBuffer() during graph destruction.
+  virtual void beginCapture(void* held_set_ptr) = 0;
+  virtual void endCapture() = 0;
+  virtual void releaseHeldBuffer(void* buf) const = 0;
 };
 
 class IMpsAllocatorCallback {

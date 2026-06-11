@@ -3,6 +3,7 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/mps/MPSStreamGraph.h>
 #include <c10/metal/error.h>
 
 @interface MPSGraphExecutionDescriptor ()
@@ -63,7 +64,15 @@ id<MTLDevice> MPSStream::device() const {
 
 id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
   if (!_commandEncoder) {
-    _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
+    id<MTLComputeCommandEncoder> raw = [commandBuffer() computeCommandEncoder];
+    if (_active_capture_graph != nullptr) {
+      // Wrap in recording proxy — see MPSStreamGraph.mm. The proxy retains
+      // `raw` and forwards all non-intercepted MTLComputeCommandEncoder
+      // protocol methods via NSProxy::forwardInvocation:.
+      _commandEncoder = wrap_compute_encoder_for_capture(raw, _active_capture_graph);
+    } else {
+      _commandEncoder = [raw retain];
+    }
   }
 
   return _commandEncoder;
