@@ -172,9 +172,6 @@ def _install_opaque_base(_PybindOpaqueBase: type) -> tuple[type, type]:
 
     def _construct_python_opaque(cls, args, kwargs):
         instance = cls.__new__(cls, *args, **kwargs)
-        if not _is_instance_of_type(instance, cls):
-            return instance
-
         try:
             instance_dict = object.__getattribute__(instance, "__dict__")
         except AttributeError:
@@ -183,8 +180,15 @@ def _install_opaque_base(_PybindOpaqueBase: type) -> tuple[type, type]:
             instance_constructing = instance_dict["_opaque_base_constructing"]
         else:
             instance_constructing = _MISSING
-        object.__setattr__(instance, "_opaque_base_constructing", True)
         try:
+            object.__setattr__(instance, "_opaque_base_constructing", True)
+        except (AttributeError, TypeError):
+            pass
+
+        try:
+            if not _is_instance_of_type(instance, cls):
+                return instance
+
             init = _find_python_init(cls)
             if init is not None:
                 init(instance, *args, **kwargs)
