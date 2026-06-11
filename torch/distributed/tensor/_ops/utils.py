@@ -621,7 +621,9 @@ def expand_to_full_mesh_op_strategy(
                 continue
 
         output_specs: tuple[DTensorSpec | None, ...] | DTensorSpec | None
-        if input_index == 0:
+        if op_schema.return_type_list_tensor_like():
+            output_specs = tuple(spec_list[:input_index])
+        elif input_index == 0:
             # No outputs (e.g., _linalg_check_errors)
             output_specs = None
         elif input_index > 1:

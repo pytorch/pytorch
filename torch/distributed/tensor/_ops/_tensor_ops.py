@@ -6,18 +6,30 @@ from typing import cast
 import torch
 from torch._ops import OpOverload
 from torch._prims_common import IntLike
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     ArgsType,
     KwargsType,
+    OpSchema,
+    OpSpec,
+    OpStrategy,
     RuntimeSchemaInfo,
+    StrategyType,
     TensorMeta,
+    TupleStrategy,
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _ShardingPlaceholder,
     register_single_dim_strategy,
 )
-from torch.distributed.tensor._ops.utils import normalize_dim
+from torch.distributed.tensor._ops.utils import (
+    generate_redistribute_costs,
+    normalize_dim,
+    register_op_strategy,
+    shift_shard_dims_after_insert,
+)
 from torch.distributed.tensor.placement_types import (
+    _is_shard_like,
     _MaskPartial,
     Partial,
     Placement,
@@ -580,41 +592,133 @@ def gather_single_dim_strategy(
     return strategies
 
 
-@register_single_dim_strategy(
-    aten.stack.default, RuntimeSchemaInfo(1, needs_pytree=True)
-)
-def stack_single_dim_strategy(
-    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    input_list = args_schema[0]
-    if not isinstance(input_list, (tuple, list)):
-        raise AssertionError(type(input_list))
-    if not all(isinstance(meta, TensorMeta) for meta in input_list):
-        raise AssertionError
+def _derive_follow_placements_from_tuple_strategy(
+    op: torch._ops.OpOverload,
+    tuple_strategy: TupleStrategy,
+) -> Sequence[Placement]:
+    """
+    derive the placements to follow from the tuple strategy, mainly used by
+    aten.stack, where each operand have the same shape, and correspondingly
+    expecting the same sharding
+    """
 
-    num_inputs = len(input_list)
-    if num_inputs == 0:
-        return []
+    def merge_placement(
+        cur_placement: Placement, new_placement: Placement
+    ) -> Placement:
+        # semantic if we already have a follow placement, we
+        # check each placement for the current arg placement
+        # to see if we want to merge/adjust the placement to follow
+        # the priority: Partial -> Shard -> Replicate
+        # _StridedShard.__eq__ compares both dim and split_factor,
+        # so two _StridedShard with different split_factor won't match here.
+        if cur_placement == new_placement:
+            return cur_placement
 
-    common_input_ndim = len(input_list[0].shape)
-    if not all(len(meta.shape) == common_input_ndim for meta in input_list):
-        raise AssertionError("Expected all stack inputs to be the same ndim")
+        if cur_placement.is_partial():
+            if _is_shard_like(new_placement):
+                # follow new placement
+                return new_placement
+            elif new_placement.is_partial():
+                # different partial types, we can't merge and have to replicate all here
+                return Replicate()
+            else:
+                # follow partial
+                return cur_placement
+        elif _is_shard_like(cur_placement):
+            if _is_shard_like(new_placement):
+                # cur/new placement are different sharding (i.e. different shard dim)
+                # currently fallback to replicate all args
+                return Replicate()
+            else:
+                # for partial/replicate, follow the current shard placement
+                return cur_placement
+        else:
+            # current replicate, just follow new placement
+            return new_placement
 
+    follow_placements: list[Placement] | None = None
+    mesh = tuple_strategy.child_mesh(0)
+    for arg_strategy in tuple_strategy.children:
+        if not isinstance(arg_strategy, OpStrategy):
+            raise AssertionError(f"Expected OpStrategy, got {type(arg_strategy)}")
+        if arg_strategy.mesh != mesh:
+            raise ValueError(
+                f"All operands in {op} must have the same mesh, "
+                f"but got {arg_strategy.mesh} and {mesh}."
+            )
+
+        for placement_strategy in arg_strategy.strategies:
+            arg_placements = placement_strategy.output_spec.placements
+            if follow_placements is None:
+                follow_placements = list(arg_placements)
+                continue
+            if follow_placements is None:
+                raise AssertionError(
+                    "follow_placements should not be None at this point"
+                )
+            for mesh_idx in range(mesh.ndim):
+                # merge placements with the priority
+                follow_placements[mesh_idx] = merge_placement(
+                    follow_placements[mesh_idx], arg_placements[mesh_idx]
+                )
+    if follow_placements is None:
+        raise AssertionError("follow placements should not be None!")
+    return follow_placements
+
+
+@register_op_strategy(aten.stack.default, RuntimeSchemaInfo(1, needs_pytree=True))
+def stack_strategy(op_schema: OpSchema) -> StrategyType:
+    # We keep stack as an OpStrategy because .stack is used w/ NormPartial, and its
+    # impossible to include every NormPartial rules as there are infinite possibilities
+    # with ord. Future changes to infra could be made, but we prefer to deprecate
+    # NormPartial at some point.
+
+    args_schema = op_schema.args_schema
+    input_tuple_strategy = args_schema[0]
+    if not isinstance(input_tuple_strategy, TupleStrategy):
+        raise AssertionError(f"Expected TupleStrategy, got {input_tuple_strategy}")
+    input_strategies: list[OpStrategy] = []
+    for child in input_tuple_strategy.children:
+        if not isinstance(child, OpStrategy):
+            raise AssertionError(f"Expected OpStrategy, got {child}")
+        input_strategies.append(child)
+    first_input_strategy = input_strategies[0]
+    common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
+    # normalize the dim to be within the output ndim (input ndim + 1),
+    # since stack inserts a new dimension
     dim = normalize_dim(dim, common_input_ndim + 1)
 
-    strategies: list[list[Placement | _ShardingPlaceholder]] = []
-    for shard_dim in range(common_input_ndim):
-        output_dim = shard_dim if shard_dim < dim else shard_dim + 1
-        strategies.append(
-            [_ShardingPlaceholder(output_dim)]  # pyrefly: ignore [bad-argument-type]
-            + [_ShardingPlaceholder(shard_dim)] * num_inputs
+    mesh = first_input_strategy.mesh
+
+    follow_placements = _derive_follow_placements_from_tuple_strategy(
+        op_schema.op, input_tuple_strategy
+    )
+
+    # create op strategy base on the follow placements
+    op_strategy = OpStrategy([])
+
+    input_specs = tuple(
+        DTensorSpec(mesh, tuple(follow_placements))
+        for _ in range(len(input_tuple_strategy.children))
+    )
+
+    # stack op would "insert" new dim, so all sharded dim >= the inserted dim need to
+    # be normalized with the new Shard placement
+    follow_placements = shift_shard_dims_after_insert(follow_placements, dim)
+    output_spec = DTensorSpec(mesh, tuple(follow_placements))
+    redistribute_cost = [
+        generate_redistribute_costs(input_strategies[i], input_specs[i])
+        for i in range(len(input_specs))
+    ]
+    op_strategy.strategies.append(
+        OpSpec(
+            output_specs=output_spec,
+            input_specs=input_specs,
+            redistribute_cost=redistribute_cost,
         )
-
-    for reduce_op in _PARTIAL_PASS_THROUGH_REDUCE_OPS:
-        strategies.append([Partial(reduce_op)] * (1 + num_inputs))
-
-    return strategies
+    )
+    return op_strategy
 
 
 @register_single_dim_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
