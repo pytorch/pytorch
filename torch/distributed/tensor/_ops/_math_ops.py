@@ -981,6 +981,7 @@ def pooling_single_dim_strategy(
     [aten._log_softmax.default, aten._softmax.default, aten._safe_softmax.default],
     schema_info=RuntimeSchemaInfo(1),
     allow_uneven_sharding=True,
+    allow_unbacked_sharding=False,
 )
 def softmax_single_dim_strategy(
     op: torch._ops.OpOverload,
@@ -1518,7 +1519,6 @@ def logsumexp_single_dim_strategy(
 
 _LINALG_NUM_PLACEMENTS = {
     # 1 in 1 out
-    aten.cholesky.default: 2,
     aten.cholesky_inverse.default: 2,
     aten.linalg_matrix_exp.default: 2,
     # 2 in 1 out
@@ -1574,7 +1574,6 @@ def _get_ndim(tensor_meta: Any) -> int:
 
 @register_single_dim_strategy(
     [
-        aten.cholesky.default,
         aten.cholesky_inverse.default,
         aten.linalg_matrix_exp.default,
         aten.cholesky_solve.default,
