@@ -101,6 +101,7 @@ def higher_order_scan(
     scan_inits: Sequence[ir.Value],
     scan_inputs: Sequence[ir.Value],
     additional_inputs: Sequence[ir.Value] | None,
+    unroll: int = 1,
     reverse: bool = False,
 ) -> Sequence[ir.Value]:
     """https://github.com/pytorch/pytorch/blob/66ac724b56e6c37a534f3e066423ef2f41d7477f/torch/_higher_order_ops/scan.py#L109"""
