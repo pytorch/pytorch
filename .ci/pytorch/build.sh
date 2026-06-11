@@ -10,6 +10,10 @@ set -ex -o pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # shellcheck source=./rocm_utils.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
+fi
 
 echo "Python version:"
 python --version
@@ -101,7 +105,18 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_MKLDNN=0
 
   export SLEEF_TARGET_EXEC_USE_QEMU=ON
-  sudo chown -R jenkins /var/lib/jenkins/workspace /opt
+  # Restrict chown to the workspace and the cross-compile sysroot/venv we
+  # actually write into. The workspace path differs by runner: EC2 docker
+  # mounts it at /var/lib/jenkins/workspace and GITHUB_WORKSPACE points at
+  # the host path that doesn't exist inside the container; OSDC k8s has it
+  # at ${GITHUB_WORKSPACE} (/__w/pytorch/pytorch) and no /var/lib/jenkins.
+  # Recursing into all of /opt would also fail on OSDC because /opt/git-cache
+  # is a read-only hostPath mount.
+  for dir in "${GITHUB_WORKSPACE:-}" /var/lib/jenkins/workspace /opt/sysroot /opt/riscv-cross-env; do
+    if [ -n "$dir" ] && [ -d "$dir" ]; then
+      sudo chown -R jenkins "$dir"
+    fi
+  done
 
 fi
 
@@ -264,6 +279,20 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     python -m build --wheel --no-isolation
   fi
   pip_install_whl "$(echo dist/*.whl)"
+
+  # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
+  # still emit a debug-rebuild plan with a -g compile and the libtorch_python
+  # relink. This guards against build-system changes (e.g. a new
+  # CONFIGURE_DEPENDS glob scheme) silently breaking the tool, which only works
+  # on a from-source build that test jobs don't have. --dry-run reads the tree
+  # without rebuilding, so it leaves the checkout clean (assert_git_not_dirty).
+  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && grep -q "csrc/Module.cpp" build/compile_commands.json; then
+    debinfo_plan="$(python tools/build_with_debinfo.py --dry-run torch/csrc/Module.cpp)"
+    echo "${debinfo_plan}"
+    grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
+    grep -q 'libtorch_python' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no libtorch_python link command"; exit 1; }
+  fi
+
   if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
     # Regression test for https://github.com/pytorch/pytorch/issues/164297
     # Torch should be importable and that's about it
@@ -288,6 +317,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
   if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchcomms* ]]; then
     install_torchcomms
+  fi
+
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *spmd_types* ]]; then
+    install_spmd_types
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
@@ -330,6 +363,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
       sudo rm -rf original
       popd
     fi
+
+    # Build rocm-composable-kernel (ck4inductor) wheel alongside PyTorch.
+    # Placed outside the /opt/rocm/llvm/bin pushd so `dist/` resolves to the repo root.
+    build_rocm_ck_wheel dist/
   fi
 
   if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then

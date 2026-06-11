@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 # within these allocations.
 #
 # To support all different mechanisms with optimal results, we aim to satisfy
-# the strictest requirement for this family of optimizations - we ensures that
+# the strictest requirement for this family of optimizations - we ensure that
 # every collective op invocation is guaranteed to operate on the same
 # allocation, at the same offset, in every iteration.
 #
@@ -95,7 +95,8 @@ def realize_as_comm_buffer(
     """
     x.realize()
     buffer = _get_data(x)
-    assert isinstance(buffer, ir.Buffer)
+    if not isinstance(buffer, ir.Buffer):
+        raise AssertionError(f"expected an `ir.Buffer`, got {type(buffer)}")
 
     layout = buffer.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
@@ -126,7 +127,10 @@ def _get_data(x: ir.TensorBox) -> ir.IRNode:
     if isinstance(x.data, ir.BaseView):
         # TensorBox -> *View -> StorageBox -> IRNode
         node = x.data.unwrap_view()
-        assert isinstance(node, (ir.BaseView, ir.MutableBox))
+        if not isinstance(node, (ir.BaseView, ir.MutableBox)):
+            raise AssertionError(
+                f"expected an `ir.BaseView` or `ir.MutableBox`, got {type(node)}"
+            )
         return node.data
     elif isinstance(x.data, ir.StorageBox):
         # TensorBox -> StorageBox -> IRNode
@@ -185,7 +189,8 @@ def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
 
 def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
     node = ir._CollectiveKernel.create_out_of_place(kernel, inputs, *args)
-    assert isinstance(node, ir.IRNode)
+    if not isinstance(node, ir.IRNode):
+        raise AssertionError(f"expected an `ir.IRNode`, got {type(node)}")
     return ir.TensorBox.create(node)
 
 
@@ -241,9 +246,9 @@ def register_comm_lowerings():
         # _AllReduce_Kernel instead of _AllReduceKernel.
         ir._AllReduce_Kernel.create_inplace(
             c10d.all_reduce_.default,
-            inp,
+            inp,  # type: ignore[arg-type]
             reduce_op,
-            group_name,
+            group_name,  # type: ignore[arg-type]
         )
         return inp  # type: ignore[return-value]
 
@@ -266,9 +271,9 @@ def register_comm_lowerings():
         inp = ir.ExternKernel.require_contiguous(inp)
         ir._AllReduce_Kernel.create_inplace(
             c10d.all_reduce_.default,
-            inp,
+            inp,  # type: ignore[arg-type]
             reduce_op,
-            group_name,
+            group_name,  # type: ignore[arg-type]
         )
         return inp  # type: ignore[return-value]
 
@@ -403,12 +408,12 @@ def register_comm_lowerings():
         ir._WaitKernel.create_wait(c10d.wait_tensor.default, inp)
         return inp
 
-    @register_comm_lowering(c10d.isend)
+    @register_comm_lowering(c10d.isend)  # type: ignore[misc]
     def _isend(inp, dst, tag, group_name):
         inp = ir.ExternKernel.require_contiguous(inp)
         return _create_out_of_place(c10d.isend.default, inp, dst, tag, group_name)
 
-    @register_comm_lowering(c10d.irecv)
+    @register_comm_lowering(c10d.irecv)  # type: ignore[misc]
     def _irecv(inp, src, tag, group_name):
         inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
@@ -416,7 +421,7 @@ def register_comm_lowerings():
         )
         return inp
 
-    @register_comm_lowering(c10d.batch_p2p_ops)
+    @register_comm_lowering(c10d.batch_p2p_ops)  # type: ignore[misc]
     def _batch_p2p_ops(op_list, peer_list, tag_list, tensors, group_name):
         tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
         kernel = c10d.batch_p2p_ops.default
@@ -435,7 +440,8 @@ def register_comm_lowerings():
                 tensors,
                 group_name,
             )
-        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        if unbacked_bindings:
+            raise AssertionError(f"{kernel} {unbacked_bindings}")
         for op, tensor_arg in zip(op_list, tensor_args):
             tensor_arg.realize()
             if op == "irecv":
@@ -519,7 +525,7 @@ def register_symm_mem_lowerings():
 
     def _maybe_realize_symm_mem(
         inp: ir.TensorBox,
-        group_name: str,
+        group_name: str,  # type: ignore[arg-type]
     ) -> ir.TensorBox:
         """
         Ensure inp is in P2P memory for a symm_mem collective.

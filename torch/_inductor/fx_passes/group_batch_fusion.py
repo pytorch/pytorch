@@ -139,12 +139,12 @@ def decompose_stack(graph: torch.fx.GraphModule, input_tensors: list[Any]) -> An
             aten.unsqueeze, args=(input_tensor,), kwargs={"dim": 0}
         )
         unsqueezed_inputs.append(unsqueezed_input)
-        unsqueezed_input.meta["val"] = aten.unsqueeze(input_tensor.meta["val"], dim=0)
+        unsqueezed_input.meta["val"] = aten.unsqueeze(input_tensor.meta["val"], dim=0)  # type: ignore[assignment]
         unsqueezed_inputs_meta.append(unsqueezed_input.meta["val"])
     stacked_inputs = graph.call_function(  # type: ignore[operator]
         aten.cat, args=(unsqueezed_inputs,), kwargs={"dim": 0}
     )
-    stacked_inputs.meta["val"] = aten.cat(unsqueezed_inputs_meta, dim=0)
+    stacked_inputs.meta["val"] = aten.cat(unsqueezed_inputs_meta, dim=0)  # type: ignore[assignment]
     return stacked_inputs
 
 
@@ -233,7 +233,7 @@ class PostGradBatchLinearFusion(BatchFusion):
             batch_biases.append(bias)  # type: ignore[possibly-undefined]
             batch_inputs_meta.append(input.meta)  # type: ignore[possibly-undefined, union-attr]
             batch_weights_meta.append(weight.meta)  # type: ignore[possibly-undefined, union-attr]
-            if bias is not None:
+            if bias is not None:  # type: ignore[possibly-undefined]
                 batch_biases_meta.append(bias.meta)  # type: ignore[possibly-undefined, union-attr]
             else:
                 batch_biases_meta.append(None)
@@ -275,7 +275,7 @@ class PostGradBatchLinearFusion(BatchFusion):
                         )
                         broadcast_bias.meta["val"] = aten.broadcast_to(
                             batch_biases_meta[i]["val"], broadcast_shape
-                        )
+                        )  # type: ignore[assignment]
                         new_bias_add = graph.call_function(  # type: ignore[operator]
                             aten.add.Tensor, args=((broadcast_bias, new_mm))
                         )
@@ -349,7 +349,8 @@ class GroupLinearFusion(GroupFusion):
             if CallFunctionVarArgs(aten.addmm.default).match(node):
                 bias, input, weight = node.args
             else:
-                assert CallFunctionVarArgs(aten.mm.default).match(node)
+                if not CallFunctionVarArgs(aten.mm.default).match(node):
+                    raise AssertionError(f"expected aten.mm node, got {node}")
                 input, weight = node.args
                 bias = None
 
@@ -495,7 +496,7 @@ class BatchLinearLHSFusion(BatchFusion):
     """
 
     def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
-        if CallFunctionVarArgs(torch.nn.functional.linear).match(
+        if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
@@ -519,7 +520,10 @@ class BatchLinearLHSFusion(BatchFusion):
             if batch_input is None:
                 batch_input = input
             else:
-                assert batch_input is input
+                if batch_input is not input:
+                    raise AssertionError(
+                        f"expected batch_input to be input, got {batch_input}"
+                    )
             batch_weights.append(weight)
             batch_weights_meta.append(weight.meta["example_value"])
             if bias:
@@ -612,7 +616,7 @@ def is_linear_node_can_be_fused(node: torch.fx.Node):
 class PreGradBatchLinearFusion(BatchFusion):
     """
     Batch linear fusion in pre grad pass.
-    Fuse linear with same size with torch.baddmm
+    Fuse linear with same size with torch.baddbmm
     """
 
     def _getitem_args(self, getitem_node: torch.fx.Node):
@@ -717,7 +721,7 @@ class PreGradBatchLinearFusion(BatchFusion):
                     bmm_meta = bmm.meta["example_value"]
                 except Exception as e:
                     log.debug(
-                        f" exception when update bmm meta data with stack error tracekey {e}"  # noqa: G004
+                        f" exception when update bmm meta data with stack error traceback {e}"  # noqa: G004
                     )
                     bmm_meta = None
 
@@ -803,9 +807,8 @@ class BatchLayernormFusion(BatchFusion):
             group_biases = None  # type: ignore[assignment]
         if all(weight is None for weight in group_weights):
             group_weights = None  # type: ignore[assignment]
-        assert all(eps == group_epss[0] for eps in group_epss), (
-            "all epsilon values must be equal"
-        )
+        if not all(eps == group_epss[0] for eps in group_epss):
+            raise AssertionError("all epsilon values must be equal")
 
         with graph.inserting_before(subset[0]):  # type: ignore[operator]
             stack_input = graph.call_function(  # type: ignore[operator]
@@ -1381,7 +1384,8 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
         if isinstance(gm, _LazyGraphModule):
             _LazyGraphModule.recompile()
         else:
-            assert isinstance(gm, torch.fx.GraphModule)
+            if not isinstance(gm, torch.fx.GraphModule):
+                raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
             gm.recompile()
         graph_str = gm.print_readable(
             print_output=False, include_stride=True, include_device=True

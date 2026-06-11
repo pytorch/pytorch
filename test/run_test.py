@@ -199,6 +199,7 @@ ROCM_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
     "distributed/pipelining/test_dtensor_pp_integration",
+    "inductor/test_cpu_repro",  # excessive runtimes compared to CUDA
 ]
 
 # Add architecture-specific blocklist entries
@@ -1732,6 +1733,7 @@ def get_selected_tests(options) -> list[str]:
             "nn/test_pooling",
             "test_view_ops",
             "test_nn",
+            "distributions/test_distributions",
             "inductor/test_mps_basic",
             "inductor/test_torchinductor",
             "inductor/test_aot_inductor",
