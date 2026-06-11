@@ -245,7 +245,6 @@ class ScanOp(HigherOrderOperator):
         init,
         xs,
         additional_inputs,
-        /,
         *,
         mutated_arg_indices: str = "",
     ):
@@ -1072,15 +1071,12 @@ def scan_functionalize(
         )
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         _check_alias_and_mutation(combine_fn, sample_inputs, "scan", pre_dispatch)
-        op_kwargs = {}
-        if mutated_arg_indices:
-            op_kwargs["mutated_arg_indices"] = mutated_arg_indices
         ret = scan_op(
             functional_combine_fn,
             unwrapped_init,
             unwrapped_xs,
             unwrapped_additional_inputs,
-            **op_kwargs,
+            mutated_arg_indices=mutated_arg_indices,
         )
     return ctx.wrap_tensors(ret)
 
