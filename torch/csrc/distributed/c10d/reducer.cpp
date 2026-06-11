@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 
 #include <functional>
+#include <unordered_set>
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -134,7 +135,7 @@ Reducer::Reducer(
   }
   // Check whether the module is multi_device_module
   {
-    std::set<int> unique_devices;
+    std::unordered_set<int> unique_devices;
     for (const auto& v : params_) {
       auto device_idx = static_cast<int>(v.device().index());
       auto [_, inserted] = unique_devices.emplace(device_idx);
@@ -2412,7 +2413,8 @@ compute_bucket_assignment_by_size(
     bucket_indices.emplace_back(std::get<0>(bucket_indices_with_size));
     per_bucket_size_limits.emplace_back(std::get<1>(bucket_indices_with_size));
   }
-  return std::make_tuple(bucket_indices, per_bucket_size_limits);
+  return std::make_tuple(
+      std::move(bucket_indices), std::move(per_bucket_size_limits));
 }
 
 // Verifies corresponding params in the model replica have the same
