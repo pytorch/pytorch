@@ -103,6 +103,26 @@ def _resolve_name_from_frame(name: str, frame):
     return obj
 
 
+def _maybe_register_schema_enum_type(
+    type_name: str,
+    frame,
+    registered: list[str],
+    parse_error: RuntimeError | None,
+) -> bool:
+    if torch._C._is_opaque_type_registered(type_name):
+        return False
+
+    obj = _resolve_name_from_frame(type_name, frame)
+    if not isinstance(obj, type) or not issubclass(obj, enum.Enum):
+        if parse_error is not None:
+            raise parse_error
+        return False
+
+    torch._C._register_opaque_type(type_name)
+    registered.append(type_name)
+    return True
+
+
 def _register_schema_enum_types(schema: str, frame) -> list[str]:
     registered = []
     seen = set()
@@ -110,7 +130,8 @@ def _register_schema_enum_types(schema: str, frame) -> list[str]:
     try:
         while True:
             try:
-                torch._C.parse_schema(schema)
+                parse_schema: Any = torch._C.parse_schema
+                parse_schema(schema, allow_typevars=False)
             except RuntimeError as exc:
                 if "unknown type specifier" not in str(exc):
                     raise
@@ -125,14 +146,7 @@ def _register_schema_enum_types(schema: str, frame) -> list[str]:
             if type_name in seen:
                 raise parse_error
             seen.add(type_name)
-            if torch._C._is_opaque_type_registered(type_name):
-                raise parse_error
-
-            obj = _resolve_name_from_frame(type_name, frame)
-            if not isinstance(obj, type) or not issubclass(obj, enum.Enum):
-                raise parse_error
-            torch._C._register_opaque_type(type_name)
-            registered.append(type_name)
+            _maybe_register_schema_enum_type(type_name, frame, registered, parse_error)
     finally:
         if not success:
             _unregister_schema_enum_types(registered)
@@ -734,7 +748,11 @@ def _clear_torch_ops_cache(op_defs):
         if not hasattr(torch.ops, ns):
             continue
         namespace = getattr(torch.ops, ns)
-        if not hasattr(namespace, name):
+        # Use vars() to check the instance dict directly, avoiding
+        # __getattr__ which calls into C++ via _jit_get_operation.
+        # During interpreter shutdown the C++ runtime may already be
+        # torn down, causing UnicodeDecodeError or segfaults.
+        if name not in vars(namespace):
             continue
         delattr(namespace, name)
         if name in namespace._dir:
