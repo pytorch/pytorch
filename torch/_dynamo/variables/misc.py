@@ -16,6 +16,7 @@ Key classes include:
 """
 
 import builtins
+import contextvars
 import dataclasses
 import enum
 import functools
@@ -2320,6 +2321,140 @@ np_constant_collections_map = {
     tnp.iinfo: ConstantLikeVariable,
     tnp.dtype: NumpyDTypeVariable,
 }
+
+
+_SUPPORTED_CV_VALUE_TYPES = (type(None), bool, int, float, str, bytes)
+
+
+def _is_supported_cv_value(value: object) -> bool:
+    return isinstance(value, (*_SUPPORTED_CV_VALUE_TYPES, enum.Enum))
+
+
+class ContextVarVariable(VariableTracker):
+    """Wraps a contextvars.ContextVar for Dynamo tracing.
+
+    .get() is resolved at trace time with a guard that re-checks at cache time.
+    .set() and .reset() graph-break in Phase 1.
+    """
+
+    _nonvar_fields = {
+        "cv_obj",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(self, cv_obj: contextvars.ContextVar[Any], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.cv_obj = cv_obj
+
+    def python_type(self) -> type:
+        return contextvars.ContextVar
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "get":
+            return self._handle_get(tx, args, kwargs)
+        elif name in ("set", "reset"):
+            unimplemented(
+                gb_type="ContextVar mutation not supported",
+                context=f"ContextVar('{self.cv_obj.name}').{name}()",
+                explanation=(
+                    f"ContextVar.{name}() is not yet supported inside "
+                    f"torch.compile. Move the .{name}() call outside the "
+                    f"compiled region."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().call_method(tx, name, args, kwargs)
+
+    def _handle_get(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from ..source import ContextVarGetSource
+        from .builder import VariableBuilder
+
+        default_var = args[0] if args else kwargs.get("default")
+        has_default = default_var is not None
+        default_value = self._resolve_default(default_var) if has_default else None
+
+        value = self._get_value(tx, has_default, default_value)
+
+        if not _is_supported_cv_value(value):
+            unimplemented(
+                gb_type="ContextVar.get() returned non-constant value",
+                context=f"ContextVar('{self.cv_obj.name}').get() -> {type(value).__name__}",
+                explanation=(
+                    f"ContextVar.get() returned a {type(value).__name__}, but only "
+                    f"constant values (str, int, float, bool, None, bytes, enum) "
+                    f"are supported inside torch.compile in this release. "
+                    f"Move the .get() call outside the compiled region."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        if not self.source:
+            raise AssertionError("ContextVarVariable requires a source for .get()")
+        value_source = ContextVarGetSource(
+            base=self.source,
+            has_default=has_default,
+            default_value=default_value,
+        )
+        return VariableBuilder(tx, value_source)(value)
+
+    def _resolve_default(self, default_var: "VariableTracker") -> Any:
+        try:
+            default_value = default_var.as_python_constant()
+        except (AsPythonConstantNotImplementedError, NotImplementedError):
+            unimplemented(
+                gb_type="ContextVar.get() with non-constant default",
+                context=f"ContextVar('{self.cv_obj.name}').get(...)",
+                explanation=(
+                    "ContextVar.get() default argument must be a "
+                    "compile-time constant inside torch.compile."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        try:
+            hash(default_value)
+        except TypeError:
+            unimplemented(
+                gb_type="ContextVar.get() with unhashable default",
+                context=f"ContextVar('{self.cv_obj.name}').get({type(default_value).__name__}(...))",
+                explanation=(
+                    "ContextVar.get() default must be hashable inside "
+                    "torch.compile (mutable containers like list/dict/set "
+                    "are not supported as defaults)."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return default_value
+
+    def _get_value(
+        self,
+        tx: "InstructionTranslatorBase",
+        has_default: bool,
+        default_value: Any,
+    ) -> Any:
+        if has_default:
+            return self.cv_obj.get(default_value)
+        try:
+            return self.cv_obj.get()
+        except LookupError:
+            raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
+
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
+        if name == "name":
+            return ConstantVariable.create(self.cv_obj.name)
+        return super().var_getattr(tx, name)
 
 
 class RandomClassVariable(VariableTracker):
