@@ -154,6 +154,31 @@ MULTILINE_MATCHERS = [
 ]
 
 
+def dynamic_call_parser(buffer: str, current_version: tuple[int, int, int] | None):
+    pattern = r"TORCH_DYNAMIC_VERSION_CALL_(\d+)_(\d+)_(\d+)\(([^,]+),([^,\)]+)"
+    buffer_without_space = buffer.replace(" ", "").replace("\n", "")
+    res = re.findall(pattern, buffer_without_space)
+    if not res:
+        raise RuntimeError(
+            f"Failed to parse dynamic version call pattern on buffer: {repr(buffer)}"
+        )
+    major, minor, patch = res[0][0:3]
+    dynamic_version = (int(major), int(minor), int(patch))
+    dynamic_lookup_identifier = res[0][3]
+    fallback_identifier = res[0][4]
+    return [
+        IdentifierUse(dynamic_lookup_identifier, version=dynamic_version),
+        IdentifierUse(fallback_identifier, version=current_version),
+    ]
+
+
+DYNAMIC_VERSION_CALL_IDENTIFIER_MATCHER = MultilineMatcher(
+    start_pattern=r".*TORCH_DYNAMIC_VERSION_CALL_\d+_\d+_\d+",
+    end_pattern=";",
+    handler=dynamic_call_parser,
+)
+
+
 class MatcherAccumulator:
     """
     This class accumulates into a buffer whenever one of the start patterns of the matchers
