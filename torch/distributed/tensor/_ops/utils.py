@@ -675,6 +675,10 @@ def expand_to_full_mesh_op_strategy(
             f"but no valid strategy preserves this placement. "
             f"Please use the out-of-place version of this operation instead."
         )
+    if not all_strategies:
+        raise RuntimeError(
+            f"{op_schema.op}: no valid sharding strategy for the input placements."
+        )
 
     return OpStrategy(all_strategies)
 
