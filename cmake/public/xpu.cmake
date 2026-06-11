@@ -5,6 +5,21 @@ if(TARGET torch::xpurt)
   return()
 endif()
 
+# "icx" is a closed source DPC++ compiler shipped with oneAPI Toolkits
+# "dpclang" is an open source DPC++ compiler shipped with Linux distros
+
+# Check if the XPU_SYCL_COMPILER is NOT already set (e.g. from -D command line)
+if(NOT DEFINED XPU_SYCL_COMPILER)
+    if(DEFINED ENV{XPU_SYCL_COMPILER})
+        set(XPU_SYCL_COMPILER "$ENV{XPU_SYCL_COMPILER}")
+    else()
+        set(XPU_SYCL_COMPILER "icx")
+    endif()
+endif()
+
+# Finalize the setting as a CACHE variable so it appears in cache files
+set(XPU_SYCL_COMPILER "${XPU_SYCL_COMPILER}" CACHE STRING "SYCL compiler to use")
+
 set(XPU_HOST_CXX_FLAGS)
 
 # Find SYCL library.
@@ -22,6 +37,9 @@ add_library(torch::sycl INTERFACE IMPORTED)
 set_property(
     TARGET torch::sycl PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${SYCL_INCLUDE_DIR})
+set_property(
+    TARGET torch::sycl PROPERTY INTERFACE_LINK_DIRECTORIES
+    ${SYCL_LIBRARY_DIR})
 set_property(
     TARGET torch::sycl PROPERTY INTERFACE_LINK_LIBRARIES
     ${SYCL_LIBRARY})
