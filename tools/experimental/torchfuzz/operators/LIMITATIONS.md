@@ -45,6 +45,23 @@ model and affect all or most operators.
 - **Half-precision edge cases** — No targeted generation of denormals,
   near-max values, or bf16 precision boundaries.
 
+## Elementwise Math
+
+- `torch.angle` and `torch.real` are no-ops on real-valued tensors;
+  their interesting behavior requires complex dtypes (excluded above).
+
+- `torch.clamp_max` / `torch.clamp_min` randomize scalar bounds but
+  never test tensor bounds (`torch.clamp_max(input, max=other_tensor)`).
+
+- `torch.heaviside` second arg is always a 0-d scalar tensor; never
+  tests a broadcastable `values` tensor of higher rank.
+
+- `torch.lerp` always uses 3 tensor inputs; the scalar weight variant
+  `torch.lerp(start, end, weight=0.5)` is never tested.
+
+- `torch.addcmul` integer inputs are valid in PyTorch but excluded by
+  `requires_float = True`.
+
 ## Tensor Creation
 
 - `_like` operators: the non-contiguous output path creates a
