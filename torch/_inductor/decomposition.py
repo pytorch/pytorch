@@ -35,7 +35,10 @@ from torch._prims_common import (
     suggest_memory_format,
     type_to_dtype,
 )
-from torch._refs import native_layer_norm as decomp_native_layer_norm
+from torch._refs import (
+    native_layer_norm as decomp_native_layer_norm,
+    normal as decomp_normal,
+)
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 
 from . import config, inductor_prims
@@ -154,6 +157,24 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+# Validate tensor std under torch.compile, matching eager (issue #185248).
+# Kept in the Inductor decomposition rather than _refs.normal so the assert is
+# lowered by Inductor instead of being dispatched eagerly on backends that lack
+# aten._assert_async (e.g. MPS).
+remove_decompositions(
+    decompositions, [aten.normal.Tensor_Tensor, aten.normal.float_Tensor]
+)
+
+
+@register_decomposition([aten.normal.Tensor_Tensor, aten.normal.float_Tensor])
+def _normal_validated(mean, std, *, generator=None):
+    aten._assert_async.msg(
+        torch.all(std >= 0),
+        "normal expects all elements of std >= 0.0",
+    )
+    return decomp_normal(mean, std, generator=generator)
 
 
 @register_decomposition([aten.lerp.Scalar])

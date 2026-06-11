@@ -5028,6 +5028,31 @@ class CPUReproTests(TestCase):
                 dtype if dtype else torch.float32,
             )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_aten_normal_negative_tensor_std_raises(self):
+        # Negative tensor std must raise like eager under torch.compile (#185248).
+        def fn(mean, std):
+            return torch.normal(mean, std)
+
+        mean = torch.zeros((4,), dtype=torch.float32)
+        std = torch.full((4,), -1.0, dtype=torch.float32)
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        with self.assertRaisesRegex(
+            RuntimeError, "normal expects all elements of std >= 0.0"
+        ):
+            compiled_fn(mean, std)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_aten_normal_positive_tensor_std(self):
+        def fn(mean, std):
+            return torch.normal(mean, std)
+
+        mean = torch.zeros((4,), dtype=torch.float32)
+        std = torch.full((4,), 0.5, dtype=torch.float32)
+        out = torch.compile(fn, backend="inductor")(mean, std)
+        self.assertEqual(out.shape, mean.shape)
+
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
