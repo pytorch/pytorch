@@ -11,6 +11,7 @@ Regression contract (three layers):
 3. **Semantics** — K=1, values in ``{0, 1}`` only: each output entry is one exact multiply;
    ``torch.equal`` vs a hand-built expected tensor catches wrong batch slices (wrong ``idx_q``).
 """
+
 from __future__ import annotations
 
 import unittest
@@ -19,7 +20,7 @@ import torch
 from torch._inductor import config as inductor_config
 from torch._inductor.kernel.bmm import bmm_grid
 from torch._inductor.runtime.runtime_utils import get_max_y_grid
-from torch._inductor.test_case import TestCase, run_tests
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing import FileCheck
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -75,8 +76,12 @@ class TestBmmBatchGridYz(TestCase):
         ):
             tiles, gy, gz = bmm_grid(b, 64, 64, meta)
             self.assertEqual(tiles, 1)  # m=n=64 with BLOCK_M=BLOCK_N=64
-            self.assertLessEqual(gy, max_y, msg=f"b={b}: grid_y must not exceed CUDA gridDim.y cap")
-            self.assertGreaterEqual(gy * gz, b, msg=f"b={b}: Y/Z grid must cover all batch rows")
+            self.assertLessEqual(
+                gy, max_y, msg=f"b={b}: grid_y must not exceed CUDA gridDim.y cap"
+            )
+            self.assertGreaterEqual(
+                gy * gz, b, msg=f"b={b}: Y/Z grid must cover all batch rows"
+            )
             if b <= max_y:
                 self.assertEqual(gz, 1)
             else:
@@ -145,9 +150,7 @@ class TestBmmBatchGridYz(TestCase):
             raise unittest.SkipTest("GPU-only")
 
         dtype = torch.float16
-        a0, b0, e0 = sparse_probe_bmm_tensors(
-            device=GPU_TYPE, dtype=dtype, B=100
-        )
+        a0, b0, e0 = sparse_probe_bmm_tensors(device=GPU_TYPE, dtype=dtype, B=100)
         a1, b1, e1 = sparse_probe_bmm_tensors(
             device=GPU_TYPE, dtype=dtype, B=max(get_max_y_grid() + 1, 70_000)
         )
