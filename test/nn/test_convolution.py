@@ -20,7 +20,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfMPS,
     expectedFailureMPS,
-    expectedFailureXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -3233,7 +3232,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyAccelerator
     @largeTensorTest("12GB")
     @serialTest()
-    @expectedFailureXPU
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type != "cpu" else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
@@ -3276,10 +3274,13 @@ class TestConvolutionNNDeviceType(NNTestCase):
             self.assertEqual(maxdiff2, 0)
             self.assertEqual(maxdiff3, 0)
 
+    # XPU: skipped due to fp16 weight gradient divergence across chunked
+    # backward (oneDNN jit:ir generates different reduction trees per batch size).
+    # Tracked in: https://github.com/intel/torch-xpu-ops/issues/3975
     @onlyAccelerator
     @largeTensorTest("12GB")
     @serialTest()
-    @expectedFailureXPU
+    @skipXPU
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type != "cpu" else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
@@ -3932,7 +3933,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
     @serialTest()
-    @expectedFailureXPU
+    # XPU: skipped due to fp16 depthwise conv precision divergence
+    # on channels_last format with large tensor indexing.
+    # Tracked in: https://github.com/intel/torch-xpu-ops/issues/3974
+    # Related pytorch issue: https://github.com/pytorch/pytorch/issues/186314
+    @skipXPU
     # Note: This xfail only applies to cuDNN (CUDA), not MIOpen (ROCm)
     # Reference: https://github.com/ROCm/MIOpen/pull/2838
     @xfailIf(
