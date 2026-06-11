@@ -1368,6 +1368,111 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(inp), inp + 6)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_graph_break_during_module_init(self):
+        """Graph break during nn.Module.__init__ should not prevent the caller
+        from compiling the rest of the function."""
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                torch._dynamo.graph_break()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            m = MyModule()
+            return m(x)
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result.shape, torch.Size([10]))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_graph_break_during_user_class_init(self):
+        """Graph break during user class __init__ via instantiate_user_defined_class_object.
+
+        The polyfill does cls.__new__ then obj.__init__. If nested graph breaks
+        were allowed in the polyfill, the resume would have a half-initialized
+        object (created by __new__ but __init__ not yet complete), and accessing
+        attributes set after the graph break would fail with AttributeError.
+        """
+
+        class Config:
+            def __init__(self, scale):
+                torch._dynamo.graph_break()
+                self.scale = scale
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            cfg = Config(2)
+            return x * cfg.scale
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result, x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_graph_break_during_user_class_new(self):
+        """Graph break during __new__ via instantiate_user_defined_class_object.
+
+        The polyfill calls cls.__new__ first. If nested graph breaks were
+        allowed, the resume would not yet have the object on the stack at all
+        (since __new__ creates it), so the subsequent __init__ call and any
+        attribute access would operate on garbage.
+        """
+
+        class Wrapper:
+            def __new__(cls, val):
+                torch._dynamo.graph_break()
+                obj = super().__new__(cls)
+                obj.val = val
+                return obj
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            w = Wrapper(3)
+            return x + w.val
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result, x + 3)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_graph_break_in_copy_deepcopy(self):
+        """copy.deepcopy is a BUILTIN_INLINE_WHEN_CALLED function that contains
+        loops and graph-breaks internally. If nested graph breaks were allowed,
+        deepcopy's internal loop would trigger raise_loop_graph_break which
+        poisons the parent frame, and deepcopy's graph-breaks would produce
+        unusable resume functions for stdlib frames."""
+        import copy
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            y = x + 1
+            m = torch.nn.Linear(10, 10)
+            m2 = copy.deepcopy(m)
+            return m2(y)
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result.shape, torch.Size([10]))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
     def test_inlined_function_globals_across_graph_break(self):
         """Module-level globals in inlined functions survive graph breaks.
 

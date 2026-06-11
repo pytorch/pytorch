@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+import gc
+import weakref
 from unittest.mock import patch
 
 import torch
@@ -239,6 +241,132 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             return x
 
         self._common(fn, 2, 6)
+
+    def test_resume_del_releases_tensor(self):
+        refs = []
+        events = []
+
+        @torch._dynamo.disable
+        def check_tensor_dead(label):
+            gc.collect()
+            events.append((label, refs[-1]() is None))
+
+        def fn(x):
+            y = x + 1
+            refs.append(weakref.ref(y, lambda _: events.append("freed_y")))
+            check_tensor_dead("after_ref")
+            del y
+            torch._dynamo.graph_break()
+            check_tensor_dead("after_del")
+            return x + 2
+
+        torch.compile(fn, backend="eager")(torch.ones(3))
+
+        self.assertEqual(
+            events,
+            [("after_ref", False), "freed_y", ("after_del", True)],
+        )
+
+    def test_issue_shape_list_clear_and_intermediate_del_release_tensors(self):
+        input_refs = []
+        intermediate_refs = []
+        events = []
+
+        @torch._dynamo.disable
+        def check_tensor_dead(label, ref):
+            gc.collect()
+            events.append((label, ref() is None))
+
+        def fn(x):
+            x2 = x[0] + 1
+            x_int = x2 + 1
+            input_refs.append(weakref.ref(x[0], lambda _: events.append("freed_x")))
+            intermediate_refs.append(
+                weakref.ref(x_int, lambda _: events.append("freed_x_int"))
+            )
+            x.clear()
+            del x
+            torch._dynamo.graph_break()
+            check_tensor_dead("after_del_x", input_refs[-1])
+            del x_int
+            torch._dynamo.graph_break()
+            check_tensor_dead("after_del_x_int", intermediate_refs[-1])
+            return x2 + 2
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager")([torch.ones(3)]),
+            torch.full((3,), 4.0),
+        )
+
+        self.assertEqual(
+            events,
+            [
+                "freed_x",
+                ("after_del_x", True),
+                "freed_x_int",
+                ("after_del_x_int", True),
+            ],
+        )
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_resume_del_releases_tensor(self):
+        refs = []
+        events = []
+
+        @torch._dynamo.disable
+        def check_tensor_dead(label):
+            gc.collect()
+            events.append((label, refs[-1]() is None))
+
+        def inner(x):
+            y = x + 1
+            refs.append(weakref.ref(y, lambda _: events.append("freed_y")))
+            torch._dynamo.graph_break()
+            del y
+            check_tensor_dead("after_del")
+            return x + 2
+
+        def fn(x):
+            return inner(x) + 3
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(torch.ones(3)),
+            torch.full((3,), 6.0),
+        )
+        self.assertEqual(
+            events,
+            ["freed_y", ("after_del", True)],
+        )
+
+    def test_del_compiled_only_local_before_graph_break(self):
+        def fn(x):
+            y = x + 1
+            del y
+            torch._dynamo.graph_break()
+            return x + 2
+
+        x = torch.ones(3)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_resume_del_post_break_local_uses_positional_call(self):
+        def fn(x):
+            torch._dynamo.graph_break()
+            y = x + 1
+            del y
+            return x + 2
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(torch.ones(3)),
+            torch.full((3,), 3.0),
+        )
+
+        from torch._dynamo.resume_execution import ContinueExecutionCache
+
+        resume_codes = list(ContinueExecutionCache.cache[fn.__code__].values())
+        self.assertGreater(len(resume_codes), 0)
+        self.assertFalse(
+            any(ContinueExecutionCache.uses_boxed_call(code) for code in resume_codes)
+        )
 
     def test_start1(self):
         def fn(a, b):
