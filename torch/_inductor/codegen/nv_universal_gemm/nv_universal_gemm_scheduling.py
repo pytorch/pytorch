@@ -89,6 +89,28 @@ class NVUniversalGemmScheduling(BaseScheduling):
         return NVUniversalGemmScheduling._is_nvgemm_ir_buffer(node.node)
 
     @staticmethod
+    def _best_nvgemm_choice(
+        ir_node: MultiTemplateBuffer,
+        require_epilogue_fusion: bool = False,
+    ) -> NVUniversalGemmCaller:
+        """Find the best NVUniversalGemmCaller from an MTB's choice timings."""
+        choice_timings = ir_node.choice_timings()
+        best: NVUniversalGemmCaller | None = None
+        best_time = float("inf")
+        for choice, timing in choice_timings.items():
+            if not isinstance(choice, NVUniversalGemmCaller):
+                continue
+            if require_epilogue_fusion and not choice.supports_epilogue_fusion:
+                continue
+            if best is None or timing < best_time:
+                best_time = timing
+                best = choice
+        if best is None:
+            kind = "EFC kernel" if require_epilogue_fusion else "NVUniversalGemmCaller"
+            raise RuntimeError(f"No {kind} found in choices")
+        return best
+
+    @staticmethod
     def get_nv_gemm_buffer_from_node(
         node: BaseSchedulerNode, require_epilogue_fusion: bool = False
     ) -> NVUniversalGemmBuffer:
@@ -99,7 +121,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if isinstance(ir_node, NVUniversalGemmBuffer):
             return ir_node
         elif isinstance(ir_node, MultiTemplateBuffer):
-            # Honor an explicit swap/finalize — the fusion benchmark loop swaps
+            # Honor an explicit swap/finalize -- the fusion benchmark loop swaps
             # in each EFC choice one at a time and must not re-select from timings.
             if isinstance(ir_node._render_caller, NVUniversalGemmCaller) and (
                 not require_epilogue_fusion
@@ -107,39 +129,17 @@ class NVUniversalGemmScheduling(BaseScheduling):
             ):
                 selected_choice = ir_node._render_caller
             elif require_epilogue_fusion:
-                # `best is None or timing < best_time` so a choice with timing=inf
-                # (benchmark failed) can still win when it's the only EFC option.
-                choice_timings = ir_node.choice_timings()
-                best_efc_choice = None
-                best_efc_time = float("inf")
-                for choice, timing in choice_timings.items():
-                    if (
-                        isinstance(choice, NVUniversalGemmCaller)
-                        and choice.supports_epilogue_fusion
-                    ):
-                        if best_efc_choice is None or timing < best_efc_time:
-                            best_efc_time = timing
-                            best_efc_choice = choice
-                if best_efc_choice is None:
-                    raise RuntimeError("No EFC kernel found for epilogue fusion")
-                selected_choice = best_efc_choice
+                selected_choice = NVUniversalGemmScheduling._best_nvgemm_choice(
+                    ir_node, require_epilogue_fusion=True
+                )
             else:
                 min_choice, _ = ir_node.get_min_choice()
                 if isinstance(min_choice, NVUniversalGemmCaller):
                     selected_choice = min_choice
                 else:
-                    choice_timings = ir_node.choice_timings()
-                    best_nvgemm = None
-                    best_time = float("inf")
-                    for choice, timing in choice_timings.items():
-                        if isinstance(choice, NVUniversalGemmCaller) and (
-                            best_nvgemm is None or timing < best_time
-                        ):
-                            best_time = timing
-                            best_nvgemm = choice
-                    if best_nvgemm is None:
-                        raise RuntimeError("No NVUniversalGemmCaller found in choices")
-                    selected_choice = best_nvgemm
+                    selected_choice = NVUniversalGemmScheduling._best_nvgemm_choice(
+                        ir_node
+                    )
             tensor_box = selected_choice.output_node()
             # pyrefly: ignore [missing-attribute]
             return cast(NVUniversalGemmBuffer, tensor_box.data.data)
