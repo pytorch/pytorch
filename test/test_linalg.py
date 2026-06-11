@@ -28,11 +28,12 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     with_ieee_matmul_precision, runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
+     runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
-     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
+     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver,
+     skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, onlyAccelerator, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type)
 from torch.testing import make_tensor
@@ -222,6 +223,13 @@ class TestLinalg(TestCase):
         zero_strided = torch.randn(1).to(device=device, dtype=dtype).expand(50)
         run_test_case(zero_strided, b)
         run_test_case(a, zero_strided)
+
+    def test_cholesky_removed_error(self, device):
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            torch.cholesky(a)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            a.cholesky()
 
     def test_matrix_rank_removed_error(self, device):
         a = make_tensor(5, 5, device=device, dtype=torch.float32)
@@ -665,109 +673,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.cholesky(A, out=out)
 
-    # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
-    @slowTest
-    @skipCUDAIfNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_old_cholesky_batched_many_batches(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
-
-        def cholesky_test_helper(n, batchsize, device, upper):
-            A = random_symmetric_pd_matrix(n, batchsize, dtype=dtype, device=device)
-            chol_fact = torch.cholesky(A, upper=upper)
-            if upper:
-                # Correctness check
-                self.assertEqual(A, chol_fact.mT.matmul(chol_fact))
-                # Upper triangular check
-                self.assertEqual(chol_fact, chol_fact.triu())
-            else:
-                # Correctness check
-                self.assertEqual(A, chol_fact.matmul(chol_fact.mT))
-                # Lower triangular check
-                self.assertEqual(chol_fact, chol_fact.tril())
-
-        for upper, batchsize in itertools.product([True, False], [262144, 524288]):
-            cholesky_test_helper(2, batchsize, device, upper)
-
-    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipCUDAIfNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_cholesky_batched(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        def cholesky_test_helper(n, batch_dims, upper):
-            A = random_hermitian_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
-            cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
-            cholesky_exp = cholesky_exp.reshape_as(A)
-            self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
-
-        for upper, batchsize in itertools.product([True, False], [(3,), (3, 4), (2, 3, 4)]):
-            cholesky_test_helper(3, batchsize, upper)
-
-    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipCUDAIfNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    # Cholesky factorization itself runs in FP32 (no TF32 path). The
-    # assertion `||A - C @ C.T|| < tol` is a factorization-correctness check;
-    # enabling TF32 (or CPU mkldnn reduced-f32) on the reconstruct mm injects
-    # condition-amplified noise unrelated to what's being verified.
-    # See https://github.com/jeffdaily/tf32_analysis.
-    @with_ieee_matmul_precision
-    def test_old_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        A = random_hermitian_pd_matrix(10, dtype=dtype, device=device)
-
-        # default Case
-        C = torch.cholesky(A)
-        B = torch.mm(C, C.t().conj())
-        self.assertEqual(A, B, atol=1e-14, rtol=0)
-
-        # test Upper Triangular
-        U = torch.cholesky(A, True)
-        B = torch.mm(U.t().conj(), U)
-        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
-
-        # test Lower Triangular
-        L = torch.cholesky(A, False)
-        B = torch.mm(L, L.t().conj())
-        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
-
-    @skipCUDAIfNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_cholesky_empty(self, device, dtype):
-        def run_test(upper):
-            A = torch.empty(0, 0, dtype=dtype, device=device)
-            chol = torch.cholesky(A, upper)
-            chol_A = torch.matmul(chol, chol.t().conj())
-            self.assertEqual(A, chol_A)
-        for upper in [True, False]:
-            run_test(upper)
-
-    # Test for issue
-    # https://github.com/pytorch/pytorch/issues/57032
-    # torch.cholesky with upper=True for batched CUDA inputs was wrong
-    # it was using the lower triangular part instead of the upper one
-    @onlyCUDA
-    @skipCUDAIfNoCusolver
-    @dtypes(*floating_and_complex_types())
-    def test_old_cholesky_batched_upper(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        batchsize = 2
-        A = random_hermitian_pd_matrix(3, batchsize, dtype=dtype, device=device)
-        A_triu = A.triu()  # fill the lower triangular part with zero
-
-        U = torch.cholesky(A_triu, upper=True)
-
-        reconstruct_A = U.mH @ U
-        self.assertEqual(A, reconstruct_A)
-
-    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_ex(self, device, dtype):
@@ -3146,7 +3052,7 @@ class TestLinalg(TestCase):
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = random_hermitian_pd_matrix(*A_dims, dtype=dtype, device=device)
-        L = torch.cholesky(A, upper=upper)
+        L = torch.linalg.cholesky(A, upper=upper)
 
         # L should be col-major
         self.assertTrue(L.mT.is_contiguous())
@@ -6587,56 +6493,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # Checking out variant
         torch._int_mm(a_int8, b_int8, out=c_int32_result)
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
-
-    @onlyCPU
-    @dtypes(torch.bfloat16, torch.float32)
-    @parametrize("m", [0, 8, 17])
-    @parametrize("k", [0, 16, 32])
-    @parametrize("n", [16, 32])
-    @parametrize("use_transpose_a", [True, False])
-    @parametrize("use_transpose_b", [True, False])
-    @parametrize("non_contig_type", [0, 1, 2])
-    @parametrize("x_dtype", [torch.int8, torch.uint8])
-    def test__int_mm_dtype_cpu(self, device, dtype, m, k, n, use_transpose_a, use_transpose_b, non_contig_type, x_dtype):
-        # non_contig_type:
-        # 0: the whole data buffer is contiguous (can be transposed)
-        # 1: stride of one dimension is 1, but the whole buffer is not contiguous
-        # 2: Neither stride is 1
-
-        def genf_int_float(x, y, use_transpose, non_contig_type, dtype):
-            if use_transpose:
-                x, y = y, x
-            if non_contig_type != 0:
-                y = y * 2
-            dt_info = torch.iinfo(dtype)
-            x_int8 = torch.randint(dt_info.min, dt_info.max, (x, y), dtype=dtype, device=device)
-            x_float = x_int8.to(torch.float32)
-            if non_contig_type == 1:
-                x_int8 = x_int8[:, : y // 2]
-                x_float = x_float[:, : y // 2]
-            elif non_contig_type == 2:
-                x_int8 = x_int8[:, ::2]
-                x_float = x_float[:, ::2]
-            if use_transpose:
-                return x_int8.t(), x_float.t()
-            return x_int8, x_float
-
-        if non_contig_type != 0 and (m == 0 or k == 0):
-            return
-
-        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type, x_dtype)
-        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type, torch.int8)
-
-        c = torch._int_mm(a_int8, b_int8, out_dtype=dtype)
-        self.assertTrue(c.dtype is dtype)
-        self.assertEqual(c.device, torch.device(device))
-        self.assertEqual(c, torch.mm(a_float, b_float).to(dtype))
-
-        c_result = torch.empty(c.size(), dtype=dtype, device=device)
-
-        # Checking out variant
-        torch._int_mm(a_int8, b_int8, out_dtype=dtype, out=c_result)
-        self.assertEqual(c_result, torch.mm(a_float, b_float).to(dtype))
 
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float32, torch.float16)

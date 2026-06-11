@@ -1287,15 +1287,6 @@ def cholesky_solve(self: Tensor, A: Tensor, upper: bool = False) -> Tensor:
     return _cholesky_solve_helper(self_broadcasted, A_broadcasted, upper)
 
 
-@register_meta(aten.cholesky)
-@out_wrapper()
-def cholesky(self: Tensor, upper: bool = False) -> Tensor:
-    if self.numel() == 0:
-        return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
-    squareCheckInputs(self, "cholesky")
-    return cloneBatchedColumnMajor(self)
-
-
 @register_meta(aten.cholesky_inverse)
 @out_wrapper()
 def cholesky_inverse(self: Tensor, upper: bool = False) -> Tensor:
@@ -4019,7 +4010,9 @@ def meta__fused_adam(
     )
 
 
-def common_meta_int_mm(a, b):
+@register_meta([aten._int_mm])
+@out_wrapper()
+def meta__int_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be a 2D tensor")
     torch._check(b.dim() == 2, lambda: "b must be a 2D tensor")
     torch._check(
@@ -4037,26 +4030,7 @@ def common_meta_int_mm(a, b):
             f"and {b.size(0)}x{b.size(1)})"
         ),
     )
-
-
-@register_meta([aten._int_mm.default, aten._int_mm.out])
-@out_wrapper()
-def meta__int_mm(a, b):
-    common_meta_int_mm(a, b)
     return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
-
-
-@register_meta([aten._int_mm.dtype, aten._int_mm.dtype_out])
-@out_wrapper(exact_dtype=True)
-def meta__int_mm_dtype(a, b, out_dtype):
-    common_meta_int_mm(a, b)
-
-    torch._check(
-        out_dtype in (torch.float32, torch.bfloat16),
-        lambda: "_int_mm.dtype only supports float32 and bfloat16 outputs",
-    )
-
-    return a.new_empty((a.size(0), b.size(1)), dtype=out_dtype)
 
 
 @register_meta([aten._convert_weight_to_int4pack])
