@@ -68,3 +68,29 @@ model and affect all or most operators.
   contiguous intermediate via the `_like` call and `.copy_()` into
   `torch.empty_strided`. This does not test the op's native stride
   handling.
+
+## Comparison
+
+- `torch.eq` and `torch.ne` accept complex inputs in PyTorch, but
+  the shared `ComparisonOperatorBase` excludes complex dtypes.
+
+## WhereOperator
+
+- Raw Python scalar dispatch is never tested — scalars are always
+  wrapped in `torch.tensor(value, dtype=...)`. Using a raw scalar
+  would trigger PyTorch type promotion that may not match
+  `output_spec.dtype` (Python `float` is float64).
+
+- The both-scalars form `torch.where(cond, scalar, scalar)` is never
+  tested.
+
+## Logical
+
+- Both inputs always share the same randomly-chosen dtype. Mixed-dtype
+  logical ops (e.g., `torch.logical_and(int_tensor, float_tensor)`)
+  are never tested.
+
+## Bitwise
+
+- Both inputs always share the output dtype. Mixed integer-type
+  bitwise ops with type promotion are never tested.
