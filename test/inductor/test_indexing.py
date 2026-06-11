@@ -921,6 +921,15 @@ class TestWideExpressionThresholds(InductorTestCase):
         wide = sum(syms)
         self.assertTrue(sizevars.statically_known_multiple_of(wide, wide))
 
+    def test_statically_known_multiple_of_factorable_add_floordiv(self):
+        sizevars = SizeVarAllocator()
+        s52, s97 = sympy.symbols("s52 s97", integer=True, positive=True)
+        k = FloorDiv(s97, s52)
+        denominator = s52 * k + k
+        numerator = 128 * s52 * k + 128 * k
+
+        self.assertTrue(sizevars.statically_known_multiple_of(numerator, denominator))
+
     def test_wide_modular_indexing_not_decomposed(self):
         """ModularIndexing with a wide base should not enter the per-term
         simplification loop (its result would feed into sympy.expand which
