@@ -145,7 +145,8 @@ FnsType = torch.fx.node.Target | str
 class Multiple:
     def __init__(self) -> None:
         # Ensure we're really a singleton.
-        assert "MULTIPLE" not in globals() or self is MULTIPLE
+        if "MULTIPLE" in globals() and self is not MULTIPLE:
+            raise AssertionError("Multiple is not a singleton")
 
 
 # Sentinel indicating multiple quantities can be matched
@@ -346,9 +347,12 @@ class Match:
                 # propagate metadata from first graph to second
                 # NB: This assertion might not be true in general, but it is true for
                 # the auto_functionalized use cases we have
-                assert len(graph_with_eager_vals.graph.nodes) == len(
+                if len(graph_with_eager_vals.graph.nodes) != len(
                     replacement.graph.nodes
-                )
+                ):
+                    raise AssertionError(
+                        "graph node count mismatch between eager and replacement"
+                    )
                 for old_node, new_node in zip(
                     graph_with_eager_vals.graph.nodes, replacement.graph.nodes
                 ):
@@ -461,7 +465,8 @@ class MatchContext:
             else:
                 return FailedMatch("repeated pattern differs")
         m = pattern._match(node, self)
-        assert pattern not in self.pattern_to_node
+        if pattern in self.pattern_to_node:
+            raise AssertionError("pattern already present in pattern_to_node")
         self.pattern_to_node[pattern] = node if m else None
         return m
 
@@ -594,7 +599,7 @@ class _TargetExpr(PatternExpr):
         fns = [fns] if callable(fns) or isinstance(fns, str) else list(fns)
         for fn in fns:
             if isinstance(fn, torch._ops.OpOverloadPacket):
-                fns.extend(getattr(fn, overload) for overload in fn.overloads())  # noqa: B909
+                fns.extend(fn.op_overloads())  # noqa: B909
 
         self.fns = fns
         self.fns_set = OrderedSet(fns)
@@ -763,7 +768,10 @@ class _TargetArgsExpr(_TargetExpr):
         if len(_kwargs) < len(self.kwargs):
             from torch.fx.operator_schemas import normalize_function
 
-            assert callable(node.target)
+            if not callable(node.target):
+                raise AssertionError(
+                    f"expected callable node.target, got {node.target}"
+                )
             normalized_args_and_kwargs = normalize_function(
                 node.target, node.args, node.kwargs
             )
@@ -785,7 +793,8 @@ class _TargetArgsExpr(_TargetExpr):
         self_items, self_spec = self.flat_args_kwargs
         if node_spec != self_spec:
             return FailedMatch("args_structure {} {}", node_spec, self_spec)
-        assert len(node_items) == len(self_items)
+        if len(node_items) != len(self_items):
+            raise AssertionError("node_items and self_items length mismatch")
 
         m = Match(ctx, self)
         for pattern, child_node in zip(self_items, node_items):
@@ -905,7 +914,8 @@ class ListOf(PatternExpr):
 
     def __init__(self, pattern: PatternExpr, partial: bool = False) -> None:
         super().__init__()
-        assert isinstance(pattern, PatternExpr)
+        if not isinstance(pattern, PatternExpr):
+            raise AssertionError(f"expected PatternExpr, got {type(pattern)}")
         self.pattern = pattern
         self.partial = partial
 
@@ -950,8 +960,10 @@ class MultiOutputPattern(PatternExpr):
 
     def __init__(self, outputs: Sequence[PatternExpr | None]) -> None:
         super().__init__()
-        assert isinstance(outputs[0], _TargetExpr)
-        assert all(x is None or isinstance(x, PatternExpr) for x in outputs), outputs
+        if not isinstance(outputs[0], _TargetExpr):
+            raise AssertionError(f"expected _TargetExpr, got {type(outputs[0])}")
+        if not all(x is None or isinstance(x, PatternExpr) for x in outputs):
+            raise AssertionError(outputs)
         self.outputs = list(outputs)
         self.op = outputs[0].op
 
@@ -1078,7 +1090,8 @@ class PatternPrettyPrinter:
         """
 
         pp = PatternPrettyPrinter()
-        assert hasattr(obj, "pretty_print")
+        if not hasattr(obj, "pretty_print"):
+            raise AssertionError("obj has no pretty_print method")
         out_str = obj.pretty_print(pp=pp)
 
         output = [
@@ -1134,11 +1147,13 @@ class PatternEntry:
         prepend: bool = False,
     ) -> None:
         if target is None:
-            assert hasattr(self.pattern, "fns")
+            if not hasattr(self.pattern, "fns"):
+                raise AssertionError("pattern has no fns attribute")
             for fn in self.pattern.fns:
                 self.register(pass_dicts, fn, prepend=prepend)
         elif isinstance(pass_dicts, (dict, PatternMatcherPass)):
-            assert hasattr(self.pattern, "op")
+            if not hasattr(self.pattern, "op"):
+                raise AssertionError("pattern has no op attribute")
             if prepend:
                 pass_dicts[(self.pattern.op, target)].insert(0, self)
             else:
@@ -1159,7 +1174,8 @@ class LoweringPatternEntry(PatternEntry):
             replacement = graph.call_function(handler, tuple(match.args), match.kwargs)
             _transfer_meta(replacement.meta, node)
             node.replace_all_uses_with(replacement)
-        assert match.nodes[-1] is node
+        if match.nodes[-1] is not node:
+            raise AssertionError("expected match.nodes[-1] to be node")
         match.erase_nodes()
 
 
@@ -1210,7 +1226,8 @@ class ReplacementPatternEntry(PatternEntry):
                 target = node.target
                 args, kwargs = self.fetch_args_kwargs_from_env(node)
                 if node.op == "call_function":
-                    assert callable(target)
+                    if not callable(target):
+                        raise AssertionError(f"expected callable target, got {target}")
                     result = graph.call_function(target, args, kwargs)
                     added_replacement_nodes.append(result)
                     _transfer_meta(
@@ -1237,14 +1254,18 @@ class ReplacementPatternEntry(PatternEntry):
                         raise NotImplementedError(
                             f"NYI: replacement_graph.{target} is not a graph module. Got {sub_gm}."
                         )
-                    assert graph.owning_module is not None
+                    if graph.owning_module is None:
+                        raise AssertionError("graph.owning_module is None")
                     graph_name = None
                     for n, mod in graph.owning_module.named_modules():
                         if sub_gm is mod:
                             graph_name = n
                             break
                     if graph_name is None:
-                        assert isinstance(target, str)
+                        if not isinstance(target, str):
+                            raise AssertionError(
+                                f"expected str target, got {type(target)}"
+                            )
                         _, graph_name = unique_graph_name_with_root(
                             # pyrefly: ignore [unbound-name]
                             graph.owning_module,
@@ -1264,7 +1285,8 @@ class ReplacementPatternEntry(PatternEntry):
         if len(output_nodes) == 1:
             last_node = output_nodes[0]
         else:
-            assert output_nodes[0]
+            if not output_nodes[0]:
+                raise AssertionError("output_nodes[0] is falsy")
             nodes = list(output_nodes[0].graph.nodes)
             indices = [
                 (nodes.index(n), n)
@@ -1294,7 +1316,10 @@ class ReplacementPatternEntry(PatternEntry):
                     queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
-            assert isinstance(replacement_graph, torch.fx.GraphModule)
+            if not isinstance(replacement_graph, torch.fx.GraphModule):
+                raise AssertionError(
+                    f"expected GraphModule, got {type(replacement_graph)}"
+                )
             replacement = Replacer(replacement_graph).run(*args)
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
@@ -1304,7 +1329,8 @@ class ReplacementPatternEntry(PatternEntry):
                     return None
                 if node.target != operator.getitem:
                     return None
-                assert len(node.args) == 2
+                if len(node.args) != 2:
+                    raise AssertionError(f"expected 2 args, got {len(node.args)}")
                 return node.args[1]
 
             def replace(
@@ -1317,9 +1343,11 @@ class ReplacementPatternEntry(PatternEntry):
                     return node not in added_replacement_nodes
 
                 if old is None:
-                    assert new is None
+                    if new is not None:
+                        raise AssertionError("expected new to be None when old is None")
                     return
-                assert isinstance(old, torch.fx.Node)
+                if not isinstance(old, torch.fx.Node):
+                    raise AssertionError(f"expected torch.fx.Node, got {type(old)}")
                 if new is None:
                     old.replace_all_uses_with(
                         None,  # type: ignore[arg-type]
@@ -1395,7 +1423,10 @@ class ReplacementPatternEntry(PatternEntry):
                 for old, new in zip(output_nodes, replacement):
                     replace(old, new)
             else:
-                assert len(output_nodes) == 1
+                if len(output_nodes) != 1:
+                    raise AssertionError(
+                        f"expected 1 output node, got {len(output_nodes)}"
+                    )
                 replace(output_nodes[0], replacement)
 
         match.erase_nodes()
@@ -1413,7 +1444,8 @@ class ReplacementPatternEntry(PatternEntry):
         return [node for node in added_replacement_nodes if not node._erased]
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node) -> None:
-        assert match.replacement_graph is not None
+        if match.replacement_graph is None:
+            raise AssertionError("match.replacement_graph is None")
         self.replace_with_graph(
             match,
             graph,
@@ -1655,7 +1687,8 @@ def register_replacement(
 
         sym_args: list[torch.SymInt] = []
         fake_mode = torch._dynamo.utils.detect_fake_mode(args)
-        assert fake_mode is not None
+        if fake_mode is None:
+            raise AssertionError("fake_mode is None")
         with fake_mode:
             invalid_args = False
             requires_grad_values = iter(pytree.tree_leaves(requires_grad))
@@ -1755,7 +1788,8 @@ def register_replacement(
                 )
 
             node = match.output_nodes()[0]
-            assert node is not None
+            if node is None:
+                raise AssertionError("output node is None")
             specific_pattern_match = specific_pattern.match(node)
 
             if _should_debug_node(node.name):
@@ -1803,7 +1837,8 @@ def register_replacement(
             if f"tangents_{i}" not in kwargs:
                 break
             args.append(kwargs.pop(f"tangents_{i}"))
-        assert not kwargs, f"leftover kwargs: {kwargs!r}"
+        if kwargs:
+            raise AssertionError(f"leftover kwargs: {kwargs!r}")
         return args
 
     if trace_fn is joint_fwd_bwd:
@@ -2063,7 +2098,8 @@ def register_lowering_pattern(
     """
 
     def decorator(handler: Callable[..., Any]) -> Callable[..., Any]:
-        assert callable(handler)
+        if not callable(handler):
+            raise AssertionError(f"expected callable handler, got {handler}")
         LoweringPatternEntry(
             pattern=pattern, extra_check=extra_check, handler=handler
         ).register(pass_dict, prepend=prepend)
@@ -2086,7 +2122,8 @@ def register_graph_pattern(
     """
 
     def decorator(handler: Callable[..., Any]) -> Callable[..., Any]:
-        assert callable(handler)
+        if not callable(handler):
+            raise AssertionError(f"expected callable handler, got {handler}")
         GraphPatternEntry(
             pattern=pattern, extra_check=extra_check, handler=handler
         ).register(pass_dict, prepend=prepend)
@@ -2111,10 +2148,7 @@ def fixme_incorrect_inductor_schema_op(op: torch._ops.OpOverload) -> bool:
 
     # TODO - fix schema
     # Don't add any more!
-    return op in (
-        torch.ops.inductor.accumulate_grad_.default,
-        torch.ops.inductor.resize_storage_bytes_.default,
-    )
+    return op in (torch.ops.inductor.resize_storage_bytes_.default,)
 
 
 def is_mutation_op(node: torch.fx.Node) -> bool:
@@ -2127,19 +2161,23 @@ def is_mutation_op(node: torch.fx.Node) -> bool:
     ):
         return False
     if node.op == "call_function":
-        assert callable(node.target)
+        if not callable(node.target):
+            raise AssertionError(f"expected callable node.target, got {node.target}")
         if _mutation_op_re.search(node.target.__name__):
             return True
     elif node.op == "call_method":
-        assert isinstance(node.target, str)
+        if not isinstance(node.target, str):
+            raise AssertionError(f"expected str node.target, got {type(node.target)}")
         if _mutation_op_re.search(node.target):
             return True
     return node.kwargs.get("out") is not None
 
 
 def same_mutation_regions(a: torch.fx.Node, b: torch.fx.Node) -> bool:
-    assert "mutation_region_id" in a.meta
-    assert "mutation_region_id" in b.meta
+    if "mutation_region_id" not in a.meta:
+        raise AssertionError("mutation_region_id missing from a.meta")
+    if "mutation_region_id" not in b.meta:
+        raise AssertionError("mutation_region_id missing from b.meta")
     return a.meta["mutation_region_id"] == b.meta["mutation_region_id"]
 
 
@@ -2226,7 +2264,8 @@ def _count_mutation_ops_until(start: torch.fx.Node, stop: torch.fx.Node) -> int:
     mutation_count = 0
     nd = start
     while nd is not stop:
-        assert nd.op != "root"
+        if nd.op == "root":
+            raise AssertionError(f"unexpected root node reached: {nd}")
         if is_mutation_op(nd):
             mutation_count += 1
         nd = nd.next
@@ -2240,7 +2279,8 @@ def _contains_mutation_op(nodes: Iterable[torch.fx.Node]) -> bool:
 def _replacement_changes_mutation_regions(
     entry: ReplacementPatternEntry, match: Match
 ) -> bool:
-    assert match.replacement_graph is not None
+    if match.replacement_graph is None:
+        raise AssertionError("match.replacement_graph must not be None")
     return _contains_mutation_op(match.nodes) or _contains_mutation_op(
         match.replacement_graph.graph.nodes
     )
@@ -2373,7 +2413,8 @@ class PatternMatcherPass:
         if has_call_module:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
         pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
-        assert isinstance(gm, torch.fx.GraphModule)
+        if not isinstance(gm, torch.fx.GraphModule):
+            raise AssertionError(f"expected GraphModule, got {type(gm)}")
         with GraphTransformObserver(gm, pass_name, self.subsystem):
             for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
                 target = extract_target(node)
@@ -2479,7 +2520,8 @@ def fx_to_pattern(
     # see https://github.com/pytorch/pytorch/issues/97894
     scalar_workaround = scalar_workaround or {}
     inv_scalar_workaround = {v: k for k, v in scalar_workaround.items()}
-    assert len(inv_scalar_workaround) == len(scalar_workaround)
+    if len(inv_scalar_workaround) != len(scalar_workaround):
+        raise AssertionError("scalar_workaround has duplicate values")
 
     def process_arg(
         x: T, ignore_types_override: Sequence[type[Any]] | None = None
@@ -2516,7 +2558,10 @@ def fx_to_pattern(
             if n < len(argnames):
                 name = argnames[n]
             elif argnames:
-                assert target.startswith("tangent")
+                if not target.startswith("tangent"):
+                    raise AssertionError(
+                        f"expected target to start with 'tangent', got {target}"
+                    )
                 name = target
             else:
                 target = re.sub(r"_\d+$", "", target)  # de-mangle arg name
@@ -2558,8 +2603,10 @@ def fx_to_pattern(
             rv = super().run_node(n)
             if n.op == "output" and isinstance(rv, tuple):
                 args = n.args[0]
-                assert isinstance(args, Collection)
-                assert len(rv) == len(args)
+                if not isinstance(args, Collection):
+                    raise AssertionError(f"expected Collection, got {type(args)}")
+                if len(rv) != len(args):
+                    raise AssertionError("rv and args length mismatch")
                 for r, arg in zip(rv, args):
                     # pyrefly: ignore [missing-attribute]
                     r.users = len(arg.users)
@@ -2567,7 +2614,8 @@ def fx_to_pattern(
                 rv.users = len(n.users)
             return rv
 
-    assert isinstance(gm, torch.fx.GraphModule)
+    if not isinstance(gm, torch.fx.GraphModule):
+        raise AssertionError(f"expected GraphModule, got {type(gm)}")
     pattern = Converter(gm).run()
     if not isinstance(pattern, PatternExpr):
         return MultiOutputPattern(pytree.tree_leaves(pattern))
@@ -2619,7 +2667,8 @@ def joint_fwd_bwd(
         joint_graph: torch.fx.GraphModule, inputs: Sequence[Any], **kwargs: Any
     ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
         nonlocal gm
-        assert not gm
+        if gm:
+            raise AssertionError("gm already set")
         gm = clone_graph(joint_graph)
         return default_partition(joint_graph, inputs, **kwargs)
 
@@ -2633,7 +2682,8 @@ def joint_fwd_bwd(
             keep_inference_input_mutations=True,
             enable_log=False,
         )(*args)
-    assert gm
+    if not gm:
+        raise AssertionError("gm was not set")
 
     from .fx_passes.post_grad import remove_noop_ops
 
@@ -2689,7 +2739,8 @@ def stable_topological_sort(graph: torch.fx.Graph) -> None:
             # ready to check again.
             pending.extend(reversed(waiting.pop(node, ())))
 
-    assert not waiting and len(ready) == len(graph.nodes)
+    if not (not waiting and len(ready) == len(graph.nodes)):
+        raise AssertionError("topological sort did not consume all nodes")
 
 
 def init_once_fakemode(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -2766,7 +2817,7 @@ def get_arg_value(
 def filter_nodes(nodes: Iterable[torch.fx.Node], fn: Any) -> list[torch.fx.Node]:
     fns = [fn]
     if isinstance(fn, torch._ops.OpOverloadPacket):
-        fns.extend([getattr(fn, overload) for overload in fn.overloads()])
+        fns.extend(fn.op_overloads())
 
     return [node for node in nodes if node.target in fns]
 
@@ -2777,7 +2828,8 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
      as a function.
     """
     if node.op == "call_module":
-        assert isinstance(node.target, str)
+        if not isinstance(node.target, str):
+            raise AssertionError(f"expected str node.target, got {type(node.target)}")
         if node.graph.owning_module is None:
             raise AssertionError("node.graph.owning_module must not be None")
         return _get_attr(node.graph.owning_module, node.target).__class__
