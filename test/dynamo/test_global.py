@@ -286,7 +286,7 @@ fn = functools.partial(my_fn, scale=2)
             self.assertNotIn(module_name, sys.modules)
 
             x = torch.randn(4, 4)
-            compiled = torch.compile(mod.fn, backend="eager")
+            compiled = torch.compile(mod.fn, backend="eager", fullgraph=True)
             self.assertTrue(same(compiled(x), mod.fn(x)))
 
     def test_store_global_in_unregistered_importlib_module(self):
