@@ -144,6 +144,50 @@ if HAS_GPU:
         output = x + y
         tl.store(out_ptr + offsets, output, mask=mask)
 
+    def _get_backend_options_kernel(*, with_enable_fp_fusion):
+        if with_enable_fp_fusion:
+
+            @triton.jit
+            def add_kernel(
+                in_ptr0,
+                in_ptr1,
+                out_ptr,
+                n_elements,
+                BLOCK_SIZE: "tl.constexpr",
+                enable_fp_fusion: "tl.constexpr",
+            ):
+                pid = tl.program_id(axis=0)
+                block_start = pid * BLOCK_SIZE
+                offsets = block_start + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                x = tl.load(in_ptr0 + offsets, mask=mask)
+                y = tl.load(in_ptr1 + offsets, mask=mask)
+                if enable_fp_fusion:
+                    result = x + y
+                else:
+                    result = x * y
+                tl.store(out_ptr + offsets, result, mask=mask)
+
+        else:
+
+            @triton.jit
+            def add_kernel(
+                in_ptr0,
+                in_ptr1,
+                out_ptr,
+                n_elements,
+                BLOCK_SIZE: "tl.constexpr",
+            ):
+                pid = tl.program_id(axis=0)
+                block_start = pid * BLOCK_SIZE
+                offsets = block_start + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                x = tl.load(in_ptr0 + offsets, mask=mask)
+                y = tl.load(in_ptr1 + offsets, mask=mask)
+                tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        return add_kernel
+
 
 class KernelTests(torch._inductor.test_case.TestCase):
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
@@ -2674,21 +2718,7 @@ def forward(self, arg0_1, arg1_1):
     def test_triton_kernel_backend_options_without_signature(self):
         # A launch kwarg that is not in the kernel signature should be kept as
         # a backend option and emitted in the generated Triton metadata.
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            tl.store(out_ptr + offsets, x + y, mask=mask)
+        add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=False)
 
         def f(x, y):
             output = torch.zeros_like(x)
@@ -2720,26 +2750,7 @@ def forward(self, arg0_1, arg1_1):
         # replaying it as the illegal form
         # `kernel[grid](..., False, enable_fp_fusion=False)`, which passes the
         # same kernel parameter both positionally and by keyword.
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-            enable_fp_fusion: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            if enable_fp_fusion:
-                result = x + y
-            else:
-                result = x * y
-            tl.store(out_ptr + offsets, result, mask=mask)
+        add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=True)
 
         def f(x, y):
             output = torch.zeros_like(x)
@@ -2770,30 +2781,10 @@ def forward(self, arg0_1, arg1_1):
         # Same dual-meaning kwarg case as above, but through a user-provided
         # triton.Config. The launch kwarg should remain both a kernel
         # parameter and a backend option after the autotune wrapper is applied.
-        @triton.autotune(
+        add_kernel = triton.autotune(
             configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
             key=[],
-        )
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-            enable_fp_fusion: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            if enable_fp_fusion:
-                result = x + y
-            else:
-                result = x * y
-            tl.store(out_ptr + offsets, result, mask=mask)
+        )(_get_backend_options_kernel(with_enable_fp_fusion=True))
 
         def f(x, y):
             output = torch.zeros_like(x)
@@ -2824,34 +2815,14 @@ def forward(self, arg0_1, arg1_1):
         # Direct Triton errors when a generic autotune config kwarg is also
         # passed as a launch kwarg. The config does not override the launch
         # kwarg; it would create duplicate keyword arguments at launch.
-        @triton.autotune(
+        add_kernel = triton.autotune(
             configs=[
                 triton.Config(
                     {"BLOCK_SIZE": 128, "enable_fp_fusion": True}, num_warps=4
                 )
             ],
             key=[],
-        )
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-            enable_fp_fusion: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            if enable_fp_fusion:
-                result = x + y
-            else:
-                result = x * y
-            tl.store(out_ptr + offsets, result, mask=mask)
+        )(_get_backend_options_kernel(with_enable_fp_fusion=True))
 
         def f(x, y):
             output = torch.zeros_like(x)
@@ -2878,25 +2849,10 @@ def forward(self, arg0_1, arg1_1):
     def test_triton_kernel_backend_options_with_autotune(self):
         # Backend options passed at launch should survive through the
         # user-defined Triton autotune wrapper as compile metadata.
-        @triton.autotune(
+        add_kernel = triton.autotune(
             configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
             key=[],
-        )
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            tl.store(out_ptr + offsets, x + y, mask=mask)
+        )(_get_backend_options_kernel(with_enable_fp_fusion=False))
 
         def f(x, y):
             output = torch.zeros_like(x)
@@ -2922,25 +2878,10 @@ def forward(self, arg0_1, arg1_1):
     def test_triton_kernel_special_kwargs_with_autotune_use_configs(self):
         # SPECIAL_CONFIG_NAMES keep the existing behavior: they update Triton
         # configs instead of being preserved as generic backend options.
-        @triton.autotune(
+        add_kernel = triton.autotune(
             configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
             key=[],
-        )
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            tl.store(out_ptr + offsets, x + y, mask=mask)
+        )(_get_backend_options_kernel(with_enable_fp_fusion=False))
 
         def f(x, y):
             output = torch.zeros_like(x)
