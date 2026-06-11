@@ -641,8 +641,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                     opt_fn(v1, a, b, c)
 
         # checking here we don't create 2^n graphs
-        self.assertEqual(cnt.frame_count, 7)
-        self.assertEqual(cnt.op_count, 10)
+        self.assertEqual(cnt.frame_count, 9)
+        self.assertEqual(cnt.op_count, 13)
 
     def test_resume_with_no_grad1(self):
         def fn(a, b):

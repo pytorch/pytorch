@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng", "module: rocm", "module: xpu"]
 # @generated DO NOT EDIT MANUALLY
 
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
@@ -74,7 +75,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -160,7 +164,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -246,7 +253,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -332,7 +342,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env

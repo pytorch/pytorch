@@ -2244,12 +2244,16 @@ class OutputGraph(OutputGraphCommon):
                 ):
                     graph_input_names_to_delete.discard(resume_args_varname)
                 graph_input_names_to_clear = tx.cleared_fast_locals - live_local_names
+                use_boxed_graph_call = resume_args_varname is not None and bool(
+                    graph_input_names_to_delete or graph_input_names_to_clear
+                )
                 instructions, subgraph_pycode = self.compile_and_call_fx_graph(
                     tx,
                     pass2.graph_output_vars(),
                     root,
                     graph_input_names_to_delete,
                     graph_input_names_to_clear,
+                    use_boxed_graph_call,
                 )
                 if resume_args_varname is not None and resume_args_varname in (
                     graph_input_names_to_delete | graph_input_names_to_clear
@@ -2477,7 +2481,8 @@ class OutputGraph(OutputGraphCommon):
         return None
 
     def _live_local_names(self, cg: PyCodegen) -> set[str]:
-        live_local_names: set[str] = set()
+        live_local_names: set[str] = set(self.code_options["co_cellvars"])
+        live_local_names.update(self.code_options["co_freevars"])
         for value in cg.uses:
             source = (
                 value if isinstance(value, Source) else getattr(value, "source", None)
@@ -2773,6 +2778,7 @@ class OutputGraph(OutputGraphCommon):
         root: FakeRootModule,
         graph_input_names_to_delete: set[str] | None = None,
         graph_input_names_to_clear: set[str] | None = None,
+        use_boxed_graph_call: bool = False,
     ) -> tuple[list[Instruction], list[str] | None]:
         """
         Generate code from self.graph and return the Instruction()s to
@@ -3010,11 +3016,7 @@ class OutputGraph(OutputGraphCommon):
                     and not (compiled_fn_code.co_flags & inspect.CO_VARARGS)
                 )
             )
-            if (
-                (graph_input_names_to_delete or graph_input_names_to_clear)
-                and not boxed_call
-                and is_gm_forward
-            ):
+            if use_boxed_graph_call and not boxed_call and is_gm_forward:
                 gm.graph.set_codegen(torch.fx.graph._BoxedCodeGen())
                 gm.recompile()
                 compiled_fn = gm.forward
