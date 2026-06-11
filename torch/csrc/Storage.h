@@ -1,11 +1,12 @@
 #ifndef THP_STORAGE_INC
 #define THP_STORAGE_INC
 
+#include <torch/csrc/utils/PythonWrapper.h>
+
 #include <c10/core/Storage.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/Types.h>
-#include <torch/csrc/utils/PythonWrapper.h>
 
 #define THPStorageStr "torch.UntypedStorage"
 
