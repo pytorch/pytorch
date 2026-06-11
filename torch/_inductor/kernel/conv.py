@@ -471,11 +471,14 @@ def convolution(
     # Need use hint for triton template since the template does not
     # work with a dynamic shape.
     #
-    # No need to guard_int for dilation and output_padding
-    # since the template is only used when dilation is 1 and output_padding
-    # is 0.
+    # Dilation must also be guarded for transposed convolutions because the
+    # backward-input template substitutes DILATION_H/W as tl.constexpr.
+    # For non-transposed convolutions the forward template gates on
+    # dilation==1, so guarding is unnecessary.
     stride = tuple(V.graph.sizevars.guard_int_seq(stride))
     padding = tuple(V.graph.sizevars.guard_int_seq(padding))
+    if transposed:
+        dilation = tuple(V.graph.sizevars.guard_int_seq(dilation))
 
     kwargs: ConvLayoutParams = {
         "stride": stride,
@@ -706,6 +709,42 @@ def convolution(
                     num_warps=num_warps,
                     **cfg.kwargs,
                 )
+    if (
+        torch._inductor.utils._use_conv_autotune_backend("TRITON")
+        and use_triton_template(layout)
+        and transposed
+        and ndim == 2
+    ):
+        # ConvTranspose2d is mathematically identical to conv_backward_input:
+        # the input plays the role of grad_output and the same weight layout
+        # is used. Reuse the backward-input Triton template.
+        conv_configs = V.choices.get_conv_configs(device_type)
+        dtype_size = x.get_dtype().itemsize
+        for cfg in conv_configs(
+            sympy_product([layout.size[0], layout.size[2], layout.size[3]]),
+            out_chan,
+            in_chan,
+            dtype_size=dtype_size,
+        ):
+            conv2d_bwd_input_template.maybe_append_choice(
+                choices,
+                input_nodes=(x, weight),
+                layout=layout,
+                KERNEL_H=kernel_shape[0],
+                KERNEL_W=kernel_shape[1],
+                PADDING_H=padding[0],
+                PADDING_W=padding[1],
+                STRIDE_H=stride[0],
+                STRIDE_W=stride[1],
+                DILATION_H=dilation[0],
+                DILATION_W=dilation[1],
+                GROUPS=groups,
+                ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
+                num_stages=cfg.num_stages,
+                num_warps=cfg.num_warps,
+                **cfg.kwargs,
+            )
+
     if use_ck_conv_template(layout):
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
@@ -717,6 +756,17 @@ def convolution(
             groups=groups,
             n_spatial_dimensions=ndim,
         )
+
+    if not choices and config.max_autotune_conv_backends.strip():
+        choices.append(
+            aten_convolution.bind(
+                args,
+                layout,
+                ordered_kwargs_for_cpp_kernel,
+                **kwargs,
+            )
+        )
+
     node, _ = autotune_select_algorithm("convolution", choices, args, layout)
     return node
 
