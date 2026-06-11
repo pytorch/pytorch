@@ -2514,6 +2514,91 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         return self.call_method(tx, "__imul__", [other], {})
 
+    def nb_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10323-L10326
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__floordiv__",
+            "__rfloordiv__",
+            nb_slot=PyNumberSlots.NB_FLOOR_DIVIDE,
+            reverse=reverse,
+        )
+
+    def nb_inplace_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__ifloordiv__", [other], {})
+
+    def nb_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10327-L10330
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__truediv__",
+            "__rtruediv__",
+            nb_slot=PyNumberSlots.NB_TRUE_DIVIDE,
+            reverse=reverse,
+        )
+
+    def nb_inplace_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__itruediv__", [other], {})
+
+    def nb_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10331-L10334
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__mod__",
+            "__rmod__",
+            nb_slot=PyNumberSlots.NB_REMAINDER,
+            reverse=reverse,
+        )
+
+    def nb_inplace_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__imod__", [other], {})
+
+    def nb_divmod_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10335-L10336
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__divmod__",
+            "__rdivmod__",
+            nb_slot=PyNumberSlots.NB_DIVMOD,
+            reverse=reverse,
+        )
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -2608,6 +2693,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return variables.UserMethodVariable(
                         traceable_fn, self
                     ).call_function(tx, args, kwargs)
+
+        if name == "__call__":
+            unimplemented(
+                gb_type="call to a callable object with no traceable __call__",
+                context=f"object={self.value}",
+                explanation="Dynamo could not trace a Python `__call__` method on "
+                "this object.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
