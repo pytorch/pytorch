@@ -161,7 +161,17 @@ class CodegenInductorTest(InductorTestCase):
         def func(x):
             return torch.var_mean(x, dim=1)
 
-        x = torch.randn((4, 18000), device=torch.device(GPU_TYPE))
+        device = torch.device(GPU_TYPE)
+        device_props = torch.cuda.get_device_properties(device)
+        outer_dim = max(1024, device_props.multi_processor_count * 2 * 32)
+        min_reduction_dim = 64
+        max_l2_reduction_dim = device_props.L2_cache_size // (
+            outer_dim * torch.empty((), dtype=torch.float32).element_size()
+        )
+        if max_l2_reduction_dim < min_reduction_dim:
+            self.skipTest("CUDA device L2 is too small for a non-split Welford test")
+        reduction_dim = min(2048, max_l2_reduction_dim)
+        x = torch.randn((outer_dim, reduction_dim), device=device)
         config_patches = {
             "triton.two_pass_variance_l2_fraction": two_pass_variance_l2_fraction,
         }
