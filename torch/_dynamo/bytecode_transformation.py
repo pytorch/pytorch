@@ -18,6 +18,7 @@ import dataclasses
 import dis
 import functools
 import itertools
+import re
 import sys
 import types
 import uuid
@@ -1959,6 +1960,21 @@ def unique_id(name: str, with_uuid: bool = False) -> str:
     if with_uuid:
         ret += f"_{uuid.uuid4()}".replace("-", "_")
     return ret
+
+
+COMPILED_FN_PREFIX = "__compiled_fn"
+_COMPILED_FN_NAME_RE = re.compile(
+    rf"^{COMPILED_FN_PREFIX}_\d+_"
+    r"[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}$"
+)
+
+
+def make_compiled_fn_name() -> str:
+    return unique_id(COMPILED_FN_PREFIX, with_uuid=True)
+
+
+def is_compiled_fn_name(name: str) -> bool:
+    return _COMPILED_FN_NAME_RE.fullmatch(name) is not None
 
 
 def is_generator(code: types.CodeType) -> bool:
