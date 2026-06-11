@@ -2996,7 +2996,7 @@ class FakeTensorMode(TorchDispatchMode):
                     return maybe_propagate_real_tensors(r)
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
-        # and do device logic, we dont need do anything but run them
+        # and do device logic, we don't need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
         # TODO - we should be use the prim aten impl

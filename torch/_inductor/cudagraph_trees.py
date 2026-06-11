@@ -2313,7 +2313,7 @@ class CUDAGraphTreeManager:
 
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
-        # we dont want to do unnecessary checking of the existing outputs
+        # we don't want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
         if self.in_recording:
@@ -2350,7 +2350,7 @@ class CUDAGraphTreeManager:
             or config.triton.force_cudagraphs_warmup
         ):
             # If we are in the middle of executing cuda graphs, then we need to checkpoint memory state.
-            # Both Recording and Warmup will be reflected in the allocator and dont need changes
+            # Both Recording and Warmup will be reflected in the allocator and don't need changes
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 

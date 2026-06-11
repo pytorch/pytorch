@@ -1491,7 +1491,7 @@ class OverlapScheduler:
 
             # if we schedule a wait tensor whose start collective is hidden by the
             # current compute node we are scheduling, then we are effectively exposing it.
-            # similarly, dont schedule a wait of a collective that could be otherwise hidden,
+            # similarly, don't schedule a wait of a collective that could be otherwise hidden,
             # thus forcing it to be exposed.
             # however, if it is already hidden it's fine to schedule it
             if _schedulable_wait_node(node):

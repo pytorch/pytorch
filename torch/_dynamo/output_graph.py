@@ -784,7 +784,7 @@ class OutputGraph(OutputGraphCommon):
         # We thought of rolling this in variable_tracker_cache but here
         # different sources point to the same object, we also don't want it to
         # go through the side effects cache because even though these objects
-        # are same, we dont want OBJECT_ALIASING guards on them. For these
+        # are same, we don't want OBJECT_ALIASING guards on them. For these
         # objects, we have DICT_CONTAINS absent guards on the mro walk, so there
         # is no need of the OBJECT_ALIASING guards.
         self.mro_source_cache: dict[tuple[int, str], DictGetItemSource] = {}
