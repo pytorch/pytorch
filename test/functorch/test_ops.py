@@ -404,6 +404,7 @@ aliasing_ops_list_return = {
 skip_noncontig = {
     "_batch_norm_with_update",
     "as_strided_copy",
+    "native_group_norm",
 }
 
 bool_unsupported_ordered_ops = {
@@ -1066,6 +1067,7 @@ class TestOperators(TestCase):
         {
             xfail("as_strided", "partial_views"),
             xfail("as_strided_copy"),
+            xfail("native_group_norm"),
         },
     )
     def test_vmapvjpvjp(self, device, dtype, op):
@@ -1225,6 +1227,7 @@ class TestOperators(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1340,6 +1343,7 @@ class TestOperators(TestCase):
         vmapjvpall_fail.union(
             {
                 xfail("as_strided_copy"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1412,6 +1416,7 @@ class TestOperators(TestCase):
                 xfail("t_copy"),
                 xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1538,6 +1543,7 @@ class TestOperators(TestCase):
                 xfail("t_copy"),
                 xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1646,6 +1652,7 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("as_strided", "partial_views"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1733,7 +1740,6 @@ class TestOperators(TestCase):
                 # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
                 xfail("normal", ""),
                 xfail("cdist", ""),  # NYI: forward-AD for _cdist_forward
-                xfail("cholesky", ""),  # NYI: forward-AD for cholesky
                 xfail(
                     "nn.functional.embedding_bag", ""
                 ),  # NYI: forward-AD for _embedding_bag
@@ -1913,7 +1919,6 @@ class TestOperators(TestCase):
                 xfail("cdouble"),  # required rank 4 tensor to use channels_last format
                 xfail("cfloat"),  # required rank 4 tensor to use channels_last format
                 xfail("chalf"),  # required rank 4 tensor to use channels_last format
-                xfail("cholesky"),  # Forward AD not implemented and no decomposition
                 xfail("ormqr"),  # Forward AD not implemented and no decomposition
                 xfail("double"),  # required rank 4 tensor to use channels_last format
                 xfail("float"),  # required rank 4 tensor to use channels_last format
@@ -2029,6 +2034,7 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("native_dropout_backward"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -2353,6 +2359,7 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
+            xfail("native_group_norm"),
         },
     )
     @opsToleranceOverride(

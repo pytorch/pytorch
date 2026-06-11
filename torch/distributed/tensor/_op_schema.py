@@ -77,6 +77,7 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
         arg.tensor_meta.shape,
         arg.tensor_meta.stride,
         dtype=arg.tensor_meta.dtype,
+        device=arg.mesh.device_type,
     )
 
 
@@ -586,9 +587,8 @@ class OpSchema:
 
     def is_out_variant_op(self) -> bool:
         # simple analysis of function schema to determine
-        # if this is an out variant, it might not
-        # be entirely correct, but it's good enough for now.
-        return "out" in self.op._schema.overload_name
+        # if this is an out variant.
+        return any(argument.is_out for argument in self.op._schema.arguments)
 
     def is_view_op(self) -> bool:
         return self.op._schema._is_view_op()

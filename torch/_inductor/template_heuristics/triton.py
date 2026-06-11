@@ -14,7 +14,7 @@ import sympy
 import torch
 from torch._inductor.template_heuristics.triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import Mod
+from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config
@@ -31,6 +31,7 @@ from ..kernel.mm import (
 )
 from ..kernel.mm_plus_mm import mm_plus_mm_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
+from ..runtime.hints import DeviceProperties
 from ..utils import (
     get_backend_num_stages,
     get_default_kpack,
@@ -275,7 +276,7 @@ class ROCmFlexDecodeConfig(FlexDecodeConfig):
 
 class BaseHeuristicSingleton(type):
     """
-    Thread-safe implementation of single to be used in the config heuristic subclasses
+    Thread-safe implementation of singleton to be used in the config heuristic subclasses
     to ensure heavy __init__ calls are not repeatedly run
     """
 
@@ -1021,17 +1022,22 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
 
         try:
-            device = torch.cuda.current_device()
-            props = torch.cuda.get_device_properties(device)
-            if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
-                sm_available = int(props.shared_memory_per_block_optin)
-            elif hasattr(props, "shared_memory_per_block"):  # for ROCm
-                sm_available = int(props.shared_memory_per_block)
+            if torch.cuda.is_available():
+                device = torch.cuda.current_device()
+                props = torch.cuda.get_device_properties(device)
+                if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                    sm_available = int(props.shared_memory_per_block_optin)
+                elif hasattr(props, "shared_memory_per_block"):  # for ROCm
+                    sm_available = int(props.shared_memory_per_block)
+                else:
+                    return None
+            elif torch.xpu.is_available():
+                props = torch.xpu.get_device_properties()
+                sm_available = int(props.local_mem_size)
             else:
                 return None
-
         except Exception:
-            # If CUDA is not available or properties cannot be queried, return None
+            # If device properties cannot be queried, return None
             return None
 
         # TODO make a BaseDeviceConfigHeuristics to handle different device configuration in its own implementation.
@@ -1164,18 +1170,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
     # Flex attn helpers
-    def _limit_flex_configs(self, configs: list) -> list:
-        max_configs = config.test_configs.max_flex_configs
-        if max_configs is not None and len(configs) > max_configs:
-            return configs[:max_configs]
-        return configs
-
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
+                return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -1192,7 +1192,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_fwd_configs)
+        return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -1201,7 +1201,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
+                return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
@@ -1209,7 +1209,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_bwd_configs)
+        return flex_attn_bwd_configs
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -1218,7 +1218,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
+                return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
         default_config = FlexDecodeConfig(block_n=64, num_stages=1, num_warps=2)
@@ -1226,7 +1226,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_decode_configs)
+        return flex_decode_configs
 
 
 class CPUConfigHeuristic(BaseConfigHeuristic):
@@ -1385,7 +1385,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
+                return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -1419,7 +1419,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_fwd_configs)
+        return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -1428,7 +1428,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
+                return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         major, minor = capability
@@ -1493,7 +1493,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_bwd_configs)
+        return flex_attn_bwd_configs
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -1506,7 +1506,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
+                return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
         if capability in [(9, 0), (10, 0), (10, 3)]:  # sm_90, sm_100, sm_103
@@ -1522,7 +1522,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_decode_configs)
+        return flex_decode_configs
 
 
 class ROCmConfigHeuristic(BaseConfigHeuristic):
@@ -1822,7 +1822,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
+                return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         capability = torch.cuda.get_device_capability()
@@ -1850,7 +1850,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_fwd_configs)
+        return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -1859,7 +1859,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
+                return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         default_kpack = get_default_kpack()
@@ -1888,7 +1888,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_bwd_configs)
+        return flex_attn_bwd_configs
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -1897,7 +1897,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
+                return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
         default_kpack = get_default_kpack()
@@ -1906,7 +1906,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_decode_configs)
+        return flex_decode_configs
 
 
 class XPUConfigHeuristic(BaseConfigHeuristic):
@@ -1970,7 +1970,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
+                return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -1990,7 +1990,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_fwd_configs)
+        return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -1999,7 +1999,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
+                return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         if dtype == torch.float32:
@@ -2017,7 +2017,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_bwd_configs)
+        return flex_attn_bwd_configs
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -2026,7 +2026,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
+                return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
         default_config = FlexDecodeConfig(64, 1, 2)
@@ -2034,7 +2034,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_decode_configs)
+        return flex_decode_configs
 
     def _prune_exhaustive_configs(
         self,
@@ -2080,12 +2080,13 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> dict[str, Any]:
-        assert isinstance(kernel_inputs, MMKernelInputs)
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
         # allow_tf32 alignment heuristics based on reverse engineering
         # H100 CUDA 12.8 behavior
         size_threshold = V.graph.sizevars.statically_known_true(
-            sympy.And(sympy.Ge(m, 16), sympy.Ge(sympy.Min(n, k), 512))
+            sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
         )
         allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
             size_threshold
@@ -2121,9 +2122,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Convert config lists to template kwargs.
         This replaces the logic from choices.get_mm_configs and inlines mm_options.
         """
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            f"{self.__class__.__name__} requires MMKernelInputs"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
         input_nodes = kernel_inputs.nodes()
         if len(input_nodes) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
@@ -2240,7 +2240,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 # One MFMA per warp, capped at 2 * parallel_mi_cu.
                 tile_area = cfg.mt.m * cfg.mt.n
                 try:
-                    warp_size = torch.cuda.get_device_properties(device).warp_size
+                    warp_size = DeviceProperties.create(device).warp_size or 64
                 except (RuntimeError, AttributeError) as e:
                     # Fallback to standard warp size if device properties unavailable
                     log.warning(
@@ -2409,7 +2409,12 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Get accumulator type for the given dtype.
         Moved from mm_common.acc_type.
         """
-        if dtype in (torch.float16, torch.bfloat16):
+        if dtype in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float8_e4m3fnuz,
+            torch.float8_e4m3fn,
+        ):
             return "tl.float32"
         return self._dtype_to_triton(dtype)
 
@@ -2437,13 +2442,45 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
         super().__init__()
         self.should_scale_configs = False
 
+    def preprocess_mm_configs(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        configs: list[BaseConfig],
+        has_int8_tensor: bool = False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
+        dtype_size: int = 0,
+        op_name: str = "mm",
+        **kwargs,
+    ) -> Generator[TritonConfig, None, None]:
+        configs = [
+            c for c in configs if V.graph.sizevars.statically_known_lt(c.block_k, k)
+        ]
+        return super().preprocess_mm_configs(
+            m,
+            n,
+            k,
+            configs=configs,
+            has_int8_tensor=has_int8_tensor,
+            scale=scale,
+            exclude=exclude,
+            dtype_size=dtype_size,
+            op_name=op_name,
+            **kwargs,
+        )
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
         **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
-        assert isinstance(kernel_inputs, MMKernelInputs), "Expect MMKernelInputs"
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Expect MMKernelInputs")
         m, n, k = kernel_inputs.mnk_symbolic()
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, op_name, **kwargs
@@ -2509,9 +2546,8 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            "TMATemplateConfigMixin requires MMKernelInputs"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("TMATemplateConfigMixin requires MMKernelInputs")
         mat1, mat2 = kernel_inputs.mat1mat2()
         tma_opts = {
             "A_ROW_MAJOR": not mat1.layout.is_transposed(),
@@ -2616,9 +2652,8 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         """
         for scaled_mm, we need to unsqueeze scale tensors, and bias
         """
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            "Expect MMKernelInputs for scaled MM"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Expect MMKernelInputs for scaled MM")
         inputs = super().adjust_kernel_inputs(kernel_inputs, op_name)
         nodes = inputs.nodes()
         mat_a, mat_b, scale_a, scale_b, *bias = nodes
@@ -2632,7 +2667,11 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             bias = L[aten.unsqueeze](bias, 0)
 
         if len(scale_a.get_size()) == 0 or len(scale_b.get_size()) == 0:
-            assert len(scale_a.get_size()) == len(scale_b.get_size())
+            if len(scale_a.get_size()) != len(scale_b.get_size()):
+                raise AssertionError(
+                    f"scale_a and scale_b must have same ndim, got "
+                    f"{len(scale_a.get_size())} and {len(scale_b.get_size())}"
+                )
             # Need to unsqueeze scale from [] -> [1, 1]
             scale_a = L[aten.unsqueeze](L[aten.unsqueeze](scale_a, 0), 1)
             scale_b = L[aten.unsqueeze](L[aten.unsqueeze](scale_b, 0), 1)
@@ -2659,9 +2698,10 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         kernel_inputs = self.adjust_kernel_inputs(kernel_inputs, op_name)
         input_nodes = kernel_inputs.nodes()
         # Initial assertion from mm_common.scaled_mm_options
-        assert len(input_nodes) >= 4, (
-            f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
-        )
+        if len(input_nodes) < 4:
+            raise AssertionError(
+                f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
+            )
 
         # Extract scale tensors (typically scale_a and scale_b are input_nodes[2] and input_nodes[3])
         scale_a = input_nodes[2]
@@ -2680,14 +2720,14 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             return False
 
         size_a, size_b = scale_a.get_size(), scale_b.get_size()
-        assert are_compatible_scales(size_a, size_b), (
-            "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
-            f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
-        )
+        if not are_compatible_scales(size_a, size_b):
+            raise AssertionError(
+                "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
+                f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
+            )
 
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            f"{self.__class__.__name__} requires MMKernelInputs"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
 
         if not self._valid(kernel_inputs):
             return
@@ -2704,7 +2744,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
 
 
 class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
-    """Mixing for scaled mm with the regular mm template"""
+    """Mixin for scaled mm with the regular mm template"""
 
     def get_extra_kwargs(
         self,
@@ -2722,9 +2762,8 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
         }
 
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            "Expect MMKernelInputs for ScaledMMConfigMixin"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Expect MMKernelInputs for ScaledMMConfigMixin")
         _, _, k = kernel_inputs.mnk_symbolic()
         if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
             # Triton crashes however uncommon for real workloads
