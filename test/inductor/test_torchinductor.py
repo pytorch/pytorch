@@ -10355,6 +10355,68 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 rtol=0.001,
             )
 
+    def test_baddbmm_broadcast_bias_decompose(self):
+        # baddbmm with a bias broadcast along dim 1 (M) of the output
+        # decomposes to bmm + pointwise add on non-cpu/mps devices so the
+        # bias add can fuse with neighboring pointwise ops; a full-size bias
+        # keeps the fused baddbmm lowering.  See issue #187093.
+        if self.device in ("cpu", "mps"):
+            raise unittest.SkipTest("decomposition does not apply on cpu/mps")
+
+        from torch._dynamo.utils import counters
+
+        def fn(bias, a, b):
+            return torch.nn.functional.relu(torch.baddbmm(bias, a, b))
+
+        a = torch.randn(4, 32, 16, device=self.device)
+        b = torch.randn(4, 16, 24, device=self.device)
+
+        # broadcast bias along M: decomposes to bmm + (fused) pointwise add
+        bias = torch.randn(4, 1, 24, device=self.device)
+        counters.clear()
+        actual, codes = run_and_get_code(torch.compile(fn), bias, a, b)
+        self.assertEqual(actual, fn(bias, a, b), atol=1e-4, rtol=1e-4)
+        self.assertEqual(counters["inductor"]["decompose_baddbmm"], 1)
+        if not config.cpp_wrapper:
+            FileCheck().check("extern_kernels.bmm").check_not(
+                "extern_kernels.baddbmm"
+            ).run(codes[0])
+
+        # full-size bias: no decomposition, the baddbmm lowering is kept
+        torch._dynamo.reset()
+        bias_full = torch.randn(4, 32, 24, device=self.device)
+        counters.clear()
+        actual, codes = run_and_get_code(torch.compile(fn), bias_full, a, b)
+        self.assertEqual(actual, fn(bias_full, a, b), atol=1e-4, rtol=1e-4)
+        self.assertEqual(counters["inductor"]["decompose_baddbmm"], 0)
+        if not config.cpp_wrapper:
+            FileCheck().check("extern_kernels.baddbmm").run(codes[0])
+
+        # beta=0 must ignore the bias entirely (eager semantics: no NaN
+        # propagation), and beta/alpha scaling must be preserved
+        torch._dynamo.reset()
+        bias_nan = torch.full((4, 1, 24), float("nan"), device=self.device)
+        counters.clear()
+        actual = torch.compile(lambda bias, a, b: torch.baddbmm(bias, a, b, beta=0.0))(
+            bias_nan, a, b
+        )
+        self.assertEqual(counters["inductor"]["decompose_baddbmm"], 1)
+        self.assertFalse(actual.isnan().any().item())
+        self.assertEqual(actual, torch.bmm(a, b), atol=1e-4, rtol=1e-4)
+
+        torch._dynamo.reset()
+        counters.clear()
+        actual = torch.compile(
+            lambda bias, a, b: torch.baddbmm(bias, a, b, beta=0.5, alpha=2.0)
+        )(bias, a, b)
+        self.assertEqual(counters["inductor"]["decompose_baddbmm"], 1)
+        self.assertEqual(
+            actual,
+            torch.baddbmm(bias, a, b, beta=0.5, alpha=2.0),
+            atol=1e-4,
+            rtol=1e-4,
+        )
+
     @config.patch({"triton.max_tiles": 2})
     def test_fuse_tiled(self):
         def fn(a, b, c):

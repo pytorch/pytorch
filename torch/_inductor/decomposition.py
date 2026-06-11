@@ -130,7 +130,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
-    aten.baddbmm,  # upcasts to fp32, perf issue
+    aten.baddbmm,  # upcasts to fp32, perf issue; conditional decomp registered below
     # FMA ops - we have lowerings that use FMA to match eager CUDA behavior
     aten.addcmul,
     aten.addcmul_,
@@ -420,6 +420,47 @@ def addmm(
             counters["inductor"]["decompose_addmm"] += 1
             out = (mat1.T * mat2).sum(dim=0, keepdim=True)
             return alpha * out + beta * self
+    return NotImplemented
+
+
+@register_decomposition([aten.baddbmm])
+def baddbmm(
+    self: torch.Tensor,
+    batch1: torch.Tensor,
+    batch2: torch.Tensor,
+    out_dtype: torch.dtype | None = None,
+    beta: torch.types.Number = 1,
+    alpha: torch.types.Number = 1,
+) -> torch.Tensor:
+    # When the bias is broadcast along the M dim of the [B, M, N] output,
+    # decompose to bmm + pointwise add.  The extern (cuBLAS) baddbmm choice
+    # is slow here: at::baddbmm_out must first materialize the broadcast
+    # bias into the output buffer (a full [B, M, N]-sized strided copy) and
+    # then run a beta=1 GEMM that re-reads those bytes.  The decomposed form
+    # routes the GEMM to a beta=0 kernel (the output is never pre-filled or
+    # re-read) and turns the bias add into a pointwise op that participates
+    # in normal Inductor fusion, so wherever the GEMM output feeds a
+    # pointwise consumer (e.g. the activation in an MLP/MoE block) the bias
+    # add is free.  Standalone (no pointwise consumer), the two forms are
+    # within a few percent of each other.  See issue #187093 for
+    # measurements.  Unlike the excluded core-ATen decomposition above, the
+    # GEMM is kept in the input dtype (no opmath upcast).
+    if (
+        self.device.type not in ["cpu", "mps"]
+        and out_dtype is None
+        and self.is_floating_point()
+        and (self.dim() < 2 or statically_known_true(self.size(-2) == 1))
+        and statically_known_true(batch1.size(1) != 1)
+    ):
+        counters["inductor"]["decompose_baddbmm"] += 1
+        result = torch.bmm(batch1, batch2)
+        if alpha != 1:
+            result = result * alpha
+        if beta == 0:
+            # eager baddbmm ignores the bias entirely when beta == 0
+            # (NaN/inf in the bias must not propagate).
+            return result
+        return result + (self if beta == 1 else self * beta)
     return NotImplemented
 
 
