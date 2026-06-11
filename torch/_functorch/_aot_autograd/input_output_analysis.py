@@ -24,7 +24,6 @@ from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
-from .functional_utils import has_same_metadata
 from .schemas import (
     AOTConfig,
     BackwardSignature,
