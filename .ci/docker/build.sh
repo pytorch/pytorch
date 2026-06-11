@@ -309,11 +309,9 @@ esac
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
-no_cache_flag=""
 progress_flag=""
-# Do not use cache and progress=plain when in CI
+# Plain (non-TTY) progress output in CI for complete, readable build logs.
 if [[ -n "${CI:-}" ]]; then
-  no_cache_flag="--no-cache"
   progress_flag="--progress=plain"
 fi
 
@@ -321,14 +319,24 @@ fi
 # `--load`, so push directly to the registry instead. The caller is expected
 # to have logged in to the target registry already (e.g. via ecr-login).
 output_flag="--load -t ${tmp_tag}"
+cache_flag=""
 if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
   output_flag="--push"
+  # Remote BuildKit pods are ephemeral with pod-private caches, so share a cache
+  # via a per-image (hence per-arch) tag in the same registry. mode=max caches
+  # intermediate stages; image-manifest/oci-mediatypes keep it ECR-compatible.
+  if [[ -n "${DOCKER_IMAGE:-}" ]]; then
+    cache_ref="${DOCKER_IMAGE%:*}:${image}-buildcache"
+    cache_flag="--cache-from type=registry,ref=${cache_ref}"
+    cache_flag="${cache_flag} --cache-to type=registry,ref=${cache_ref},mode=max,image-manifest=true,oci-mediatypes=true"
+  fi
 fi
 
 # Build image
-docker buildx build \
-       ${no_cache_flag} \
+build_image() {
+  docker buildx build \
        ${progress_flag} \
+       ${cache_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
@@ -364,6 +372,39 @@ docker buildx build \
        ${output_flag} \
        "$@" \
        .
+}
+
+if [[ -z "${REMOTE_BUILDKIT:-}" ]]; then
+  build_image "$@"
+else
+  # The autoscaled pool may be cold / at capacity at start, where buildx's ~20s
+  # connect (gRPC default) fails before scale-up. Retry connection failures (not
+  # build errors) for ~2h so a capacity-limited build waits for a free pod instead
+  # of hard-failing — still within the 240m job timeout.
+  attempts="${REMOTE_BUILDKIT_CONNECT_ATTEMPTS:-360}"
+  delay="${REMOTE_BUILDKIT_CONNECT_DELAY:-15}"
+  for attempt in $(seq 1 "${attempts}"); do
+    build_log="$(mktemp)"
+    set +e
+    build_image "$@" 2>&1 | tee "${build_log}"
+    rc="${PIPESTATUS[0]}"
+    set -e
+    if [[ "${rc}" -eq 0 ]]; then
+      rm -f "${build_log}"
+      break
+    fi
+    if [[ "${attempt}" -lt "${attempts}" ]] && grep -qiE \
+      "waiting for connection|context deadline exceeded|server preface|failed to (dial|list workers)|connection (refused|reset)|no such host|transport: Error|i/o timeout|use of closed network connection|EOF" \
+      "${build_log}"; then
+      echo "Remote BuildKit not ready yet (attempt ${attempt}/${attempts}); retrying in ${delay}s..." >&2
+      rm -f "${build_log}"
+      sleep "${delay}"
+      continue
+    fi
+    rm -f "${build_log}"
+    exit "${rc}"
+  done
+fi
 
 # NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
 # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
