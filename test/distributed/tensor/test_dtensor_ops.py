@@ -169,8 +169,6 @@ dtensor_fails = {
     xfail("sparse.mm", "reduce"),
     # meta tensor data not allocated yet during tensor_split
     xfail("tensor_split"),
-    # output_specs count mismatch in unsafe_split strategy
-    xfail("unsafe_split"),
     # /TODO(whc) debug/triage
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)

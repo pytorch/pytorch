@@ -24,9 +24,11 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 )
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
+    is_tensor_dim_sharded,
     normalize_dim,
     register_op_strategy,
     shift_shard_dims_after_insert,
+    shift_shard_dims_after_remove,
 )
 from torch.distributed.tensor.placement_types import (
     _is_shard_like,
@@ -1140,43 +1142,51 @@ def split_single_dim_strategy(
 
 # TODO: fix remaining failures in xfail("unbind") in test_dtensor_ops.py
 #       and remove this xfail item
-@register_single_dim_strategy(
-    aten.unbind.int,
-    schema_info=RuntimeSchemaInfo(1),
-    allow_input_redistribution=False,
-)
-def unbind_single_dim_strategy(
-    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    input_meta = args_schema[0]
-    if not isinstance(input_meta, TensorMeta):
-        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
-    input_shape = input_meta.shape
-    input_ndim = len(input_shape)
-    unbind_dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
+@register_op_strategy(aten.unbind.int, schema_info=RuntimeSchemaInfo(1))
+def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
+    """Forward all shardings except the unbind dimension."""
+    input_strategy = op_schema.args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+    input_ndim = input_strategy.ndim
+    input_shape = input_strategy.shape
+    unbind_dim = (
+        cast(int, op_schema.args_schema[1]) if len(op_schema.args_schema) > 1 else 0
+    )
     unbind_dim = normalize_dim(unbind_dim, input_ndim)
-    num_outputs = input_shape[unbind_dim]
 
-    strategies: list[list[Placement | _ShardingPlaceholder]] = []
-    for input_dim in range(input_ndim):
-        if input_dim == unbind_dim:
-            continue
-        output_dim = input_dim if input_dim < unbind_dim else input_dim - 1
-        strategies.append(
-            [_ShardingPlaceholder(output_dim)]  # pyrefly: ignore [bad-argument-type]
-            * num_outputs
-            + [_ShardingPlaceholder(input_dim)]
+    mesh = input_strategy.mesh
+    unbind_strategy = OpStrategy([])
+    for arg_strategy in input_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        if is_tensor_dim_sharded(arg_spec, dim=unbind_dim):
+            raise RuntimeError(
+                f"Attempted to unbind along the sharded dimension {unbind_dim}. ",
+                "It cannot be performed without redistribution, which is disallowed "
+                "by the current operator.",
+            )
+        output_placements = shift_shard_dims_after_remove(
+            arg_spec.placements, unbind_dim
         )
-    for reduce_op in _PARTIAL_PASS_THROUGH_REDUCE_OPS:
-        strategies.append([Partial(reduce_op)] * (num_outputs + 1))
-    return strategies
+        output_specs = tuple(
+            DTensorSpec(mesh, tuple(output_placements))
+            for _ in range(input_shape[unbind_dim])
+        )
+        unbind_strategy.strategies.append(
+            OpSpec(
+                output_specs=output_specs,
+                input_specs=(arg_spec,),
+                redistribute_cost=[[0.0] * len(input_strategy.strategies)],
+            )
+        )
+    return unbind_strategy
 
 
 @register_single_dim_strategy(
     aten.eye.m_out,
+    schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]),
     allow_unbacked_sharding=True,
     allow_uneven_sharding=True,
-    allow_input_redistribution=False,
 )
 def eye_out_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
