@@ -1162,7 +1162,7 @@ class OverFusionTest(TestBase):
     """
 
     @skipIfXpu(
-        msg="https://github.com/pytorch/pytorch/issues/181699 — "
+        msg="https://github.com/pytorch/pytorch/issues/181699: "
         "Mix-order reduction does not trigger on XPU Triton backend for "
         "this transformer model. The model compiles and produces correct "
         "numerical results, but the scheduler metrics assertions (codegen_"
