@@ -137,6 +137,7 @@ __all__ = [
     "split_group",
     "shrink_group",
     "record_comm",
+    "register_process_group",
 ]
 
 _MPI_AVAILABLE = True
@@ -416,7 +417,12 @@ class BackendConfig:
         # pyrefly: ignore [bad-assignment]
         backend = str(backend)
 
-        if backend == Backend.UNDEFINED:
+        if "(" in backend:
+            outer, _ = _parse_nested_backend(backend)
+            supported_devices = Backend.backend_capability[outer.lower()]
+            backend_val = Backend(backend)
+            self.device_backend_map = dict.fromkeys(supported_devices, backend_val)
+        elif backend == Backend.UNDEFINED:
             # Detect the accelerator on the machine. If no accelerator is
             # available, it returns CPU.
             device_type = torch._C._get_accelerator().type
@@ -1430,6 +1436,34 @@ def _get_default_group() -> ProcessGroup:
         return GroupMember.WORLD
 
 
+from torch.distributed.custom_pg import (  # noqa: F401
+    _create_process_group,
+    _DistributedBackendOpts,
+    _pg_bypass,
+    _pop_pg_options,
+    PassthroughProcessGroup,
+    setup_inner_pg,
+)
+
+
+def _parse_nested_backend(backend_str: str) -> tuple[str, str | None]:
+    """Parse a possibly nested backend string.
+
+    Returns ``(outer, inner)`` where *inner* is ``None`` for
+    terminal backends.
+    """
+    paren = backend_str.find("(")
+    if paren == -1:
+        return backend_str, None
+    if not backend_str.endswith(")"):
+        raise ValueError(
+            f"Malformed nested backend string: {backend_str!r}. Expected closing ')'."
+        )
+    outer = backend_str[:paren]
+    inner = backend_str[paren + 1 : -1]
+    return outer, inner
+
+
 def _get_default_store() -> Store:
     """Get the default store created by init_process_group."""
     if not is_initialized():
@@ -2067,8 +2101,9 @@ def _new_process_group_helper(
     )
     backend_config = BackendConfig(backend)
     # Set the default backend when single backend is passed in.
+    outer, _ = _parse_nested_backend(str(backend))
     if "," not in str(backend) and ":" not in str(backend):
-        if backend not in Backend.backend_type_map:
+        if outer not in Backend.backend_type_map:
             raise AssertionError(f"Unknown backend type {backend}")
         if backend == Backend.UNDEFINED:
             # Currently when backend is UNDEFINED, only one backend will be initialized
@@ -2079,7 +2114,7 @@ def _new_process_group_helper(
             else:
                 pg._set_default_backend(ProcessGroup.BackendType.GLOO)
         else:
-            pg._set_default_backend(Backend.backend_type_map[backend])
+            pg._set_default_backend(Backend.backend_type_map[outer])
     # In order to correctly call pg._has_hooks(), we should set the default backend
     # when multi backend is passed in
     else:
@@ -2234,10 +2269,12 @@ def _new_process_group_helper(
             )
             backend_type = ProcessGroup.BackendType.XCCL
         else:
-            if backend_str.upper() not in Backend._plugins:
-                raise AssertionError(f"Unknown c10d backend type {backend_str.upper()}")
+            outer, inner = _parse_nested_backend(backend_str)
 
-            backend_plugin = Backend._plugins[backend_str.upper()]
+            if outer.upper() not in Backend._plugins:
+                raise AssertionError(f"Unknown c10d backend type {outer.upper()}")
+
+            backend_plugin = Backend._plugins[outer.upper()]
             creator_fn = backend_plugin.creator_fn
             extended_api = backend_plugin.extended_api
             backend_type = ProcessGroup.BackendType.CUSTOM
@@ -2247,7 +2284,9 @@ def _new_process_group_helper(
                     backend_prefix_store, group_rank, group_size, timeout
                 )
             else:
-                dist_backend_opts = _DistributedBackendOptions()
+                dist_backend_opts = _DistributedBackendOpts(
+                    _DistributedBackendOptions()
+                )
                 dist_backend_opts.store = backend_prefix_store
                 dist_backend_opts.group_rank = group_rank
                 dist_backend_opts.group_size = group_size
@@ -2255,8 +2294,15 @@ def _new_process_group_helper(
                 dist_backend_opts.timeout = timeout
                 dist_backend_opts.group_id = group_name
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
+                dist_backend_opts.inner = inner
 
-                backend_class = creator_fn(dist_backend_opts, backend_options)
+                this_opts, dist_opts, remaining = _pop_pg_options(
+                    backend_options, outer.lower()
+                )
+                dist_backend_opts.pg_options = dist_opts
+                dist_backend_opts._remaining_pg_options = remaining
+
+                backend_class = creator_fn(dist_backend_opts, this_opts)
 
         # Set sequence numbers for gloo and nccl backends.
         if backend_str == Backend.GLOO and not _use_torchcomms_enabled():
@@ -2358,6 +2404,7 @@ def _new_process_group_helper(
     return pg, prefix_store
 
 
+@_pg_bypass()
 def destroy_process_group(group: ProcessGroup | None = None):
     """
     Destroy a given process group, and deinitialize the distributed package.
@@ -2595,6 +2642,7 @@ def get_world_size(group: ProcessGroup | None = None) -> int:
     return _get_group_size(group)
 
 
+@_pg_bypass()
 def isend(
     tensor: torch.Tensor,
     dst: int | None = None,
@@ -2652,6 +2700,7 @@ def isend(
     return group.send([tensor], group_dst, tag)
 
 
+@_pg_bypass()
 def irecv(
     tensor: torch.Tensor,
     src: int | None = None,
@@ -2709,6 +2758,7 @@ def irecv(
         return group.recv([tensor], group_src, tag)
 
 
+@_pg_bypass()
 @_exception_logger
 def send(
     tensor: torch.Tensor,
@@ -2753,6 +2803,7 @@ def send(
         work.wait()
 
 
+@_pg_bypass()
 @_exception_logger
 def recv(
     tensor: torch.Tensor,
@@ -3082,6 +3133,7 @@ def _is_fp8(tensor):
     )
 
 
+@_pg_bypass()
 @_exception_logger
 def broadcast(
     tensor: torch.Tensor,
@@ -3152,6 +3204,7 @@ def broadcast(
     # Otherwise, the backend has sync'ed at CPP level
 
 
+@_pg_bypass()
 @_exception_logger
 def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op: bool = False):
     """
@@ -3253,6 +3306,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op: bool = False):
     # Otherwise, the backend has sync'ed at CPP level
 
 
+@_pg_bypass()
 @_exception_logger
 @deprecated(
     "`torch.distributed.all_reduce_coalesced` will be deprecated. If you must "
@@ -3333,6 +3387,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op: bool = 
     # Otherwise, the backend has sync'ed at CPP level
 
 
+@_pg_bypass()
 @_exception_logger
 def reduce(
     tensor: torch.Tensor,
@@ -3435,6 +3490,7 @@ def _tensor_to_object(tensor, tensor_size, group):
         return _unpickler(io.BytesIO(buf)).load()
 
 
+@_pg_bypass()
 @_exception_logger
 def all_gather_object(object_list, obj, group=None):
     """
@@ -3530,6 +3586,7 @@ def all_gather_object(object_list, obj, group=None):
         object_list[i] = _tensor_to_object(tensor, tensor_size, group)
 
 
+@_pg_bypass()
 @_exception_logger
 def gather_object(
     obj: Any,
@@ -3661,6 +3718,7 @@ def gather_object(
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size, group)
 
 
+@_pg_bypass()
 @_exception_logger
 def send_object_list(
     object_list: list[Any],
@@ -3779,6 +3837,7 @@ def send_object_list(
         send(object_tensor, group_dst=group_dst, group=group)
 
 
+@_pg_bypass()
 @_exception_logger
 def recv_object_list(
     object_list: list[Any],
@@ -3921,6 +3980,7 @@ def recv_object_list(
     return rank_objects
 
 
+@_pg_bypass()
 @_exception_logger
 def broadcast_object_list(
     object_list: list[Any],
@@ -4053,6 +4113,7 @@ def broadcast_object_list(
             object_list[i] = _tensor_to_object(obj_view, obj_size, group)
 
 
+@_pg_bypass()
 @_exception_logger
 def scatter_object_list(
     scatter_object_output_list: list[Any],
@@ -4188,6 +4249,7 @@ def scatter_object_list(
     )
 
 
+@_pg_bypass()
 @_exception_logger
 def all_gather(tensor_list, tensor, group=None, async_op=False):
     """
@@ -4288,6 +4350,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     # Otherwise, the backend has sync'ed at CPP level
 
 
+@_pg_bypass()
 @_exception_logger
 def all_gather_single(output_tensor, input_tensor, group=None, async_op=False):
     """
@@ -4443,6 +4506,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op: bool = F
     return all_gather_single(output_tensor, input_tensor, group, async_op)
 
 
+@_pg_bypass()
 @_exception_logger
 @deprecated(
     "`torch.distributed.all_gather_coalesced` will be deprecated. If you must use it, "
@@ -4564,6 +4628,7 @@ def _validate_output_list_for_rank(my_rank: int, dst: int, gather_list):
         )
 
 
+@_pg_bypass()
 @_exception_logger
 def gather(
     tensor: torch.Tensor,
@@ -4668,6 +4733,7 @@ def gather(
     # Otherwise, the backend has sync'ed at CPP level
 
 
+@_pg_bypass()
 @_exception_logger
 def scatter(
     tensor: torch.Tensor,
@@ -4786,6 +4852,7 @@ def scatter(
     # Otherwise, the backend has sync'ed at CPP level
 
 
+@_pg_bypass()
 @_exception_logger
 def reduce_scatter(
     output, input_list, op=ReduceOp.SUM, group=None, async_op: bool = False
@@ -4843,6 +4910,7 @@ def reduce_scatter(
     # Otherwise, the backend has sync'ed at CPP level
 
 
+@_pg_bypass()
 @_exception_logger
 def reduce_scatter_single(output, input, op=ReduceOp.SUM, group=None, async_op=False):
     """
@@ -4992,6 +5060,7 @@ def _reduce_scatter_base(
     return reduce_scatter_single(output, input, op, group, async_op)
 
 
+@_pg_bypass()
 @_exception_logger
 def all_to_all_single(
     output,
@@ -5141,6 +5210,7 @@ def all_to_all_single(
     # Otherwise, the backend has sync'ed at CPP level
 
 
+@_pg_bypass()
 @_exception_logger
 def all_to_all(
     output_tensor_list, input_tensor_list, group=None, async_op: bool = False
@@ -5280,6 +5350,7 @@ def all_to_all(
     # Otherwise, the backend has sync'ed at CPP level
 
 
+@_pg_bypass()
 @_exception_logger
 def barrier(
     group: ProcessGroup | None = GroupMember.WORLD,
@@ -5357,6 +5428,7 @@ def barrier(
     # Otherwise, the backend has sync'ed at CPP level
 
 
+@_pg_bypass()
 def monitored_barrier(
     group: ProcessGroup | None = GroupMember.WORLD,
     timeout=None,
@@ -5513,6 +5585,7 @@ def _is_safe_to_split() -> bool:
     return _get_default_group().bound_device_id is not None
 
 
+@_pg_bypass(group_param="parent_pg")
 @_time_logger
 def split_group(
     parent_pg: ProcessGroup | None = None,
@@ -5741,6 +5814,7 @@ def split_group(
     return split_pg
 
 
+@_pg_bypass()
 @_time_logger
 def new_group(
     ranks=None,
@@ -6025,34 +6099,6 @@ def _new_group_with_tag(
 
     group_name = _process_group_name(ranks, use_hashed_name=use_local_synchronization)
 
-    # If the default PG implements new_group, delegate to it. This allows
-    # custom Python PG subclasses to handle subgroup creation in a single
-    # call, avoiding the per-device creator iteration in
-    # _new_process_group_helper.
-    if hasattr(default_pg, "new_group") and callable(default_pg.new_group):
-        pg_or_none = default_pg.new_group(
-            ranks,
-            timeout=timeout,
-            pg_options=backend_options,
-            group_name=group_name,
-            group_desc=group_desc,
-        )
-        if pg_or_none is None:
-            return GroupMember.NON_GROUP_MEMBER
-
-        pg: ProcessGroup = pg_or_none  # pyrefly: ignore[bad-assignment]
-        _register_pg_in_world(
-            pg,
-            backend_name=backend,
-            store=PrefixStore(f"{group_name}/", default_store),
-            group_name=group_name,
-            backend_config=str(BackendConfig(backend)),
-            rank_mapping={
-                global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
-            },
-        )
-        return pg
-
     pg, pg_store = _new_process_group_helper(
         group_world_size,
         group_rank,
@@ -6100,6 +6146,7 @@ def _new_group_with_tag(
     return pg
 
 
+@_pg_bypass()
 def new_subgroups(
     group_size=None,
     group=None,
@@ -6817,6 +6864,36 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
         logger.warning(
             "Failed to fully clean up global state for process group", exc_info=True
         )
+
+
+def register_process_group(
+    pg: ProcessGroup,
+    group_name: str,
+    ranks: list[int],
+) -> None:
+    """Register a custom-created process group in the global state.
+
+    Custom PG backends that create subgroups (via new_group, split_group,
+    or manual construction) must register them so that ``dist.*`` calls
+    on the subgroup pass validation.
+
+    Args:
+        pg: The process group to register.
+        group_name: A unique name for this group.
+        ranks: Global ranks of the members, in group-rank order.
+            ``ranks[i]`` is the global rank of group rank ``i``.
+    """
+    default_store = _get_default_store()
+    _register_pg_in_world(
+        pg,
+        backend_name="",
+        store=PrefixStore(f"{group_name}/", default_store),
+        group_name=GroupName(group_name),
+        backend_config="",
+        rank_mapping={
+            global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
+        },
+    )
 
 
 def _register_pg_in_world(
