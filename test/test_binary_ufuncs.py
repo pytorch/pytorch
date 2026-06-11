@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     precisionOverride,
+    skipCUDAIfNotRocm,
     skipIf,
     skipMeta,
     skipXPU,
@@ -1099,6 +1100,9 @@ class TestBinaryUfuncsDevice(TestCase):
         else:
             info = torch.iinfo(dtype)
             low, high = info.min, info.max
+            if dtype.is_signed:
+                # Avoid source-level UB from signed overflow and signed min / -1.
+                low += 1
 
         a = make_tensor((100,), dtype=dtype, device=device, low=low, high=high)
         b = make_tensor((100,), dtype=dtype, device=device, low=low, high=high)
@@ -1233,6 +1237,9 @@ class TestBinaryUfuncsDevice(TestCase):
     def test_div_rounding_numpy(self, device, dtype):
         info = torch.finfo(dtype) if dtype.is_floating_point else torch.iinfo(dtype)
         low, high = info.min, info.max
+        if not dtype.is_floating_point and not dtype.is_complex and dtype.is_signed:
+            # Avoid source-level UB from signed min / -1 in truncating division.
+            low += 1
 
         # Compare division of random values against NumPy
         a = make_tensor((4096,), dtype=dtype, device=device, low=low, high=high)
@@ -1657,6 +1664,7 @@ class TestBinaryUfuncsDevice(TestCase):
             .requires_grad_()
         )
         gradcheck(lambda a: torch.pow(2, a), (a,))
+        gradcheck(lambda a: torch.pow(True, a), (a,))
 
     # Tests pow() for integral, floating-type tensors, with integral, floating-type
     # exponents (tensor or scalar), respectively. noncontiguous tensors are also tested.
@@ -2785,7 +2793,7 @@ class TestBinaryUfuncsDevice(TestCase):
     @dtypesIfXPU(*set(get_all_math_dtypes("xpu")) - {torch.complex64, torch.complex128})
     @dtypes(*set(get_all_math_dtypes("cpu")) - {torch.complex64, torch.complex128})
     def test_floor_divide_tensor(self, device, dtype):
-        x = torch.randn(10, device=device).mul(30).to(dtype)
+        x = make_tensor((10,), dtype=dtype, device=device, low=-90, high=90)
         y = torch.arange(1, 11, dtype=dtype, device=device)
 
         z = x // y
@@ -2800,7 +2808,7 @@ class TestBinaryUfuncsDevice(TestCase):
     @dtypesIfXPU(*set(get_all_math_dtypes("xpu")) - {torch.complex64, torch.complex128})
     @dtypes(*set(get_all_math_dtypes("cpu")) - {torch.complex64, torch.complex128})
     def test_floor_divide_scalar(self, device, dtype):
-        x = torch.randn(100, device=device).mul(10).to(dtype)
+        x = make_tensor((100,), dtype=dtype, device=device, low=-30, high=30)
 
         z = x // 3
         z_alt = torch.tensor(
@@ -2821,6 +2829,7 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertTrue(torch.all(fn(x, zero).isnan()))
 
     @onlyNativeDeviceTypes  # Check Issue https://github.com/pytorch/pytorch/issues/48130
+    @skipCUDAIfNotRocm  # NVIDIA CUDA reaches source-level UB for these inputs.
     @dtypes(*integral_types())
     @dtypesIfXPU(*set(integral_types()) - {torch.int64})
     def test_fmod_remainder_by_zero_integral(self, device, dtype):
@@ -2837,10 +2846,8 @@ class TestBinaryUfuncsDevice(TestCase):
                 # ROCm behavior: x % 0 is a no-op; x is returned
                 self.assertEqual(fn(x, zero), x)
             else:
-                # CUDA behavior: Different value for different dtype
-                # Due to it's an undefined behavior, CUDA returns a pattern of all 1s
-                # for integral dividend (other than int64) divided by zero. For int64,
-                # CUDA returns all 1s for negative dividend, half 1s for positive dividend.
+                # Other accelerator backends may return backend-specific bit
+                # patterns for integral remainder by zero.
                 # uint8: 0xff -> 255
                 # int32: 0xffffffff -> -1
                 if dtype == torch.int64:
@@ -2851,6 +2858,7 @@ class TestBinaryUfuncsDevice(TestCase):
                     self.assertTrue(torch.all(fn(x, zero) == value))
 
     @onlyNativeDeviceTypes
+    @skipCUDAIfNotRocm  # NVIDIA CUDA reaches source-level UB for these inputs.
     @dtypes(*integral_types())
     def test_fmod_remainder_overflow(self, device, dtype):
         fn_list = (torch.fmod, torch.remainder)
