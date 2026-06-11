@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import logging
 import sys
 import traceback
@@ -33,6 +34,22 @@ def _is_spmd_types_available() -> bool:
     import importlib.util
 
     return importlib.util.find_spec("spmd_types") is not None
+
+
+def _spmd_no_typecheck():
+    """
+    Return a spmd_types no_typecheck context, or a no-op if not installed.
+    """
+    if _is_spmd_types_available():
+        import spmd_types
+
+        return spmd_types.no_typecheck()
+
+    @contextlib.contextmanager
+    def no_typecheck():
+        yield
+
+    return no_typecheck()
 
 
 if is_available() and not torch._C._c10d_init():
@@ -155,8 +172,13 @@ if is_available():
         _CoalescingManager,
         _create_process_group_wrapper,
         _get_process_group_name,
+        _get_reconfigure_handle,
+        _new_window,
         _rank_not_in_group,
+        _reconfigure,
         _reduce_scatter_base,
+        _supports_reconfigure,
+        _supports_window,
         _time_estimator,
         get_node_local_rank,
     )

@@ -231,7 +231,8 @@ class InductorChoices:
         """
         # Extract device_type from kernel_inputs
         device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_ktc requires a valid device type"
+        if device_type is None:
+            raise AssertionError("get_ktc requires a valid device type")
         # Extract template_name from the template object
         template_name = template.uid
 
@@ -480,7 +481,7 @@ class InductorChoices:
         so we will do the reduction in two phases."""
         props = DeviceProperties.create(device)
         num_sm = props.multi_processor_count
-        warp_size = props.warp_size if props.warp_size is not None else 32
+        warp_size = props.warp_size_or_default
         max_threads_per_sm = (
             props.max_threads_per_multi_processor
             if props.max_threads_per_multi_processor is not None
