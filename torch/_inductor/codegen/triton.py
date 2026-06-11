@@ -6354,6 +6354,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             inductor_meta["coordinate_descent_check_all_directions"] = (
                 config.coordinate_descent_check_all_directions
             )
+        if config.log_autotune_inputs:
+            inductor_meta["log_autotune_inputs"] = config.log_autotune_inputs
         return inductor_meta
 
     def inductor_meta_per_kernel(self) -> dict[str, Any]:

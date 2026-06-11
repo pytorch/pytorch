@@ -763,6 +763,9 @@ coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
 
+# Log detailed input tensor shapes/dtypes during autotuning. Requires TORCH_LOGS=+inductor.
+log_autotune_inputs = False
+
 # AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
 # generate the learned heuristic to code which is shipped with the compiler
 

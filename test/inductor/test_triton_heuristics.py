@@ -459,6 +459,58 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(compiled(x), fn(x))
             self.assertEqual(len(benchmark_calls), 1)
 
+    def _run_autotune_gating_test(self, flag_on, debug_on, expect_called):
+        """Helper to test the _log_autotune_inputs gating in autotune_to_one_config."""
+        autotuner = MagicMock()
+        autotuner.inductor_meta = {"log_autotune_inputs": flag_on}
+        autotuner.fn.__name__ = "mock_kernel"
+        autotuner.save_cache_hook = False
+        autotuner.precompile_time_taken_ns = 0
+        autotuner.benchmark_failure_reasons = {}
+
+        mock_launcher = MagicMock()
+        mock_launcher.config = "mock_config"
+        mock_launcher.n_regs = 0
+        mock_launcher.n_spills = 0
+        mock_launcher.shared = 0
+        mock_launcher.cache_hash = "test_hash"
+
+        autotuner.benchmark_all_configs.return_value = {mock_launcher: 1.0}
+
+        with (
+            patch("torch._inductor.runtime.triton_heuristics.log") as mock_log,
+            patch("torch._inductor.runtime.triton_heuristics.TritonBundler.put_winner"),
+        ):
+            mock_log.isEnabledFor.return_value = debug_on
+            CachingAutotuner.autotune_to_one_config(autotuner)
+
+            if expect_called:
+                autotuner._log_autotune_inputs.assert_called_once()
+            else:
+                autotuner._log_autotune_inputs.assert_not_called()
+
+    def test_log_autotune_inputs_flag_off_debug_on(self):
+        """_log_autotune_inputs should NOT be called when flag is off, even with DEBUG."""
+        self._run_autotune_gating_test(
+            flag_on=False, debug_on=True, expect_called=False
+        )
+
+    def test_log_autotune_inputs_flag_on_debug_off(self):
+        """_log_autotune_inputs should NOT be called when DEBUG is off, even with flag on."""
+        self._run_autotune_gating_test(
+            flag_on=True, debug_on=False, expect_called=False
+        )
+
+    def test_log_autotune_inputs_flag_on_debug_on(self):
+        """_log_autotune_inputs should be called when both flag and DEBUG are on."""
+        self._run_autotune_gating_test(flag_on=True, debug_on=True, expect_called=True)
+
+    def test_log_autotune_inputs_flag_off_debug_off(self):
+        """_log_autotune_inputs should NOT be called when both flag and DEBUG are off."""
+        self._run_autotune_gating_test(
+            flag_on=False, debug_on=False, expect_called=False
+        )
+
 
 _PLUGIN_FACTORY_PATH = (
     "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"
