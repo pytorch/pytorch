@@ -41,6 +41,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.fx.experimental.symbolic_shapes import guard_or_false
 
 
 aten = torch.ops.aten
@@ -367,10 +368,6 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.prod.dim_int: "product",
     aten.prod.int_out: "product",
     prims.prod.default: "product",
-    # avg is only linear when there is no padding
-    aten.mean.default: "avg",
-    aten.mean.dim: "avg",
-    aten.mean.out: "avg",
     aten.max.default: "max",
     aten.max.out: "max",
     aten.min.default: "min",
@@ -391,6 +388,12 @@ NON_LINEAR_BOOL_REDUCTION_OPS = [
     aten.any.dim,
     aten.any.dims,
     aten.any.out,
+]
+
+MEAN_REDUCTION_OPS = [
+    aten.mean.default,
+    aten.mean.dim,
+    aten.mean.out,
 ]
 
 ARGMAX_ARGMIN_OPS = {
@@ -432,6 +435,79 @@ def linear_reduction_single_dim_strategy(
         reduction_linear=True,
         reduction_op=reduction_op,
     )
+
+
+register_single_dim_strategy(
+    [aten._foreach_max.default],
+    schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
+    allow_uneven_sharding=True,
+)(linear_reduction_single_dim_strategy)
+
+
+def _is_spec_evenly_sharded_on_dim(spec: DTensorSpec, dim: int) -> bool:
+    shape = spec.shape
+    dim = normalize_dim(dim, len(shape))
+
+    num_shards = 1
+    for mesh_dim, placement in enumerate(spec.placements):
+        if _is_shard_like(placement) and placement.dim == dim:
+            num_shards *= spec.mesh.size(mesh_dim)
+            if isinstance(placement, _StridedShard):
+                num_shards *= placement.split_factor
+
+    return guard_or_false(cast(Any, shape[dim]) % num_shards == 0)
+
+
+def _mean_full_mesh_strategy_filter(
+    mesh: DeviceMesh,
+    op_schema: OpSchema,
+    input_specs: list[DTensorSpec],
+    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
+) -> bool:
+    input_spec = input_specs[0]
+    dims = None
+    if len(op_schema.args_schema) > 1:
+        dims = _infer_reduction_dims(op_schema.args_schema[1], input_spec.ndim)
+    reduce_dims = list(range(input_spec.ndim)) if dims is None else dims
+
+    return all(_is_spec_evenly_sharded_on_dim(input_spec, dim) for dim in reduce_dims)
+
+
+@register_single_dim_strategy(
+    MEAN_REDUCTION_OPS,
+    schema_info=RuntimeSchemaInfo(1),
+    full_mesh_strategy_filter=_mean_full_mesh_strategy_filter,
+)
+def mean_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+
+    dims = None
+    if len(args_schema) > 1:
+        dims = _infer_reduction_dims(args_schema[1], ndim)
+
+    reduce_dims = list(range(ndim)) if dims is None else dims
+    keep_dim = len(args_schema) > 2 and bool(args_schema[2])
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d in reduce_dims:
+            strategies.append([Partial("avg"), _ShardingPlaceholder(d)])
+        else:
+            if keep_dim:
+                out_d = d
+            else:
+                out_d = d - sum(1 for rd in reduce_dims if rd < d)
+            strategies.append([_ShardingPlaceholder(out_d), _ShardingPlaceholder(d)])
+
+    strategies.append([Partial("avg"), Partial("avg")])
+    return strategies
 
 
 @register_single_dim_strategy(
