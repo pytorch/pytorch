@@ -109,6 +109,8 @@ LLM_OP_DB_NAMES = {
     # Normalization
     "nn.functional.layer_norm",
     "nn.functional.rms_norm",
+    # Normalization - batch norm
+    "nn.functional.batch_norm",
     # Attention/linear
     "nn.functional.linear",
     "bmm",
@@ -393,12 +395,15 @@ DETERMINISM_XFAILS = {}
 
 BATCH_INVARIANCE_XFAILS = {
     "aot_eager_decomp_partition": {
+        "nn.functional.batch_norm": {ALL},  # only training samples have batch >= 4
         "nn.functional.linear": {ALL},
     },
     "inductor_default": {
+        "nn.functional.batch_norm": {ALL},  # only training samples have batch >= 4
         "nn.functional.linear": {ALL},
     },
     "inductor_numerics": {
+        "nn.functional.batch_norm": {ALL},  # only training samples have batch >= 4
         "nn.functional.linear": {ALL},
     },
 }
@@ -427,6 +432,13 @@ BINARY_NUMERICAL_XFAILS = {
     },
     "inductor_numerics": {
         "remainder": {ALL},
+    },
+}
+
+SKIP_SAMPLES = {
+    "eager_equivalence": {
+        # Training-mode var_mean decomposition mismatch.
+        "nn.functional.batch_norm": lambda sample: sample.kwargs.get("training", False),
     },
 }
 
@@ -811,8 +823,13 @@ class TestOpInfoProperties(TestCase):
 
         fn = op.get_op()
 
+        skip_sample = SKIP_SAMPLES.get("eager_equivalence", {}).get(op.name)
+
         def run_test():
             for sample in samples:
+                if skip_sample is not None and skip_sample(sample):
+                    continue
+
                 args = (sample.input,) + tuple(sample.args)
                 kwargs = sample.kwargs
 

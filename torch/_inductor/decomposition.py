@@ -142,6 +142,8 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._foreach_addcdiv_,
     aten.lerp,
     aten.lerp_,
+    # Overridden below with addcmul-based version for FMA matching
+    aten._native_batch_norm_legit_no_training,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -154,6 +156,56 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition([aten._native_batch_norm_legit_no_training])
+def _native_batch_norm_legit_no_training_decomp(
+    input: torch.Tensor,
+    weight: torch.Tensor | None,
+    bias: torch.Tensor | None,
+    running_mean: torch.Tensor,
+    running_var: torch.Tensor,
+    momentum: float,
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Match eager CUDA kernel numerics for eval-mode batch norm.
+
+    Uses rsqrt (not 1/sqrt) and addcmul to emit FMA for the final
+    multiply-add, matching eager even with emulate_precision_casts.
+    """
+    from torch._decomp.decompositions import _unsqueeze_to_dim
+
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    running_mean = running_mean.to(dtype=computation_dtype)
+    running_var = running_var.to(dtype=computation_dtype)
+    invstd = torch.rsqrt(running_var + eps)
+
+    if input.device.type != "cpu":
+        save_mean = running_mean
+        save_rstd = invstd
+    else:
+        save_mean = input.new_zeros((0,))
+        save_rstd = input.new_zeros((0,))
+
+    mean = _unsqueeze_to_dim(running_mean, input.dim() - 1)
+    invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
+
+    if weight is not None:
+        weight = _unsqueeze_to_dim(weight.flatten(), input.dim() - 1)
+        xmu_w = (input - mean) * weight
+    else:
+        xmu_w = input - mean
+
+    if bias is not None:
+        bias = _unsqueeze_to_dim(bias.flatten(), input.dim() - 1)
+        if input.device.type == "cpu":
+            output = xmu_w * invstd + bias
+        else:
+            output = torch.addcmul(bias, xmu_w, invstd)
+    else:
+        output = xmu_w * invstd
+
+    return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
 @register_decomposition([aten.lerp.Scalar])

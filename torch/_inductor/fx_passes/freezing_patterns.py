@@ -34,6 +34,36 @@ pass_patterns = [
 binary_folding_pass = PatternMatcherPass()
 
 
+def _decompose_addcmul_for_folding(graph: torch.fx.Graph) -> None:
+    """Decompose addcmul(self, t1, t2, value=v) -> self + v * t1 * t2.
+
+    addcmul is a ternary op that binary folding can't pattern-match through.
+    Expanding it into mul + add lets binary folding fold the constants into
+    conv/linear weights during freezing.  This is numerics-safe because the
+    folded constants are absorbed into new weights — no mul or add survives to
+    codegen.
+    """
+    changed = False
+    for node in graph.find_nodes(op="call_function", target=aten.addcmul.default):
+        self_arg, t1, t2 = node.args[0], node.args[1], node.args[2]
+        value = node.kwargs.get("value", 1)
+        if len(node.args) > 3:
+            value = node.args[3]
+        with graph.inserting_before(node):
+            prod = graph.call_function(aten.mul.Tensor, (t1, t2))
+            prod.meta.update(node.meta)
+            if value != 1:
+                prod = graph.call_function(aten.mul.Scalar, (prod, value))
+                prod.meta.update(node.meta)
+            result = graph.call_function(aten.add.Tensor, (prod, self_arg))
+            result.meta.update(node.meta)
+            node.replace_all_uses_with(result)
+        graph.erase_node(node)
+        changed = True
+    if changed:
+        stable_topological_sort(graph)
+
+
 def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     """
     Passes that are applied to the graph to freeze pass.
@@ -47,6 +77,12 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     # works like: conv+binary+binary.
     binary_folding = counters["inductor"]["binary_folding"]
     fake_tensor_prop(gm, aot_example_inputs, True)
+
+    # Decompose addcmul (ternary) into mul + add (binary) before
+    # mark_mixed_dtype and binary folding.  mark_mixed_dtype walks
+    # through _binary_ops to find convert_element_type; addcmul would
+    # block that walk.
+    _decompose_addcmul_for_folding(gm.graph)
 
     torch._inductor.fx_passes.binary_folding.mark_mixed_dtype_allowed_computation_ops(
         gm
