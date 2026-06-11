@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyCPU,
+    onlyNativeDeviceTypes,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -404,6 +405,24 @@ class TestShapeOps(TestCase):
             X.clamp_()
         with self.assertRaisesRegex(RuntimeError, error_msg):
             torch.clamp(X)
+
+    @onlyNativeDeviceTypes
+    def test_clamp_float16_scalar_overflow(self, device):
+        # float16 max is ~65504; scalars that overflow must raise on all devices.
+        # Previously CUDA promoted the scalar to opmath_t (float) before casting,
+        # silently bypassing the overflow check that CPU kernels performed.
+        x = torch.zeros(4, dtype=torch.float16, device=device)
+        overflow = 65507.0
+        err = "cannot be converted to type"
+        with self.assertRaisesRegex(RuntimeError, err):
+            torch.clamp(x, max=overflow)
+        with self.assertRaisesRegex(RuntimeError, err):
+            torch.clamp(x, min=overflow)
+        with self.assertRaisesRegex(RuntimeError, err):
+            torch.clamp(x, min=-overflow, max=overflow)
+        # values within float16 range must still work
+        self.assertEqual(torch.clamp(x, max=100.0), x)
+        self.assertEqual(torch.clamp(x, min=-100.0, max=100.0), x)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_flip(self, device, dtype):
