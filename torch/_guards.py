@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from torch._dynamo.guards import GuardCheckSpec
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 
 
 """
@@ -1491,22 +1491,36 @@ class ChainedSource(Source):
         return result
 
 
-def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
+def detect_fake_mode(
+    inputs: Any = None,
+) -> FakeTensorMode | CppFakeTensorMode | None:
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
     heuristically detect the fake mode via the following sources, in order of
     priority:
 
+        - Active C++ FakeTensorMode (DispatchKey::Fake)
         - Currently active fake mode on stack
         - Fake mode associated with passed in tensors (inputs does not
           have to be flattened)
     """
     from torch._subclasses.fake_tensor import (
+        cpp_fake_tensor_mode_active,
+        CppFakeTensorMode,
         FakeTensor,
         FakeTensorMode,
         get_plain_tensors,
     )
+
+    # When the user opts into the C++ FakeTensorMode (the make_fx / dynamo /
+    # inductor env-var flags), dynamo creates it alongside the Python fake_mode
+    # that backs TracingContext, so check it before the TracingContext shortcut
+    # below.  C++ fake inputs are plain Tensors carrying DispatchKey::Fake (not
+    # the Python FakeTensor subclass), so the heuristics below would not find
+    # them anyway.
+    if cpp_fake_tensor_mode_active():
+        return CppFakeTensorMode._get_active_cpp_fake_tensor_mode()
 
     # If TracingContext has a fake_mode, use it authoritatively.
     # This is the case when Dynamo is driving compilation - any fake tensors

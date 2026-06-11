@@ -2490,7 +2490,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # generation.
             if tx.fake_mode is None:
                 raise AssertionError("tx.fake_mode must not be None")
-            tx.fake_mode.epoch += 1
+            # Only the Python FakeTensorMode memoizes; the C++ mode does not.
+            from torch._subclasses.fake_tensor import FakeTensorMode
+
+            if isinstance(tx.fake_mode, FakeTensorMode):
+                tx.fake_mode.epoch += 1
 
             if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
                 unimplemented(

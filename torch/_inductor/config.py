@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
 can_inplace_pad_graph_input = False  # ease testing
 
-use_cpp_fake_tensor = os.environ.get("INDUCTOR_CPP_FAKE_TENSOR", "0") == "1"
+use_cpp_fake_tensor = os.environ.get("CPP_FAKETENSOR", "0") == "1"
 
 
 def fx_graph_remote_cache_default() -> bool | None:

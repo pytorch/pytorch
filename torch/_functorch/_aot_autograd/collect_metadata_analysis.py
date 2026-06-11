@@ -21,7 +21,7 @@ from torch import Tensor
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_opaque_type
 from torch._logging import getArtifactLogger
-from torch._subclasses.fake_tensor import CppFakeTensorMode
+from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
@@ -243,8 +243,9 @@ def run_functionalized_fw_and_collect_metadata(
 
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
-            # Also, prevent memoization from applying.
-            if fake_mode:
+            # Also, prevent memoization from applying. Only the Python
+            # FakeTensorMode memoizes; the C++ mode has nothing to invalidate.
+            if isinstance(fake_mode, FakeTensorMode):
                 fake_mode.epoch += 1
                 fake_mode.reset_nt_tensor_id_counter()
 

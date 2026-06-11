@@ -8925,8 +8925,13 @@ class FallbackKernel(ExternKernelAlloc):
     @classmethod
     def create(cls, kernel: _OpOverloads, *args: Any, **kwargs: Any) -> FallbackKernel:
         """Create an instance of FallbackKernel from an _OpOverloads"""
+        from torch._subclasses.fake_tensor import cpp_fake_tensor_mode_active
+
+        # The C++ FakeTensorMode (DispatchKey::Fake) is an orthogonal path: when
+        # it is active it handles fake propagation via the dispatch key, so the
+        # Python FakeTensorMode must not be entered (doing so double-dispatches).
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
-        if kernel not in fake_incorrect_kernels:
+        if kernel not in fake_incorrect_kernels and not cpp_fake_tensor_mode_active():
             context = cast(AbstractContextManager[None], V.graph.fake_mode)
         else:
             context = nullcontext()

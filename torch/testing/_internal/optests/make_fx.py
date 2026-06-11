@@ -10,7 +10,7 @@ import torch.utils._pytree as pytree
 
 
 MAKE_FX_CPP_FAKE_TENSOR = (
-    os.environ.get("MAKE_FX_CPP_FAKE_TENSOR", "0") == "1"
+    os.environ.get("CPP_FAKETENSOR", "0") == "1"
     and hasattr(torch._C, "_is_fake_tensor")
 )
 

@@ -26,6 +26,7 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._opaque_base import OpaqueBase
 from torch._prims_common import CUDARngStateHelper
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
     get_proxy_mode,
@@ -1530,7 +1531,10 @@ def create_functional_call(
                         fake_mode = detect_fake_mode()
                         if fake_mode is None:
                             raise AssertionError("fake_mode must not be None")
-                        fake_mode.epoch += 1
+                        # Only the Python FakeTensorMode memoizes unbacked
+                        # SymInts; the C++ mode has nothing to invalidate.
+                        if isinstance(fake_mode, FakeTensorMode):
+                            fake_mode.epoch += 1
                         out = PropagateUnbackedSymInts(mod).run(*args)
             else:
                 out = mod(*args[params_len:], **kwargs)

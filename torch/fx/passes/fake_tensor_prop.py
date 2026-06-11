@@ -34,8 +34,11 @@ class FakeTensorProp(torch.fx.Interpreter):
         if mode is None:
             mode = FakeTensorMode()
         self._mode = mode
-        mode.epoch += 1
-        mode.reset_nt_tensor_id_counter()
+        # Only the Python FakeTensorMode memoizes; the C++ mode has nothing
+        # to invalidate.
+        if isinstance(mode, FakeTensorMode):
+            mode.epoch += 1
+            mode.reset_nt_tensor_id_counter()
         self.seen_subgraphs: OrderedSet[str] = OrderedSet()
 
     def run_node(self, n: Node) -> Any:
