@@ -1618,7 +1618,9 @@ InsertObserversHelper::insertObserversFor(
     block_observer_map_[block] = observer_name_and_modules;
   }
   return std::make_tuple(
-      block_input_observers, block_output_observers, output_idxs);
+      std::move(block_input_observers),
+      std::move(block_output_observers),
+      std::move(output_idxs));
 }
 
 void InsertObserversHelper::propagateObservedProperty(
