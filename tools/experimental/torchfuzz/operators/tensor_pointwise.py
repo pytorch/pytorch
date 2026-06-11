@@ -38,7 +38,7 @@ def _random_broadcast_shape(output_size: tuple[int, ...]) -> tuple[int, ...]:
     return tuple(result)
 
 
-class PointwiseOperator(Operator):
+class PointwiseOperatorBase(Operator):
     """Base class for element-wise pointwise operations."""
 
     _scalar_input_positions: tuple[int, ...] = (0, 1)
@@ -122,7 +122,7 @@ class PointwiseOperator(Operator):
             return f"{output_name} = {expr}"
 
 
-class AddOperator(PointwiseOperator):
+class AddOperator(PointwiseOperatorBase):
     """Operator for element-wise addition."""
 
     def __init__(self, weight: float = 1.0):
@@ -152,7 +152,7 @@ class AddOperator(PointwiseOperator):
         return super().codegen(output_name, input_names, output_spec)
 
 
-class MulOperator(PointwiseOperator):
+class MulOperator(PointwiseOperatorBase):
     """Operator for element-wise multiplication."""
 
     def __init__(self):
@@ -163,7 +163,7 @@ class MulOperator(PointwiseOperator):
         return "torch.mul"
 
 
-class SubOperator(PointwiseOperator):
+class SubOperator(PointwiseOperatorBase):
     """Operator for element-wise subtraction."""
 
     def __init__(self):
@@ -174,7 +174,7 @@ class SubOperator(PointwiseOperator):
         return "torch.sub"
 
 
-class DivOperator(PointwiseOperator):
+class DivOperator(PointwiseOperatorBase):
     """Operator for element-wise division."""
 
     def __init__(self):
