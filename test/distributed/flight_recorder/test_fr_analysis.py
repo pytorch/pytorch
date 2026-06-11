@@ -2,12 +2,14 @@
 
 import copy
 import math
+from dataclasses import asdict
 from typing import Any
 
 from torch.distributed.flight_recorder.components.builder import build_db
 from torch.distributed.flight_recorder.components.config_manager import JobConfig
 from torch.distributed.flight_recorder.components.types import (
     COLLECTIVES,
+    FlightRecorderEntry,
     MatchInfo,
     MatchState,
     Op,
@@ -26,19 +28,21 @@ def create_one_event(
     p2p_seq_id=0,
     output_dtypes="float32",
 ):
-    return {
-        "profiling_name": f"nccl:{collective_name}",
-        "state": state,
-        "process_group": pg_info,
-        "input_sizes": input_sizes,
-        "output_sizes": output_sizes,
-        "input_dtypes": "float32",
-        "output_dtypes": output_dtypes,
-        "collective_seq_id": str(collective_seq_id),
-        "p2p_seq_id": str(p2p_seq_id),
-        "time_created_ns": 0,
-        "frames": [],
-    }
+    return FlightRecorderEntry(
+        process_group=pg_info,
+        profiling_name=f"nccl:{collective_name}",
+        collective_seq_id=collective_seq_id,
+        p2p_seq_id=p2p_seq_id,
+        record_id=-1,
+        input_sizes=input_sizes,
+        output_sizes=output_sizes,
+        state=state,
+        is_p2p=False,
+        input_dtypes="float32",
+        output_dtypes=output_dtypes,
+        time_created_ns=0,
+        frames=[],
+    )
 
 
 class FlightRecorderEventTest(TestCase):
@@ -183,19 +187,21 @@ class FlightRecorderOpBackendTest(TestCase):
     """Tests that the Op class accepts all supported backend prefixes."""
 
     def _make_event(self, backend: str, collective: str = "all_reduce"):
-        return {
-            "profiling_name": f"{backend}:{collective}",
-            "state": "completed",
-            "process_group": ("0", "default"),
-            "input_sizes": [[4, 4]],
-            "output_sizes": [[4, 4]],
-            "input_dtypes": "float32",
-            "output_dtypes": "float32",
-            "collective_seq_id": "1",
-            "p2p_seq_id": "0",
-            "time_created_ns": 0,
-            "frames": [],
-        }
+        return FlightRecorderEntry(
+            process_group=("0", "default"),
+            profiling_name=f"{backend}:{collective}",
+            collective_seq_id=1,
+            p2p_seq_id=0,
+            record_id=-1,
+            input_sizes=[[4, 4]],
+            output_sizes=[[4, 4]],
+            state="completed",
+            is_p2p=False,
+            input_dtypes="float32",
+            output_dtypes="float32",
+            time_created_ns=0,
+            frames=[],
+        )
 
     def test_nccl_backend(self):
         op = Op(self._make_event("nccl"), {"0": {0, 1}}, "0")
@@ -269,9 +275,8 @@ def create_one_entry(
         p2p_seq_id,
         output_dtypes,
     )
-    event.update({"record_id": record_id})
-    event.update({"is_p2p": False})
-    return event
+    event.record_id = record_id
+    return asdict(event)
 
 
 class FlightRecorderE2ETest(TestCase):

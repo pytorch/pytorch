@@ -12,6 +12,7 @@ from torch.distributed.flight_recorder.components.fr_logger import FlightRecorde
 from torch.distributed.flight_recorder.components.types import (
     Collective,
     EntryState,
+    FlightRecorderEntry,
     Group,
     MatchInfo,
     MatchState,
@@ -65,8 +66,8 @@ def format_frames(frames: list[dict[str, str]]) -> str:
 
 
 def match_one_event(
-    event_a: dict[Any, Any],
-    event_b: dict[Any, Any],
+    event_a: FlightRecorderEntry,
+    event_b: FlightRecorderEntry,
     memberships: dict[str, set[Any]],
     pg_name: str,
 ) -> MatchInfo:
@@ -76,7 +77,7 @@ def match_one_event(
 
 
 def match_coalesced_groups(
-    all_rank_events: dict[Any, Any],
+    all_rank_events: dict[int, list[tuple[int, FlightRecorderEntry]]],
     group_size: int,
     groups: dict[str, Group],
     memberships: dict[str, set[Any]],
@@ -107,7 +108,7 @@ def match_coalesced_groups(
     """
     all_ops = {
         rank: [
-            Op(e, memberships, _pg_guids[(e["process_group"][0], rank)])
+            Op(e, memberships, _pg_guids[(e.process_group[0], rank)])
             for i, e in all_rank_events[rank]
         ]
         for rank in all_rank_events
@@ -119,7 +120,7 @@ def match_coalesced_groups(
     ) -> None:
         all_ops = {
             rank: [
-                Op(e, memberships, _pg_guids[(e["process_group"][0], rank)])
+                Op(e, memberships, _pg_guids[(e.process_group[0], rank)])
                 for i, e in all_rank_events[rank]
             ]
             for rank in all_rank_events
@@ -135,7 +136,7 @@ def match_coalesced_groups(
                 if len(all_ops[r]) > i:
                     rank, event = all_rank_events[r][i]
                     # Check if the pg_guid exists for this rank and process group
-                    pg_key = (event["process_group"][0], rank)
+                    pg_key = (event.process_group[0], rank)
                     if pg_key in _pg_guids:
                         row.append(
                             Op(
@@ -206,7 +207,7 @@ def match_coalesced_groups(
 
 # We enabled the creating FR entry for non-P2P slow path collective ops in v2.7.
 def match_coalesced_groups_with_non_p2p(
-    all_rank_events: dict[Any, Any],
+    all_rank_events: dict[int, list[tuple[int, FlightRecorderEntry]]],
     pg_info: tuple[str, str],
     memberships: dict[str, set[Any]],
     _pg_guids: dict[tuple[str, int], str],
@@ -241,7 +242,7 @@ def match_coalesced_groups_with_non_p2p(
     """
     all_ops = {
         rank: [
-            Op(e, memberships, _pg_guids[(e["process_group"][0], rank)])
+            Op(e, memberships, _pg_guids[(e.process_group[0], rank)])
             for _, e in all_rank_events[rank]
         ]
         for rank in all_rank_events
@@ -255,7 +256,7 @@ def match_coalesced_groups_with_non_p2p(
     ) -> None:
         all_ops = {
             rank: [
-                Op(e, memberships, _pg_guids[(e["process_group"][0], rank)])
+                Op(e, memberships, _pg_guids[(e.process_group[0], rank)])
                 for _, e in all_rank_events[rank]
             ]
             for rank in all_rank_events
@@ -271,7 +272,7 @@ def match_coalesced_groups_with_non_p2p(
                 if len(all_ops[r]) > i:
                     rank, event = all_rank_events[r][i]
                     # Check if the pg_guid exists for this rank and process group
-                    pg_key = (event["process_group"][0], rank)
+                    pg_key = (event.process_group[0], rank)
                     if pg_key in _pg_guids:
                         row.append(
                             Op(
@@ -334,7 +335,8 @@ def match_coalesced_groups_with_non_p2p(
                 return False
         else:
             all_coalesced_entries = {
-                rank: [e for _, e in all_rank_events[rank]] for rank in all_rank_events
+                rank: [e for _, e in all_rank_events[rank]]
+                for rank in all_rank_events
             }
             current_entry = all_coalesced_entries[first_rank][0]
             my_ops.pop(0)
@@ -413,35 +415,42 @@ def match_coalesced_groups_with_non_p2p(
     return True
 
 
-def check_size_alltoall(alltoall_cases: list[dict[str, Any]]) -> tuple[bool, int, int]:
+def check_size_alltoall(
+    alltoall_cases: list[FlightRecorderEntry],
+) -> tuple[bool, int, int]:
     input_numel = 0
     output_numel = 0
     for e in alltoall_cases:
-        input_numel += math.prod(e["input_sizes"][0])
-        output_numel += math.prod(e["output_sizes"][0])
+        input_numel += math.prod(e.input_sizes[0])
+        output_numel += math.prod(e.output_sizes[0])
     return input_numel != output_numel, input_numel, output_numel
 
 
 def check_current_entry_match(
-    all_entries: dict[int, list[dict[str, Any]]],
+    all_entries: dict[int, list[FlightRecorderEntry]],
     _pg_guids: dict[tuple[str, int], str],
     pg_info: tuple[str, str],
-    current_entry: dict[str, Any],
+    current_entry: FlightRecorderEntry,
     _memberships: dict[str, set[Any]],
     mismatch: dict[str, int],
     match_record: MatchStateRecord,
 ) -> None:
     pg_name, desc = pg_info[0], pg_info[1]
     for o in match_record.expected_ranks.intersection(set(match_record.other_ranks)):
-        for i, e in enumerate(all_entries[o]):  # type: ignore[index]
+        for i, e in enumerate(all_entries[o]):
             # step over ops from other PGs
             # only check match state when seq_id matches
             if (
-                _pg_guids[(e["process_group"][0], o)] == pg_name
-                and e["process_group"][1] == desc
-                and e["collective_seq_id"] == match_record.entry_state.collective_seq_id
+                _pg_guids[(e.process_group[0], o)] == pg_name
+                and e.process_group[1] == desc
+                and e.collective_seq_id == match_record.entry_state.collective_seq_id
             ):
-                match_info = match_one_event(current_entry, e, _memberships, pg_name)
+                match_info = match_one_event(
+                    current_entry,
+                    e,
+                    _memberships,
+                    pg_name,
+                )
                 if (
                     match_info.state in [MatchState.FULLY_MATCHED, MatchState.UNDECIDED]
                     and mismatch[pg_name] == 0
@@ -467,11 +476,11 @@ def check_current_entry_match(
 
 
 def error_analysis(
-    all_entries: dict[int, list[dict[str, Any]]],
+    all_entries: dict[int, list[FlightRecorderEntry]],
     match_record: MatchStateRecord,
     dumps_ranks: set[int],
     first_rank: int,
-    current_entry: dict[str, Any],
+    current_entry: FlightRecorderEntry,
     mismatch: dict[str, int],
     version: tuple[int, int],
     pg_name: str,
@@ -577,32 +586,30 @@ def error_analysis(
 
 def find_coalesced_group(
     pg_name: str,
-    entries: list[dict[str, Any]],
+    entries: list[FlightRecorderEntry],
     _pg_guids: dict[tuple[str, int], str],
     rank: int,
-) -> list[tuple[int, dict[str, Any]]]:
+) -> list[tuple[int, FlightRecorderEntry]]:
     """Given a list of entries, if the collective_seq_id of the first entry matches that of subsequent ones,
     build and return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
     """
     found = []
     collective_seq_id = None
     for i, e in enumerate(entries):
-        if _pg_guids[(e["process_group"][0], rank)] != pg_name:
+        if _pg_guids[(e.process_group[0], rank)] != pg_name:
             continue
         elif collective_seq_id is None:
-            collective_seq_id = (
-                e["p2p_seq_id"] if e["is_p2p"] else e["collective_seq_id"]
-            )
+            collective_seq_id = e.p2p_seq_id if e.is_p2p else e.collective_seq_id
             found.append((i, e))
-        elif not e["is_p2p"] and e["collective_seq_id"] == collective_seq_id:
+        elif not e.is_p2p and e.collective_seq_id == collective_seq_id:
             found.append((i, e))
-        elif e["is_p2p"] and e["p2p_seq_id"] == collective_seq_id:
+        elif e.is_p2p and e.p2p_seq_id == collective_seq_id:
             found.append((i, e))
         else:
             break
 
     if len(found) > 1:
-        if found[-1][1]["profiling_name"] != "nccl:coalesced":
+        if found[-1][1].profiling_name != "nccl:coalesced":
             raise AssertionError
         return found
     return []
@@ -611,32 +618,30 @@ def find_coalesced_group(
 # We enabled the creating FR entry for non-P2P slow path collective ops in v2.7.
 def find_coalesced_group_with_non_p2p(
     pg_name: str,
-    entries: list[dict[str, Any]],
+    entries: list[FlightRecorderEntry],
     _pg_guids: dict[tuple[str, int], str],
     rank: int,
-) -> list[tuple[int, dict[str, Any]]]:
+) -> list[tuple[int, FlightRecorderEntry]]:
     """Given a list of entries, if the collective_seq_id of the first entry matches that of subsequent ones,
     build and return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
     """
     found = []
     collective_seq_id = None
     for i, e in enumerate(entries):
-        if _pg_guids[(e["process_group"][0], rank)] != pg_name:
+        if _pg_guids[(e.process_group[0], rank)] != pg_name:
             continue
         elif collective_seq_id is None:
-            collective_seq_id = (
-                e["p2p_seq_id"] if e["is_p2p"] else e["collective_seq_id"]
-            )
+            collective_seq_id = e.p2p_seq_id if e.is_p2p else e.collective_seq_id
             found.append((i, e))
-        elif not e["is_p2p"] and e["collective_seq_id"] == collective_seq_id:
+        elif not e.is_p2p and e.collective_seq_id == collective_seq_id:
             found.append((i, e))
-        elif e["is_p2p"] and e["p2p_seq_id"] == collective_seq_id:
+        elif e.is_p2p and e.p2p_seq_id == collective_seq_id:
             found.append((i, e))
         else:
             break
 
     if len(found) > 1:
-        name = found[-1][1]["profiling_name"]
+        name = found[-1][1].profiling_name
         if name.startswith("nccl:") and not name.endswith("_coalesced"):
             logger.error("Rank %s does not have a coalesced end.", rank)
         return found
@@ -644,7 +649,7 @@ def find_coalesced_group_with_non_p2p(
 
 
 def just_print_entries(
-    all_entries: dict[int, list[dict[str, Any]]],
+    all_entries: dict[int, list[FlightRecorderEntry]],
     _groups: dict[str, Group],
     _memberships: dict[str, set[Any]],
     _pg_guids: dict[tuple[str, int], str],
@@ -669,11 +674,11 @@ def just_print_entries(
                 row.append("")
             else:
                 entry = all_entries[rank].pop(0)
-                pg_name = _pg_guids[(entry["process_group"][0], rank)]
+                pg_name = _pg_guids[(entry.process_group[0], rank)]
                 if (
                     args.pg_filters is None
-                    or entry["process_group"][1] in args.pg_filters
-                    or entry["process_group"][0] in args.pg_filters
+                    or entry.process_group[1] in args.pg_filters
+                    or entry.process_group[0] in args.pg_filters
                 ):
                     row.append(str(Op(entry, _memberships, pg_name)))
                 else:
@@ -724,29 +729,29 @@ def get_version_detail(version: str) -> tuple[int, int]:
 
 
 def add_stack_id_in_entries(
-    entries: dict[int, list[dict[str, Any]]],
-) -> tuple[dict[int, list[dict[str, Any]]], dict[str, int]]:
+    entries: dict[int, list[FlightRecorderEntry]],
+) -> tuple[dict[int, list[FlightRecorderEntry]], dict[str, int]]:
     stack_id = 0
     stack_id_trace_map = {}
     for rank in entries:
         for dump in entries[rank]:
-            if dump.get("frames", []):
-                frames = str(dump["frames"])
+            if dump.frames:
+                frames = str(dump.frames)
                 if frames not in stack_id_trace_map:
                     stack_id_trace_map[frames] = stack_id
-                    dump["stack_id"] = stack_id
+                    dump.stack_id = stack_id
                     stack_id += 1
                 else:
-                    dump["stack_id"] = stack_id_trace_map[frames]
+                    dump.stack_id = stack_id_trace_map[frames]
             else:
-                dump["stack_id"] = -1
+                dump.stack_id = -1
 
     return entries, stack_id_trace_map
 
 
 def align_trace_from_beginning(
-    entries: dict[int, list[dict[str, Any]]],
-) -> dict[int, list[dict[str, Any]]]:
+    entries: dict[int, list[FlightRecorderEntry]],
+) -> dict[int, list[FlightRecorderEntry]]:
     """
     Align the trace entries by record ID for entries.
     This function takes a dictionary of rank names to lists of trace entries as input.
@@ -778,14 +783,14 @@ def align_trace_from_beginning(
         # as well.
         if len(entries[rank]) == 0:
             continue
-        first_record_id = entries[rank][0]["record_id"]
+        first_record_id = entries[rank][0].record_id
         maximum_starting_record_id = max(maximum_starting_record_id, first_record_id)
 
     for rank in entries:
         entries[rank] = [
             entry
             for entry in entries[rank]
-            if entry["record_id"] >= maximum_starting_record_id
+            if entry.record_id >= maximum_starting_record_id
         ]
 
     return entries

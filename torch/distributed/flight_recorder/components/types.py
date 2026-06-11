@@ -6,10 +6,12 @@
 
 import math
 import os
+from dataclasses import dataclass, field
 from enum import auto, Enum
 from typing import (
     _eval_type,  # pyrefly: ignore [missing-module-attribute]
     Any,
+    cast,
     Generic,
     NamedTuple,
     TypeVar,
@@ -29,6 +31,7 @@ __all__ = [
     "Collective",
     "NCCLCall",
     "Database",
+    "FlightRecorderEntry",
     "EntryState",
     "Op",
     "MatchStateRecord",
@@ -179,6 +182,44 @@ class Database(NamedTuple):
     ncclcalls: list[NCCLCall]
 
 
+@dataclass
+class FlightRecorderEntry:
+    process_group: tuple[str, str]
+    profiling_name: str
+    collective_seq_id: int
+    p2p_seq_id: int
+    record_id: int
+    input_sizes: list[list[int]]
+    output_sizes: list[list[int]]
+    state: str
+    is_p2p: bool
+    input_dtypes: Any = None
+    output_dtypes: Any = None
+    time_created_ns: int = 0
+    frames: list[dict[str, str]] = field(default_factory=list)
+    stack_id: int = -1
+
+    @classmethod
+    def from_dict(cls, entry: dict[str, Any]) -> "FlightRecorderEntry":
+        process_group = cast(tuple[str, str], entry["process_group"])
+        return cls(
+            process_group=(process_group[0], process_group[1]),
+            profiling_name=cast(str, entry["profiling_name"]),
+            collective_seq_id=int(entry["collective_seq_id"]),
+            p2p_seq_id=int(entry["p2p_seq_id"]),
+            record_id=cast(int, entry["record_id"]),
+            input_sizes=cast(list[list[int]], entry["input_sizes"]),
+            output_sizes=cast(list[list[int]], entry["output_sizes"]),
+            state=cast(str, entry["state"]),
+            is_p2p=cast(bool, entry["is_p2p"]),
+            input_dtypes=entry.get("input_dtypes"),
+            output_dtypes=entry.get("output_dtypes"),
+            time_created_ns=cast(int, entry.get("time_created_ns", 0)),
+            frames=cast(list[dict[str, str]], entry.get("frames", [])),
+            stack_id=cast(int, entry.get("stack_id", -1)),
+        )
+
+
 # TODO: We need to add a schema for the following
 types = [
     TypeInfo.from_type(t)  # type: ignore[type-var]
@@ -245,20 +286,20 @@ class EntryState:
     log the error info during analysis.
     """
 
-    def __init__(self, entry: dict[str, Any], expected_ranks: set[int]) -> None:
-        self.pg_name = entry["process_group"][0]
-        self.desc = entry["process_group"][1]
+    def __init__(self, entry: FlightRecorderEntry, expected_ranks: set[int]) -> None:
+        self.pg_name = entry.process_group[0]
+        self.desc = entry.process_group[1]
         self.pg_desc = (
             f"{self.pg_name}:{self.desc}" if self.desc != "undefined" else self.pg_name
         )
-        self.profiling_name = entry["profiling_name"]
-        self.collective_seq_id = entry["collective_seq_id"]
-        self.p2p_seq_id = entry["p2p_seq_id"]
-        self.record_id = entry["record_id"]
-        self.input_sizes = entry["input_sizes"]
-        self.output_sizes = entry["output_sizes"]
-        self.collective_state = entry["state"]
-        self.collective_frames = entry.get("frames", [])
+        self.profiling_name = entry.profiling_name
+        self.collective_seq_id = entry.collective_seq_id
+        self.p2p_seq_id = entry.p2p_seq_id
+        self.record_id = entry.record_id
+        self.input_sizes = entry.input_sizes
+        self.output_sizes = entry.output_sizes
+        self.collective_state = entry.state
+        self.collective_frames = entry.frames
         self.expected_ranks = expected_ranks
         self.missing_ranks: set[int]
         self.input_numel: int
@@ -309,7 +350,7 @@ class EntryState:
         id: int,
         errors: set[tuple[int, MatchInfo]] | None = None,
         idx_map: dict[int, int] | None = None,
-        all_entries: dict[int, list[dict[str, Any]]] | None = None,
+        all_entries: dict[int, list[FlightRecorderEntry]] | None = None,
     ) -> Collective:
         if not errors:
             return Collective(
@@ -337,22 +378,22 @@ class EntryState:
             for rank, error in errors:
                 idx = idx_map[rank]
                 entry = all_entries[rank][idx]
-                desc = entry["process_group"][1]
-                pg_name = entry["process_group"][0]
+                desc = entry.process_group[1]
+                pg_name = entry.process_group[0]
                 mismatch_collectives[rank] = Collective(
                     id=id,
-                    group_id=entry["process_group"][0],
-                    record_id=entry["record_id"],
+                    group_id=entry.process_group[0],
+                    record_id=entry.record_id,
                     pg_desc=f"{pg_name}:{desc}" if desc != "undefined" else pg_name,
                     pass_check=False,
-                    collective_seq_id=entry["collective_seq_id"],
-                    p2p_seq_id=entry["p2p_seq_id"],
-                    collective_name=entry["profiling_name"],
-                    input_sizes=entry["input_sizes"],
-                    output_sizes=entry["output_sizes"],
+                    collective_seq_id=entry.collective_seq_id,
+                    p2p_seq_id=entry.p2p_seq_id,
+                    collective_name=entry.profiling_name,
+                    input_sizes=entry.input_sizes,
+                    output_sizes=entry.output_sizes,
                     expected_ranks=self.expected_ranks,
-                    collective_state=entry["state"],
-                    collective_frames=entry.get("frames", []),
+                    collective_state=entry.state,
+                    collective_frames=entry.frames,
                     type_of_mismatch=error,
                 )
             return Collective(
@@ -381,7 +422,7 @@ class EntryState:
 
     def to_nccl_call(
         self,
-        all_entries: dict[int, list[dict[str, Any]]],
+        all_entries: dict[int, list[FlightRecorderEntry]],
         idx_map: dict[int, int],
         nccl_call_id: int,
         collective_id: Any,
@@ -414,9 +455,9 @@ class Op:
     """
 
     def __init__(
-        self, event: dict[Any, Any], memberships: dict[str, set[Any]], pg_name: str
+        self, event: FlightRecorderEntry, memberships: dict[str, set[Any]], pg_name: str
     ):
-        self.profiling_name = event["profiling_name"]
+        self.profiling_name = event.profiling_name
         comm_lib_backend, name = self.profiling_name.split(":")
         _SUPPORTED_BACKENDS = {
             "nccl",
@@ -435,10 +476,10 @@ class Op:
         parts = name.split(" ")
         type = parts[0]
         meta = parts[1] if len(parts) == 2 else None
-        self.state = event["state"]
+        self.state = event.state
         # Store the hashed pg_name for accessing memberships, and original pg info for display
         self.pg_name = pg_name  # This is the hashed version used for memberships lookup
-        self.original_pg_name, self.pg_desc = event["process_group"]
+        self.original_pg_name, self.pg_desc = event.process_group
         if type not in COLLECTIVES | P2P | {"coalesced"}:
             raise AssertionError(f"{type} is not a supported operation")
         self.type = type
@@ -456,18 +497,20 @@ class Op:
             self._src, self._dst = -1, -1
         self._init_global_src_dst(memberships[pg_name])
         self.pg_size = len(memberships[pg_name])
+        self.input_sizes: list[list[int]] | None
+        self.output_sizes: list[list[int]] | None
         if type in P2P | COLLECTIVES:
-            self.input_sizes = event["input_sizes"]
-            self.output_sizes = event["output_sizes"]
+            self.input_sizes = event.input_sizes
+            self.output_sizes = event.output_sizes
         else:
             self.input_sizes, self.output_sizes = None, None
-        self.collective_seq_id = event["collective_seq_id"]
-        self.stack_id = event.get("stack_id", -1)
-        self.p2p_seq_id = event["p2p_seq_id"]
-        self.input_dtypes = event["input_dtypes"]
-        self.output_dtypes = event["output_dtypes"]
-        self.time_created_ns = event["time_created_ns"]
-        self.collective_frames = event.get("frames", [])
+        self.collective_seq_id = event.collective_seq_id
+        self.stack_id = event.stack_id
+        self.p2p_seq_id = event.p2p_seq_id
+        self.input_dtypes = event.input_dtypes
+        self.output_dtypes = event.output_dtypes
+        self.time_created_ns = event.time_created_ns
+        self.collective_frames = event.frames
         self.is_verbose = os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1"
 
     def _init_global_src_dst(self, pg_ranks: set[Any]) -> None:
@@ -513,6 +556,13 @@ class Op:
         )
 
     def dtype_mismatch(self, other: "Op") -> bool:
+        if (
+            self.input_sizes is None
+            or self.output_sizes is None
+            or other.input_sizes is None
+            or other.output_sizes is None
+        ):
+            return False
         if (
             (
                 self.type not in ["scatter", "gather", "broadcast"]
@@ -571,6 +621,13 @@ class Op:
                     MatchState.COLLECTIVE_TYPE_MISMATCH,
                     f"Expected collective type: '{self.type}' does not match found collective type: '{other.type}'",
                 )
+            if (
+                self.input_sizes is None
+                or self.output_sizes is None
+                or other.input_sizes is None
+                or other.output_sizes is None
+            ):
+                return MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH)
             if (
                 self.type not in ["all_to_all", "scatter"]
                 and self.input_sizes != other.input_sizes

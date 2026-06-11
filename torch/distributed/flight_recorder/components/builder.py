@@ -9,13 +9,14 @@ import ast
 import copy
 import os
 import sys
-from typing import Any  # type: ignore[attr-defined]
+from typing import Any
 
 from torch.distributed.flight_recorder.components.fr_logger import FlightRecorderLogger
 from torch.distributed.flight_recorder.components.types import (
     Collective,
     Database,
     EntryState,
+    FlightRecorderEntry,
     Group,
     MatchStateRecord,
     Membership,
@@ -139,7 +140,7 @@ def build_groups_memberships(
 
 
 def build_collectives(
-    all_entries: dict[int, list[dict[str, Any]]],
+    all_entries: dict[int, list[FlightRecorderEntry]],
     _groups: dict[str, Group],
     _memberships: dict[str, set[Any]],
     _pg_guids: dict[tuple[str, int], str],
@@ -206,9 +207,9 @@ def build_collectives(
         # collective is also the first one on those ranks within that group
         entries = all_entries[first_rank]
         current_entry = entries[0]
-        desc = current_entry["process_group"][1]
+        desc = current_entry.process_group[1]
         # For db build and logs printing, we want to use the original pg_name, not the hash one.
-        original_pg_name = current_entry["process_group"][0]
+        original_pg_name = current_entry.process_group[0]
         pg_name = _pg_guids[(original_pg_name, first_rank)]
         expected_ranks = set(_memberships[pg_name])
         entry_state = EntryState(current_entry, expected_ranks)
@@ -237,13 +238,13 @@ def build_collectives(
             # We need a copy of the original expected ranks to avoid modifying it.
             candidate_ranks = copy.deepcopy(expected_ranks)
             done_ranks = set()
-            all_coalesced_entries = {}
+            all_coalesced_entries: dict[int, list[tuple[int, FlightRecorderEntry]]] = {}
             while candidate_ranks:
                 curr = candidate_ranks.pop()
                 done_ranks.add(curr)
                 grp = (
-                    find_coalesced_group(pg_name, all_entries[curr], _pg_guids, curr)  # type: ignore[index]
-                    if curr in all_entries  # type: ignore[comparison-overlap]
+                    find_coalesced_group(pg_name, all_entries[curr], _pg_guids, curr)
+                    if curr in all_entries
                     else []
                 )
                 all_coalesced_entries[curr] = grp
@@ -413,12 +414,14 @@ def build_db(
     if args.verbose:
         os.environ["FR_TRACE_VERBOSE_OUTPUT"] = "1"
     # temporary state used for building database
-    entries = {}
+    entries: dict[int, list[FlightRecorderEntry]] = {}
     pg_config = {}
     version_by_ranks = {}
     for dump in details.values():
         rank = dump["rank"]
-        entries[rank] = dump["entries"]
+        entries[rank] = [
+            FlightRecorderEntry.from_dict(entry) for entry in dump["entries"]
+        ]
         version_by_ranks[rank] = dump["version"]
         pg_config[rank] = dump["pg_config"]
 
