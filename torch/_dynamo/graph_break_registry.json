@@ -4195,6 +4195,16 @@
       ]
     }
   ],
+  "GB4818": [
+    {
+      "Gb_type": "call to a callable object with no traceable __call__",
+      "Context": "object={self.value}",
+      "Explanation": "Dynamo could not trace a Python `__call__` method on this object.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0288": [
     {
       "Gb_type": "Can't extract message from torch._check()",

@@ -3146,9 +3146,6 @@ class PolyfilledFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__call__":
-            return self.call_function(tx, args, kwargs)
-
         method = getattr(self.fn, name, None)
         if not (method or is_function(method)):
             raise_type_error(tx, f"Cannot find callable {name} in {self.fn}")
