@@ -2293,7 +2293,10 @@ class TritonHOPifier:
         combined_args_raw = {**dict(zip(iter_kernel.arg_names, args)), **kwargs}
         default_args = {}
         for name, param in iter_kernel.signature.parameters.items():
-            if name not in combined_args_raw and param.default is not inspect.Parameter.empty:
+            if (
+                name not in combined_args_raw
+                and param.default is not inspect.Parameter.empty
+            ):
                 default_args[name] = param.default
                 combined_args_raw[name] = param.default
 
