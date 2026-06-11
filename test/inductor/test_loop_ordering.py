@@ -17,6 +17,7 @@ from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
+from torch._inductor.loop_body import LoopBody, MemoryUsageType
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
@@ -123,6 +124,18 @@ class ImplDetailTest(MockSchedulerTest):
         computed_buf.decide_layout()
         return computed_buf
 
+    @staticmethod
+    def _create_buffer(name, shape, dtype=torch.float32):
+        return ir.Buffer(
+            name=name,
+            layout=ir.FixedLayout(
+                torch.device(GPU_TYPE),
+                dtype=dtype,
+                size=shape,
+                stride=ir.FlexibleLayout.contiguous_strides(shape),
+            ),
+        )
+
     def test_reorder_twice(self):
         """
         This may happen in practice if we pick a order when fusing A and B.
@@ -207,6 +220,98 @@ class ImplDetailTest(MockSchedulerTest):
             new_body.indexing_exprs["index0"],
             z2 + 49 * z1 + 2401 * ModularIndexing(z3, 1, 64),
         )
+
+    def test_loop_body_define_by_run_capture_helpers(self):
+        x = self._create_buffer("x", (8,))
+        i0 = sympy_index_symbol("i0")
+        r0 = sympy_index_symbol("r0")
+        iter_vars = [i0]
+        reduce_vars = [r0]
+        var_ranges = {
+            i0: 8,
+            r0: 4,
+        }
+
+        def inner_fn(index, rindex):
+            indirect = ops.indirect_indexing(index[0] + rindex[0], x.get_size()[0])
+            masked = ops.masked(
+                ops.lt(
+                    ops.index_expr(rindex[0], torch.int64),
+                    ops.constant(2, torch.int64),
+                ),
+                lambda: ops.load(x.get_name(), indirect),
+                ops.constant(0.0, x.get_dtype()),
+            )
+            (scanned,) = ops.scan(
+                (x.get_dtype(),),
+                lambda lhs, rhs: (ops.add(lhs[0], rhs[0]),),
+                (masked,),
+            )
+            ops.store("out", index[0], scanned)
+
+        body = LoopBody(
+            inner_fn,
+            (iter_vars, reduce_vars),
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+        )
+
+        masked_name = next(
+            name for name in body.subblocks if name.startswith("masked_subblock")
+        )
+        scan_name = next(name for name in body.submodules if name.startswith("scan"))
+        indirect_name = next(
+            name for name in body.submodules if name.startswith("set_indirect")
+        )
+
+        self.assertIn(masked_name, body.submodules)
+        self.assertNotIn(scan_name, body.subblocks)
+        self.assertNotIn(indirect_name, body.subblocks)
+        self.assertEqual(len(body.indirect_vars), 1)
+        self.assertEqual(body.indirect_var_ranges[body.indirect_vars[0]], 8)
+        self.assertTrue(body.has_op("masked"))
+        self.assertTrue(body.has_op("scan"))
+        self.assertTrue(body.has_op("indirect_indexing"))
+        self.assertEqual(
+            [entry.buffer_name for entry in body.memory_usage[MemoryUsageType.LOAD]],
+            ["x"],
+        )
+        self.assertEqual(
+            [entry.buffer_name for entry in body.memory_usage[MemoryUsageType.STORE]],
+            ["out"],
+        )
+        self.assertTrue(body.subblocks[masked_name].contains_only_ops(("load",)))
+
+        p0 = sympy_index_symbol("p0")
+        p1 = sympy_index_symbol("p1")
+        copied = LoopBody(
+            body,
+            ([p0], [p1]),
+            {p0: 8, p1: 4},
+            [p0],
+            [p1],
+        )
+        q0 = sympy_index_symbol("q0")
+        q1 = sympy_index_symbol("q1")
+        copied_twice = LoopBody(
+            copied,
+            ([q0], [q1]),
+            {q0: 8, q1: 4},
+            [q0],
+            [q1],
+        )
+
+        for cloned in (copied, copied_twice):
+            self.assertEqual(set(body.submodules), set(cloned.submodules))
+            self.assertEqual(set(body.subblocks), set(cloned.subblocks))
+            self.assertGreater(len(list(cloned.root_block.graph.nodes)), 0)
+            self.assertTrue(
+                all(
+                    name == "get_index" or hasattr(submodule, "clone")
+                    for name, submodule in cloned.submodules.items()
+                )
+            )
 
 
 @inductor_config.patch(

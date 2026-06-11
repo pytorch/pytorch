@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import collections
+import contextlib
 import functools
 import itertools
 import re
@@ -95,6 +96,12 @@ class LoopBody:
     """
     Captures the body of a Loops subclass into an FX graph.  Persists any
     indexing simplifications and makes it easier to analyze loop bodies.
+
+    The capture pipeline is still define-by-run: we run the user callback once with
+    a tracing ``V.ops`` handler installed. The handler records symbolic indexing,
+    registers synthetic ``call_module`` targets for control-flow-like constructs
+    such as ``masked``/``scan``/``indirect_indexing``, and emits an FX graph that
+    can later be replayed with a different ``V.ops`` interpretation.
     """
 
     indexing_exprs: dict[str, sympy.Expr]
@@ -559,40 +566,71 @@ class LoopBody:
             for name, expr in self.indexing_exprs.items()
         }
 
-    def __call__(self, *indices, allow_same_symbol_in_index=False):
+    @contextlib.contextmanager
+    def indexing_context(self, indices, allow_same_symbol_in_index=False):
+        assert self.indexing is None
         self.indexing = self.indexing_from_args(indices, allow_same_symbol_in_index)
-        result = self.root_block()
-        self.indexing = None
-        return result
+        try:
+            yield
+        finally:
+            self.indexing = None
 
-    def bind_set_indirect_shim(self, var, size, check, wrap_neg):
+    def __call__(self, *indices, allow_same_symbol_in_index=False):
+        with self.indexing_context(indices, allow_same_symbol_in_index):
+            return self.root_block()
+
+    def _make_cloneable_shim(self, shim_factory, **kwargs):
+        shim = shim_factory(self, **kwargs)
+        shim.clone = functools.partial(  # type: ignore[attr-defined]
+            LoopBody._make_cloneable_shim,
+            shim_factory=shim_factory,
+            **kwargs,
+        )
+        return shim
+
+    def _indirect_index_shim(self, var, size, check, wrap_neg):
         def set_indirect(new_var):
             self.replace_indirect(
                 var, V.ops.indirect_indexing(new_var, size, check, wrap_neg)
             )
 
-        set_indirect.clone = functools.partial(  # type: ignore[attr-defined]
-            LoopBody.bind_set_indirect_shim,
+        return set_indirect
+
+    def add_indirect_index_submodule(self, size, check=True, wrap_neg=True):
+        var = self.add_indirect(size)
+        shim = self._make_cloneable_shim(
+            LoopBody._indirect_index_shim,
             var=var,
             size=size,
             check=check,
             wrap_neg=wrap_neg,
         )
-        return set_indirect
+        return var, self.add_submodule(shim, f"set_{var}")
 
-    def bind_scan_shim(self, combine_fn):
+    def _scan_shim(self, combine_fn):
         def shim(dtypes, values):
             return V.ops.scan(dtypes, combine_fn, values)
 
-        shim.clone = functools.partial(LoopBody.bind_scan_shim, combine_fn=combine_fn)  # type: ignore[attr-defined]
         return shim
 
-    def bind_masked_shim(self, name):
+    def add_scan_submodule(self, combine_fn):
+        shim = self._make_cloneable_shim(LoopBody._scan_shim, combine_fn=combine_fn)
+        return self.add_submodule(shim, "scan")
+
+    def _masked_subblock_shim(self, name):
         def shim(mask, other):
             return V.ops.masked(mask, self.subblocks[name], other)
 
-        shim.clone = functools.partial(LoopBody.bind_masked_shim, name=name)  # type: ignore[attr-defined]
         return shim
+
+    def add_masked_subblock(self, masked_body):
+        name = self.add_submodule(None, "masked_subblock")
+        self.submodules[name] = self._make_cloneable_shim(
+            LoopBody._masked_subblock_shim,
+            name=name,
+        )
+        self.subblocks[name] = LoopBodyBlock(self, masked_body, [])
+        return name
 
 
 class LoopBodyBlock:
@@ -603,14 +641,11 @@ class LoopBodyBlock:
     operations will manifest as an extra LoopBodyBlock.
     """
 
-    def __init__(self, body: LoopBody, fn: Callable[..., Any], args: list[Any]):
-        self.body = body
-
-        tracer = LightTracer()
-        proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
-
+    @staticmethod
+    def _make_tracing_handler(body: LoopBody, tracer: LightTracer):
         from .index_propagation import IndexPropagation
 
+        proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
         handler: Any = CountOps(
             CaptureIndexing(
                 # pyrefly: ignore[bad-argument-type]
@@ -622,8 +657,15 @@ class LoopBodyBlock:
         )
         if config.constant_and_index_propagation:
             handler = IndexPropagation(
-                handler, self.body.var_ranges, self.body.indirect_var_ranges
+                handler, body.var_ranges, body.indirect_var_ranges
             )
+        return handler
+
+    def __init__(self, body: LoopBody, fn: Callable[..., Any], args: list[Any]):
+        self.body = body
+
+        tracer = LightTracer()
+        handler = self._make_tracing_handler(body, tracer)
 
         with V.set_ops_handler(handler):
             # This indirection is just a cute way to get IndexPropagation to
@@ -721,6 +763,13 @@ class CaptureIndexing(WrapperHandler):
             (self.body.add_index_expr(expr, mtype, **kwargs),),
             {},
         )
+
+    def _call_submodule(self, name: str, *args: Any):
+        return self.tracer.create_proxy("call_module", name, args, {})
+
+    @staticmethod
+    def _proxy_tuple(result_proxy, size: int):
+        return tuple(result_proxy[i] for i in range(size))
 
     def _simplify(self, expr: sympy.Expr) -> sympy.Expr:
         return V.graph.sizevars.simplify_with_ranges(expr, self.body.var_ranges)
@@ -833,12 +882,8 @@ class CaptureIndexing(WrapperHandler):
         """
         Recursively capture the masked out body in another LoopBodyBlock
         """
-        name = self.body.add_submodule(None, "masked_subblock")
-        self.body.submodules[name] = self.body.bind_masked_shim(name)
-        self.body.subblocks[name] = LoopBodyBlock(self.body, masked_body, [])
-        return self.tracer.create_proxy(
-            "call_module", name, (mask_proxy, other_proxy), {}
-        )
+        name = self.body.add_masked_subblock(masked_body)
+        return self._call_submodule(name, mask_proxy, other_proxy)
 
     def scan(
         self,
@@ -846,26 +891,20 @@ class CaptureIndexing(WrapperHandler):
         combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]],
         value_proxy,
     ):
-        shim = self.body.bind_scan_shim(combine_fn)
-        name = self.body.add_submodule(shim, "scan")
-        result = self.tracer.create_proxy(
-            "call_module",
-            name,
-            (dtype_proxy, value_proxy),
-            {},
-        )
+        name = self.body.add_scan_submodule(combine_fn)
+        result = self._call_submodule(name, dtype_proxy, value_proxy)
         # Proxies are iterable, but some methods expect tuples/lists
-        return tuple(result[i] for i in range(len(value_proxy)))
+        return self._proxy_tuple(result, len(value_proxy))
 
     def sort(self, dtypes, values, stable, descending):
         result = self._inner.sort(dtypes, values, stable, descending)
         # Proxies are iterable, but some methods expect tuples/lists
-        return tuple(result[i] for i in range(len(values)))
+        return self._proxy_tuple(result, len(values))
 
     def frexp(self, value_proxy):
         result = self._inner.frexp(value_proxy)
         # Proxies are iterable, but some methods expect tuples/lists
-        return (result[0], result[1])
+        return self._proxy_tuple(result, 2)
 
     def indirect_indexing(self, index_proxy, size, check=True, wrap_neg=True):
         """
@@ -873,14 +912,12 @@ class CaptureIndexing(WrapperHandler):
         Introduce a call_module to update the indexing.
         """
 
-        var = self.body.add_indirect(size)
-        set_indirect = self.body.bind_set_indirect_shim(var, size, check, wrap_neg)
-        self.tracer.create_proxy(
-            "call_module",
-            self.body.add_submodule(set_indirect, f"set_{var}"),
-            (index_proxy,),
-            {},
+        var, submodule_name = self.body.add_indirect_index_submodule(
+            size,
+            check=check,
+            wrap_neg=wrap_neg,
         )
+        self._call_submodule(submodule_name, index_proxy)
         return var
 
     def output(self, *result):
