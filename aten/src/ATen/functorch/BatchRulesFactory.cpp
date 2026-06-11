@@ -119,19 +119,59 @@ static std::tuple<Tensor, std::optional<int64_t>> linspace_logspace_batch_rule_h
   auto end_ = ensure_has_bdim(end, end_bdim.has_value(), batch_size);
   start_ = moveBatchDimToFront(start_, start_bdim);
   end_ = moveBatchDimToFront(end_, end_bdim);
+  TORCH_CHECK(
+      start_.dim() == 1 && end_.dim() == 1,
+      "linspace/logspace only supports 0-dimensional start and end tensors");
 
-  auto result_dtype = dtype.value_or(c10::typeMetaToScalarType(c10::get_default_dtype()));
+  auto result_dtype = dtype;
+  if (start_.is_complex() || end_.is_complex()) {
+    auto default_complex_dtype =
+        c10::typeMetaToScalarType(c10::get_default_complex_dtype());
+    TORCH_CHECK(
+        !result_dtype || at::isComplexType(*result_dtype),
+        "linspace/logspace: inferred dtype ",
+        default_complex_dtype,
+        " can't be safely cast to passed dtype ",
+        *result_dtype);
+    result_dtype = result_dtype.value_or(default_complex_dtype);
+  } else {
+    result_dtype = result_dtype.value_or(
+        c10::typeMetaToScalarType(c10::get_default_dtype()));
+  }
   auto tensor_options = at::TensorOptions().dtype(result_dtype).layout(layout).device(device).pinned_memory(pin_memory);
-  auto denom = (steps - 1).max(1);
-  auto step_range = at::arange(0, steps, tensor_options).unsqueeze_(1);
-  auto result = (start_ + step_range * (end_ - start_) / denom).transpose(0, 1);
+  Tensor result;
+  if (auto concrete_steps = steps.maybe_as_int()) {
+    if (*concrete_steps == 0) {
+      result = at::full_symint(
+          c10::SymIntArrayRef({batch_size, 0}), 0, tensor_options);
+    } else if (*concrete_steps == 1) {
+      if (base) {
+        result = start_.unsqueeze(1);
+      } else {
+        result = start_
+                     .new_empty_symint(
+                         c10::SymIntArrayRef({batch_size}), tensor_options)
+                     .copy_(start_)
+                     .unsqueeze(1);
+      }
+    }
+  }
+  if (!result.defined()) {
+    auto denom = (steps - 1).max(1);
+    auto arange_options = at::isComplexType(*result_dtype)
+        ? tensor_options.dtype(
+              c10::typeMetaToScalarType(c10::get_default_dtype()))
+        : tensor_options;
+    auto step_range = at::arange(0, steps, arange_options).unsqueeze_(1);
+    result = (start_ + step_range * (end_ - start_) / denom).transpose(0, 1);
+  }
 
   if (base){
     result = at::pow(*base, result);
   }
 
-  if (dtype && result.scalar_type() != *dtype){
-    result = result.to(*dtype);
+  if (result.scalar_type() != *result_dtype){
+    result = result.to(*result_dtype);
   }
 
   return std::make_tuple(std::move(result), 0);

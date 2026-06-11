@@ -9878,6 +9878,68 @@ def forward(self, x):
                             ]
                         ),
                     )
+            vmap_inputs = [
+                (start, end, 0, torch.complex64),
+                (start, end, 1, torch.complex64),
+                (start, end, 4, torch.complex64),
+                (start.double(), end.double(), 4, None),
+                (start.to(torch.complex64) + 1j, end.to(torch.complex64), 0, None),
+                (start.to(torch.complex64) + 1j, end.to(torch.complex64), 1, None),
+                (start.to(torch.complex64) + 1j, end.to(torch.complex64), 4, None),
+                (
+                    start.to(torch.complex128) + 1j,
+                    end.to(torch.complex128),
+                    4,
+                    None,
+                ),
+            ]
+            if op is torch.linspace:
+                vmap_inputs.append(
+                    (
+                        torch.tensor([2**54 + 1, 2**54 + 3], dtype=torch.int64),
+                        torch.tensor([2**54 + 5, 2**54 + 7], dtype=torch.int64),
+                        1,
+                        torch.int64,
+                    )
+                )
+            if op is torch.logspace:
+                vmap_inputs.extend(
+                    [
+                        (
+                            torch.tensor([0.5, 1.5]),
+                            torch.tensor([2.5, 3.5]),
+                            1,
+                            torch.int64,
+                        ),
+                        (
+                            torch.tensor([0.5, 1.5], dtype=torch.float64),
+                            torch.tensor([2.5, 3.5], dtype=torch.float64),
+                            1,
+                            None,
+                        ),
+                        (
+                            torch.tensor([0.5, 1.5], dtype=torch.complex128),
+                            torch.tensor([2.5, 3.5], dtype=torch.complex128),
+                            1,
+                            None,
+                        ),
+                    ]
+                )
+            for case_start, case_end, step_count, dtype in vmap_inputs:
+                with self.subTest(op=op.__name__, steps=step_count, dtype=dtype):
+
+                    def call_op(s, e):
+                        kwargs = {"device": s.device}
+                        if dtype is not None:
+                            kwargs["dtype"] = dtype
+                        return op(s, e, steps=step_count, **kwargs)
+
+                    self.assertEqual(
+                        torch.vmap(call_op)(case_start, case_end),
+                        torch.stack(
+                            [call_op(s, e) for s, e in zip(case_start, case_end)]
+                        ),
+                    )
 
         for module in (LinspaceVmap(), LogspaceVmap()):
             with self.subTest(module=type(module).__name__):
