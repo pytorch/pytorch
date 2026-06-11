@@ -165,12 +165,21 @@ static void linalg_eig_make_complex_eigenvectors_cpu_impl(const Tensor& result, 
         for (auto i = decltype(n){0}; i < n; i++) {
           res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i], 0);
         }
-      } else {
+      } else if (j + 1 < n) {
         for (auto i = decltype(n){0}; i < n; i++) {
           res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i],  vecs[(j+1) * n + i]);      // v(j)   = VR(:,j) + i*VR(:,j+1)
           res[(j+1) * n + i] = c10::complex<scalar_t>(vecs[j * n + i], -vecs[(j+1) * n + i]);  // v(j+1) = VR(:,j) - i*VR(:,j+1)
         }
         j++;
+      } else {
+        // LAPACK reported a complex eigenvalue at the final index with no partner column in VR.
+        // VR has only n columns, so a complex pair at index n-1 would require a non-existent
+        // column n; the only interpretation of LAPACK's output consistent with the buffer
+        // dimensions is that this column represents a real eigenvector and the non-zero
+        // imag(lambda) is the inconsistent piece. Treat as real.
+        for (auto i = decltype(n){0}; i < n; i++) {
+          res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i], 0);
+        }
       }
     }
   }

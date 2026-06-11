@@ -2527,6 +2527,38 @@ class TestLinalg(TestCase):
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
     @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
+    @dtypes(torch.float64)
+    def test_eig_subnormal_input_no_overflow(self, device, dtype):
+        # Regression test for pytorch/pytorch#162358: subnormal inputs could trigger
+        # heap-buffer-overflow in linalg_eig_make_complex_eigenvectors when LAPACK's
+        # eigenvalue array reported a complex eigenvalue at the trailing index with
+        # no partner column in the packed real-eigenvector layout.
+        v = 9.01285756841503997614390621177016e-188
+        a = torch.full((9, 9), v, dtype=dtype, device=device)
+        a[0, 0] = 6.92733286357142009759300753973877e-310
+        a[0, 1] = 4.87107170610649251002689828257271e-310
+        a[0, 2] = 9.01272004312255329946307405656429e-188
+        a[8, 7] = 3.09700932956638653566522653421558e-312
+        a[8, 8] = -1.09006211749085692498734985786208e-277
+
+        # Whether the buggy branch is reached depends on how the underlying
+        # LAPACK classifies the trailing eigenvalue: conda-forge LAPACK on the
+        # OP's Linux box reports a lone complex at index n-1 (triggering the
+        # OOB), while some other builds (e.g. Apple Accelerate) classify the
+        # trailing two as a valid conjugate pair and bypass the branch
+        # entirely. Under ASAN on the OP's environment the unfixed code aborts
+        # before this line. Where the branch is reached without ASAN, the
+        # trailing eigenvector contained garbage past the buffer; the fix
+        # writes zero, so A @ V = V @ diag(L) holds.
+        L, V = torch.linalg.eig(a)
+        self.assertEqual(a.to(L.dtype) @ V, V @ torch.diag(L), atol=1e-6, rtol=1e-6)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)
