@@ -100,29 +100,41 @@ struct DistReduceOp {
 };
 
 template <typename scalar_t, typename F>
-__global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self, const int64_t n, const int64_t m, const scalar_t p,
-                                              const double n2, const double n2_squared_minus_1) {
-  const int64_t k = blockIdx.x;
+__global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self,
+    const int64_t n, const int64_t m, const scalar_t p,
+    const double n2, const double n2_squared_minus_1, const int64_t total) {
   const int stride = blockDim.x;
 
-  // The -1 accounts for floating point truncation issues
-  int64_t i = static_cast<int64_t>((n2 - device_sqrt<double>(n2_squared_minus_1 - 2 * k)));
-  int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
+  // Grid-stride loop over outputs: the grid is bounded (see launch site), so a
+  // single huge 1-D grid is never required. This avoids unreliable dispatch of
+  // very large 1-D grids on some backends and is also better for occupancy.
+  for (int64_t k = blockIdx.x; k < total; k += gridDim.x) {
+    // Recover (i, j) from the flat output index k by inverting the triangular
+    // numbering. The fp sqrt can land `i` off by one, so correct it with exact
+    // integer arithmetic, making the result independent of the device math lib.
+    // row_start(i) = number of output elements before row i = n*i - i*(i+1)/2
+    int64_t i = static_cast<int64_t>((n2 - device_sqrt<double>(n2_squared_minus_1 - 2 * k)));
+    auto row_start = [n](int64_t ii) { return n * ii - ii * (ii + 1) / 2; };
+    while (row_start(i + 1) <= k) ++i;
+    while (row_start(i) > k) --i;
+    int64_t j = k - row_start(i) + i + 1;
 
-  const scalar_t * const start = self + i * m;
-  const scalar_t * const end = start + m;
-  const scalar_t * a = start + threadIdx.x;
-  const scalar_t * b = self + j * m + threadIdx.x;
-  scalar_t agg = 0.0;
-  for (; a < end; a += stride, b += stride) {
-    F::inc(agg, std::abs(*a - *b), p);
-  }
+    const scalar_t * const start = self + i * m;
+    const scalar_t * const end = start + m;
+    const scalar_t * a = start + threadIdx.x;
+    const scalar_t * b = self + j * m + threadIdx.x;
+    scalar_t agg = 0.0;
+    for (; a < end; a += stride, b += stride) {
+      F::inc(agg, std::abs(*a - *b), p);
+    }
 
-  __shared__ scalar_t agg_smem[kCUDANumThreads];
-  scalar_t agg_init{0.0};
-  agg = cuda_utils::BlockReduce(agg, DistReduceOp<scalar_t, F>{}, agg_init, agg_smem);
-  if (threadIdx.x == 0) {
-    result[k] = F::finish(agg, p);
+    __shared__ scalar_t agg_smem[kCUDANumThreads];
+    scalar_t agg_init{0.0};
+    agg = cuda_utils::BlockReduce(agg, DistReduceOp<scalar_t, F>{}, agg_init, agg_smem);
+    if (threadIdx.x == 0) {
+      result[k] = F::finish(agg, p);
+    }
+    __syncthreads(); // ensure agg_smem reuse across grid-stride iterations is safe
   }
 }
 
@@ -244,12 +256,15 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
 }
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
-  const dim3 grid(result.numel());
+  const int64_t total = result.numel();
+  // Bound the grid to a reliably-dispatchable size; the kernel uses a
+  // grid-stride loop to cover all `total` outputs. A few thousand blocks of
+  // kCUDANumThreads threads already saturate the device.
+  const int64_t max_blocks = 4096;
+  const dim3 grid(static_cast<unsigned int>(std::min<int64_t>(total, max_blocks)));
   const dim3 block(kCUDANumThreads);
   int64_t n = self.size(0);
   int64_t m = self.size(1);
-  // https://github.com/pytorch/pytorch/issues/15511 demonstrated we need to do
-  // some math in fp64 -- this is just minimizing the amount of fp64 math we do on the device.
   const double n2 = n - .5;
   const double n2_squared_minus_1 = n2 * n2 - 1;
 
@@ -264,7 +279,9 @@ void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
     } else if (std::isinf(p)) {
       impl_fptr = pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf>;
     }
-    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
+    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
+        n, m, p, n2, n2_squared_minus_1, total);   // <-- pass total
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
