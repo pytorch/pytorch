@@ -19,6 +19,8 @@ from torch._inductor.pattern_matcher import (
     CallFunction,
     fwd_only,
     gen_pattern,
+    gen_pattern_and_search_gm,
+    GetAttr,
     is_mutation_op,
     KeywordArg,
     Match,
@@ -2606,6 +2608,108 @@ class TestPatternMatcher(TestCase):
         result = compiled_fn(x)
         self.assertEqual(result, x * 3)
         self.assertEqual(count, 1)
+
+    def test_get_attr_tensor_constant_pattern_matching(self):
+        def pattern(x):
+            y = x + 1
+            fill = torch.tensor(torch.finfo(y.dtype).min)
+            return torch.maximum(y, fill)
+
+        def different_constant(x):
+            y = x + 1
+            fill = torch.tensor(0.0)
+            return torch.maximum(y, fill)
+
+        x = torch.randn(4, 4)
+        generated_pattern = gen_pattern(pattern, [x], fwd_only)
+
+        gm = fwd_only(pattern, [x])
+        maximum = next(
+            n for n in gm.graph.nodes if n.target == torch.ops.aten.maximum.default
+        )
+        self.assertTrue(generated_pattern.match(maximum))
+
+        other_gm = fwd_only(different_constant, [x])
+        other_maximum = next(
+            n
+            for n in other_gm.graph.nodes
+            if n.target == torch.ops.aten.maximum.default
+        )
+        self.assertFalse(generated_pattern.match(other_maximum))
+
+    def test_pretty_print_get_attr_tensor_constant_under_fake_mode(self):
+        def pattern(x):
+            y = x + 1
+            fill = torch.tensor(torch.finfo(y.dtype).min)
+            return torch.maximum(y, fill)
+
+        x = torch.randn(2, 2)
+        with torch._guards.tracing(None), torch._subclasses.FakeTensorMode() as mode:
+            fx = mode.from_tensor(x)
+            generated_pattern, _ = gen_pattern_and_search_gm(pattern, [fx], fwd_only)
+            pattern_str = PatternPrettyPrinter.run(generated_pattern)
+
+        self.assertIn("GetAttr(torch.tensor(", pattern_str)
+        self.assertIn("dtype=torch.float32", pattern_str)
+
+    def test_pretty_print_get_attr_nonfinite_tensor_constant_executes(self):
+        pattern_str = PatternPrettyPrinter.run(
+            GetAttr(torch.tensor([float("inf"), -float("inf"), float("nan")]))
+        )
+        namespace = {"GetAttr": GetAttr, "torch": torch}
+
+        exec(pattern_str, namespace)
+
+        self.assertIsInstance(namespace["output"], GetAttr)
+        self.assertIn("float('inf')", pattern_str)
+        self.assertIn("float('nan')", pattern_str)
+
+    def test_get_attr_fake_tensor_constant_requires_value(self):
+        def make_attr_node(value):
+            graph = torch.fx.Graph()
+            attr = graph.get_attr("constant")
+            graph.output(attr)
+            mod = torch.nn.Module()
+            mod.constant = value
+            gm = torch.fx.GraphModule(mod, graph)
+            return next(n for n in gm.graph.nodes if n.op == "get_attr")
+
+        expected = torch.tensor([1.0, 2.0])
+        unknown_source = torch.empty_like(expected)
+        with torch._subclasses.FakeTensorMode() as mode:
+            unknown_fake = mode.from_tensor(unknown_source)
+            known_fake = mode.fake_tensor_converter.from_real_tensor(
+                mode, expected, make_constant=True
+            )
+
+        self.assertFalse(GetAttr(expected).match(make_attr_node(unknown_fake)))
+        self.assertTrue(GetAttr(known_fake).match(make_attr_node(expected)))
+
+    def test_register_replacement_with_get_attr_tensor_constant(self):
+        def pattern(x):
+            y = x + 1
+            fill = torch.tensor(torch.finfo(y.dtype).min)
+            return torch.maximum(y, fill)
+
+        def replacement(x):
+            return x + 2
+
+        def fn(x):
+            y = x + 1
+            fill = torch.tensor(torch.finfo(y.dtype).min)
+            return torch.maximum(y, fill)
+
+        my_patterns = PatternMatcherPass()
+        x = torch.randn(4, 4)
+        register_replacement(pattern, replacement, [x], fwd_only, my_patterns)
+
+        gm = fwd_only(fn, [x])
+        self.assertEqual(my_patterns.apply(gm), 1)
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+
+        self.assertEqual(gm(x), replacement(x))
+        self.assertFalse(any(n.op == "get_attr" for n in gm.graph.nodes))
 
     def test_register_replacement_single_tensor_input(self):
         def pattern(x):

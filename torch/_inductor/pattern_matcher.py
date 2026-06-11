@@ -42,6 +42,7 @@ import importlib
 import inspect
 import itertools
 import logging
+import math
 import operator
 import os
 import re
@@ -536,6 +537,144 @@ class Ignored(PatternExpr):
 
     def pretty_print(self, pp: PatternPrettyPrinter) -> str:
         return "Ignored()"
+
+
+def _get_fake_tensor_constant(value: torch.Tensor) -> torch.Tensor | None:
+    if isinstance(value, FakeTensor):
+        return value.constant
+    return value
+
+
+def _constant_values_equal(a: Any, b: Any) -> bool:
+    if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
+        if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
+            return False
+        if (
+            a.dtype != b.dtype
+            or a.shape != b.shape
+            or a.device != b.device
+            or a.layout != b.layout
+        ):
+            return False
+        a_constant = _get_fake_tensor_constant(a)
+        b_constant = _get_fake_tensor_constant(b)
+        if a_constant is None or b_constant is None:
+            return False
+        try:
+            with unset_fake_temporarily():
+                return bool(torch.equal(a_constant, b_constant))
+        except Exception:
+            return False
+
+    try:
+        result = a == b
+    except Exception:
+        return False
+    return result if isinstance(result, bool) else False
+
+
+def _python_constant_repr(value: Any) -> str:
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "float('nan')"
+        if math.isinf(value):
+            return "float('inf')" if value > 0 else "-float('inf')"
+    if isinstance(value, list):
+        return f"[{', '.join(map(_python_constant_repr, value))}]"
+    if isinstance(value, tuple):
+        trailing_comma = "," if len(value) == 1 else ""
+        return f"({', '.join(map(_python_constant_repr, value))}{trailing_comma})"
+    return repr(value)
+
+
+def _tensor_constant_repr(value: torch.Tensor) -> str:
+    if value.layout != torch.strided:
+        raise NotImplementedError(
+            f"NYI: serializing get_attr tensor with layout {value.layout}"
+        )
+    dtype = value.dtype
+    device = value.device
+    if isinstance(value, FakeTensor):
+        constant = getattr(value, "constant", None)
+        if constant is None:
+            raise NotImplementedError("NYI: serializing fake get_attr tensor")
+        data_value = constant
+    else:
+        data_value = value
+    if value.requires_grad:
+        raise NotImplementedError("NYI: serializing tensor that requires grad")
+    with unset_fake_temporarily():
+        if data_value.device.type != "cpu":
+            cpu_value = data_value.detach().cpu()
+        else:
+            cpu_value = data_value.detach()
+        value_list = cpu_value.tolist()
+
+    args = [_python_constant_repr(value_list)]
+    args.append(f"dtype={dtype}")
+    if device.type != "cpu":
+        args.append(f"device={str(device)!r}")
+    return f"torch.tensor({', '.join(args)})"
+
+
+class GetAttr(PatternExpr):
+    """
+    Match a get_attr node by comparing the attribute value instead of the target
+    name, which is local to the traced GraphModule.
+    """
+
+    def __init__(self, value: Any, users: Multiple | int = 1) -> None:
+        super().__init__()
+        self.value = value
+        self.users = users
+
+    def __repr__(self) -> str:
+        if self.users is MULTIPLE:
+            comma_users = ", MULTIPLE"
+        elif self.users != 1:
+            comma_users = f", {self.users}"
+        else:
+            comma_users = ""
+        return f"{self.__class__.__name__}({self.value!r}{comma_users})"
+
+    def has_multiple_users(self) -> bool:
+        return isinstance(self.users, Multiple) or self.users > 1
+
+    def _match(self, node: NodeOrConstant, ctx: MatchContext) -> MatchResult:
+        if not isinstance(node, torch.fx.Node) or node.op != "get_attr":
+            return FailedMatch("get_attr_mismatch: node={}, pattern={}", node, self)
+        if (
+            self not in ctx.outputs
+            and self.users is not MULTIPLE
+            and len(node.users) != self.users
+        ):
+            return FailedMatch("multiple_users {}", self)
+        if node.graph.owning_module is None:
+            return FailedMatch("get_attr without owning module: {}", node)
+        if not isinstance(node.target, str):
+            return FailedMatch("get_attr target is not str: {}", node.target)
+        value = _get_attr(node.graph.owning_module, node.target)
+        if not _constant_values_equal(self.value, value):
+            return FailedMatch("get_attr_value: {} != {}", value, self.value)
+        m = Match(ctx, self)
+        m.nodes.append(node)
+        return m
+
+    def pretty_print(self, pp: PatternPrettyPrinter) -> str:
+        args = [pp.pretty_print(self.value)]
+        if self.users is MULTIPLE:
+            args.append("MULTIPLE")
+        elif self.users != 1:
+            args.append(str(self.users))
+        return f"{self.__class__.__name__}({', '.join(args)})"
+
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)
+        return (
+            super().pattern_eq(other)
+            and _constant_values_equal(self.value, other.value)
+            and self.users == other.users
+        )
 
 
 class KeywordArg(PatternExpr):
@@ -1109,6 +1248,8 @@ class PatternPrettyPrinter:
                 return memoized_name
             else:
                 return self.memoize(obj)
+        if isinstance(obj, torch.Tensor):
+            return _tensor_constant_repr(obj)
         if hasattr(obj, "pretty_print"):
             return obj.pretty_print(self)
 
@@ -2544,8 +2685,6 @@ def fx_to_pattern(
         call_method = _not_implemented
         # pyrefly: ignore [bad-override]
         call_module = _not_implemented
-        # pyrefly: ignore [bad-override]
-        get_attr = _not_implemented
 
         # pyrefly: ignore [bad-override]
         def placeholder(
@@ -2570,6 +2709,17 @@ def fx_to_pattern(
                 return ExclusiveKeywordArg(name)
             else:
                 return KeywordArg(name)
+
+        # pyrefly: ignore [bad-override]
+        def get_attr(
+            self,
+            target: str,  # type: ignore[override]
+            args: Sequence[Any],
+            kwargs: Mapping[str, Any],
+        ) -> GetAttr:
+            if args or kwargs:
+                raise AssertionError(f"unexpected get_attr args: {args}, {kwargs}")
+            return GetAttr(_get_attr(self.module, target))
 
         # pyrefly: ignore [bad-override]
         def call_function(
