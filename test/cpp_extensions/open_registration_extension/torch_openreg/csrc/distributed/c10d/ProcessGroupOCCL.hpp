@@ -21,6 +21,7 @@ constexpr const char* OCCL_BACKEND_NAME = "occl";
 
 class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
  public:
+  // LITERALINCLUDE START: OCCL DUMMYWORK
   class DummyWork : public Work {
    public:
     DummyWork();
@@ -39,6 +40,7 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
    private:
     c10::intrusive_ptr<c10::ivalue::Future> future_;
   };
+  // LITERALINCLUDE END: OCCL DUMMYWORK
 
   struct OPENREG_EXPORT Options : public Backend::Options {
     explicit Options(

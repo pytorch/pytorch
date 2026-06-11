@@ -66,7 +66,8 @@ struct TORCH_API ExperimentalConfig {
       bool record_python_gc_info = false,
       bool expose_kineto_event_metadata = false,
       std::string custom_profiler_config = "",
-      bool adjust_timestamps = false);
+      bool adjust_timestamps = false,
+      bool trace_only = false);
   explicit operator bool() const;
 
   std::vector<std::string> profiler_metrics;
@@ -132,6 +133,11 @@ struct TORCH_API ExperimentalConfig {
    * information instead of the original information.
    */
   bool adjust_timestamps;
+
+  // When true, __exit__ skips TransferEvents, build_tree, and
+  // materializeOpEvents. Only export_chrome_trace / save() will work;
+  // accessing events() raises an error.
+  bool trace_only;
 };
 
 struct TORCH_API ProfilerConfig {

@@ -11,7 +11,11 @@ from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.runtime.benchmarking import benchmarker
-from torch._inductor.sizevars import SizeVarAllocator
+from torch._inductor.sizevars import (
+    simplify_index_in_vec_range,
+    SizeVarAllocator,
+    stride_at_vec_range,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_utils import (
@@ -30,6 +34,7 @@ from torch.utils._sympy.functions import (
     RoundDecimal,
     RoundToInt,
 )
+from torch.utils._sympy.numbers import int_oo
 
 
 # int64_t is long long on MacOS, but long on 64-bit Linux
@@ -38,6 +43,97 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
 class TestIndexingSimplification(InductorTestCase):
+    def test_simplify_index_in_vec_range(self):
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+
+        self.assertEqual(
+            simplify_index_in_vec_range(ModularIndexing(i, 1, 16), i, 8),
+            i + sympy.Symbol("i_mod_c0"),
+        )
+        self.assertEqual(stride_at_vec_range(ModularIndexing(i, 1, 16), i, 8), 1)
+        self.assertEqual(stride_at_vec_range(FloorDiv(i, 8), i, 8), 0)
+        self.assertEqual(
+            simplify_index_in_vec_range(ModularIndexing(i, 1, 10), i, 8),
+            ModularIndexing(i, 1, 10),
+        )
+
+    def test_simplify_index_in_vec_range_with_relational(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/181115
+
+        sympy.simplify crashes with 'StrictLessThan has no attribute diff'
+        when index expressions contain relational sub-expressions. This happens
+        with dynamic=True + torch.func.grad producing Piecewise/Min/Max terms.
+        """
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+        index = sympy.Piecewise((i, i < s0), (s0 - 1, True))
+        result = simplify_index_in_vec_range(index, i, 16)
+        self.assertIsNotNone(result)
+        result2 = stride_at_vec_range(index, i, 16)
+        self.assertIsNotNone(result2)
+
+    def test_analyze_lane_contiguity(self):
+        sizevars = SizeVarAllocator()
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+        j = sympy.Symbol("j", integer=True, nonnegative=True)
+
+        result = sizevars.analyze_lane_contiguity(i + 8, i)
+        self.assertEqual(result.contiguous_width, int_oo)
+        self.assertEqual(result.stride, 1)
+        self.assertFalse(result.uniform)
+
+        result = sizevars.analyze_lane_contiguity(2 * i, i)
+        self.assertIsNone(result.contiguous_width)
+        self.assertEqual(result.stride, 2)
+        self.assertFalse(result.uniform)
+
+        result = sizevars.analyze_lane_contiguity(2 * i * j, i)
+        self.assertIsNone(result.contiguous_width)
+        self.assertEqual(result.stride, 2 * j)
+        self.assertFalse(result.uniform)
+
+        result = sizevars.analyze_lane_contiguity(i * i, i)
+        self.assertTrue(result.unknown)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i, 1, 4), i)
+        self.assertEqual(result.contiguous_width, 4)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 4, 1, 8), i)
+        self.assertEqual(result.contiguous_width, 4)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 2, 1, 8), i)
+        self.assertEqual(result.contiguous_width, 2)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(Mod(i, 4), i)
+        self.assertEqual(result.contiguous_width, 4)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 1, 1, 8), i)
+        self.assertTrue(result.unknown)
+
+        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 8), i)
+        self.assertTrue(result.uniform)
+        self.assertEqual(result.uniform_width, 8)
+        self.assertEqual(result.stride, 0)
+
+        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 2), i)
+        self.assertTrue(result.uniform)
+        self.assertEqual(result.uniform_width, 2)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i, 8, 4), i)
+        self.assertTrue(result.uniform)
+        self.assertEqual(result.uniform_width, 8)
+
+        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 8) + i, i)
+        self.assertEqual(result.contiguous_width, 8)
+        self.assertFalse(result.uniform)
+
+        result = sizevars.analyze_lane_contiguity(2 * i - ModularIndexing(i, 1, 4), i)
+        self.assertTrue(result.unknown)
+
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
         i0 = sympy.Symbol("i0", integer=True)
@@ -287,6 +383,27 @@ class TestIndexingSimplification(InductorTestCase):
         expected = FloorDiv(x * 15 + y, 3)
         self.assertEqual(expected, FloorDiv(actual, denominator))
 
+    def test_expand_floor_div_applied_symbolic_factor(self):
+        sizevars = SizeVarAllocator()
+        s = sympy.Symbol("s", integer=True, positive=True)
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = s * x + FloorDiv(y, 3)
+        actual, denominator = sizevars.expand_floor_div(expr, (x, y))
+        self.assertNotEqual(expr, actual)
+        expected = FloorDiv(3 * s * x + y, 3)
+        self.assertEqual(expected, FloorDiv(actual, denominator))
+
+    def test_expand_floor_div_skipped_cross_tree_symbolic_factor(self):
+        sizevars = SizeVarAllocator()
+        s = sympy.Symbol("s", integer=True, positive=True)
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = s * x + FloorDiv(y, 3)
+        self.assertFalse(sizevars.expand_floor_div(expr, (x,)))
+
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_int8_unpack(self):
         @torch.compile
@@ -307,6 +424,24 @@ class TestIndexingSimplification(InductorTestCase):
         if DO_PERF_TEST:
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
+
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    def test_int8_unpack_dynamic_shape(self):
+        @torch.compile(dynamic=True)
+        def f(x):
+            first_elements = x >> 4
+            second_elements = x & 15
+            unpacked = torch.stack([first_elements, second_elements], dim=-1).view(
+                *x.size()[:-1], -1
+            )
+            return unpacked * 2
+
+        x = torch.randint(0, 255, (2, 16, 32), dtype=torch.uint8, device=GPU_TYPE)
+
+        triton_code = run_and_get_triton_code(f, x)
+        # Dynamic shape coefficients should still be coalesced through the
+        # pointwise-cat view instead of loading from s*x1 + x0//2.
+        self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
 
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_floordiv_div_sympy_is_integer_bug(self):
