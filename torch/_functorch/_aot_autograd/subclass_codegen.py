@@ -70,10 +70,12 @@ class _CodegenState:
         return name
 
 
-def _maybe_wait_async_collective_tensor(x: object) -> object:
+def _maybe_wait_async_collective_tensor(
+    x: object,
+    AsyncCollectiveTensor: type["AsyncCollectiveTensor"],
+) -> object:
     """Wait on ACT values and leave all other runtime inputs unchanged."""
-    AsyncCollectiveTensor = get_loaded_async_collective_tensor_type()
-    if AsyncCollectiveTensor is not None and type(x) is AsyncCollectiveTensor:
+    if isinstance(x, AsyncCollectiveTensor):
         return cast("AsyncCollectiveTensor", x).trigger_wait()
     return x
 
@@ -318,9 +320,15 @@ def _codegen_subclass_wrapper_source(
     act_input_paths_by_input: dict[int, set[tuple[str, ...]]] = {}
     act_wait_fn = None
     if act_input_paths:
+        AsyncCollectiveTensor = get_loaded_async_collective_tensor_type()
+        if AsyncCollectiveTensor is None:
+            raise AssertionError("ACT input paths require the ACT type to be loaded")
         act_wait_fn = state.add_global(
             state.fresh_name("_maybe_wait_act"),
-            _maybe_wait_async_collective_tensor,
+            functools.partial(
+                _maybe_wait_async_collective_tensor,
+                AsyncCollectiveTensor=AsyncCollectiveTensor,
+            ),
         )
         for i, attr_path in act_input_paths:
             act_input_paths_by_input.setdefault(i, set()).add(attr_path)
