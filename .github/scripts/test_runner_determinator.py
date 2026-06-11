@@ -1188,5 +1188,65 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         self.assertEqual(set(), rd.parse_workflow_list(""))
 
 
+class TestRunnerDeterminatorAmdDoExperiment(TestCase):
+    AMD_DO_SETTINGS = """
+        experiments:
+            amd-do:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,amd-do
+        @User2,lf
+
+        """
+
+    def test_amd_do_opted_in_returns_prefix(self) -> None:
+        result = rd.get_runner_prefix(self.AMD_DO_SETTINGS, ["User1"], USER_BRANCH)
+        self.assertEqual("amd-do-", result.amd_do_prefix)
+        # amd-do is exposed via its own output, not folded into the shared prefix
+        self.assertEqual("", result.prefix)
+
+    def test_amd_do_not_enabled_returns_empty_prefix(self) -> None:
+        result = rd.get_runner_prefix(self.AMD_DO_SETTINGS, ["User2"], USER_BRANCH)
+        self.assertEqual("", result.amd_do_prefix)
+        self.assertEqual("", result.prefix)
+
+    def test_amd_do_with_arc_keeps_both(self) -> None:
+        settings_text = """
+        experiments:
+            arc:
+                rollout_perc: 0
+            amd-do:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,arc,amd-do
+
+        """
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("mt-", result.prefix)
+        self.assertTrue(result.use_arc)
+        self.assertEqual("amd-do-", result.amd_do_prefix)
+
+    def test_amd_do_with_lf_keeps_both(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            amd-do:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf,amd-do
+
+        """
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("lf.", result.prefix)
+        self.assertEqual("amd-do-", result.amd_do_prefix)
+
+
 if __name__ == "__main__":
     main()
