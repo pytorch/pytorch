@@ -3,6 +3,7 @@ import functools
 import operator
 import os
 import re
+import unittest
 import unittest.mock as mock
 from unittest.mock import patch
 
@@ -12,7 +13,10 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
+    IS_MACOS,
     skipIfWindows,
+    TEST_WITH_ASAN,
 )
 from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTestCase
 
@@ -1536,6 +1540,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Must be 3 compilations. If not marked static there would be 2, because self.c would be converted to symints.
         self.assertEqual(cnts.frame_count, 3)
 
+    @unittest.skipIf(
+        IS_LINUX or IS_MACOS, "https://github.com/pytorch/pytorch/issues/148515"
+    )
     def test_set_stance_eager_then_compile(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1550,6 +1557,10 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(cnts.frame_count, 1)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/148463",
+    )
     def test_set_stance_eager_then_compile_with_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1981,6 +1992,45 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         cnts.clear()
         self.assertEqual(f4(inp), inp + 7)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_error_on_graph_break_skips_redundant_set(self):
+        torch._dynamo.utils._set_error_on_graph_break(False)
+
+        with mock.patch(
+            "torch._dynamo.decorators._set_error_on_graph_break",
+            side_effect=AssertionError("redundant error_on_graph_break set"),
+        ):
+            with torch._dynamo.error_on_graph_break(False):
+                pass
+
+    def test_error_on_graph_break_reentrant_context_restores_outer_state(self):
+        torch._dynamo.utils._set_error_on_graph_break(True)
+        cm = torch._dynamo.error_on_graph_break(False)
+
+        try:
+            with cm:
+                self.assertFalse(torch._dynamo.utils._get_error_on_graph_break())
+                with cm:
+                    self.assertFalse(torch._dynamo.utils._get_error_on_graph_break())
+
+            self.assertTrue(torch._dynamo.utils._get_error_on_graph_break())
+        finally:
+            torch._dynamo.utils._set_error_on_graph_break(False)
+
+    def test_error_on_graph_break_compile_wrapper_skips_redundant_set(self):
+        torch._dynamo.utils._set_error_on_graph_break(False)
+
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch._dynamo.optimize("eager", error_on_graph_break=False)(fn)
+        x = torch.ones(3)
+
+        with mock.patch(
+            "torch._dynamo.eval_frame._set_error_on_graph_break",
+            side_effect=AssertionError("redundant error_on_graph_break set"),
+        ):
+            self.assertEqual(opt_fn(x), fn(x))
 
     def test_error_on_graph_break_nested(self):
         # error_on_graph_break in a nested frame
