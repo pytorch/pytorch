@@ -7768,6 +7768,8 @@ class TestMPS(TestCaseMPS):
         helper(2, 0, 1, 1, 6)
         # test float16
         helper((2,), 0, [1], (1,), 6.0, x_dtype=torch.float16)
+        # test size-0 source/self, see https://github.com/pytorch/pytorch/issues/186972
+        helper((0, 1, 1, 1), -3, [0], (0, 1, 1, 1), -0.25)
 
     def test_index_64bit(self):
         """ Test that index operations work for 4Gb+ tensors """
