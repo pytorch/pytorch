@@ -773,6 +773,67 @@ class TestPatternMatcher(TestCase):
     # called in test_gpu_cpp_wrapper
     test_cat_slice_cat_xpu = test_cat_slice_cat_cuda
 
+    @parametrize("n", (8, 64))
+    def test_randperm_index(self, n):
+        def fn(x):
+            idx = torch.randperm(x.shape[0], device=x.device)
+            return x[idx]
+
+        x = torch.randn(n, 64, device=GPU_TYPE)
+        rand_opt = torch.compile(fn, backend="inductor")
+
+        torch.manual_seed(42)
+        expect = fn(x)
+
+        torch._dynamo.reset()
+        counters.clear()
+        torch.manual_seed(42)
+        actual = rand_opt(x)
+
+        self.assertEqual(expect, actual)
+        self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+    @parametrize("case", ((8, 42), (64, 42), (64, 8), (128, 64)))
+    def test_randperm_index_with_slice(self, case):
+        def fn(x, slice_shape):
+            idx = torch.randperm(x.shape[0], device=x.device)[:slice_shape]
+            return x[idx]
+
+        n, s = case
+        x = torch.randn(n, 64, device=GPU_TYPE)
+        rand_opt = torch.compile(fn, backend="inductor")
+
+        torch.manual_seed(42)
+        expect = fn(x, s)
+
+        torch._dynamo.reset()
+        counters.clear()
+        torch.manual_seed(42)
+        actual = rand_opt(x, s)
+
+        self.assertEqual(expect, actual)
+        self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+    @parametrize("n", (8, 64))
+    def test_randperm_index_2d(self, n):
+        def fn(x):
+            idx = torch.randperm(x.shape[0], device=x.device)
+            return x[idx, :]
+
+        x = torch.randn(n, 64, device=GPU_TYPE)
+        rand_opt = torch.compile(fn, backend="inductor")
+
+        torch.manual_seed(42)
+        expect = fn(x)
+
+        torch._dynamo.reset()
+        counters.clear()
+        torch.manual_seed(42)
+        actual = rand_opt(x)
+
+        self.assertEqual(expect, actual)
+        self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
     def test_pointless_view_pair(self):
         def f(x):
             x = aten.view.default(x, [3, 5, 7])
