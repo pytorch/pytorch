@@ -18,7 +18,7 @@ import sympy
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
-from torch import SymInt, Tensor
+from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import _dispatch_keys, DispatchKey
 from torch._higher_order_ops.utils import redirect_to_mode, register_fake
 from torch._ops import HigherOrderOperator
@@ -2463,6 +2463,27 @@ class TracingTritonHOPifier(TritonHOPifier):
 
         return graphable_args, constant_args_idx
 
+    def is_dynamic_backend_option(self, value: Any) -> bool:
+        # Backend options are compile-time values. In proxy tracing, a value can
+        # be a Proxy/Node directly or be nested inside a tuple/list option such
+        # as grid_launch_partition=(sym_size,). Reject those unless the name is
+        # later identified as a real kernel parameter.
+        leaves, _ = pytree.tree_flatten(value)
+        return any(
+            isinstance(
+                leaf,
+                (
+                    fx.Node,
+                    fx.Proxy,
+                    Tensor,
+                    SymInt,
+                    SymBool,
+                    SymFloat,
+                ),
+            )
+            for leaf in leaves
+        )
+
     def call_HOP(
         self,
         variable: "TraceableTritonKernelWrapper",
@@ -2480,8 +2501,18 @@ class TracingTritonHOPifier(TritonHOPifier):
             )
 
         graphable_args, constant_args_idx = self.store_non_graphable_args(combined_args)
+        # backend_option_kwargs starts as the original launch kwargs because
+        # direct Triton exposes that dict to backend.parse_options(). In the
+        # tracing HOP, real kernel arguments already live in combined_args and
+        # must be carried through kwargs/constant_args instead. Drop every
+        # bound kernel parameter, including tensor/proxy args and Python
+        # constants, then validate that the remaining backend options are
+        # concrete compile-time values.
+        backend_options = dict(backend_option_kwargs)
+        for name in combined_args:
+            backend_options.pop(name, None)
         dynamic_backend_options = [
-            k for k, v in backend_option_kwargs.items() if isinstance(v, fx.Node)
+            k for k, v in backend_options.items() if self.is_dynamic_backend_option(v)
         ]
         if dynamic_backend_options:
             self.raise_unsupported(
@@ -2501,7 +2532,7 @@ class TracingTritonHOPifier(TritonHOPifier):
             # supported in non-dynamo tracing
             tma_descriptor_metadata={},
             kwargs=graphable_args,
-            backend_options=dict(backend_option_kwargs),
+            backend_options=backend_options,
         )
 
 

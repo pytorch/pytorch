@@ -4666,6 +4666,96 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         expected = torch.empty_like(x)
         self.assertEqual(out, expected)
 
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_capture_triton_backend_options_exclude_kernel_args(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pass
+
+        def f(x, y):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            capture_triton(add_kernel)[grid](
+                in_ptr0=x,
+                in_ptr1=y,
+                out_ptr=output,
+                n_elements=n_elements,
+                BLOCK_SIZE=16,
+                enable_fp_fusion=False,
+            )
+            return output
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+        gm = make_fx(f, tracing_mode="symbolic")(x, y)
+        hop_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function"
+            and node.target is triton_kernel_wrapper_mutation
+        )
+
+        # capture_triton sees the original launch kwargs, including tensor and
+        # symbolic kernel args. Those names must remain in kwargs, not in
+        # backend_options, because backend_options are later parsed as compiler
+        # options.
+        self.assertEqual(
+            set(hop_node.kwargs["kwargs"]),
+            {"in_ptr0", "in_ptr1", "out_ptr", "n_elements", "BLOCK_SIZE"},
+        )
+        self.assertEqual(
+            hop_node.kwargs["backend_options"], {"enable_fp_fusion": False}
+        )
+
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_capture_triton_dynamic_backend_options_error(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pass
+
+        def f(x):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            capture_triton(add_kernel)[grid](
+                in_ptr0=x,
+                out_ptr=output,
+                n_elements=n_elements,
+                BLOCK_SIZE=16,
+                grid_launch_partition=(n_elements,),
+            )
+            return output
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # Unlike n_elements above, grid_launch_partition is not a kernel
+        # parameter. If it contains a symbolic value, it cannot be represented
+        # as a concrete compile-time backend option.
+        with self.assertRaisesRegex(
+            RuntimeError, "Triton backend options must be concrete values"
+        ):
+            make_fx(f, tracing_mode="symbolic")(torch.randn(4))
+
     @requires_gpu
     def test_wrap_triton_disabled_in_triton_op(self):
         import triton  # @manual
