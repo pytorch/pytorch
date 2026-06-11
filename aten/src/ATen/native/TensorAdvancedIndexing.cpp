@@ -987,7 +987,8 @@ Tensor& _index_put_impl_(
   auto value_ = value;
   if (value.device() != self.device() && value.numel() == 1 &&
       value.dim() == 0) {
-    value_ = value.to(self.device());
+    bool non_blocking = value.is_cpu() && self.device().is_cuda();
+    value_ = value.to(self.device(), non_blocking);
   }
   at::assert_no_overlap(self, value);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
