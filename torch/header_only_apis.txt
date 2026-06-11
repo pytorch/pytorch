@@ -314,3 +314,17 @@ ForcedUnroll
 
 # torch/headeronly/util/static_tracepoint_elfx86.h
 # TORCH_SDT_* are preprocessor macros, not tested at runtime
+
+# torch/headeronly/util/string_utils.h
+stod
+stoi
+stoll
+stoull
+to_string
+
+# torch/headeronly/util/string_view.h
+basic_string_view
+c10_string_view
+
+# torch/headeronly/util/FileSystem.h
+# c10::filesystem is a namespace alias to std::filesystem, no namespaced symbol
