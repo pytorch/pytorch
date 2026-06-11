@@ -4418,7 +4418,7 @@ class MemberDescriptorVariable(VariableTracker):
                 return obj.var_getattr(tx, attr_name)
         try:
             resolved = self.descriptor.__get__(obj_value)
-        except AttributeError:
+        except (AttributeError, TypeError):
             raise_observed_exception(
                 AttributeError,
                 tx,
@@ -4505,7 +4505,7 @@ class GetSetDescriptorVariable(VariableTracker):
                 return obj.var_getattr(tx, attr_name)
         try:
             resolved = self.descriptor.__get__(obj_value)
-        except AttributeError:
+        except (AttributeError, TypeError):
             raise_observed_exception(
                 AttributeError,
                 tx,
