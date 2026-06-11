@@ -103,3 +103,28 @@ model and affect all or most operators.
 
 - `torch.fill` never uses a 0-d tensor fill value (always uses a
   scalar literal).
+
+## Loss Functions
+
+- `reduction` is always `'none'`. The `'mean'` and `'sum'` modes are
+  never tested. This is structural: the top-down model needs a
+  predictable output shape, and reduced-scalar outputs would require
+  the loss operators to work like reduction operators with a
+  separate "scalar mode" path.
+
+- `F.cross_entropy`: `weight`, `ignore_index`, `label_smoothing`, and
+  soft targets are never exercised. Only the 2-D `(N, C)` input form
+  is tested; the multi-dimensional form `(N, C, d1, ...)` used in
+  segmentation is excluded.
+
+- `F.nll_loss`: `weight` and `ignore_index` are never exercised. Only
+  the 2-D `(N, C)` input form is tested.
+
+- `F.binary_cross_entropy_with_logits`: `pos_weight` is never
+  exercised.
+
+- `F.binary_cross_entropy`: `weight` is never exercised.
+
+- `F.huber_loss` and `F.smooth_l1_loss`: hyperparameters are drawn
+  from small discrete sets (`{0.1, 0.5, 1.0, 2.0}`); continuous
+  draws and extreme values are never tested.
