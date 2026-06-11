@@ -93,10 +93,8 @@ def repurpose_ops(op_db, base_test_name, derived_test_name):
 dtensor_fails = {
     # view/reshape ops: rejects flatten/split of sharded dims without redistribution
     xfail("repeat_interleave"),
-    xfail("reshape"),
     xfail("unbind"),
     xfail("unflatten"),
-    xfail("view"),
     # factory/creation ops: test harness can't convert non-tensor args to DTensor
     xfail("arange"),
     xfail("broadcast_shapes"),
@@ -146,6 +144,12 @@ dtensor_fails = {
     xfail("linalg.lstsq", "grad_oriented"),
     xfail("masked_select"),
     xfail("nn.functional.ctc_loss"),
+    # weighted cross_entropy mean reduction over a sharded batch:
+    # DTensor averages per-rank means instead of computing a global
+    # weighted mean, so any per-rank ``sum(weight[target])`` imbalance
+    # produces drift. Compiled DTensor handles it; see
+    # dtensor_numeric_only_fails for the subtraction.
+    xfail("nn.functional.linear_cross_entropy"),
     # 0-dim tensor edge cases: strategies don't handle scalar tensors
     xfail("logsumexp"),
     xfail("masked.logsumexp"),
@@ -232,11 +236,10 @@ dtensor_compiled_fails = {
     xfail("cartesian_prod"),
     xfail("flatten"),
     xfail("kron"),
-    xfail("linalg.tensorsolve"),
-    xfail("nn.functional.instance_norm"),
     xfail("ravel"),
+    xfail("reshape"),
     xfail("reshape_as"),
-    xfail("take_along_dim"),
+    xfail("view"),
     xfail("view_as"),
     # View-type ops that decompose into as_strided (at autograd level).
     # DTensor doesn't have a sharding strategy for as_strided.
@@ -286,7 +289,6 @@ dtensor_compiled_fails = {
     xfail("nn.functional.gaussian_nll_loss"),
     xfail("nn.functional.logsigmoid"),
     xfail("scatter"),
-    xfail("take_along_dim"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
     xfail("nn.functional.multilabel_soft_margin_loss"),
@@ -294,6 +296,9 @@ dtensor_compiled_fails = {
     skip("norm", "nuc"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/176973
     skip("histc"),
+    xfail("nn.functional.linear_cross_entropy"),
+    xfail("nn.functional.linear_cross_entropy", "chunked"),
+    xfail("nn.functional.linear_cross_entropy", "chunked_none"),
 }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
@@ -365,7 +370,8 @@ dtensor_fails_no_strategy = {
     xfail("masked_scatter"),
     xfail("nanquantile"),
     xfail("nn.functional.bilinear"),
-    xfail("nn.functional.linear_cross_entropy"),
+    xfail("nn.functional.linear_cross_entropy", "chunked"),
+    xfail("nn.functional.linear_cross_entropy", "chunked_none"),
     xfail("nn.functional.multi_margin_loss"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.pad", "reflect"),
@@ -838,7 +844,6 @@ ops_unbacked_dtensor_dde = {
     xfail("nn.functional.triplet_margin_loss"),
     xfail("nn.functional.triplet_margin_with_distance_loss"),
     xfail("nn.functional.upsample_nearest"),
-    xfail("nn.functional.pixel_unshuffle"),
     xfail("nonzero_static"),
     xfail("permute_copy"),
     xfail("prod"),
@@ -862,7 +867,6 @@ ops_unbacked_dtensor_dde = {
     xfail("view"),
     xfail("view_as"),
     xfail("view_as_complex"),
-    xfail("view_copy"),
 }
 
 
