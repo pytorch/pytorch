@@ -1996,8 +1996,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
       }
     } else if (!cpp_placement.is_replicate() && !cpp_placement.is_partial()) {
 #if IS_PYTHON_3_11_PLUS
-      const auto placement_type_name =
-          py::str(py::handle(PyType_GetName(Py_TYPE(placement.ptr()))));
+      const auto placement_type_name = py::str(py::reinterpret_steal<py::object>(
+          PyType_GetName(Py_TYPE(placement.ptr()))));
 #else
       const auto placement_type_name =
           py::str(py::handle((PyObject*)Py_TYPE(placement.ptr()))

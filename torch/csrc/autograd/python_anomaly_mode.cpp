@@ -32,24 +32,28 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
   if (!PyDict_Check(dict())) {
     TORCH_CHECK(false, "Anomaly metadata is not a python dictionary.");
   }
-  PyObject* trace_stack = nullptr;
-  if (PyDict_GetItemStringRef(dict(), ANOMALY_TRACE_KEY, &trace_stack) < 0) {
+  PyObject* trace_stack_ptr = nullptr;
+  if (PyDict_GetItemStringRef(dict(), ANOMALY_TRACE_KEY, &trace_stack_ptr) < 0) {
     throw python_error();
   }
-  _print_stack(trace_stack, current_node_name, false);
-  PyObject* pyparent = nullptr;
-  if (PyDict_GetItemStringRef(dict(), ANOMALY_PARENT_KEY, &pyparent) < 0) {
+  THPObjectPtr trace_stack(trace_stack_ptr);
+  _print_stack(trace_stack.get(), current_node_name, false);
+  PyObject* pyparent_ptr = nullptr;
+  if (PyDict_GetItemStringRef(dict(), ANOMALY_PARENT_KEY, &pyparent_ptr) < 0) {
     throw python_error();
   }
+  THPObjectPtr pyparent(pyparent_ptr);
 
   // if there is no "parent_" in metadata, then it means this metadata's node
   // is the root and stop printing the traceback
   while (pyparent) {
-    THPObjectPtr parent_metadata(PyObject_GetAttrString(pyparent, "metadata"));
+    THPObjectPtr parent_metadata(
+        PyObject_GetAttrString(pyparent.get(), "metadata"));
     if (!parent_metadata) {
       throw python_error();
     }
-    THPObjectPtr parent_name_pyobj(PyObject_CallMethod(pyparent, "name", ""));
+    THPObjectPtr parent_name_pyobj(
+        PyObject_CallMethod(pyparent.get(), "name", ""));
     if (!parent_name_pyobj) {
       throw python_error();
     }
@@ -58,18 +62,21 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
       throw python_error();
     }
     const std::string parent_name(parent_name_char);
-    PyObject* parent_stack = nullptr;
+    PyObject* parent_stack_ptr = nullptr;
     if (PyDict_GetItemStringRef(
-            parent_metadata.get(), ANOMALY_TRACE_KEY, &parent_stack) < 0) {
+            parent_metadata.get(), ANOMALY_TRACE_KEY, &parent_stack_ptr) < 0) {
       throw python_error();
     }
-    _print_stack(parent_stack, parent_name, true);
+    THPObjectPtr parent_stack(parent_stack_ptr);
+    _print_stack(parent_stack.get(), parent_name, true);
     // get the parent of this node, if this node is a root, pyparent is simply
     // null
+    PyObject* next_parent_ptr = nullptr;
     if (PyDict_GetItemStringRef(
-            parent_metadata.get(), ANOMALY_PARENT_KEY, &pyparent) < 0) {
+            parent_metadata.get(), ANOMALY_PARENT_KEY, &next_parent_ptr) < 0) {
       throw python_error();
     }
+    pyparent = THPObjectPtr(next_parent_ptr);
   }
 }
 
