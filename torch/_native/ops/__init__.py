@@ -1,1 +1,1 @@
-from . import bmm_outer_product, norm, scatter_add, topk
+from . import bmm_outer_product, foreach_mm, norm, scatter_add, topk

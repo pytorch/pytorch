@@ -128,9 +128,14 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
             return "nvTmaDesc"
         else:
             # https://github.com/triton-lang/triton/blob/9695baed9b46cf957e08b157bb4133f4a4b331c5/python/triton/runtime/jit.py#L360-L363
-            assert arg.api_type == "stable"
-            assert arg.block_shape is not None
-            assert arg.dtype is not None
+            if arg.api_type != "stable":
+                raise AssertionError(
+                    f"expected api_type == 'stable', got {arg.api_type}"
+                )
+            if arg.block_shape is None:
+                raise AssertionError("expected block_shape to not be None")
+            if arg.dtype is None:
+                raise AssertionError("expected dtype to not be None")
             inner = _type_of(arg.dtype)[1:]  # strip the `*`: *fp32 -> fp32
             return f"tensordesc<{inner}{list(arg.block_shape)}>"
     if isinstance(arg, ConstexprArg):
@@ -145,6 +150,21 @@ def non_constexpr_signature(signature):
             new_signature.append(arg)
 
     return new_signature
+
+
+def select_tile_hint(size_hints, signature):
+    """Pick TileHint.SQUARE vs TileHint.DEFAULT for 2D pointwise; None for 1D.
+
+    SQUARE applies when the kernel has exactly 2 size hints and 4 non-constexpr
+    signature args (input, output, and 2 numel args -> a square 2D tile).
+    """
+    from torch._inductor.runtime.hints import TileHint
+
+    if len(size_hints) != 2:
+        return None
+    if len(non_constexpr_signature(signature)) == 4:
+        return TileHint.SQUARE
+    return TileHint.DEFAULT
 
 
 def signature_to_meta(
@@ -193,7 +213,10 @@ def _get_buffer_layout(buf_name: str) -> "torch._inductor.ir.Layout":
         buffer = V.graph.try_get_buffer(buf_name)
         # output arg
         if not buffer:
-            assert buf_name == V.kernel.output_node.name
+            if buf_name != V.kernel.output_node.name:
+                raise AssertionError(
+                    f"expected buf_name == output_node.name, got {buf_name}"
+                )
             layout = V.kernel.output_node.layout
         else:
             layout = buffer.get_layout()
