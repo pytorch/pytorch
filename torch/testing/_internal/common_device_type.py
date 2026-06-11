@@ -491,15 +491,32 @@ class DeviceTypeTestBase(TestCase):
 
     @classmethod
     def _should_exclude_test_conditionally(
-        cls, test_class_name, test_name, *, dtypes=None
+        cls, test_class_name, test_name, *, dtype_variant=None
     ):
+        """Entry point for conditional test variant exclusion.
+
+        Currently only supports dtype-based exclusion (delegating to
+        _should_exclude_dtype_variant), but is designed as a separate
+        method so that future non-dtype conditional exclusions (e.g.
+        based on device capabilities or other test parameters) can
+        be added here without changing the call site in instantiate_test.
+        """
         return cls._should_exclude_dtype_variant(
-            test_class_name, test_name, dtypes=dtypes
+            test_class_name, test_name, dtype_variant=dtype_variant
         )
 
     @classmethod
-    def _should_exclude_dtype_variant(cls, test_class_name, test_name, *, dtypes=None):
-        if dtypes is None:
+    def _should_exclude_dtype_variant(
+        cls, test_class_name, test_name, *, dtype_variant=None
+    ):
+        """Check whether a dtype variant should be excluded.
+
+        Args:
+            dtype_variant: Either a single torch.dtype (e.g. torch.float32) or
+                a tuple of dtypes (e.g. (torch.float64, torch.int32)) from a
+                @dtypes decorator with tuple variants.
+        """
+        if dtype_variant is None:
             return False
 
         exclusion_rule = cls._get_test_exclusions(test_class_name)
@@ -515,9 +532,11 @@ class DeviceTypeTestBase(TestCase):
         if not excluded_dtypes:
             return False
 
-        if isinstance(dtypes, (list, tuple)):
-            return any(component_dtype in excluded_dtypes for component_dtype in dtypes)
-        return dtypes in excluded_dtypes
+        if isinstance(dtype_variant, (list, tuple)):
+            return any(
+                component_dtype in excluded_dtypes for component_dtype in dtype_variant
+            )
+        return dtype_variant in excluded_dtypes
 
     @classmethod
     def _apply_op_allowlist(cls, ops):
@@ -684,7 +703,7 @@ class DeviceTypeTestBase(TestCase):
                 dtype
                 for dtype in dtypes
                 if not cls._should_exclude_test_conditionally(
-                    test_class_name, name, dtypes=dtype
+                    test_class_name, name, dtype_variant=dtype
                 )
             )
 
