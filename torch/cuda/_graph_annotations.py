@@ -44,7 +44,7 @@ import importlib.metadata
 from collections import defaultdict
 from contextlib import contextmanager
 from logging import getLogger
-from typing import Any, cast, TypeAlias
+from typing import Any, TypeAlias
 
 import torch
 from torch.cuda._utils import _check_cuda_bindings, _HAS_CUDA_BINDINGS
@@ -325,10 +325,7 @@ def mark_kernels(annotation: str | dict[str, Any]):
         # Stamp the capturing graph with its capture id (toolsId high bits) so
         # remap can later match these annotations to this graph's exec id
         # without relying on keep_graph or call ordering.
-        capturing = cast(
-            torch.cuda.CUDAGraph,
-            torch.cuda.CUDAGraph.get_currently_capturing_graph(),
-        )
+        capturing = torch.cuda.CUDAGraph.get_currently_capturing_graph()
         capturing._capture_graph_id = tools_ids[0] >> 32
         _pending_scopes.append((annotation, tools_ids))
 
@@ -391,10 +388,26 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
         )
     )
 
-    # Rekey only this graph's annotations. Entries from other graphs (already
-    # remapped to their own exec ids, or pending their own remap) are kept.
+    remapped = _rekey_annotations(_kernel_annotations, capture_graph_id, exec_graph_id)
+    _kernel_annotations.clear()
+    _kernel_annotations.update(remapped)
+
+
+def _rekey_annotations(
+    annotations: dict[int, list[Any]],
+    capture_graph_id: int,
+    exec_graph_id: int,
+) -> dict[int, list[Any]]:
+    """Rekey one graph's annotations from its capture id to its exec id.
+
+    A toolsId packs the graph id in the upper 32 bits and the node id in the
+    lower 32. Only entries whose upper bits match ``capture_graph_id`` are
+    rewritten to ``exec_graph_id``; entries from other graphs (already remapped
+    to their own exec ids, or pending their own remap) are kept as-is. When two
+    capture-side ids collide on the same rekeyed id their lists are merged.
+    """
     remapped: dict[int, list[Any]] = {}
-    for tools_id, ann_list in _kernel_annotations.items():
+    for tools_id, ann_list in annotations.items():
         if tools_id >> 32 != capture_graph_id:
             remapped[tools_id] = ann_list
             continue
@@ -404,9 +417,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
             remapped[new_tools_id].extend(ann_list)
         else:
             remapped[new_tools_id] = list(ann_list)
-
-    _kernel_annotations.clear()
-    _kernel_annotations.update(remapped)
+    return remapped
 
 
 def get_kernel_annotations() -> dict[int, list[Any]]:

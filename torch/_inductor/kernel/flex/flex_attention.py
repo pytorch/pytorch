@@ -25,6 +25,8 @@ from ...select_algorithm import (
 )
 from ...utils import can_use_tma
 from .common import (
+    _flex_kernel_options_example,
+    _flex_kernel_tuning_options,
     build_subgraph_buffer,
     create_indices_fake,
     create_num_blocks_fake_generator,
@@ -52,7 +54,7 @@ from .flex_flash_attention import (
 
 
 if TYPE_CHECKING:
-    from ...heuristics.template.triton import FlexBwDConfig, FlexConfig
+    from ...template_heuristics.triton import FlexBwDConfig, FlexConfig
 
 
 log = logging.getLogger(__name__)
@@ -70,6 +72,28 @@ def _sanitize_kernel_options_for_triton(
     sanitized = dict(kernel_options)
     backend = cast(_Backend, sanitized.pop("BACKEND", "AUTO"))
     return sanitized, backend
+
+
+def raise_flex_kernel_options_error(
+    kernel_name: str,
+    kernel_options: dict[str, Any],
+    option_names: Sequence[str],
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
+) -> None:
+    option_values = ", ".join(f"{name}={kernel_options[name]}" for name in option_names)
+    raise ValueError(
+        f"Invalid FlexAttention {kernel_name} kernel options: Q and KV block sizes "
+        f"must be divisible by the selected tile sizes. Got "
+        f"SPARSE_Q_BLOCK_SIZE={sparse_q_block_size}, "
+        f"SPARSE_KV_BLOCK_SIZE={sparse_kv_block_size}, and {option_values}. "
+        f"Pass compatible values with kernel_options. Available {kernel_name} "
+        f"tuning options are {_flex_kernel_tuning_options(kernel_name)}. For example: "
+        f"{_flex_kernel_options_example(kernel_name)}. If you did not pin "
+        f"these options, and the default choice errors, compiling with "
+        f"mode='max-autotune-no-cudagraphs' can also fix this by trying more "
+        f"FlexAttention configs."
+    )
 
 
 @SymbolicGridFn
@@ -414,6 +438,7 @@ def flex_attention(
     original_kernel_options = kernel_options.copy()
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
+    invalid_block_options: dict[str, Any] | None = None
 
     for conf in configs:
         cur_kernel_options = original_kernel_options.copy()
@@ -452,11 +477,14 @@ def flex_attention(
             or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"] % cur_kernel_options["BLOCK_M"]
             != 0
         ):
+            invalid_block_options = cur_kernel_options
             if len(configs) == 1:
-                raise ValueError(
-                    f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We "
-                    f"got Q_BLOCK_SIZE={cur_kernel_options['SPARSE_Q_BLOCK_SIZE']} and "
-                    f"KV_BLOCK_SIZE={cur_kernel_options['SPARSE_KV_BLOCK_SIZE']}."
+                raise_flex_kernel_options_error(
+                    "forward",
+                    cur_kernel_options,
+                    ("BLOCK_M", "BLOCK_N"),
+                    SPARSE_Q_BLOCK_SIZE,
+                    SPARSE_KV_BLOCK_SIZE,
                 )
             continue
 
@@ -492,6 +520,16 @@ def flex_attention(
         )
         if error is not None and len(configs) == 1:
             raise error
+
+    if not choices and invalid_block_options is not None:
+        raise_flex_kernel_options_error(
+            "forward",
+            invalid_block_options,
+            ("BLOCK_M", "BLOCK_N"),
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
+        )
+
     inputs_for_autotuning = (
         [
             query,
@@ -939,18 +977,11 @@ def flex_attention_backward(*args, **kwargs):
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
+    invalid_block_options: dict[str, Any] | None = None
 
     original_kernel_options = kernel_options.copy()
 
     for conf in configs:
-        if (
-            SPARSE_KV_BLOCK_SIZE % conf.block_n1 != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_m1 != 0
-            or SPARSE_KV_BLOCK_SIZE % conf.block_n2 != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_m2 != 0
-        ):
-            continue
-
         # Performance tuning
         # Triton heuristics
         cur_kernel_options = original_kernel_options.copy()
@@ -984,6 +1015,30 @@ def flex_attention_backward(*args, **kwargs):
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        if (
+            cur_kernel_options["SPARSE_KV_BLOCK_SIZE"] % cur_kernel_options["BLOCK_N1"]
+            != 0
+            or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"]
+            % cur_kernel_options["BLOCK_M1"]
+            != 0
+            or cur_kernel_options["SPARSE_KV_BLOCK_SIZE"]
+            % cur_kernel_options["BLOCK_N2"]
+            != 0
+            or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"]
+            % cur_kernel_options["BLOCK_M2"]
+            != 0
+        ):
+            invalid_block_options = cur_kernel_options
+            if len(configs) == 1:
+                raise_flex_kernel_options_error(
+                    "backward",
+                    cur_kernel_options,
+                    ("BLOCK_M1", "BLOCK_N1", "BLOCK_M2", "BLOCK_N2"),
+                    SPARSE_Q_BLOCK_SIZE,
+                    SPARSE_KV_BLOCK_SIZE,
+                )
+            continue
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
@@ -1025,6 +1080,16 @@ def flex_attention_backward(*args, **kwargs):
             call_sizes=query.get_size() + key.get_size()[1:3],
             **cur_kernel_options,
         )
+
+    if not choices and invalid_block_options is not None:
+        raise_flex_kernel_options_error(
+            "backward",
+            invalid_block_options,
+            ("BLOCK_M1", "BLOCK_N1", "BLOCK_M2", "BLOCK_N2"),
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
+        )
+
     inputs_for_autotuning = (
         [
             query,
