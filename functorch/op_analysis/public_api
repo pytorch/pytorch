@@ -225,7 +225,6 @@ block_diag
 bmm
 cartesian_prod
 chain_matmul
-cholesky
 cholesky_inverse
 cholesky_solve
 cross
@@ -290,6 +289,7 @@ ormqr
 outer
 pca_lowrank
 pinverse
+qr
 renorm
 solve
 svd
