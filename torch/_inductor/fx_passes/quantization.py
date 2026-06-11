@@ -1501,7 +1501,7 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
                 with graph.inserting_before(node):
                     if not all(user.args[1].op == "get_attr" for user in users):
                         raise AssertionError(
-                            "expected all weight nodes to be get_attr"
+                            "expected all users to have get_attr weight"
                         )
                     computation_node_0 = users[0]
                     packed_wgts = [getattr(gm, user.args[1].target) for user in users]
@@ -1555,11 +1555,9 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
                         for gemm_idx, user in enumerate(users):
                             if user.target != computation_op:
                                 raise AssertionError(
-                                    f"expected user.target to be {computation_op}, "
-                                    f"got {user.target}"
+                                    f"expected target {computation_op}, got {user.target}"
                                 )
                             get_item = graph.create_node(
-
                                 "call_function",
                                 operator.getitem,
                                 (
