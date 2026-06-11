@@ -52,6 +52,21 @@ def _warn_once(msg, category=UserWarning, stacklevel=2):
         warn(msg, category=category, stacklevel=stacklevel)
 
 
+def _parse_custom_profiler_config(
+    experimental_config: _ExperimentalConfig | None,
+) -> dict[str, Any]:
+    if experimental_config is None:
+        return {}
+    raw = getattr(experimental_config, "custom_profiler_config", None)
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"backend": raw}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 class _NumpyEncoder(json.JSONEncoder):
     """
     Json encoder for numpy types (np.int, np.float, np.array etc.)
@@ -210,6 +225,23 @@ class _KinetoProfile:
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.with_modules = with_modules
+        if (
+            experimental_config is not None
+            and experimental_config.trace_only
+            and with_stack
+        ):
+            import copy
+
+            warn(
+                "trace_only=True is incompatible with with_stack=True "
+                "(stack traces require event post-processing). "
+                "Disabling trace_only."
+            )
+            experimental_config_copy: _ExperimentalConfig = copy.copy(
+                experimental_config
+            )
+            experimental_config_copy.trace_only = False
+            experimental_config = experimental_config_copy
         self.experimental_config = experimental_config
         self.execution_trace_observer = execution_trace_observer
         self.acc_events = acc_events
@@ -237,6 +269,20 @@ class _KinetoProfile:
 
         # user-defined metadata to be amended to the trace
         self.preset_metadata: dict[str, str] = {}
+        self._trace_metadata: dict[str, str] = {}
+        self._custom_profiler_config = _parse_custom_profiler_config(
+            self.experimental_config
+        )
+        self._use_cupti_monitor = self._custom_profiler_config.get(
+            "backend"
+        ) == "cupti_monitor" or bool(self._custom_profiler_config.get("cupti_monitor"))
+        self._monitor_started_here = False
+        self._monitor_tempdir: tempfile.TemporaryDirectory[str] | None = None
+        self._monitor_trace_window: dict[str, object] | None = None
+        if self._use_cupti_monitor and ProfilerActivity.CPU not in self.activities:
+            raise ValueError(
+                "cupti_monitor profiler backend currently requires CPU activity"
+            )
 
     def start(self) -> None:
         self.prepare_trace()
@@ -257,9 +303,10 @@ class _KinetoProfile:
                 "To keep events across cycles, set acc_events=True."
             )
         if (self.profiler is None) or (not self.acc_events):
+            use_device = None if self._use_cupti_monitor else self.use_device
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
-                use_device=self.use_device,
+                use_device=use_device,
                 record_shapes=self.record_shapes,
                 with_flops=self.with_flops,
                 profile_memory=self.profile_memory,
@@ -274,6 +321,17 @@ class _KinetoProfile:
                 if self.activity_filters
                 else None,
             )
+        if self._use_cupti_monitor:
+            from torch.profiler import _cupti_monitor as _mon
+
+            if _mon.get_monitor() is None:
+                self._monitor_tempdir = tempfile.TemporaryDirectory(
+                    prefix="torch_cupti_profiler_"
+                )
+                _mon.start_collection(self._monitor_tempdir.name)
+                self._monitor_started_here = True
+            self._monitor_trace_window = None
+            _mon.prepare_trace_window()
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
@@ -282,6 +340,10 @@ class _KinetoProfile:
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before starting trace")
         self.profiler._start_trace()
+        if self._use_cupti_monitor:
+            from torch.profiler import _cupti_monitor as _mon
+
+            _mon.start_trace_window()
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")
@@ -328,9 +390,23 @@ class _KinetoProfile:
             self.execution_trace_observer.stop()
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before stopping trace")
-        self.profiler.__exit__(None, None, None)
+        if self._use_cupti_monitor:
+            from torch.profiler import _cupti_monitor as _mon
 
-    def export_chrome_trace(self, path: str):
+            if self.use_device:
+                torch.accelerator.synchronize()
+            self._monitor_trace_window = _mon.end_trace_window()
+        self.profiler.__exit__(None, None, None)
+        if self._use_cupti_monitor and self._monitor_started_here:
+            from torch.profiler import _cupti_monitor as _mon
+
+            _mon.stop_collection()
+            self._monitor_started_here = False
+            if self._monitor_tempdir is not None:
+                self._monitor_tempdir.cleanup()
+                self._monitor_tempdir = None
+
+    def export_chrome_trace(self, path: str, use_python_export: bool = False):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
@@ -339,14 +415,35 @@ class _KinetoProfile:
             raise AssertionError(
                 "Profiler must be initialized before exporting chrome trace"
             )
-        if path.endswith(".gz"):
+        if self._use_cupti_monitor:
+            if self._monitor_trace_window is None:
+                raise AssertionError(
+                    "CUPTI monitor trace window must exist before exporting chrome trace"
+                )
+            from torch.profiler._cupti_monitor_trace import (
+                merge_trace_window_into_chrome_trace,
+            )
+
+            with tempfile.NamedTemporaryFile("w+t", suffix=".json") as fp:
+                self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
+                merge_trace_window_into_chrome_trace(
+                    fp.name,
+                    path,
+                    self._monitor_trace_window,
+                    trace_name=path,
+                )
+            return
+        if use_python_export:
+            self.profiler.export_chrome_trace(
+                path, self._trace_metadata, use_python_export=True
+            )
+        elif path.endswith(".gz"):
             with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
-                retvalue = self.profiler.export_chrome_trace(fp.name)
+                self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
                 with open(fp.name, "rb") as fin, gzip.open(path, "wb") as fout:
                     fout.writelines(fin)
-            return retvalue
         else:
-            return self.profiler.export_chrome_trace(path)
+            self.profiler.export_chrome_trace(path, self._trace_metadata)
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         """Save stack traces to a file
@@ -422,6 +519,11 @@ class _KinetoProfile:
         """
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before accessing events")
+        if self.experimental_config is not None and self.experimental_config.trace_only:
+            raise RuntimeError(
+                "events() is not available when trace_only=True in "
+                "ExperimentalConfig. Use export_chrome_trace() instead."
+            )
         return self.profiler.function_events
 
     def add_metadata(self, key: str, value: str) -> None:
@@ -430,6 +532,7 @@ class _KinetoProfile:
         into the trace file
         """
         wrapped_value = '"' + value.replace('"', '\\"') + '"'
+        self._trace_metadata[key] = wrapped_value
         torch.autograd._add_metadata_json(key, wrapped_value)
 
     def add_metadata_json(self, key: str, value: str) -> None:
@@ -437,6 +540,7 @@ class _KinetoProfile:
         Adds a user defined metadata with a string key and a valid json value
         into the trace file
         """
+        self._trace_metadata[key] = value
         torch.autograd._add_metadata_json(key, value)
 
     def preset_metadata_json(self, key: str, value: str) -> None:
@@ -631,7 +735,10 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
 
 
 def tensorboard_trace_handler(
-    dir_name: str, worker_name: str | None = None, use_gzip: bool = False
+    dir_name: str,
+    worker_name: str | None = None,
+    use_gzip: bool = False,
+    use_python_export: bool = False,
 ):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -655,7 +762,10 @@ def tensorboard_trace_handler(
         file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
         if use_gzip:
             file_name = file_name + ".gz"
-        prof.export_chrome_trace(os.path.join(dir_name, file_name))
+        prof.export_chrome_trace(
+            os.path.join(dir_name, file_name),
+            use_python_export=use_python_export,
+        )
 
     return handler_fn
 

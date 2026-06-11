@@ -301,6 +301,9 @@ def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
     if is_out(op):
         # Tag.out ops have a trivial fake impl: return the out= args in order.
         return True
+    if is_inplace(op):
+        # Tag.inplace ops have a trivial fake impl: return the mutated first arg.
+        return True
     # It's suspicious if the op is not mutable but returns nothing, so we return False out of an abundance of caution
     if not schema.is_mutable:
         return False
@@ -315,6 +318,7 @@ def generate_trivial_fake_impl(op: OpOverload, *args, **kwargs):
 
     For ops with no returns: returns None.
     For Tag.out ops: returns the out= kwargs in declaration order.
+    For Tag.inplace ops: returns the first positional arg.
     """
     if is_out(op):
         schema = op._schema
@@ -323,6 +327,8 @@ def generate_trivial_fake_impl(op: OpOverload, *args, **kwargs):
         if len(out_args) == 1:
             return out_args[0]
         return out_args
+    if is_inplace(op):
+        return args[0]
     return None
 
 

@@ -569,7 +569,7 @@ static bool constZeroDimTensorAsScalarArg(
       std::stringstream ss;
       ss << "Unsupported tensor dtype:" << dtype
          << " for converting constant 0-dim Tensor to scalar" << '\n';
-      throw unsupported_dtype(ss.str());
+      throw unsupported_dtype(std::move(ss).str());
   }
 }
 
@@ -997,7 +997,7 @@ void TensorExprKernel::genInputDebugNames() {
     std::string sanitized_name = sanitizeName(input->debugName());
     // we could get fancier here, but name conflict is extremely unlikely
     while (name_set.count(sanitized_name)) {
-      sanitized_name.append("_");
+      sanitized_name.push_back('_');
     }
     value_to_name[input] = sanitized_name;
     name_set.insert(sanitized_name);
