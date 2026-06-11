@@ -30,6 +30,24 @@ void set_fmha_bwd_sink_ptr_fields([[maybe_unused]] Args &args)
     }
 }
 
+// SFINAE for an older composable_kernel `fmha_bwd.hpp` snapshot (see mha_fwd_ck.hip).
+// In older CK, `aiter::mha_bwd_args` carried a `ck_mask_type` field in its `fmha_bwd_traits`
+// block (alongside the aiter-level `mask_type`); newer CK renamed/collapsed it into `mask_type`.
+template <typename T, typename = void>
+struct has_fmha_bwd_args_ck_mask_type : std::false_type {};
+
+template <typename T>
+struct has_fmha_bwd_args_ck_mask_type<T, std::void_t<decltype(std::declval<T&>().ck_mask_type)>>
+    : std::true_type {};
+
+template <typename Args>
+void set_fmha_bwd_ck_mask_type([[maybe_unused]] Args &args, [[maybe_unused]] int ck_mask_type)
+{
+    if constexpr(has_fmha_bwd_args_ck_mask_type<Args>::value) {
+        args.ck_mask_type = ck_mask_type;
+    }
+}
+
 aiter::mha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
                                          std::string dtype,
                                          bool has_dropout,
@@ -156,6 +174,7 @@ aiter::mha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
     args.data_type         = dtype;
     args.is_group_mode     = false;
     args.mask_type         = static_cast<int>(mask.type);
+    set_fmha_bwd_ck_mask_type(args, static_cast<int>(mask.type));
     args.bias_type =
         enable_bias ? static_cast<int>(bias_enum::elementwise_bias)
                     : static_cast<int>(bias_enum::no_bias);
