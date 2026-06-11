@@ -640,6 +640,18 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 1, requires_grad=False)]
         self.verify_aot_autograd(f, inp, dynamic=True)
 
+    def test_to_dense_strided_tensor(self):
+        def f(a):
+            return (
+                a.to_dense(),
+                a.to_dense(masked_grad=True),
+                a.to_dense(dtype=torch.float32),
+                a.to_dense(dtype=torch.float64),
+            )
+
+        inp = [torch.randn(3, 4)]
+        self.verify_aot_autograd(f, inp, dynamic=True)
+
     def test_complex_linear(self):
         # https://github.com/pytorch/pytorch/issues/93424
         inp = [torch.randn(1, 10, 10, dtype=torch.complex64)]
@@ -5062,7 +5074,7 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    add = torch.ops.aten.add.Scalar(clone, 1);  clone = None
     return (add,)""",
         )
 
@@ -9651,9 +9663,9 @@ class TestAOTDispatch(AOTTestCase):
             fw_graph_cell[0].code.strip(),
             """\
 def forward(self, primals_1, primals_2, primals_3):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 6);  primals_1 = None
-    mul_1 = torch.ops.aten.mul.Tensor(primals_2, 6);  primals_2 = None
-    div = torch.ops.aten.div.Tensor(primals_3, 2);  primals_3 = None
+    mul = torch.ops.aten.mul.Scalar(primals_1, 6);  primals_1 = None
+    mul_1 = torch.ops.aten.mul.Scalar(primals_2, 6);  primals_2 = None
+    div = torch.ops.aten.div.Scalar(primals_3, 2);  primals_3 = None
     add = torch.ops.aten.add.Tensor(mul, div);  mul = None
     add_1 = torch.ops.aten.add.Tensor(mul_1, div);  mul_1 = div = None
     return (add, add_1)""",
@@ -9670,10 +9682,10 @@ def forward(self, primals_1, primals_2, primals_3):
             bw_graph_cell[0].code.strip(),
             """\
 def forward(self, tangents_1, tangents_2):
-    div_1 = torch.ops.aten.div.Tensor(tangents_1, 2)
-    div_2 = torch.ops.aten.div.Tensor(tangents_2, 2)
-    mul_2 = torch.ops.aten.mul.Tensor(tangents_1, 6);  tangents_1 = None
-    mul_3 = torch.ops.aten.mul.Tensor(tangents_2, 6);  tangents_2 = None
+    div_1 = torch.ops.aten.div.Scalar(tangents_1, 2)
+    div_2 = torch.ops.aten.div.Scalar(tangents_2, 2)
+    mul_2 = torch.ops.aten.mul.Scalar(tangents_1, 6);  tangents_1 = None
+    mul_3 = torch.ops.aten.mul.Scalar(tangents_2, 6);  tangents_2 = None
     return (mul_2, mul_3, div_1, div_2)""",
         )
 
@@ -11496,10 +11508,6 @@ if not TEST_MKL:
     )
 
 symbolic_aot_autograd_failures = {
-    xfail("combinations", ""),  # aten.masked_select.default
-    xfail(
-        "index_fill", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "linalg.lstsq", ""
     ),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition

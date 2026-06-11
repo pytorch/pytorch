@@ -413,6 +413,25 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
             torch.ops.aten.scalar_tensor.default,
         )
 
+    def test_aot_autograd_tensorifies_symbolic_lhs_floor_divide(self):
+        def f(x, y):
+            return x.shape[0] // y
+
+        nodes = self._collect_aot_autograd_backend_nodes(
+            f, (torch.randn(3, 3), torch.ones(3, 3)), dynamic=True
+        )
+        floor_divide_nodes = [
+            node for node in nodes if node.target == torch.ops.aten.floor_divide.default
+        ]
+        self.assertEqual(len(floor_divide_nodes), 1)
+        floor_divide_node = floor_divide_nodes[0]
+        self.assertIsInstance(floor_divide_node.args[0], torch.fx.Node)
+        self.assertEqual(
+            floor_divide_node.args[0].target,
+            torch.ops.aten.scalar_tensor.default,
+        )
+        self.assertIsInstance(floor_divide_node.args[0].args[0], torch.fx.Node)
+
     def test_lookup_backend(self):
         from torch._dynamo import lookup_backend
 

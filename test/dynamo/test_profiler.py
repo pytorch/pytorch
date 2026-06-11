@@ -405,7 +405,7 @@ def forward(self, arg0_1):
     cos = torch.ops.aten.cos.default(sin);  sin = None
     _record_function_exit_1 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_1);  _record_function_enter_new_1 = _record_function_exit_1 = None
     _record_function_enter_new_2 = torch.ops.profiler._record_function_enter_new.default('my_net2')
-    add = torch.ops.aten.add.Tensor(cos, 2);  cos = None
+    add = torch.ops.aten.add.Scalar(cos, 2);  cos = None
     _record_function_exit_2 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_2);  _record_function_enter_new_2 = _record_function_exit_2 = None
     return (add,)""",
         )

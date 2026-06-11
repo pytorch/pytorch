@@ -807,7 +807,7 @@ class GraphModule(torch.nn.Module):
             inductor_random_default: "f32[8]" = torch.ops.prims.inductor_random.default([8], inductor_lookup_seed_default, 'rand');  inductor_lookup_seed_default = None
             gt: "b8[8]" = torch.ops.aten.gt.Scalar(inductor_random_default, 0.5);  inductor_random_default = None
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(gt, sin);  sin = None
-            mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(mul, 2.0);  mul = None
+            mul_1: "f32[8]" = torch.ops.aten.mul.Scalar(mul, 2.0);  mul = None
             return (mul_1, primals_0, gt)
 
     class partitioned_fw_subgraph_1_0(torch.nn.Module):
@@ -1397,7 +1397,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(exp_out, out)
         self.assertEqual(x_clone, x)
 
-    def test_input_mutation_mutiple_times_fake_tensor_cahche_hit(self):
+    def test_input_mutation_mutiple_times_fake_tensor_cache_hit(self):
         @nested_compile_region
         def gn(x, y):
             x.add_(1)
@@ -1424,7 +1424,7 @@ class GraphModule(torch.nn.Module):
             return (operands[0].clone(),)
 
         with (
-            mock.patch(
+            mock.patch.dict(
                 "torch._higher_order_ops.utils.registered_hop_fake_fns",
                 {torch.ops.higher_order.invoke_subgraph: _mock_invoke_subgraph},
             ),

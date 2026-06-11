@@ -441,11 +441,24 @@ def _sfdp_pattern_16(query, key, value, attn_mask, inv_scale, dropout_p):
 
 def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+    if query.device.type == "cuda" and torch.version.hip is None:
+        # Keep the Bert CUDA pattern on its original math path; generic SDPA can
+        # pick fused backends whose scaling/dropout numerics fail tight checks.
+        attn_weight = torch.matmul(query, key.transpose(-2, -1))
+        attn_weight = attn_weight.div(inv_scale) + attn_mask
+        attn_weight = attn_weight.softmax(dim=-1)
+        if dropout_p != 0.0:
+            attn_weight = torch.nn.functional.dropout(attn_weight, p=dropout_p)
+        return attn_weight.to(dtype=query.dtype).matmul(value)
+    attn_mask = attn_mask.to(dtype=query.dtype)
     return _scaled_dot_product_attention(
-        query.transpose(1, 2),
-        key.transpose(1, 2),
-        value.transpose(1, 2),
-        attn_mask=attn_mask.to(dtype=query.dtype),
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
         dropout_p=dropout_p,
         is_causal=False,
         scale=1.0 / inv_scale,
@@ -935,7 +948,8 @@ def _warn_tf32_disabled() -> None:
 
 
 def _sfdp_params_check(match):
-    assert all(k in match.kwargs for k in ("query", "key", "value"))
+    if not all(k in match.kwargs for k in ("query", "key", "value")):
+        raise AssertionError("expected query, key, value in match.kwargs")
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
     value = match.kwargs["value"].meta["val"]
@@ -1226,7 +1240,6 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 s,
                 _sfdp_extra_check(_sfdp_div_scale_ops),
             ),
-            # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
@@ -1438,7 +1451,10 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
         for pattern, replacement, args, workaround, extra_check in candidates:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
-            assert isinstance(workaround, dict)
+            if not isinstance(workaround, dict):
+                raise AssertionError(
+                    f"expected workaround to be a dict, got {type(workaround)}"
+                )
             name = pattern.__name__
             pattern_name = name
 
@@ -1469,7 +1485,10 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 )
             inference_workaround = {}
             if workaround:
-                assert len(workaround) <= 2
+                if len(workaround) > 2:
+                    raise AssertionError(
+                        f"expected len(workaround) <= 2, got {len(workaround)}"
+                    )
                 for scale_arg in ("inv_scale", "inv_scale_factor", "scale_factor"):
                     if scale_arg in workaround:
                         inference_workaround[scale_arg] = workaround[scale_arg]

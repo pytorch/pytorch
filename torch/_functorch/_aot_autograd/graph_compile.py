@@ -508,10 +508,18 @@ def _tensorify_scalar_lhs_floor_divide(
     if dtype is None:
         return False
 
+    node_lhs = node.args[0]
+    if isinstance(node_lhs, torch.fx.Node):
+        lhs_arg = node_lhs
+    elif _is_python_scalar(node_lhs) and not isinstance(node_lhs, py_sym_types):
+        lhs_arg = node_lhs
+    else:
+        return False
+
     with module.graph.inserting_before(node):
         lhs_tensor = module.graph.call_function(
             torch.ops.aten.scalar_tensor.default,
-            (lhs,),
+            (lhs_arg,),
             {
                 "dtype": dtype,
                 "device": rhs.device,

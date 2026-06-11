@@ -2994,14 +2994,18 @@ class GraphModule(torch.nn.Module):
             # xs tests
             autograds.append([True, False, True, True, True, True, True, True])
             autograds.append([False, False, True, True, True, True, True, True])
+            autograds.append([True, False, False, False, False, False, False, False])
         elif partial_grad == "init":
             # init tests
             autograds.append([True, True, False, True, True, True, True, True])
             autograds.append([True, True, False, False, True, True, True, True])
+            autograds.append([False, False, False, True, False, False, False, False])
         elif partial_grad == "additional_inputs":
             # additional input tests
             autograds.append([True, True, True, True, False, True, False, True])
-            autograds.append([True, True, True, True, False, False, False, False])
+            autograds.append([True, True, True, True, False, False, True, False])
+            autograds.append([False, False, False, False, False, True, False, True])
+            autograds.append([False, False, False, False, False, False, True, False])
         elif partial_grad == "complex":
             # complex cases
             autograds.append([True, False, False, False, False, False, False, True])
@@ -3030,7 +3034,7 @@ class GraphModule(torch.nn.Module):
             ]
 
             def RNN(x: torch.Tensor, y: torch.Tensor):
-                c_new_0 = x[0] + 1
+                c_new_0 = x[0] + b_hh
                 c_new_1 = x[1] + 1
                 h_new = (
                     torch.tanh(c_new_1 + x[0] @ W_hh + b_hh)
@@ -3055,6 +3059,44 @@ class GraphModule(torch.nn.Module):
                     [r for r, m in zip(result_exp_flat, exp_grad_mask) if m],
                     params,
                 )
+
+    def test_scan_break_bw_input_output_aliasing(self):
+        # Focused test for ScanAutogradImpl._break_bw_input_output_aliasing.
+        # The partitioner naturally produces direct placeholder outputs (covered
+        # by test_scan_closure_combine_fn_with_no_grad_additional_inputs_partial),
+        # but transitive aliases (a view of a placeholder) don't arise from real
+        # fixtures, so we hand-craft a bw_gm that returns both kinds and a
+        # non-aliasing computed output, then check the pass clones the right ones.
+        from torch._higher_order_ops.scan import ScanAutogradImpl
+
+        graph = torch.fx.Graph()
+        ph_tangent = graph.placeholder("tangent")
+        ph_tangent.meta["val"] = torch.empty(2, 3)
+        ph_zeros = graph.placeholder("zeros_like")
+        ph_zeros.meta["val"] = torch.empty(6)
+        # Non-aliasing computed gradient.
+        computed = graph.call_function(
+            torch.ops.aten.mul.Tensor, args=(ph_tangent, 2.0)
+        )
+        computed.meta["val"] = ph_tangent.meta["val"] * 2.0
+        # Transitive alias: view of a placeholder.
+        view = graph.call_function(torch.ops.aten.view.default, args=(ph_zeros, [2, 3]))
+        view.meta["val"] = ph_zeros.meta["val"].view(2, 3)
+        graph.output((computed, ph_zeros, view))
+        bw_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        # Stub instance: only hop_partitioned_graph.bw_gm is read by the pass.
+        impl = ScanAutogradImpl.__new__(ScanAutogradImpl)
+        impl.hop_partitioned_graph = type("_S", (), {"bw_gm": bw_gm})()
+
+        impl._break_bw_input_output_aliasing()
+
+        outs = next(iter(bw_gm.graph.find_nodes(op="output"))).args[0]
+        self.assertIs(outs[0], computed)  # not an alias of any input
+        self.assertEqual(outs[1].target, torch.ops.aten.clone.default)  # direct
+        self.assertEqual(outs[1].args, (ph_zeros,))
+        self.assertEqual(outs[2].target, torch.ops.aten.clone.default)  # transitive
+        self.assertEqual(outs[2].args, (view,))
 
     @requires_cuda
     @skipIfTorchDynamo("not a dynamo test")
@@ -8700,7 +8742,7 @@ class GraphModule(torch.nn.Module):
         out_x: "f32[s77, s27]" = while_loop[1];  while_loop = None
 
         gt: "Sym(u2 > 0)" = getitem_4 > 0
-        _check = torch._check(gt);  gt = _check = None
+        _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression u2 > 0 on node 'gt'");  gt = _assert_scalar_default_2 = None
 
         add: "Sym(u2 + 1)" = getitem_4 + 1
 
@@ -8733,11 +8775,11 @@ class GraphModule(torch.nn.Module):
             x_clone: "f32[s77, s27]" = child_1.clone()
 
             ge: "Sym(u1 >= 0)" = unbacked_symint_0 >= 0
-            _check = torch._check(ge);  ge = _check = None
+            _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
 
             size = child_1.size();  child_1 = size = None
             lt: "Sym(u1 < s77)" = unbacked_symint_0 < sym_size_int;  sym_size_int = None
-            _check_1 = torch._check(lt);  lt = _check_1 = None
+            _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < s77 on node 'lt'");  lt = _assert_scalar_default_1 = None
 
             select: "f32[s27]" = x_clone.select(0, unbacked_symint_0)
             select_1: "f32[s27]" = x_clone.select(0, unbacked_symint_0)
@@ -9146,7 +9188,7 @@ class GraphModule(torch.nn.Module):
     class while_loop_body_graph_0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3]", arg2_1: "f32[3, 3]"):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1)
-            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, 1);  mul = None
+            add: "f32[3, 3]" = torch.ops.aten.add.Scalar(mul, 1);  mul = None
             t: "f32[3, 3]" = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
             addmm: "f32[3, 3]" = torch.ops.aten.addmm.default(arg1_1, arg0_1, t);  arg1_1 = arg0_1 = t = None
             add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, addmm);  add = addmm = None
@@ -9183,7 +9225,7 @@ class GraphModule(torch.nn.Module):
             sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0)
 
             rsub: "i64[]" = torch.ops.aten.rsub.Scalar(arg0_1, sym_size_int_1);  sym_size_int_1 = None
-            sub_1: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
+            sub_1: "i64[]" = torch.ops.aten.sub.Scalar(rsub, 1);  rsub = None
             _local_scalar_dense: "Sym(u7)" = torch.ops.aten._local_scalar_dense.default(sub_1);  sub_1 = None
             select: "f32[3, 3]" = torch.ops.aten.select.int(arg4_1, 0, _local_scalar_dense);  arg4_1 = _local_scalar_dense = None
             t: "f32[3, 3]" = torch.ops.aten.t.default(arg6_1);  arg6_1 = None
@@ -9199,7 +9241,7 @@ class GraphModule(torch.nn.Module):
             mul_5: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
             add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_5);  mm = mul_5 = None
             add_8: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_7, mul_4);  add_7 = mul_4 = None
-            add_9: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            add_9: "i64[]" = torch.ops.aten.add.Scalar(arg0_1, 1);  arg0_1 = None
             add_10: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
             add_11: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
             return (add_9, add_8, add_10, add_11)
