@@ -542,7 +542,7 @@ std::unique_ptr<at::ObserverContext> onFunctionEnterTLS(
   return state_ptr->recordQueue.getSubqueue()->begin_op(fn);
 }
 
-static void onFunctionExitImpl(
+void onFunctionExitImpl(
     KinetoThreadLocalState& state,
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {

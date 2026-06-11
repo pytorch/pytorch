@@ -124,12 +124,18 @@ ProfilerStateBase::~ProfilerStateBase() {
 }
 
 /*static*/ std::shared_ptr<ProfilerStateBase> ProfilerStateBase::getGlobal() {
-  return GlobalManager::get();
+  auto out = GlobalManager::get();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      out == nullptr || out->config().pushGlobalCallbacks());
+  return out;
 }
 
 /*static*/ ProfilerStateBase* ProfilerStateBase::getTLS() {
-  return static_cast<ProfilerStateBase*>(
+  auto* out = static_cast<ProfilerStateBase*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      out == nullptr || !out->config().pushGlobalCallbacks());
+  return out;
 }
 
 /*static*/ void ProfilerStateBase::push(
