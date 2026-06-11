@@ -4,6 +4,7 @@ import random
 
 import torch
 
+from torchfuzz.operators._dtypes import FLOAT_DTYPES
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 from torchfuzz.type_promotion import (
@@ -237,14 +238,22 @@ class ClampOperator(Operator):
         if not use_min and not use_max:
             use_min = True
 
+        # For integer-dtype tensors, emit integer bounds so the fuzzer doesn't
+        # generate float-bound + int-tensor mismatches between CPU and MTIA.
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if output_spec.dtype in FLOAT_DTYPES:
+            min_literal, max_literal = "-1.0", "1.0"
+        else:
+            min_literal, max_literal = "-1", "1"
+
         args = [input_name]
         if use_min:
-            args.append("min=-1.0")
+            args.append(f"min={min_literal}")
         else:
             args.append("min=None")
 
         if use_max:
-            args.append("max=1.0")
+            args.append(f"max={max_literal}")
         else:
             args.append("max=None")
 
