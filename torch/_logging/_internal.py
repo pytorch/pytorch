@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import errno
 import functools
 import hashlib
 import importlib.util
@@ -1204,22 +1205,41 @@ class LazyTraceHandler(logging.StreamHandler):
         self.root_dir = root_dir
         logging.Handler.__init__(self)
         self.stream = None
+        self._pid: int | None = None
+        self._stream_path: str | None = None
         self._builtin_open = open
         self._pending_log_version = False
+
+    def _close_stream(self, *, flush: bool = True) -> None:
+        if self.stream:
+            stream = self.stream
+            try:
+                if flush:
+                    self.flush()
+            finally:
+                self.stream = None
+                self._pid = None
+                self._stream_path = None
+                self._pending_log_version = False
+                if flush and hasattr(stream, "close"):
+                    stream.close()
+                elif not flush:
+                    # stream.close() flushes Python buffers.  In a post-fork
+                    # child, close only the inherited fd so parent buffers are
+                    # discarded instead of written to the parent's trace file.
+                    os.close(stream.fileno())
+                    try:
+                        stream.close()
+                    except OSError as exc:
+                        if exc.errno != errno.EBADF:
+                            raise
 
     # cloned from FileHandler in cpython
     def close(self) -> None:
         self.acquire()
         try:
             try:
-                if self.stream:
-                    try:
-                        self.flush()
-                    finally:
-                        stream = self.stream
-                        self.stream = None
-                        if hasattr(stream, "close"):
-                            stream.close()
+                self._close_stream(flush=self._pid is None or self._pid == os.getpid())
             finally:
                 # Issue #19523: call unconditionally to
                 # prevent a handler leak when delay is set
@@ -1230,6 +1250,10 @@ class LazyTraceHandler(logging.StreamHandler):
             self.release()
 
     def emit(self, record) -> None:
+        current_pid = os.getpid()
+        if self.stream is not None and self._pid != current_pid:
+            self._close_stream(flush=False)
+
         if self.stream is None:
             if self.root_dir is None:
                 TRACE_LOG_DIR = "/logs"
@@ -1265,18 +1289,19 @@ class LazyTraceHandler(logging.StreamHandler):
                 ranksuffix = ""
                 if dist.is_available() and dist.is_initialized():
                     ranksuffix = f"rank_{dist.get_rank()}_"
-                self.stream = tempfile.NamedTemporaryFile(  # noqa: SIM115
-                    mode="w+",
+                fd, path = tempfile.mkstemp(
                     suffix=".log",
                     prefix=LOG_PREFIX + ranksuffix,
                     dir=self.root_dir,
-                    delete=False,
                 )
-                log.info("LazyTraceHandler: logging to %s", self.stream.name)
+                self.stream = os.fdopen(fd, mode="w+")
+                self._pid = current_pid
+                self._stream_path = path
+                log.info("LazyTraceHandler: logging to %s", self._stream_path)
                 # Log tlparse path via inductor logger so it shows when
                 # TORCH_LOGS="inductor" is enabled
                 inductor_log = logging.getLogger("torch._inductor")
-                inductor_log.info("tlparse raw data: %s", self.stream.name)
+                inductor_log.info("tlparse raw data: %s", self._stream_path)
                 self._pending_log_version = True
             else:
                 # We go poof, remove and no-op
