@@ -553,12 +553,21 @@ def _add_nv_gemm_choices_impl(
         return
     cc_int = int(cc)
 
-    non_efc_kernels = get_compatible_kernels(
-        args, cc_int, metadata_filter=_exclude_efc_kernels
+    def _classify(metadata) -> int:
+        if _include_efc_kernels_only(metadata):
+            return 1  # efc bucket (with tile_M >= 128)
+        if _exclude_efc_kernels(metadata):
+            return 0  # non-efc bucket
+        # NOTE: tile_M < 128 EFC kernels are dropped due to a cutlass_api
+        # broadcast bug. Tracking: https://github.com/pytorch/pytorch/issues/181901
+        return -1
+
+    include_efc = config.epilogue_fusion
+    non_efc_kernels, efc_kernels = partition_compatible_kernels(
+        args, cc_int, _classify, num_buckets=2
     )
-    efc_kernels = get_compatible_kernels(
-        args, cc_int, metadata_filter=_include_efc_kernels_only
-    )
+    if not include_efc:
+        efc_kernels = []
     if not non_efc_kernels and not efc_kernels:
         log.debug("No compatible %s kernels found", variant.op_name)
         return
