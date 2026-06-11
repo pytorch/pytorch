@@ -157,10 +157,13 @@ static void group_norm_backward_x(const Tensor& dY,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state =
-          lib.getPipelineStateForFunc(fmt::format("group_norm_backward_x_{}_{}_{}_{}",
-                                                  scalarToMetalTypeString(dY),
+          lib.getPipelineStateForFunc(fmt::format("group_norm_backward_x_{}_{}_{}_{}_{}_{}_{}",
+                                                  scalarToMetalTypeString(X),
+                                                  scalarToMetalTypeString(dY_opt),
                                                   scalarToMetalTypeString(mean),
                                                   scalarToMetalTypeString(gamma_opt),
+                                                  scalarToMetalTypeString(dmean_opt),
+                                                  scalarToMetalTypeString(drstd_opt),
                                                   std::is_same_v<idx_T, uint32_t> ? "uint32_t" : "uint64_t"));
       getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_x", {dY, X});
       [compute_encoder setComputePipelineState:pipeline_state];
