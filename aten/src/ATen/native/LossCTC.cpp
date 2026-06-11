@@ -119,7 +119,11 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
 
-  return std::make_tuple(neg_log_likelihood, log_alpha, tg_target_stride, tg_batch_offsets);
+  return std::make_tuple(
+      std::move(neg_log_likelihood),
+      std::move(log_alpha),
+      tg_target_stride,
+      std::move(tg_batch_offsets));
 }
 
 // This kernel is a relatively straightforward implementation of the alpha calculation in the forward backward algorithm (section 4.1).
@@ -547,12 +551,6 @@ Tensor ctc_loss_impl(const Tensor& log_probs_, const Tensor& targets, LengthsTyp
   return is_batched ? std::move(res) : res.squeeze(0);
 }
 
-} // namespace
-
-Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
-  return ctc_loss_impl(log_probs_, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
-}
-
 Tensor ctc_loss_tensor_subclass(
     const Tensor& log_probs_,
     const Tensor& targets,
@@ -583,6 +581,12 @@ Tensor ctc_loss_tensor_subclass(
     return res.sum();
   }
   return is_batched ? std::move(res) : res.squeeze(0);
+}
+
+} // namespace
+
+Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  return ctc_loss_impl(log_probs_, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
 }
 
 // Convenience function accepting Tensors
