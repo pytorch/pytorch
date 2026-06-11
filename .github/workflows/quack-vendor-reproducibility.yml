@@ -1,19 +1,19 @@
 # Reproducibility guard for the vendored quack subset (torch/_vendor/quack).
 #
 # Runs tools/vendoring/quack/vendor.sh --check against the SHA pinned in
-# tools/vendoring/quack/vendor.sh: it re-renders the subset into a tempdir and
-# diffs it against the committed tree, failing on any drift. This catches
-# hand-edits to vendored files that bypass the patch set (such edits work
-# locally but are silently clobbered on the next re-vendor). Fix drift by
-# editing tools/vendoring/quack/patches, not the vendored files.
+# tools/vendoring/quack/vendor.sh. The script first verifies that the pinned
+# SHA is reachable from Dao-AILab/quack main, then re-renders the subset into a
+# tempdir and diffs it against the committed tree. This catches hand-edits to
+# vendored files that bypass the patch set. Fix drift by editing the FlexGEMM
+# patchset or PyTorch vendoring patches, not the vendored files.
 #
 # Run it yourself (needs only git + patch + bash; no torch / CUTLASS / GPU):
 #
-#   tools/vendoring/quack/vendor.sh --check                 # clones the pinned SHA
+#   tools/vendoring/quack/vendor.sh --check                 # clones upstream main
 #   tools/vendoring/quack/vendor.sh --check --src /path/to/quack  # or reuse a local checkout
 #
 # The pinned SHA is the PINNED_SHA constant in tools/vendoring/quack/vendor.sh;
-# no SHA is passed on the command line.
+# no SHA is passed on the command line, and the SHA must be on upstream main.
 #
 # A pytest entry wraps the same check for local use (skips unless opted in):
 #
