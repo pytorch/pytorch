@@ -5268,6 +5268,29 @@ class TestMPS(TestCaseMPS):
         helper(2, 8, 4, 4, "min", torch.float16)
         helper(2, 8, 4, 4, "min", torch.int64)
 
+    # https://github.com/pytorch/pytorch/issues/130295
+    # argmax/argmin must return the index of the first NaN to match CPU
+    # semantics (NaN propagates through max/min).
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_argmax_argmin_with_nan(self, dtype):
+        # 1-D, scalar arg-reduction
+        x = torch.tensor([1.0, float("nan"), 3.0], device="mps", dtype=dtype)
+        self.assertEqual(torch.argmax(x), torch.argmax(x.cpu()))
+        self.assertEqual(torch.argmin(x), torch.argmin(x.cpu()))
+
+        # 2-D, per-dim arg-reduction
+        x = torch.tensor(
+            [[1.0, float("nan"), 3.0], [float("nan"), 2.0, 1.0], [4.0, 5.0, 6.0]],
+            device="mps", dtype=dtype,
+        )
+        for d in (0, 1):
+            self.assertEqual(torch.argmax(x, dim=d), torch.argmax(x.cpu(), dim=d))
+            self.assertEqual(torch.argmin(x, dim=d), torch.argmin(x.cpu(), dim=d))
+
+        # All NaN
+        x = torch.tensor([float("nan")] * 3, device="mps", dtype=dtype)
+        self.assertEqual(torch.argmax(x), torch.argmax(x.cpu()))
+
     def test_reduction_sum_max_long_val(self):
         x_mps = torch.tensor([sys.maxsize, sys.maxsize - 10, sys.maxsize - 5, sys.maxsize - 18], device="mps")
         x_cpu = x_mps.detach().clone().cpu()
