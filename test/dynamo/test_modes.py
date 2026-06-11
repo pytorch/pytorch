@@ -25,7 +25,10 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import skipIfXpu, TEST_ACCELERATOR
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._device import DeviceContext
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode_stack,
+    TorchDispatchMode,
+)
 
 
 device_type = (
@@ -137,6 +140,27 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(eager_res, compiled_res)
         self.assertEqual(cnt.frame_count, 0)
+
+    def test_dispatch_mode_stack_empty_while_compiling(self):
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def stack_fn():
+            return _get_current_dispatch_mode_stack()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def stack_len_fn():
+            return torch._C._len_torch_dispatch_stack()
+
+        self.assertEqual(stack_fn(), [])
+        self.assertEqual(stack_len_fn(), 0)
+
+        with A() as mode:
+            self.assertEqual(_get_current_dispatch_mode_stack(), [mode])
+            self.assertEqual(stack_fn(), [])
+            self.assertEqual(stack_len_fn(), 0)
 
 
 class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
