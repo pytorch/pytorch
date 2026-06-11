@@ -7150,6 +7150,52 @@ def meta_scaled_mm(
     )
 
 
+@register_meta([aten._scaled_mm_v2.default])
+def meta_scaled_mm_v2(
+    self: torch.Tensor,
+    mat2: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    scale_recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    scale_recipe_b: list[int],
+    swizzle_b: list[int],
+    bias: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+    contraction_dim: list[int] | None = None,
+    use_fast_accum: bool = False,
+):
+    # Shape inference only; per-recipe scale validation lives in the C++
+    # TORCH_META_FUNC (validate_scaled_mm_v2_inputs) and runs in eager. This
+    # Python meta exists because the structured C++ meta sizes its output via
+    # IntArrayRef, which specializes symbolic dims under fake-tensor tracing
+    # (breaking mark_dynamic and unbacked symints). Same pattern as meta_mm.
+    torch._check(
+        self.dim() == 2 and mat2.dim() == 2,
+        lambda: f"Inputs must be 2D but got self.dim()={self.dim()} and mat2.dim()={mat2.dim()}",
+    )
+    if contraction_dim:
+        torch._check(
+            self.size(contraction_dim[0]) == mat2.size(contraction_dim[1]),
+            lambda: (
+                f"mat_a and mat_b shapes cannot be multiplied ({self.shape} and {mat2.shape}) "
+                f"with contraction dims mat_a: {contraction_dim[0]}, mat_b: {contraction_dim[1]}"
+            ),
+        )
+    else:
+        torch._check(
+            self.size(1) == mat2.size(0),
+            lambda: f"mat_a and mat_b shapes cannot be multiplied ({self.shape} and {mat2.shape})",
+        )
+    torch._check(
+        bias is None or bias.numel() == mat2.size(1),
+        lambda: f"Bias must be size {mat2.size(1)} but got {bias.numel()}",  # type: ignore[union-attr]
+    )
+
+    _out_dtype = out_dtype if out_dtype is not None else self.dtype
+    return torch.empty(self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device)
+
+
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
 @out_wrapper()
 def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
