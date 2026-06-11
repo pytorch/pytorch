@@ -17,6 +17,7 @@ from torch.distributed.fsdp._common_utils import (
     replace_grad_tensors,
 )
 from torch.profiler import record_function
+from torch.utils.checkpoint import _bypass_sac_dispatch_modes
 from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
@@ -405,14 +406,17 @@ class FSDPParamGroup:
             return
 
         with record_function(self._with_fqn("FSDP::all_gather")):
-            self._all_gather_result = foreach_all_gather(
-                self.fsdp_params,
-                self._all_gather_process_group,
-                async_op,
-                *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
-                self.device,
-                self._all_gather_comm,
-            )
+            with _bypass_sac_dispatch_modes():
+                self._all_gather_result = foreach_all_gather(
+                    self.fsdp_params,
+                    self._all_gather_process_group,
+                    async_op,
+                    *self.comm_ctx.get_all_gather_streams(
+                        async_op, self._training_state
+                    ),
+                    self.device,
+                    self._all_gather_comm,
+                )
 
     @_disable_functorch_if_active
     def wait_for_unshard(self):
@@ -461,11 +465,12 @@ class FSDPParamGroup:
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
-                foreach_all_gather_copy_out(
-                    self._all_gather_result,
-                    self.fsdp_params,
-                    self._all_gather_process_group,
-                )
+                with _bypass_sac_dispatch_modes():
+                    foreach_all_gather_copy_out(
+                        self._all_gather_result,
+                        self.fsdp_params,
+                        self._all_gather_process_group,
+                    )
 
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_unsharded_param()

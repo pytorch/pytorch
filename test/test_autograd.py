@@ -16235,6 +16235,99 @@ class TestSelectiveActivationCheckpoint(TestCase):
         out = checkpoint(fn, x_wrapper, use_reentrant=False, context_fn=context_fn)
         out.sum().backward()
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_profiler_record_function_ignored(self):
+        call_count = [0]
+        policy_calls = []
+        profiler_ops = {
+            torch.ops.profiler._record_function_enter.default,
+            torch.ops.profiler._record_function_enter_new.default,
+            torch.ops.profiler._record_function_exit._RecordFunction,
+            torch.ops.profiler._record_function_exit.default,
+        }
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            policy_calls.append(op)
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            call_count[0] += 1
+            with torch.profiler.record_function("shared"):
+                y = x.sin()
+            if call_count[0] > 1:
+                with torch.profiler.record_function("recompute_only"):
+                    pass
+            return y.cos()
+
+        x = torch.randn(3, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_()
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        out = checkpoint(
+            fn, x, use_reentrant=False, context_fn=context_fn, early_stop=False
+        )
+        out.sum().backward()
+
+        ref = x_ref.sin().cos()
+        ref.sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertTrue(profiler_ops.isdisjoint(policy_calls))
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_sac_bypass_context_skips_storage_and_counters(self):
+        from torch.utils.checkpoint import (
+            _bypass_sac_dispatch_modes,
+            _CachedTorchDispatchMode,
+            _CachingTorchDispatchMode,
+        )
+
+        policy_calls = []
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            policy_calls.append(op)
+            return CheckpointPolicy.MUST_SAVE
+
+        x = torch.randn(3)
+        storage = defaultdict(dict)
+        with _CachingTorchDispatchMode(policy_fn, storage) as caching_mode:
+            with _bypass_sac_dispatch_modes():
+                bypassed_out = x.sin()
+            saved_out = x.sin()
+
+        self.assertEqual(policy_calls, [torch.ops.aten.sin.default])
+        self.assertEqual(caching_mode.func_counter[torch.ops.aten.sin.default], 1)
+        self.assertIn(0, storage[torch.ops.aten.sin.default])
+
+        cached_mode = _CachedTorchDispatchMode(None, storage, False)
+        with cached_mode:
+            with _bypass_sac_dispatch_modes():
+                cached_bypassed_out = x.sin()
+            replayed_out = x.sin()
+
+        self.assertEqual(cached_bypassed_out, bypassed_out)
+        self.assertEqual(replayed_out, saved_out)
+        self.assertEqual(cached_mode.func_counter[torch.ops.aten.sin.default], 1)
+
+        nested_policy_calls = []
+
+        def nested_policy_fn(ctx, op, *args, **kwargs):
+            nested_policy_calls.append(op)
+            return CheckpointPolicy.MUST_SAVE
+
+        nested_storage = defaultdict(dict)
+        with _CachingTorchDispatchMode(nested_policy_fn, nested_storage) as nested_mode:
+            with _bypass_sac_dispatch_modes():
+                with _bypass_sac_dispatch_modes():
+                    x.cos()
+                x.cos()
+            x.cos()
+
+        self.assertEqual(nested_policy_calls, [torch.ops.aten.cos.default])
+        self.assertEqual(nested_mode.func_counter[torch.ops.aten.cos.default], 1)
+
+        with _CachedTorchDispatchMode(None, {}, False):
+            with self.assertRaisesRegex(RuntimeError, "not found in storage"):
+                x.sin()
+
     def test_bad_inputs(self):
         bad_op_list1 = [2]
 

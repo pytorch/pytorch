@@ -9,7 +9,12 @@ from typing import Any
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    fully_shard,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+)
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -24,6 +29,12 @@ from torch.testing._internal.common_utils import run_tests, TEST_HPU
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
+)
+from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.checkpoint import (
+    checkpoint,
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
 )
 
 
@@ -42,6 +53,58 @@ class TestFullyShardAutograd(FSDPTest):
         for param in module.parameters():
             if param.grad is not None:
                 param.grad.div_(group.size())
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_gather_internals_bypass_sac_not_torch_dispatch_modes(self):
+        fsdp_internal_ops = (
+            torch.ops.aten.split_with_sizes.default,
+            torch.ops.aten._foreach_copy_.default,
+        )
+        observed_ops: collections.Counter[Any] = collections.Counter()
+        policy_ops: collections.Counter[Any] = collections.Counter()
+
+        class CountAllGatherInternalsMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func in fsdp_internal_ops:
+                    observed_ops[func] += 1
+                kwargs = {} if kwargs is None else kwargs
+                return func(*args, **kwargs)
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            policy_ops[op] += 1
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 16, bias=False, device=device_type),
+            nn.ReLU(),
+            nn.Linear(16, 8, bias=False, device=device_type),
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+        )
+        fully_shard(model[0], mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+        inp = torch.randn(
+            (2, 8), device=device_type, dtype=torch.bfloat16, requires_grad=True
+        )
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+
+        with CountAllGatherInternalsMode():
+            out = checkpoint(
+                model,
+                inp,
+                use_reentrant=False,
+                context_fn=context_fn,
+                early_stop=False,
+            )
+            out.sum().backward()
+
+        self.assertIsNotNone(inp.grad)
+        self.assertGreater(sum(observed_ops[op] for op in fsdp_internal_ops), 0)
+        for op in fsdp_internal_ops:
+            self.assertEqual(policy_ops[op], 0)
 
     @skip_if_lt_x_gpu(2)
     def test_unused_forward_output(self):
