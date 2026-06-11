@@ -11,6 +11,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
@@ -759,6 +760,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
           kFloat8_e4m3fnuz,
           kFloat8_e5m2fnuz,
           kComplexHalf,
+          kBComplex32,
           kHalf,
           kBool,
           kBFloat16);
@@ -789,6 +791,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             kFloat8_e4m3fnuz,
             kFloat8_e5m2fnuz,
             kComplexHalf,
+            kBComplex32,
             kHalf,
             kBool,
             kBFloat16);
@@ -820,6 +823,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
               kFloat8_e4m3fnuz,
               kFloat8_e5m2fnuz,
               kComplexHalf,
+              kBComplex32,
               kHalf,
               kBool,
               kBFloat16);
@@ -850,6 +854,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             kFloat8_e4m3fnuz,
             kFloat8_e5m2fnuz,
             kComplexHalf,
+            kBComplex32,
             kHalf,
             kBool,
             kBFloat16);
@@ -1725,6 +1730,7 @@ Tensor& index_select_out_cuda(
         AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
         AT_EXPAND(AT_FLOAT8_TYPES),
         kComplexHalf,
+        kBComplex32,
         kHalf,
         kBool,
         kBFloat16);
@@ -1751,8 +1757,8 @@ Tensor index_select_quantized_cuda(const Tensor& self, int64_t dim, const Tensor
 namespace {
 
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      kBool, kHalf, kBFloat16, kComplexHalf, iter.common_dtype(), "masked_fill_", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
+      kBool, kHalf, kBFloat16, kComplexHalf, kBComplex32, iter.common_dtype(), "masked_fill_", [&]() {
         const auto value_ = value.to<scalar_t>();
         gpu_kernel(
             iter, [value_] GPU_LAMBDA(scalar_t self, bool mask) -> scalar_t {
@@ -1796,7 +1802,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
     mask.device(), " and self on ", self.device());
   TORCH_CHECK(mask.scalar_type() == kBool,
     "masked_fill only supports boolean masks, but got dtype ", mask.scalar_type());
-  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of masked_fill_ on expanded tensors is deprecated. "
@@ -1817,7 +1822,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
       .build();
 
   masked_fill_kernel(iter, value);
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 

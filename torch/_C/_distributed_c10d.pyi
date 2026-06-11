@@ -436,6 +436,12 @@ class ProcessGroup:
         tensors: list[Tensor],
         opts=...,
     ) -> Work: ...
+    def reduce_scatter_single_coalesced(
+        self,
+        outputTensors: list[Tensor],
+        inputTensors: list[Tensor],
+        opts: ReduceScatterOptions | None = None,
+    ) -> Work: ...
     def reduce_scatter_tensor_coalesced(
         self,
         outputTensors: list[Tensor],
@@ -470,6 +476,12 @@ class ProcessGroup:
         input_tensor: Tensor,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def all_gather_single(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts=...,
+    ) -> Work: ...
     def _allgather_base(
         self,
         output: Tensor,
@@ -479,6 +491,12 @@ class ProcessGroup:
     def allgather_coalesced(
         self,
         output_lists: list[list[Tensor]],
+        input_list: list[Tensor],
+        opts=...,
+    ) -> Work: ...
+    def all_gather_single_coalesced(
+        self,
+        output_lists: list[Tensor],
         input_list: list[Tensor],
         opts=...,
     ) -> Work: ...
@@ -533,11 +551,35 @@ class ProcessGroup:
         op=...,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def reduce_scatter_single(
+        self,
+        outputTensor: Tensor,
+        inputTensor: Tensor,
+        opts: ReduceScatterOptions | None,
+    ) -> Work: ...
     def _reduce_scatter_base(
         self,
         outputTensor: Tensor,
         inputTensor: Tensor,
         opts: ReduceScatterOptions | None,
+    ) -> Work: ...
+    @overload
+    def all_to_all_single(
+        self,
+        output_tensor: Tensor,
+        input_tensor: Tensor,
+        output_split_sizes: list[int],
+        input_split_sizes: list[int],
+        opts=...,
+    ) -> Work: ...
+    @overload
+    def all_to_all_single(
+        self,
+        output: Tensor,
+        input: Tensor,
+        output_split_sizes: list[int],
+        input_split_sizes: list[int],
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def alltoall_base(
