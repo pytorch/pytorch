@@ -519,6 +519,16 @@ def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
         raise RuntimeError(f"{name} might be modifying the input!")
 
 
+def _check_mutation(graph_module, inputs_fake, name, pre_dispatch):
+    # Like _check_alias_and_mutation but only rejects input mutation; aliasing
+    # is permitted (e.g. torch.cond, whose branches are mutually exclusive).
+    _, inp_mutation = has_potential_input_alias_or_mutation(
+        graph_module, inputs_fake, pre_dispatch=pre_dispatch
+    )
+    if inp_mutation:
+        raise RuntimeError(f"{name} might be modifying the input!")
+
+
 def unique_graph_id(proxy_mode, prefix):
     """Returns a unique name and id for a graph to be added to a proxy_mode tracer"""
     # There are probably better ways - I know that create_arg has some self incrementing name
