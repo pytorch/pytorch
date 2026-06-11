@@ -25,6 +25,8 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     FloorDiv,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
     safe_gcd,
@@ -192,7 +194,8 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
-    index = sympy.simplify(index)
+    if not index.has(sympy.Rel):
+        index = sympy.simplify(index)
     if index != original_index:
         return simplify_index_in_vec_range(index, var, vec_length)
 
@@ -456,7 +459,8 @@ class SizeVarAllocator:
             )
             for x in index_formulas
         ]
-        assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
+        if len(sizes) != len(strides[0]):
+            raise AssertionError((len(sizes), len(strides[0])))
 
         for i in range(len(sizes)):
             if sizes[i] == 1:
@@ -503,11 +507,15 @@ class SizeVarAllocator:
                     new_index.append(sympy.S.Zero)
                 else:
                     new_index.append(it.pop())
-            assert not it
+            if it:
+                raise AssertionError(f"expected all entries consumed, got {it}")
             return new_index
 
         def prune(index):
-            assert len(index) == len(sizes)
+            if len(index) != len(sizes):
+                raise AssertionError(
+                    f"expected len(index) == len(sizes), got {len(index)} != {len(sizes)}"
+                )
             return [i for i, s in zip(index, sizes) if s is not None]
 
         return [x for x in sizes if x is not None], reindex, prune
@@ -852,7 +860,8 @@ class SizeVarAllocator:
         check Note [expect_true].
         """
         expr = sympy_subs(expr, self.inv_precomputed_replacements)
-        assert self.expect_true(expr)
+        if not self.expect_true(expr):
+            raise AssertionError(f"expect_true failed for {expr}")
 
     def check_equals(self, left: Expr, right: Expr) -> None:
         """
@@ -912,7 +921,8 @@ class SizeVarAllocator:
         size_oblivious: bool = False,
         fallback_value: bool | None = None,
     ) -> bool:
-        assert isinstance(left, (Expr, sympy.logic.boolalg.Boolean)), type(left)
+        if not isinstance(left, (Expr, sympy.logic.boolalg.Boolean)):
+            raise AssertionError(type(left))
         return self.shape_env.evaluate_expr(
             sympy.sympify(left),
             size_oblivious=size_oblivious,
@@ -960,10 +970,10 @@ class SizeVarAllocator:
                 return self.guard_or_false(sympy.Le(a, rhs))
 
             # Min(Min(a, b), c) ==> Min(a, b) if (a <= c) or (b <= c).
-            if isinstance(lhs, sympy.Min) and any(le_rhs(a) for a in lhs.args):
+            if isinstance(lhs, (sympy.Min, Min)) and any(le_rhs(a) for a in lhs.args):
                 return lhs
             # Min(Max(a, b), c) ==> Max(a, b) if (a <= c) and (b <= c).
-            if isinstance(lhs, sympy.Max) and all(le_rhs(a) for a in lhs.args):
+            if isinstance(lhs, (sympy.Max, Max)) and all(le_rhs(a) for a in lhs.args):
                 return lhs
 
         raise TypeError(
@@ -1018,7 +1028,8 @@ class SizeVarAllocator:
         # Substitute all hints into expr, but leave unbacked symints alone
         expr = self.simplify(expr)
         if not isinstance(expr, Expr):
-            assert isinstance(expr, int)
+            if not isinstance(expr, int):
+                raise AssertionError(f"expected int, got {type(expr)}")
             return expr
 
         expr = self.remove_precomputed_replacements(expr)
@@ -1436,7 +1447,7 @@ class SizeVarAllocator:
                 else:
                     return None
 
-                if isinstance(term, sympy.Symbol) and var not in candidate_vars_set:
+                if var not in candidate_vars_set:
                     return None
 
             # It's easier to reason about the correctness of the transformation
@@ -1464,6 +1475,8 @@ class SizeVarAllocator:
                 if not isinstance(factor, sympy.Integer) or not isinstance(
                     var, sympy.Symbol
                 ):
+                    return False
+                if candidate_vars_set is not None and var not in candidate_vars_set:
                     return False
                 if not self.statically_known_geq(var, 0):
                     return False
@@ -1512,7 +1525,8 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
 
     This type of pattern can come from view operations
     """
-    assert isinstance(expr, sympy.Add)
+    if not isinstance(expr, sympy.Add):
+        raise AssertionError(f"expected sympy.Add, got {type(expr)}")
 
     scale = sympy.Wild("scale", exclude=[0], integer=True)
     base = sympy.Wild("base", integer=True)
@@ -1579,6 +1593,9 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
 
     def index_expr(self, index, dtype):
         return self._inner.index_expr(self._simplify(index), dtype)
+
+    def value_expr(self, index, dtype):
+        return self._inner.value_expr(self._simplify(index), dtype)
 
     def check_bounds(self, index, size, lower, upper):
         return self._inner.check_bounds(self._simplify(index), size, lower, upper)
