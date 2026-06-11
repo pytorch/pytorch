@@ -2909,7 +2909,7 @@
 
 - func: native_group_norm_backward.multiple_grads(Tensor? grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, SymInt N, SymInt C, SymInt HxW, int group, bool[3] output_mask, *, Tensor? grad_mean=None, Tensor? grad_rstd=None) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU, CUDA: native_group_norm_backward_multiple_grads
+    CPU, CUDA, MPS: native_group_norm_backward_multiple_grads
   autogen: native_group_norm_backward.multiple_grads_out
   tags: core
 
@@ -6554,6 +6554,7 @@
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
+    MPS: _s_poisson_mps
   tags: nondeterministic_seeded
   autogen: poisson.out
 
@@ -9322,15 +9323,6 @@
   device_check: NoCheck
   device_guard: False
   tags: inplace_view
-
-- func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA, MPS: cholesky_out
-
-- func: cholesky(Tensor self, bool upper=False) -> Tensor
-  variants: method, function
-  dispatch:
-    CPU, CUDA, MPS: cholesky
 
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

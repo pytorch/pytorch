@@ -1874,7 +1874,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.channel_shuffle",
         "torch.cholesky_inverse",
         "torch.cholesky_solve",
-        "torch.cholesky",
         "torch.choose_qparams_optimized",
         "torch.chunk",
         "torch.clamp_",
@@ -3111,6 +3110,19 @@ def get_tensor_method() -> frozenset[Any]:
     s = set()
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
+        if (
+            isinstance(
+                method,
+                (
+                    types.MethodDescriptorType,
+                    types.WrapperDescriptorType,
+                    types.BuiltinFunctionType,
+                ),
+            )
+            and name not in disallowed_tensor_methods
+        ):
+            s.add(method)
+    for name, method in torch._C.TensorBase.__dict__.items():
         if (
             isinstance(
                 method,
