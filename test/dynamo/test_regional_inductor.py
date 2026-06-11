@@ -747,6 +747,26 @@ def forward(self, tangents_0):
         # self.assertEqual(len(codes), 2)
         self.assertEqual(result, fn(c))
 
+    @requires_cuda_and_triton
+    def test_unbacked_expr_size_input(self):
+        def fn(c):
+            d = torch.concat([c, c], dim=0)
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                d = d + 1
+            return d
+
+        c = torch.randn((64, 32), device="cuda", requires_grad=True)
+        torch._dynamo.decorators.mark_unbacked(c, 0)
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(serialize=False),
+            fullgraph=True,
+        )
+
+        result, _ = run_fw_bw_and_get_code(lambda: opt_fn(c))
+        self.assertEqual(result, fn(c))
+
     @parametrize("serialize", [False])
     def test_repeated_blocks(self, serialize):
         nested_config = get_invoke_subgraph_compile_options()
