@@ -154,7 +154,7 @@ class TestCustomOpOutLowering(InductorTestCase):
             x = torch.randn(4, 4)
             eager_out = f(x)
 
-            with config.patch(cpp_wrapper=True):
+            with config.patch(cpp_wrapper=True, size_asserts=True):
                 compiled_out, code = run_and_get_code(
                     torch.compile(f, backend="inductor", fullgraph=True), x
                 )
