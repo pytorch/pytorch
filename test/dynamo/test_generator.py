@@ -367,8 +367,8 @@ class GraphModule(torch.nn.Module):
             fn(t, ctx)
 
     def test_generator_as_argument_3(self):
-        # An unstarted generator passed as an argument is re-inlined as if its
-        # function were called here, so next() works.
+        # The inline tracer needs to be kept in sync if an already advanced generator
+        # is given to a compiled function.
         def whoo():
             yield 1
             yield 2
@@ -382,7 +382,8 @@ class GraphModule(torch.nn.Module):
 
         t = torch.randn(2)
         ctx = whoo()
-        self.assertEqual(fn(t, ctx), t + 1)
+        with self.assertRaises(Unsupported):
+            fn(t, ctx)
 
     def test_generator_as_argument_4(self):
         def whoo(x):

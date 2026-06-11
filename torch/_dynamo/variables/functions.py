@@ -1195,15 +1195,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        # Generators have no tp_richcompare: identity for ==/!=, TypeError for
-        # ordering.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def gen_send_ex2(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
@@ -1538,14 +1529,6 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if isinstance(self.vt, SkipFunctionVariable):
-            unimplemented(
-                gb_type="generator function over a skipped function",
-                context=str(self.vt),
-                explanation="Cannot trace a generator whose underlying function is skipped by Dynamo "
-                "(e.g. defined in a skip-listed module), since its body cannot be symbolically traced.",
-                hints=[*graph_break_hints.FUNDAMENTAL],
-            )
         if not is_generator(self.vt.get_code()):
             unimplemented(
                 gb_type="non-generator contextlib.contextmanager",
