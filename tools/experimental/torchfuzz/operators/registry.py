@@ -8,6 +8,7 @@ from torchfuzz.operators.base import Operator
 
 
 _OPERATOR_MODULES: list[str] = [
+    "activations",
     "arg",
     "argsort",
     "bitwise",
