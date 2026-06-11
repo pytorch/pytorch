@@ -2657,6 +2657,16 @@
       ]
     }
   ],
+  "GB2483": [
+    {
+      "Gb_type": "str_impl not implemented",
+      "Context": "{type(self).__name__} has no str_impl override for {self.python_type_name()}",
+      "Explanation": "Dynamo does not implement __str__ for {self.python_type_name()} in {type(self).__name__}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0187": [
     {
       "Gb_type": "functools.wraps",
@@ -2935,6 +2945,15 @@
     }
   ],
   "GB0207": [
+    {
+      "Gb_type": "sort with non-constant keys",
+      "Context": "str(self.key)",
+      "Explanation": "Cannot perform sort whose key comparison is not a compile-time constant. Key type: {self.key.python_type()}. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.",
+      "Hints": [
+        "Use something else as the key.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "sort with non-constant keys",
       "Context": "str(first_non_constant_key)",
