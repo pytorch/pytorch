@@ -137,3 +137,27 @@ model and affect all or most operators.
 
 - `F.softplus` `beta` is drawn from `[0.1, 5.0]`. The large-beta
   regime (where softplus degenerates to relu) is underexercised.
+
+## Reductions
+
+- **Tuple-dim reductions** — `dim` is always a single int. Multi-axis
+  reductions like `torch.sum(x, dim=(0, 2))` are never tested.
+
+- `torch.nansum` never receives inputs containing NaN values (the
+  fuzzer's materializer produces standard random data). The
+  distinguishing behavior — ignoring NaN — is never deliberately
+  exercised.
+
+- `torch.aminmax`, `torch.var_mean`, and `torch.count_nonzero` only
+  cover the 0-D scalar (no-dim) form. The `dim`/`keepdim` forms are
+  excluded (documented as intentional follow-up).
+
+- Tuple-returning ops (`cummax`, `cummin`, `max`, `min`, `median`,
+  `mode`, `aminmax`, `var_mean`) only extract one field (`.values`,
+  `.min`, `.var`). The second return value (`.indices`, `.max`,
+  `.mean`) is never tested.
+
+- `torch.max` / `torch.min` 1-arg full-reduction form and 2-tensor
+  element-wise form (`torch.max(a, b)`) are never tested.
+
+- `torch.cumprod` `dtype=` kwarg is never exercised.
