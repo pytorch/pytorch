@@ -247,6 +247,9 @@ def permutations(
     n = len(pool)
     r = n if r is None else r
 
+    if r < 0:
+        raise ValueError("r must be non-negative")
+
     def _permutations() -> Iterator[tuple[_T, ...]]:
         if r > n:
             return

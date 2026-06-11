@@ -332,6 +332,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(Unsupported, fn)
         self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
         self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], -1)
 
     @make_test
     def test_itertools_permutations_various_iterators(a, b):
