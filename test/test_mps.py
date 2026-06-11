@@ -2280,13 +2280,20 @@ class TestMPS(TestCaseMPS):
         def run_lu_factor_ex_test(size, *batch_dims, check_errors, atol=1e-5, rtol=1e-6):
             input_cpu = make_arg(*batch_dims, size, size)
             input_mps = input_cpu.to('mps')
-            out_cpu = torch.linalg.lu_factor_ex(input_cpu, check_errors=check_errors)
-            out_mps = torch.linalg.lu_factor_ex(input_mps, check_errors=check_errors)
-            self.assertEqual(out_cpu, out_mps, atol=atol, rtol=rtol)
 
-            out_cpu = torch.linalg.lu_factor_ex(input_cpu.mT, check_errors=check_errors)
-            out_mps = torch.linalg.lu_factor_ex(input_mps.mT, check_errors=check_errors)
-            self.assertEqual(out_cpu, out_mps, atol=atol, rtol=rtol)
+            # LU pivots are not unique: at larger sizes fp32 rounding can pick a
+            # different but equally valid pivot on a near-tie, which then cascades
+            # through the factorization. Compare the reconstruction P @ L @ U == A
+            # rather than the raw factors/pivots, which is the pivot-invariant check.
+            def check(A_cpu, A_mps):
+                _, _, info_cpu = torch.linalg.lu_factor_ex(A_cpu, check_errors=check_errors)
+                LU, pivots, info_mps = torch.linalg.lu_factor_ex(A_mps, check_errors=check_errors)
+                self.assertEqual(info_cpu, info_mps)
+                P, L, U = torch.lu_unpack(LU, pivots)
+                self.assertEqual(P @ L @ U, A_mps, atol=atol, rtol=rtol)
+
+            check(input_cpu, input_mps)
+            check(input_cpu.mT, input_mps.mT)
 
         # test with different even/odd matrix sizes
         matrix_sizes = [1, 2, 3, 4]
