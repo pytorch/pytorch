@@ -1307,8 +1307,8 @@ _ClearCublasWorkspaces = None
 
 def _clear_cublas_workspaces(device: Device = None) -> None:
     r"""Clear cuBLAS workspaces on this thread and CUDA autograd worker threads.
-        Note that this enables multithreaded autograd during cleanup to reach
-        worker threads.
+    Note that this enables multithreaded autograd during cleanup to reach
+    worker threads.
     """
     if not hasattr(torch._C, "_cuda_clearCublasWorkspaces"):
         return
