@@ -1020,6 +1020,46 @@ def nll_loss_forward_strategy(op_schema: OpSchema) -> OpStrategy:
             total_weight_expected_spec = DTensorSpec(
                 mesh=mesh, placements=tuple([Replicate()] * mesh.ndim)
             )
+        elif reduction == Reduction.MEAN.value and weight_strategy is not None:
+            # Weighted mean: the per-rank denominator sum(w[t[n]]) varies across
+            # ranks when input is batch-sharded. Per-rank means
+            # (local_loss_sum / local_weight_sum) cannot be averaged across ranks
+            # to recover the global weighted mean (global_loss_sum / global_weight_sum).
+            # Force full replication so the op computes the correct result directly.
+            all_replicate_placements = tuple(Replicate() for _ in range(mesh.ndim))
+            new_input_spec = DTensorSpec(
+                mesh=mesh,
+                placements=all_replicate_placements,
+                tensor_meta=input_src_spec.tensor_meta,
+            )
+            new_target_spec = DTensorSpec(
+                mesh=mesh,
+                placements=all_replicate_placements,
+                tensor_meta=target_src_spec.tensor_meta,
+            )
+            op_args_target_specs[0] = new_input_spec
+            op_args_target_specs[1] = new_target_spec
+            redistribute_costs[0] = generate_redistribute_costs(
+                input_strategy, new_input_spec
+            )
+            redistribute_costs[1] = generate_redistribute_costs(
+                target_strategy, new_target_spec
+            )
+            new_weight_spec = DTensorSpec(
+                mesh=mesh,
+                placements=all_replicate_placements,
+                tensor_meta=weight_src_spec.tensor_meta,
+            )
+            op_args_target_specs[2] = new_weight_spec
+            redistribute_costs[2] = generate_redistribute_costs(
+                weight_strategy, new_weight_spec  # type: ignore[arg-type]
+            )
+            output_expected_spec = DTensorSpec(
+                mesh=mesh, placements=all_replicate_placements
+            )
+            total_weight_expected_spec = DTensorSpec(
+                mesh=mesh, placements=all_replicate_placements
+            )
         else:
             if reduction == Reduction.MEAN.value:
                 reduction_op = "avg"
