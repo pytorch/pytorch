@@ -10,6 +10,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/main.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_accessor.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_alignment.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_callonce.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_cast.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_compiletimefunctionpointer.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_constexprcrc.cpp
@@ -24,11 +25,14 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_headeronlyarrayref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_idwrapper.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_layout.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_lazy.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_macros.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_math.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_memoryformat.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_metaprogramming.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_overloaded.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_scopeexit.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_synchronized.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scalartype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_typelist.cpp
