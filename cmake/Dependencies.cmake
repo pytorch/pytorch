@@ -1200,10 +1200,22 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     # Tensorpipe uses cuda_add_library
     torch_update_find_cuda_flags()
+    # Suppress warning to unblock libnop compilation by clang-17.
+    # Apply it while creating TensorPipe targets so nested libnop users such as
+    # tensorpipe_cuda also inherit it.
+    set(_tensorpipe_libnop_compile_options "")
+    append_cxx_flag_if_supported(
+      "-Wno-missing-template-arg-list-after-template-kw"
+      _tensorpipe_libnop_compile_options)
+    get_directory_property(_caffe2_compile_options COMPILE_OPTIONS)
+    if(NOT "${_tensorpipe_libnop_compile_options}" STREQUAL "")
+      add_compile_options(
+        "$<$<COMPILE_LANGUAGE:CXX>:-Wno-missing-template-arg-list-after-template-kw>")
+    endif()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-    # Suppress warning to unblock libnop compilation by clang-17
-    # See https://github.com/pytorch/pytorch/issues/151316
-    target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
+    set_directory_properties(PROPERTIES COMPILE_OPTIONS "${_caffe2_compile_options}")
+    unset(_caffe2_compile_options)
+    unset(_tensorpipe_libnop_compile_options)
     # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
     # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
     # But are used only once during shutdown
