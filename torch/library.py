@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import enum
 import functools
 import inspect
 import re
@@ -55,6 +56,122 @@ _defs: set[str] = set()
 
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ["prim"]
+
+
+_SCHEMA_NAME = re.compile(r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\b")
+
+
+def _resolve_name_from_frame(name: str, frame):
+    parts = name.split(".")
+    if not parts:
+        return None
+
+    while frame is not None:
+        if parts[0] in frame.f_locals:
+            obj = frame.f_locals[parts[0]]
+            rest = parts[1:]
+        elif parts[0] in frame.f_globals:
+            obj = frame.f_globals[parts[0]]
+            rest = parts[1:]
+        else:
+            frame = frame.f_back
+            continue
+
+        for part in rest:
+            try:
+                obj = getattr(obj, part)
+            except AttributeError:
+                return None
+        return obj
+
+    obj = None
+    rest = ()
+    for idx in range(len(parts), 0, -1):
+        module_name = ".".join(parts[:idx])
+        if module_name in sys.modules:
+            obj = sys.modules[module_name]
+            rest = parts[idx:]
+            break
+    if obj is None:
+        return None
+
+    for part in rest:
+        try:
+            obj = getattr(obj, part)
+        except AttributeError:
+            return None
+    return obj
+
+
+def _maybe_register_schema_enum_type(
+    type_name: str,
+    frame,
+    registered: list[str],
+    parse_error: RuntimeError | None,
+) -> bool:
+    if torch._C._is_opaque_type_registered(type_name):
+        return False
+
+    obj = _resolve_name_from_frame(type_name, frame)
+    if not isinstance(obj, type) or not issubclass(obj, enum.Enum):
+        if parse_error is not None:
+            raise parse_error
+        return False
+
+    torch._C._register_opaque_type(type_name)
+    registered.append(type_name)
+    return True
+
+
+def _register_schema_enum_types(schema: str, frame) -> list[str]:
+    registered = []
+    seen = set()
+    success = False
+    try:
+        while True:
+            try:
+                parse_schema: Any = torch._C.parse_schema
+                parse_schema(schema, allow_typevars=False)
+            except RuntimeError as exc:
+                if "unknown type specifier" not in str(exc):
+                    raise
+                type_name = _unknown_type_name_from_schema_parse_error(exc)
+                if type_name is None:
+                    raise
+                parse_error = exc
+            else:
+                success = True
+                return registered
+
+            if type_name in seen:
+                raise parse_error
+            seen.add(type_name)
+            _maybe_register_schema_enum_type(type_name, frame, registered, parse_error)
+    finally:
+        if not success:
+            _unregister_schema_enum_types(registered)
+
+
+def _unregister_schema_enum_types(type_names: list[str]) -> None:
+    unregister_opaque_type = getattr(torch._C, "_unregister_opaque_type")  # noqa: B009
+    for type_name in reversed(type_names):
+        unregister_opaque_type(type_name)
+
+
+def _unknown_type_name_from_schema_parse_error(exc: RuntimeError) -> str | None:
+    lines = str(exc).splitlines()
+    for idx, line in enumerate(lines):
+        marker_idx = line.find("<--- HERE")
+        if marker_idx == -1 or idx == 0:
+            continue
+        underline_start = line.find("~")
+        if underline_start == -1 or underline_start > marker_idx:
+            continue
+        schema_line = lines[idx - 1]
+        match = _SCHEMA_NAME.match(schema_line, underline_start)
+        if match is not None:
+            return match.group(0)
+    return None
 
 
 def fallthrough_kernel():
@@ -269,7 +386,7 @@ class Library:
     def __repr__(self):
         return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
-    def define(self, schema, alias_analysis="", *, tags=()):
+    def define(self, schema, alias_analysis="", *, tags=(), _stacklevel=1):
         r"""Defines a new operator and its semantics in the ns namespace.
 
         Args:
@@ -305,12 +422,18 @@ class Library:
             getattr(torch.ops, self.ns), packet_name
         )
 
-        if torch.Tag.out in tags:
-            _validate_out_schema(schema)
-        if torch.Tag.inplace in tags:
-            _validate_inplace_schema(schema)
+        enum_type_registrations = _register_schema_enum_types(
+            schema, sys._getframe(_stacklevel)
+        )
+        try:
+            if torch.Tag.out in tags:
+                _validate_out_schema(schema)
+            if torch.Tag.inplace in tags:
+                _validate_inplace_schema(schema)
 
-        result = self.m.define(schema, alias_analysis, tuple(tags))
+            result = self.m.define(schema, alias_analysis, tuple(tags))
+        finally:
+            _unregister_schema_enum_types(enum_type_registrations)
         name = schema.split("(")[0]
         qualname = self.ns + "::" + name
 
@@ -746,7 +869,7 @@ def define(qualname, schema, *, lib=None, tags=()):
             f'to look like e.g. "(Tensor x) -> Tensor" but '
             f'got "{schema}"'
         )
-    lib.define(name + schema, alias_analysis="", tags=tags)
+    lib.define(name + schema, alias_analysis="", tags=tags, _stacklevel=3)
 
 
 @define.register
@@ -756,7 +879,7 @@ def _(lib: Library, schema, alias_analysis=""):
     """
 
     def wrap(f):
-        name = lib.define(schema, alias_analysis)
+        name = lib.define(schema, alias_analysis, _stacklevel=2)
         lib.impl(name, f)
         return f
 
