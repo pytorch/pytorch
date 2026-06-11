@@ -7768,6 +7768,8 @@ class TestMPS(TestCaseMPS):
         helper(2, 0, 1, 1, 6)
         # test float16
         helper((2,), 0, [1], (1,), 6.0, x_dtype=torch.float16)
+        # test size-0 source/self, see https://github.com/pytorch/pytorch/issues/186972
+        helper((0, 1, 1, 1), -3, [0], (0, 1, 1, 1), -0.25)
 
     def test_index_64bit(self):
         """ Test that index operations work for 4Gb+ tensors """
@@ -8878,6 +8880,57 @@ class TestMPS(TestCaseMPS):
         for _ in range(100):
             a = torch.empty(32_000, device="mps", dtype=dtype).exponential_()
             self.assertTrue((a != 0).all())
+
+    @parametrize("dtype", [torch.float32])
+    def test_poisson(self, dtype):
+        """Test poisson on MPS matches expected statistical properties and CPU."""
+        n_samples = 10000
+
+        # Cover both code paths in the Metal kernel: Knuth for lambda < 10,
+        # Hoermann PTRD for lambda >= 10.
+        for rate_val in [0.5, 1.0, 5.0, 10.0, 50.0]:
+            rate_mps = torch.full((n_samples,), rate_val, device='mps', dtype=dtype)
+            rate_cpu = rate_mps.cpu()
+            samples_mps = torch.poisson(rate_mps)
+            samples_cpu = torch.poisson(rate_cpu)
+
+            self.assertTrue((samples_mps >= 0).all(),
+                            f"Poisson samples should be non-negative for rate={rate_val}")
+
+            mps_f = samples_mps.float()
+            self.assertTrue(torch.allclose(mps_f, mps_f.floor()),
+                            f"Poisson samples should be integers for rate={rate_val}")
+
+            # Theoretical Poisson has mean == var == rate. Sampling error on
+            # n=10k is roughly sqrt(rate / n); compare MPS to CPU within a few
+            # standard errors so we catch implementation drift without being
+            # flaky on legitimate RNG noise.
+            tol_mean = max(0.1, 5.0 * (rate_val / n_samples) ** 0.5)
+            tol_var = max(0.2, 5.0 * rate_val * (2.0 / n_samples) ** 0.5)
+
+            mps_mean = mps_f.mean().item()
+            cpu_mean = samples_cpu.float().mean().item()
+            self.assertAlmostEqual(mps_mean, rate_val, delta=tol_mean,
+                                   msg=f"MPS mean should match rate={rate_val}")
+            self.assertAlmostEqual(mps_mean, cpu_mean, delta=tol_mean,
+                                   msg=f"MPS mean should match CPU mean for rate={rate_val}")
+
+            mps_var = mps_f.var(unbiased=False).item()
+            cpu_var = samples_cpu.float().var(unbiased=False).item()
+            self.assertAlmostEqual(mps_var, rate_val, delta=tol_var,
+                                   msg=f"MPS variance should match rate={rate_val}")
+            self.assertAlmostEqual(mps_var, cpu_var, delta=tol_var,
+                                   msg=f"MPS variance should match CPU variance for rate={rate_val}")
+
+        # Test zero rate
+        zero_rate = torch.zeros(100, device='mps', dtype=dtype)
+        zero_samples = torch.poisson(zero_rate)
+        self.assertTrue((zero_samples == 0).all(), "Poisson(0) should return all zeros")
+
+        # Test empty tensor
+        empty_rate = torch.empty(0, device='mps', dtype=dtype)
+        empty_samples = torch.poisson(empty_rate)
+        self.assertEqual(empty_samples.numel(), 0)
 
     def test_distributions(self):
         ops = [
