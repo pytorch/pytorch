@@ -10,10 +10,12 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/main.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_accessor.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_alignment.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_bfloat16math.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_callonce.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_cast.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_compiletimefunctionpointer.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_constexprcrc.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_copysign.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_devicecapability.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_devicetype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dispatch.cpp
