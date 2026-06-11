@@ -551,6 +551,15 @@ TORCH_IMPL_FUNC(index_add_mps_out)
     return;
   }
 
+  // Empty source has nothing to scatter; the MPSGraph path would build an empty
+  // placeholder buffer and assert. Just propagate self into result and bail out.
+  if (source.numel() == 0) {
+    if (!result.is_same(self)) {
+      result.copy_(self);
+    }
+    return;
+  }
+
   bool use_deterministic_algorithm = globalContext().deterministicAlgorithms();
 
   // TODO: Do not use deterministic algorithm for long/complex but rather implement it as Metal shader
