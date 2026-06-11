@@ -5,7 +5,7 @@
 #include <c10/core/Stream.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/flat_hash_map.h>
-#include <c10/util/llvmMathExtras.h>
+#include <bit>
 #include <iostream>
 #include <optional>
 
@@ -301,7 +301,7 @@ struct CachingHostAllocatorImpl {
     const auto roundSize = [&]() -> size_t {
       if (size <= pinned_max_round_threshold() &&
           size <= pinned_max_cached_size()) {
-        return c10::llvm::PowerOf2Ceil(size);
+        return std::bit_ceil(size);
       } else {
         return size;
       }
@@ -468,7 +468,7 @@ struct CachingHostAllocatorImpl {
   }
 
   inline size_t size_index(size_t size) {
-    return c10::llvm::Log2_64_Ceil(size);
+    return std::bit_width(size - 1);
   }
 
   virtual bool pinned_use_background_threads() {

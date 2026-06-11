@@ -4,6 +4,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <csignal>
+#include <cstring>
 #include <optional>
 
 #ifndef _MSC_VER

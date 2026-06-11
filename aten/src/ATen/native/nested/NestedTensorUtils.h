@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstring>
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
 #include <ATen/NestedTensorImpl.h>

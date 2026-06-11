@@ -4,6 +4,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/Type.h>
+#include <cstring>
 #include <typeindex>
 
 namespace c10::impl {
