@@ -27,7 +27,7 @@ from unittest.mock import patch
 import torch
 from torch._dynamo import disable
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
-from torch._dynamo.utils import counters, defake, flatten_graph_inputs
+from torch._dynamo.utils import counters, defake, flatten_graph_inputs, GmWrapper
 from torch._functorch.aot_autograd import (
     aot_module_simplified,
     SerializableAOTDispatchCompiler,
@@ -41,6 +41,84 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
+def _output_nodes(gm: torch.fx.GraphModule) -> list[torch.fx.Node]:
+    output_node = next(node for node in gm.graph.nodes if node.op == "output")
+    leaves, _ = torch.utils._pytree.tree_flatten(output_node.args[0])
+    return [leaf for leaf in leaves if isinstance(leaf, torch.fx.Node)]
+
+
+def _node_requires_grad(node: torch.fx.Node) -> bool:
+    example_value = node.meta.get("example_value")
+    if isinstance(example_value, torch.Tensor):
+        return example_value.requires_grad
+    return True
+
+
+def _node_is_view(node: torch.fx.Node) -> bool:
+    example_value = node.meta.get("example_value")
+    if isinstance(example_value, torch.Tensor):
+        return example_value._is_view()
+    return False
+
+
+def _has_output_node_dependency(gm: torch.fx.GraphModule) -> bool:
+    # AOTAutograd wraps the FX graph in a custom autograd.Function. When one
+    # differentiable output is also an ancestor of another output, a hook
+    # registered on the ancestor after this graph returns would need to observe
+    # the descendant's internal gradient. Sibling outputs of a custom Function
+    # cannot represent that edge, so this graph must run without AOTAutograd.
+    # Pure view chains from a non-view output are okay: AOTAutograd handles
+    # output aliases specially and preserves hook behavior for the regenerated
+    # aliases. But if the ancestor output is itself a view, the same hook can
+    # be lost, so fall back.
+    outputs = [node for node in _output_nodes(gm) if _node_requires_grad(node)]
+    if len(outputs) < 2:
+        return False
+
+    output_set = set(outputs)
+    for output in outputs:
+        seen: set[tuple[torch.fx.Node, bool]] = set()
+        stack = [(node, not _node_is_view(output)) for node in output.all_input_nodes]
+        while stack:
+            node, saw_non_view = stack.pop()
+            if node in output_set and node is not output:
+                if saw_non_view or _node_is_view(node):
+                    return True
+                continue
+            state = (node, saw_non_view)
+            if state in seen:
+                continue
+            seen.add(state)
+            next_saw_non_view = saw_non_view or not _node_is_view(node)
+            stack.extend(
+                (input_node, next_saw_non_view) for input_node in node.all_input_nodes
+            )
+
+    return False
+
+
+def _aot_autograd_fallback_reason(gm: torch.nn.Module) -> str | None:
+    graph_module = gm.gm if isinstance(gm, GmWrapper) else gm
+    if isinstance(graph_module, torch.fx.GraphModule) and _has_output_node_dependency(
+        graph_module
+    ):
+        return "graph has dependent outputs"
+    return None
+
+
+def _make_aot_autograd_fallback(gm: torch.nn.Module) -> Callable[..., Any]:
+    if isinstance(gm, torch.fx.GraphModule):
+        return gm
+
+    if not isinstance(gm, GmWrapper):
+        raise AssertionError(f"Unexpected AOTAutograd fallback module type: {type(gm)}")
+
+    def boxed_gm(runtime_args: list[Any]) -> Any:
+        return gm(*runtime_args)
+
+    return boxed_gm
+
+
 class AotAutograd:
     def __init__(self, **kwargs: Any) -> None:
         self.__name__ = "compiler_fn"
@@ -51,6 +129,12 @@ class AotAutograd:
     ) -> Callable[..., Any]:
         if kwargs:
             log.warning("aot_autograd-based backend ignoring extra kwargs %s", kwargs)
+
+        fallback_reason = _aot_autograd_fallback_reason(gm)
+        if fallback_reason is not None:
+            log.debug("Unable to use AOT Autograd because %s", fallback_reason)
+            counters["aot_autograd"]["not_ok"] += 1
+            return _make_aot_autograd_fallback(gm)
 
         if any(isinstance(x, (list, tuple, dict)) for x in example_inputs):
             return flatten_graph_inputs(
@@ -65,12 +149,6 @@ class AotAutograd:
 
         # NB: don't delete counter increment
         counters["aot_autograd"]["total"] += 1
-        use_fallback = False
-
-        if use_fallback:
-            log.debug("Unable to use AOT Autograd because graph has mutation")
-            counters["aot_autograd"]["not_ok"] += 1
-            return gm
 
         def wrap_bw_compiler(bw_compiler_fn: Callable[P, R]) -> Callable[..., R]:
             def _wrapped_bw_compiler(*args: P.args, **kwargs: P.kwargs) -> R:
