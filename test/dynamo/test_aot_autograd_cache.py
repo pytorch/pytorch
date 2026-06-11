@@ -513,23 +513,40 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch({"fx_graph_cache": True, "compile_threads": 1})
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_act_input_paths_cache_hit(self):
+        import torch.distributed._functional_collectives as funcol
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
         def fn(x):
             return x + 1
 
         compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        elem = torch.randn(4)
-        self.assertEqual(compiled_fn(AsyncCollectiveTensor(elem)), elem + 1)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        wait_calls = []
+        orig_wait_tensor = funcol.wait_tensor
 
-        self._clear_dynamo_and_codecache()
+        def counting_wait_tensor(t):
+            wait_calls.append(1)
+            return orig_wait_tensor(t)
 
-        elem = torch.randn(4)
-        self.assertEqual(compiled_fn(AsyncCollectiveTensor(elem)), elem + 1)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        with patch.object(funcol, "wait_tensor", counting_wait_tensor):
+            elem = torch.randn(4)
+            act = AsyncCollectiveTensor(elem)
+            self.assertFalse(act.completed)
+            self.assertEqual(compiled_fn(act), elem + 1)
+            self.assertTrue(act.completed)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            wait_calls.clear()
+            self._clear_dynamo_and_codecache()
+
+            elem = torch.randn(4)
+            act = AsyncCollectiveTensor(elem)
+            self.assertFalse(act.completed)
+            self.assertEqual(compiled_fn(act), elem + 1)
+            self.assertTrue(act.completed)
+            self.assertGreaterEqual(len(wait_calls), 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
