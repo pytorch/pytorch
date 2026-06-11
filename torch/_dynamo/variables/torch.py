@@ -280,6 +280,15 @@ methods_consuming_unbacked_scalars: frozenset[str] = frozenset(
     if hasattr(torch.Tensor, name)
 )
 
+packed_sequence_data_dependent_output_functions: frozenset[Callable[..., Any]] = (
+    frozenset(
+        {
+            torch._pack_padded_sequence,
+            torch._pad_packed_sequence,
+        }
+    )
+)
+
 
 @functools.cache
 def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
@@ -3158,6 +3167,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     "Dynamo does not support this."
                 ),
                 hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        if self.value in packed_sequence_data_dependent_output_functions:
+            unimplemented(
+                gb_type="Packed sequence data-dependent output shape",
+                context=str(self.value),
+                explanation=f"Operator `{self.value.__name__}`'s output shape depends on input Tensor data.",
+                hints=[
+                    "Move this operator outside the compiled region.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
