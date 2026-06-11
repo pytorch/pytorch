@@ -361,7 +361,7 @@ class class_ : public ::torch::detail::class_base {
     auto format_getstate_schema = [&getstate_schema]() {
       std::stringstream ss;
       ss << getstate_schema;
-      return ss.str();
+      return std::move(ss).str();
     };
 #endif
     TORCH_CHECK(

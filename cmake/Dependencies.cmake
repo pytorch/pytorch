@@ -119,11 +119,27 @@ if(USE_ASAN OR USE_LSAN OR USE_TSAN)
   if(USE_ASAN)
     if(TARGET Sanitizer::address)
       list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::address)
+      # torch_hip needs the sanitizer linked so HIP-side TUs participate
+      # in the libstdc++ container annotations propagated via
+      # Sanitizer::address (see cmake/Modules/FindSanitizer.cmake).
+      if(USE_ROCM)
+        list(APPEND Caffe2_HIP_DEPENDENCY_LIBS Sanitizer::address)
+        # Disable jiterator under ROCm + ASAN: jiterator JITs kernels
+        # through hiprtc and we haven't set up an ASAN-aware hiprtc
+        # runtime. Read by the AT_USE_JITERATOR() gate in
+        # aten/src/ATen/jit_macros.h.
+        add_definitions(-DAT_DISABLE_JITERATOR)
+      endif()
     else()
       message(WARNING "ASAN not found. Suppress this warning with -DUSE_ASAN=OFF.")
       caffe2_update_option(USE_ASAN OFF)
     endif()
-    if(TARGET Sanitizer::undefined)
+    # UBSan (-fsanitize=undefined) combined with ASAN on ROCm Clang
+    # causes ASAN global metadata to reference unaligned original
+    # globals instead of aligned __sanitized_padded_global copies,
+    # triggering an unconditional alignment check abort in the ASAN
+    # runtime. Skip UBSan under USE_ROCM until that interaction is fixed.
+    if(TARGET Sanitizer::undefined AND NOT USE_ROCM)
       list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::undefined)
     endif()
   endif()
@@ -565,15 +581,6 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       set(XNNPACK_ENABLE_AVX512FP16  OFF CACHE BOOL "")
     ENDIF()
 
-    # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
-    # XNNPACK does conditionally compile this based on GCC version. Once it also does
-    # so based on Clang version, this logic can be removed.
-    IF(CMAKE_C_COMPILER_ID STREQUAL "Clang")
-      IF(CMAKE_C_COMPILER_VERSION VERSION_LESS "11")
-        set(XNNPACK_ENABLE_AVX512AMX OFF CACHE BOOL "")
-      ENDIF()
-    ENDIF()
-
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
     # be PIC to successfully link this static libXNNPACK with pytorch
@@ -823,6 +830,21 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
 
 if(BUILD_PYTHON)
+  # On Windows venvs, the Python import library (pythonXX.lib) lives in the
+  # base installation's libs/ directory, not in the venv.  Help FindPython
+  # locate it by adding sys.base_prefix/libs to the library search path.
+  if(WIN32 AND Python_EXECUTABLE)
+    execute_process(
+      COMMAND "${Python_EXECUTABLE}" -c "import sys; print(sys.base_prefix)"
+      OUTPUT_VARIABLE _py_base_prefix
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    if(_py_base_prefix AND IS_DIRECTORY "${_py_base_prefix}/libs")
+      list(APPEND CMAKE_LIBRARY_PATH "${_py_base_prefix}/libs")
+    endif()
+  endif()
+
   set(PYTHON_COMPONENTS Development.Module)
   if(USE_NUMPY)
     list(APPEND PYTHON_COMPONENTS NumPy)
@@ -1020,6 +1042,13 @@ if(USE_ROCM)
     endif()
     if(USE_ROCM_CK_GEMM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
+    endif()
+    # add_definitions(-DAT_DISABLE_JITERATOR) above doesn't reliably
+    # propagate to HIP TUs; mirror the pattern used for USE_ROCM and
+    # add it explicitly so the AT_USE_JITERATOR() gate in
+    # aten/src/ATen/jit_macros.h fires under hipified .cu/.cuh TUs.
+    if(USE_ASAN)
+      list(APPEND HIP_CXX_FLAGS -DAT_DISABLE_JITERATOR)
     endif()
     # CMAKE_HIP_FLAGS: flags passed to the HIP compiler for device code.
     # Architecture is handled by CMAKE_HIP_ARCHITECTURES (set in LoadHIP.cmake).
@@ -1248,6 +1277,40 @@ if(USE_GLOO)
       endif()
       message("Found gloo: ${Gloo_NATIVE_LIBRARY}, cuda lib: ${Gloo_CUDA_LIBRARY}, hip lib: ${Gloo_HIP_LIBRARY}")
       message("Found gloo include directories: ${Gloo_INCLUDE_DIRS}")
+
+      # Validate that the system-installed gloo was built with the GPU flavor
+      # PyTorch is requesting. A mismatch (e.g. a CUDA-only gloo used in a
+      # ROCm build) causes cryptic compile errors deep in the build; catch it
+      # here with a clear message instead.
+      set(_gloo_config_h "${Gloo_INCLUDE_DIRS}/gloo/config.h")
+      if(EXISTS "${_gloo_config_h}")
+        file(READ "${_gloo_config_h}" _gloo_config_contents)
+        if(USE_CUDA)
+          string(REGEX MATCH "#define GLOO_USE_CUDA ([01])" _match "${_gloo_config_contents}")
+          if(NOT "${CMAKE_MATCH_1}" STREQUAL "1")
+            message(FATAL_ERROR
+              "USE_SYSTEM_GLOO: the gloo found at ${Gloo_INCLUDE_DIRS} was not "
+              "built with CUDA support (GLOO_USE_CUDA=${CMAKE_MATCH_1} in "
+              "${_gloo_config_h}). Rebuild gloo with -DUSE_CUDA=ON or point "
+              "CMAKE_PREFIX_PATH at a CUDA-enabled gloo installation.")
+          endif()
+        elseif(USE_ROCM)
+          string(REGEX MATCH "#define GLOO_USE_ROCM ([01])" _match "${_gloo_config_contents}")
+          if(NOT "${CMAKE_MATCH_1}" STREQUAL "1")
+            message(FATAL_ERROR
+              "USE_SYSTEM_GLOO: the gloo found at ${Gloo_INCLUDE_DIRS} was not "
+              "built with ROCm support (GLOO_USE_ROCM=${CMAKE_MATCH_1} in "
+              "${_gloo_config_h}). Rebuild gloo with -DUSE_ROCM=ON or point "
+              "CMAKE_PREFIX_PATH at a ROCm-enabled gloo installation.")
+          endif()
+        endif()
+      else()
+        message(WARNING
+          "USE_SYSTEM_GLOO: could not find ${_gloo_config_h} to verify GPU "
+          "flavor; proceeding, but the build may fail if gloo was compiled "
+          "for a different GPU backend.")
+      endif()
+
       add_library(gloo SHARED IMPORTED)
       set_target_properties(gloo PROPERTIES IMPORTED_LOCATION ${Gloo_NATIVE_LIBRARY})
       if(USE_CUDA)
@@ -1459,9 +1522,6 @@ if(NOT INTERN_BUILD_MOBILE)
       "-DUSE_MAGMA=OFF.")
     caffe2_update_option(USE_MAGMA OFF)
   endif()
-
-  # ARM specific flags
-  find_package(ARM)
 
   find_package(LAPACK)
   if(LAPACK_FOUND)
