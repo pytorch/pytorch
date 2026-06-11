@@ -791,6 +791,16 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         with torch.device("cpu"):
             torch.compile(mod, fullgraph=True)(x)
 
+    def test_tensor_unflatten_with_default_device(self):
+        def fn(x):
+            return x.unflatten(0, (2, 2))
+
+        x = torch.randn(4)
+        with torch.device("cpu"):
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x)
+            )
+
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop(self):
