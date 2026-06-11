@@ -2202,6 +2202,14 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
+    def test_randperm_index_slice_range(self):
+        def fn(x):
+            idx = torch.randperm(x.shape[0], device=x.device)
+            return x[idx[2:6]]
+
+        for n in (8, 64):
+            self.common(fn, (torch.randn(n, 64, device=self.device),))
+
     def test__unsafe_masked_index(self):
         def fn(a, mask, idx):
             return aten._unsafe_masked_index(a, mask, idx, 1)

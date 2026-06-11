@@ -73,12 +73,36 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         randperm_index_pattern,
         # pyrefly: ignore [bad-argument-type]
         randperm_index_replacement,
-        [torch.empty(4, 8, device=device)],
+        # x.shape[0] must exceed scalar_workaround['slice_shape'] (42)
+        # so applySlice's length<=stop fast path doesn't elide
+        # the slice during pattern tracing
+        [torch.empty(64, 8, device=device)],
         # pyrefly: ignore [bad-argument-type]
         fwd_only,
         # pyrefly: ignore [bad-argument-type]
         [post_grad_patterns, joint_graph_patterns],
         scalar_workaround={"slice_shape": 42},
+        skip_duplicates=True,
+    )
+
+    def randperm_index_only_pattern(x):
+        index = torch.randperm(x.shape[0], device=x.device)
+        return torch.ops.aten.index(x, (index,))
+
+    def randperm_index_only_replacement(x):
+        index = torch.randperm(x.shape[0], device=x.device)
+        return torch.ops.aten._unsafe_index(x, (index,))
+
+    register_replacement(
+        # pyrefly: ignore [bad-argument-type]
+        randperm_index_only_pattern,
+        # pyrefly: ignore [bad-argument-type]
+        randperm_index_only_replacement,
+        [torch.empty(4, 8, device=device)],
+        # pyrefly: ignore [bad-argument-type]
+        fwd_only,
+        # pyrefly: ignore [bad-argument-type]
+        [post_grad_patterns, joint_graph_patterns],
         skip_duplicates=True,
     )
 
