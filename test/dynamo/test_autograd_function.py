@@ -1240,11 +1240,41 @@ class GraphModule(torch.nn.Module):
         y.backward(y.clone().detach().requires_grad_(True))
 
         bwd_placeholders = [
-            node.name
+            node.target
             for node in cnt.graphs[0].bwd_body_0.graph.nodes
             if node.op == "placeholder"
         ]
         self.assertEqual(bwd_placeholders, ["grad_y", "l_x_"])
+
+    def test_backward_graph_grad_input_names_are_unique_after_prefix(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x.sin()
+                grad_y = x.cos()
+                return y, grad_y
+
+            @staticmethod
+            def backward(ctx, y, grad_y):
+                return y + grad_y
+
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        y, grad_y = opt_fn(x)
+        torch.autograd.backward(
+            (y, grad_y), (torch.ones_like(y), torch.ones_like(grad_y))
+        )
+
+        bwd_placeholders = [
+            node.target
+            for node in cnt.graphs[0].bwd_body_0.graph.nodes
+            if node.op == "placeholder"
+        ]
+        self.assertEqual(bwd_placeholders, ["grad_y", "grad_y_1"])
 
     def test_smuggle_symint_issue_111031(self):
         from torch.autograd import Function
