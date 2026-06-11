@@ -149,6 +149,36 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_mm_out_dtype(self):
+        # The out_dtype dtype restriction in mm/bmm/baddbmm is a property of the
+        # in-tree CUDA/XPU backends. Out-of-tree backends may support arbitrary
+        # out_dtype combinations
+        with FakeTensorMode():
+            a = torch.empty((8, 2048), dtype=torch.float8_e4m3fn, device="cpu")
+            b = torch.empty((2048, 768), dtype=torch.float8_e4m3fn, device="cpu")
+            out = torch.mm(a, b, out_dtype=torch.float32)
+            self.assertEqual(out.dtype, torch.float32)
+            self.assertEqual(out.shape, (8, 768))
+
+            a3 = torch.empty((2, 8, 2048), dtype=torch.float8_e4m3fn, device="cpu")
+            b3 = torch.empty((2, 2048, 768), dtype=torch.float8_e4m3fn, device="cpu")
+            out3 = torch.bmm(a3, b3, out_dtype=torch.float32)
+            self.assertEqual(out3.dtype, torch.float32)
+            self.assertEqual(out3.shape, (2, 8, 768))
+
+        # On CUDA the restriction must still be enforced by the meta kernel.
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            a = torch.empty((8, 2048), dtype=torch.float8_e4m3fn, device="cuda")
+            b = torch.empty((2048, 768), dtype=torch.float8_e4m3fn, device="cuda")
+            with self.assertRaisesRegex(RuntimeError, "out_dtype must be the same"):
+                torch.mm(a, b, out_dtype=torch.float32)
+
+            # fp16/bf16 -> fp32 is still allowed on CUDA.
+            c = torch.empty((8, 2048), dtype=torch.bfloat16, device="cuda")
+            d = torch.empty((2048, 768), dtype=torch.bfloat16, device="cuda")
+            out = torch.mm(c, d, out_dtype=torch.float32)
+            self.assertEqual(out.dtype, torch.float32)
+
     def test_sparse_spdiags(self):
         with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
             out = torch.sparse.spdiags(torch.randn(2, 3), torch.tensor([0, -1]), (2, 3))
