@@ -2239,31 +2239,32 @@ class SIMDScheduling(BaseScheduling):
                     return is_reduction_tiling_valid
                 return True
 
-            reduction_writes = [
-                w for w in node2.read_writes.writes if isinstance(w, MemoryDep)
-            ]
-            pointwise_reads = list(node1.read_writes.reads)
+            if config.polyhedral_fusion:
+                reduction_writes = [
+                    w for w in node2.read_writes.writes if isinstance(w, MemoryDep)
+                ]
+                pointwise_reads = list(node1.read_writes.reads)
 
-            reduction_output_names = OrderedSet([w.name for w in reduction_writes])
-            consuming_reads = [
-                r
-                for r in pointwise_reads
-                if isinstance(r, MemoryDep) and r.name in reduction_output_names
-            ]
+                reduction_output_names = OrderedSet([w.name for w in reduction_writes])
+                consuming_reads = [
+                    r
+                    for r in pointwise_reads
+                    if isinstance(r, MemoryDep) and r.name in reduction_output_names
+                ]
 
-            if consuming_reads:
-                for read_dep in consuming_reads:
-                    write_dep = next(
-                        w for w in reduction_writes if w.name == read_dep.name
-                    )
-
-                    if not self._check_index_compatibility(write_dep, read_dep):
-                        why(
-                            "index incompatibility between reduction output and pointwise consumer"
+                if consuming_reads:
+                    for read_dep in consuming_reads:
+                        write_dep = next(
+                            w for w in reduction_writes if w.name == read_dep.name
                         )
-                        return False
 
-                return True
+                        if not self._check_index_compatibility(write_dep, read_dep):
+                            why(
+                                "index incompatibility between reduction output and pointwise consumer"
+                            )
+                            return False
+
+                    return True
             if numel1 != numel2:
                 why("nodes numel incompatibility")
             return numel1 == numel2
@@ -2339,6 +2340,8 @@ class SIMDScheduling(BaseScheduling):
                 return False
             if node_numel == numel:
                 return True
+            if not config.polyhedral_fusion:
+                return False
             if not (not_ready_yet_nodes & n.ancestors):
                 return False
             return self._node_reads_subset_of_reduction(n, reduction_write_deps)
