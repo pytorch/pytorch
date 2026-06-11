@@ -2701,6 +2701,26 @@ class TestLRScheduler(TestCase):
     # the underlying behavior is fixed.
 
     @expectedFailure
+    def test_constantlr_factor_zero_rejected(self):
+        # factor=0 should be rejected during validation. Otherwise, ConstantLR
+        # later tries to restore the original learning rate using 1 / factor,
+        # which results in a ZeroDivisionError.
+        model = torch.nn.Linear(1, 1)
+        optim = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        try:
+            sched = ConstantLR(optim, factor=0, total_iters=2)
+        except ValueError:
+            return
+
+        optim.step()
+        sched.step()
+
+        optim.step()
+        sched.step()
+        self.fail("ConstantLR accepted factor=0 without rejecting it.")
+
+    @expectedFailure
     def test_sequentiallr_resume_reproducibility(self):
         # Note: Saving and restoring both the optimizer and SequentialLR
         # state mid training should reproduce the same LR sequence as a
