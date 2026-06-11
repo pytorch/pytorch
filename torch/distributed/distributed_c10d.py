@@ -2066,23 +2066,17 @@ def _new_process_group_helper(
         group_size,
     )
     backend_config = BackendConfig(backend)
+    pg_backend_set = False
     # Set the default backend when single backend is passed in.
     if "," not in str(backend) and ":" not in str(backend):
         if backend not in Backend.backend_type_map:
             raise AssertionError(f"Unknown backend type {backend}")
-        if backend == Backend.UNDEFINED:
-            # Currently when backend is UNDEFINED, only one backend will be initialized
-            # we use nccl (if cuda is available) or gloo as default backend
-            # so we can correctly call getDefaultBackend which in ProcessGroup.
-            if Backend.NCCL in backend_config.get_device_backend_map().values():
-                pg._set_default_backend(ProcessGroup.BackendType.NCCL)
-            else:
-                pg._set_default_backend(ProcessGroup.BackendType.GLOO)
-        else:
+        if backend != Backend.UNDEFINED:
             pg._set_default_backend(Backend.backend_type_map[backend])
+            pg_backend_set = True
     # In order to correctly call pg._has_hooks(), we should set the default backend
     # when multi backend is passed in
-    else:
+    if not pg_backend_set:
         if Backend.NCCL in backend_config.device_backend_map.values():
             pg._set_default_backend(ProcessGroup.BackendType.NCCL)
         elif Backend._plugins.keys():
@@ -2906,9 +2900,7 @@ def _coalescing_manager(
                 outputs.append(not_none(op.dst_tensor))
             all_gather_opts = AllgatherOptions()
             all_gather_opts.asyncOp = async_ops
-            work = group.allgather_into_tensor_coalesced(
-                outputs, inputs, all_gather_opts
-            )
+            work = group.all_gather_single_coalesced(outputs, inputs, all_gather_opts)
         elif op0 is reduce_scatter_single:
             inputs = []
             outputs = []
@@ -2918,7 +2910,7 @@ def _coalescing_manager(
             reduce_opts = ReduceScatterOptions()
             reduce_opts.reduceOp = not_none(op_list[0].redop)
             reduce_opts.asyncOp = async_ops
-            work = group.reduce_scatter_tensor_coalesced(outputs, inputs, reduce_opts)
+            work = group.reduce_scatter_single_coalesced(outputs, inputs, reduce_opts)
         else:
             raise AssertionError(
                 f"Coalescing manager does not support fast-path coalescing of {op0}, "
@@ -4386,7 +4378,7 @@ def all_gather_single(output_tensor, input_tensor, group=None, async_op=False):
         else:
             return None
 
-    work = group._allgather_base(output_tensor, input_tensor, opts)
+    work = group.all_gather_single(output_tensor, input_tensor, opts)
 
     if async_op:
         return work
@@ -4935,7 +4927,7 @@ def reduce_scatter_single(output, input, op=ReduceOp.SUM, group=None, async_op=F
         else:
             return None
 
-    work = group._reduce_scatter_base(output, input, opts)
+    work = group.reduce_scatter_single(output, input, opts)
 
     if async_op:
         return work
@@ -5130,7 +5122,7 @@ def all_to_all_single(
     input_split_sizes = [] if input_split_sizes is None else input_split_sizes
 
     group = group or _get_default_group()
-    work = group.alltoall_base(
+    work = group.all_to_all_single(
         output, input, output_split_sizes, input_split_sizes, opts
     )
 
@@ -5836,16 +5828,31 @@ def new_group(
     default group's bound device).
     """
     if _use_torchcomms_enabled():
-        return _new_group_via_split_group(
-            ranks=ranks,
-            timeout=timeout,
-            backend=backend,
-            pg_options=pg_options,
-            use_local_synchronization=use_local_synchronization,
-            group_desc=group_desc,
-            device_id=device_id,
-            sort_ranks=sort_ranks,
+        # split_group can only split the parent's existing communicator, so it
+        # cannot produce a child whose backend differs from the parent's. A
+        # "fake" subgroup of a real parent -- how DeviceMesh creates disabled /
+        # unflattened dims, with use_local_synchronization for hashed names -- is
+        # exactly that case: route it through the normal path, which builds the
+        # FakeProcessGroup directly (see ``_new_group_with_tag``). When the
+        # requested backend matches the parent (including a fake parent), split
+        # delegation is fine.
+        parent_backend, _ = _world.pg_map[_get_default_group()]
+        is_fake_subgroup = (
+            backend is not None
+            and str(backend).lower() == "fake"
+            and str(backend).lower() != str(parent_backend).lower()
         )
+        if not is_fake_subgroup:
+            return _new_group_via_split_group(
+                ranks=ranks,
+                timeout=timeout,
+                backend=backend,
+                pg_options=pg_options,
+                use_local_synchronization=use_local_synchronization,
+                group_desc=group_desc,
+                device_id=device_id,
+                sort_ranks=sort_ranks,
+            )
 
     return _new_group_with_tag(
         ranks,

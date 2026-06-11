@@ -407,6 +407,9 @@ class BaseUserFunctionVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
+    def self_args(self) -> list[VariableTracker]:
+        return []
+
     def get_source(self) -> Source | None:
         return self.source
 
@@ -513,7 +516,12 @@ class BaseUserFunctionVariable(VariableTracker):
             and self.get_filename().endswith("torch/optim/lr_scheduler.py")
         ):
             return ConstantVariable.create(None)
-        return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
+        return tx.inline_user_function_return(
+            self,
+            [*self.self_args(), *args],
+            kwargs,
+            allow_nested_graph_breaks=True,
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -633,6 +641,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def get_globals(self) -> dict[str, Any]:
         return self.fn.__globals__
+
+    def should_allow_nested_graph_breaks(self) -> bool:
+        from torch._dynamo.trace_rules import BUILTIN_INLINE_WHEN_CALLED
+
+        filename = self.get_filename()
+        if any(filename.startswith(d) for d in BUILTIN_INLINE_WHEN_CALLED):
+            return False
+        return True
 
     def get_source(self) -> Source:
         source = self.source
@@ -1894,7 +1910,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def python_type(self) -> type[types.FunctionType]:
         return types.FunctionType
 
-    def get_function(self, _converting: set[int] | None = None) -> types.FunctionType:
+    def get_function(
+        self,
+        _converting: set[int] | None = None,
+        *,
+        allow_sourced_cells: bool = False,
+    ) -> types.FunctionType:
         # _converting is used a way to break cycles when
         # two nested_functions refer to each other.
         from .base import AsPythonConstantNotImplementedError
@@ -1908,7 +1929,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             )
         _converting.add(self_id)
         try:
-            return self._get_function_impl(_converting)
+            return self._get_function_impl(_converting, allow_sourced_cells)
         except AsPythonConstantNotImplementedError as e:
             raise ClosureConversionError(
                 "failed to convert closure cell to Python constant"
@@ -1923,7 +1944,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         except (NotImplementedError, Unsupported):
             return False
 
-    def _get_function_impl(self, _converting: set[int]) -> types.FunctionType:
+    def _get_function_impl(
+        self, _converting: set[int], allow_sourced_cells: bool
+    ) -> types.FunctionType:
         closure_cells = None
         if self.closure:
             from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -1950,10 +1973,46 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 # If the cell contents is a NestedUserFunctionVariable, call get_function
                 # directly to properly propagate the _converting set for cycle detection
                 if isinstance(cell_contents, NestedUserFunctionVariable):
-                    value = cell_contents.get_function(_converting)
-                else:
+                    value = cell_contents.get_function(
+                        _converting,
+                        allow_sourced_cells=allow_sourced_cells,
+                    )
+                    cells.append(make_cell(value))
+                    continue
+
+                try:
                     value = cell_contents.as_python_constant()
-                cells.append(make_cell(value))
+                    cells.append(make_cell(value))
+                    continue
+                except (NotImplementedError, Unsupported):
+                    if not allow_sourced_cells:
+                        raise ClosureConversionError(
+                            "failed to convert closure cell to Python constant"
+                        ) from None
+
+                # Non-constant closure cell (e.g. a class defined in a compiled
+                # region closing over a real object such as a TestCase
+                # instance). Only allow source-backed objects that have not
+                # been mutated during the trace, and pin their identity with
+                # an ID_MATCH guard. Materialize a real cell from the backing
+                # object and register it in side_effects mapping back to the
+                # traced VT, so that when methods of the built class are
+                # later inlined, bind_args reuses the original VT (preserving
+                # its source, guards, and identity) via load_cell. Only the
+                # __build_class__ path opts in; as_python_constant
+                # conversions must stay strict.
+                if not (
+                    isinstance(cell_contents, UserDefinedObjectVariable)
+                    and cell_contents.source is not None
+                    and not tx.output.side_effects.is_modified(cell_contents)
+                ):
+                    raise ClosureConversionError(
+                        "failed to convert closure cell to Python constant"
+                    )
+                value = cell_contents.guard_as_python_constant()
+                cell = make_cell(value)
+                tx.output.side_effects.track_cell_existing(None, cell, cell_contents)
+                cells.append(cell)
             closure_cells = tuple(cells)
 
         func = types.FunctionType(
@@ -3117,7 +3176,11 @@ class PolyfilledFunctionVariable(VariableTracker):
             )
 
         traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
-        return traceable_function_variable.call_function(tx, args, kwargs)
+        return tx.inline_user_function_return(
+            traceable_function_variable,
+            list(args),
+            dict(kwargs),
+        )
 
     def call_method(
         self,
