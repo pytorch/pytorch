@@ -3867,7 +3867,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(dst, dst2, atol=0, rtol=0)
 
         # test non-contiguous case
-        dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
+        dst = make_tensor(
+            (num_dest, num_dest, num_dest), dtype=dtype, device=device, low=-30, high=30
+        ).permute((2, 0, 1))
         dst2 = dst.contiguous()
         if dtype.is_complex:
             mask = dst.abs() > 0
