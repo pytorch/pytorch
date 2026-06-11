@@ -1125,47 +1125,29 @@ def _bind_spec_to_args(
     )
     pos_params = list(sig.parameters.values())
 
-    # The user's signature has up to four logical regions of parameters
-    # (in this order). "Bound from" = where each signature param gets its
-    # runtime value when the user makes the call.
-    #   1) named-positional: POSITIONAL_ONLY or POSITIONAL_OR_KEYWORD
-    #      params before `*args`. Bound from user's positional `args[i]`
-    #      where i < varargs_idx. Spec lookup:
-    #      `user._named_args[name]` using `pos_params[i].name`.
-    #   2) varargs: VAR_POSITIONAL (`*args`). Bound from user's positional
-    #      `args[i]` where i >= varargs_idx. Spec lookup:
-    #      `user._varargs[i - varargs_idx]`.
-    #   3) keyword-named: KEYWORD_ONLY params (also POSITIONAL_OR_KEYWORD
-    #      ones passed by name). Arrive in user's `kwargs[name]`. Spec
-    #      lookup: `user._named_args[name]`.
-    #   4) var-keyword: VAR_KEYWORD (`**kwargs`). Also arrive in user's
-    #      `kwargs[name]`. Spec lookup: `user._varkw[name]` for names not
-    #      declared as named params.
-    #   Regions 3 and 4 both arrive in `kwargs` and are handled by one
-    #   loop: `user._named_args[name]` first, falling back to
-    #   `user._varkw[name]`.
-    # Python's call grammar guarantees the user's call layout is always
-    # `[positionals][kwargs]` — never interleaved (`func(a, b=c, d)` is a
-    # SyntaxError). So we walk `args` first (regions 1 + 2 below), then
-    # `kwargs.items()` (regions 3 + 4, handled in the kwargs loop further
-    # down).
+    # The signature has up to four param regions, bound from the user's
+    # call as follows (spec lookup in parens):
+    #   1) named-positional: params before `*args`, from args[i] where
+    #      i < varargs_idx            (params_spec_named_args[name])
+    #   2) varargs (`*args`): from args[i] where i >= varargs_idx
+    #                                 (params_spec_varargs[i - varargs_idx])
+    #   3) keyword-named (KEYWORD_ONLY, or pos-or-kw passed by name): from
+    #      kwargs[name]               (params_spec_named_args[name])
+    #   4) var-keyword (`**kwargs`): from kwargs[name]
+    #                                 (params_spec_varkw[name])
+    # Python guarantees the call layout is [positionals][kwargs], so we
+    # walk `args` first (regions 1 + 2), then `kwargs.items()` (regions
+    # 3 + 4, same loop).
     #
-    # `varargs_idx` is the position of `*args` in the signature's parameter
-    # list (or `len(pos_params)` if the signature has no `*args` — sentinel
-    # meaning "no varargs region; everything the user passes positionally is
-    # named"). We use it as a slicing boundary on `args`:
-    #   args[:varargs_idx]  → named-positional region
-    #   args[varargs_idx:]  → varargs region
-    #
-    # Example: signature `def forward(self, x, y, *args, **kwargs)`, user
-    # calls `mod(T1, T2, T3, T4, foo=T5, bar=T6)`:
-    #   pos_params = [x, y, *args, **kwargs]    varargs_idx = 2
-    #   args   = (T1, T2, T3, T4)
-    #   kwargs = {"foo": T5, "bar": T6}
-    #   args[:2] = (T1, T2)        → named-positional loop (x, y)
-    #   args[2:] = (T3, T4)        → varargs loop (*args[0], *args[1])
-    #   kwargs.items()             → kwargs loop (foo, bar) handled separately
-    varargs_idx = len(pos_params)  # default: no `*args` in the signature
+    # Example: `def forward(self, x, y, *args, **kwargs)` called as
+    # `mod(T1, T2, T3, T4, foo=T5, bar=T6)` → varargs_idx=2;
+    # args[:2]=(T1,T2) named; args[2:]=(T3,T4) varargs; kwargs={foo,bar}.
+
+    # `varargs_idx` is how many positional params come before `*args` in the
+    # signature: the first `varargs_idx` of the caller's positional `args`
+    # bind to those named params, and any extras spill into `*args`. It is
+    # len(pos_params) when there is no `*args`.
+    varargs_idx = len(pos_params)
     for i, p in enumerate(pos_params):
         if p.kind is inspect.Parameter.VAR_POSITIONAL:
             varargs_idx = i
@@ -1173,14 +1155,20 @@ def _bind_spec_to_args(
 
     # Walk the user's actual call structure.
     total_leaves = in_spec.num_leaves
+    # out_leaf_specs[i] = leaf-spec for flat_args[i] (None = static); keyed
+    # under "*args" since ModuleToTrace.forward only has a varargs signature.
     out_leaf_specs: list[LeafSpec] = [None] * total_leaves
 
     flat_idx = 0
 
+    # Track which named / **kwargs spec entries get bound; leftovers (typo
+    # or spec for an omitted defaulted param) are rejected below.
     matched_named_keys: set[str] = set()
     matched_varkw_keys: set[str] = set()
 
-    # Loop 1: named-positional region.
+    # Loop 1: named-positional. Spec keyed by signature param name. A key
+    # present with value None means "explicitly static" — it skips binding
+    # but still counts as matched (not flagged as unmatched below).
     for i, arg_value in enumerate(args[:varargs_idx]):
         arg_name = pos_params[i].name
         if arg_name in params_spec_named_args:
@@ -1197,12 +1185,13 @@ def _bind_spec_to_args(
         )
         flat_idx += consumed
 
-    # Pad params_spec_varargs to match the actual `*args` count.
+    # Pad varargs spec to the actual `*args` count (missing tail = static)
+    # so Loop 2 can index uniformly without a bounds check.
     n_actual_varargs = len(args) - varargs_idx
     params_spec_varargs = list(params_spec_varargs or [])
     params_spec_varargs += [None] * max(0, n_actual_varargs - len(params_spec_varargs))
 
-    # Loop 2: varargs region.
+    # Loop 2: varargs. Spec keyed by position within `*args`.
     for user_idx, arg_value in enumerate(args[varargs_idx:]):
         user_spec = params_spec_varargs[user_idx]
         consumed = _walk_spec(
@@ -1214,7 +1203,8 @@ def _bind_spec_to_args(
         )
         flat_idx += consumed
 
-    # Loop 3: kwargs region.
+    # Loop 3: kwargs. Spec comes from named_args[name] (kwarg matches a
+    # named param) or varkw[name] (kwarg flows through `**kwargs`).
     params_spec_varkw = params_spec._varkw  # may be None
     for arg_name, arg_value in kwargs.items():
         if arg_name in params_spec_named_args:
@@ -1234,6 +1224,8 @@ def _bind_spec_to_args(
         )
         flat_idx += consumed
 
+    # Every named / **kwargs spec entry must bind to a passed argument; a
+    # leftover is almost always a typo or a spec for an omitted default.
     unmatched = set(params_spec_named_args) - matched_named_keys
     if params_spec_varkw is not None:
         unmatched |= set(params_spec_varkw) - matched_varkw_keys
@@ -1247,6 +1239,8 @@ def _bind_spec_to_args(
             f"{passed!r}."
         )
 
+    # Sanity: per-arg leaf count must equal the whole-tree flatten, else
+    # our per-arg walk drifted from the tracer's layout.
     if flat_idx != total_leaves:
         raise AssertionError(
             f"_bind_spec_to_args leaf-count drift: walked {flat_idx} leaves "
