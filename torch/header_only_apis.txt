@@ -328,3 +328,15 @@ c10_string_view
 
 # torch/headeronly/util/FileSystem.h
 # c10::filesystem is a namespace alias to std::filesystem, no namespaced symbol
+
+# torch/headeronly/util/safe_numerics.h
+add_overflows
+mul_overflows
+safe_multiplies_u64
+
+# torch/headeronly/util/sparse_bitset.h
+SparseBitVector
+SparseBitVectorElement
+
+# torch/headeronly/util/static_tracepoint.h
+# TORCH_SDT* are preprocessor macros, not tested at runtime
