@@ -4201,7 +4201,6 @@ def _reduction_configs(
     num_dynamic=0,
 ) -> list[Config]:
     reduction_hint = inductor_meta.get("reduction_hint")
-    device_props = triton_meta["device"]
 
     # Convert reductions to 1D, to simplify heuristics.
     rnumel = get_total_reduction_numel(size_hints)
@@ -4784,7 +4783,6 @@ def _persistent_reduction_configs(
     max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
         "max_autotune_pointwise"
     )
-    device_props = triton_meta["device"]
 
     if torch.version.hip:
         xblock_vals = [1, 4, 8, 16, 32, 64, 128, 256]
