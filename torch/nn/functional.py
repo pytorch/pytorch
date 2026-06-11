@@ -3940,6 +3940,7 @@ def linear_cross_entropy(
             num_classes=num_classes,
             dtype=input.dtype,
             device=input.device,
+            prob_target=target.dtype.is_floating_point,
         )
 
         # Local import avoids a circular init via torch.library.custom_op.

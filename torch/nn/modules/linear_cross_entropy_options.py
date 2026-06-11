@@ -13,14 +13,24 @@ class _AutoDefault(NamedTuple):
 
 
 # Defaults for the ``"auto"`` sentinel of ``acc_policy`` / ``chunking_method``,
-# keyed by ``(device_type, input_dtype)`` -- Pareto picks from an fp64-jacobian
-# sweep. CPU picks ``"accurate"`` (only chunked policy with fp32 weight-grad mm
-# on CPU; others hit emulated low-precision matmul, ~20-50x slower).
-_AUTO_DEFAULTS: dict[tuple[str, torch.dtype], _AutoDefault] = {
-    ("cuda", torch.bfloat16): _AutoDefault("compact", "aspect_ratio:2"),
-    ("cuda", torch.float16): _AutoDefault("compact", "aspect_ratio:2"),
-    ("cpu", torch.bfloat16): _AutoDefault("accurate", "aspect_ratio"),
-    ("cpu", torch.float16): _AutoDefault("accurate", "aspect_ratio"),
+# keyed by ``(device_type, input_dtype, prob_target)`` -- Pareto picks from
+# an fp64-jacobian sweep. CPU picks ``"accurate"`` (only chunked policy with
+# fp32 weight-grad mm on CPU; others hit emulated low-precision matmul,
+# ~20-50x slower). Probability targets on CUDA pick aspect_ratio factor 1:
+# the (N, V) target is an input on that path, so it floors peak memory
+# regardless of chunk size -- on A100 every aspect_ratio factor measured the
+# same peak while factor 1 ran ~1.4x faster than factor 2 at large
+# num_classes; finer chunking is pure overhead. The CPU prob-target picks
+# are inherited from the index-target measurements (not yet prob-measured).
+_AUTO_DEFAULTS: dict[tuple[str, torch.dtype, bool], _AutoDefault] = {
+    ("cuda", torch.bfloat16, False): _AutoDefault("compact", "aspect_ratio:2"),
+    ("cuda", torch.float16, False): _AutoDefault("compact", "aspect_ratio:2"),
+    ("cuda", torch.bfloat16, True): _AutoDefault("compact", "aspect_ratio"),
+    ("cuda", torch.float16, True): _AutoDefault("compact", "aspect_ratio"),
+    ("cpu", torch.bfloat16, False): _AutoDefault("accurate", "aspect_ratio"),
+    ("cpu", torch.float16, False): _AutoDefault("accurate", "aspect_ratio"),
+    ("cpu", torch.bfloat16, True): _AutoDefault("accurate", "aspect_ratio"),
+    ("cpu", torch.float16, True): _AutoDefault("accurate", "aspect_ratio"),
 }
 _AUTO_FALLBACK: _AutoDefault = _AutoDefault("compact", "aspect_ratio:2")
 
@@ -38,9 +48,9 @@ class LinearCrossEntropyOptions:
 
     Zero-argument ``LinearCrossEntropyOptions()`` leaves
     :attr:`acc_policy` and :attr:`chunking_method` set to ``"auto"``,
-    resolved at call time from :data:`_AUTO_DEFAULTS` (per-(device, dtype)
-    picks measured on A100 / x86 CPU); unlisted pairs fall back to
-    ``("compact", "aspect_ratio:2")``.
+    resolved at call time from :data:`_AUTO_DEFAULTS`
+    (per-(device, dtype, prob_target) picks measured on A100 / x86 CPU);
+    unlisted keys fall back to ``("compact", "aspect_ratio:2")``.
 
     Supports a subset of :func:`linear_cross_entropy`; unsupported
     configurations fall through to the reference path with a warning.
@@ -227,14 +237,23 @@ class LinearCrossEntropyOptions:
         # __post_init__ validates the method, so this is unreachable.
         raise AssertionError(f"unhandled chunking_method: {method!r}")
 
-    def _adjust(self, num_batches, in_features, num_classes, dtype, device=None):
+    def _adjust(
+        self,
+        num_batches,
+        in_features,
+        num_classes,
+        dtype,
+        device=None,
+        prob_target=False,
+    ):
         """Resolve ``"auto"`` sentinels and ``None`` defaults against a
         specific call site; returns a fully concrete options instance.
 
         Internal API consumed by ``F.linear_cross_entropy``'s chunked
         dispatch and a handful of test call sites. ``device=None``
         forces the :data:`_AUTO_FALLBACK` pick instead of the
-        per-device one.
+        per-device one. ``prob_target`` is part of the
+        :data:`_AUTO_DEFAULTS` key.
         """
         acc_policy = self.acc_policy
         chunking_method = self.chunking_method
@@ -246,8 +265,7 @@ class LinearCrossEntropyOptions:
         if acc_policy == "auto" or chunking_method == "auto":
             if device is not None:
                 ap, cm = _AUTO_DEFAULTS.get(
-                    (device.type, dtype),
-                    _AUTO_FALLBACK,
+                    (device.type, dtype, prob_target), _AUTO_FALLBACK
                 )
             else:
                 ap, cm = _AUTO_FALLBACK

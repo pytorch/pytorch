@@ -14768,7 +14768,7 @@ if __name__ == '__main__':
                 _AUTO_DEFAULTS, _AUTO_FALLBACK,
             )
             _resolved_policy, _ = _AUTO_DEFAULTS.get(
-                (torch.device(device).type, dtype), _AUTO_FALLBACK,
+                (torch.device(device).type, dtype, prob_target), _AUTO_FALLBACK,
             )
         else:
             _resolved_policy = acc_policy
@@ -14792,13 +14792,13 @@ if __name__ == '__main__':
             # policy-independent and the ULP counts run larger (smaller
             # eps; the floor threshold feps*max barely bites), in line
             # with the index-target fp32 caps below. Observed maxima:
-            # fp32 ig 173-4619 / w 16-914; fp16 balanced/compact ig
-            # 60-93 / w 17-58; bf16 balanced/compact ig 6 / w 3;
-            # accurate fp16/bf16 all 0. No bias=True prob samples, so
-            # the bias-grad cap stays 0.
+            # fp32 ig 9229 (aarch64; x86_64 4619, A100 173) / w 16-914;
+            # fp16 balanced/compact ig 60-93 / w 17-58; bf16
+            # balanced/compact ig 6 / w 3; accurate fp16/bf16 all 0.
+            # No bias=True prob samples, so the bias-grad cap stays 0.
             expected_max_ulp_diff = 4
             if dtype == torch.float32:
-                expected_input_grad_max_ulp_diff = 8192
+                expected_input_grad_max_ulp_diff = 16384  # aarch64 9229
                 expected_weight_grad_max_ulp_diff = 2048
             elif _resolved_policy == "accurate":
                 expected_input_grad_max_ulp_diff = 4
@@ -15704,6 +15704,21 @@ if __name__ == '__main__':
                 options=options,
             )
         self.assertEqual(out.dtype, torch.float32)
+
+        # auto heuristic: on CUDA, probability targets resolve the
+        # chunking method to aspect_ratio factor 1 (the (N, V) target
+        # floors peak memory, so finer chunking is pure overhead).
+        if "cuda" in device:
+            adjusted = nn.LinearCrossEntropyOptions()._adjust(
+                num_batches=N, in_features=F_, num_classes=C,
+                dtype=torch.float16, device=inp.device, prob_target=True,
+            )
+            self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+            adjusted = nn.LinearCrossEntropyOptions()._adjust(
+                num_batches=N, in_features=F_, num_classes=C,
+                dtype=torch.float16, device=inp.device, prob_target=False,
+            )
+            self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
 
         # Empty batch on the chunked path: mean is NaN, sum is 0
         # (matches the reference).
