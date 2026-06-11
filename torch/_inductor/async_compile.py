@@ -283,7 +283,10 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def pool() -> ThreadPoolExecutor:
-        assert get_compile_threads() > 1
+        if get_compile_threads() <= 1:
+            raise AssertionError(
+                f"expected get_compile_threads() > 1, got {get_compile_threads()}"
+            )
         return ThreadPoolExecutor(get_compile_threads())
 
     @staticmethod
@@ -294,7 +297,10 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
-        assert get_compile_threads() > 1
+        if get_compile_threads() <= 1:
+            raise AssertionError(
+                f"expected get_compile_threads() > 1, got {get_compile_threads()}"
+            )
         if not _process_pool_allowed():
             raise RuntimeError(
                 "Inductor async compile process pools are disabled in daemonic "
@@ -327,11 +333,12 @@ class AsyncCompile:
                 mp_context=ctx,
                 initializer=partial(_async_compile_initializer, os.getpid()),
             )
-            # when this pool is created in a subprocess object, the normal exit handler
-            # doesn't run, and we need to register our own handler.
-            # exitpriority has to be high, because another one of the finalizers will
-            # kill the worker thread that sends the shutdown message to the workers...
-            multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+
+        # When this pool is created in a multiprocessing subprocess, the normal
+        # atexit handler may not run, and we need to register our own handler.
+        # exitpriority has to be high, because another one of the finalizers will
+        # kill the worker thread that sends the shutdown message to the workers.
+        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
         _pool_set.add(pool)
         return pool
