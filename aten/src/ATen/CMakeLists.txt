@@ -945,11 +945,18 @@ if(USE_MPS)
         add_custom_target(metallibs DEPENDS ${METALLIB_DEPS} metallib_dummy.cpp)
     else()
         file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
+        set(METALLIB_HEADERS)
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
             string(CONCAT SHADER_HDR_NAME  "${CMAKE_CURRENT_BINARY_DIR}" /native/mps/ ${TGT_STEM} "_metallib.h")
-            metal_to_metallib_h(${SHADER} ${SHADER_HDR_NAME})
+            add_custom_command(OUTPUT ${SHADER_HDR_NAME}
+                               COMMAND ${Python_EXECUTABLE} torch/utils/_write_metallib_headers.py ${SHADER} ${SHADER_HDR_NAME}
+                               DEPENDS ${SHADER}
+                               WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                               VERBATIM)
+            list(APPEND METALLIB_HEADERS ${SHADER_HDR_NAME})
         endforeach()
+        add_custom_target(metallibs DEPENDS ${METALLIB_HEADERS})
     endif()
 endif()
 
