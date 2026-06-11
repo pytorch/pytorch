@@ -42,8 +42,10 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_metaprogramming.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_orderpreservingflathashmap.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_overloaded.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_safenumerics.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scopeexit.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_smallbuffer.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_sparsebitset.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_stringutils.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_stringview.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_strongtype.cpp
