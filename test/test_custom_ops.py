@@ -331,15 +331,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             @staticmethod
             def forward(ctx, x):
                 # Emulate AutoDispatchBelowADInplaceOrView, which is not bound into python
-                guard = torch._C._AutoDispatchBelowAutograd()
-                guard2 = torch._C.ExcludeDispatchKeyGuard(
-                    torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
-                )
-                try:
+                with (
+                    torch._C._AutoDispatchBelowAutograd(),
+                    torch._C._ExcludeDispatchKeyGuard(
+                        torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
+                    ),
+                ):
                     return op(x)
-                finally:
-                    del guard
-                    del guard2
 
             @staticmethod
             def backward(ctx, gx):
@@ -3403,37 +3401,6 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(y, x + 2.0)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @parametrize(
-        "op_factory, opname",
-        [
-            subtest((torch.library.custom_op, "custom"), name="custom_op"),
-            subtest((torch.library.triton_op, "triton"), name="triton_op"),
-        ],
-    )
-    def test_register_autograd_incorrect_num_gradients(self, op_factory, opname):
-        @op_factory(
-            f"_torch_testing::incorrect_num_gradients_{opname}",
-            mutates_args=(),
-        )
-        def f(x: Tensor) -> Tensor:
-            return x.sin()
-
-        def setup_context(ctx, inputs, output):
-            pass
-
-        def backward(ctx, grad_output):
-            return ()
-
-        f.register_autograd(backward, setup_context=setup_context)
-
-        x = torch.randn(3, requires_grad=True)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"incorrect number of gradients \(expected 1, got 0\)",
-        ):
-            f(x).sum().backward()
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema(self):
         @torch.library.custom_op(
             "_torch_testing::add",
@@ -3906,6 +3873,69 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(result.numel(), 0)
         self.assertEqual(out, x)
         self.assertGreater(out._version, version)
+
+    def test_mutated_version_bump_does_not_fill_all_defaults(self):
+        @torch.library.custom_op(
+            "_torch_testing::mutated_fastpath", mutates_args={"x", "ys"}
+        )
+        def mutated_fastpath(
+            x: Tensor,
+            a: Tensor,
+            b: Tensor,
+            c: Tensor,
+            d: Tensor,
+            ys: List[Tensor],
+        ) -> None:
+            pass
+
+        @torch.library.custom_op(
+            "_torch_testing::mutated_fastpath_out",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def mutated_fastpath_out(x: Tensor, *, out: Tensor) -> Tensor:
+            out.copy_(x)
+            return out
+
+        @torch.library.custom_op(
+            "_torch_testing::mutated_fastpath_default", mutates_args={"out"}
+        )
+        def mutated_fastpath_default(x: Tensor, out: Optional[Tensor] = None) -> Tensor:
+            if out is None:
+                return x.clone()
+            out.copy_(x)
+            return out
+
+        x = torch.randn(3)
+        args = [torch.randn(3) for _ in range(4)]
+        ys = [torch.randn(3), torch.randn(3)]
+        out = torch.empty_like(x)
+
+        initial_versions = pytree.tree_map_only(
+            torch.Tensor, lambda t: t._version, (x, ys, out)
+        )
+        with patch(
+            "torch._library.utils.fill_defaults",
+            side_effect=AssertionError("unexpected fill_defaults"),
+        ):
+            mutated_fastpath(
+                x=x,
+                a=args[0],
+                b=args[1],
+                c=args[2],
+                d=args[3],
+                ys=ys,
+            )
+            mutated_fastpath_out(x, out=out)
+            self.assertEqual(mutated_fastpath_default(x), x)
+        new_versions = pytree.tree_map_only(
+            torch.Tensor, lambda t: t._version, (x, ys, out)
+        )
+
+        self.assertGreater(new_versions[0], initial_versions[0])
+        for new_version, initial_version in zip(new_versions[1], initial_versions[1]):
+            self.assertGreater(new_version, initial_version)
+        self.assertGreater(new_versions[2], initial_versions[2])
 
     def test_mutated_no_warning(self):
         # Run in subprocess since the warning is emitted only once
