@@ -944,7 +944,6 @@ struct InputFlags {
 };
 
 namespace {
-template <bool enforce_variables>
 std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
   UnpackedInput unpacked;
   InputFlags flags;
@@ -961,13 +960,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
     bool is_variable = THPVariable_Check(arg);
     flags.is_variable_input.push_back(is_variable);
     if (!is_variable) {
-      // TODO: remove this code path once Variable and Tensor are merged in
-      // Python
-      if (enforce_variables) {
-        THPUtils_setError(
-            "expected a Tensor argument, but got ", THPUtils_typename(arg));
-        throw python_error();
-      }
+      // Non-tensor argument: it can't require grad.
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_NewRef(Py_False));
 
       if (profiler_need_input) {
@@ -1514,7 +1507,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
 
   // save a local copy of seq_id before it gets incremented
   auto seq_id = at::sequence_number::peek();
-  auto info_pair = unpack_input<false>(inputs);
+  auto info_pair = unpack_input(inputs);
   UnpackedInput& unpacked_input = info_pair.first;
   InputFlags& input_info = info_pair.second;
 

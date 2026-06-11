@@ -81,6 +81,54 @@ class TestCheckTypeId(torch._dynamo.test_case.TestCase):
         )
         self.assertIn(expected_second_part, second_part)
 
+    def test_id_match_guard_text_does_not_call_repr(self):
+        class ReprMeta(type):
+            repr_calls = 0
+
+            def __repr__(cls):
+                ReprMeta.repr_calls += 1
+                return "<expensive class repr>"
+
+        class Config(metaclass=ReprMeta):
+            multiplier = 2
+
+        class ReprCounter:
+            repr_calls = 0
+
+            def __repr__(self):
+                ReprCounter.repr_calls += 1
+                return "<expensive instance repr>"
+
+        obj = ReprCounter()
+
+        def fn(x, o):
+            if id(o) == id(obj):
+                return x + Config.multiplier
+            return x + 3
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.ones(1)
+        self.assertTrue(torch.allclose(opt_fn(x, obj), x + 2))
+        self.assertEqual(ReprCounter.repr_calls, 0)
+        self.assertEqual(ReprMeta.repr_calls, 0)
+
+        cache_entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(cache_entries), 1)
+
+        guard_str = str(cache_entries[0].guard_manager)
+        self.assertNotIn("<expensive", guard_str)
+
+        matches = self._find_guard_lines(guard_str, "ID_MATCH")
+        object_guard = next(line for line in matches if "L['o']" in line)
+        class_guard = next(line for line in matches if "Config" in line)
+
+        self.assertIn("type=<class '", object_guard)
+        self.assertIn("ReprCounter'>", object_guard)
+        self.assertIn("type=<class '", class_guard)
+        self.assertIn("Config'>", class_guard)
+
     def test_type_match_with_custom_classes(self):
         """
         Test TYPE_MATCH guard with custom class instances.
