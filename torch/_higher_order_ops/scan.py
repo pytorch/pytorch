@@ -32,12 +32,12 @@ from torch._higher_order_ops.utils import (
     mask_list,
     materialize_as_graph,
     reenter_make_fx,
-    register_fake,
     split_into_chunks,
     unique_graph_id,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -1005,7 +1005,7 @@ def scan_proxy_mode(
     )
 
 
-@register_fake(scan_op, skip_cache=True)
+@scan_op.py_impl(FakeTensorMode)
 def scan_fake_tensor_mode(
     mode, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
 ):
