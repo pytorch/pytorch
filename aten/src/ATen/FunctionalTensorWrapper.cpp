@@ -668,12 +668,14 @@ Tensor maybe_preserve_strides(const Tensor& old_value, const Tensor& new_value) 
     return new_value;
   }
   for (const auto dim : c10::irange(old_strides.size())) {
-    if (TORCH_STATICALLY_KNOWN_TRUE(
-            sym_ne(old_strides[dim], new_strides[dim]))) {
+    if (!TORCH_STATICALLY_KNOWN_TRUE(
+            sym_eq(old_strides[dim], new_strides[dim]))) {
       needs_preserve_strides = true;
       break;
     }
   }
+  // Avoid forcing a guard on unbacked symbolic storage offsets. If the offset
+  // mismatch is statically known, preserve it; otherwise rely on stride checks.
   if (TORCH_STATICALLY_KNOWN_TRUE(sym_ne(
           old_value.sym_storage_offset(), new_value.sym_storage_offset()))) {
     needs_preserve_strides = true;
