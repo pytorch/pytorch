@@ -1115,11 +1115,12 @@ def decide_worker_start_method() -> str:
         start_method = os.environ["TORCHINDUCTOR_WORKER_START"]
     else:
         start_method = "subprocess"
-    assert start_method in (
+    if start_method not in (
         "subprocess",
         "fork",
         "spawn",
-    ), f"Invalid start method: {start_method}"
+    ):
+        raise AssertionError(f"Invalid start method: {start_method}")
     return start_method
 
 
@@ -1362,7 +1363,8 @@ def decide_compile_threads() -> int:
         log.info("compile_threads set to 1 in fbcode")
     else:
         cpu_count = torch._utils.cpu_count()
-        assert cpu_count
+        if not cpu_count:
+            raise AssertionError(f"expected nonzero cpu_count, got {cpu_count}")
         compile_threads = min(32, cpu_count)
         log.info("compile_threads set to %d", compile_threads)
 
@@ -1409,6 +1411,16 @@ strict_static_cuda_launcher: bool = (
 # Alias of strict_static_cuda_launcher, used by both CUDA/XPU.
 strict_static_triton_launcher: bool = Config(
     alias="torch._inductor.config.strict_static_cuda_launcher"
+)
+
+# Retain raw cubin bytes on statically-launchable Triton kernels when caching
+# them, instead of dropping them and relying on the per-kernel cubin files left
+# in the local Triton cache dir. Makes a cached CachingAutotuner portable across
+# machines (e.g. a remote cache restored on a cold container), where
+# reload_cubin_path can rehydrate from the retained bytes instead of forcing a
+# recompile. Trades cache size for portability.
+keep_static_cubin_raw: bool = (
+    os.environ.get("TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW", "0") == "1"
 )
 
 # Use _FastCudaLauncher (vectorcall C extension) instead of
@@ -1689,6 +1701,12 @@ class cpp:
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
+    )
+
+    # Allow emitting KernelContextGuard metadata alongside kernel profiling.
+    # This switch only works when enable_kernel_profile is set to 1.
+    enable_kernel_context_guard = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_CONTEXT_GUARD", "0") == "1"
     )
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint

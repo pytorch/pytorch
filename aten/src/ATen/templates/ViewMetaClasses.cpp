@@ -7,7 +7,6 @@
 #include <ATen/Operators.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_unsafe_view_ops.h>
 ${op_headers}
 #endif
 

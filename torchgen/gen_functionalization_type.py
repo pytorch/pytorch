@@ -944,36 +944,8 @@ struct TORCH_API {self.classname} : public ViewMeta {{
 
         return f"{opname}({arguments}){maybe_index}"
 
-    def inplace_view_opcall(self) -> str:
-        if "inplace_view" not in self.f.tags:
-            raise AssertionError("Expected an inplace view op")
-
-        dispatcher_sig = DispatcherSignature.from_schema(self.f.func)
-        op_arguments = dispatcher_sig.arguments()[1:]
-        context = functionalization.base_ctor_arguments(self.f.func)
-        context += functionalization.attributes(self.f.func)
-        arguments = ["functional_base"] + [
-            e.expr for e in translate(context, op_arguments, method=False)
-        ]
-        api_name = self.f.func.name.unambiguous_name()
-        return f"at::_ops::{api_name}::call({', '.join(arguments)})"
-
     def impl(self) -> list[str]:
-        if "inplace_view" in self.f.tags:
-            forward = f"""
-at::Tensor {self.classname}::forward(const at::Tensor& base) {{
-  if (reapply_views) {{
-    if (base.is_view()) {{
-      return {self.opcall(is_reverse=False, reapply_views=True)};
-    }}
-    auto functional_base = at::_ops::_unsafe_view::call(base, base.sym_sizes());
-    return {self.inplace_view_opcall()};
-  }} else {{
-    return {self.opcall(is_reverse=False, reapply_views=False)};
-  }}
-}}"""
-        else:
-            forward = f"""
+        forward = f"""
 at::Tensor {self.classname}::forward(const at::Tensor& base) {{
   if (reapply_views) {{
     return {self.opcall(is_reverse=False, reapply_views=True)};
