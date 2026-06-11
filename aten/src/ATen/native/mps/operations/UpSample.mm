@@ -246,22 +246,7 @@ static accscalar_t compute_scales_value_backwards(const std::optional<double> sc
   return (scale.value_or(0.) > 0.) ? (accscalar_t)scale.value() : (accscalar_t)src_size / dst_size;
 }
 
-template <typename accscalar_t>
-static accscalar_t area_pixel_compute_scale(int input_size,
-                                            int output_size,
-                                            bool align_corners,
-                                            const std::optional<double> scale) {
-  if (align_corners) {
-    if (output_size > 1) {
-      return (accscalar_t)(input_size - 1) / (output_size - 1);
-    } else {
-      return static_cast<accscalar_t>(0);
-    }
-  } else {
-    return compute_scales_value<accscalar_t>(scale, input_size, output_size);
-  }
-}
-
+template <unsigned N>
 static void upsample_kernel_out_template(const Tensor& input,
                                          IntArrayRef output_size,
                                          bool align_corners,
@@ -272,29 +257,19 @@ static void upsample_kernel_out_template(const Tensor& input,
   if (output.numel() == 0) {
     return;
   }
-  std::array<float, 2> scales = {
-      area_pixel_compute_scale<float>(input.size(-1), output.size(-1), align_corners, scale_w_opt),
-      area_pixel_compute_scale<float>(input.size(2), output.size(2), align_corners, scale_h_opt)};
+  UpsampleParams<N> params(input, output, align_corners, {scale_w_opt, scale_h_opt});
+  int64_t njobs = 1;
+  for (auto s : output_size) {
+    njobs *= s;
+  }
   auto upsamplePSO = lib.getPipelineStateForFunc(fmt::format("upsample_{}_{}", name, scalarToMetalTypeString(input)));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:upsamplePSO];
-      mtl_setArgs(computeEncoder,
-                  input,
-                  output,
-                  input.strides(),
-                  output.strides(),
-                  input.sizes(),
-                  output.sizes(),
-                  scales,
-                  align_corners);
-      if (output.ndimension() == 4) {
-        mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1]);
-      } else {
-        mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0]);
-      }
+      mtl_setArgs(computeEncoder, input, output, params);
+      mtl_dispatch1DJob(computeEncoder, upsamplePSO, njobs);
     }
   });
 }
@@ -310,15 +285,7 @@ static void upsample_kernel_out_template(const Tensor& input,
   if (output.numel() == 0) {
     return;
   }
-  UpsampleParams<5> params;
-  memcpy(params.input_sizes.data(), input.sizes().data(), 5 * sizeof(long));
-  memcpy(params.input_strides.data(), input.strides().data(), 5 * sizeof(long));
-  memcpy(params.output_strides.data(), output.strides().data(), 5 * sizeof(long));
-  memcpy(params.output_sizes.data(), output.sizes().data(), 5 * sizeof(long));
-  params.scales[0] = area_pixel_compute_scale<float>(input.size(4), output.size(4), align_corners, scale_w_opt);
-  params.scales[1] = area_pixel_compute_scale<float>(input.size(3), output.size(3), align_corners, scale_h_opt);
-  params.scales[2] = area_pixel_compute_scale<float>(input.size(2), output.size(2), align_corners, scale_d_opt);
-  params.align_corners = align_corners;
+  UpsampleParams<5> params(input, output, align_corners, {scale_w_opt, scale_h_opt, scale_d_opt});
   auto upsamplePSO = lib.getPipelineStateForFunc(fmt::format("upsample_{}_{}", name, scalarToMetalTypeString(input)));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -346,18 +313,7 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
   }
   auto upsamplePSO =
       lib.getPipelineStateForFunc(fmt::format("upsample_{}_backward_{}", name, scalarToMetalTypeString(grad_input)));
-  UpsampleParams<5> params;
-  memcpy(params.input_sizes.data(), grad_input.sizes().data(), 5 * sizeof(long));
-  memcpy(params.input_strides.data(), grad_input.strides().data(), 5 * sizeof(long));
-  memcpy(params.output_strides.data(), grad_output.strides().data(), 5 * sizeof(long));
-  memcpy(params.output_sizes.data(), grad_output.sizes().data(), 5 * sizeof(long));
-  params.scales[0] =
-      area_pixel_compute_scale<float>(grad_input.size(4), grad_output.size(4), align_corners, scale_w_opt);
-  params.scales[1] =
-      area_pixel_compute_scale<float>(grad_input.size(3), grad_output.size(3), align_corners, scale_h_opt);
-  params.scales[2] =
-      area_pixel_compute_scale<float>(grad_input.size(2), grad_output.size(2), align_corners, scale_d_opt);
-  params.align_corners = align_corners;
+  UpsampleParams<5> params(grad_input, grad_output, align_corners, {scale_w_opt, scale_h_opt, scale_d_opt});
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -381,9 +337,7 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
   if (grad_output.numel() == 0) {
     return;
   }
-  std::array<float, 2> scales = {
-      area_pixel_compute_scale<float>(grad_input.size(3), grad_output.size(3), align_corners, scale_w_opt),
-      area_pixel_compute_scale<float>(grad_input.size(2), grad_output.size(2), align_corners, scale_h_opt)};
+  UpsampleParams<4> params(grad_input, grad_output, align_corners, {scale_w_opt, scale_h_opt});
   auto upsamplePSO = lib.getPipelineStateForFunc(
       fmt::format("upsample_{}_backward_{}", name, mps::scalarToMetalTypeString(grad_input)));
   auto stream = getCurrentMPSStream();
@@ -391,15 +345,7 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:upsamplePSO];
-      mtl_setArgs(computeEncoder,
-                  grad_input,
-                  grad_output,
-                  grad_input.strides(),
-                  grad_output.strides(),
-                  grad_input.sizes(),
-                  grad_output.sizes(),
-                  scales,
-                  align_corners);
+      mtl_setArgs(computeEncoder, grad_input, grad_output, params);
       mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1]);
     }
   });
@@ -409,7 +355,7 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
 
 TORCH_IMPL_FUNC(upsample_nearest1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, std::optional<double> scale, const Tensor& output) {
-  mps::upsample_kernel_out_template(input, output_size, false, scale, scale, output, "nearest1d");
+  mps::upsample_kernel_out_template<3>(input, output_size, false, scale, scale, output, "nearest1d");
 }
 
 TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_mps)
@@ -423,7 +369,7 @@ TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_mps)
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, std::optional<double> scale, const Tensor& output) {
-  mps::upsample_kernel_out_template(input, output_size, false, scale, scale, output, "nearest_exact1d");
+  mps::upsample_kernel_out_template<3>(input, output_size, false, scale, scale, output, "nearest_exact1d");
 }
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact1d_backward_out_mps)
@@ -442,7 +388,7 @@ TORCH_IMPL_FUNC(upsample_nearest2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  mps::upsample_kernel_out_template(input, output_size, false, scales_h, scales_w, output, "nearest2d");
+  mps::upsample_kernel_out_template<4>(input, output_size, false, scales_h, scales_w, output, "nearest2d");
 }
 
 TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_mps)
@@ -461,7 +407,7 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  mps::upsample_kernel_out_template(input, output_size, false, scales_h, scales_w, output, "nearest_exact2d");
+  mps::upsample_kernel_out_template<4>(input, output_size, false, scales_h, scales_w, output, "nearest_exact2d");
 }
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)
@@ -477,7 +423,7 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)
 
 TORCH_IMPL_FUNC(upsample_linear1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scale, const Tensor& output) {
-  mps::upsample_kernel_out_template(input, output_size, align_corners, scale, scale, output, "linear1d");
+  mps::upsample_kernel_out_template<3>(input, output_size, align_corners, scale, scale, output, "linear1d");
 }
 
 TORCH_IMPL_FUNC(upsample_linear1d_backward_out_mps)
@@ -498,7 +444,7 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bilinear2d");
+  mps::upsample_kernel_out_template<4>(input, output_size, align_corners, scales_h, scales_w, output, "bilinear2d");
 }
 
 TORCH_IMPL_FUNC(upsample_bilinear2d_backward_out_mps)
@@ -520,7 +466,7 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bicubic2d");
+  mps::upsample_kernel_out_template<4>(input, output_size, align_corners, scales_h, scales_w, output, "bicubic2d");
 }
 
 TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_mps)
@@ -544,7 +490,7 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_mps)
  const Tensor& output) {
   TORCH_CHECK(at::isFloatingType(input.scalar_type()),
               "_upsample_bilineard2d_aa_out_mps only supports floating-point dtypes");
-  mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bilinear2d_aa");
+  mps::upsample_kernel_out_template<4>(input, output_size, align_corners, scales_h, scales_w, output, "bilinear2d_aa");
 }
 
 TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_mps)
@@ -556,7 +502,7 @@ TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_mps)
  const Tensor& output) {
   TORCH_CHECK(at::isFloatingType(input.scalar_type()),
               "_upsample_bicubic2d_aa_out_mps only supports floating-point dtypes");
-  mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bicubic2d_aa");
+  mps::upsample_kernel_out_template<4>(input, output_size, align_corners, scales_h, scales_w, output, "bicubic2d_aa");
 }
 
 TORCH_IMPL_FUNC(upsample_nearest3d_out_mps)(const Tensor& input,
