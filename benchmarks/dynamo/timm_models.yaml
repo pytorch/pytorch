@@ -63,6 +63,16 @@ require_larger_multiplier_for_smaller_tensor:
   - vit_base_patch14_dinov2.lvd142m
 
 
+# Models that need torch._inductor.config.emulate_precision_casts=True to match
+# eager bf16 rounding semantics (fp16 untested). Without this, inductor
+# pointwise fusion can elide a bf16 round-trip that eager performs (e.g.
+# conv-bias-add fused across a bf16->fp32 cat boundary), producing a ~1 bf16
+# ULP forward divergence that amplifies through gradients in models with very
+# small natural gradient magnitudes (e.g. LayerScale init=1e-5).
+emulate_precision_casts:
+  - vit_base_patch14_dinov2.lvd142m
+
+
 dtype:
   force_amp_for_fp16_bf16_models: []
 
