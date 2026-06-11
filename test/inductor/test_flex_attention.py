@@ -6128,6 +6128,9 @@ class GraphModule(torch.nn.Module):
             "get_stride_and_maybe_freeze_layout should be called with FlexibleLayout nodes",
         )
 
+    @unittest.skip(
+        "Too large to run reliably in CI. Kept as a manual repro for #185262"
+    )
     @supported_platform
     @skip_on_cpu
     @largeTensorTest("12GB", inductor=True)
