@@ -2,6 +2,7 @@
 import multiprocessing
 import os
 import queue
+import sys
 import tempfile
 import textwrap
 import traceback
@@ -88,7 +89,7 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides=None,
                                 device_capability=None, hw_info=None):
     with open(_PRECOMPILE_SENTINEL, "w") as f:
         import json
-        f.write(json.dumps({"shapes": precompile_shapes, "dtypes": precompile_dtypes}))
+        json.dump({"shapes": precompile_shapes, "strides": precompile_strides, "dtypes": precompile_dtypes}, f)
 """
 )
 
@@ -271,6 +272,34 @@ class TestAsyncCompile(TestCase):
             AsyncCompile.wait_pool_ready()
             self.assertTrue(AsyncCompile._ready_future.done())
             self.assertTrue(AsyncCompile.use_process_pool())
+
+    def test_subprocess_pool_registers_multiprocessing_finalizer(self):
+        class FakeSubprocPool:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def shutdown(self):
+                pass
+
+        shutdown_compile_workers()
+        try:
+            with (
+                config.patch(worker_start_method="subprocess", compile_threads=2),
+                patch("torch._inductor.async_compile.SubprocPool", FakeSubprocPool),
+                patch(
+                    "torch._inductor.async_compile.multiprocessing.util.Finalize"
+                ) as finalize,
+            ):
+                pool = AsyncCompile.process_pool()
+
+                finalize.assert_called_once()
+                args, kwargs = finalize.call_args
+                self.assertIsNone(args[0])
+                self.assertIs(args[1].__self__, pool)
+                self.assertIs(args[1].__func__, FakeSubprocPool.shutdown)
+                self.assertEqual(kwargs, {"exitpriority": sys.maxsize})
+        finally:
+            shutdown_compile_workers()
 
     @requires_gpu()
     @requires_triton()
