@@ -1,3 +1,4 @@
+# Owner(s): ["module: rocm"]
 name: rocm-mi200
 
 on:
