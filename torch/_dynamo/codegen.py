@@ -31,6 +31,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_call_function_ex,
     create_call_method,
+    create_copy,
     create_dup_top,
     create_instruction,
     create_load_const,
@@ -426,6 +427,13 @@ class PyCodegen:
         self.tempvars[value] = var
         self._output.append(self.create_store(var))
 
+    def clear_tempvars(self) -> None:
+        for key, var in list(self.tempvars.items()):
+            if var is not None:
+                self._output.append(self.create_delete(var))
+            del self.tempvars[key]
+        self.top_of_stack = None
+
     def foreach(self, items: Iterable[VariableTracker | Source]) -> None:
         for i in items:
             self(i)
@@ -514,6 +522,32 @@ class PyCodegen:
 
     def call_method(self, nargs: int) -> None:
         self.extend_output(create_call_method(nargs))
+
+    def create_list_append(self) -> list[Instruction]:
+        # Append TOS to the list at TOS-1, leaving the list on the stack
+        # (same stack effect as LIST_APPEND with arg=1).
+        #
+        # The bare LIST_APPEND opcode does not lock the list and so requires
+        # the target be uniquely owned (refcnt == 1) on free-threaded builds.
+        # When appending to a shared list (e.g. a list nested inside another
+        # list, refcnt > 1) we must instead use the locked list.append()
+        # method call, otherwise CPython's ensure_shared_on_resize assertion
+        # fires (or, in a release build, a data race occurs).
+        self.tx.output.update_co_names("append")
+        return [
+            # stack: list, value
+            *create_copy(2),
+            # stack: list, value, list
+            create_load_method("append"),
+            # stack: list, value, append, self
+            *create_copy(3),
+            # stack: list, value, append, self, value
+            *create_call_method(1),
+            # stack: list, value, None
+            create_instruction("POP_TOP"),
+            create_instruction("POP_TOP"),
+            # stack: list
+        ]
 
     def create_load_attr(self, name: str) -> Instruction:
         if name not in self.code_options["co_names"]:
@@ -735,6 +769,7 @@ class PyCodegen:
             self.pop_top()
 
         self.extend_output(create_call_function(len(graphargs), False))
+        self.clear_tempvars()
         self.add_pycode(
             f"__graph_out = {fn_name}({', '.join(arg_varnames)})",
         )
