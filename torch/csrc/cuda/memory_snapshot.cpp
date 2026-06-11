@@ -146,8 +146,7 @@ at::CallbackHandle _initCompileContexts() {
               -> std::unique_ptr<at::ObserverContext> {
             std::string functionName = fn.name();
             const std::string functionNamePrefix = "Torch-Compiled Region";
-            if (functionName.compare(
-                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+            if (functionName.starts_with(functionNamePrefix)) {
               c10::cuda::CUDACachingAllocator::pushCompileContext(functionName);
             }
             return nullptr;
@@ -155,8 +154,7 @@ at::CallbackHandle _initCompileContexts() {
           [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
             std::string functionName = fn.name();
             const std::string functionNamePrefix = "Torch-Compiled Region";
-            if (functionName.compare(
-                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+            if (functionName.starts_with(functionNamePrefix)) {
               c10::cuda::CUDACachingAllocator::popCompileContext();
             }
           })

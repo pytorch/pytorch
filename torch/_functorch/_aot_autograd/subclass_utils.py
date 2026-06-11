@@ -84,7 +84,7 @@ def get_subclass_typing_container(
 ) -> dict[type[torch.Tensor], list[type[torch.Tensor]]]:
     """
     Given a subclass, returns a recursive dictionary mapping each
-    inner tensors to its' subclass types.
+    inner tensors to its subclass types.
     """
 
     def _get_types_for_subclass(tensor_subclass: torch.Tensor) -> None:
@@ -174,8 +174,8 @@ def create_subclass_metadata(
             included_subclass_symints=count_symints,
             attrs=attrs,
             meta=metadata,
-            outer_size=a.size(),
-            outer_stride=a.stride(),
+            outer_size=a.size(),  # type: ignore[attr-defined, arg-type]
+            outer_stride=a.stride(),  # type: ignore[arg-type]
             original_subclass=a,
             memory_format=maybe_suggest_memory_format(a, with_memory_format),
         ),

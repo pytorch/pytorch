@@ -697,11 +697,13 @@ class CKTileGemmTemplate(CKTileTemplate):
         The primary entry point for the code rendering process used in this template.
         """
         epilogue_nodes = kwargs.get("epilogue_nodes")
-        assert epilogue_nodes is None or 0 == len(epilogue_nodes)
+        if not (epilogue_nodes is None or 0 == len(epilogue_nodes)):
+            raise AssertionError("expected no epilogue_nodes for CK tile gemm template")
         template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
-        assert 2 == len(self.input_nodes)
+        if 2 != len(self.input_nodes):
+            raise AssertionError(f"expected 2 input_nodes, got {len(self.input_nodes)}")
         X, W = self.input_nodes
         Y = self.output_node
 
@@ -723,7 +725,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             globals=self.globals().getvalue(),
             instance_definition=instance_definition,
             kernel_definition=kernel.def_kernel(
-                inputs=[X, W],
+                inputs=[X, W],  # type: ignore[list-item]
                 outputs=[Y],
                 names_str="X, W, Y",
                 size_args=[
