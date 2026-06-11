@@ -1001,16 +1001,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
-        elif (
-            self.value is collections.defaultdict
-            and name == "__copy__"
-            and len(args) == 1
-            and not kwargs
-        ):
-            # copy.copy(dd) resolves type(dd).__copy__ and calls it with the
-            # instance as the sole argument; dispatch to the instance so the
-            # default_factory and contents are preserved.
-            return args[0].call_method(tx, name, [], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_len
 
@@ -4948,9 +4938,9 @@ class DefaultDictVariable(UserDefinedDictVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return self.nb_inplace_or_impl(tx, args[0])
-        elif name in ("copy", "__copy__"):
-            # defaultdict.copy() / copy.copy(dd) both create a new defaultdict
-            # https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Modules/_collectionsmodule.c#L2290-L2293
+        elif name == "copy":
+            # defaultdict.copy() creates a new defaultdict with same factory
+            # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2282
             from .builder import SourcelessBuilder
 
             if self._base_vt is None:
