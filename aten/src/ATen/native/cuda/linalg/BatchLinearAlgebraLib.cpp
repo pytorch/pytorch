@@ -1664,11 +1664,20 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
     const auto pivots_stride = get_pivots ? pivots.size(-1) : 0;
 
     const auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+    int lwork;
+    at::cuda::solver::getrf_bufferSize<scalar_t>(
+      handle, m, n, self_data, lda, &lwork);
+    auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+    auto workspace = allocator.allocate(sizeof(scalar_t) * lwork);
+    auto workspace_ptr = static_cast<scalar_t*>(workspace.get());
+
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
       at::cuda::solver::getrf<scalar_t>(
         handle, m, n,
         self_data + batch * self_stride,
         lda,
+        workspace_ptr,
         get_pivots ? pivots_data + batch * pivots_stride : nullptr,
         infos_data + batch
       );
