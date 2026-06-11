@@ -1,8 +1,9 @@
-import torch
 import triton
 import triton.testing
+from baseline_example import HIDDEN_DIM, rms_norm_residual_block, SEQ_LEN
 from golden_kernel import launch_fused_block
-from baseline_example import rms_norm_residual_block, HIDDEN_DIM, SEQ_LEN
+
+import torch
 from torch._inductor import config
 from torch._inductor.utils import fresh_cache
 
@@ -23,10 +24,14 @@ def run_benchmark(warmup=1, rep=25):
     res = torch.randn(SEQ_LEN, HIDDEN_DIM, device=device, dtype=dtype)
     w = torch.randn(HIDDEN_DIM, device=device, dtype=dtype)
 
-    print(f"Benchmarking Inductor baseline (polyhedral=False, warmup={warmup}, rep={rep})...")
+    print(
+        f"Benchmarking Inductor baseline (polyhedral=False, warmup={warmup}, rep={rep})..."
+    )
     baseline_ms = bench_inductor(x, res, w, polyhedral=False, warmup=warmup, rep=rep)
 
-    print(f"Benchmarking Inductor fused (polyhedral=True, warmup={warmup}, rep={rep})...")
+    print(
+        f"Benchmarking Inductor fused (polyhedral=True, warmup={warmup}, rep={rep})..."
+    )
     fused_ms = bench_inductor(x, res, w, polyhedral=True, warmup=warmup, rep=rep)
 
     print(f"Benchmarking Golden Kernel (warmup={warmup}, rep={rep})...")
@@ -35,7 +40,7 @@ def run_benchmark(warmup=1, rep=25):
     )
 
     print("\n" + "=" * 60)
-    print(f"BENCHMARK RESULTS (triton.testing.do_bench)")
+    print("BENCHMARK RESULTS (triton.testing.do_bench)")
     print(f"Config: SEQ_LEN={SEQ_LEN}, HIDDEN_DIM={HIDDEN_DIM}")
     print(f"Warmup: {warmup}, Repetitions: {rep}")
     print("=" * 60)

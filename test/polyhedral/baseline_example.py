@@ -1,8 +1,10 @@
 import torch
 
+
 # Standard Llama-3 70B Hidden Dim
-HIDDEN_DIM = 8192 
+HIDDEN_DIM = 8192
 SEQ_LEN = 2048
+
 
 def rms_norm_residual_block(x, residual, weight):
     # 1. Residual Add (Pointwise)
@@ -23,6 +25,7 @@ def rms_norm_residual_block(x, residual, weight):
     # The .chunk() operation is what torch.compile is NOT optimized for!
     gate, up = x_normed.chunk(2, dim=-1)
     return torch.nn.functional.silu(gate) * up
+
 
 # Compilation Target
 compiled_fn = torch.compile(rms_norm_residual_block, fullgraph=True)

@@ -1,16 +1,18 @@
-import torch
 import triton
 import triton.language as tl
 
+import torch
+
+
 @triton.jit
 def triton_fused_rmsnorm_residual_gating_0(
-    in_ptr0,        # Input x
-    in_ptr1,        # Residual
-    in_ptr2,        # RMSNorm Weights
-    out_ptr0,       # Final Gated Output
+    in_ptr0,  # Input x
+    in_ptr1,  # Residual
+    in_ptr2,  # RMSNorm Weights
+    out_ptr0,  # Final Gated Output
     stride_xnumel,  # Stride between rows (Hidden Dim)
-    rnumel,         # Total Hidden Dim (e.g., 8192)
-    eps,            # RMSNorm epsilon
+    rnumel,  # Total Hidden Dim (e.g., 8192)
+    eps,  # RMSNorm epsilon
     RBLOCK: tl.constexpr,
 ):
     """
@@ -126,8 +128,13 @@ def launch_fused_block(arg0_1, arg1_1, arg2_1):
 
     # Launch kernel
     triton_fused_rmsnorm_residual_gating_0[grid](
-        arg0_1, arg1_1, arg2_1, buf0,
-        arg0_1.stride(0), rnumel, 1e-6,
+        arg0_1,
+        arg1_1,
+        arg2_1,
+        buf0,
+        arg0_1.stride(0),
+        rnumel,
+        1e-6,
         RBLOCK=RBLOCK,
     )
     return buf0

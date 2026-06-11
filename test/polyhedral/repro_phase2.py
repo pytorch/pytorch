@@ -1,13 +1,15 @@
 import torch
-from torch._inductor import config
 import torch._inductor.test_operators
+from torch._inductor import config
 from torch._inductor.utils import fresh_cache
+
 
 config.polyhedral_fusion = True
 
 # Standard Llama-3 70B Hidden Dim
 HIDDEN_DIM = 8192
 SEQ_LEN = 2048
+
 
 def rms_norm_residual_block(x, residual, weight):
     # 1. Residual Add (Pointwise)
@@ -23,9 +25,11 @@ def rms_norm_residual_block(x, residual, weight):
     gate, up = x_normed.chunk(2, dim=-1)
     return torch.nn.functional.silu(gate) * up
 
+
 def count_triton_kernels(code):
     """Count @triton.jit decorated functions"""
     return code.count("@triton.jit")
+
 
 def test_fusion_phase2():
     """
@@ -38,8 +42,6 @@ def test_fusion_phase2():
     - ~1.42x speedup achieved
     """
     import os
-
-
 
     # Enable output code logging
     os.environ["TORCH_LOGS"] = "output_code"
@@ -56,16 +58,16 @@ def test_fusion_phase2():
 
     from torch._inductor.utils import run_and_get_code
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("PHASE 2 TEST: Codegen Single Fused Kernel")
-    print("="*60)
+    print("=" * 60)
 
     with fresh_cache():
         result, (source_code,) = run_and_get_code(compiled_fn, x, res, w)
 
     kernel_count = count_triton_kernels(source_code)
 
-    print(f"\n📊 Results:")
+    print("\n📊 Results:")
     print(f"  Kernel count: {kernel_count}")
     print("  Expected: 1 ✅")
 
@@ -89,6 +91,7 @@ def test_fusion_phase2():
     print("✅ All Phase 2 checks: PASS")
 
     return kernel_count
+
 
 if __name__ == "__main__":
     kernel_count = test_fusion_phase2()

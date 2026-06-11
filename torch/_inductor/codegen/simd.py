@@ -2279,31 +2279,46 @@ class SIMDScheduling(BaseScheduling):
     can_fuse_vertical = can_fuse
     can_fuse_horizontal = can_fuse
 
-    def _check_index_compatibility(self, write_dep, read_dep):
-        """For each index variable, check read range <= write range."""
+    def _compute_fusion_shift(self, write_dep, read_dep):
+        """Compute the shift vector for fusing a producer write with a consumer read.
+
+        Returns a dict {read_var: shift} or None if fusion is structurally illegal.
+        A shift of 0 on all dims means the consumer's domain is a subset of the
+        producer's and the shared buffer can stay in registers.
+        """
         write_ranges = write_dep.ranges
         read_ranges = read_dep.ranges
-
         write_vars = list(write_ranges.keys())
         read_vars = list(read_ranges.keys())
+        sv = V.graph.sizevars
+
+        shift_vector: dict[sympy.Symbol, sympy.Expr] = {}
 
         for i, write_var in enumerate(write_vars):
             if write_var not in write_dep.index.free_symbols:
                 continue
             if i >= len(read_vars):
-                return False
+                return None
             read_var = read_vars[i]
             if read_var not in read_dep.index.free_symbols:
-                return False
-            if not V.graph.sizevars.statically_known_leq(
-                read_ranges[read_var], write_ranges[write_var]
-            ):
-                return False
+                return None
 
-        return True
+            w_bound = write_ranges[write_var]
+            r_bound = read_ranges[read_var]
+
+            if sv.statically_known_leq(r_bound, w_bound):
+                shift_vector[read_var] = sv.simplify(w_bound - r_bound)
+            else:
+                return None
+
+        return shift_vector
+
+    def _check_index_compatibility(self, write_dep, read_dep):
+        """Boolean wrapper: True if a valid fusion shift exists."""
+        return self._compute_fusion_shift(write_dep, read_dep) is not None
 
     def _node_reads_subset_of_reduction(self, node, reduction_write_deps):
-        """Check that node's reads from reduction outputs have ranges <= the write ranges."""
+        """Check that all of node's reads from reduction outputs have zero-shift compatibility."""
         reads = [
             r
             for r in node.read_writes.reads
@@ -2313,7 +2328,8 @@ class SIMDScheduling(BaseScheduling):
             return False
         for read_dep in reads:
             write_dep = reduction_write_deps[read_dep.name]
-            if not self._check_index_compatibility(write_dep, read_dep):
+            shift = self._compute_fusion_shift(write_dep, read_dep)
+            if shift is None:
                 return False
         return True
 
