@@ -2314,8 +2314,14 @@ class SIMDScheduling(BaseScheduling):
         return shift_vector
 
     def _check_index_compatibility(self, write_dep, read_dep):
-        """Boolean wrapper: True if a valid fusion shift exists."""
-        return self._compute_fusion_shift(write_dep, read_dep) is not None
+        """Boolean wrapper: True if a valid zero-shift fusion exists."""
+        shift = self._compute_fusion_shift(write_dep, read_dep)
+        if shift is None:
+            return False
+
+        # todo: Shift does not need to be 0 in general.
+        # This check will be removed in next phase of implementation.
+        return all(v == 0 for v in shift.values())
 
     @staticmethod
     def _is_dense_uniform(dep):
@@ -2323,7 +2329,7 @@ class SIMDScheduling(BaseScheduling):
         if dep.is_indirect():
             return False
 
-        return dep.index.free_symbols <= set(dep.var_names)
+        return dep.index.free_symbols <= OrderedSet(dep.var_names)
 
     def _node_reads_subset_of_reduction(self, node, reduction_write_deps):
         """Check that all of node's reads from reduction outputs have zero-shift compatibility."""
@@ -2336,7 +2342,9 @@ class SIMDScheduling(BaseScheduling):
             return False
         for read_dep in reads:
             write_dep = reduction_write_deps[read_dep.name]
-            if not self._is_dense_uniform(write_dep) or not self._is_dense_uniform(read_dep):
+            if not self._is_dense_uniform(write_dep) or not self._is_dense_uniform(
+                read_dep
+            ):
                 return False
             shift = self._compute_fusion_shift(write_dep, read_dep)
             if shift is None:
