@@ -14,7 +14,7 @@ from .hints import (
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
-from .runtime_utils import red_text, triton_config_to_hashable
+from .runtime_utils import is_power_of_2, red_text, triton_config_to_hashable
 
 
 if TYPE_CHECKING:
@@ -243,10 +243,15 @@ class CoordescTuner:
     def is_valid_config(self, config) -> bool:
         if self.is_mix_order_reduction:
             # Mix order reduction has an extra constraint that
-            # we should not tune XBLOCK beyond RSPLIT_SIZE
+            # XBLOCK must be a power-of-two divisor of RSPLIT_SIZE.
             xblock = config.kwargs["XBLOCK"]
             split_size = config.kwargs["RSPLIT_SIZE"]
-            return xblock <= split_size
+            return (
+                xblock <= split_size
+                and xblock > 0
+                and is_power_of_2(xblock)
+                and split_size % xblock == 0
+            )
         if self.is_native_matmul:
             r0_block = None
             if "R0_BLOCK" not in config.kwargs:
