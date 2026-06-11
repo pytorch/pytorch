@@ -8829,6 +8829,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(64), torch.randn(64)))
 
+    @parametrize("y", (3.14, torch.tensor(3.14)))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_remainder_scalar_values(self, y, dtype):
+        def fn(a, b):
+            return torch.remainder(a, b)
+
+        x = torch.tensor([-4.0, 0.0, 0.4, 4], dtype=dtype, device=self.device)
+
+        self.common(fn, (x, y))
+
     @skip_if_halide  # cpp-only RuntimeError contract
     @skip_if_pallas  # cpp-only RuntimeError contract
     @skip_if_triton_cpu  # cpp-only RuntimeError contract
