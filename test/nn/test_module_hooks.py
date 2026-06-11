@@ -186,8 +186,16 @@ class DummyContextManager:
         self.input.append(-1)
 
 
-@torch._dynamo.config.patch(nested_graph_breaks=False)
 class TestModuleHooks(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._prior_ngb = torch._dynamo.config.nested_graph_breaks
+        torch._dynamo.config.nested_graph_breaks = False
+
+    def tearDown(self):
+        torch._dynamo.config.nested_graph_breaks = self._prior_ngb
+        super().tearDown()
+
     @parametrize_test("named_tuple", (True, False))
     def test_forward_hooks(self, named_tuple):
         fired_hooks: list[int] = []
@@ -1255,10 +1263,18 @@ class TestModuleGlobalHooks(TestCase):
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
 
-@torch._dynamo.config.patch(nested_graph_breaks=False)
 class TestModuleHookNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+
+    def setUp(self):
+        super().setUp()
+        self._prior_ngb = torch._dynamo.config.nested_graph_breaks
+        torch._dynamo.config.nested_graph_breaks = False
+
+    def tearDown(self):
+        torch._dynamo.config.nested_graph_breaks = self._prior_ngb
+        super().tearDown()
 
     def _test_hooks(self, backward_register_fn):
         module = nn.Sigmoid()
