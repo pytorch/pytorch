@@ -28,8 +28,16 @@ if torch.get_default_dtype() is not torch.float32:
 # This test file tests scatter and gather operations,
 #   like torch.scatter and torch.gather.
 
-@torch._dynamo.config.patch(nested_graph_breaks=False)
 class TestScatterGather(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._prior_ngb = torch._dynamo.config.nested_graph_breaks
+        torch._dynamo.config.nested_graph_breaks = False
+
+    def tearDown(self):
+        torch._dynamo.config.nested_graph_breaks = self._prior_ngb
+        super().tearDown()
+
     # Fills an index tensor with valid indices
     def _fill_indices(self, idx, dim, dim_size, elems_per_row, m, n, o, unique_indices=True):
         for i in range(1 if dim == 0 else m):
@@ -356,7 +364,6 @@ class TestScatterGather(TestCase):
             del self_t1, src_t1, self_full, src_full
 
     # FIXME: discrepancy between bool ReduceAdd on CUDA and CPU (a + b on CPU and buggy a && b on CUDA)
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
     def test_scatter_reduce_sum(self, device, dtype):
         for include_self in (True, False):
