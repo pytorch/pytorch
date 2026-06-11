@@ -1301,6 +1301,28 @@ class TestReductions(TestCase):
         self._test_minmax_helper(_amax_wrapper, np.amax, device, dtype)
 
     @onlyNativeDeviceTypes
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
+    def test_minmax_reductions_signed_zero(self, device, dtype):
+        negative_zero = torch.full((2, 64), -0.0, device=device, dtype=dtype)
+        positive_zero = torch.zeros((2, 64), device=device, dtype=dtype)
+        mixed = torch.stack((negative_zero[0], positive_zero[0]))
+        reversed_mixed = torch.stack((positive_zero[0], negative_zero[0]))
+
+        for x in (mixed, reversed_mixed):
+            self.assertFalse(torch.signbit(torch.max(x)).item())
+            self.assertFalse(torch.signbit(torch.amax(x)).item())
+            self.assertFalse(torch.signbit(torch.amax(x, dim=0)).any().item())
+            self.assertFalse(torch.signbit(torch.aminmax(x)[1]).item())
+            self.assertFalse(torch.signbit(torch.aminmax(x, dim=0)[1]).any().item())
+
+            self.assertTrue(torch.signbit(torch.min(x)).item())
+            self.assertTrue(torch.signbit(torch.amin(x)).item())
+            self.assertTrue(torch.signbit(torch.amin(x, dim=0)).all().item())
+            self.assertTrue(torch.signbit(torch.aminmax(x)[0]).item())
+            self.assertTrue(torch.signbit(torch.aminmax(x, dim=0)[0]).all().item())
+
+    @onlyNativeDeviceTypes
     @dtypes(*complex_types())
     @dtypesIfMPS(torch.complex64)
     def test_invalid_0dim_aminmax(self, device, dtype):

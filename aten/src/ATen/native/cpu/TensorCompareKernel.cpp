@@ -4,9 +4,11 @@
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorCompare.h>
 
+#include <cmath>
 #include <numeric>
 #include <iterator>
 #include <algorithm>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -15,6 +17,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
+#include <c10/util/BFloat16-math.h>
 #include <c10/util/irange.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
@@ -28,6 +31,26 @@
 #endif
 
 namespace at::native { namespace {
+
+template <typename scalar_t>
+inline scalar_t minimum_with_signed_zero(scalar_t a, scalar_t b) {
+  if constexpr (std::is_floating_point_v<scalar_t> ||
+                c10::is_reduced_floating_point_v<scalar_t>) {
+    return std::fmin(a, b);
+  } else {
+    return std::min(a, b);
+  }
+}
+
+template <typename scalar_t>
+inline scalar_t maximum_with_signed_zero(scalar_t a, scalar_t b) {
+  if constexpr (std::is_floating_point_v<scalar_t> ||
+                c10::is_reduced_floating_point_v<scalar_t>) {
+    return std::fmax(a, b);
+  } else {
+    return std::max(a, b);
+  }
+}
 
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
 inline void compare_base_kernel_core(
@@ -195,16 +218,13 @@ void aminmax_kernel(
         scalar_t max_number = min_number;
         for (const auto i : c10::irange(self_dim_size)) {
           scalar_t value = c10::load(&self_data[i * self_dim_stride]);
-          // note: comparison is written this way to handle NaN correctly
-          if (!(value >= min_number)) {
+          if (_isnan<scalar_t>(value)) {
             min_number = value;
-            if (_isnan<scalar_t>(value)) {
-              max_number = value;
-              break;
-            }
-          } else if (!(value <= max_number)) {
             max_number = value;
+            break;
           }
+          min_number = minimum_with_signed_zero(min_number, value);
+          max_number = maximum_with_signed_zero(max_number, value);
         }
         *min_result_data = min_number;
         *max_result_data = max_number;
@@ -343,10 +363,12 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
-        if (min != min || max != max) {
+        if (a != a) {
+            return a;
+        } else if (min != min || max != max) {
             return std::numeric_limits<scalar_t>::quiet_NaN();
         } else {
-            return std::min(std::max(a, min), max);
+            return minimum_with_signed_zero(maximum_with_signed_zero(a, min), max);
         }
       },
       [](Vectorized<scalar_t> a, Vectorized<scalar_t> min, Vectorized<scalar_t> max) {
@@ -363,7 +385,10 @@ void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, cons
     const Vectorized<scalar_t> max_vec(max);
       cpu_kernel_vec(iter,
         [=](scalar_t a) -> scalar_t {
-          return std::min(std::max(a, min), max);
+          if (a != a) {
+            return a;
+          }
+          return minimum_with_signed_zero(maximum_with_signed_zero(a, min), max);
         },
         [=](Vectorized<scalar_t> a) {
           return vec::clamp(a, min_vec, max_vec);
@@ -377,7 +402,10 @@ void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
     const Vectorized<scalar_t> max_vec(max);
     cpu_kernel_vec(iter,
       [=](scalar_t a) -> scalar_t {
-        return std::min(a, max);
+        if (a != a) {
+          return a;
+        }
+        return minimum_with_signed_zero(a, max);
       },
       [=](Vectorized<scalar_t> a) {
         return vec::clamp_max(a, max_vec);
@@ -391,7 +419,10 @@ void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
     const Vectorized<scalar_t> min_vec(min);
     cpu_kernel_vec(iter,
         [=](scalar_t a) -> scalar_t {
-          return std::max(a, min);
+          if (a != a) {
+            return a;
+          }
+          return maximum_with_signed_zero(a, min);
         },
         [=](Vectorized<scalar_t> a) {
           return vec::clamp_min(a, min_vec);

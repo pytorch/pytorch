@@ -862,12 +862,15 @@ template <
 Vectorized<T> inline maximum(const Vectorized<T>& a, const Vectorized<T>& b) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = (a[i] > b[i]) ? a[i] : b[i];
-    if (_isnan(a[i])) {
-      // If either input is NaN, propagate a NaN.
-      // NOTE: The case where b[i] was NaN is handled correctly by the naive
-      // ternary operator above.
-      c[i] = a[i];
+    if constexpr (is_floating_point_v<T>) {
+      c[i] = std::fmax(a[i], b[i]);
+      if (_isnan(a[i])) {
+        c[i] = a[i];
+      } else if (_isnan(b[i])) {
+        c[i] = b[i];
+      }
+    } else {
+      c[i] = (a[i] > b[i]) ? a[i] : b[i];
     }
   }
   return c;
@@ -900,12 +903,15 @@ template <
 Vectorized<T> inline minimum(const Vectorized<T>& a, const Vectorized<T>& b) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = (a[i] < b[i]) ? a[i] : b[i];
-    if (_isnan(a[i])) {
-      // If either input is NaN, propagate a NaN.
-      // NOTE: The case where b[i] was NaN is handled correctly by the naive
-      // ternary operator above.
-      c[i] = a[i];
+    if constexpr (is_floating_point_v<T>) {
+      c[i] = std::fmin(a[i], b[i]);
+      if (_isnan(a[i])) {
+        c[i] = a[i];
+      } else if (_isnan(b[i])) {
+        c[i] = b[i];
+      }
+    } else {
+      c[i] = (a[i] < b[i]) ? a[i] : b[i];
     }
   }
   return c;
@@ -937,11 +943,7 @@ Vectorized<T> inline clamp(
     const Vectorized<T>& a,
     const Vectorized<T>& min_vec,
     const Vectorized<T>& max_vec) {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = std::min(std::max(a[i], min_vec[i]), max_vec[i]);
-  }
-  return c;
+  return minimum(maximum(a, min_vec), max_vec);
 }
 
 #define VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(name)       \
@@ -986,11 +988,7 @@ template <
 Vectorized<T> inline clamp_max(
     const Vectorized<T>& a,
     const Vectorized<T>& max_vec) {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] > max_vec[i] ? max_vec[i] : a[i];
-  }
-  return c;
+  return minimum(a, max_vec);
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(clamp_max)
@@ -1001,11 +999,7 @@ template <
 Vectorized<T> inline clamp_min(
     const Vectorized<T>& a,
     const Vectorized<T>& min_vec) {
-  Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
-  }
-  return c;
+  return maximum(a, min_vec);
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(clamp_min)

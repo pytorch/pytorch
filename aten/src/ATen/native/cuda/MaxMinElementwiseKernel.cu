@@ -33,7 +33,7 @@ void maximum_kernel_cuda(TensorIteratorBase& iter) {
         } else if (b != b) {
           return b;
         } else {
-          return ::max(a, b);
+          return ::fmax(a, b);
         }
       });
     });
@@ -59,7 +59,7 @@ void minimum_kernel_cuda(TensorIteratorBase& iter) {
         } else if (b != b) {
           return b;
         } else {
-          return ::min(a, b);
+          return ::fmin(a, b);
         }
       });
     });

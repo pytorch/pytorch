@@ -935,10 +935,23 @@ Vectorized<BFloat16> inline maximum(
   cvtbf16_fp32(__m512i(b), b_lo, b_hi);
   auto max_lo = _mm512_max_ps(a_lo, b_lo);
   auto max_hi = _mm512_max_ps(a_hi, b_hi);
+  auto zero = _mm512_setzero_ps();
+  auto neg_zero = _mm512_set1_ps(-0.0f);
+  auto both_zero_lo_mask = _mm512_cmp_ps_mask(a_lo, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_ps_mask(b_lo, zero, _CMP_EQ_OQ);
+  auto both_zero_hi_mask = _mm512_cmp_ps_mask(a_hi, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_ps_mask(b_hi, zero, _CMP_EQ_OQ);
+  auto zero_result_lo = _mm512_and_ps(_mm512_and_ps(a_lo, b_lo), neg_zero);
+  auto zero_result_hi = _mm512_and_ps(_mm512_and_ps(a_hi, b_hi), neg_zero);
+  max_lo = _mm512_mask_blend_ps(both_zero_lo_mask, max_lo, zero_result_lo);
+  max_hi = _mm512_mask_blend_ps(both_zero_hi_mask, max_hi, zero_result_hi);
   auto nan_lo_mask = _mm512_cmp_ps_mask(a_lo, b_lo, _CMP_UNORD_Q);
   auto nan_hi_mask = _mm512_cmp_ps_mask(a_hi, b_hi, _CMP_UNORD_Q);
-  auto nan_lo = _mm512_castsi512_ps(_mm512_set1_epi32(nan_lo_mask));
-  auto nan_hi = _mm512_castsi512_ps(_mm512_set1_epi32(nan_hi_mask));
+  auto zero_vec = _mm512_set1_epi32(0);
+  auto nan_lo = _mm512_castsi512_ps(
+      _mm512_mask_set1_epi32(zero_vec, nan_lo_mask, 0xFFFFFFFF));
+  auto nan_hi = _mm512_castsi512_ps(
+      _mm512_mask_set1_epi32(zero_vec, nan_hi_mask, 0xFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
   auto o1 = _mm512_or_ps(max_lo, nan_lo);
   auto o2 = _mm512_or_ps(max_hi, nan_hi);
@@ -958,6 +971,16 @@ Vectorized<BFloat16> inline minimum(
   cvtbf16_fp32(__m512i(b), b_lo, b_hi);
   auto min_lo = _mm512_min_ps(a_lo, b_lo);
   auto min_hi = _mm512_min_ps(a_hi, b_hi);
+  auto zero = _mm512_setzero_ps();
+  auto neg_zero = _mm512_set1_ps(-0.0f);
+  auto both_zero_lo_mask = _mm512_cmp_ps_mask(a_lo, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_ps_mask(b_lo, zero, _CMP_EQ_OQ);
+  auto both_zero_hi_mask = _mm512_cmp_ps_mask(a_hi, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_ps_mask(b_hi, zero, _CMP_EQ_OQ);
+  auto zero_result_lo = _mm512_and_ps(_mm512_or_ps(a_lo, b_lo), neg_zero);
+  auto zero_result_hi = _mm512_and_ps(_mm512_or_ps(a_hi, b_hi), neg_zero);
+  min_lo = _mm512_mask_blend_ps(both_zero_lo_mask, min_lo, zero_result_lo);
+  min_hi = _mm512_mask_blend_ps(both_zero_hi_mask, min_hi, zero_result_hi);
   auto nan_lo_mask = _mm512_cmp_ps_mask(a_lo, b_lo, _CMP_UNORD_Q);
   auto nan_hi_mask = _mm512_cmp_ps_mask(a_hi, b_hi, _CMP_UNORD_Q);
   auto nan_lo = _mm512_castsi512_ps(
@@ -975,41 +998,21 @@ Vectorized<BFloat16> inline clamp(
     const Vectorized<BFloat16>& a,
     const Vectorized<BFloat16>& min,
     const Vectorized<BFloat16>& max) {
-  __m512 a_lo, a_hi;
-  __m512 min_lo, min_hi;
-  __m512 max_lo, max_hi;
-  cvtbf16_fp32(__m512i(a), a_lo, a_hi);
-  cvtbf16_fp32(__m512i(min), min_lo, min_hi);
-  cvtbf16_fp32(__m512i(max), max_lo, max_hi);
-  auto o1 = _mm512_min_ps(max_lo, _mm512_max_ps(min_lo, a_lo));
-  auto o2 = _mm512_min_ps(max_hi, _mm512_max_ps(min_hi, a_hi));
-  return cvtfp32_bf16(o1, o2);
+  return minimum(maximum(a, min), max);
 }
 
 template <>
 Vectorized<BFloat16> inline clamp_max(
     const Vectorized<BFloat16>& a,
     const Vectorized<BFloat16>& max) {
-  __m512 a_lo, a_hi;
-  __m512 max_lo, max_hi;
-  cvtbf16_fp32(__m512i(a), a_lo, a_hi);
-  cvtbf16_fp32(__m512i(max), max_lo, max_hi);
-  auto o1 = _mm512_min_ps(max_lo, a_lo);
-  auto o2 = _mm512_min_ps(max_hi, a_hi);
-  return cvtfp32_bf16(o1, o2);
+  return minimum(a, max);
 }
 
 template <>
 Vectorized<BFloat16> inline clamp_min(
     const Vectorized<BFloat16>& a,
     const Vectorized<BFloat16>& min) {
-  __m512 a_lo, a_hi;
-  __m512 min_lo, min_hi;
-  cvtbf16_fp32(__m512i(a), a_lo, a_hi);
-  cvtbf16_fp32(__m512i(min), min_lo, min_hi);
-  auto o1 = _mm512_max_ps(min_lo, a_lo);
-  auto o2 = _mm512_max_ps(min_hi, a_hi);
-  return cvtfp32_bf16(o1, o2);
+  return maximum(a, min);
 }
 
 template <>
@@ -1695,10 +1698,23 @@ Vectorized<Half> inline maximum(
   cvtfp16_fp32(__m512i(b), b_lo, b_hi);
   auto max_lo = _mm512_max_ps(a_lo, b_lo);
   auto max_hi = _mm512_max_ps(a_hi, b_hi);
+  auto zero = _mm512_setzero_ps();
+  auto neg_zero = _mm512_set1_ps(-0.0f);
+  auto both_zero_lo_mask = _mm512_cmp_ps_mask(a_lo, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_ps_mask(b_lo, zero, _CMP_EQ_OQ);
+  auto both_zero_hi_mask = _mm512_cmp_ps_mask(a_hi, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_ps_mask(b_hi, zero, _CMP_EQ_OQ);
+  auto zero_result_lo = _mm512_and_ps(_mm512_and_ps(a_lo, b_lo), neg_zero);
+  auto zero_result_hi = _mm512_and_ps(_mm512_and_ps(a_hi, b_hi), neg_zero);
+  max_lo = _mm512_mask_blend_ps(both_zero_lo_mask, max_lo, zero_result_lo);
+  max_hi = _mm512_mask_blend_ps(both_zero_hi_mask, max_hi, zero_result_hi);
   auto nan_lo_mask = _mm512_cmp_ps_mask(a_lo, b_lo, _CMP_UNORD_Q);
   auto nan_hi_mask = _mm512_cmp_ps_mask(a_hi, b_hi, _CMP_UNORD_Q);
-  auto nan_lo = _mm512_castsi512_ps(_mm512_set1_epi32(nan_lo_mask));
-  auto nan_hi = _mm512_castsi512_ps(_mm512_set1_epi32(nan_hi_mask));
+  auto zero_vec = _mm512_set1_epi32(0);
+  auto nan_lo = _mm512_castsi512_ps(
+      _mm512_mask_set1_epi32(zero_vec, nan_lo_mask, 0xFFFFFFFF));
+  auto nan_hi = _mm512_castsi512_ps(
+      _mm512_mask_set1_epi32(zero_vec, nan_hi_mask, 0xFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
   auto o1 = _mm512_or_ps(max_lo, nan_lo);
   auto o2 = _mm512_or_ps(max_hi, nan_hi);
@@ -1718,6 +1734,16 @@ Vectorized<Half> inline minimum(
   cvtfp16_fp32(__m512i(b), b_lo, b_hi);
   auto min_lo = _mm512_min_ps(a_lo, b_lo);
   auto min_hi = _mm512_min_ps(a_hi, b_hi);
+  auto zero = _mm512_setzero_ps();
+  auto neg_zero = _mm512_set1_ps(-0.0f);
+  auto both_zero_lo_mask = _mm512_cmp_ps_mask(a_lo, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_ps_mask(b_lo, zero, _CMP_EQ_OQ);
+  auto both_zero_hi_mask = _mm512_cmp_ps_mask(a_hi, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_ps_mask(b_hi, zero, _CMP_EQ_OQ);
+  auto zero_result_lo = _mm512_and_ps(_mm512_or_ps(a_lo, b_lo), neg_zero);
+  auto zero_result_hi = _mm512_and_ps(_mm512_or_ps(a_hi, b_hi), neg_zero);
+  min_lo = _mm512_mask_blend_ps(both_zero_lo_mask, min_lo, zero_result_lo);
+  min_hi = _mm512_mask_blend_ps(both_zero_hi_mask, min_hi, zero_result_hi);
   auto nan_lo_mask = _mm512_cmp_ps_mask(a_lo, b_lo, _CMP_UNORD_Q);
   auto nan_hi_mask = _mm512_cmp_ps_mask(a_hi, b_hi, _CMP_UNORD_Q);
   auto nan_lo = _mm512_castsi512_ps(
@@ -1735,41 +1761,21 @@ Vectorized<Half> inline clamp(
     const Vectorized<Half>& a,
     const Vectorized<Half>& min,
     const Vectorized<Half>& max) {
-  __m512 a_lo, a_hi;
-  __m512 min_lo, min_hi;
-  __m512 max_lo, max_hi;
-  cvtfp16_fp32(__m512i(a), a_lo, a_hi);
-  cvtfp16_fp32(__m512i(min), min_lo, min_hi);
-  cvtfp16_fp32(__m512i(max), max_lo, max_hi);
-  auto o1 = _mm512_min_ps(max_lo, _mm512_max_ps(min_lo, a_lo));
-  auto o2 = _mm512_min_ps(max_hi, _mm512_max_ps(min_hi, a_hi));
-  return cvtfp32_fp16(o1, o2);
+  return minimum(maximum(a, min), max);
 }
 
 template <>
 Vectorized<Half> inline clamp_max(
     const Vectorized<Half>& a,
     const Vectorized<Half>& max) {
-  __m512 a_lo, a_hi;
-  __m512 max_lo, max_hi;
-  cvtfp16_fp32(__m512i(a), a_lo, a_hi);
-  cvtfp16_fp32(__m512i(max), max_lo, max_hi);
-  auto o1 = _mm512_min_ps(max_lo, a_lo);
-  auto o2 = _mm512_min_ps(max_hi, a_hi);
-  return cvtfp32_fp16(o1, o2);
+  return minimum(a, max);
 }
 
 template <>
 Vectorized<Half> inline clamp_min(
     const Vectorized<Half>& a,
     const Vectorized<Half>& min) {
-  __m512 a_lo, a_hi;
-  __m512 min_lo, min_hi;
-  cvtfp16_fp32(__m512i(a), a_lo, a_hi);
-  cvtfp16_fp32(__m512i(min), min_lo, min_hi);
-  auto o1 = _mm512_max_ps(min_lo, a_lo);
-  auto o2 = _mm512_max_ps(min_hi, a_hi);
-  return cvtfp32_fp16(o1, o2);
+  return maximum(a, min);
 }
 
 template <>

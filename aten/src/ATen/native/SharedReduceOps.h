@@ -8,6 +8,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/OpMathType.h>
+#include <c10/util/BFloat16-math.h>
 #if defined(__CUDACC__)
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
@@ -24,13 +25,29 @@
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <typename scalar_t>
 inline C10_DEVICE scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
-  scalar_t max = at::_isnan(b) ? b : std::max(a, b);
-  return max;
+  if (at::_isnan(a)) {
+    return a;
+  } else if (at::_isnan(b)) {
+    return b;
+  } else if constexpr (std::is_floating_point_v<scalar_t> ||
+                       c10::is_reduced_floating_point_v<scalar_t>) {
+    return ::fmax(a, b);
+  } else {
+    return std::max(a, b);
+  }
 }
 template <typename scalar_t>
 inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
-  scalar_t min = at::_isnan(b) ? b : std::min(a, b);
-  return min;
+  if (at::_isnan(a)) {
+    return a;
+  } else if (at::_isnan(b)) {
+    return b;
+  } else if constexpr (std::is_floating_point_v<scalar_t> ||
+                       c10::is_reduced_floating_point_v<scalar_t>) {
+    return ::fmin(a, b);
+  } else {
+    return std::min(a, b);
+  }
 }
 #define MAX(X, Y) max_propagate_nan(X,Y)
 #define MIN(X, Y) min_propagate_nan(X,Y)
@@ -517,8 +534,8 @@ struct MinMaxOps {
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
-    auto min_val = (at::_isnan(a.first) || a.first < b.first) ? a.first : b.first;
-    auto max_val = (at::_isnan(a.second) || a.second > b.second) ? a.second : b.second;
+    auto min_val = MIN(a.first, b.first);
+    auto max_val = MAX(a.second, b.second);
 
     return {min_val, max_val};
   }

@@ -369,6 +369,14 @@ Vectorized<double> inline maximum(
     const Vectorized<double>& a,
     const Vectorized<double>& b) {
   Vectorized<double> max = _mm256_max_pd(a, b);
+  Vectorized<double> zero = _mm256_setzero_pd();
+  Vectorized<double> neg_zero = _mm256_set1_pd(-0.0);
+  Vectorized<double> both_zero = _mm256_and_pd(
+      _mm256_cmp_pd(a, zero, _CMP_EQ_OQ),
+      _mm256_cmp_pd(b, zero, _CMP_EQ_OQ));
+  Vectorized<double> zero_result =
+      _mm256_and_pd(_mm256_and_pd(a, b), neg_zero);
+  max = _mm256_blendv_pd(max, zero_result, both_zero);
   Vectorized<double> isnan = _mm256_cmp_pd(a, b, _CMP_UNORD_Q);
   // Exploit the fact that all-ones is a NaN.
   return _mm256_or_pd(max, isnan);
@@ -381,6 +389,14 @@ Vectorized<double> inline minimum(
     const Vectorized<double>& a,
     const Vectorized<double>& b) {
   Vectorized<double> min = _mm256_min_pd(a, b);
+  Vectorized<double> zero = _mm256_setzero_pd();
+  Vectorized<double> neg_zero = _mm256_set1_pd(-0.0);
+  Vectorized<double> both_zero = _mm256_and_pd(
+      _mm256_cmp_pd(a, zero, _CMP_EQ_OQ),
+      _mm256_cmp_pd(b, zero, _CMP_EQ_OQ));
+  Vectorized<double> zero_result =
+      _mm256_and_pd(_mm256_or_pd(a, b), neg_zero);
+  min = _mm256_blendv_pd(min, zero_result, both_zero);
   Vectorized<double> isnan = _mm256_cmp_pd(a, b, _CMP_UNORD_Q);
   // Exploit the fact that all-ones is a NaN.
   return _mm256_or_pd(min, isnan);
@@ -391,21 +407,21 @@ Vectorized<double> inline clamp(
     const Vectorized<double>& a,
     const Vectorized<double>& min,
     const Vectorized<double>& max) {
-  return _mm256_min_pd(max, _mm256_max_pd(min, a));
+  return minimum(maximum(a, min), max);
 }
 
 template <>
 Vectorized<double> inline clamp_min(
     const Vectorized<double>& a,
     const Vectorized<double>& min) {
-  return _mm256_max_pd(min, a);
+  return maximum(a, min);
 }
 
 template <>
 Vectorized<double> inline clamp_max(
     const Vectorized<double>& a,
     const Vectorized<double>& max) {
-  return _mm256_min_pd(max, a);
+  return minimum(a, max);
 }
 
 template <>

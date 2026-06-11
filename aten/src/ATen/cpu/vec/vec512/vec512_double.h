@@ -415,6 +415,12 @@ Vectorized<double> inline maximum(
     const Vectorized<double>& b) {
   auto zero_vec = _mm512_set1_epi64(0);
   Vectorized<double> max = _mm512_max_pd(a, b);
+  Vectorized<double> zero = _mm512_setzero_pd();
+  Vectorized<double> neg_zero = _mm512_set1_pd(-0.0);
+  auto both_zero_mask = _mm512_cmp_pd_mask(a, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_pd_mask(b, zero, _CMP_EQ_OQ);
+  auto zero_result = _mm512_and_pd(_mm512_and_pd(a, b), neg_zero);
+  max = _mm512_mask_blend_pd(both_zero_mask, max, zero_result);
   auto isnan_mask = _mm512_cmp_pd_mask(a, b, _CMP_UNORD_Q);
   auto isnan = _mm512_castsi512_pd(
       _mm512_mask_set1_epi64(zero_vec, isnan_mask, 0xFFFFFFFFFFFFFFFF));
@@ -430,6 +436,12 @@ Vectorized<double> inline minimum(
     const Vectorized<double>& b) {
   auto zero_vec = _mm512_set1_epi64(0);
   Vectorized<double> min = _mm512_min_pd(a, b);
+  Vectorized<double> zero = _mm512_setzero_pd();
+  Vectorized<double> neg_zero = _mm512_set1_pd(-0.0);
+  auto both_zero_mask = _mm512_cmp_pd_mask(a, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_pd_mask(b, zero, _CMP_EQ_OQ);
+  auto zero_result = _mm512_and_pd(_mm512_or_pd(a, b), neg_zero);
+  min = _mm512_mask_blend_pd(both_zero_mask, min, zero_result);
   auto isnan_mask = _mm512_cmp_pd_mask(a, b, _CMP_UNORD_Q);
   auto isnan = _mm512_castsi512_pd(
       _mm512_mask_set1_epi64(zero_vec, isnan_mask, 0xFFFFFFFFFFFFFFFF));
@@ -442,21 +454,21 @@ Vectorized<double> inline clamp(
     const Vectorized<double>& a,
     const Vectorized<double>& min,
     const Vectorized<double>& max) {
-  return _mm512_min_pd(max, _mm512_max_pd(min, a));
+  return minimum(maximum(a, min), max);
 }
 
 template <>
 Vectorized<double> inline clamp_min(
     const Vectorized<double>& a,
     const Vectorized<double>& min) {
-  return _mm512_max_pd(min, a);
+  return maximum(a, min);
 }
 
 template <>
 Vectorized<double> inline clamp_max(
     const Vectorized<double>& a,
     const Vectorized<double>& max) {
-  return _mm512_min_pd(max, a);
+  return minimum(a, max);
 }
 
 template <>

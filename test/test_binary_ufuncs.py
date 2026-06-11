@@ -2419,6 +2419,29 @@ class TestBinaryUfuncsDevice(TestCase):
                 self.assertEqual(tensor_result, numpy_result)
                 self.assertEqual(out, numpy_result)
 
+    @onlyNativeDeviceTypes
+    @dtypes(*(floating_types_and(torch.half, torch.bfloat16)))
+    def test_maximum_minimum_signed_zero(self, device, dtype):
+        for size in (1, 64):
+            negative_zero = torch.full((size,), -0.0, device=device, dtype=dtype)
+            positive_zero = torch.zeros((size,), device=device, dtype=dtype)
+            positive_signbit = torch.zeros((size,), device=device, dtype=torch.bool)
+            negative_signbit = torch.ones((size,), device=device, dtype=torch.bool)
+
+            for lhs, rhs in (
+                (negative_zero, positive_zero),
+                (positive_zero, negative_zero),
+            ):
+                for op in (torch.maximum, torch.max, torch.fmax):
+                    result = op(lhs, rhs)
+                    self.assertEqual(result, positive_zero)
+                    self.assertEqual(torch.signbit(result), positive_signbit)
+
+                for op in (torch.minimum, torch.min, torch.fmin):
+                    result = op(lhs, rhs)
+                    self.assertEqual(result, negative_zero)
+                    self.assertEqual(torch.signbit(result), negative_signbit)
+
     @dtypes(
         *product(
             complex_types(),

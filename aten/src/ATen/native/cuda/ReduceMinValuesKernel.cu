@@ -18,7 +18,16 @@ namespace at::native {
 template <typename acc_t>
 struct MinNanFunctor {
   __device__ __forceinline__ acc_t operator()(acc_t a, acc_t b) const {
-      return (at::_isnan(a) || a < b) ? a : b;
+    if (at::_isnan(a)) {
+      return a;
+    } else if (at::_isnan(b)) {
+      return b;
+    } else if constexpr (std::is_floating_point_v<acc_t> ||
+                         c10::is_reduced_floating_point_v<acc_t>) {
+      return ::fmin(a, b);
+    } else {
+      return a < b ? a : b;
+    }
   }
 };
 

@@ -628,6 +628,12 @@ Vectorized<float> inline maximum(
     const Vectorized<float>& b) {
   auto zero_vec = _mm512_set1_epi32(0);
   auto max = _mm512_max_ps(a, b);
+  auto zero = _mm512_setzero_ps();
+  auto neg_zero = _mm512_set1_ps(-0.0f);
+  auto both_zero_mask = _mm512_cmp_ps_mask(a, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_ps_mask(b, zero, _CMP_EQ_OQ);
+  auto zero_result = _mm512_and_ps(_mm512_and_ps(a, b), neg_zero);
+  max = _mm512_mask_blend_ps(both_zero_mask, max, zero_result);
   auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
   auto isnan = _mm512_castsi512_ps(
       _mm512_mask_set1_epi32(zero_vec, isnan_mask, 0xFFFFFFFF));
@@ -643,6 +649,12 @@ Vectorized<float> inline minimum(
     const Vectorized<float>& b) {
   auto zero_vec = _mm512_set1_epi32(0);
   auto min = _mm512_min_ps(a, b);
+  auto zero = _mm512_setzero_ps();
+  auto neg_zero = _mm512_set1_ps(-0.0f);
+  auto both_zero_mask = _mm512_cmp_ps_mask(a, zero, _CMP_EQ_OQ) &
+      _mm512_cmp_ps_mask(b, zero, _CMP_EQ_OQ);
+  auto zero_result = _mm512_and_ps(_mm512_or_ps(a, b), neg_zero);
+  min = _mm512_mask_blend_ps(both_zero_mask, min, zero_result);
   auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
   auto isnan = _mm512_castsi512_ps(
       _mm512_mask_set1_epi32(zero_vec, isnan_mask, 0xFFFFFFFF));
@@ -655,21 +667,21 @@ Vectorized<float> inline clamp(
     const Vectorized<float>& a,
     const Vectorized<float>& min,
     const Vectorized<float>& max) {
-  return _mm512_min_ps(max, _mm512_max_ps(min, a));
+  return minimum(maximum(a, min), max);
 }
 
 template <>
 Vectorized<float> inline clamp_max(
     const Vectorized<float>& a,
     const Vectorized<float>& max) {
-  return _mm512_min_ps(max, a);
+  return minimum(a, max);
 }
 
 template <>
 Vectorized<float> inline clamp_min(
     const Vectorized<float>& a,
     const Vectorized<float>& min) {
-  return _mm512_max_ps(min, a);
+  return maximum(a, min);
 }
 
 template <>

@@ -576,6 +576,14 @@ Vectorized<float> inline maximum(
     const Vectorized<float>& a,
     const Vectorized<float>& b) {
   Vectorized<float> max = _mm256_max_ps(a, b);
+  Vectorized<float> zero = _mm256_setzero_ps();
+  Vectorized<float> neg_zero = _mm256_set1_ps(-0.0f);
+  Vectorized<float> both_zero = _mm256_and_ps(
+      _mm256_cmp_ps(a, zero, _CMP_EQ_OQ),
+      _mm256_cmp_ps(b, zero, _CMP_EQ_OQ));
+  Vectorized<float> zero_result =
+      _mm256_and_ps(_mm256_and_ps(a, b), neg_zero);
+  max = _mm256_blendv_ps(max, zero_result, both_zero);
   Vectorized<float> isnan = _mm256_cmp_ps(a, b, _CMP_UNORD_Q);
   // Exploit the fact that all-ones is a NaN.
   return _mm256_or_ps(max, isnan);
@@ -588,6 +596,14 @@ Vectorized<float> inline minimum(
     const Vectorized<float>& a,
     const Vectorized<float>& b) {
   Vectorized<float> min = _mm256_min_ps(a, b);
+  Vectorized<float> zero = _mm256_setzero_ps();
+  Vectorized<float> neg_zero = _mm256_set1_ps(-0.0f);
+  Vectorized<float> both_zero = _mm256_and_ps(
+      _mm256_cmp_ps(a, zero, _CMP_EQ_OQ),
+      _mm256_cmp_ps(b, zero, _CMP_EQ_OQ));
+  Vectorized<float> zero_result =
+      _mm256_and_ps(_mm256_or_ps(a, b), neg_zero);
+  min = _mm256_blendv_ps(min, zero_result, both_zero);
   Vectorized<float> isnan = _mm256_cmp_ps(a, b, _CMP_UNORD_Q);
   // Exploit the fact that all-ones is a NaN.
   return _mm256_or_ps(min, isnan);
@@ -598,21 +614,21 @@ Vectorized<float> inline clamp(
     const Vectorized<float>& a,
     const Vectorized<float>& min,
     const Vectorized<float>& max) {
-  return _mm256_min_ps(max, _mm256_max_ps(min, a));
+  return minimum(maximum(a, min), max);
 }
 
 template <>
 Vectorized<float> inline clamp_max(
     const Vectorized<float>& a,
     const Vectorized<float>& max) {
-  return _mm256_min_ps(max, a);
+  return minimum(a, max);
 }
 
 template <>
 Vectorized<float> inline clamp_min(
     const Vectorized<float>& a,
     const Vectorized<float>& min) {
-  return _mm256_max_ps(min, a);
+  return maximum(a, min);
 }
 
 template <>

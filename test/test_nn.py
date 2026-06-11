@@ -10686,6 +10686,15 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_relu_signed_zero(self, device, dtype):
+        x = torch.tensor([-0.0, 0.0], device=device, dtype=dtype)
+        result = F.relu(x)
+
+        self.assertEqual(result, torch.zeros_like(x))
+        self.assertEqual(torch.signbit(result), torch.zeros_like(x, dtype=torch.bool))
+
     @expectedFailureMPS  # TypeError: float64 the MPS framework doesn't support float64
     @parametrize_test("mode", ["nearest-exact", "nearest"])
     def test_upsamplingNearest1d(self, device, mode):

@@ -118,6 +118,20 @@ Vectorized<Half> inline maximum(
   cvtfp16_fp32(__m256i(b), b_lo, b_hi);
   auto max_lo = _mm256_max_ps(a_lo, b_lo);
   auto max_hi = _mm256_max_ps(a_hi, b_hi);
+  auto zero = _mm256_setzero_ps();
+  auto neg_zero = _mm256_set1_ps(-0.0f);
+  auto both_zero_lo = _mm256_and_ps(
+      _mm256_cmp_ps(a_lo, zero, _CMP_EQ_OQ),
+      _mm256_cmp_ps(b_lo, zero, _CMP_EQ_OQ));
+  auto both_zero_hi = _mm256_and_ps(
+      _mm256_cmp_ps(a_hi, zero, _CMP_EQ_OQ),
+      _mm256_cmp_ps(b_hi, zero, _CMP_EQ_OQ));
+  auto zero_result_lo =
+      _mm256_and_ps(_mm256_and_ps(a_lo, b_lo), neg_zero);
+  auto zero_result_hi =
+      _mm256_and_ps(_mm256_and_ps(a_hi, b_hi), neg_zero);
+  max_lo = _mm256_blendv_ps(max_lo, zero_result_lo, both_zero_lo);
+  max_hi = _mm256_blendv_ps(max_hi, zero_result_hi, both_zero_hi);
   auto nan_lo = _mm256_cmp_ps(a_lo, b_lo, _CMP_UNORD_Q);
   auto nan_hi = _mm256_cmp_ps(a_hi, b_hi, _CMP_UNORD_Q);
   // Exploit the fact that all-ones is a NaN.
@@ -138,6 +152,20 @@ Vectorized<Half> inline minimum(
   cvtfp16_fp32(__m256i(b), b_lo, b_hi);
   auto min_lo = _mm256_min_ps(a_lo, b_lo);
   auto min_hi = _mm256_min_ps(a_hi, b_hi);
+  auto zero = _mm256_setzero_ps();
+  auto neg_zero = _mm256_set1_ps(-0.0f);
+  auto both_zero_lo = _mm256_and_ps(
+      _mm256_cmp_ps(a_lo, zero, _CMP_EQ_OQ),
+      _mm256_cmp_ps(b_lo, zero, _CMP_EQ_OQ));
+  auto both_zero_hi = _mm256_and_ps(
+      _mm256_cmp_ps(a_hi, zero, _CMP_EQ_OQ),
+      _mm256_cmp_ps(b_hi, zero, _CMP_EQ_OQ));
+  auto zero_result_lo =
+      _mm256_and_ps(_mm256_or_ps(a_lo, b_lo), neg_zero);
+  auto zero_result_hi =
+      _mm256_and_ps(_mm256_or_ps(a_hi, b_hi), neg_zero);
+  min_lo = _mm256_blendv_ps(min_lo, zero_result_lo, both_zero_lo);
+  min_hi = _mm256_blendv_ps(min_hi, zero_result_hi, both_zero_hi);
   auto nan_lo = _mm256_cmp_ps(a_lo, b_lo, _CMP_UNORD_Q);
   auto nan_hi = _mm256_cmp_ps(a_hi, b_hi, _CMP_UNORD_Q);
   // Exploit the fact that all-ones is a NaN.
@@ -151,41 +179,21 @@ Vectorized<Half> inline clamp(
     const Vectorized<Half>& a,
     const Vectorized<Half>& min,
     const Vectorized<Half>& max) {
-  __m256 a_lo, a_hi;
-  __m256 min_lo, min_hi;
-  __m256 max_lo, max_hi;
-  cvtfp16_fp32(__m256i(a), a_lo, a_hi);
-  cvtfp16_fp32(__m256i(min), min_lo, min_hi);
-  cvtfp16_fp32(__m256i(max), max_lo, max_hi);
-  auto o1 = _mm256_min_ps(max_lo, _mm256_max_ps(min_lo, a_lo));
-  auto o2 = _mm256_min_ps(max_hi, _mm256_max_ps(min_hi, a_hi));
-  return cvtfp32_fp16(o1, o2);
+  return minimum(maximum(a, min), max);
 }
 
 template <>
 Vectorized<Half> inline clamp_max(
     const Vectorized<Half>& a,
     const Vectorized<Half>& max) {
-  __m256 a_lo, a_hi;
-  __m256 max_lo, max_hi;
-  cvtfp16_fp32(__m256i(a), a_lo, a_hi);
-  cvtfp16_fp32(__m256i(max), max_lo, max_hi);
-  auto o1 = _mm256_min_ps(max_lo, a_lo);
-  auto o2 = _mm256_min_ps(max_hi, a_hi);
-  return cvtfp32_fp16(o1, o2);
+  return minimum(a, max);
 }
 
 template <>
 Vectorized<Half> inline clamp_min(
     const Vectorized<Half>& a,
     const Vectorized<Half>& min) {
-  __m256 a_lo, a_hi;
-  __m256 min_lo, min_hi;
-  cvtfp16_fp32(__m256i(a), a_lo, a_hi);
-  cvtfp16_fp32(__m256i(min), min_lo, min_hi);
-  auto o1 = _mm256_max_ps(min_lo, a_lo);
-  auto o2 = _mm256_max_ps(min_hi, a_hi);
-  return cvtfp32_fp16(o1, o2);
+  return maximum(a, min);
 }
 
 template <>
