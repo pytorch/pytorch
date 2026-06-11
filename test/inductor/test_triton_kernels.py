@@ -188,6 +188,22 @@ if HAS_GPU:
 
         return add_kernel
 
+    def _get_backend_options_fn(add_kernel, **launch_kwargs):
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                **launch_kwargs,
+            )
+            return output
+
+        return f
+
 
 class KernelTests(torch._inductor.test_case.TestCase):
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
@@ -2719,20 +2735,9 @@ def forward(self, arg0_1, arg1_1):
         # A launch kwarg that is not in the kernel signature should be kept as
         # a backend option and emitted in the generated Triton metadata.
         add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=False)
-
-        def f(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel[grid](
-                x,
-                y,
-                output,
-                n_elements,
-                BLOCK_SIZE=128,
-                enable_fp_fusion=False,
-            )
-            return output
+        f = _get_backend_options_fn(
+            add_kernel, BLOCK_SIZE=128, enable_fp_fusion=False
+        )
 
         x = torch.randn(4, device=GPU_TYPE)
         out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
@@ -2751,20 +2756,9 @@ def forward(self, arg0_1, arg1_1):
         # `kernel[grid](..., False, enable_fp_fusion=False)`, which passes the
         # same kernel parameter both positionally and by keyword.
         add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=True)
-
-        def f(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel[grid](
-                x,
-                y,
-                output,
-                n_elements,
-                BLOCK_SIZE=128,
-                enable_fp_fusion=False,
-            )
-            return output
+        f = _get_backend_options_fn(
+            add_kernel, BLOCK_SIZE=128, enable_fp_fusion=False
+        )
 
         x = torch.randn(4, device=GPU_TYPE)
         y = torch.randn(4, device=GPU_TYPE)
@@ -2785,19 +2779,7 @@ def forward(self, arg0_1, arg1_1):
             configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
             key=[],
         )(_get_backend_options_kernel(with_enable_fp_fusion=True))
-
-        def f(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel[grid](
-                x,
-                y,
-                output,
-                n_elements,
-                enable_fp_fusion=False,
-            )
-            return output
+        f = _get_backend_options_fn(add_kernel, enable_fp_fusion=False)
 
         x = torch.randn(4, device=GPU_TYPE)
         y = torch.randn(4, device=GPU_TYPE)
@@ -2823,19 +2805,7 @@ def forward(self, arg0_1, arg1_1):
             ],
             key=[],
         )(_get_backend_options_kernel(with_enable_fp_fusion=True))
-
-        def f(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel[grid](
-                x,
-                y,
-                output,
-                n_elements,
-                enable_fp_fusion=False,
-            )
-            return output
+        f = _get_backend_options_fn(add_kernel, enable_fp_fusion=False)
 
         x = torch.randn(4, device=GPU_TYPE)
         y = torch.randn(4, device=GPU_TYPE)
@@ -2853,19 +2823,7 @@ def forward(self, arg0_1, arg1_1):
             configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
             key=[],
         )(_get_backend_options_kernel(with_enable_fp_fusion=False))
-
-        def f(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel[grid](
-                x,
-                y,
-                output,
-                n_elements,
-                enable_fp_fusion=False,
-            )
-            return output
+        f = _get_backend_options_fn(add_kernel, enable_fp_fusion=False)
 
         x = torch.randn(4, device=GPU_TYPE)
         out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
@@ -2882,19 +2840,7 @@ def forward(self, arg0_1, arg1_1):
             configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
             key=[],
         )(_get_backend_options_kernel(with_enable_fp_fusion=False))
-
-        def f(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel[grid](
-                x,
-                y,
-                output,
-                n_elements,
-                num_warps=8,
-            )
-            return output
+        f = _get_backend_options_fn(add_kernel, num_warps=8)
 
         x = torch.randn(4, device=GPU_TYPE)
         out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
