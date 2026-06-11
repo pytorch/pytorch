@@ -410,7 +410,7 @@ def main() -> None:
 
     ensure_pip_on_path()
 
-    # MKL: x86_64 only; aarch64 uses OpenBLAS/ACL from the builder image.
+    # MKL: x86_64 only; aarch64 uses OpenBLAS from the builder image.
     if arch == "x86_64" and not Path("/opt/intel/lib").is_dir():
         print("MKL not found, installing...")
         subprocess.run(

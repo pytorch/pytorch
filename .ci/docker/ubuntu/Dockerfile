@@ -154,13 +154,6 @@ RUN if [ -n "${TSAN}" ]; then \
     fi
 RUN rm -f install_cpython.sh /tmp/requirements-ci.txt
 
-# (optional) Build ACL
-ARG ACL
-COPY ./common/install_acl.sh install_acl.sh
-RUN if [ -n "${ACL}" ]; then bash ./install_acl.sh; fi
-RUN rm install_acl.sh
-ENV INSTALLED_ACL ${ACL}
-
 ARG OPENBLAS
 COPY ./common/install_openblas.sh install_openblas.sh
 RUN if [ -n "${OPENBLAS}" ]; then bash ./install_openblas.sh; fi
