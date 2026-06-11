@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterable
 from typing import Any, TYPE_CHECKING, Union
 
 import torch.nn
+from torch._library.opaque_object import is_opaque_value_type
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, graph_break_hints, utils
@@ -368,6 +369,23 @@ class PyCodegen:
 
                 self.add_push_null(gen_fn)
                 output.extend(create_call_function(0, False))
+            elif isinstance(value, TorchScriptObjectVariable):
+                try:
+                    py_value = value.as_python_constant()
+                except NotImplementedError:
+                    py_value = None
+
+                if is_opaque_value_type(type(py_value)):
+                    self.add_push_null(
+                        lambda: self.load_import_from(
+                            "torch._library.fake_class_registry",
+                            "maybe_unwrap_fake_script_object",
+                        )
+                    )
+                    self.load_graph_output(graph_outputs[graph_outputs_key].index)
+                    output.extend(create_call_function(1, False))
+                else:
+                    self.load_graph_output(graph_outputs[graph_outputs_key].index)
             else:
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)
         elif isinstance(value, NNModuleVariable):
