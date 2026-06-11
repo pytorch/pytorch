@@ -2135,8 +2135,8 @@ class TestLinalg(TestCase):
     )
     @skipCUDAIf(
         TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 13)),
-        "hipsolverDnXgeev requires ROCm >= 7.13",
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXgeev requires ROCm >= 7.14",
     )
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
@@ -2192,8 +2192,8 @@ class TestLinalg(TestCase):
     )
     @skipCUDAIf(
         TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 13)),
-        "hipsolverDnXgeev requires ROCm >= 7.13",
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXgeev requires ROCm >= 7.14",
     )
     @dtypes(*floating_and_complex_types())
     def test_eig_identity(self, device, dtype):
@@ -2260,8 +2260,8 @@ class TestLinalg(TestCase):
     )
     @skipCUDAIf(
         TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 13)),
-        "hipsolverDnXgeev requires ROCm >= 7.13",
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXgeev requires ROCm >= 7.14",
     )
     @dtypes(*floating_and_complex_types())
     def test_eigvals_out_variants(self, device, dtype):
@@ -2310,8 +2310,8 @@ class TestLinalg(TestCase):
     )
     @skipCUDAIf(
         TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 13)),
-        "hipsolverDnXgeev requires ROCm >= 7.13",
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXgeev requires ROCm >= 7.14",
     )
     @dtypes(*floating_and_complex_types())
     def test_eig_out_variants(self, device, dtype):
@@ -2371,8 +2371,8 @@ class TestLinalg(TestCase):
     )
     @skipCUDAIf(
         TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 13)),
-        "hipsolverDnXgeev requires ROCm >= 7.13",
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXgeev requires ROCm >= 7.14",
     )
     @dtypes(torch.float32, torch.float64)
     def test_eig_cuda_complex_eigenvectors(self, device, dtype):
@@ -2465,8 +2465,8 @@ class TestLinalg(TestCase):
     )
     @skipCUDAIf(
         TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 13)),
-        "hipsolverDnXgeev requires ROCm >= 7.13",
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXgeev requires ROCm >= 7.14",
     )
     @dtypes(*floating_and_complex_types())
     def test_eig_errors_and_warnings(self, device, dtype):
@@ -2535,8 +2535,8 @@ class TestLinalg(TestCase):
     )
     @skipCUDAIf(
         TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 13)),
-        "hipsolverDnXgeev requires ROCm >= 7.13",
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXgeev requires ROCm >= 7.14",
     )
     @dtypes(*floating_and_complex_types())
     def test_eig_with_nan(self, device, dtype):
@@ -2555,8 +2555,8 @@ class TestLinalg(TestCase):
     )
     @skipCUDAIf(
         TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 13)),
-        "hipsolverDnXgeev requires ROCm >= 7.13",
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXgeev requires ROCm >= 7.14",
     )
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
@@ -2610,8 +2610,8 @@ class TestLinalg(TestCase):
     )
     @skipCUDAIf(
         TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 13)),
-        "hipsolverDnXgeev requires ROCm >= 7.13",
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXgeev requires ROCm >= 7.14",
     )
     @dtypes(*floating_and_complex_types())
     def test_eigvals_errors_and_warnings(self, device, dtype):
@@ -3047,8 +3047,8 @@ class TestLinalg(TestCase):
     )
     @skipCUDAIf(
         TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 13)),
-        "hipsolverDnXgeev requires ROCm >= 7.13",
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXgeev requires ROCm >= 7.14",
     )
     @dtypes(torch.complex128)
     def test_invariance_error_spectral_decompositions(self, device, dtype):
@@ -8691,8 +8691,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipCPUIfNoLapack
     @skipCUDAIf(
         TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 13)),
-        "hipsolverDnXsytrs requires ROCm >= 7.13"
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXsytrs requires ROCm >= 7.14"
     )
     @dtypes(*floating_and_complex_types())
     def test_ldl_solve(self, device, dtype):
