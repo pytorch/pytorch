@@ -3518,6 +3518,16 @@
       ]
     }
   ],
+  "GB8949": [
+    {
+      "Gb_type": "STORE_GLOBAL in non-module globals",
+      "Context": "name",
+      "Explanation": "Dynamo cannot safely replay global writes for an inlined function whose globals dict is not the registered module __dict__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0242": [
     {
       "Gb_type": "Attempted to call op with non-contiguous `out=` tensor",
