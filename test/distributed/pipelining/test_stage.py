@@ -9,6 +9,7 @@ from torch.distributed.pipelining import (
     build_stage,
     pipeline,
     PipelineStage,
+    Schedule1F1B,
     ScheduleGPipe,
 )
 from torch.distributed.pipelining._utils import PipeliningMetadataError
@@ -332,6 +333,82 @@ class StageTest(MultiProcContinuousTest):
             self.assertEqual(
                 len(stage.output_chunks), 0, "Last stage should store output chunks"
             )
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    def test_recv_buffer_hooks_do_not_accumulate(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/185331
+        # Backward hooks on stage-boundary activations must not accumulate across
+        # training steps. Before the fix, requires_grad_() was in-place and returned
+        # self, aliasing the persistent recv buffer directly as the stage activation.
+        # Hooks registered in step N persisted into step N+1 causing fired counts to
+        # grow: 2, 4, 6, 8, 10. detach() gives a fresh tensor identity each step
+        # (zero-copy, preserves pinned/custom allocator properties) so hooks are
+        # discarded naturally when the activation goes out of scope.
+        n_microbatches = 2
+        n_steps = 5
+
+        full_mod = MultiMLP(d_hid, n_layers=self.world_size)
+        full_mod.to(self.device)
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        pipe = pipeline(module=full_mod, mb_args=(x,))
+        stage = pipe.build_stage(self.rank, self.device, None)
+
+        fired_hook_ids = []
+        next_hook_id = [0]
+
+        def add_tensor_hook(module):
+            def pre_hook(_module, inputs):
+                inp = inputs[0]
+                hook_id = next_hook_id[0]
+                next_hook_id[0] += 1
+
+                def tensor_hook(_grad):
+                    fired_hook_ids.append(hook_id)
+
+                inp.register_hook(tensor_hook)
+
+            module.register_forward_pre_hook(pre_hook)
+
+        if self.rank == self.world_size - 1:
+            first_submod = next(stage.submod.children())
+            add_tensor_hook(first_submod)
+
+        loss_fn = torch.nn.MSELoss()
+        hooks_per_step = []
+
+        for _step in range(n_steps):
+            fired_hook_ids.clear()
+            inp = torch.randn(batch_size, d_hid, device=self.device)
+            target = torch.randn(batch_size, d_hid, device=self.device)
+            schedule = Schedule1F1B(
+                stage,
+                n_microbatches=n_microbatches,
+                loss_fn=loss_fn,
+            )
+            if self.rank == 0:
+                schedule.step(inp)
+            else:
+                schedule.step(target=target)
+            if self.rank == self.world_size - 1:
+                hooks_per_step.append(len(fired_hook_ids))
+
+        if self.rank == self.world_size - 1:
+            # Before fix (buffer aliased as activation): [2, 4, 6, 8, 10]
+            # After fix  (detach gives fresh identity):  [2, 2, 2, 2,  2]
+            for step, count in enumerate(hooks_per_step):
+                self.assertEqual(
+                    count,
+                    n_microbatches,
+                    msg=(
+                        f"Step {step}: expected {n_microbatches} hooks "
+                        f"(== n_microbatches), got {count}. "
+                        f"Hook accumulation regression on recv buffer. "
+                        f"All steps: {hooks_per_step}"
+                    ),
+                )
 
 
 instantiate_parametrized_tests(StageTest)

@@ -630,7 +630,13 @@ class _PipelineStageBase(ABC):
                         run_check=False,
                     ).requires_grad_(effective_requires_grad)
                 else:
-                    activation = info.buffer.requires_grad_(effective_requires_grad)
+                    # Detach instead of aliasing the buffer directly: requires_grad_()
+                    # is in-place and returns self, so hooks attached to the activation
+                    # would accumulate on the persistent recv buffer across steps.
+                    # See https://github.com/pytorch/pytorch/issues/185331
+                    activation = info.buffer.detach().requires_grad_(
+                        effective_requires_grad
+                    )
                 # Activation must be a leaf so backward terminates here.
                 if effective_requires_grad and not activation.is_leaf:
                     warnings.warn(
