@@ -63,8 +63,8 @@ class TORCH_API AOTIModelPackageLoader {
 
  private:
   std::string temp_dir_;
-  std::unique_ptr<AOTIModelContainerRunner> runner_;
-  std::unordered_map<std::string, std::string> metadata_;
+  std::unique_ptr<AOTIModelContainerRunner> runner_ = nullptr;
+  std::unordered_map<std::string, std::string> metadata_{};
   // True when loading from a user-provided unpacked package directory. In this
   // mode temp_dir_ points to that directory and must not be removed by the
   // loader. False when temp_dir_ is an owned extraction directory.
