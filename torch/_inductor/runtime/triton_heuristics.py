@@ -686,15 +686,42 @@ class CachingAutotuner(KernelInterface):
 
         compile_results = []
         exc = None
+        saved_configs = list(self.configs)
         for c in self.configs:
             try:
                 compile_results.append(self._precompile_config(c))
-            except (OutOfResources, PTXASError, IntelGPUError) as e:
+            except (
+                OutOfResources,
+                PTXASError,
+                IntelGPUError,
+            ) as e:
+                exc = e
+            except Exception as e:
                 exc = e
         if len(compile_results) == 0:
-            raise NoTritonConfigsError(
-                f"No valid triton configs. {type(exc).__name__}: {exc}"
-            )
+            # If host-side TMA is enabled, retry without TMA signature upgrade.
+            # The kernel source may have .load() calls that only work with
+            # tensordesc args, but without the upgrade they'll get raw pointers
+            # and fail. This retry only helps for configs where the TMA upgrade
+            # was the ONLY issue (e.g., degenerate block shapes).
+            host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
+            if host_tma_args:
+                log.debug(
+                    "All TMA configs failed, retrying without host-side TMA"
+                )
+                saved_tma = self.inductor_meta.pop("host_tma_descriptor_args")
+                try:
+                    for c in saved_configs:
+                        try:
+                            compile_results.append(self._precompile_config(c))
+                        except Exception:
+                            pass
+                finally:
+                    self.inductor_meta["host_tma_descriptor_args"] = saved_tma
+            if len(compile_results) == 0:
+                raise NoTritonConfigsError(
+                    f"No valid triton configs. {type(exc).__name__}: {exc}"
+                )
         self.compile_results = compile_results
         self.configs = None
 
@@ -1050,15 +1077,53 @@ class CachingAutotuner(KernelInterface):
 
         for i in get_constexprs(self.fn):
             arg_name = self.fn.arg_names[i]
-            if arg_name not in compile_meta["constants"] and (
-                arg_name == "num_warps" or arg_name == "num_stages"
-            ):
-                compile_meta["constants"][arg_name] = getattr(cfg, arg_name)
+            if arg_name not in compile_meta["constants"]:
+                if arg_name == "num_warps" or arg_name == "num_stages":
+                    compile_meta["constants"][arg_name] = getattr(cfg, arg_name)
         if HAS_WARP_SPEC:
             compile_meta["num_consumer_groups"] = getattr(cfg, "num_consumer_groups", 0)
             compile_meta["num_buffers_warp_spec"] = getattr(
                 cfg, "num_buffers_warp_spec", 0
             )
+
+        # Upgrade pointer args to tensordesc for host-side TMA buffers.
+        # The triton_meta signature keeps the original pointer types (*bf16);
+        # here we upgrade to tensordesc<bf16[block_shape]> per-config with
+        # concrete block sizes resolved from cfg_kwargs and constants.
+        host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
+        if host_tma_args:
+            all_constants = compile_meta["constants"]
+            for key, ty in compile_meta["signature"].items():
+                if key in host_tma_args:
+                    block_shape_strs = host_tma_args[key]
+                    if isinstance(block_shape_strs, dict):
+                        block_shape_strs = block_shape_strs.get("block_shape", block_shape_strs)
+                    block_shape_vals = []
+                    for s in block_shape_strs:
+                        if isinstance(s, int):
+                            block_shape_vals.append(s)
+                        elif s in all_constants:
+                            block_shape_vals.append(int(all_constants[s]))
+                        elif s in cfg_kwargs:
+                            block_shape_vals.append(int(cfg_kwargs[s]))
+                        else:
+                            eval_ns = {
+                                "__builtins__": {},
+                                "Min": min, "Max": max,
+                                **cfg_kwargs, **all_constants,
+                            }
+                            block_shape_vals.append(int(eval(s, eval_ns)))
+                    if any(v <= 0 for v in block_shape_vals):
+                        continue
+                    if isinstance(ty, str) and ty.startswith("*"):
+                        dtype_str = ty[1:]
+                    elif isinstance(ty, str) and "tensordesc<" in ty:
+                        dtype_str = ty.split("<")[1].split("[")[0]
+                    else:
+                        continue
+                    compile_meta["signature"][key] = (
+                        f"tensordesc<{dtype_str}{list(block_shape_vals)}>"
+                    )
 
         compile_meta["debug"] = self.inductor_meta.get("assert_indirect_indexing", True)
 
@@ -2870,17 +2935,50 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         pre_runner_lines: list[str] = []
         if host_tma_args:
             cfg_kwargs = cfg.kwargs
-            for inner_name, block_shape_strs in host_tma_args.items():
+            all_constants = compile_meta["constants"]
+
+            def _eval_dim(s):
+                if isinstance(s, int):
+                    return s
+                if s in cfg_kwargs:
+                    return int(cfg_kwargs[s])
+                if s in all_constants:
+                    return int(all_constants[s])
+                eval_ns = {
+                    "__builtins__": {},
+                    "Min": min, "Max": max,
+                    **cfg_kwargs, **all_constants,
+                }
+                return int(eval(s, eval_ns))
+
+            for inner_name, desc_info in host_tma_args.items():
                 if inner_name not in call_args:
                     continue
-                block_shape_vals = [
-                    cfg_kwargs.get(s, s) for s in block_shape_strs
-                ]
+                if isinstance(desc_info, dict):
+                    block_shape_vals = [_eval_dim(s) for s in desc_info["block_shape"]]
+                    shape_vals = [_eval_dim(s) for s in desc_info["shape"]]
+                    stride_vals = [_eval_dim(s) for s in desc_info["strides"]]
+                else:
+                    block_shape_vals = [cfg_kwargs.get(s, s) for s in desc_info]
+                    shape_vals = None
+                    stride_vals = None
                 desc_var = f"{inner_name}_host_tma_desc"
+                aligned_var = f"{inner_name}_aligned"
                 pre_runner_lines.append(
-                    f"{desc_var} = triton.tools.tensor_descriptor"
-                    f".TensorDescriptor.from_tensor({inner_name}, {block_shape_vals})"
+                    f"{aligned_var} = {inner_name} if {inner_name}.data_ptr() % 16 == 0"
+                    f" else {inner_name}.clone()"
                 )
+                if shape_vals is not None and stride_vals is not None:
+                    pre_runner_lines.append(
+                        f"{desc_var} = triton.tools.tensor_descriptor"
+                        f".TensorDescriptor({aligned_var}, {shape_vals},"
+                        f" {stride_vals}, {block_shape_vals})"
+                    )
+                else:
+                    pre_runner_lines.append(
+                        f"{desc_var} = triton.tools.tensor_descriptor"
+                        f".TensorDescriptor.from_tensor({aligned_var}, {block_shape_vals})"
+                    )
                 runner_args = [
                     desc_var if a == inner_name else a for a in runner_args
                 ]
