@@ -159,19 +159,17 @@ def rebuild_xpu_tensor(
     Rebuild a tensor that was originally on XPU from serialized raw bytes.
 
     XPU lacks IPC support (no cudaIpcMemHandle equivalent), so XPU tensors
-    are serialized as raw bytes (via numpy().tobytes() of the CPU tensor) and
-    reconstructed here before being copied back to XPU.
-
-    We avoid fd-based storage sharing because the DupFd / SCM_RIGHTS fd
-    transfer can fail in spawn child processes (EINVAL on ftruncate).
-    The tensor is always reconstructed as contiguous — strides may differ
-    from the original if it was a view, but the data is identical.
+    are serialized as raw bytes of a CPU copy and reconstructed here before
+    being copied back to XPU.  The resulting tensor is an independent copy —
+    mutations do NOT propagate across processes (unlike CUDA IPC which
+    produces shared-memory-backed tensors).
     """
-    size, requires_grad, device, dtype_str = metadata
-    # Parse dtype from string like "torch.int64"
-    dtype = getattr(torch, dtype_str.rsplit(".", 1)[-1])
-    # Reconstruct from raw bytes via uint8 intermediate to support all dtypes
-    t = torch.frombuffer(raw_bytes, dtype=torch.uint8).view(dtype).reshape(size)
+    size, requires_grad, device, dtype = metadata
+    if len(raw_bytes) == 0:
+        # torch.frombuffer rejects zero-length buffers; construct empty tensor directly
+        t = torch.empty(size, dtype=dtype, device="cpu")
+    else:
+        t = torch.frombuffer(raw_bytes, dtype=torch.uint8).view(dtype).reshape(size)
     t = t.to(device)
     if tensor_cls == torch.nn.parameter.Parameter:
         # It is crucial for integer tensors to receive
@@ -431,15 +429,15 @@ def reduce_tensor(tensor):
         # Always contiguous after .contiguous(), so we don't need
         # storage_offset or stride in metadata.
         cpu_tensor = tensor.detach().cpu().contiguous()
-        # Use numpy().tobytes() instead of memoryview(untyped_storage())
-        # to avoid a PYREFLY bad-argument-type lint error (UntypedStorage
-        # is not recognized as a Buffer in type stubs).
-        raw_bytes = cpu_tensor.numpy().tobytes()
+        # Use untyped_storage bytes directly instead of numpy().tobytes()
+        # so that bfloat16, float8, and complex32 (not supported by numpy)
+        # serialize correctly.
+        raw_bytes = bytes(cpu_tensor.untyped_storage())  # noqa: PYREFLY
         metadata = (
             tuple(cpu_tensor.size()),
             tensor.requires_grad,
             tensor.device,
-            str(cpu_tensor.dtype),
+            cpu_tensor.dtype,
         )
         return (rebuild_xpu_tensor, (type(tensor), raw_bytes, metadata))
 
