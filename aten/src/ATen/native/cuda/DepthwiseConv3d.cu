@@ -85,7 +85,7 @@ __global__ void conv_depthwise3d_cuda_kernel(
       }
       input_ptr += iW * (iH * dilationT - kH * dilationH);
     }
-    if (bias != NULL) {
+    if (bias != nullptr) {
       sum += bias[out_channel];
     }
 
@@ -435,7 +435,7 @@ Tensor conv_depthwise3d_cuda(
         int64_t smem = 0;
 
         const scalar_t* bias_ptr =
-            bias_.defined() ? bias_.const_data_ptr<scalar_t>() : NULL;
+            bias_.defined() ? bias_.const_data_ptr<scalar_t>() : nullptr;
 
         // Range check to avoid overflow in CUDA kernels.
         TORCH_CHECK(input_.numel() <= std::numeric_limits<int32_t>::max(),

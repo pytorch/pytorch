@@ -60,6 +60,8 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     MI200_ARCH,
     run_tests,
+    skipIfRocm,
+    skipIfTorchInductor,
     TEST_CUDA_GRAPH,
     TEST_HPU,
     TEST_XPU,
@@ -430,6 +432,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/148901")
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     @unittest.skipIf(TEST_HPU or TEST_XPU, "sleep kernel not supported on HPU/XPU")
     def test_train_parity_multi_group_cpu_offload_eager(self):
@@ -541,8 +544,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
-        orig_all_gather = dist.all_gather_into_tensor
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_all_gather = dist.all_gather_single
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def delayed_all_gather(*args, **kwargs):
             device_sleep(
@@ -2650,6 +2653,7 @@ class TestFullyShardCudaGraph(FSDPTest):
     def world_size(self) -> int:
         return 2
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/173761")
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

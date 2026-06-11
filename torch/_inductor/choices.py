@@ -13,8 +13,14 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
-from .heuristics.template import get_template_heuristic
-from .heuristics.template.triton import (
+from .kernel_inputs import KernelInputs, MMKernelInputs
+from .kernel_template_choice import make_ktc_generator
+from .metrics import get_metric_table, is_metric_table_enabled
+from .runtime.hints import DeviceProperties, ReductionHint
+from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
+from .select_algorithm import ExternKernelChoice
+from .template_heuristics import get_template_heuristic
+from .template_heuristics.triton import (
     _origami_enabled,
     BaseConfigHeuristic,
     CPUConfigHeuristic,
@@ -24,12 +30,6 @@ from .heuristics.template.triton import (
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
-from .kernel_inputs import KernelInputs, MMKernelInputs
-from .kernel_template_choice import make_ktc_generator
-from .metrics import get_metric_table, is_metric_table_enabled
-from .runtime.hints import DeviceProperties, ReductionHint
-from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
-from .select_algorithm import ExternKernelChoice
 from .utils import _use_autotune_backend
 from .virtualized import V
 
@@ -231,7 +231,8 @@ class InductorChoices:
         """
         # Extract device_type from kernel_inputs
         device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_ktc requires a valid device type"
+        if device_type is None:
+            raise AssertionError("get_ktc requires a valid device type")
         # Extract template_name from the template object
         template_name = template.uid
 
@@ -480,7 +481,7 @@ class InductorChoices:
         so we will do the reduction in two phases."""
         props = DeviceProperties.create(device)
         num_sm = props.multi_processor_count
-        warp_size = props.warp_size if props.warp_size is not None else 32
+        warp_size = props.warp_size_or_default
         max_threads_per_sm = (
             props.max_threads_per_multi_processor
             if props.max_threads_per_multi_processor is not None
@@ -517,7 +518,7 @@ class InductorChoices:
                 divisors = sympy.divisors(reduction_numel_hint)
                 closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
                 if abs(closest - tmp_split_size) < 30:
-                    # prefer even splits, but never smalle than min_elements_per_thread
+                    # prefer even splits, but never smaller than min_elements_per_thread
                     split_size = max(closest, min_elements_per_thread)
                 else:
                     split_size = tmp_split_size
