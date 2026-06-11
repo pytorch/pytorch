@@ -692,6 +692,7 @@ class NumaBindingTest(TestCase):
             ("numactl", "--physcpubind=0-1", "echo", "Hello, world!"),
         )
 
+    @skipIfTorchDynamo("Dynamo tracing bypasses unittest.mock patches used by NUMA binding tests")
     def test_callable_entrypoint_basic(self) -> None:
         self._add_mock_hardware(
             num_sockets=4,
