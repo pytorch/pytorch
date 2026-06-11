@@ -841,6 +841,47 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             "reduction after GEMM should NOT be fused into NVGEMM epilogue",
         )
 
+    def test_epilogue_fusion_eliminates_intermediate(self):
+        """Verify that epilogue fusion eliminates the intermediate GEMM buffer.
+
+        When relu is fused, the GEMM output should not be allocated separately.
+        The fused kernel writes directly to the final output. We check that
+        only one output buffer is allocated for the fused kernel, not two
+        (one for GEMM + one for relu)."""
+        dtype = torch.bfloat16
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+
+        def fn(a, b):
+            return torch.relu(a @ b)
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused, "relu was NOT fused into epilogue")
+        # The fused kernel's main function should take exactly 3 positional
+        # params (in_ptr0, in_ptr1, out_ptr0) plus stream. No extra intermediate.
+        for line in code.split("\n"):
+            if "_main(" in line and "def " in line and "nv_universal_gemm" in line:
+                self.assertIn(
+                    "in_ptr0, in_ptr1, out_ptr0, stream=None",
+                    line,
+                    f"Unexpected kernel signature: {line.strip()}",
+                )
+
+    def test_epilogue_with_aux_input(self):
+        """Epilogue that reads an auxiliary tensor (bias) gets it as a kernel arg."""
+        dtype = torch.bfloat16
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+        bias = torch.randn(self.M, self.N, device="cuda", dtype=dtype)
+
+        def fn(a, b, bias):
+            return torch.relu((a @ b) + bias)
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b, bias)
+        torch.testing.assert_close(result, fn(a, b, bias), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused, "bias+relu was NOT fused into epilogue")
+
     def test_workspace_runtime_integration(self):
         """End-to-end: mock the chosen kernel's workspace_size to non-zero and
         actually let benchmark_codegened_module run, exercising the runtime

@@ -619,6 +619,8 @@ class NVUniversalGemmKernel(Kernel):
             arg_types.append(V.graph.get_dtype(read_name))
             buf = V.graph.get_buffer(read_name)
             if buf is None:
+                # Epilogue may read model parameters/inputs (e.g. bias) that are
+                # graph inputs rather than computed buffers.
                 buf = V.graph.graph_inputs.get(read_name)
             # pyrefly: ignore [bad-argument-type]
             raw_args.append(buf)
