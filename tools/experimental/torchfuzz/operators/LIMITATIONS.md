@@ -128,3 +128,12 @@ model and affect all or most operators.
 - `F.huber_loss` and `F.smooth_l1_loss`: hyperparameters are drawn
   from small discrete sets (`{0.1, 0.5, 1.0, 2.0}`); continuous
   draws and extreme values are never tested.
+
+## Activations
+
+- `F.prelu` never generates a scalar-broadcast weight `(1,)` for
+  rank >= 2 inputs; always uses a per-channel weight of shape
+  `(output_spec.size[1],)`.
+
+- `F.softplus` `beta` is drawn from `[0.1, 5.0]`. The large-beta
+  regime (where softplus degenerates to relu) is underexercised.
