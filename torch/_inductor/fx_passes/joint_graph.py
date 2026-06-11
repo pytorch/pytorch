@@ -20,14 +20,17 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_or_true,
     statically_known_true,
 )
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..custom_graph_pass import get_custom_graph_passes
 from ..pattern_matcher import (
+    _transfer_meta,
     Arg,
     CallFunction,
+    CallFunctionVarArgs,
     init_once_fakemode,
     KeywordArg,
     Match,
@@ -455,6 +458,146 @@ def _has_self_referential_shape(
     return False
 
 
+def _is_direct_graph_output(gm: torch.fx.GraphModule, node: torch.fx.Node) -> bool:
+    for output_node in gm.graph.find_nodes(op="output"):  # type: ignore[operator, union-attr]
+        if node in pytree.tree_leaves(output_node.args):
+            return True
+    return False
+
+
+def _is_uniform_value_node(node: Any, value: int | float) -> bool:
+    if not isinstance(node, torch.fx.Node) or node.op != "call_function":
+        return False
+
+    if (
+        node.target is aten.full.default
+        and len(node.args) == 2
+        and node.args[1] == value
+    ):
+        return True
+
+    if node.target is aten.as_strided.default and len(node.args) >= 1:
+        return _is_uniform_value_node(node.args[0], value)
+
+    return False
+
+
+def _zero_bias_sdpa_replacement_args(
+    node: torch.fx.Node,
+) -> (
+    tuple[torch.fx.Node, torch.fx.Node, torch.fx.Node, float, bool, float | None] | None
+):
+    if (
+        len(node.args) < 5
+        or not _is_uniform_value_node(node.args[3], 0)
+        or node.args[4] is not False
+    ):
+        return None
+
+    query_arg, key_arg, value_arg = node.args[:3]
+    if not all(
+        isinstance(arg, torch.fx.Node) for arg in (query_arg, key_arg, value_arg)
+    ):
+        return None
+    query = typing.cast(torch.fx.Node, query_arg)
+    key = typing.cast(torch.fx.Node, key_arg)
+    value = typing.cast(torch.fx.Node, value_arg)
+
+    dropout_p = (
+        node.args[5] if len(node.args) > 5 else node.kwargs.get("dropout_p", 0.0)
+    )
+    is_causal = (
+        node.args[6] if len(node.args) > 6 else node.kwargs.get("is_causal", False)
+    )
+    scale = node.kwargs.get("scale", None)
+
+    if (
+        type(dropout_p) not in (int, float)
+        or dropout_p != 0.0
+        or not isinstance(is_causal, bool)
+        or not (scale is None or type(scale) in (int, float))
+    ):
+        return None
+    dropout_p = float(typing.cast(int | float, dropout_p))
+    scale = None if scale is None else float(typing.cast(int | float, scale))
+
+    # Efficient attention only exposes an empty logsumexp when
+    # compute_log_sumexp=False.  Rewriting is semantics-preserving for the
+    # attention output, but not for users that observe other tuple entries.
+    for user in typing.cast(dict[torch.fx.Node, Any], node.users):
+        if (
+            user.op != "call_function"
+            or user.target is not operator.getitem
+            or (user.args[1] != 0 and len(user.users) > 0)
+        ):
+            return None
+
+    query_meta = query.meta.get("val")
+    key_meta = key.meta.get("val")
+    value_meta = value.meta.get("val")
+    if (
+        not isinstance(query_meta, torch.Tensor)
+        or query_meta.device.type != "cuda"
+        or query_meta.is_meta
+        or not isinstance(key_meta, torch.Tensor)
+        or key_meta.device.type != "cuda"
+        or key_meta.is_meta
+        or not isinstance(value_meta, torch.Tensor)
+        or value_meta.device.type != "cuda"
+        or value_meta.is_meta
+    ):
+        return None
+
+    params = torch.backends.cuda.SDPAParams(
+        query_meta,
+        key_meta,
+        value_meta,
+        None,
+        dropout_p,
+        is_causal,
+        False,
+    )
+    if not torch.backends.cuda.can_use_flash_attention(params):
+        return None
+
+    return query, key, value, dropout_p, is_causal, scale
+
+
+def _is_zero_bias_sdpa(match: Match) -> bool:
+    return _zero_bias_sdpa_replacement_args(match.output_node()) is not None
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(
+        aten._scaled_dot_product_efficient_attention.default,
+        MULTIPLE,
+    ),
+    extra_check=_is_zero_bias_sdpa,
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=patterns,
+)
+def replace_zero_bias_sdpa_with_flash(match: Match, *args, **kwargs) -> None:
+    replacement_args = _zero_bias_sdpa_replacement_args(match.output_node())
+    if replacement_args is None:
+        return
+
+    query, key, value, dropout_p, is_causal, scale = replacement_args
+    node = match.output_node()
+    flash_node = match.graph.call_function(
+        aten._scaled_dot_product_flash_attention.default,
+        args=(query, key, value, dropout_p, is_causal, False),
+        kwargs={} if scale is None else {"scale": scale},
+    )
+    _transfer_meta(flash_node.meta, node, pass_name="replace_zero_bias_sdpa_with_flash")
+    # Efficient attention returns 4 tuple entries while flash attention returns
+    # 9, so the old output metadata is not valid for the replacement node.
+    flash_node.meta.pop("val", None)
+    flash_node.meta.pop("tensor_meta", None)
+
+    node.replace_all_uses_with(flash_node)
+    match.erase_nodes()
+
+
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     """Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."""
     with torch.utils._python_dispatch._disable_current_modes():
@@ -488,16 +631,25 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         for node in cf.node_replacements:
             constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
 
+        def replace_symint(value: int | torch.SymInt) -> int | torch.fx.Node | None:
+            if isinstance(value, torch.SymInt):
+                return cf.symint_nodes.get(value)
+            return value
+
+        def replace_symints(
+            values: Sequence[int | torch.SymInt],
+        ) -> list[int | torch.fx.Node] | None:
+            replaced = [replace_symint(value) for value in values]
+            if any(value is None for value in replaced):
+                return None
+            return typing.cast(list[int | torch.fx.Node], replaced)
+
         for node, value in node_replacements.items():
-            # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
-            # hasn't shown up to be important yet
             if "val" not in node.meta:
                 # This can only happen in AOTI
                 continue
 
             fake_tensor = node.meta["val"]
-            if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
-                continue
 
             # TODO - not sure about lossy uint->python value->uint conversions
             if fake_tensor.dtype in (
@@ -508,7 +660,9 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             ):
                 continue
 
-            if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
+            if constant_data_ptr_count[
+                cf.constant_data_ptrs[node]
+            ] > 1 and _is_direct_graph_output(gm, node):
                 continue
 
             with graph.inserting_after(node):
@@ -535,20 +689,58 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 ):
                     continue
 
-                shapes = [
-                    cf.symint_nodes[s] if isinstance(s, torch.SymInt) else s
-                    for s in node_replacements_shapes[node]
-                ]
+                shapes = replace_symints(node_replacements_shapes[node])
+                if shapes is None:
+                    continue
 
                 # Check if any shape depends on a symint that was computed from
                 # the node being replaced - this would create a cycle
                 if _has_self_referential_shape(shapes, node):
                     continue
 
+                full_shapes = shapes
+                full_meta_val = None
+                as_strided_args = None
+                if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
+                    strides = replace_symints(fake_tensor.stride())
+                    storage_offset = replace_symint(fake_tensor.storage_offset())
+                    if strides is None or storage_offset is None:
+                        continue
+
+                    dense_numel = functools.reduce(operator.mul, fake_tensor.shape, 1)
+                    required_storage_len = 0
+                    if not guard_or_false(dense_numel == 0):
+                        required_storage_len = (
+                            1
+                            + fake_tensor.storage_offset()
+                            + sum(
+                                (size - 1) * stride
+                                for size, stride in zip(
+                                    fake_tensor.shape, fake_tensor.stride()
+                                )
+                            )
+                        )
+
+                    full_storage_len = replace_symint(required_storage_len)
+                    if full_storage_len is not None:
+                        full_shapes = [full_storage_len]
+                        full_meta_shape = (required_storage_len,)
+                    elif not (
+                        value in (0, 1)
+                        and guard_or_true(required_storage_len <= dense_numel)
+                    ):
+                        continue
+                    else:
+                        full_meta_shape = fake_tensor.shape
+
+                    full_meta_val = fake_tensor.new_empty(full_meta_shape)
+
+                    as_strided_args = (shapes, strides, storage_offset)
+
                 # zeros and ones just get traced into full, so we insert those
                 new_node = graph.call_function(
                     aten.full.default,
-                    args=(shapes, value),
+                    args=(full_shapes, value),
                     kwargs={
                         "dtype": fake_tensor.dtype,
                         "layout": torch.strided,
@@ -556,6 +748,19 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                         "pin_memory": node.kwargs.get("pin_memory", False),
                     },
                 )
+
+                if as_strided_args is not None:
+                    if full_meta_val is None:
+                        continue
+                    new_node.meta["val"] = full_meta_val
+                    new_node.meta["tensor_meta"] = _extract_tensor_metadata(
+                        full_meta_val
+                    )
+                    with graph.inserting_after(new_node):
+                        new_node = graph.call_function(
+                            aten.as_strided.default,
+                            args=(new_node, *as_strided_args),
+                        )
 
                 new_node.meta.update(node.meta)
                 node.replace_all_uses_with(new_node)
