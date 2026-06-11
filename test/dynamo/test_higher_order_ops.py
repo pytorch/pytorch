@@ -3931,6 +3931,14 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_hessian_with_default_device(self):
+        def wrapper_fn(x):
+            return torch.func.hessian(torch.sin)(x)
+
+        x = torch.randn(4, 3)
+        with torch.device("cpu"):
+            self._compile_check(wrapper_fn, (x,))
+
     def test_hessian_argnums(self):
         counters.clear()
 
