@@ -5329,6 +5329,16 @@ for dtype in (torch.int32, torch.int64):
         self.assertTrue(r3.size() == (2, 3))
         self.assertTrue(r4.size() == (2, 1))
 
+    def test_tensor_split_with_scalar_tensor_sections(self):
+        def fn(a, sections):
+            return tuple(t + 1.0 for t in torch.tensor_split(a * 2.0, sections, -1))
+
+        self.common(
+            fn,
+            (torch.randn(2, 2, 10, device=self.device), torch.tensor(3)),
+            copy_to_gpu=False,
+        )
+
     def test_split_overload_packet_lowering(self):
         graph = torch.fx.Graph()
         x_node = graph.placeholder("x")
