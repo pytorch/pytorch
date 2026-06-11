@@ -9,6 +9,7 @@ import operator
 import os
 import pprint
 import sys
+import time
 from typing import Any, TYPE_CHECKING
 
 import cuda.bindings.driver as cuda_driver  # pyrefly: ignore [missing-import]
@@ -998,6 +999,87 @@ def cudagraphify(
         if isinstance(output_spec, InputAliasOutputSpec)
     )
     copyback_input_idxs = OrderedSet(mutated_input_idxs) | output_alias_input_idxs
+    debug_output_reconstruction = (
+        os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_DEBUG_OUTPUT_RECONSTRUCTION") == "1"
+    )
+    if debug_output_reconstruction:
+        non_tensor_output_count = 0
+        empty_tensor_output_count = 0
+        input_alias_output_count = 0
+        segment_output_count = 0
+        input_alias_outputs_per_base: dict[tuple[int, torch.dtype], int] = {}
+        segment_outputs_per_base: dict[tuple[int, torch.dtype], int] = {}
+        output_metadata_counts: dict[
+            tuple[
+                str,
+                torch.device,
+                torch.dtype,
+                tuple[int, ...],
+                tuple[int, ...],
+            ],
+            int,
+        ] = {}
+        for output_spec in output_specs:
+            if isinstance(output_spec, NonTensorOutputSpec):
+                non_tensor_output_count += 1
+            elif isinstance(output_spec, EmptyTensorOutputSpec):
+                empty_tensor_output_count += 1
+                metadata_key = (
+                    type(output_spec).__name__,
+                    output_spec.device,
+                    output_spec.dtype,
+                    output_spec.size,
+                    output_spec.stride,
+                )
+                output_metadata_counts[metadata_key] = (
+                    output_metadata_counts.get(metadata_key, 0) + 1
+                )
+            elif isinstance(output_spec, InputAliasOutputSpec):
+                input_alias_output_count += 1
+                key = (output_spec.input_idx, output_spec.dtype)
+                input_alias_outputs_per_base[key] = (
+                    input_alias_outputs_per_base.get(key, 0) + 1
+                )
+                metadata_key = (
+                    type(output_spec).__name__,
+                    output_spec.device,
+                    output_spec.dtype,
+                    output_spec.size,
+                    output_spec.stride,
+                )
+                output_metadata_counts[metadata_key] = (
+                    output_metadata_counts.get(metadata_key, 0) + 1
+                )
+            elif isinstance(output_spec, SegmentOutputSpec):
+                segment_output_count += 1
+                key = (output_spec.segment_idx, output_spec.dtype)
+                segment_outputs_per_base[key] = segment_outputs_per_base.get(key, 0) + 1
+                metadata_key = (
+                    type(output_spec).__name__,
+                    output_spec.device,
+                    output_spec.dtype,
+                    output_spec.size,
+                    output_spec.stride,
+                )
+                output_metadata_counts[metadata_key] = (
+                    output_metadata_counts.get(metadata_key, 0) + 1
+                )
+        print(
+            "cudagraph_digraphs_output_reconstruction_static "
+            f"total_outputs={len(output_specs)} "
+            f"non_tensor_outputs={non_tensor_output_count} "
+            f"empty_tensor_outputs={empty_tensor_output_count} "
+            f"input_alias_outputs={input_alias_output_count} "
+            f"segment_outputs={segment_output_count} "
+            f"unique_input_alias_dtype_bases={len(input_alias_outputs_per_base)} "
+            f"unique_segment_dtype_bases={len(segment_outputs_per_base)} "
+            f"unique_tensor_metadata={len(output_metadata_counts)} "
+            f"max_input_alias_outputs_per_base="
+            f"{max(input_alias_outputs_per_base.values(), default=0)} "
+            f"max_segment_outputs_per_base="
+            f"{max(segment_outputs_per_base.values(), default=0)} "
+            f"copy_replay_outputs={copy_replay_outputs}"
+        )
 
     capture_keepalive.clear()
     capture_inputs = []
@@ -1125,7 +1207,36 @@ def cudagraphify(
         if copyback_dsts:
             torch._foreach_copy_(copyback_dsts, copyback_srcs)
 
+        output_reconstruction_start = (
+            time.perf_counter() if debug_output_reconstruction else None
+        )
         outputs: OutputType = []
+        segment_base_tensors: dict[tuple[int, torch.dtype], torch.Tensor] = {}
+        input_base_tensors: dict[tuple[int, torch.dtype], torch.Tensor] = {}
+
+        def get_typed_base_tensor(
+            storage_tensor: torch.Tensor,
+            dtype: torch.dtype,
+            device: torch.device,
+            cache_key: tuple[int, torch.dtype],
+            cache: dict[tuple[int, torch.dtype], torch.Tensor],
+        ) -> torch.Tensor:
+            base_tensor = cache.get(cache_key)
+            if base_tensor is not None:
+                return base_tensor
+
+            base_tensor = torch.empty((), device=device, dtype=dtype)
+            storage_nbytes = storage_tensor.untyped_storage().nbytes()
+            itemsize = base_tensor.element_size()
+            assert storage_nbytes % itemsize == 0
+            base_tensor.set_(
+                storage_tensor.untyped_storage(),
+                storage_offset=0,
+                stride=(1,),
+                size=(storage_nbytes // itemsize,),
+            )
+            cache[cache_key] = base_tensor
+            return base_tensor
 
         for output_spec in output_specs:
             if isinstance(output_spec, NonTensorOutputSpec):
@@ -1144,38 +1255,48 @@ def cudagraphify(
             if isinstance(output_spec, InputAliasOutputSpec):
                 input_tensor = new_inputs[output_spec.input_idx]
                 assert isinstance(input_tensor, torch.Tensor)
-                true_output_tensor = torch.empty(
-                    (), device=output_spec.device, dtype=output_spec.dtype
+                input_base_tensor = get_typed_base_tensor(
+                    input_tensor,
+                    output_spec.dtype,
+                    output_spec.device,
+                    (output_spec.input_idx, output_spec.dtype),
+                    input_base_tensors,
                 )
-                input_offset_from_storage = (
+                input_offset_from_storage_bytes = (
                     input_tensor.data_ptr() - input_tensor.untyped_storage().data_ptr()
                 )
-                assert input_offset_from_storage % input_tensor.itemsize == 0
-                input_offset_from_storage = (
-                    input_offset_from_storage // input_tensor.itemsize
+                assert (
+                    input_offset_from_storage_bytes % input_base_tensor.element_size()
+                    == 0
                 )
-                true_output_tensor.set_(
-                    input_tensor.untyped_storage(),
+                input_offset_from_storage = input_offset_from_storage_bytes // (
+                    input_base_tensor.element_size()
+                )
+                true_output_tensor = torch.as_strided(
+                    input_base_tensor,
+                    size=output_spec.size,
+                    stride=output_spec.stride,
                     storage_offset=(
                         output_spec.offset_from_input + input_offset_from_storage
                     ),
-                    stride=output_spec.stride,
-                    size=output_spec.size,
                 )
 
                 outputs.append(true_output_tensor)
                 continue
             assert isinstance(output_spec, SegmentOutputSpec)
             storage_tensor = dynamic_tensors[output_spec.segment_idx]
-            true_output_tensor = torch.empty(
-                (), device=output_spec.device, dtype=output_spec.dtype
+            segment_base_tensor = get_typed_base_tensor(
+                storage_tensor,
+                output_spec.dtype,
+                output_spec.device,
+                (output_spec.segment_idx, output_spec.dtype),
+                segment_base_tensors,
             )
-
-            true_output_tensor.set_(
-                storage_tensor.untyped_storage(),
-                storage_offset=output_spec.storage_offset,
-                stride=output_spec.stride,
+            true_output_tensor = torch.as_strided(
+                segment_base_tensor,
                 size=output_spec.size,
+                stride=output_spec.stride,
+                storage_offset=output_spec.storage_offset,
             )
             if copy_replay_outputs:
                 compact_output_tensor = torch.empty_strided(
@@ -1187,6 +1308,18 @@ def cudagraphify(
                 compact_output_tensor.copy_(true_output_tensor)
                 true_output_tensor = compact_output_tensor
             outputs.append(true_output_tensor)
+
+        if output_reconstruction_start is not None:
+            output_reconstruction_ms = (
+                time.perf_counter() - output_reconstruction_start
+            ) * 1000
+            print(
+                "cudagraph_digraphs_output_reconstruction_replay "
+                f"total_outputs={len(outputs)} "
+                f"input_base_tensors_created={len(input_base_tensors)} "
+                f"segment_base_tensors_created={len(segment_base_tensors)} "
+                f"elapsed_ms={output_reconstruction_ms:.3f}"
+            )
 
         return outputs
 
