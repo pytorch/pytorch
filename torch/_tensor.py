@@ -899,6 +899,11 @@ class Tensor(torch._C.TensorBase):
             )
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    def cholesky(self, upper=False):
+        from ._linalg_utils import cholesky
+
+        return cholesky(self, upper=upper)
+
     def solve(self, other):
         from torch._linalg_utils import solve
 
@@ -913,11 +918,6 @@ class Tensor(torch._C.TensorBase):
         from torch._linalg_utils import eig
 
         return eig(self, eigenvectors=eigenvectors)
-
-    def qr(self, some=True):
-        from torch._linalg_utils import qr
-
-        return qr(self, some=some)
 
     def symeig(self, eigenvectors=False):
         from torch._linalg_utils import _symeig

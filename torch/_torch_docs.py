@@ -2618,88 +2618,6 @@ Example::
 )
 
 add_docstr(
-    torch.cholesky,
-    r"""
-cholesky(input, upper=False, *, out=None) -> Tensor
-
-Computes the Cholesky decomposition of a symmetric positive-definite
-matrix :math:`A` or for batches of symmetric positive-definite matrices.
-
-If :attr:`upper` is ``True``, the returned matrix ``U`` is upper-triangular, and
-the decomposition has the form:
-
-.. math::
-
-  A = U^TU
-
-If :attr:`upper` is ``False``, the returned matrix ``L`` is lower-triangular, and
-the decomposition has the form:
-
-.. math::
-
-    A = LL^T
-
-If :attr:`upper` is ``True``, and :math:`A` is a batch of symmetric positive-definite
-matrices, then the returned tensor will be composed of upper-triangular Cholesky factors
-of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, the returned
-tensor will be composed of lower-triangular Cholesky factors of each of the individual
-matrices.
-
-.. warning::
-
-    :func:`torch.cholesky` is deprecated in favor of :func:`torch.linalg.cholesky`
-    and will be removed in a future PyTorch release.
-
-    ``L = torch.cholesky(A)`` should be replaced with
-
-    .. code:: python
-
-        L = torch.linalg.cholesky(A)
-
-    ``U = torch.cholesky(A, upper=True)`` should be replaced with
-
-    .. code:: python
-
-        U = torch.linalg.cholesky(A).mH
-
-    This transform will produce equivalent results for all valid (symmetric positive definite) inputs.
-
-Args:
-    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
-                batch dimensions consisting of symmetric positive-definite matrices.
-    upper (bool, optional): flag that indicates whether to return a
-                            upper or lower triangular matrix. Default: ``False``
-
-Keyword args:
-    out (Tensor, optional): the output matrix
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> a = a @ a.mT + 1e-3 # make symmetric positive-definite
-    >>> l = torch.cholesky(a)
-    >>> a
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-    >>> l
-    tensor([[ 1.5528,  0.0000,  0.0000],
-            [-0.4821,  1.0592,  0.0000],
-            [ 0.9371,  0.5487,  0.7023]])
-    >>> l @ l.mT
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-    >>> a = torch.randn(3, 2, 2) # Example for batched input
-    >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
-    >>> l = torch.cholesky(a)
-    >>> z = l @ l.mT
-    >>> torch.dist(z, a)
-    tensor(2.3842e-07)
-""",
-)
-
-add_docstr(
     torch.cholesky_solve,
     r"""
 cholesky_solve(B, L, upper=False, *, out=None) -> Tensor
@@ -8917,6 +8835,90 @@ Example::
 )
 
 add_docstr(
+    torch.qr,
+    r"""
+qr(input: Tensor, some: bool = True, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor], None]) -> (Tensor, Tensor)
+
+Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
+and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
+with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
+:math:`R` being an upper triangular matrix or batch of upper triangular matrices.
+
+If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
+Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
+
+.. warning::
+
+    :func:`torch.qr` is deprecated in favor of :func:`torch.linalg.qr`
+    and will be removed in a future PyTorch release. The boolean parameter :attr:`some` has been
+    replaced with a string parameter :attr:`mode`.
+
+    ``Q, R = torch.qr(A)`` should be replaced with
+
+    .. code:: python
+
+        Q, R = torch.linalg.qr(A)
+
+    ``Q, R = torch.qr(A, some=False)`` should be replaced with
+
+    .. code:: python
+
+        Q, R = torch.linalg.qr(A, mode="complete")
+
+.. warning::
+          If you plan to backpropagate through QR, note that the current backward implementation
+          is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
+          columns of :attr:`input` are linearly independent.
+          This behavior will probably change once QR supports pivoting.
+
+.. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
+          and may produce different (valid) decompositions on different device types
+          or different platforms.
+
+Args:
+    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
+                batch dimensions consisting of matrices of dimension :math:`m \times n`.
+    some (bool, optional): Set to ``True`` for reduced QR decomposition and ``False`` for
+                complete QR decomposition. If `k = min(m, n)` then:
+
+                  * ``some=True`` : returns `(Q, R)` with dimensions (m, k), (k, n) (default)
+
+                  * ``'some=False'``: returns `(Q, R)` with dimensions (m, m), (m, n)
+
+Keyword args:
+    out (tuple, optional): tuple of `Q` and `R` tensors.
+                The dimensions of `Q` and `R` are detailed in the description of :attr:`some` above.
+
+Example::
+
+    >>> a = torch.tensor([[12., -51, 4], [6, 167, -68], [-4, 24, -41]])
+    >>> q, r = torch.qr(a)
+    >>> q
+    tensor([[-0.8571,  0.3943,  0.3314],
+            [-0.4286, -0.9029, -0.0343],
+            [ 0.2857, -0.1714,  0.9429]])
+    >>> r
+    tensor([[ -14.0000,  -21.0000,   14.0000],
+            [   0.0000, -175.0000,   70.0000],
+            [   0.0000,    0.0000,  -35.0000]])
+    >>> torch.mm(q, r).round()
+    tensor([[  12.,  -51.,    4.],
+            [   6.,  167.,  -68.],
+            [  -4.,   24.,  -41.]])
+    >>> torch.mm(q.t(), q).round()
+    tensor([[ 1.,  0.,  0.],
+            [ 0.,  1., -0.],
+            [ 0., -0.,  1.]])
+    >>> a = torch.randn(3, 4, 5)
+    >>> q, r = torch.qr(a, some=False)
+    >>> torch.allclose(torch.matmul(q, r), a)
+    True
+    >>> torch.allclose(torch.matmul(q.mT, q), torch.eye(5))
+    True
+""",
+)
+
+add_docstr(
     torch.rad2deg,
     r"""
 rad2deg(input: Tensor, *, out: Optional[Tensor]) -> Tensor
@@ -11475,7 +11477,11 @@ The boolean option :attr:`sorted` if ``True``, will make sure that the returned
 
 .. note::
     When using `torch.topk`, the indices of tied elements are not guaranteed to be stable
-    and may vary across different invocations.
+    and may vary across different invocations unless
+    :func:`torch.use_deterministic_algorithms` is enabled. In deterministic mode,
+    lower indices are selected before higher indices for tied values. If
+    :attr:`sorted` is ``False``, the returned elements are still not guaranteed
+    to appear in sorted order.
 
 Args:
     {input}

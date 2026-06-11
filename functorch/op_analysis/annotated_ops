@@ -394,10 +394,10 @@ eig, linalg
 svd, linalg
 swapaxes, alias
 swapdims, alias
-cholesky, linalg
 cholesky_solve, linalg
 solve, linalg
 cholesky_inverse, linalg
+qr, linalg
 geqrf, linalg
 orgqr, alias
 ormqr, linalg

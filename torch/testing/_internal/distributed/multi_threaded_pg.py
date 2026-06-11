@@ -83,7 +83,7 @@ _reduce_ops = {
 # actually update any view metadata if you do differentiation.  This
 # ordinarily "doesn't matter" because distributed collectives aren't
 # differentiable anyway, but it's possible to tickle this in testing if
-# someone tries to touch the grad_fn of a Tensor.  There a few ways to
+# someone tries to touch the grad_fn of a Tensor.  There are a few ways to
 # fix this, but the easiest way was to use the .detach() trick to hide
 # the mutations from autograd.
 
