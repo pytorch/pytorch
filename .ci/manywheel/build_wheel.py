@@ -31,9 +31,6 @@ def configure_blas_env() -> None:
     )
 
     if arch == "x86_64":
-        if Path("/opt/intel/include").is_dir():
-            os.environ["CMAKE_INCLUDE_PATH"] = "/opt/intel/include"
-            os.environ["CMAKE_LIBRARY_PATH"] = "/opt/intel/lib:/lib"
         return
 
     if arch != "aarch64":
