@@ -252,10 +252,6 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/148607",
-    )
     @serialTest()
     def test_host_memory_stats(self):
         # Helper functions
@@ -283,12 +279,21 @@ class TestCuda(TestCase):
                 "active_requests.peak": 0,
             }
 
+        # Deltas from baseline captured after cleanup (not absolute totals), so
+        # ordering against other tests cannot leave host stats in a broken state.
+        baseline = {}
+
         def check_stats(expected):
             stats = torch.cuda.host_memory_stats()
             for k, v in expected.items():
-                if v != stats[k]:
-                    print(f"key: {k}, expected: {v}, stats: {stats[k]}")
-                self.assertEqual(v, stats[k])
+                want = baseline[k] + v
+                actual = stats[k]
+                if actual != want:
+                    print(
+                        f"key: {k}, baseline: {baseline[k]}, delta: {v}, "
+                        f"want: {want}, got: {actual}"
+                    )
+                self.assertEqual(actual, want)
 
         # Setup the test cleanly
         alloc1 = 10
@@ -297,11 +302,12 @@ class TestCuda(TestCase):
         alloc2_aligned = 32
         expected = empty_stats()
 
-        # Reset any lingering state
         gc.collect()
         torch._C._host_emptyCache()
+        torch.cuda.reset_peak_host_memory_stats()
+        torch.cuda.reset_accumulated_host_memory_stats()
+        baseline.update(torch.cuda.host_memory_stats())
 
-        # Check that stats are empty
         check_stats(expected)
 
         # Make first allocation and check stats
@@ -4477,6 +4483,44 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    def test_cuda_graph_many_if_nodes_across_graphs(self):
+        pred = torch.zeros((), device="cuda", dtype=torch.bool)
+        x = torch.zeros((), device="cuda")
+        for _ in range(40):
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                g.begin_capture_to_if_node(pred)
+                x.add_(1.0)
+                g.end_capture_to_conditional_node()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    def test_cuda_graph_many_if_nodes_in_one_graph(self):
+        pred = torch.zeros((), device="cuda", dtype=torch.bool)
+        x = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            for _ in range(40):
+                g.begin_capture_to_if_node(pred)
+                x.add_(1.0)
+                g.end_capture_to_conditional_node()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_cuda_graph_tensor_item_not_allowed(self):
         test_script = """\
 import torch
@@ -5792,11 +5836,9 @@ class TestCudaAllocator(TestCase):
 
     def test_allocator_backend(self):
         def check_output(script: str) -> str:
-            return (
-                subprocess.check_output([sys.executable, "-c", script])
-                .decode("ascii")
-                .strip()
-            )
+            return subprocess.check_output(
+                [sys.executable, "-c", script], env={}, text=True
+            ).strip()
 
         test_script = """\
 import os
