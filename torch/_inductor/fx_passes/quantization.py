@@ -413,7 +413,6 @@ def _register_quantized_conv_lowering(
         pattern,
         extra_check=_is_valid_qconv_lowering_pattern(),
         pass_number=pass_number,
-        output_metadata_ignores_input_storage=True,
     )
     def qconv(match: Match, *args, **kwargs):
         # Activation QParams
@@ -526,7 +525,6 @@ def _register_quantized_linear_unary_lowering(
         pattern,
         extra_check=_is_valid_qlinear_lowering_pattern(),
         pass_number=pass_number,
-        output_metadata_ignores_input_storage=True,
     )
     def qlinear(match: Match, *args, **kwargs):
         output_dtype = _get_pattern_output_dtype(match)
@@ -586,7 +584,6 @@ def _register_quantized_linear_binary_lowering(
         pattern,
         extra_check=_is_valid_qlinear_lowering_pattern(),
         pass_number=pass_number,
-        output_metadata_ignores_input_storage=True,
     )
     def qlinear_binary(match: Match, *args, **kwargs):
         output_dtype = _get_pattern_output_dtype(match)
