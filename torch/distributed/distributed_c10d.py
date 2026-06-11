@@ -3035,6 +3035,13 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
         this API call; otherwise, the behavior is undefined. If this API call is
         not the first collective call in the ``group``, batched P2P operations
         involving only a subset of ranks of the ``group`` are allowed.
+
+    .. note:: When using the NCCL backend with a large number of P2P operations,
+        operations are automatically grouped by peer rank into separate
+        coalescing groups to avoid NCCL internal hangs (default threshold:
+        256 ops).  Set ``TORCH_NCCL_BATCH_P2P_CHUNK_SIZE`` to override the
+        threshold or to ``0`` to disable grouping and revert to the legacy
+        single-group behaviour.
     """
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
@@ -3047,6 +3054,10 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
         return {key: op.group_peer}
 
     if type(group) is ProcessGroup and group._get_backend(device).supports_coalescing:
+        chunk_size = int(os.environ.get("TORCH_NCCL_BATCH_P2P_CHUNK_SIZE", 256))
+        if chunk_size > 0 and len(p2p_op_list) > chunk_size:
+            return _chunked_batch_p2p(p2p_op_list, group, device, peer_kwarg)
+
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
@@ -3071,6 +3082,58 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
             if work:
                 reqs.append(work)
         return reqs
+
+
+def _chunked_batch_p2p(
+    p2p_op_list: list[P2POp],
+    group: ProcessGroup,
+    device: torch.device,
+    peer_kwarg: Callable[[P2POp], dict[str, int]],
+) -> list[Work]:
+    """Split P2P ops into round-robin tournament rounds.
+
+    Uses a round-robin tournament schedule so that in each round,
+    communicating rank pairs are matched on both sides.  This avoids
+    NCCL plan-splitting divergence while preventing hotspots and
+    deadlocks.
+    """
+    ops_by_peer: dict[int, list[P2POp]] = {}
+    for op in p2p_op_list:
+        ops_by_peer.setdefault(op.peer, []).append(op)
+
+    my_rank = group.rank()
+
+    # Build round-robin tournament schedule (circle method).
+    participants = sorted(set(ops_by_peer.keys()) | {my_rank})
+    n = len(participants)
+    if n % 2 == 1:
+        participants.append(-1)
+        n += 1
+
+    rank_to_idx = {r: i for i, r in enumerate(participants)}
+    my_idx = rank_to_idx[my_rank]
+
+    all_works: list[Work] = []
+    for round_num in range(n - 1):
+        circle = [0] + [1 + (round_num + i) % (n - 1) for i in range(n - 1)]
+        my_pos = circle.index(my_idx)
+        partner_idx = circle[n - 1 - my_pos]
+        partner_rank = participants[partner_idx]
+
+        if partner_rank == -1 or partner_rank not in ops_by_peer:
+            continue
+
+        ops = ops_by_peer[partner_rank]
+        with _coalescing_manager(group, device, async_ops=True) as cm:
+            for p2p_op in ops:
+                p2p_op.op(
+                    p2p_op.tensor,
+                    group=p2p_op.group,
+                    tag=p2p_op.tag,
+                    **peer_kwarg(p2p_op),
+                )
+        all_works.extend(cm.works)
+    return all_works
 
 
 def _is_fp8(tensor):
