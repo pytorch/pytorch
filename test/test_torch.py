@@ -10835,6 +10835,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             _wr = weakref.ref(t1)
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
+            torch.utils.swap_tensors(t1, t2, allow_weakrefs=True)
+            self.assertIs(_wr(), t1)
 
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
