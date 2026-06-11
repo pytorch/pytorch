@@ -1,5 +1,7 @@
 # Owner(s): ["module: PrivateUse1"]
 
+import os
+
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
@@ -223,8 +225,11 @@ class TestDeviceInterface(TestCase):
 
 
 class TestInductorRegistration(TestCase):
-    def test_scheduling_registered(self):
+    def setUp(self):
+        super().setUp()
         import torch_openreg.inductor_backend  # noqa: F401
+
+    def test_scheduling_registered(self):
         from torch._inductor.codegen.common import get_scheduling_for_device
         from torch._inductor.codegen.cpp import CppScheduling
 
@@ -255,9 +260,18 @@ class TestInductorRegistration(TestCase):
 
 
 class TestInductorCompile(TestCase):
-    def test_inductor_simple_add(self):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        os.environ["OPENREG_SKIP_MPROTECT"] = "1"
         import torch_openreg.inductor_backend  # noqa: F401
 
+    @classmethod
+    def tearDownClass(cls):
+        os.environ.pop("OPENREG_SKIP_MPROTECT", None)
+        super().tearDownClass()
+
+    def test_inductor_simple_add(self):
         @torch.compile(backend="inductor")
         def fn(x, y):
             return x + y
@@ -267,8 +281,6 @@ class TestInductorCompile(TestCase):
         self.assertEqual(fn(x, y), x + y)
 
     def test_inductor_multiple_ops(self):
-        import torch_openreg.inductor_backend  # noqa: F401
-
         def fn(x):
             return torch.relu(x * 2 + 1)
 
@@ -277,8 +289,6 @@ class TestInductorCompile(TestCase):
         self.assertEqual(compiled(x), fn(x))
 
     def test_inductor_matches_eager(self):
-        import torch_openreg.inductor_backend  # noqa: F401
-
         def fn(x):
             return x * 2 + x
 
@@ -287,8 +297,6 @@ class TestInductorCompile(TestCase):
         self.assertEqual(compiled(x), fn(x))
 
     def test_inductor_output_device(self):
-        import torch_openreg.inductor_backend  # noqa: F401
-
         @torch.compile(backend="inductor")
         def fn(x):
             return x + 1

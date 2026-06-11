@@ -1,7 +1,6 @@
 #include <ATen/Context.h>
 
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -13,7 +12,6 @@
 #if USE_DISTRIBUTED
 #include "distributed/init.hpp"
 #endif
-#include <include/openreg.h>
 #include <runtime/OpenRegFunctions.h>
 
 static PyObject* _initExtension(PyObject* self, PyObject* noargs) {
@@ -95,38 +93,6 @@ PyObject* _getDeviceCount(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-// LITERALINCLUDE START: MEMORY GUARD HELPERS
-PyObject* _memoryUnprotect(PyObject* self, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  const auto& tensor = THPVariable_Unpack(arg);
-  if (tensor.defined() && tensor.has_storage()) {
-    void* ptr = tensor.data_ptr();
-    orPointerAttributes attr;
-    if (orPointerGetAttributes(&attr, ptr) == orSuccess &&
-        attr.type == orMemoryTypeDevice) {
-      orMemoryUnprotect(attr.pointer);
-    }
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* _memoryProtect(PyObject* self, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  const auto& tensor = THPVariable_Unpack(arg);
-  if (tensor.defined() && tensor.has_storage()) {
-    void* ptr = tensor.data_ptr();
-    orPointerAttributes attr;
-    if (orPointerGetAttributes(&attr, ptr) == orSuccess &&
-        attr.type == orMemoryTypeDevice) {
-      orMemoryProtect(attr.pointer);
-    }
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-// LITERALINCLUDE END: MEMORY GUARD HELPERS
-
 // LITERALINCLUDE START: OPENREG MODULE METHODS
 static PyMethodDef methods[] = {
     {"_init", _initExtension, METH_NOARGS, nullptr},
@@ -136,8 +102,6 @@ static PyMethodDef methods[] = {
     {"_set_device", _setDevice, METH_O, nullptr},
     {"_exchangeDevice", _exchangeDevice, METH_O, nullptr},
     {"_get_device_count", _getDeviceCount, METH_NOARGS, nullptr},
-    {"_memory_unprotect", _memoryUnprotect, METH_O, nullptr},
-    {"_memory_protect", _memoryProtect, METH_O, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 // LITERALINCLUDE END: OPENREG MODULE METHODS
 /*
