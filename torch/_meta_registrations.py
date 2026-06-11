@@ -1287,15 +1287,6 @@ def cholesky_solve(self: Tensor, A: Tensor, upper: bool = False) -> Tensor:
     return _cholesky_solve_helper(self_broadcasted, A_broadcasted, upper)
 
 
-@register_meta(aten.cholesky)
-@out_wrapper()
-def cholesky(self: Tensor, upper: bool = False) -> Tensor:
-    if self.numel() == 0:
-        return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
-    squareCheckInputs(self, "cholesky")
-    return cloneBatchedColumnMajor(self)
-
-
 @register_meta(aten.cholesky_inverse)
 @out_wrapper()
 def cholesky_inverse(self: Tensor, upper: bool = False) -> Tensor:
@@ -2763,7 +2754,7 @@ def meta_miopen_batch_norm(
 def meta_conv(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
-    bias: torch.Tensor,
+    bias: torch.Tensor | None,
     stride: list[int],
     padding: list[int],
     dilation: list[int],
@@ -2796,6 +2787,35 @@ def meta_conv(
     # kernel and uses FakeTensor.fake_device for an accurate answer.
     out = input_tensor.new_empty(shape_out)
     return out
+
+
+@register_meta(aten._convolution.default)
+def meta__conv(
+    input_tensor: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None,
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
+    transposed: bool,
+    output_padding: list[int],
+    groups: int,
+    benchmark: bool,
+    deterministic: bool,
+    cudnn_enabled: bool,
+    allow_tf32: bool = True,
+):
+    return meta_conv(
+        input_tensor,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+    )
 
 
 if torch._C._has_mkldnn:
@@ -4694,7 +4714,7 @@ def meta_lshifts(self, other):
 
 @register_meta(aten.zero.default)
 def meta_zero(self):
-    return self.new_empty(self.shape)
+    return torch.empty_like(self)
 
 
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
