@@ -13,10 +13,10 @@ from functools import partial
 from typing import Any, NamedTuple
 
 import torch
-import torch.fx as fx
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
+import torch.fx as fx
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.exc import Unsupported
@@ -2223,11 +2223,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         graph.output((a, b, barrier, c))
 
         _canonicalize_graph(graph)
-        ops = [
-            n.name
-            for n in graph.nodes
-            if n.op in ("call_function", "call_method")
-        ]
+        ops = [n.name for n in graph.nodes if n.op in ("call_function", "call_method")]
         barrier_idx = next(i for i, name in enumerate(ops) if "add_" in name)
         neg_idx = next(i for i, name in enumerate(ops) if "neg" in name)
         # neg must come after the barrier even though it only depends on x
@@ -2253,10 +2249,20 @@ class DictTests(torch._dynamo.test_case.TestCase):
             if n.op in ("call_function", "call_method")
         ]
         barrier_idx = next(
-            i for i, (name, op) in enumerate(ops) if op == "call_method" and "add_" in name
+            i
+            for i, (name, op) in enumerate(ops)
+            if op == "call_method" and "add_" in name
         )
-        mul_before = [i for i, (name, _) in enumerate(ops) if name.startswith("mul") and i < barrier_idx]
-        mul_after = [i for i, (name, _) in enumerate(ops) if name.startswith("mul") and i > barrier_idx]
+        mul_before = [
+            i
+            for i, (name, _) in enumerate(ops)
+            if name.startswith("mul") and i < barrier_idx
+        ]
+        mul_after = [
+            i
+            for i, (name, _) in enumerate(ops)
+            if name.startswith("mul") and i > barrier_idx
+        ]
         self.assertTrue(len(mul_before) >= 1)
         self.assertTrue(len(mul_after) >= 1)
 
