@@ -2276,9 +2276,9 @@ def export(
     if config.debug_force_graph_break_on_leaf_return:
         raise unittest.SkipTest("Cannot force graph break on export")
 
-    # `dynamic_shapes` is overloaded: it accepts the legacy dict/tuple/list/Dim
+    # `dynamic_shapes` is overloaded: it accepts the Dim-based dict/tuple/list
     # spec, OR the new ShapesSpec/ParamsSpec API. If the latter is passed, we
-    # route it through dynamo's `shapes_spec` mechanism and skip the legacy
+    # route it through dynamo's `shapes_spec` mechanism and skip the Dim-based
     # constraint processing.
     from torch.fx.experimental.dynamic_spec import (
         _SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG,
