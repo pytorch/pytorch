@@ -50,6 +50,24 @@ except ModuleNotFoundError:
     np = None
 
 
+_SCALED_GROUPED_MM_CUTEDSL_KERNELS_REGISTERED = False
+
+
+def _try_register_scaled_grouped_mm_cutedsl_kernels_once() -> None:
+    global _SCALED_GROUPED_MM_CUTEDSL_KERNELS_REGISTERED
+    if _SCALED_GROUPED_MM_CUTEDSL_KERNELS_REGISTERED:
+        return
+    try:
+        from torch._cutedsl import scaled_grouped_mm_blockscaled_register_kernels
+
+        scaled_grouped_mm_blockscaled_register_kernels()
+        _SCALED_GROUPED_MM_CUTEDSL_KERNELS_REGISTERED = True
+    except Exception:
+        # CuTeDSL integration is optional; keep default behavior when
+        # registration is unavailable.
+        pass
+
+
 conv1d = _add_docstr(
     torch.conv1d,
     r"""
@@ -7264,6 +7282,20 @@ def scaled_grouped_mm(
     scale_recipe_b = _expand_single_value(scale_recipe_b)
     swizzle_a = _expand_single_value(swizzle_a)
     swizzle_b = _expand_single_value(swizzle_b)
+
+    # Register CuTeDSL override lazily on the first Python-call path through
+    # torch.nn.functional.scaled_grouped_mm.
+    #
+    # Note: direct callers of torch._scaled_grouped_mm_v2 bypass this function.
+    # They can enable the same override manually via:
+    #   torch._cutedsl.scaled_grouped_mm_blockscaled_register_kernels()
+    #
+    # If we later decide to make this automatic for *all* callsites (including
+    # direct torch._scaled_grouped_mm_v2), move the registration call to a
+    # process-global import path (e.g. torch/__init__.py) instead of this lazy
+    # functional.py hook.
+    if not _SCALED_GROUPED_MM_CUTEDSL_KERNELS_REGISTERED:
+        _try_register_scaled_grouped_mm_cutedsl_kernels_once()
 
     out = torch._scaled_grouped_mm_v2(
         mat_a,
