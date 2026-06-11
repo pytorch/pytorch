@@ -85,6 +85,7 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch._environment import is_fbcode
+from torch._functorch.fx_minifier import is_uninitialized_tensor_factory_node
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._library.fake_class_registry import FakeScriptObject
@@ -1275,6 +1276,9 @@ def repro_minify(options: Any, mod: nn.Module, load_args: Any) -> None:
             skip_offload=options.skip_saving_eager_intermediates,
             skip_sanity=options.skip_sanity,
             max_granularity=options.max_granularity,
+            skip_output_node=is_uninitialized_tensor_factory_node
+            if options.accuracy != ""
+            else None,
         )
 
 
