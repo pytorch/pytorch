@@ -503,7 +503,7 @@ An example of this process can be found here:
 
 ## Triton dependency for the release
 
-In nightly builds for conda and wheels pytorch depend on Triton build by this workflow: https://hud.pytorch.org/hud/pytorch/pytorch/nightly/1?per_page=50&name_filter=Build%20Triton%20Wheel. The pinned version of triton used by this workflow is specified here:  https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton.txt .
+In nightly builds for conda and wheels pytorch depend on Triton build by this workflow: https://hud.pytorch.org/hud/pytorch/pytorch/nightly/1?per_page=50&name_filter=Build%20Triton%20Wheel. The pinned commit for CUDA Triton wheels is in https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton.txt ; ROCm wheels use https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton-rocm.txt .
 
 In Nightly builds we have following configuration:
 * Wheel builds, depend on : https://download.pytorch.org/whl/nightly/triton/
