@@ -3445,7 +3445,6 @@ def triton_config(
     xnumel = size_hints["x"]
     ynumel = size_hints.get("y")
     znumel = size_hints.get("z")
-    warp_size = device_props.warp_size_or_default()
 
     # Increase x to satisfy min_elem_per_thread requirements.
     block_size = max(
