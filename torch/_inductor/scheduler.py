@@ -268,10 +268,10 @@ class MixOrderReduction:
         g1 = cls.get_numel_rnumel(node1)
         g2 = cls.get_numel_rnumel(node2)
 
-        if len(g1) != 2 or len(g2) != 2 or g1 == g2:
+        if len(g1) != 2 or len(g2) != 2:
             return False
 
-        return tuple(g1) == tuple(reversed(g2))
+        return g1 == g2 or tuple(g1) == tuple(reversed(g2))
 
     @classmethod
     def _is_full_access(cls, buf: str, node: BaseSchedulerNode) -> bool:
@@ -292,11 +292,22 @@ class MixOrderReduction:
 
         if not var_ranges:
             if not isinstance(node, FusedSchedulerNode):
-                raise AssertionError(f"{type(node)}")
+                return False
+            # FusedSchedulerNode.read_writes is produced by ReadWrites.merge_list(),
+            # which intentionally drops var_ranges because fused children can have
+            # different loop domains. Preserve the existing best-effort fallback to
+            # the first child, but do not require that child to have ranges either.
             var_ranges = node.snodes[0].read_writes.var_ranges
 
         if not var_ranges:
-            raise AssertionError("expected var_ranges to be non-empty")
+            # Missing ranges are still valid here: scalar or fully unrolled nodes
+            # have no loop variables to record. For example,
+            # test_comprehensive_masked_cumprod_cuda_float32 can produce a fused
+            # node whose first child only has constant-indexed reads. Since this
+            # helper only proves a MixOrderReduction fusion opportunity, decline
+            # the proof instead of turning an optional fusion miss into a
+            # compilation failure.
+            return False
         if not (OrderedSet(var_ranges) - OrderedSet(index.free_symbols)):
             return True
 
@@ -418,6 +429,16 @@ class MixOrderReduction:
                 fallback_value=False,
             ):
                 return False
+
+        # Equal groups can be true square inner+outer reductions, but also
+        # same-order reductions where an unrelated read makes one node look
+        # non-contiguous. Compare only common full reads to prove mixed order.
+        g2 = cls.get_numel_rnumel(other_node)
+        if g1 == g2 and not any(
+            cls.is_contiguous_load(buf, node1) != cls.is_contiguous_load(buf, node2)
+            for buf in common_reads
+        ):
+            return False
 
         # Make sure a persistent reduction will be generated
         if any(
