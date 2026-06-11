@@ -2591,9 +2591,9 @@ class VariableBuilder:
         # They are handled later in __call__ and always treated as dynamic.
         if type(value) is int:
             # Check for user-provided spec from shapes_spec.
-            if config._shapes_spec is not None:
+            if config._dynamic_shapes is not None:
                 int_spec = lookup_spec_from_dynamo_source(
-                    self.source, config._shapes_spec
+                    self.source, config._dynamic_shapes
                 )
                 if int_spec is None:
                     # shapes_spec is set but this int has no spec → force static
@@ -2759,7 +2759,7 @@ class VariableBuilder:
         # At tensor builder callsites, shapes_spec for this source can only be TensorSpec or None.
         _tensor_spec = cast(
             TensorSpec | None,
-            lookup_spec_from_dynamo_source(source, config._shapes_spec),
+            lookup_spec_from_dynamo_source(source, config._dynamic_shapes),
         )
         _has_spec = _tensor_spec is not None
 
@@ -4446,7 +4446,7 @@ def _automatic_dynamic(
     # (e.g. nn.Parameter shapes when force_parameter_static_shapes=True).
     # Otherwise PGO would later "learn" those dims as dynamic and bypass the
     # progressive PGO warm-up that consumers (e.g. test_pgo_dynamic_params) rely on.
-    if config._shapes_spec is None and static_shapes and not is_dynamic_source(name):
+    if config._dynamic_shapes is None and static_shapes and not is_dynamic_source(name):
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -4496,7 +4496,7 @@ def _automatic_dynamic(
                     constraint.dim, constraint.constraint_range, constraint.name
                 )
 
-    if config._shapes_spec is not None:
+    if config._dynamic_shapes is not None:
         return _symbolic_context_from_shapes_spec(
             e,
             source,
