@@ -553,15 +553,14 @@ void initPythonBindings(PyObject* module) {
       .def_property_readonly(
           "layout",
           [](const TensorMetadata& metadata) {
-            PyObject* layout_obj =
-                torch::autograd::utils::wrap(metadata.layout_);
-            return py::reinterpret_borrow<py::object>(layout_obj);
+            return py::reinterpret_steal<py::object>(
+                torch::autograd::utils::wrap(metadata.layout_));
           })
       .def_readonly("device", &TensorMetadata::device_)
       .def_property_readonly(
           "dtype",
           [](const TensorMetadata& metadata) {
-            return py::reinterpret_borrow<py::object>(
+            return py::reinterpret_steal<py::object>(
                 torch::autograd::utils::wrap(metadata.dtype_));
           })
       .def_readonly("dim", &TensorMetadata::size_dim_)
