@@ -2190,6 +2190,25 @@ def forward(self, x_1):
         self.assertIn(torch.ops.aten.sub.Tensor, ops)
         self.assertNotIn(torch.ops.aten.sub_.Tensor, ops)
 
+    def test_python_functionalization_skips_inductor_decomposition_table(self):
+        from torch._inductor.decomposition import decompositions as inductor_decomps
+
+        def f(x, weight, bias):
+            return torch.ops.aten.native_layer_norm.default(x, [4], weight, bias, 1e-5)[
+                0
+            ]
+
+        x = torch.randn(2, 4)
+        weight = torch.randn(4)
+        bias = torch.randn(4)
+        mode = FunctionalTensorMode(decomposition_table=inductor_decomps)
+        fx_g = make_fx(dispatch_functionalize(f, mode))(x, weight, bias)
+
+        self.assertEqual(fx_g(x, weight, bias), f(x, weight, bias))
+        ops = {node.target for node in fx_g.graph.nodes if node.op == "call_function"}
+        self.assertIn(torch.ops.aten.native_layer_norm.default, ops)
+        self.assertNotIn(torch.ops.aten.var_mean.correction, ops)
+
     def test_export_decomposition_cast_does_not_emit_metadata_assert(self):
         def f(x):
             return torch.neg(x)

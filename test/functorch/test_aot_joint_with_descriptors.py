@@ -207,66 +207,72 @@ class inner_f(torch.nn.Module):
         div: "f32[1, 3, 1, 1]" = torch.ops.prims.div.default(broadcast_in_dim_1, 32.0);  broadcast_in_dim_1 = None
         add_1: "f32[1, 3, 1, 1]" = torch.ops.prims.add.default(broadcast_in_dim, 1e-05)
         rsqrt: "f32[1, 3, 1, 1]" = torch.ops.prims.rsqrt.default(add_1);  add_1 = None
-        expand: "f32[2, 3, 4, 4]" = torch.ops.aten.expand.default(div, [2, 3, 4, 4])
-        sub: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, expand);  expand = None
-        expand_1: "f32[2, 3, 4, 4]" = torch.ops.aten.expand.default(rsqrt, [2, 3, 4, 4])
-        mul: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub, expand_1);  sub = expand_1 = None
-        squeeze: "f32[3]" = torch.ops.aten.squeeze.dims(div, [0, 2, 3]);  div = None
-        squeeze_1: "f32[3]" = torch.ops.aten.squeeze.dims(rsqrt, [0, 2, 3]);  rsqrt = None
-        mul_1: "f32[3]" = torch.ops.prims.mul.default(squeeze, 0.1)
+        broadcast_in_dim_2: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(div, [2, 3, 4, 4], [0, 1, 2, 3])
+        sub: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, broadcast_in_dim_2);  broadcast_in_dim_2 = None
+        broadcast_in_dim_3: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(rsqrt, [2, 3, 4, 4], [0, 1, 2, 3])
+        mul: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub, broadcast_in_dim_3);  sub = broadcast_in_dim_3 = None
+        squeeze: "f32[1, 3, 1]" = torch.ops.prims.squeeze.default(div, [3]);  div = None
+        squeeze_1: "f32[1, 3]" = torch.ops.prims.squeeze.default(squeeze, [2]);  squeeze = None
+        squeeze_2: "f32[3]" = torch.ops.prims.squeeze.default(squeeze_1, [0]);  squeeze_1 = None
+        squeeze_3: "f32[1, 3, 1]" = torch.ops.prims.squeeze.default(rsqrt, [3]);  rsqrt = None
+        squeeze_4: "f32[1, 3]" = torch.ops.prims.squeeze.default(squeeze_3, [2]);  squeeze_3 = None
+        squeeze_5: "f32[3]" = torch.ops.prims.squeeze.default(squeeze_4, [0]);  squeeze_4 = None
+        mul_1: "f32[3]" = torch.ops.prims.mul.default(squeeze_2, 0.1)
         mul_2: "f32[3]" = torch.ops.prims.mul.default(primals_5, 0.9);  primals_5 = None
         add_2: "f32[3]" = torch.ops.prims.add.default(mul_1, mul_2);  mul_1 = mul_2 = None
-        squeeze_2: "f32[3]" = torch.ops.aten.squeeze.dims(broadcast_in_dim, [0, 2, 3]);  broadcast_in_dim = None
-        mul_3: "f32[3]" = torch.ops.prims.mul.default(squeeze_2, 1.032258064516129);  squeeze_2 = None
+        squeeze_6: "f32[1, 3, 1]" = torch.ops.prims.squeeze.default(broadcast_in_dim, [3]);  broadcast_in_dim = None
+        squeeze_7: "f32[1, 3]" = torch.ops.prims.squeeze.default(squeeze_6, [2]);  squeeze_6 = None
+        squeeze_8: "f32[3]" = torch.ops.prims.squeeze.default(squeeze_7, [0]);  squeeze_7 = None
+        mul_3: "f32[3]" = torch.ops.prims.mul.default(squeeze_8, 1.032258064516129);  squeeze_8 = None
         mul_4: "f32[3]" = torch.ops.prims.mul.default(mul_3, 0.1);  mul_3 = None
         mul_5: "f32[3]" = torch.ops.prims.mul.default(primals_6, 0.9);  primals_6 = None
         add_3: "f32[3]" = torch.ops.prims.add.default(mul_4, mul_5);  mul_4 = mul_5 = None
-        unsqueeze: "f32[3, 1]" = torch.ops.aten.unsqueeze.default(primals_3, -1)
-        unsqueeze_1: "f32[3, 1, 1]" = torch.ops.aten.unsqueeze.default(unsqueeze, -1);  unsqueeze = None
-        expand_2: "f32[2, 3, 4, 4]" = torch.ops.aten.expand.default(unsqueeze_1, [2, 3, 4, 4]);  unsqueeze_1 = None
-        mul_6: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(mul, expand_2);  mul = expand_2 = None
-        unsqueeze_2: "f32[3, 1]" = torch.ops.aten.unsqueeze.default(primals_4, -1);  primals_4 = None
-        unsqueeze_3: "f32[3, 1, 1]" = torch.ops.aten.unsqueeze.default(unsqueeze_2, -1);  unsqueeze_2 = None
-        expand_3: "f32[2, 3, 4, 4]" = torch.ops.aten.expand.default(unsqueeze_3, [2, 3, 4, 4]);  unsqueeze_3 = None
-        add_4: "f32[2, 3, 4, 4]" = torch.ops.prims.add.default(mul_6, expand_3);  mul_6 = expand_3 = None
+        broadcast_in_dim_4: "f32[3, 1]" = torch.ops.prims.broadcast_in_dim.default(primals_3, [3, 1], [0])
+        broadcast_in_dim_5: "f32[3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_4, [3, 1, 1], [0, 1]);  broadcast_in_dim_4 = None
+        broadcast_in_dim_6: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_5, [2, 3, 4, 4], [1, 2, 3]);  broadcast_in_dim_5 = None
+        mul_6: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(mul, broadcast_in_dim_6);  mul = broadcast_in_dim_6 = None
+        broadcast_in_dim_7: "f32[3, 1]" = torch.ops.prims.broadcast_in_dim.default(primals_4, [3, 1], [0]);  primals_4 = None
+        broadcast_in_dim_8: "f32[3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_7, [3, 1, 1], [0, 1]);  broadcast_in_dim_7 = None
+        broadcast_in_dim_9: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_8, [2, 3, 4, 4], [1, 2, 3]);  broadcast_in_dim_8 = None
+        add_4: "f32[2, 3, 4, 4]" = torch.ops.prims.add.default(mul_6, broadcast_in_dim_9);  mul_6 = broadcast_in_dim_9 = None
         le: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(add_4, 0.0)
         where: "f32[2, 3, 4, 4]" = torch.ops.prims.where.default(le, 0.0, add_4);  le = add_4 = None
-        detach: "f32[2, 3, 4, 4]" = torch.ops.aten.detach.default(where)
-        detach_1: "f32[2, 3, 4, 4]" = torch.ops.aten.detach.default(detach);  detach = None
-        le_1: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(detach_1, 0.0);  detach_1 = None
+        view_of: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(where)
+        view_of_1: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of);  view_of = None
+        le_1: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(view_of_1, 0.0);  view_of_1 = None
         where_1: "f32[2, 3, 4, 4]" = torch.ops.prims.where.default(le_1, 0.0, tangents_1);  le_1 = tangents_1 = None
-        unsqueeze_4: "f32[1, 3]" = torch.ops.aten.unsqueeze.default(squeeze, 0);  squeeze = None
-        unsqueeze_5: "f32[1, 3, 1]" = torch.ops.aten.unsqueeze.default(unsqueeze_4, 2);  unsqueeze_4 = None
-        unsqueeze_6: "f32[1, 3, 1, 1]" = torch.ops.aten.unsqueeze.default(unsqueeze_5, 3);  unsqueeze_5 = None
+        broadcast_in_dim_10: "f32[1, 3]" = torch.ops.prims.broadcast_in_dim.default(squeeze_2, [1, 3], [1]);  squeeze_2 = None
+        broadcast_in_dim_11: "f32[1, 3, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_10, [1, 3, 1], [0, 1]);  broadcast_in_dim_10 = None
+        broadcast_in_dim_12: "f32[1, 3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_11, [1, 3, 1, 1], [0, 1, 2]);  broadcast_in_dim_11 = None
         sum_2: "f32[3]" = torch.ops.prims.sum.default(where_1, [0, 2, 3])
-        expand_4: "f32[2, 3, 4, 4]" = torch.ops.aten.expand.default(unsqueeze_6, [2, 3, 4, 4])
-        sub_1: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, expand_4);  expand_4 = None
+        broadcast_in_dim_13: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_12, [2, 3, 4, 4], [0, 1, 2, 3])
+        sub_1: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, broadcast_in_dim_13);  broadcast_in_dim_13 = None
         mul_7: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(where_1, sub_1);  sub_1 = None
         sum_3: "f32[3]" = torch.ops.prims.sum.default(mul_7, [0, 2, 3]);  mul_7 = None
         mul_8: "f32[3]" = torch.ops.prims.mul.default(sum_2, 0.03125)
-        unsqueeze_7: "f32[1, 3]" = torch.ops.aten.unsqueeze.default(mul_8, 0);  mul_8 = None
-        unsqueeze_8: "f32[1, 3, 1]" = torch.ops.aten.unsqueeze.default(unsqueeze_7, 2);  unsqueeze_7 = None
-        unsqueeze_9: "f32[1, 3, 1, 1]" = torch.ops.aten.unsqueeze.default(unsqueeze_8, 3);  unsqueeze_8 = None
+        broadcast_in_dim_14: "f32[1, 3]" = torch.ops.prims.broadcast_in_dim.default(mul_8, [1, 3], [1]);  mul_8 = None
+        broadcast_in_dim_15: "f32[1, 3, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_14, [1, 3, 1], [0, 1]);  broadcast_in_dim_14 = None
+        broadcast_in_dim_16: "f32[1, 3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_15, [1, 3, 1, 1], [0, 1, 2]);  broadcast_in_dim_15 = None
         mul_9: "f32[3]" = torch.ops.prims.mul.default(sum_3, 0.03125)
-        mul_10: "f32[3]" = torch.ops.prims.mul.default(squeeze_1, squeeze_1)
+        mul_10: "f32[3]" = torch.ops.prims.mul.default(squeeze_5, squeeze_5)
         mul_11: "f32[3]" = torch.ops.prims.mul.default(mul_9, mul_10);  mul_9 = mul_10 = None
-        unsqueeze_10: "f32[1, 3]" = torch.ops.aten.unsqueeze.default(mul_11, 0);  mul_11 = None
-        unsqueeze_11: "f32[1, 3, 1]" = torch.ops.aten.unsqueeze.default(unsqueeze_10, 2);  unsqueeze_10 = None
-        unsqueeze_12: "f32[1, 3, 1, 1]" = torch.ops.aten.unsqueeze.default(unsqueeze_11, 3);  unsqueeze_11 = None
-        mul_12: "f32[3]" = torch.ops.prims.mul.default(squeeze_1, primals_3);  primals_3 = None
-        unsqueeze_13: "f32[1, 3]" = torch.ops.aten.unsqueeze.default(mul_12, 0);  mul_12 = None
-        unsqueeze_14: "f32[1, 3, 1]" = torch.ops.aten.unsqueeze.default(unsqueeze_13, 2);  unsqueeze_13 = None
-        unsqueeze_15: "f32[1, 3, 1, 1]" = torch.ops.aten.unsqueeze.default(unsqueeze_14, 3);  unsqueeze_14 = None
-        expand_5: "f32[2, 3, 4, 4]" = torch.ops.aten.expand.default(unsqueeze_6, [2, 3, 4, 4]);  unsqueeze_6 = None
-        sub_2: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, expand_5);  convolution = expand_5 = None
-        expand_6: "f32[2, 3, 4, 4]" = torch.ops.aten.expand.default(unsqueeze_12, [2, 3, 4, 4]);  unsqueeze_12 = None
-        mul_13: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub_2, expand_6);  sub_2 = expand_6 = None
+        broadcast_in_dim_17: "f32[1, 3]" = torch.ops.prims.broadcast_in_dim.default(mul_11, [1, 3], [1]);  mul_11 = None
+        broadcast_in_dim_18: "f32[1, 3, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_17, [1, 3, 1], [0, 1]);  broadcast_in_dim_17 = None
+        broadcast_in_dim_19: "f32[1, 3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_18, [1, 3, 1, 1], [0, 1, 2]);  broadcast_in_dim_18 = None
+        mul_12: "f32[3]" = torch.ops.prims.mul.default(squeeze_5, primals_3);  primals_3 = None
+        broadcast_in_dim_20: "f32[1, 3]" = torch.ops.prims.broadcast_in_dim.default(mul_12, [1, 3], [1]);  mul_12 = None
+        broadcast_in_dim_21: "f32[1, 3, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_20, [1, 3, 1], [0, 1]);  broadcast_in_dim_20 = None
+        broadcast_in_dim_22: "f32[1, 3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_21, [1, 3, 1, 1], [0, 1, 2]);  broadcast_in_dim_21 = None
+        broadcast_in_dim_23: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_12, [2, 3, 4, 4], [0, 1, 2, 3]);  broadcast_in_dim_12 = None
+        sub_2: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, broadcast_in_dim_23);  convolution = broadcast_in_dim_23 = None
+        broadcast_in_dim_24: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_19, [2, 3, 4, 4], [0, 1, 2, 3]);  broadcast_in_dim_19 = None
+        mul_13: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub_2, broadcast_in_dim_24);  sub_2 = broadcast_in_dim_24 = None
         sub_3: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(where_1, mul_13);  where_1 = mul_13 = None
-        expand_7: "f32[2, 3, 4, 4]" = torch.ops.aten.expand.default(unsqueeze_9, [2, 3, 4, 4]);  unsqueeze_9 = None
-        sub_4: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(sub_3, expand_7);  sub_3 = expand_7 = None
-        expand_8: "f32[2, 3, 4, 4]" = torch.ops.aten.expand.default(unsqueeze_15, [2, 3, 4, 4]);  unsqueeze_15 = None
-        mul_14: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub_4, expand_8);  sub_4 = expand_8 = None
-        mul_15: "f32[3]" = torch.ops.prims.mul.default(sum_3, squeeze_1);  sum_3 = squeeze_1 = None
+        broadcast_in_dim_25: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_16, [2, 3, 4, 4], [0, 1, 2, 3]);  broadcast_in_dim_16 = None
+        sub_4: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(sub_3, broadcast_in_dim_25);  sub_3 = broadcast_in_dim_25 = None
+        broadcast_in_dim_26: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_22, [2, 3, 4, 4], [0, 1, 2, 3]);  broadcast_in_dim_22 = None
+        mul_14: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub_4, broadcast_in_dim_26);  sub_4 = broadcast_in_dim_26 = None
+        mul_15: "f32[3]" = torch.ops.prims.mul.default(sum_3, squeeze_5);  sum_3 = squeeze_5 = None
         convolution_backward = torch.ops.aten.convolution_backward.default(mul_14, primals_8, primals_1, [3], [1, 1], [1, 1], [1, 1], False, [0, 0], 1, [False, True, True]);  mul_14 = primals_8 = primals_1 = None
         getitem_1: "f32[3, 1, 3, 3]" = convolution_backward[1]
         getitem_2: "f32[3]" = convolution_backward[2];  convolution_backward = None

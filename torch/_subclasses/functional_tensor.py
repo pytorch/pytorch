@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import sys
 import warnings
 import weakref
 from abc import ABC, abstractmethod
@@ -85,24 +86,34 @@ def _can_decompose_fast(
     return None
 
 
-def _must_decompose_for_functionalization(func: OpOverload) -> bool:
+def _should_skip_decomposition_for_functionalization(func: OpOverload) -> bool:
     return func._schema.is_mutable
 
 
-def _is_default_decomposition(func: OpOverload, decomp_fn: Any) -> bool:
+def _is_internal_decomposition(func: OpOverload, decomp_fn: Any) -> bool:
     from torch._decomp import decomposition_table
 
-    return decomposition_table.get(func) is decomp_fn
+    if decomposition_table.get(func) is decomp_fn:
+        return True
+
+    inductor_decomposition_mod = sys.modules.get("torch._inductor.decomposition")
+    if inductor_decomposition_mod is None:
+        return False
+
+    inductor_decomps = inductor_decomposition_mod.decompositions
+    return inductor_decomps.get(func) is decomp_fn
 
 
-def _should_skip_default_decomposition(
+def _should_skip_internal_decomposition(
     func: OpOverload,
     decomp_fn: Any,
 ) -> bool:
+    # Keep PyTorch's own decomposition tables on the existing proxy path; the
+    # functionalization path is only needed for user/custom decompositions.
     return func not in (
         torch.ops.aten.t.default,
         torch.ops.aten.transpose.int,
-    ) and _is_default_decomposition(func, decomp_fn)
+    ) and _is_internal_decomposition(func, decomp_fn)
 
 
 def _assert_functionalize_not_active(msg: str) -> None:
@@ -531,7 +542,7 @@ class FunctionalTensorMode(TorchDispatchMode):
     ) -> Any:
         if func in FunctionalTensor.metadata_fns:
             return NotImplemented
-        if _must_decompose_for_functionalization(func):
+        if _should_skip_decomposition_for_functionalization(func):
             return NotImplemented
 
         decomp_table = self.decomposition_table
@@ -549,7 +560,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             if func not in decomp_table:
                 return NotImplemented
             decomp_fn = decomp_table[func]
-            if _should_skip_default_decomposition(
+            if _should_skip_internal_decomposition(
                 func,
                 decomp_fn,
             ):
@@ -575,7 +586,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         decomp_fn = decomp_table.get(func)
         if decomp_fn is None:
             return NotImplemented
-        if _should_skip_default_decomposition(
+        if _should_skip_internal_decomposition(
             func,
             decomp_fn,
         ):

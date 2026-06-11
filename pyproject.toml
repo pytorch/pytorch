@@ -354,9 +354,6 @@ select = [
     "LOG015" # please fix
 ]
 
-# torch/ folders still needing S101 migration
-"torch/_inductor/**" = ["S101"]
-
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
 
@@ -376,6 +373,9 @@ package = 'torch'
   ".spin/cmds.py:regenerate_type_stubs",
   ".spin/cmds.py:regenerate_clangtidy_files",
   ".spin/cmds.py:regenerate_github_workflows",
+]
+"Documentation" = [
+  ".spin/cmds.py:docs",
 ]
 "Type" = [
     ".spin/cmds.py:pyrefly",
