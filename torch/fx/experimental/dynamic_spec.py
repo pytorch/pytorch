@@ -9,8 +9,6 @@ import itertools
 import threading
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
-import sympy
-
 from torch import SymBool, SymInt
 
 
@@ -170,6 +168,8 @@ class IntVar(SymInt):
         max: int | None = None,
         optimization_hint: int | None = None,
     ) -> None:
+        import sympy
+
         from torch.fx.experimental.sym_node import _NO_HINT, SymNode
         from torch.utils._sympy.numbers import int_oo
         from torch.utils._sympy.value_ranges import ValueRanges
@@ -720,3 +720,24 @@ _SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG = (
     "currently uses unbacked symbols only, which already emit "
     "runtime assertions; the flag has no effect."
 )
+
+
+def _coerce_to_shapes_spec(
+    x: Any,
+) -> ShapesSpec | None:
+    """Normalize a user-supplied dynamic-spec value to ``ShapesSpec | None``.
+
+    Accepts ``None``, an existing ``ShapesSpec``, a ``ParamsSpec``, or a plain
+    ``dict`` (the same shape ``ParamsSpec`` accepts). The dict and
+    ``ParamsSpec`` forms are auto-wrapped by ``ShapesSpec.__init__``.
+    """
+    if x is None:
+        return None
+    if isinstance(x, ShapesSpec):
+        return x
+    if isinstance(x, (dict, ParamsSpec)):
+        return ShapesSpec(x)
+    raise TypeError(
+        f"dynamic spec expects a dict, ShapesSpec, or ParamsSpec, "
+        f"got {type(x).__name__}"
+    )
