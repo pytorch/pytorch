@@ -852,6 +852,100 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertEqual(indices_plc.dim, 0)
         self.assertEqual(input_plc.dim, 1)
 
+    def test_nll_loss_forward_single_dim_strategy(self):
+        from torch.distributed.tensor._ops._math_ops import (
+            nll_loss_forward_single_dim_strategy,
+            Reduction,
+        )
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _ShardingPlaceholder,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 16, 12]), stride=(192, 12, 1), dtype=torch.float32
+        )
+        target_meta = TensorMeta(
+            shape=torch.Size([8, 12]), stride=(12, 1), dtype=torch.int64
+        )
+        weight_meta = TensorMeta(
+            shape=torch.Size([16]), stride=(1,), dtype=torch.float32
+        )
+
+        strategies = nll_loss_forward_single_dim_strategy(
+            torch.ops.aten.nll_loss2d_forward.default,
+            (input_meta, target_meta, weight_meta, Reduction.NONE.value, -100),
+            {},
+        )
+        self.assertEqual(len(strategies), 2)
+        self.assertEqual(len(strategies[0]), 5)
+        out, total_weight, inp, target, weight = strategies[0]
+        self.assertIsInstance(out, _ShardingPlaceholder)
+        self.assertEqual(out.dim, 0)
+        self.assertIsInstance(total_weight, Replicate)
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(target.dim, 0)
+        self.assertIsInstance(weight, Replicate)
+
+        out, total_weight, inp, target, weight = strategies[1]
+        self.assertEqual(out.dim, 1)
+        self.assertIsInstance(total_weight, Replicate)
+        self.assertEqual(inp.dim, 2)
+        self.assertEqual(target.dim, 1)
+        self.assertIsInstance(weight, Replicate)
+
+        strategies = nll_loss_forward_single_dim_strategy(
+            torch.ops.aten.nll_loss2d_forward.default,
+            (input_meta, target_meta, None, Reduction.MEAN.value, -100),
+            {},
+        )
+        self.assertEqual(len(strategies), 2)
+        self.assertEqual(len(strategies[0]), 4)
+        out, total_weight, inp, target = strategies[0]
+        self.assertEqual(out, Partial("avg"))
+        self.assertEqual(total_weight, Partial("sum"))
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(target.dim, 0)
+
+    def test_nll_loss_forward_mean_filter(self):
+        from torch.distributed.tensor._ops._math_ops import (
+            _nll_loss_forward_full_mesh_strategy_filter,
+        )
+
+        mesh = DeviceMesh("cpu", torch.arange(2))
+        input_meta = TensorMeta(
+            shape=torch.Size([7, 16]), stride=(16, 1), dtype=torch.float32
+        )
+        target_meta = TensorMeta(shape=torch.Size([7]), stride=(1,), dtype=torch.int64)
+        input_spec = DTensorSpec(mesh, (Shard(0),), input_meta)
+        target_spec = DTensorSpec(mesh, (Shard(0),), target_meta)
+        output_spec = DTensorSpec(mesh, (Partial("avg"),), None)
+        total_weight_spec = DTensorSpec(mesh, (Partial("sum"),), None)
+        op_schema = OpSchema(
+            torch.ops.aten.nll_loss_forward.default,
+            args_schema=(),
+            kwargs_schema={},
+        )
+
+        self.assertFalse(
+            _nll_loss_forward_full_mesh_strategy_filter(
+                mesh,
+                op_schema,
+                [input_spec, target_spec],
+                (output_spec, total_weight_spec),
+            )
+        )
+
+        target_meta = TensorMeta(shape=torch.Size([8]), stride=(1,), dtype=torch.int64)
+        target_spec = DTensorSpec(mesh, (Shard(0),), target_meta)
+        self.assertTrue(
+            _nll_loss_forward_full_mesh_strategy_filter(
+                mesh,
+                op_schema,
+                [input_spec, target_spec],
+                (output_spec, total_weight_spec),
+            )
+        )
+
     def test_layer_norm_fwd_single_dim_strategy(self):
         """layer_norm produces sharding rules for each outer dim."""
         from torch.distributed.tensor._ops._math_ops import (

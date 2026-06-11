@@ -1059,127 +1059,87 @@ def softmax_backward_single_dim_strategy(
     )
 
 
-@register_op_strategy(
+def _nll_loss_forward_full_mesh_strategy_filter(
+    mesh: DeviceMesh,
+    op_schema: OpSchema,
+    input_specs: list[DTensorSpec],
+    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
+) -> bool:
+    if not isinstance(output_specs, tuple):
+        raise AssertionError(f"Expected tuple output specs, got {type(output_specs)}")
+    output_spec = output_specs[0]
+    if output_spec is None:
+        raise AssertionError("Expected nll_loss output spec")
+
+    if any(
+        isinstance(p, Partial) and p.reduce_op == "avg" for p in output_spec.placements
+    ):
+        target_spec = input_specs[1]
+        return is_tensor_evenly_shardable(target_spec.shape, target_spec)
+    return True
+
+
+@register_single_dim_strategy(
     [aten.nll_loss_forward.default, aten.nll_loss2d_forward.default],
     schema_info=RuntimeSchemaInfo(3),
+    full_mesh_strategy_filter=_nll_loss_forward_full_mesh_strategy_filter,
 )
-def nll_loss_forward_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-
-    if not len(op_schema.args_schema) == 5:
-        raise AssertionError(f"Expected 5 args, got {len(op_schema.args_schema)}")
+def nll_loss_forward_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    if len(args_schema) != 5:
+        raise AssertionError(f"Expected 5 args, got {len(args_schema)}")
 
     (
-        input_strategy,
-        target_strategy,
-        weight_strategy,
+        input_meta,
+        target_meta,
+        weight_meta,
         reduction,
         _,
-    ) = op_schema.args_schema
-    input_strategy = cast(OpStrategy, input_strategy)
-    target_strategy = cast(OpStrategy, target_strategy)
+    ) = args_schema
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    if not isinstance(target_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(target_meta)}")
+    if weight_meta is not None and not isinstance(weight_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(weight_meta)}")
     reduction = cast(int, reduction)
 
-    input_shape = input_strategy.shape
+    input_shape = input_meta.shape
     channel_dim = 1 if len(input_shape) >= 2 else 0
-
-    output_strategy = OpStrategy([])
-    for idx, input_placement_strategy in enumerate(input_strategy.strategies):
-        op_args_target_specs = []
-        redistribute_costs = []
-
-        input_src_spec = input_placement_strategy.output_spec
-        input_expected_spec = DTensorSpec(
-            mesh=mesh,
-            placements=replicate_reduction_dims(
-                input_src_spec.placements, [channel_dim]
-            ),
-            tensor_meta=input_src_spec.tensor_meta,
-        )
-        op_args_target_specs.append(input_expected_spec)
-        redistribute_costs.append(
-            generate_redistribute_costs(input_strategy, input_expected_spec)
-        )
-
-        target_src_spec = target_strategy.strategies[idx].output_spec
-        target_expected_spec = DTensorSpec(
-            mesh=mesh,
-            placements=_skip_dim(input_expected_spec.placements, channel_dim),
-            tensor_meta=target_src_spec.tensor_meta,
-        )
-        op_args_target_specs.append(target_expected_spec)
-        redistribute_costs.append(
-            generate_redistribute_costs(target_strategy, target_expected_spec)
-        )
-
-        if weight_strategy is not None:
-            if not isinstance(weight_strategy, OpStrategy):
-                raise AssertionError(
-                    f"Expected OpStrategy, got {type(weight_strategy)}"
-                )
-            weight_src_spec = weight_strategy.strategies[idx].output_spec
-            weight_expected_spec = DTensorSpec(
-                mesh=mesh,
-                placements=_replicate_dims_start_at(weight_src_spec.placements),
-                tensor_meta=weight_src_spec.tensor_meta,
-            )
-            op_args_target_specs.append(weight_expected_spec)
-            redistribute_costs.append(
-                generate_redistribute_costs(weight_strategy, weight_expected_spec)
-            )
-
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    weight_placement = [Replicate()] if weight_meta is not None else []
+    for input_dim in range(len(input_shape)):
+        if input_dim == channel_dim:
+            continue
+        target_dim = input_dim if input_dim < channel_dim else input_dim - 1
+        input_shard = _ShardingPlaceholder(input_dim)
+        target_shard = _ShardingPlaceholder(target_dim)
         if reduction == Reduction.NONE.value:
-            output_expected_spec = target_expected_spec
-            total_weight_expected_spec = DTensorSpec(
-                mesh=mesh, placements=tuple([Replicate()] * mesh.ndim)
+            strategies.append(
+                [
+                    target_shard,
+                    Replicate(),
+                    input_shard,
+                    target_shard,
+                    *weight_placement,
+                ]
             )
         else:
-            if reduction == Reduction.MEAN.value:
-                reduction_op = "avg"
-                if not is_tensor_evenly_shardable(
-                    target_expected_spec.shape, target_expected_spec
-                ):
-                    raise ValueError(
-                        "The intermediate results of nll_loss cannot be evenly sharded, \
-                        resulting in biased mean result."
-                    )
-            else:
-                reduction_op = "sum"
-            reduce_dims = list(range(target_expected_spec.ndim))
-            reduce_dims_map = _infer_reduce_dims_map(
-                reduce_dims, target_expected_spec.ndim, keep_dim=False
-            )
-            out_placements = map_placements_after_reduction(
-                target_expected_spec.placements,
-                reduce_dims,
-                reduce_dims_map,
-                reduction_op,
-            )
-            output_expected_spec = DTensorSpec(
-                mesh=mesh,
-                placements=out_placements,
+            reduction_op = "avg" if reduction == Reduction.MEAN.value else "sum"
+            strategies.append(
+                [
+                    Partial(reduction_op),
+                    Partial("sum"),
+                    input_shard,
+                    target_shard,
+                    *weight_placement,
+                ]
             )
 
-            total_weight_placements = map_placements_after_reduction(
-                target_expected_spec.placements,
-                reduce_dims,
-                reduce_dims_map,
-                "sum",
-            )
-            total_weight_expected_spec = DTensorSpec(
-                mesh=mesh,
-                placements=total_weight_placements,
-            )
-
-        output_strategy.strategies.append(
-            OpSpec(
-                output_specs=(output_expected_spec, total_weight_expected_spec),
-                input_specs=op_args_target_specs,
-                redistribute_cost=redistribute_costs,
-            )
-        )
-
-    return output_strategy
+    return strategies
 
 
 @register_op_strategy(
