@@ -759,10 +759,10 @@ class OutputGraph(OutputGraphCommon):
 
         # Wire ShapesSpec.assumptions BEFORE any input is processed. Each
         # assumption is appended to `_shape_spec_pending_assumptions`;
-        if config._shapes_spec is not None:
-            from torch._dynamo.variables.builder import _wire_spec_assumptions
+        if config._dynamic_shapes is not None:
+            from torch.fx.experimental.symbolic_shapes import _wire_spec_assumptions
 
-            _wire_spec_assumptions(self.shape_env, config._shapes_spec)
+            _wire_spec_assumptions(self.shape_env, config._dynamic_shapes)
 
         # Map each tensor id to a list of sources. This is necessary because
         # tensor ids cannot be recovered from tracked fakes (in general).
@@ -1949,8 +1949,8 @@ class OutputGraph(OutputGraphCommon):
         # Finalize shapes_spec wiring: errors if any spec assumption/derived
         # check still has unbound IntVar dependencies (i.e. an IntVar
         # appears in an expression but never as a bare-IntVar input slot).
-        if config._shapes_spec is not None:
-            from torch._dynamo.variables.builder import _finalize_spec_wiring
+        if config._dynamic_shapes is not None:
+            from torch.fx.experimental.symbolic_shapes import _finalize_spec_wiring
 
             _finalize_spec_wiring(self.shape_env)
 
