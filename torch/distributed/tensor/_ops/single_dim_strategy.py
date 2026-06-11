@@ -68,6 +68,15 @@ _SingleDimStrategyFunc: TypeAlias = Callable[
 _ExpandedSingleDimStrategyFunc: TypeAlias = Callable[
     [OpOverload, ArgsType, KwargsType], _StrategyTypeT
 ]
+_FullMeshStrategyFilter: TypeAlias = Callable[
+    [
+        DeviceMesh,
+        OpSchema,
+        list[DTensorSpec],
+        DTensorSpec | tuple[DTensorSpec | None, ...],
+    ],
+    bool,
+]
 
 
 @dataclass
@@ -75,6 +84,7 @@ class _SingleDimStrategyInfo:
     func: _SingleDimStrategyFunc
     allow_unbacked_sharding: bool | None = field(default=None)
     allow_uneven_sharding: bool = field(default=False)
+    full_mesh_strategy_filter: _FullMeshStrategyFilter | None = field(default=None)
     # Positions (in args_schema) of args that may live on a different mesh
     # than the op's compute mesh.  These args must be Replicate.
     # See Note [Multi-mesh args] in expand_to_full_mesh_op_strategy.
@@ -305,11 +315,13 @@ class _PreparedSingleDimStrategy:
         if isinstance(strategy_fn, _SingleDimStrategyInfo):
             self.allow_unbacked_sharding = strategy_fn.allow_unbacked_sharding
             self.allow_uneven_sharding = strategy_fn.allow_uneven_sharding
+            self.full_mesh_strategy_filter = strategy_fn.full_mesh_strategy_filter
             different_mesh_args = strategy_fn.different_mesh_args
             func = strategy_fn.func
         else:
             self.allow_unbacked_sharding = None
             self.allow_uneven_sharding = False
+            self.full_mesh_strategy_filter = None
             different_mesh_args = None
             func = strategy_fn
 
@@ -370,9 +382,7 @@ class _PreparedSingleDimStrategy:
         # A mismatch means the strategy is missing kwargs placements or has
         # extra entries.
         if len(strategies_with_placeholders) > 0:
-            schema_num_outputs = sum(
-                1 for r in op_schema.op._schema.returns if "Tensor" in str(r.type)
-            )
+            schema_num_outputs = len(op_schema.op._schema.returns)
             expected_len = schema_num_outputs + num_inputs
             actual_len = len(strategies_with_placeholders[0])
             if actual_len != expected_len:
@@ -663,6 +673,18 @@ def _expand_single_dim_strategy_to_mesh(
             is_inplace = base_name.endswith("_")
 
             element_mesh = prepared_strategy.element_mesh or mesh
+            full_mesh_strategy_filter = None
+            if prepared_strategy.full_mesh_strategy_filter is not None:
+
+                def full_mesh_strategy_filter(
+                    input_specs: list[DTensorSpec],
+                    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
+                ) -> bool:
+                    if prepared_strategy.full_mesh_strategy_filter is None:
+                        raise AssertionError
+                    return prepared_strategy.full_mesh_strategy_filter(
+                        element_mesh, op_schema, input_specs, output_specs
+                    )
 
             return expand_to_full_mesh_op_strategy(
                 element_mesh,
@@ -673,6 +695,7 @@ def _expand_single_dim_strategy_to_mesh(
                 input_index=prepared_strategy.num_outputs,
                 allow_unbacked_sharding=prepared_strategy.allow_unbacked_sharding,
                 allow_uneven_sharding=prepared_strategy.allow_uneven_sharding,
+                full_mesh_strategy_filter=full_mesh_strategy_filter,
                 different_mesh_args=prepared_strategy.remapped_different_mesh_args,
             )
 
@@ -780,6 +803,7 @@ def register_single_dim_strategy(
     schema_info: RuntimeSchemaInfo | None = None,
     allow_unbacked_sharding: bool | None = None,
     allow_uneven_sharding: bool = False,
+    full_mesh_strategy_filter: _FullMeshStrategyFilter | None = None,
     different_mesh_args: list[int] | None = None,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
@@ -829,6 +853,7 @@ def register_single_dim_strategy(
             func=impl,
             allow_unbacked_sharding=allow_unbacked_sharding,
             allow_uneven_sharding=allow_uneven_sharding,
+            full_mesh_strategy_filter=full_mesh_strategy_filter,
             different_mesh_args=different_mesh_args,
         )
         registration_wrapper(info)
