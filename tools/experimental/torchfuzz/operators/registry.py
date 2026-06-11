@@ -19,6 +19,7 @@ _OPERATOR_MODULES: list[str] = [
     "item",
     "layout",
     "logical",
+    "manipulation_indexing",
     "masked_select",
     "matrix_multiply",
     "nn_functional",

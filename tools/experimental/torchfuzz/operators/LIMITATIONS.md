@@ -94,3 +94,12 @@ model and affect all or most operators.
 
 - Both inputs always share the output dtype. Mixed integer-type
   bitwise ops with type promotion are never tested.
+
+## Manipulation & Indexing
+
+- `torch.conj_physical` never tests complex dtypes. On real-valued
+  tensors it is a no-op; the actual conjugation logic is never
+  exercised.
+
+- `torch.fill` never uses a 0-d tensor fill value (always uses a
+  scalar literal).
