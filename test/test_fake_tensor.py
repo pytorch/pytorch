@@ -2621,6 +2621,67 @@ class FakeTensorOperatorInvariants(TestCase):
                 torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE).device.type, GPU_TYPE
             )
 
+    def test_ctc_loss_tensor_fake_validates_static_inputs(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+
+        with FakeTensorMode(
+            shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True)
+        ) as fake_mode:
+
+            def fake_tensor(shape, dtype, device):
+                meta = torch.empty(shape, dtype=dtype, device="meta")
+                return FakeTensor(fake_mode, meta, torch.device(device))
+
+            log_probs = fake_tensor((2, 2, 3), torch.float32, "cuda")
+            log_probs_2d = fake_tensor((2, 3), torch.float32, "cuda")
+            log_probs_1d = fake_tensor((3,), torch.float32, "cuda")
+            log_probs_half = fake_tensor((2, 2, 3), torch.float16, "cuda")
+            targets = fake_tensor((2,), torch.int64, "cuda")
+            float_targets = fake_tensor((2,), torch.float32, "cuda")
+            lengths = fake_tensor((2,), torch.int64, "cuda")
+            length = fake_tensor((1,), torch.int64, "cuda")
+            bool_lengths = fake_tensor((2,), torch.bool, "cuda")
+
+            none_reduction = torch.ops.aten.ctc_loss.Tensor(
+                log_probs, targets, lengths, lengths, 0, 0, False
+            )
+            mean_reduction = torch.ops.aten.ctc_loss.Tensor(
+                log_probs, float_targets, lengths, lengths, 0, 1, False
+            )
+            sum_reduction = torch.ops.aten.ctc_loss.Tensor(
+                log_probs, targets, lengths, lengths, 0, 2, False
+            )
+            unbatched_none_reduction = torch.ops.aten.ctc_loss.Tensor(
+                log_probs_2d, targets, length, length, 0, 0, False
+            )
+
+            self.assertEqual(none_reduction.shape, (2,))
+            self.assertEqual(mean_reduction.shape, ())
+            self.assertEqual(sum_reduction.shape, ())
+            self.assertEqual(unbatched_none_reduction.shape, ())
+
+            with self.assertRaisesRegex(RuntimeError, "input_lengths must be integral"):
+                torch.ops.aten.ctc_loss.Tensor(
+                    log_probs, targets, bool_lengths, lengths, 0, 1, False
+                )
+            with self.assertRaisesRegex(
+                RuntimeError, "target_lengths must be integral"
+            ):
+                torch.ops.aten.ctc_loss.Tensor(
+                    log_probs, targets, lengths, bool_lengths, 0, 1, False
+                )
+            with self.assertRaisesRegex(RuntimeError, "log_probs must be 3-D"):
+                torch.ops.aten.ctc_loss.Tensor(
+                    log_probs_1d, targets, lengths, lengths, 0, 1, False
+                )
+            with self.assertRaisesRegex(
+                RuntimeError, "log_probs must be float32 or float64"
+            ):
+                torch.ops.aten.ctc_loss.Tensor(
+                    log_probs_half, targets, lengths, lengths, 0, 1, False
+                )
+
     @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
     def test_move_module_under_fake(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
