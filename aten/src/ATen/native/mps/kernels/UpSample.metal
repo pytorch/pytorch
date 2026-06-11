@@ -502,68 +502,6 @@ kernel void upsample_bilinear2d(
   }
 }
 
-// Nearest source index: floor(scale * dst) for nearest, floor(scale * (dst +
-// 0.5)) for nearest-exact. scale is the input/output ratio, so truncation
-// (== floor for the non-negative product) matches the CPU reference. Computing
-// this directly in Metal (built with -fno-fast-math) is bit-stable across macOS
-// versions, unlike the MPSGraph resize which mis-rounds exact boundaries on
-// macOS 14.
-template <bool exact>
-inline long nearest_src_index(float scale, uint dst) {
-  return static_cast<long>(exact ? scale * (dst + 0.5f) : scale * dst);
-}
-
-template <typename T, bool exact>
-kernel void upsample_nearest1d(
-    constant T* inputData [[buffer(0)]],
-    device T* outputData [[buffer(1)]],
-    constant ulong3& input_strides [[buffer(2)]],
-    constant ulong3& output_strides [[buffer(3)]],
-    constant long3& input_sizes [[buffer(4)]],
-    constant long3& output_sizes [[buffer(5)]],
-    constant float2& scales [[buffer(6)]],
-    constant bool& align_corners [[buffer(7)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  (void)align_corners; // nearest never uses align_corners
-  const auto output_x = thread_index;
-  const auto src_x = nearest_src_index<exact>(scales.x, output_x);
-  for (int n = 0; n < output_sizes.x; n++) {
-    for (int c = 0; c < output_sizes.y; c++) {
-      outputData
-          [n * output_strides.x + c * output_strides.y +
-           output_x * output_strides.z] = upsample_get_value_bounded<T>(
-          inputData, input_sizes.z, input_strides, n, c, src_x);
-    }
-  }
-}
-
-template <typename T, bool exact>
-kernel void upsample_nearest2d(
-    constant T* inputData [[buffer(0)]],
-    device T* outputData [[buffer(1)]],
-    constant ulong4& input_strides [[buffer(2)]],
-    constant ulong4& output_strides [[buffer(3)]],
-    constant long4& input_sizes [[buffer(4)]],
-    constant long4& output_sizes [[buffer(5)]],
-    constant float2& scales [[buffer(6)]],
-    constant bool& align_corners [[buffer(7)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  (void)align_corners; // nearest never uses align_corners
-  const auto output_x = thread_index % static_cast<uint>(output_sizes.w);
-  const auto output_y = thread_index / static_cast<uint>(output_sizes.w);
-  const auto src_x = nearest_src_index<exact>(scales.x, output_x);
-  const auto src_y = nearest_src_index<exact>(scales.y, output_y);
-  for (int n = 0; n < output_sizes.x; n++) {
-    for (int c = 0; c < output_sizes.y; c++) {
-      outputData
-          [n * output_strides.x + c * output_strides.y +
-           output_y * output_strides.z + output_x * output_strides.w] =
-          upsample_get_value_bounded<T>(
-              inputData, input_sizes.wz, input_strides, n, c, src_y, src_x);
-    }
-  }
-}
-
 struct BilinearFunctor {
   inline float operator()(float x) {
     x = abs(x);
@@ -821,38 +759,6 @@ kernel void upsample_bicubic2d_backward(
       constant bool& align_corners [[buffer(7)]],                 \
       uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_UPSAMPLE_NEAREST_1D(NAME, EXACT, DTYPE)       \
-  template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
-  upsample_nearest1d<DTYPE, EXACT>(                                \
-      constant DTYPE * inputData [[buffer(0)]],                    \
-      device DTYPE * outputData [[buffer(1)]],                     \
-      constant ulong3 & input_strides [[buffer(2)]],              \
-      constant ulong3 & output_strides [[buffer(3)]],             \
-      constant long3 & input_sizes [[buffer(4)]],                 \
-      constant long3 & output_sizes [[buffer(5)]],                \
-      constant float2 & scales [[buffer(6)]],                     \
-      constant bool& align_corners [[buffer(7)]],                 \
-      uint thread_index [[thread_position_in_grid]])
-
-#define INSTANTIATE_UPSAMPLE_NEAREST_2D(NAME, EXACT, DTYPE)       \
-  template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
-  upsample_nearest2d<DTYPE, EXACT>(                                \
-      constant DTYPE * inputData [[buffer(0)]],                    \
-      device DTYPE * outputData [[buffer(1)]],                     \
-      constant ulong4 & input_strides [[buffer(2)]],              \
-      constant ulong4 & output_strides [[buffer(3)]],             \
-      constant long4 & input_sizes [[buffer(4)]],                 \
-      constant long4 & output_sizes [[buffer(5)]],                \
-      constant float2 & scales [[buffer(6)]],                     \
-      constant bool& align_corners [[buffer(7)]],                 \
-      uint thread_index [[thread_position_in_grid]])
-
-#define INSTANTIATE_UPSAMPLE_NEAREST(DTYPE)                      \
-  INSTANTIATE_UPSAMPLE_NEAREST_1D(nearest1d, false, DTYPE);      \
-  INSTANTIATE_UPSAMPLE_NEAREST_1D(nearest_exact1d, true, DTYPE); \
-  INSTANTIATE_UPSAMPLE_NEAREST_2D(nearest2d, false, DTYPE);      \
-  INSTANTIATE_UPSAMPLE_NEAREST_2D(nearest_exact2d, true, DTYPE)
-
 #define INSTANTIATE_UPSAMPLE_3D(DTYPE)                                    \
   template [[host_name("upsample_nearest_3d_" #DTYPE)]] kernel void       \
   upsample_nearest_3d<DTYPE>(                                             \
@@ -909,15 +815,3 @@ INSTANTIATE_UPSAMPLE_3D(uchar);
 INSTANTIATE_UPSAMPLE_ALL(float);
 INSTANTIATE_UPSAMPLE_ALL(half);
 INSTANTIATE_UPSAMPLE_ALL(bfloat);
-
-// Nearest 1d/2d forward is a pure gather, so cover every dtype the MPSGraph path
-// supported to avoid a coverage regression.
-INSTANTIATE_UPSAMPLE_NEAREST(float);
-INSTANTIATE_UPSAMPLE_NEAREST(half);
-INSTANTIATE_UPSAMPLE_NEAREST(bfloat);
-INSTANTIATE_UPSAMPLE_NEAREST(uchar);
-INSTANTIATE_UPSAMPLE_NEAREST(char);
-INSTANTIATE_UPSAMPLE_NEAREST(short);
-INSTANTIATE_UPSAMPLE_NEAREST(int);
-INSTANTIATE_UPSAMPLE_NEAREST(long);
-INSTANTIATE_UPSAMPLE_NEAREST(bool);
