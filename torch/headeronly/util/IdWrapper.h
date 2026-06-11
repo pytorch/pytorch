@@ -1,12 +1,10 @@
 #pragma once
 
-#include <torch/headeronly/macros/Macros.h>
-
 #include <cstddef>
 #include <functional>
 #include <utility>
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+namespace c10 {
 
 /**
  * This template simplifies generation of simple classes that wrap an id
@@ -66,11 +64,11 @@ class IdWrapper {
   underlying_type id_;
 };
 
-HIDDEN_NAMESPACE_END(torch, headeronly)
-
-namespace c10 {
-using torch::headeronly::IdWrapper;
 } // namespace c10
+
+namespace torch::headeronly {
+using c10::IdWrapper;
+} // namespace torch::headeronly
 
 #define C10_DEFINE_HASH_FOR_IDWRAPPER(ClassName) \
   namespace std {                                \
