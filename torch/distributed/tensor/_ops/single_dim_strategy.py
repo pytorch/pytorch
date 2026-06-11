@@ -376,23 +376,18 @@ class _PreparedSingleDimStrategy:
             func(op_schema.op, op_schema.args_meta, op_schema.kwargs_meta),
         )
 
-        # Validate strategy length against the op schema. The schema is the
-        # ground truth for num_outputs; combined with num_inputs (which counts
-        # all tensor args + kwargs), it gives the expected strategy length.
-        # A mismatch means the strategy is missing kwargs placements or has
-        # extra entries.
+        # Validate strategy length against the op outputs. Tuple outputs are
+        # aligned with output_tensor_meta so mixed Tensor/non-Tensor returns
+        # keep their None slots for wrapping the real result tuple.
         if len(strategies_with_placeholders) > 0:
-            if any(
+            if isinstance(output_tensor_meta, Sequence) and not isinstance(
+                output_tensor_meta, TensorMeta
+            ):
+                schema_num_outputs = len(output_tensor_meta)
+            elif any(
                 isinstance(r.type, torch.ListType) for r in op_schema.op._schema.returns
             ):
-                if isinstance(output_tensor_meta, Sequence) and not isinstance(
-                    output_tensor_meta, TensorMeta
-                ):
-                    schema_num_outputs = len(output_tensor_meta)
-                else:
-                    schema_num_outputs = (
-                        len(strategies_with_placeholders[0]) - num_inputs
-                    )
+                schema_num_outputs = len(strategies_with_placeholders[0]) - num_inputs
             else:
                 schema_num_outputs = sum(
                     1 for r in op_schema.op._schema.returns if "Tensor" in str(r.type)
