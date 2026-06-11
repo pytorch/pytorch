@@ -2093,8 +2093,18 @@ except RuntimeError as e:
             "^The size of tensor a \\(\\d\\) must match the size of "
             "tensor b \\(\\d\\) at non-singleton dimension \\d.*"
         )
-        # Verify that an operation using STABLE_TORCH_ERROR_CHECK provides detailed errors.
-        self.assertRaisesRegex(RuntimeError, expect_re, make_exception_stable)
+        # Verify that an operation using STABLE_TORCH_ERROR_CODE_CHECK provides the
+        # detailed error AND wraps it with the "(originally from ...)" annotation
+        # naming the failing shim call and its source location.
+        with self.assertRaises(RuntimeError) as cm:
+            make_exception_stable()
+        stable_msg = str(cm.exception)
+        self.assertRegex(stable_msg, expect_re)
+        self.assertRegex(
+            stable_msg,
+            r" \(originally from aoti_torch_aten_subtract_Tensor\(.*\) "
+            r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$",
+        )
 
         # Retrieve the exception message directly.
         self.assertEqual(
@@ -2107,6 +2117,60 @@ except RuntimeError as e:
         self.assertTrue(
             with_backtrace.count("\n") > 10
         )  # Conservative, backtrace is 25 lines.
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_dynamic_version_call_error_message(self, device):
+        """Exercise the dynamic version call (dlsym) path.
+
+        our_subtract_stable_error_check lives in the 2.10 extension, which
+        targets 2.10 -- older than the 2.13 torch_exception_get_what* shims that
+        STABLE_TORCH_ERROR_CODE_CHECK relies on. It therefore reaches them via
+        TORCH_DYNAMIC_VERSION_CALL (a runtime symbol lookup). When the running
+        libtorch is >= 2.13 the lookup succeeds and we get the detailed message;
+        against an older runtime it falls back to the simple call-site message.
+        """
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        # Mismatched shapes so the subtract errors.
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(1, 2, device=device)
+        self.assertRaises(RuntimeError, lambda: torch.subtract(a, b))
+
+        # The non-stable check always yields the simple call-site message.
+        simple_re = (
+            "aoti_torch_aten_subtract_Tensor\\(self.get\\(\\), other.get\\(\\), alpha, &ret0\\)"
+            " API call failed at .+?, line \\d+$"
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            simple_re,
+            lambda: libtorch_agnostic.ops.our_subtract_torch_error_check(a, b),
+        )
+
+        def make_exception_stable():
+            libtorch_agnostic.ops.our_subtract_stable_error_check(a, b)
+
+        if _torchVersionLessThan(2, 13):
+            # Runtime predates the shim: dlsym returns null, so we fall back to
+            # the same simple call-site message as the non-stable check.
+            self.assertRaisesRegex(RuntimeError, simple_re, make_exception_stable)
+        else:
+            # Runtime has the shim: the dynamic lookup succeeds and we get the
+            # detailed error retrieved across the C ABI boundary, wrapped with the
+            # "(originally from ...)" annotation naming the failing shim call.
+            detailed_re = (
+                "^The size of tensor a \\(\\d\\) must match the size of "
+                "tensor b \\(\\d\\) at non-singleton dimension \\d.*"
+            )
+            with self.assertRaises(RuntimeError) as cm:
+                make_exception_stable()
+            stable_msg = str(cm.exception)
+            self.assertRegex(stable_msg, detailed_re)
+            self.assertRegex(
+                stable_msg,
+                r" \(originally from aoti_torch_aten_subtract_Tensor\(.*\) "
+                r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$",
+            )
 
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
