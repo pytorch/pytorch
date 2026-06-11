@@ -55,6 +55,16 @@ treat_parameters_as_free_to_save = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+# When the partitioner's _size_of encounters a (Fake)ScriptObject in node
+# metadata, it has no general way to know the object's true memory footprint:
+# a ScriptObject may hold tensors internally. By default we raise rather than
+# guess. Enabling this flag makes _size_of assume such objects are zero size,
+# which unblocks dynamic-shapes compilation of models containing ScriptObject
+# parameters (e.g. embedding-table configs from FBGEMM) at the cost of
+# soundness. This is a temporary escape hatch until we have a principled way to
+# probe the size of a (Fake)ScriptObject.
+unsafe_treat_script_objects_as_zero_size = False
+
 from torch._environment import is_fbcode
 
 
@@ -94,9 +104,12 @@ autograd_cache_normalize_inputs = not is_fbcode()
 #
 # Deprecated: Custom ops returning aliased outputs is deprecated and will
 # become an error in a future version of PyTorch. Currently error_on_custom_op_aliasing
-# is True only in CI.
+# is True in CI unless explicitly overridden.
 check_custom_op_aliasing = True
-error_on_custom_op_aliasing = bool(os.getenv("CI"))
+error_on_custom_op_aliasing: bool = Config(
+    env_name_force="TORCHINDUCTOR_ERROR_ON_CUSTOM_OP_ALIASING",
+    default=bool(os.getenv("CI")),
+)
 
 
 def remote_autograd_cache_default() -> bool | None:

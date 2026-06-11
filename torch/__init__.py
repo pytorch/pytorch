@@ -1424,6 +1424,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
+        * :func:`torch.topk` when called on a CPU or CUDA tensor
         * :func:`torch.gather` when called on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
@@ -1715,6 +1716,12 @@ def _check_with(
     message: _Callable[[], str],
 ):
     if not isinstance(cond, (builtins.bool, SymBool)):
+        if isinstance(cond, torch.Tensor):
+            raise TypeError(
+                "cond must be a bool, but got a Tensor. "
+                "For tensor conditions, use torch._check_tensor_all() "
+                "to assert that all elements are true."
+            )
         raise TypeError(f"cond must be a bool, but got {type(cond)}")
 
     from torch.fx.experimental.symbolic_shapes import expect_true
@@ -2397,6 +2404,7 @@ from torch import masked as masked
 # Import removed ops with error message about removal
 from torch._linalg_utils import (  # type: ignore[misc]
     _symeig as symeig,
+    cholesky,
     eig,
     lstsq,
     matrix_rank,

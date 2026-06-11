@@ -260,6 +260,26 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                 "Expected one lookup profiler event for one opt_fn run",
             )
 
+    def test_profiler_guardless_cache_hit_skips_guard_lookup(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn((2, 2))
+        opt_fn = torch.compile(
+            fn,
+            backend="eager",
+            options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe},
+        )
+        opt_fn(x)
+
+        with torch.profiler.profile() as prof:
+            self.assertEqual(opt_fn(x), fn(x))
+
+        events = [
+            event for event in prof.events() if "TorchDynamo Cache Lookup" in event.name
+        ]
+        self.assertEqual(events, [])
+
     def test_profiler_cache_lookup_profiler_step(self):
         def fn(x, y, z):
             return torch.add(torch.sub(x, y), z)
