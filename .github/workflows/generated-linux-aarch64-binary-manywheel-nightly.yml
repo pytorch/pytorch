@@ -73,11 +73,11 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
-          # Fetch tags so binary_populate_env.sh can detect the release tag via
-          # `git describe --tags --exact`; without this a tag-triggered build is
-          # mistaken for a dev build and pins triton to a +git<hash> version.
-          fetch-tags: true
+          # Full fetch on tag pushes so the release tag is present for
+          # `git describe --tags --exact`; a shallow fetch of a pinned SHA drops
+          # tag refs even with fetch-tags. Nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type == 'tag' && 0 || 2 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -163,11 +163,11 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
-          # Fetch tags so binary_populate_env.sh can detect the release tag via
-          # `git describe --tags --exact`; without this a tag-triggered build is
-          # mistaken for a dev build and pins triton to a +git<hash> version.
-          fetch-tags: true
+          # Full fetch on tag pushes so the release tag is present for
+          # `git describe --tags --exact`; a shallow fetch of a pinned SHA drops
+          # tag refs even with fetch-tags. Nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type == 'tag' && 0 || 2 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -253,11 +253,11 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
-          # Fetch tags so binary_populate_env.sh can detect the release tag via
-          # `git describe --tags --exact`; without this a tag-triggered build is
-          # mistaken for a dev build and pins triton to a +git<hash> version.
-          fetch-tags: true
+          # Full fetch on tag pushes so the release tag is present for
+          # `git describe --tags --exact`; a shallow fetch of a pinned SHA drops
+          # tag refs even with fetch-tags. Nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type == 'tag' && 0 || 2 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -343,11 +343,11 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
-          # Fetch tags so binary_populate_env.sh can detect the release tag via
-          # `git describe --tags --exact`; without this a tag-triggered build is
-          # mistaken for a dev build and pins triton to a +git<hash> version.
-          fetch-tags: true
+          # Full fetch on tag pushes so the release tag is present for
+          # `git describe --tags --exact`; a shallow fetch of a pinned SHA drops
+          # tag refs even with fetch-tags. Nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type == 'tag' && 0 || 2 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
