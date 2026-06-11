@@ -3617,6 +3617,7 @@ if torch.mtia._is_compiled():
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
+make_fallback(aten.ctc_loss.Tensor, warn=False, override_decomp=True)
 
 # 2) Medium
 make_fallback(aten._trilinear)

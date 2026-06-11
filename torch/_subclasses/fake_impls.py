@@ -360,6 +360,98 @@ def _sparse_coo_tensor_with_dims_and_tensors(
     return constructors(fake_mode, func, *args, **kwargs)
 
 
+def _check_ctc_loss_tensor_args(
+    log_probs: FakeTensorLike,
+    targets: FakeTensorLike,
+    input_lengths: FakeTensorLike,
+    target_lengths: FakeTensorLike,
+    blank: int,
+) -> tuple[int, int]:
+    torch._check(
+        log_probs.dim() == 3,
+        lambda: f"log_probs must be 3-D, got {log_probs.dim()}-D",
+    )
+    torch._check(
+        log_probs.dtype in (torch.float32, torch.float64),
+        lambda: f"log_probs must be float32 or float64, got {log_probs.dtype}",
+    )
+    torch._check(
+        targets.dtype in (torch.int32, torch.int64),
+        lambda: f"targets must be int32 or int64, got {targets.dtype}",
+    )
+    torch._check(
+        is_integer_dtype(input_lengths.dtype)
+        and not is_boolean_dtype(input_lengths.dtype),
+        lambda: "input_lengths must be integral",
+    )
+    torch._check(
+        is_integer_dtype(target_lengths.dtype)
+        and not is_boolean_dtype(target_lengths.dtype),
+        lambda: "target_lengths must be integral",
+    )
+    torch._check(
+        targets.dim() in (1, 2),
+        lambda: f"targets must be 1-D or 2-D, got {targets.dim()}-D",
+    )
+    batch_size = log_probs.size(1)
+    max_input_length = log_probs.size(0)
+    num_labels = log_probs.size(2)
+    torch._check(blank >= 0, lambda: "blank must be in label range")
+    torch._check(blank < num_labels, lambda: "blank must be in label range")
+    torch._check(
+        input_lengths.numel() == batch_size,
+        lambda: "input_lengths must be of size batch_size",
+    )
+    torch._check(
+        target_lengths.numel() == batch_size,
+        lambda: "target_lengths must be of size batch_size",
+    )
+    if targets.dim() == 2:
+        torch._check(
+            targets.size(0) == batch_size,
+            lambda: "targets must have batch_size rows",
+        )
+    return batch_size, max_input_length
+
+
+@register_op_impl(aten._ctc_loss.Tensor)
+def ctc_loss_tensor(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    log_probs: FakeTensorLike,
+    targets: FakeTensorLike,
+    input_lengths: FakeTensorLike,
+    target_lengths: FakeTensorLike,
+    blank: int = 0,
+    zero_infinity: bool = False,
+) -> tuple[FakeTensorLike, FakeTensorLike]:
+    batch_size, max_input_length = _check_ctc_loss_tensor_args(
+        log_probs,
+        targets,
+        input_lengths,
+        target_lengths,
+        blank,
+    )
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        raise DynamicOutputShapeException(func)
+
+    log_alpha_width = fake_mode.shape_env.create_unbacked_symint()
+    fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(
+        log_alpha_width.node.expr
+    )
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(log_alpha_width, min=1)
+    return (
+        log_probs.new_empty((batch_size,)),
+        log_probs.new_empty((batch_size, max_input_length, log_alpha_width)),
+    )
+
+
 def _spdiags_static_offsets(offsets: FakeTensorLike) -> list[int] | None:
     constant = getattr(offsets, "constant", None)
     if constant is None:

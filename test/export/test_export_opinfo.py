@@ -37,7 +37,6 @@ export_failures = {
     xfail("equal"),
     xfail("linalg.lstsq"),
     xfail("linalg.lstsq", "grad_oriented"),
-    xfail("nn.functional.ctc_loss"),
     xfail("nn.functional.gaussian_nll_loss"),
     xfail("sparse.sampled_addmm"),
     xfail("tensor_split"),

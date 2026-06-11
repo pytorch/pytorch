@@ -9385,6 +9385,171 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
 class CUDAReproTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_ctc_loss_fullgraph_tensor_lengths(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.loss = nn.CTCLoss(zero_infinity=True, reduction="sum")
+                self.register_buffer("targets", torch.tensor([1, 2], dtype=torch.int32))
+                self.register_buffer(
+                    "input_lengths", torch.tensor([2, 2], dtype=torch.int32)
+                )
+                self.register_buffer(
+                    "target_lengths", torch.tensor([2, 0], dtype=torch.int32)
+                )
+
+            def forward(self, x):
+                log_probs = x.log_softmax(2)
+                return self.loss(
+                    log_probs,
+                    self.targets,
+                    self.input_lengths,
+                    self.target_lengths,
+                )
+
+        m = M().cuda().eval()
+
+        def assert_public_ctc_graph(backend):
+            self.assertEqual(len(backend.graphs), 1)
+            public_ctc_targets = {
+                F.ctc_loss,
+                torch.ctc_loss,
+                torch.ops.aten.ctc_loss.Tensor,
+            }
+            self.assertEqual(
+                len(
+                    [
+                        node
+                        for node in backend.graphs[0].graph.nodes
+                        if node.op == "call_function"
+                        and node.target in public_ctc_targets
+                    ]
+                ),
+                1,
+            )
+            for target in (
+                torch.ops.aten._ctc_loss.Tensor,
+                torch.ops.aten._use_cudnn_ctc_loss.Tensor,
+                torch.ops.aten._use_miopen_ctc_loss.Tensor,
+            ):
+                self.assertEqual(
+                    len(
+                        backend.graphs[0].graph.find_nodes(
+                            op="call_function", target=target
+                        )
+                    ),
+                    0,
+                )
+
+        for dtype in (torch.double, torch.float):
+            x = torch.rand(2, 2, 3, dtype=dtype, device="cuda")
+            backend = EagerAndRecordGraphs()
+            compiled = torch.compile(
+                m,
+                backend=backend,
+                fullgraph=True,
+                dynamic=True,
+            )
+
+            with torch.no_grad():
+                self.assertEqual(compiled(x), m(x))
+
+            assert_public_ctc_graph(backend)
+            torch.compiler.reset()
+
+        def functional_ctc_loss_kwargs(
+            log_probs, targets, input_lengths, target_lengths
+        ):
+            return F.ctc_loss(
+                log_probs=log_probs,
+                targets=targets,
+                input_lengths=input_lengths,
+                target_lengths=target_lengths,
+                reduction="sum",
+                zero_infinity=True,
+            )
+
+        def torch_ctc_loss_kwargs(log_probs, targets, input_lengths, target_lengths):
+            return torch.ctc_loss(
+                log_probs=log_probs,
+                targets=targets,
+                input_lengths=input_lengths,
+                target_lengths=target_lengths,
+                reduction=2,
+                zero_infinity=True,
+            )
+
+        log_probs = torch.rand(2, 2, 3, dtype=torch.double, device="cuda").log_softmax(
+            2
+        )
+        for fn in (functional_ctc_loss_kwargs, torch_ctc_loss_kwargs):
+            backend = EagerAndRecordGraphs()
+            compiled = torch.compile(
+                fn,
+                backend=backend,
+                fullgraph=True,
+                dynamic=True,
+            )
+            with torch.no_grad():
+                self.assertEqual(
+                    compiled(
+                        log_probs,
+                        m.targets,
+                        m.input_lengths,
+                        m.target_lengths,
+                    ),
+                    fn(log_probs, m.targets, m.input_lengths, m.target_lengths),
+                )
+            assert_public_ctc_graph(backend)
+            torch.compiler.reset()
+
+        def torch_ctc_loss_string_reduction(
+            log_probs, targets, input_lengths, target_lengths
+        ):
+            return torch.ctc_loss(
+                log_probs,
+                targets,
+                input_lengths,
+                target_lengths,
+                reduction="mean",
+            )
+
+        def functional_ctc_loss_int_reduction(
+            log_probs, targets, input_lengths, target_lengths
+        ):
+            return F.ctc_loss(
+                log_probs,
+                targets,
+                input_lengths,
+                target_lengths,
+                reduction=1,
+            )
+
+        for fn in (torch_ctc_loss_string_reduction, functional_ctc_loss_int_reduction):
+            with self.assertRaisesRegex(Exception, "invalid combination|valid value"):
+                fn(log_probs, m.targets, m.input_lengths, m.target_lengths)
+            compiled = torch.compile(
+                fn,
+                backend="eager",
+                fullgraph=True,
+                dynamic=True,
+            )
+            with self.assertRaisesRegex(Exception, "invalid combination|valid value"):
+                compiled(log_probs, m.targets, m.input_lengths, m.target_lengths)
+            torch.compiler.reset()
+
+        x = torch.rand(2, 2, 3, dtype=torch.double, device="cuda")
+        compiled = torch.compile(
+            m,
+            backend="inductor",
+            fullgraph=True,
+            dynamic=True,
+        )
+
+        with torch.no_grad():
+            self.assertEqual(compiled(x), m(x))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_sync(self):
         def fn(x):
             y = x + 1
