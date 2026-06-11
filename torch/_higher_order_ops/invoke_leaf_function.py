@@ -209,7 +209,7 @@ def check_escaped_gradients(
     requires_grad_indices: set[int],
 ) -> None:
     """
-    Check if autograd graph depends on tensors that not passed as explicit inputs.
+    Check if autograd graph depends on tensors that are not passed as explicit inputs.
 
     Controlled by torch._dynamo.config.leaf_function_check_escaped_gradients.
     """

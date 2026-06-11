@@ -18,7 +18,7 @@ which assumes accurate fake tensor metadata, without actually running fn.
 In the future, we may allow for a "meta" function associated with fn to allow for more interesting input-output patterns.
 
 Note that tensors / Python state are allowed to be mutated.
-This is relaxed constraint is not always sound, but it is sound for backward tracing with fake
+This relaxed constraint is not always sound, but it is sound for backward tracing with fake
 tensors as it takes place in AOTAutograd, as the backward pass is guaranteed not to depend on concrete
 tensor values (via fake tensor) or Python state (because the autograd engine doesn't depend on Python).
 
@@ -75,7 +75,7 @@ def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
     indices_indims = indims[1]
     expanded_indices = []
     for idx, idx_indim in zip(indices, indices_indims):
-        # The index is not a being batched, we should unsqueeze and expand to val
+        # The index is not being batched, we should unsqueeze and expand to val
         if idx_indim is None:
             expanded_indices.append(idx.expand(value.shape))
         else:

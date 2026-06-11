@@ -13,6 +13,7 @@ from functools import partial
 from typing import Any, NamedTuple
 
 import torch
+import torch.fx as fx
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
@@ -757,6 +758,69 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dict_update_no_args(self):
+        def fn(x):
+            d = {"a": x}
+            result = d.update()
+            return d["a"], result is None, len(d)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_from_mapping_like(self):
+        class MappingLike:
+            def __init__(self, x):
+                self.d = {"a": x, "b": x + 1}
+
+            def keys(self):
+                return self.d.keys()
+
+            def __getitem__(self, key):
+                return self.d[key]
+
+        def fn(x):
+            d = {"a": x - 1}
+            result = d.update(MappingLike(x))
+            return d["a"], d["b"], result is None
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_from_mapping_proxy(self):
+        def fn(x):
+            source = {"a": x, "b": x + 1}
+            d = {"a": x - 1}
+            d.update(types.MappingProxyType(source))
+            return d["a"], d["b"]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_rejects_bad_sequence_element_length(self):
+        def fn():
+            try:
+                {}.update([(1, 2, 3)])
+            except ValueError as exc:
+                return "length 3; 2 is required" in str(exc)
+            return False
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
+    def test_dict_update_rejects_too_many_args(self):
+        def fn():
+            try:
+                {}.update({}, {})
+            except TypeError:
+                return True
+            return False
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
     def test_dict_subclass_initialization_in_graph(self):
         for super_class in (
             OrderedDict,
@@ -1144,6 +1208,23 @@ class DictTests(torch._dynamo.test_case.TestCase):
             b = {"two": torch.ones(2)}
             a |= b
             return a, b
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_defaultdict_inplace_union_preserves_factory(self):
+        def f():
+            d = defaultdict(int, {1: 1, 2: 2})
+            d |= [(0, "zero"), (1, "one")]
+            result = d.__ior__({3: "three"})
+            return (
+                result is d,
+                d.default_factory is int,
+                type(d) is defaultdict,
+                dict(d),
+                list(d),
+                d[4],
+            )
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
@@ -2126,6 +2207,138 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_barrier_preserves_order(self):
+        from torch._dynamo.output_graph import _canonicalize_graph
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        # Pure ops that could be reordered
+        a = graph.call_function(torch.relu, (x,))
+        b = graph.call_function(torch.sigmoid, (x,))
+        # In-place call_method acts as barrier
+        barrier = graph.call_method("add_", (x, a))
+        # Pure op after barrier
+        c = graph.call_function(torch.neg, (x,))
+        graph.output((a, b, barrier, c))
+
+        _canonicalize_graph(graph)
+        ops = [
+            n.name
+            for n in graph.nodes
+            if n.op in ("call_function", "call_method")
+        ]
+        barrier_idx = next(i for i, name in enumerate(ops) if "add_" in name)
+        neg_idx = next(i for i, name in enumerate(ops) if "neg" in name)
+        # neg must come after the barrier even though it only depends on x
+        self.assertGreater(neg_idx, barrier_idx)
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_in_place_ops_are_barriers(self):
+        def f(x, y):
+            a = y * 2
+            x.add_(1)
+            b = y * 3
+            return a + b + x
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        out = torch.compile(f, backend=backend)(torch.randn(4), torch.randn(4))
+        out_eager = f(torch.randn(4), torch.randn(4))
+        self.assertEqual(out.shape, out_eager.shape)
+
+        graph = backend.graphs[0].graph
+        ops = [
+            (n.name, n.op)
+            for n in graph.nodes
+            if n.op in ("call_function", "call_method")
+        ]
+        barrier_idx = next(
+            i for i, (name, op) in enumerate(ops) if op == "call_method" and "add_" in name
+        )
+        mul_before = [i for i, (name, _) in enumerate(ops) if name.startswith("mul") and i < barrier_idx]
+        mul_after = [i for i, (name, _) in enumerate(ops) if name.startswith("mul") and i > barrier_idx]
+        self.assertTrue(len(mul_before) >= 1)
+        self.assertTrue(len(mul_after) >= 1)
+
+    def test_canonical_graph_config_gating(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear_a = torch.nn.Linear(8, 16)
+                self.linear_b = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                results = []
+                for key, val in d.items():
+                    if key == "a":
+                        results.append(self.linear_a(val))
+                    else:
+                        results.append(self.linear_b(val))
+                return torch.cat(results, dim=-1)
+
+        model = Model()
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": torch.randn(4, 8), "a": torch.randn(4, 8)}
+
+        with torch._dynamo.config.patch(canonicalize_output_graph_node_order=False):
+            names1 = self._get_graph_node_names(model, d1)
+            torch._dynamo.reset()
+            names2 = self._get_graph_node_names(model, d2)
+        self.assertNotEqual(names1, names2)
+
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(canonicalize_output_graph_node_order=True):
+            names3 = self._get_graph_node_names(model, d1)
+            torch._dynamo.reset()
+            names4 = self._get_graph_node_names(model, d2)
+        self.assertEqual(names3, names4)
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_is_safe_to_reorder(self):
+        import operator
+
+        from torch._dynamo.output_graph import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+
+        pure_call = graph.call_function(torch.relu, (x,))
+        self.assertTrue(_is_safe_to_reorder(pure_call))
+
+        inplace_method = graph.call_method("add_", (x, x))
+        self.assertFalse(_is_safe_to_reorder(inplace_method))
+
+        safe_method = graph.call_method("add", (x, x))
+        self.assertTrue(_is_safe_to_reorder(safe_method))
+
+        iadd_node = graph.call_function(operator.iadd, (x, x))
+        self.assertFalse(_is_safe_to_reorder(iadd_node))
+
+        # operator.invert is pure despite starting with "i"
+        invert_node = graph.call_function(operator.invert, (x,))
+        self.assertTrue(_is_safe_to_reorder(invert_node))
+
+        index_node = graph.call_function(operator.index, (x,))
+        self.assertTrue(_is_safe_to_reorder(index_node))
+
+        # out= kwarg makes a node unsafe
+        out_node = graph.call_function(torch.add, (x, x), {"out": x})
+        self.assertFalse(_is_safe_to_reorder(out_node))
+
+        # Functions with no FX Node arguments are treated as barriers
+        def _fake_state_fn():
+            pass
+
+        no_input_node = graph.call_function(_fake_state_fn, ())
+        self.assertFalse(_is_safe_to_reorder(no_input_node))
+
+        # _add_batch_dim / _remove_batch_dim are barriers
+        add_batch = graph.call_function(torch._add_batch_dim, (x, x, x))
+        self.assertFalse(_is_safe_to_reorder(add_batch))
+
+        remove_batch = graph.call_function(torch._remove_batch_dim, (x, x, x, x))
+        self.assertFalse(_is_safe_to_reorder(remove_batch))
+
 
 instantiate_parametrized_tests(DictTests)
 
@@ -2183,7 +2396,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2208,7 +2421,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2445,7 +2658,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # Test invalid usage
         self.assertRaises(TypeError, d.copy, 1)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_fromkeys(self):
         d = self.thetype.fromkeys(["a", "b"], 1)
@@ -2775,9 +2987,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
-
-    def test_binop_or(self):
-        super().test_binop_or()
 
 
 class OrderedDictMethodsTests(DictMethodsTests):

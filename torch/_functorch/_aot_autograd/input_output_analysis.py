@@ -24,6 +24,7 @@ from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
+from .functional_utils import has_same_metadata
 from .schemas import (
     AOTConfig,
     BackwardSignature,
@@ -231,13 +232,16 @@ def create_synthetic_base_metadata(
     ]
     existing_output_infos = []
     for o in m.output_info:
+        synthetic_base_info_for_output = (
+            None if o.base_idx is None else synthetic_base_info[o.base_idx]
+        )
         new_base_idx = (
             None
             if o.base_idx is None
             else (
-                synthetic_base_info[o.base_idx]
-                if isinstance(synthetic_base_info[o.base_idx], int)
-                else synthetic_base_info[o.base_idx][0]  # type: ignore[index]
+                synthetic_base_info_for_output
+                if isinstance(synthetic_base_info_for_output, int)
+                else synthetic_base_info_for_output[0]  # type: ignore[index]
             )
         )
         # If the original input was merged into a synthetic base, then an
