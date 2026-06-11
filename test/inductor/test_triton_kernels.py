@@ -2739,9 +2739,7 @@ def forward(self, arg0_1, arg1_1):
         # A launch kwarg that is not in the kernel signature should be kept as
         # a backend option and emitted in the generated Triton metadata.
         add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=False)
-        f = _get_backend_options_fn(
-            add_kernel, BLOCK_SIZE=128, enable_fp_fusion=False
-        )
+        f = _get_backend_options_fn(add_kernel, BLOCK_SIZE=128, enable_fp_fusion=False)
 
         x = torch.randn(4, device=GPU_TYPE)
         out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
@@ -2760,9 +2758,7 @@ def forward(self, arg0_1, arg1_1):
         # `kernel[grid](..., False, enable_fp_fusion=False)`, which passes the
         # same kernel parameter both positionally and by keyword.
         add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=True)
-        f = _get_backend_options_fn(
-            add_kernel, BLOCK_SIZE=128, enable_fp_fusion=False
-        )
+        f = _get_backend_options_fn(add_kernel, BLOCK_SIZE=128, enable_fp_fusion=False)
 
         x = torch.randn(4, device=GPU_TYPE)
         y = torch.randn(4, device=GPU_TYPE)
