@@ -70,6 +70,29 @@ scalar_t upsample_get_value_bounded(
   return data[n * strides.x + c * strides.y + access_x * strides.z];
 }
 
+// Store counterparts of upsample_get_value_bounded: output coordinates are
+// always in range, so no clamping is needed. Coordinates are packed as
+// (n, c, x) / (n, c, y, x) to mirror the stride vector layout.
+template <typename scalar_t>
+void upsample_set_value(
+    device scalar_t* data,
+    ulong3 strides,
+    uint3 ncx,
+    scalar_t value) {
+  data[ncx.x * strides.x + ncx.y * strides.y + ncx.z * strides.z] = value;
+}
+
+template <typename scalar_t>
+void upsample_set_value(
+    device scalar_t* data,
+    ulong4 strides,
+    uint4 ncyx,
+    scalar_t value) {
+  data
+      [ncyx.x * strides.x + ncyx.y * strides.y + ncyx.z * strides.z +
+       ncyx.w * strides.w] = value;
+}
+
 template <typename scalar_t>
 void upsample_increment_value_bounded(
     device AtomicType_t<scalar_t>* data,
@@ -449,9 +472,11 @@ kernel void upsample_linear1d(
       auto i01 = upsample_get_value_bounded<T>(
           inputData, input_sizes.z, input_strides, n, c, real_x + 1);
       auto res = linear_interp(i00, i01, t_x);
-      outputData
-          [n * output_strides.x + c * output_strides.y +
-           output_x * output_strides.z] = static_cast<T>(res);
+      upsample_set_value(
+          outputData,
+          output_strides,
+          uint3(n, c, output_x),
+          static_cast<T>(res));
     }
   }
 }
@@ -494,10 +519,11 @@ kernel void upsample_bilinear2d(
       auto i0_l = linear_interp(i00, i01, t_x);
       auto i1_l = linear_interp(i10, i11, t_x);
       auto res = linear_interp(i0_l, i1_l, t_y);
-      outputData
-          [n * output_strides.x + c * output_strides.y +
-           output_y * output_strides.z + output_x * output_strides.w] =
-              static_cast<T>(res);
+      upsample_set_value(
+          outputData,
+          output_strides,
+          uint4(n, c, output_y, output_x),
+          static_cast<T>(res));
     }
   }
 }
@@ -527,11 +553,12 @@ kernel void upsample_nearest1d(
   const auto src_x = nearest_src_index<exact>(scales.x, output_x);
   for (int n = 0; n < output_sizes.x; n++) {
     for (int c = 0; c < output_sizes.y; c++) {
-      outputData
-          [n * output_strides.x + c * output_strides.y +
-           output_x * output_strides.z] =
-              upsample_get_value_bounded<T>(
-                  inputData, input_sizes.z, input_strides, n, c, src_x);
+      upsample_set_value(
+          outputData,
+          output_strides,
+          uint3(n, c, output_x),
+          upsample_get_value_bounded<T>(
+              inputData, input_sizes.z, input_strides, n, c, src_x));
     }
   }
 }
@@ -552,11 +579,12 @@ kernel void upsample_nearest2d(
   const auto src_y = nearest_src_index<exact>(scales.y, output_y);
   for (int n = 0; n < output_sizes.x; n++) {
     for (int c = 0; c < output_sizes.y; c++) {
-      outputData
-          [n * output_strides.x + c * output_strides.y +
-           output_y * output_strides.z + output_x * output_strides.w] =
-              upsample_get_value_bounded<T>(
-                  inputData, input_sizes.wz, input_strides, n, c, src_y, src_x);
+      upsample_set_value(
+          outputData,
+          output_strides,
+          uint4(n, c, output_y, output_x),
+          upsample_get_value_bounded<T>(
+              inputData, input_sizes.wz, input_strides, n, c, src_y, src_x));
     }
   }
 }
@@ -593,11 +621,9 @@ kernel void upsample_2d_aa(
     constant long4& input_sizes [[buffer(4)]],
     constant long4& output_sizes [[buffer(5)]],
     constant float2& scales [[buffer(6)]],
-    constant bool& align_corners [[buffer(7)]],
     uint thread_index [[thread_position_in_grid]]) {
   auto output_x = thread_index % static_cast<uint>(output_sizes.w);
   auto output_y = thread_index / static_cast<uint>(output_sizes.w);
-  (void)align_corners; // Align corners is unused for AA algorithm
   F f;
   auto x_center = area_pixel_compute_source_index(
       scales.x,
@@ -633,10 +659,11 @@ kernel void upsample_2d_aa(
           ws += dx * dy;
         }
       }
-      outputData
-          [n * output_strides.x + c * output_strides.y +
-           output_y * output_strides.z + output_x * output_strides.w] =
-              static_cast<T>(res / ws);
+      upsample_set_value(
+          outputData,
+          output_strides,
+          uint4(n, c, output_y, output_x),
+          static_cast<T>(res / ws));
     }
   }
 }
@@ -708,9 +735,8 @@ kernel void upsample_bicubic2d(
           coefficients[2],
           coefficients[3],
           t_y));
-      outputData
-          [n * output_strides.x + c * output_strides.y +
-           output_y * output_strides.z + output_x * output_strides.w] = inp;
+      upsample_set_value(
+          outputData, output_strides, uint4(n, c, output_y, output_x), inp);
     }
   }
 }
@@ -789,7 +815,6 @@ kernel void upsample_bicubic2d_backward(
       constant long4 & input_sizes [[buffer(4)]],                  \
       constant long4 & output_sizes [[buffer(5)]],                 \
       constant float2 & scales [[buffer(6)]],                      \
-      constant bool& align_corners [[buffer(7)]],                  \
       uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_2D_BACKWARD(NAME, DTYPE)                       \
