@@ -453,6 +453,60 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     common_dtype_ = compute_common_dtype();
   }
 
+  // For comparison ops involving an unsigned tensor dtype and a signed
+  // wrapped-number scalar (e.g. uint8 tensor vs Python literal -19), the
+  // standard combine_categories rule discards the scalar's dtype and keeps
+  // the tensor's unsigned dtype, silently wrapping -19 to uint8(237) and
+  // producing wrong comparison results.
+  //
+  // We fix this in two tiers depending on where the wrapped scalar lives:
+  //
+  // (A) CPU-resident wrapped scalar (.device().is_cpu()):
+  //     Inspect the actual value. Promotion only fires when strictly needed:
+  //       - scalar < 0:         negative, impossible in any unsigned type
+  //       - scalar > dtype_max: positive overflow of the unsigned type
+  //     In-range values (0 <= val <= dtype_max) keep common_dtype_ as-is,
+  //     so e.g. `uint8_tensor <= 5` is still computed in uint8.
+  //
+  // (B) Non-CPU wrapped scalar (e.g. MPS kernels create MPS-device wrapped
+  //     scalars via set_wrapped_number; see OperationUtils.mm):
+  //     Use dtype-only promotion via c10::promoteTypes. This is conservative
+  //     but always correct, and avoids a device-to-host sync. In practice the
+  //     wrapped dtype for an integral MPS scalar is always kLong (see the same
+  //     callsite), so promotion yields at least int64 — safe.
+  if (config.is_comparison_op_ &&
+      c10::isIntegralType(common_dtype_, /*includeBool=*/false) &&
+      !c10::isSignedType(common_dtype_)) {
+    for (const auto& op : operands_) {
+      if (!op.is_output && op.tensor_base().defined() &&
+          op.tensor_base().unsafeGetTensorImpl()->is_wrapped_number()) {
+        ScalarType wrapped_dtype = op.tensor_base().scalar_type();
+        if (!c10::isIntegralType(wrapped_dtype, /*includeBool=*/false) ||
+            !c10::isSignedType(wrapped_dtype)) {
+          continue;
+        }
+        bool needs_promotion;
+        if (op.tensor_base().device().is_cpu()) {
+          int64_t scalar_val = op.tensor().item<int64_t>();
+          needs_promotion = scalar_val < 0;
+          if (!needs_promotion && common_dtype_ != ScalarType::UInt64) {
+            // For uint8/uint16/uint32, check against the type's max value.
+            // For uint64, any non-negative int64 value fits (int64_max < uint64_max).
+            int64_t bits = 8LL * static_cast<int64_t>(c10::elementSize(common_dtype_));
+            int64_t dtype_max = (1LL << bits) - 1;
+            needs_promotion = scalar_val > dtype_max;
+          }
+        } else {
+          // Non-CPU wrapped scalar: fall back to dtype-only promotion.
+          needs_promotion = true;
+        }
+        if (needs_promotion) {
+          common_dtype_ = c10::promoteTypes(common_dtype_, wrapped_dtype);
+        }
+      }
+    }
+  }
+
   // Promotes common dtype to the default float scalar type, if needed
   if (config.promote_integer_inputs_to_float_ &&
       c10::isIntegralType(common_dtype_, /*includeBool=*/true)) {
@@ -878,6 +932,7 @@ static void set_up_comparison_op_config(TensorIteratorConfig& config, const Tens
   config.set_check_mem_overlap(true);
   config.allow_cpu_scalars(true);
   config.promote_inputs_to_common_dtype(true);
+  config.is_comparison_op(true);
 
   // When 'out' isn't defined (e.g. for the functional operator 'a == b'), we
   // want the output to be bool. Otherwise (e.g. 'torch.eq(a, b, out=c)') we

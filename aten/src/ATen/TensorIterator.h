@@ -912,6 +912,11 @@ class TORCH_API TensorIteratorConfig final {
     return *this;
   }
 
+  TensorIteratorConfig& is_comparison_op(const bool _is_comparison_op) {
+    is_comparison_op_ = _is_comparison_op;
+    return *this;
+  }
+
   TensorIteratorConfig& is_reduction(const bool _is_reduction) {
     is_reduction_ = _is_reduction;
     return *this;
@@ -981,6 +986,7 @@ class TORCH_API TensorIteratorConfig final {
   bool check_all_same_device_ = true;
   bool enforce_safe_casting_to_output_ = false;
   bool enforce_linear_iteration_ = false;
+  bool is_comparison_op_ = false;
   bool promote_inputs_to_common_dtype_ = false;
   bool promote_integer_inputs_to_float_ = false;
   bool cast_common_dtype_to_outputs_ = false;
