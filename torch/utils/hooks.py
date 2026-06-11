@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
+import torch.nn.modules.module as module_impl
 from collections import OrderedDict
 import weakref
 import warnings
@@ -41,6 +42,14 @@ class RemovableHandle:
             extra_dict = ref()
             if extra_dict is not None and self.id in extra_dict:
                 del extra_dict[self.id]
+
+        if not (
+            module_impl._global_backward_pre_hooks
+            or module_impl._global_backward_hooks
+            or module_impl._global_forward_hooks
+            or module_impl._global_forward_pre_hooks
+        ):
+            module_impl._atLeastOneGlobalHookSet = False
 
     def __getstate__(self):
         if self.extra_dict_ref is None:
