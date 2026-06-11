@@ -8,7 +8,7 @@ from unittest import mock
 
 import torch
 from torch import _dynamo as dynamo, _inductor as inductor
-from torch._inductor import config
+from torch._inductor import config, cpp_builder
 from torch._inductor.codecache import write
 from torch._inductor.cpp_builder import CppBuilder, CppOptions, CppTorchOptions
 from torch._inductor.cpu_vec_isa import invalid_vec_isa
@@ -244,6 +244,54 @@ class TestStandaloneInductor(TestCase):
             for flag in build_option.get_cflags()
             if flag.startswith(("march=", "mcpu="))
         ]
+
+    def test_windows_cross_target_link_flags_not_used_for_compile_commands(self):
+        if not sys.platform.startswith("linux"):
+            self.skipTest("Tests Linux-to-Windows cross-target command generation")
+
+        with (
+            config.patch({"aot_inductor.cross_target_platform": "windows"}),
+            mock.patch.object(
+                cpp_builder, "check_mingw_win32_flavor", return_value="posix"
+            ),
+        ):
+            link_option = CppOptions(compiler=cpp_builder.MINGW_GXX)
+            link_command = CppBuilder(
+                name="test_module",
+                sources="test.cpp",
+                output_dir="/tmp",
+                BuildOption=link_option,
+            ).get_command_line()
+
+            compile_only_option = CppOptions(
+                compiler=cpp_builder.MINGW_GXX,
+                compile_only=True,
+            )
+            compile_only_command = CppBuilder(
+                name="test_module",
+                sources="test.cpp",
+                output_dir="/tmp",
+                BuildOption=compile_only_option,
+            ).get_command_line()
+
+            pch_option = CppOptions(
+                compiler=cpp_builder.MINGW_GXX,
+                precompiling=True,
+            )
+            pch_command = CppBuilder(
+                name="test_header",
+                sources="test.h",
+                output_dir="/tmp",
+                BuildOption=pch_option,
+            ).get_command_line()
+
+        for flag in ("-static-libstdc++", "-static-libgcc", "-lwinpthread"):
+            self.assertIn(flag, link_command)
+            self.assertNotIn(flag, compile_only_command)
+            self.assertNotIn(flag, pch_command)
+
+        self.assertIn("-c -o", compile_only_command)
+        self.assertIn("-x c++-header", pch_command)
 
     @unittest.skipIf(config.is_fbcode(), "fbcode does not emit CPU architecture flags")
     def test_aot_cpp_march_config(self):

@@ -1168,6 +1168,56 @@ class TestAOTInductorPackage(TestCase):
             load_package(package_path, model_name="forward")
 
 
+class TestAOTIModelPackageLoaderPathHandling(TestCase):
+    def test_load_metadata_from_package_normalizes_backslash_zip_entries(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            package_path = os.path.join(temp_dir, "package.pt2")
+            with zipfile.ZipFile(package_path, "w") as zip_ref:
+                zip_ref.writestr(
+                    r"model\data\aotinductor\model\foo.wrapper_metadata.json",
+                    '{"AOTI_DEVICE_KEY": "cpu", "dummy": "moo"}',
+                )
+                zip_ref.writestr(r"model\archive_format", "pt2")
+
+            loaded_metadata = (
+                torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
+                    package_path, "model"
+                )
+            )
+
+        self.assertEqual(loaded_metadata.get("AOTI_DEVICE_KEY"), "cpu")
+        self.assertEqual(loaded_metadata.get("dummy"), "moo")
+
+    def test_backslash_wrapper_so_package_does_not_fall_back_to_compile_so(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            package_path = os.path.join(temp_dir, "package.pt2")
+            with zipfile.ZipFile(package_path, "w") as zip_ref:
+                zip_ref.writestr(
+                    r"model\data\aotinductor\model\foo.wrapper.so",
+                    b"",
+                )
+                zip_ref.writestr(
+                    r"model\data\aotinductor\model\foo.wrapper_metadata.json",
+                    '{"AOTI_DEVICE_KEY": "cpu"}',
+                )
+                zip_ref.writestr(
+                    r"model\data\aotinductor\model\foo.wrapper.cpp",
+                    "",
+                )
+                zip_ref.writestr(r"model\archive_format", "pt2")
+
+            with self.assertRaisesRegex(RuntimeError, r"foo\.wrapper\.so") as cm:
+                torch._C._aoti.AOTIModelPackageLoader(
+                    package_path, "model", False, 1, -1
+                )
+
+        self.assertNotIn("_compile_flags.json", str(cm.exception))
+        self.assertNotIn(
+            "Failed to find a generated cpp file or so file",
+            str(cm.exception),
+        )
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

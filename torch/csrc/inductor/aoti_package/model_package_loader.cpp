@@ -10,6 +10,7 @@
 #include <fmt/format.h>
 #include <miniz.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <iostream>
@@ -65,7 +66,9 @@ std::string remove_duplicate_separator_of_path(const std::string& path) {
   return result;
 }
 
-std::string normalize_path_separator(const std::string& orig_path) {
+std::string normalize_path_separator(
+    const std::string& orig_path,
+    bool normalize_backslash_on_all_platforms = false) {
   /*
   On Windows and Linux have different separator:
   On Windows use "\", and the path like: C:\Users\Test\file.txt
@@ -79,6 +82,9 @@ std::string normalize_path_separator(const std::string& orig_path) {
   "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
   */
   std::string normalized_path = orig_path;
+  if (normalize_backslash_on_all_platforms) {
+    std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
+  }
 #ifdef _WIN32
   std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
 #endif
@@ -128,10 +134,14 @@ std::string detect_file_prefix(
     return "";
   }
 
-  size_t pos = found_filenames[0].find('/');
-  std::string prefix0 = found_filenames[0].substr(0, pos);
-  pos = found_filenames[1].find('/');
-  std::string prefix1 = found_filenames[1].substr(0, pos);
+  const std::string normalized_filename0 =
+      normalize_path_separator(found_filenames[0], true);
+  const std::string normalized_filename1 =
+      normalize_path_separator(found_filenames[1], true);
+  size_t pos = normalized_filename0.find('/');
+  std::string prefix0 = normalized_filename0.substr(0, pos);
+  pos = normalized_filename1.find('/');
+  std::string prefix1 = normalized_filename1.substr(0, pos);
 
   if (!prefix0.empty() && !prefix1.empty() && prefix0 == prefix1) {
     return prefix0 + "/";
@@ -157,7 +167,16 @@ const char* extension_file_ext() {
 }
 
 bool is_wrapper_library(const std::string& path) {
-  return c10::ends_with(path, std::string(".wrapper") + extension_file_ext());
+  // Linux-to-Windows AOTI cross-compilation stores a Windows DLL payload with
+  // the historical .wrapper.so package suffix.
+  return c10::ends_with(path, ".wrapper.so") ||
+      c10::ends_with(path, std::string(".wrapper") + extension_file_ext());
+}
+
+bool is_loadable_library(
+    const std::string& path,
+    const std::string& extension) {
+  return extension == extension_file_ext() || is_wrapper_library(path);
 }
 
 void categorize_model_file(
@@ -177,7 +196,7 @@ void categorize_model_file(
     cpp_filename = filename;
   } else if (extension == object_file_ext()) {
     obj_filenames.push_back(filename);
-  } else if (extension == extension_file_ext()) {
+  } else if (is_loadable_library(filename, extension)) {
     // Triton CPU AOTI has multiple .so files: kernel.so + launcher.so
     // alongside wrapper.so. So, prefer *.wrapper.so, and fall back to
     // first .so for non-CPU mode.
@@ -442,8 +461,9 @@ std::unordered_set<std::string> find_model_names(
   std::regex re(pattern);
 
   for (const auto& path : paths) {
+    const std::string normalized_path = normalize_path_separator(path, true);
     std::smatch match;
-    if (std::regex_search(path, match, re) && match.size() > 1) {
+    if (std::regex_search(normalized_path, match, re) && match.size() > 1) {
       model_names.insert(match[1].str());
     }
   }
@@ -613,11 +633,13 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
         model_name);
 
     std::string metadata_filename;
+    std::string metadata_package_path;
     for (auto const& zip_filename_str : found_filenames) {
-      auto cur_filename = normalize_path_separator(zip_filename_str);
+      auto cur_filename = normalize_path_separator(zip_filename_str, true);
       if (path_starts_with_directory(cur_filename, model_directory) &&
           c10::ends_with(cur_filename, metadata_suffix)) {
         metadata_filename = zip_filename_str;
+        metadata_package_path = cur_filename;
         break;
       }
     }
@@ -625,8 +647,8 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     if (!metadata_filename.empty()) {
       // Create temporary directory for extraction
       std::string temp_dir = normalize_path_separator(create_temp_dir());
-      std::string output_path_str =
-          normalize_path_separator(temp_dir + k_separator + metadata_filename);
+      std::string output_path_str = normalize_path_separator(
+          temp_dir + k_separator + metadata_package_path);
 
       // Create the parent directory if it doesn't exist
       size_t parent_path_idx = output_path_str.find_last_of(k_separator);
@@ -809,7 +831,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     // zip_filename_str can't be normalize_path_separator, because it should be
     // as index for mz_zip_reader_extract_file_to_file.
     for (auto const& zip_filename_str : found_filenames) {
-      auto cur_filename = normalize_path_separator(zip_filename_str);
+      auto cur_filename = normalize_path_separator(zip_filename_str, true);
       // Only compile files in the specified model directory
       if (path_starts_with_directory(cur_filename, model_directory) ||
           path_starts_with_directory(cur_filename, const_directory)) {
@@ -946,9 +968,11 @@ std::vector<at::Tensor> AOTIModelPackageLoader::run(
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::boxed_run(
-    std::vector<at::Tensor>&& inputs,
+    std::vector<at::Tensor>&&
+        inputs, // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
     void* stream_handle) {
-  return runner_->boxed_run(std::move(inputs), stream_handle);
+  std::vector<at::Tensor> moved_inputs = std::move(inputs);
+  return runner_->boxed_run(std::move(moved_inputs), stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
