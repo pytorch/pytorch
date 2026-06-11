@@ -683,7 +683,9 @@ if "__compile_source__" in globals():
     if len(kernel_side_table.constant_args) > 0:
         model_str += f"{kernel_side_table_prefix}.constant_args={kernel_side_table.constant_args}\n"
 
-    model_str += NNModuleToString.convert(gm)
+    # This string is also emitted as a best-effort trace artifact during
+    # normal compilation, so unsupported modules must not mask compile errors.
+    model_str += NNModuleToString.convert(gm, allow_unsafe_repr=True)
 
     writer = InputWriter(save_dir, stable_hash=stable_hash)
     # pyrefly: ignore [implicit-any]
