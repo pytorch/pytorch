@@ -1776,6 +1776,23 @@ class TestSplitIterationRanges(MockSchedulerTest):
         # 32 should split into 4 * 8 across the two groups
         self.assertEqual(len(new_ranges), 2)
 
+    def test_two_way_split_with_factorable_add_floordiv(self):
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        s52, s97 = sympy.symbols("s52 s97", integer=True, positive=True)
+        k = FloorDiv(s97, s52)
+        den = s52 * k + k
+        num = 128 * s52 * k + 128 * k
+
+        new_ranges, getters = SIMDKernel._split_iteration_ranges(
+            [den, sympy.Integer(128)],
+            [[num], []],
+        )
+
+        self.assertEqual(new_ranges, [[den], [sympy.Integer(128)]])
+        i0, i1 = sympy.symbols("i0 i1", integer=True)
+        self.assertEqual(getters[0][0]([i0, i1]), 128 * i0 + i1)
+
     def test_groups_exhausted_raises_cant_split(self):
         """When all groups are consumed but sizes remain, CantSplit is raised."""
         from torch._inductor.codegen.simd import CantSplit, SIMDKernel
