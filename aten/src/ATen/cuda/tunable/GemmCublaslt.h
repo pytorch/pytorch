@@ -372,12 +372,25 @@ class CublasltStandardGemmProblem {
     lie_to_cublaslt_ = reduction_mask_ == CUBLASLT_REDUCTION_SCHEME_NONE &&
         n_ == 1 && at::cuda::getCurrentDeviceProperties()->major >= 10;
     if (lie_to_cublaslt_) {
+      const auto fake_ldb = ldb_ == 1 ? 2 : ldb_;
+      const auto fake_ldc = ldc_ == 1 ? 2 : ldc_;
       fake_bdesc_ =
           std::make_unique<at::cuda::blas::detail::CuBlasLtMatrixLayout>(
-              type_info_.ab_type, k_, 2, ldb_, opb_ == CUBLAS_OP_T);
+              type_info_.ab_type, k_, 2, fake_ldb, opb_ == CUBLAS_OP_T);
       fake_cdesc_ =
           std::make_unique<at::cuda::blas::detail::CuBlasLtMatrixLayout>(
-              type_info_.c_type, m_, 2, ldc_);
+              type_info_.c_type, m_, 2, fake_ldc);
+      if (batch_count_ > 1) {
+        int batch_as_int = static_cast<int>(batch_count_);
+        fake_bdesc_->setAttribute(
+            CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, batch_as_int);
+        fake_cdesc_->setAttribute(
+            CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, batch_as_int);
+        fake_bdesc_->setAttribute(
+            CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stride_b_);
+        fake_cdesc_->setAttribute(
+            CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stride_c_);
+      }
     }
   }
 
