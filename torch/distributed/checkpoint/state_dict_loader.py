@@ -93,7 +93,7 @@ def load(
 
     .. warning::
         Users must call `load_state_dict` on the root module to ensure load
-        pos-processing and non-tensor data properly propagates.
+        post-processing and non-tensor data properly propagates.
 
     .. note:
         If no process group is initialized, this function will assume the intent
