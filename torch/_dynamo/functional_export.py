@@ -941,8 +941,13 @@ def _dynamo_graph_capture_for_export(
     def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
         # This sets the is_exporting flag when building guards.
         with _compiling_state_context():
-            # Normalize ParamsSpec/dict → ShapesSpec up front.
-            user_spec = _coerce_to_shapes_spec(dynamic_shapes)
+            # Only a ShapesSpec/ParamsSpec object opts into the new spec API.
+            # A bare dict/tuple in export's `dynamic_shapes` is the legacy
+            # format (Dim/tuple/None) and must NOT be routed through
+            # _bind_spec_to_args.
+            user_spec: ShapesSpec | None = None
+            if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
+                user_spec = _coerce_to_shapes_spec(dynamic_shapes)
             flattened_spec: ShapesSpec | None = None
             if user_spec is not None:
                 # _bind_spec_to_args also flattens (args, kwargs) for us.
