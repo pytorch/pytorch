@@ -18,15 +18,10 @@ from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
     set_default_dtype,
-    TEST_CUDA,
-    TEST_XPU, 
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
 )
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-TEST_GPU = TEST_XPU or TEST_CUDA
+
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager

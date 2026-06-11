@@ -255,9 +255,8 @@ instantiate_device_type_tests(
 
 instantiate_device_type_tests(TestDebugUtils, globals())
 
-devices = ["cuda", "hpu", "xpu"]
 instantiate_device_type_tests(
-    TestDebugUtilsDevice, globals(), only_for=devices, allow_xpu=True
+    TestDebugUtilsDevice, globals(), only_for=devices, except_for="mps", allow_xpu=True
 )
 
 

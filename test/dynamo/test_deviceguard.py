@@ -11,7 +11,6 @@ from torch.testing._internal.common_utils import TEST_CUDA, TEST_XPU
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 TEST_GPU = TEST_CUDA or TEST_XPU
-TEST_MULTIGPU = torch.cuda.device_count() >= 2 or torch.xpu.device_count() >= 2
 
 
 class TestDeviceGuard(torch._dynamo.test_case.TestCase):
