@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: export"]
 
 import itertools
+import re
 from unittest import mock
 
 import torch
@@ -16,8 +17,11 @@ from torch.export._trace import (
     _strict_export,
 )
 from torch.fx.experimental.dynamic_spec import (
+    DictSpec as DICT,
     IntVar,
+    ObjectSpec as OBJ,
     ParamsSpec as PARAMS,
+    SeqSpec as L,
     ShapesSpec,
     ShapeVar as VAR,
     STATIC,
@@ -284,7 +288,7 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
 
         with self.assertRaisesRegex(
             ValueError,
-            r"ParamsSpec entry for forward param 'xs'.*TensorSpec.*not a Tensor",
+            r"shapes_spec\['xs'\]: spec is TensorSpec but the actual arg is list, not a Tensor\.",
         ):
             export(
                 M(),
@@ -342,9 +346,7 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
         ep = export(
             _ModXPlus(),
             args=(torch.randn(8, 3),),
-            dynamic_shapes=ShapesSpec(
-                params=PARAMS({"x": None}),  # explicit static spec for x
-            ),
+            dynamic_shapes=PARAMS({"x": None}),
             strict=True,
         )
         shape = _first_tensor_placeholder_shape(ep.graph_module)
@@ -879,6 +881,559 @@ class <lambda>(torch.nn.Module):
                 orig_in_spec=in_spec,
                 prefer_deferred_runtime_asserts_over_guards=False,
                 _to_aten_func=_export_to_aten_ir,
+            )
+
+
+class TestContainerSpec(TestCase):
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
+    # ---- Positive cases ----
+
+    def test_seq_spec_on_list_of_tensors(self):
+        """SeqSpec marks each list position dynamic independently."""
+
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                return xs[0].sum(0) + xs[1].sum(0)
+
+        ep = export(
+            M(),
+            args=([torch.randn(8, 3), torch.randn(5, 3)],),
+            dynamic_shapes=PARAMS(
+                {
+                    "xs": L(
+                        [
+                            T([VAR("A"), STATIC]),
+                            T([VAR("B"), STATIC]),
+                        ]
+                    )
+                }
+            ),
+            strict=True,
+        )
+        ep_str = str(ep)
+        # Both list elements have unbacked dim 0.
+        self.assertRegex(ep_str, r'xs_0: "f32\[u\d+, 3\]"')
+        self.assertRegex(ep_str, r'xs_1: "f32\[u\d+, 3\]"')
+        ep.module()([torch.randn(20, 3), torch.randn(99, 3)])
+
+    def test_dict_spec_on_dict_of_tensors_partial(self):
+        class M(torch.nn.Module):
+            def forward(self, d):
+                return d["a"].sum(0) + d["b"].sum(0)
+
+        ep = export(
+            M(),
+            args=({"a": torch.randn(7, 3), "b": torch.randn(8, 3)},),
+            dynamic_shapes=PARAMS({"d": DICT({"b": T([VAR("B"), STATIC])})}),
+            strict=True,
+        )
+        ep_str = str(ep)
+        # a is omitted from the spec → static; b is dynamic.
+        self.assertIn('d_a: "f32[7, 3]"', ep_str)
+        self.assertRegex(ep_str, r'd_b: "f32\[u\d+, 3\]"')
+
+    def test_object_spec_on_namedtuple(self):
+        from collections import namedtuple
+
+        Pair = namedtuple("Pair", ["first", "second"])
+
+        class M(torch.nn.Module):
+            def forward(self, p):
+                return p.first.sum(0) + p.second.sum(0)
+
+        ep = export(
+            M(),
+            args=(Pair(torch.randn(5, 3), torch.randn(8, 3)),),
+            dynamic_shapes=PARAMS({"p": OBJ({"second": T([VAR("S"), STATIC])})}),
+            strict=True,
+        )
+        ep_str = str(ep)
+        # first is omitted from the spec → static; second is dynamic.
+        self.assertIn('p_first: "f32[5, 3]"', ep_str)
+        self.assertRegex(ep_str, r'p_second: "f32\[u\d+, 3\]"')
+
+    def test_seq_spec_on_namedtuple(self):
+        from collections import namedtuple
+
+        Pair = namedtuple("Pair", ["first", "second"])
+
+        class M(torch.nn.Module):
+            def forward(self, p):
+                return p.first.sum(0) + p.second.sum(0)
+
+        ep = export(
+            M(),
+            args=(Pair(torch.randn(5, 3), torch.randn(8, 3)),),
+            dynamic_shapes=PARAMS({"p": L([None, T([VAR("B"), STATIC])])}),
+            strict=True,
+        )
+        ep_str = str(ep)
+        # Position 0 → static (None entry); position 1 → dynamic.
+        self.assertIn('p_first: "f32[5, 3]"', ep_str)
+        self.assertRegex(ep_str, r'p_second: "f32\[u\d+, 3\]"')
+
+    def test_object_spec_on_custom_pytree_node(self):
+        """ObjectSpec on a class registered via
+        ``pytree.register_pytree_node`` with a caller-supplied
+        ``flatten_with_keys_fn`` that yields ``GetAttrKey`` entries."""
+
+        class MyContainer:
+            def __init__(self, a, b):
+                self.a = a
+                self.b = b
+
+        # Caller supplies flatten / unflatten / flatten_with_keys_fn —
+        # the KeyPath shape is whatever the caller chooses to return.
+        # We use GetAttrKey so ObjectSpec can address fields by name.
+        def _flatten(c):
+            return [c.a, c.b], None
+
+        def _unflatten(values, _context):
+            a, b = values
+            return MyContainer(a, b)
+
+        def _flatten_with_keys(c):
+            children = [
+                (pytree.GetAttrKey("a"), c.a),
+                (pytree.GetAttrKey("b"), c.b),
+            ]
+            return children, None
+
+        pytree.register_pytree_node(
+            MyContainer,
+            _flatten,
+            _unflatten,
+            serialized_type_name="test_dynamic_spec_export.MyContainer",
+            flatten_with_keys_fn=_flatten_with_keys,
+        )
+
+        class M(torch.nn.Module):
+            def forward(self, c):
+                return c.a.sum(0) + c.b.sum(0)
+
+        ep = export(
+            M(),
+            args=(MyContainer(torch.randn(5, 3), torch.randn(8, 3)),),
+            dynamic_shapes=PARAMS({"c": OBJ({"b": T([VAR("B"), STATIC])})}),
+            strict=True,
+        )
+        ep_str = str(ep)
+        # a is omitted from the spec → static; b is dynamic.
+        self.assertIn('c_a: "f32[5, 3]"', ep_str)
+        self.assertRegex(ep_str, r'c_b: "f32\[u\d+, 3\]"')
+
+    def test_object_spec_via_torch_export_register_dataclass(self):
+        import dataclasses
+
+        import torch.export as te
+
+        @dataclasses.dataclass
+        class ExportedBox:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        te.register_dataclass(ExportedBox)
+
+        class M(torch.nn.Module):
+            def forward(self, box):
+                return box.x.sum(0) + box.y.sum(0)
+
+        ep = export(
+            M(),
+            args=(ExportedBox(torch.randn(5, 3), torch.randn(8, 3)),),
+            dynamic_shapes=PARAMS({"box": OBJ({"y": T([VAR("Y"), STATIC])})}),
+            strict=True,
+        )
+        ep_str = str(ep)
+        # x is omitted from the spec → static; y is dynamic.
+        self.assertIn('box_x: "f32[5, 3]"', ep_str)
+        self.assertRegex(ep_str, r'box_y: "f32\[u\d+, 3\]"')
+
+    def test_object_spec_on_dataclass(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Box:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        pytree.register_dataclass(Box)
+
+        class M(torch.nn.Module):
+            def forward(self, box):
+                return box.x.sum(0) + box.y.sum(0)
+
+        ep = export(
+            M(),
+            args=(Box(torch.randn(5, 3), torch.randn(8, 3)),),
+            dynamic_shapes=PARAMS({"box": OBJ({"y": T([VAR("Y"), STATIC])})}),
+            strict=True,
+        )
+        ep_str = str(ep)
+        # x is omitted from the spec → static; y is dynamic.
+        self.assertIn('box_x: "f32[5, 3]"', ep_str)
+        self.assertRegex(ep_str, r'box_y: "f32\[u\d+, 3\]"')
+
+    def test_nested_dict_of_seq_spec(self):
+        """Nested DictSpec({"foo": SeqSpec([TensorSpec, None])}) — first
+        list elem dynamic, second left to default (static)."""
+
+        class M(torch.nn.Module):
+            def forward(self, d):
+                return d["foo"][0].sum(0) + d["foo"][1].sum(0)
+
+        ep = export(
+            M(),
+            args=({"foo": [torch.randn(8, 3), torch.randn(5, 3)]},),
+            dynamic_shapes=PARAMS(
+                {
+                    "d": DICT(
+                        {
+                            "foo": L(
+                                [
+                                    T([VAR("A"), STATIC]),
+                                    T([5, 3]),
+                                ]
+                            )
+                        }
+                    )
+                }
+            ),
+            strict=True,
+        )
+        ep_str = str(ep)
+        self.assertRegex(ep_str, r'd_foo_0: "f32\[u\d+, 3\]"')
+        self.assertIn('d_foo_1: "f32[5, 3]"', ep_str)
+
+    def test_mixed_leaf_and_container_under_params_spec(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a.sum(0) + b[0].sum(0) + b[1].sum(0)
+
+        ep = export(
+            M(),
+            args=(
+                torch.randn(8, 3),
+                [torch.randn(5, 3), torch.randn(6, 3)],
+            ),
+            dynamic_shapes=PARAMS(
+                {
+                    "a": T([VAR("A"), STATIC]),
+                    "b": L(
+                        [
+                            T([VAR("B0"), STATIC]),
+                            T([VAR("B1"), STATIC]),
+                        ]
+                    ),
+                }
+            ),
+            strict=True,
+        )
+        ep_str = str(ep)
+        self.assertRegex(ep_str, r'a: "f32\[u\d+, 3\]"')
+        self.assertRegex(ep_str, r'b_0: "f32\[u\d+, 3\]"')
+        self.assertRegex(ep_str, r'b_1: "f32\[u\d+, 3\]"')
+
+    # ---- Partial-spec cases ----
+
+    def test_seq_spec_shorter_than_runtime_list_tail_static(self):
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                return xs[0].sum() + xs[1].sum() + xs[2].sum()
+
+        ep = export(
+            M(),
+            args=([torch.randn(8, 3), torch.randn(5, 3), torch.randn(6, 3)],),
+            dynamic_shapes=PARAMS({"xs": L([T([VAR("A"), STATIC])])}),
+            strict=True,
+        )
+        ep_str = str(ep)
+        self.assertRegex(ep_str, r'xs_0: "f32\[u\d+, 3\]"')
+        self.assertIn('xs_1: "f32[5, 3]"', ep_str)
+        self.assertIn('xs_2: "f32[6, 3]"', ep_str)
+
+    # ---- Negative / structural cases ----
+
+    def test_seq_spec_on_dict_arg_raises(self):
+        class M(torch.nn.Module):
+            def forward(self, d):
+                return d["a"]
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"SeqSpec expected list/tuple, got dict",
+        ):
+            export(
+                M(),
+                args=({"a": torch.randn(4)},),
+                dynamic_shapes=PARAMS({"d": L([T([VAR("A")])])}),
+                strict=True,
+            )
+
+    def test_seq_spec_longer_than_runtime_list_raises(self):
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                return xs[0]
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"SeqSpec has 2 entries beyond runtime sequence length 1",
+        ):
+            export(
+                M(),
+                args=([torch.randn(4)],),
+                dynamic_shapes=PARAMS(
+                    {
+                        "xs": L(
+                            [
+                                T([VAR("A")]),
+                                T([VAR("B")]),
+                            ]
+                        )
+                    }
+                ),
+                strict=True,
+            )
+
+    def test_dict_spec_key_not_in_runtime_dict_raises(self):
+        class M(torch.nn.Module):
+            def forward(self, d):
+                return d["a"]
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"shapes_spec\['d'\]: DictSpec has entries \['missing'\] that do not match any key in the runtime dict\. Runtime keys: \['a'\]",
+        ):
+            export(
+                M(),
+                args=({"a": torch.randn(4)},),
+                dynamic_shapes=PARAMS({"d": DICT({"missing": T([VAR("A")])})}),
+                strict=True,
+            )
+
+    def test_object_spec_attr_not_on_runtime_object_raises(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Box2:
+            x: torch.Tensor
+
+        pytree.register_dataclass(Box2)
+
+        class M(torch.nn.Module):
+            def forward(self, box):
+                return box.x
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"ObjectSpec has entries .*'nope'.* that do not match any attribute",
+        ):
+            export(
+                M(),
+                args=(Box2(torch.randn(4)),),
+                dynamic_shapes=PARAMS({"box": OBJ({"nope": T([VAR("A")])})}),
+                strict=True,
+            )
+
+    def test_where_path_accumulates_in_nested_error(self):
+        """Errors from nested specs should report the full path to the
+        offending spot, exercising all three ``where``-formatting
+        variants: ``[str]`` (DictSpec), ``.attr`` (ObjectSpec), and
+        ``[int]`` (SeqSpec)."""
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Box:
+            items: list
+
+        pytree.register_dataclass(Box)
+
+        class M(torch.nn.Module):
+            def forward(self, batch):
+                return batch["b"].items[1]["data"]
+
+        with self.assertRaisesRegex(
+            ValueError,
+            re.escape(
+                "shapes_spec['batch']['b'].items[1]: "
+                "DictSpec has entries ['missing'] that do not match "
+                "any key in the runtime dict. Runtime keys: ['data']"
+            ),
+        ):
+            export(
+                M(),
+                args=({"b": Box(items=[torch.randn(3), {"data": torch.randn(3)}])},),
+                dynamic_shapes=PARAMS(
+                    {
+                        "batch": DICT(
+                            {
+                                "b": OBJ(
+                                    {
+                                        "items": L(
+                                            [
+                                                None,
+                                                DICT({"missing": T([VAR("A")])}),
+                                            ]
+                                        )
+                                    }
+                                )
+                            }
+                        )
+                    }
+                ),
+                strict=True,
+            )
+
+    def test_object_spec_on_pytree_node_without_keys_fn_raises(self):
+        class KeyslessContainer:
+            def __init__(self, x):
+                self.x = x
+
+        pytree.register_pytree_node(
+            KeyslessContainer,
+            lambda c: ([c.x], None),
+            lambda values, _context: KeyslessContainer(next(iter(values))),
+            serialized_type_name="test_dynamic_spec_export.KeyslessContainer",
+        )
+
+        class M(torch.nn.Module):
+            def forward(self, c):
+                return c.x
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"export requires `flatten_with_keys_fn` to be registered for "
+            r"type KeyslessContainer",
+        ):
+            export(
+                M(),
+                args=(KeyslessContainer(torch.randn(4)),),
+                dynamic_shapes=PARAMS({"c": OBJ({"x": T([VAR("A")])})}),
+                strict=True,
+            )
+
+    # ---- Alignment invariant: walker order == pytree.tree_flatten order ----
+
+    def test_walker_alignment_with_pytree_flatten(self):
+        """For each structured input value, ``_walk_spec`` must
+        return leaf specs in exactly the same order as
+        ``pytree.tree_flatten(value)``.
+
+        Proof technique: build a "complete" container spec where every
+        leaf is a unique TensorSpec whose ShapeVar name encodes the
+        ``id()`` of the tensor it targets. After flattening the user
+        spec, assert that the i-th returned spec carries the name
+        corresponding to the i-th tensor from
+        ``pytree.tree_leaves(value)``. Any drift in iteration order
+        would cause a name mismatch.
+        """
+        import dataclasses
+
+        from torch._dynamo.functional_export import _walk_spec
+
+        @dataclasses.dataclass
+        class _Box:
+            u: torch.Tensor
+            v: torch.Tensor
+
+        pytree.register_dataclass(_Box)
+
+        def _build_complete_spec(v):
+            """Build a container spec that targets every tensor in v
+            with a uniquely-named ShapeVar."""
+            if isinstance(v, torch.Tensor):
+                return T([VAR(f"t{id(v)}")])
+            if isinstance(v, (list, tuple)):
+                return L([_build_complete_spec(e) for e in v])
+            if isinstance(v, dict):
+                return DICT({k: _build_complete_spec(val) for k, val in v.items()})
+            if dataclasses.is_dataclass(v) and not isinstance(v, type):
+                return OBJ(
+                    {
+                        f.name: _build_complete_spec(getattr(v, f.name))
+                        for f in dataclasses.fields(v)
+                    }
+                )
+            # Leaf type with no spec needed (None / int / etc.)
+            return None
+
+        cases = [
+            # Bare tensor — trivial leaf case.
+            torch.randn(3),
+            # Plain containers.
+            [torch.randn(3), torch.randn(4)],
+            (torch.randn(3), torch.randn(4)),
+            {"a": torch.randn(3), "b": torch.randn(4)},
+            # Different dict insertion order — must still align.
+            {"z": torch.randn(3), "a": torch.randn(4), "m": torch.randn(5)},
+            # Dataclass.
+            _Box(torch.randn(3), torch.randn(4)),
+            # Nested dict-of-list-of-tensors.
+            {"x": [torch.randn(3), torch.randn(4)], "y": torch.randn(5)},
+            # Nested list-of-dataclass-and-dict.
+            [
+                _Box(torch.randn(3), torch.randn(4)),
+                {"k": torch.randn(5), "j": torch.randn(6)},
+            ],
+            # Deeply nested.
+            {
+                "a": [
+                    _Box(torch.randn(2), torch.randn(3)),
+                    {"inner": [torch.randn(4), torch.randn(5)]},
+                ],
+                "b": torch.randn(6),
+            },
+        ]
+
+        for arg_value in cases:
+            spec = _build_complete_spec(arg_value)
+            leaves = pytree.tree_leaves(arg_value)
+            out: list = [None] * len(leaves)
+            consumed = _walk_spec(spec, arg_value, out, 0, where="<root>")
+            self.assertEqual(
+                consumed, len(leaves), f"leaf-count drift for case {arg_value!r}"
+            )
+            # Per-slot check: each slot's spec name must match the
+            # tensor at that flat position from pytree.tree_flatten.
+            for i, (slot_spec, leaf) in enumerate(zip(out, leaves, strict=True)):
+                self.assertIsInstance(
+                    slot_spec,
+                    T,
+                    msg=f"slot {i} is {slot_spec!r} (expected TensorSpec) "
+                    f"for case {arg_value!r}",
+                )
+                expected = f"t{id(leaf)}"
+                actual = slot_spec._specs[0].name
+                self.assertEqual(
+                    actual,
+                    expected,
+                    msg=(
+                        f"alignment drift at slot {i}: spec name "
+                        f"{actual!r} does not match pytree-flatten leaf "
+                        f"name {expected!r} for case {arg_value!r}"
+                    ),
+                )
+
+    def test_walker_alignment_no_spec_advances_correctly(self):
+        """When user_spec=None, the walker must return exactly
+        len(pytree.tree_leaves(value)) — i.e. no-spec subtrees stay in
+        lockstep with pytree's flatten."""
+        from torch._dynamo.functional_export import _walk_spec
+
+        cases = [
+            torch.randn(3),
+            [torch.randn(3), torch.randn(4), torch.randn(5)],
+            {"a": [torch.randn(3), torch.randn(4)], "b": torch.randn(5)},
+            (torch.randn(3), {"k": torch.randn(4)}, [torch.randn(5)]),
+        ]
+        for arg_value in cases:
+            expected = len(pytree.tree_leaves(arg_value))
+            consumed = _walk_spec(None, arg_value, [None] * expected, 0, where="<root>")
+            self.assertEqual(
+                consumed, expected, f"no-spec leaf-count drift for {arg_value!r}"
             )
 
 

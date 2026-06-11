@@ -22,7 +22,7 @@ from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
 from torch._guards import detect_fake_mode, TracingContext
-from torch.export.dynamic_shapes import _IntWrapper, _RelaxedConstraint, Constraint
+from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
@@ -907,41 +907,180 @@ def op_overload_wrapper({", ".join(arg_list)}):
     return inner
 
 
-def _check_leaf_spec_matches_value(
-    user_spec: IntermediateSpec,
+def _walk_spec(
+    user_spec: IntermediateSpec | None,
     arg_value: Any,
+    out_leaf_specs: list[IntermediateSpec | None],
+    flat_idx: int,
     where: str,
-) -> None:
-    """Verify a user-provided spec is acceptable on the export path and
-    type-compatible with the actual arg value.
+) -> int:
+    """Walk ``(user_spec, arg_value)`` pairwise, writing leaf specs into
+    ``out_leaf_specs`` starting at ``flat_idx``, and return the **count
+    of flat argument leaves consumed** by this subtree.
+
+    Container specs (``SeqSpec`` / ``DictSpec`` / ``ObjectSpec``) walk in
+    parallel with the runtime value's pytree.
+
+    Flat-index alignment with the export tracer
+    -------------------------------------------
+    Each recursive case visits children in exactly the same order
+    ``pytree.tree_flatten`` does, guaranteed structurally:
+
+    - **list / tuple** (``SeqSpec`` or no-spec subtree): both this
+      walker and pytree's ``_list_flatten`` / ``_tuple_flatten``
+      iterate via plain ``enumerate(seq)``.
+    - **dict** (``DictSpec`` or no-spec subtree): this walker
+      iterates ``arg_value.items()`` (insertion order); pytree's
+      ``_dict_flatten`` does ``list(d.values())``, same order.
+    - **pytree-registered objects** (``ObjectSpec``): this walker calls
+      the type's own registered ``flatten_with_keys_fn`` directly
+      (same function pytree itself dispatches to).
+
+    ``where`` is a human-readable path string used solely for error
+    messages; it accumulates as the walker descends (e.g.
+    ``"ParamsSpec entry for forward param 'd'['a'][0]"``).
     """
-    if isinstance(user_spec, (DictSpec, SeqSpec, ObjectSpec)):
-        raise NotImplementedError(
-            f"{where}: container specs ({type(user_spec).__name__}) are "
-            f"not yet supported on the export path. Use the legacy "
-            f"`dynamic_shapes` API instead."
-        )
-    match user_spec:
-        case TensorSpec():
-            if not isinstance(arg_value, torch.Tensor):
-                raise ValueError(
-                    f"{where}: spec is TensorSpec but the actual arg is "
-                    f"{type(arg_value).__name__}, not a Tensor."
-                )
-        case IntVar() | int():
-            # Scalar spec — arg must be a Python int, a SymInt, or the
-            # export-internal `_IntWrapper` (export wraps user ints in
-            # `_IntWrapper` upstream via `pytree.tree_map_only(int, ...)`).
-            if not isinstance(arg_value, (int, torch.SymInt, _IntWrapper)):
-                raise ValueError(
-                    f"{where}: spec is {type(user_spec).__name__} "
-                    f"(scalar spec) but the actual arg is "
-                    f"{type(arg_value).__name__}, not int/SymInt."
-                )
-        case _:
-            raise AssertionError(
-                f"{where}: unexpected leaf spec type {type(user_spec).__name__}"
+    # No spec for this subtree (top-level None or unspecified slot) ⇒
+    # everything below it is static; count its flat leaves without
+    # writing anything (slots are pre-initialized to None).
+    if user_spec is None:
+        return len(pytree.tree_leaves(arg_value))
+
+    if isinstance(user_spec, SeqSpec):
+        if not isinstance(arg_value, (list, tuple)):
+            raise ValueError(
+                f"{where}: SeqSpec expected list/tuple, got {type(arg_value).__name__}"
             )
+        entries = user_spec._entries
+        if len(entries) > len(arg_value):
+            raise ValueError(
+                f"{where}: SeqSpec has {len(entries)} entries beyond runtime "
+                f"sequence length {len(arg_value)}"
+            )
+        consumed = 0
+        for i, value in enumerate(arg_value):
+            sub_spec = entries[i] if i < len(entries) else None
+            consumed += _walk_spec(
+                sub_spec,
+                value,
+                out_leaf_specs,
+                flat_idx + consumed,
+                where=f"{where}[{i}]",
+            )
+        return consumed
+
+    if isinstance(user_spec, DictSpec):
+        if not isinstance(arg_value, dict):
+            raise ValueError(
+                f"{where}: DictSpec expected dict, got {type(arg_value).__name__}"
+            )
+
+        unmatched = set(user_spec) - set(arg_value)
+        if unmatched:
+            raise ValueError(
+                f"{where}: DictSpec has entries {sorted(unmatched)!r} "
+                f"that do not match any key in the runtime dict. "
+                f"Runtime keys: {sorted(arg_value.keys())!r}"
+            )
+        # Walk runtime ordering so flat positions align with
+        # pytree.tree_flatten (insertion order for plain dicts).
+        consumed = 0
+        for key, value in arg_value.items():
+            sub_spec = user_spec._entries[key] if key in user_spec else None
+            consumed += _walk_spec(
+                sub_spec,
+                value,
+                out_leaf_specs,
+                flat_idx + consumed,
+                where=f"{where}[{key!r}]",
+            )
+        return consumed
+
+    if isinstance(user_spec, ObjectSpec):
+        # By the time we get here, export has already validated that
+        # arg_value is pytree-flattenable (its top-level input check
+        # rejects unregistered types). The only ObjectSpec-specific
+        # requirement is that the registered handler also expose a
+        # `flatten_with_keys_fn` so we can address children by
+        # attribute name.
+        node_type = pytree._get_node_type(arg_value)
+        handler = pytree.SUPPORTED_NODES.get(node_type)
+        if handler is None:
+            raise ValueError(
+                f"{where}: ObjectSpec requires the runtime value's type "
+                f"to be pytree-registered, but {type(arg_value).__name__} "
+                f"is not registered. Register it via "
+                f"`torch.export.register_dataclass(<cls>)` (for dataclasses) "
+                f"or `pytree.register_pytree_node(...)`."
+            )
+        if handler.flatten_with_keys_fn is None:
+            # Note: this requirement is not ObjectSpec-specific — plain
+            # export() and the legacy dynamic_shapes API also fail on
+            # types registered without a `flatten_with_keys_fn` (their
+            # input-path construction uses `tree_flatten_with_path`).
+            # We just catch it earlier here with a clearer message.
+            raise ValueError(
+                f"{where}: export requires "
+                f"`flatten_with_keys_fn` to be registered for type "
+                f"{type(arg_value).__name__}, but none was found. "
+                f"Re-register via "
+                f"`pytree.register_pytree_node(..., flatten_with_keys_fn=...)` "
+                f"or use `torch.export.register_dataclass` for dataclasses."
+            )
+        key_children, _ = handler.flatten_with_keys_fn(arg_value)
+        # Fail-fast on unmatched attrs before recursing. Non-attribute
+        # keys (SequenceKey / MappingKey) contribute no matchable names.
+        available_names = {
+            ke.name for ke, _ in key_children if isinstance(ke, pytree.GetAttrKey)
+        }
+        unmatched = set(user_spec) - available_names
+        if unmatched:
+            raise ValueError(
+                f"{where}: ObjectSpec has entries {sorted(unmatched)!r} "
+                f"that do not match any attribute on the runtime object "
+                f"of type {type(arg_value).__name__}. Available "
+                f"attributes: {sorted(available_names)!r}"
+            )
+        consumed = 0
+        for key_entry, child in key_children:
+            # Only ``GetAttrKey`` entries can match an ObjectSpec entry
+            # (ObjectSpec addresses by attribute name); any other key
+            # shape contributes a static subtree.
+            if isinstance(key_entry, pytree.GetAttrKey) and key_entry.name in user_spec:
+                consumed += _walk_spec(
+                    user_spec._fields[key_entry.name],
+                    child,
+                    out_leaf_specs,
+                    flat_idx + consumed,
+                    where=f"{where}.{key_entry.name}",
+                )
+            else:
+                # No spec for this attribute — count its leaves as static.
+                consumed += len(pytree.tree_leaves(child))
+        return consumed
+
+    # Leaf spec — single flat slot. Type-check the leaf spec against
+    # the runtime value, then write it.
+    if isinstance(user_spec, TensorSpec):
+        if not isinstance(arg_value, torch.Tensor):
+            raise ValueError(
+                f"{where}: spec is TensorSpec but the actual arg is "
+                f"{type(arg_value).__name__}, not a Tensor."
+            )
+    elif isinstance(user_spec, (IntVar, int)):
+        # Scalar spec — arg must be a Python int.
+        if not isinstance(arg_value, int):
+            raise ValueError(
+                f"{where}: spec is {type(user_spec).__name__} "
+                f"(scalar spec) but the actual arg is "
+                f"{type(arg_value).__name__}, not int."
+            )
+    else:
+        raise AssertionError(
+            f"{where}: unexpected leaf spec type {type(user_spec).__name__}"
+        )
+    out_leaf_specs[flat_idx] = user_spec
+    return 1
 
 
 def _flatten_shapes_spec(
@@ -1030,19 +1169,14 @@ def _flatten_shapes_spec(
             user_spec = params_spec_named_args[arg_name]
         else:
             user_spec = None
-        if user_spec is not None:
-            _check_leaf_spec_matches_value(
-                user_spec,
-                arg_value,
-                where=f"ParamsSpec entry for forward param {arg_name!r}",
-            )
-            out_leaf_specs[flat_idx] = user_spec
-            flat_idx += 1
-        else:
-            # No spec (or explicit-None spec) for this arg — just advance
-            # past its flat slots.
-            leaves, _ = pytree.tree_flatten(arg_value)
-            flat_idx += len(leaves)
+        consumed = _walk_spec(
+            user_spec,
+            arg_value,
+            out_leaf_specs,
+            flat_idx,
+            where=f"shapes_spec[{arg_name!r}]",
+        )
+        flat_idx += consumed
 
     # Pad varargs spec to the actual `*args` count (missing tail = static)
     # so Loop 2 can index uniformly without a bounds check.
@@ -1053,17 +1187,14 @@ def _flatten_shapes_spec(
     # Loop 2: varargs. Spec keyed by position within `*args`.
     for user_idx, arg_value in enumerate(args[varargs_idx:]):
         user_spec = params_spec_varargs[user_idx]
-        if user_spec is not None:
-            _check_leaf_spec_matches_value(
-                user_spec,
-                arg_value,
-                where=f"ParamsSpec varargs[{user_idx}]",
-            )
-            out_leaf_specs[flat_idx] = user_spec
-            flat_idx += 1
-        else:
-            sub_leaves, _ = pytree.tree_flatten(arg_value)
-            flat_idx += len(sub_leaves)
+        consumed = _walk_spec(
+            user_spec,
+            arg_value,
+            out_leaf_specs,
+            flat_idx,
+            where=f"shapes_spec['*args'][{user_idx}]",
+        )
+        flat_idx += consumed
 
     # Loop 3: kwargs. Spec comes from named_args[name] (kwarg matches a
     # named param) or varkw[name] (kwarg flows through `**kwargs`).
@@ -1077,17 +1208,14 @@ def _flatten_shapes_spec(
             matched_varkw_keys.add(arg_name)
         else:
             user_spec = None
-        if user_spec is not None:
-            _check_leaf_spec_matches_value(
-                user_spec,
-                arg_value,
-                where=f"ParamsSpec entry for forward kwarg {arg_name!r}",
-            )
-            out_leaf_specs[flat_idx] = user_spec
-            flat_idx += 1
-        else:
-            leaves, _ = pytree.tree_flatten(arg_value)
-            flat_idx += len(leaves)
+        consumed = _walk_spec(
+            user_spec,
+            arg_value,
+            out_leaf_specs,
+            flat_idx,
+            where=f"shapes_spec[{arg_name!r}]",
+        )
+        flat_idx += consumed
 
     # Every named / **kwargs spec entry must bind to a passed argument; a
     # leftover is almost always a typo or a spec for an omitted default.
