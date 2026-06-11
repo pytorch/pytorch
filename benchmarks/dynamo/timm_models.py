@@ -143,6 +143,11 @@ class TimmRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
+        # Sentinel; captured lazily on first load_model call (which runs
+        # AFTER main() in common.py has applied any --inductor-config CLI
+        # overrides). Capturing eagerly here would always see the unmodified
+        # default and silently override the user-specified value.
+        self._orig_emulate_precision_casts = None
 
     @property
     def _config(self):
@@ -167,6 +172,10 @@ class TimmRunner(BenchmarkRunner):
     @property
     def _require_larger_multiplier_for_smaller_tensor(self):
         return self._config["require_larger_multiplier_for_smaller_tensor"]
+
+    @property
+    def _emulate_precision_casts(self):
+        return self._config["emulate_precision_casts"]
 
     @property
     def skip_models_for_cpu(self):
@@ -276,6 +285,30 @@ class TimmRunner(BenchmarkRunner):
 
         if model_name in self._config["scaled_compute_loss"]:
             self.compute_loss = self.scaled_compute_loss
+
+        # See yaml note for emulate_precision_casts. This preserves the
+        # bf16 downcast-upcast pairs (fp16 untested) that inductor would
+        # otherwise elide when fusing across mixed-precision boundaries
+        # (e.g. bf16 conv-bias-add fused into an fp32 cat-prep store),
+        # which is what eager autocast actually does.
+        #
+        # Baseline is captured on the FIRST load_model call so that any
+        # --inductor-config emulate_precision_casts=... CLI override (applied
+        # by main() in common.py between __init__ and this point) is included
+        # in the baseline. Per-call assignment then sets the flag to
+        # (baseline OR model-in-yaml-list), which both preserves the user
+        # override across every model and toggles the flag back to baseline
+        # for non-listed models (no carry-over across iter_models).
+        if self._orig_emulate_precision_casts is None:
+            self._orig_emulate_precision_casts = (
+                torch._inductor.config.emulate_precision_casts
+            )
+        if self._orig_emulate_precision_casts:
+            torch._inductor.config.emulate_precision_casts = True
+        else:
+            torch._inductor.config.emulate_precision_casts = (
+                model_name in self._emulate_precision_casts
+            )
 
         if is_training and not use_eval_mode:
             model.train()
