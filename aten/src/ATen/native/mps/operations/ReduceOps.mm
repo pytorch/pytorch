@@ -796,22 +796,23 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
                                   const std::string& func_name) {
   using CachedGraph = MPSUnaryCachedGraph;
 
+  // Contiguous input required: the no-dim path reshapes to 1-D via
+  // apparent_in_shape, and Placeholder cannot view non-contiguous storage.
+  auto input = input_t.contiguous();
+
   int64_t dim_ = -1;
 
   if (dim.has_value()) {
-    dim_ = maybe_wrap_dim(dim.value(), input_t.dim());
-    zero_numel_check_dims(input_t, dim_, reduction_type == MPSReductionType::MAX ? "argmax()" : "argmin()");
+    dim_ = maybe_wrap_dim(dim.value(), input.dim());
+    zero_numel_check_dims(input, dim_, reduction_type == MPSReductionType::MAX ? "argmax()" : "argmin()");
   } else {
-    TORCH_CHECK_INDEX(input_t.numel() != 0,
+    TORCH_CHECK_INDEX(input.numel() != 0,
                       reduction_type == MPSReductionType::MAX ? "argmax()" : "argmin()",
                       ": Expected reduction dim to be specified for input.numel() == 0.");
-    // Since input will be flattened, take argmax or argmin along 0'th dimension
     dim_ = 0;
   }
 
-  // Calculate the output shape according to keepdim=True
-  // If there is no dim argument, the input shape is flattened
-  IntArrayRef input_shape = input_t.sizes();
+  IntArrayRef input_shape = input.sizes();
   int64_t num_input_dims = input_shape.size();
   NSMutableArray<NSNumber*>* apparent_in_shape = nil;
   NSMutableArray<NSNumber*>* apparent_out_shape = nil;
@@ -835,15 +836,15 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   }
 
   if (!apparent_in_shape) {
-    apparent_in_shape = [getMPSShape(input_t.sizes()) mutableCopy];
+    apparent_in_shape = [getMPSShape(input.sizes()) mutableCopy];
   }
 
   @autoreleasepool {
     NSString* ns_key = [[apparent_in_shape valueForKey:@"description"] componentsJoinedByString:@","];
-    std::string key = func_name + ":" + std::to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" +
+    std::string key = func_name + ":" + std::to_string(dim_) + ":" + getTensorsStringKey(input) + ":" +
         std::string([ns_key UTF8String]);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto inputScalarType = input_t.scalar_type();
+      auto inputScalarType = input.scalar_type();
       MPSGraphTensor* inputTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(inputScalarType), apparent_in_shape);
       MPSGraphTensor* argreduceOutTensor = nil;
@@ -874,7 +875,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
       newCachedGraph->outputTensor_ = outputClampedTensor;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t, apparent_in_shape);
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, apparent_in_shape);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
 
     auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
