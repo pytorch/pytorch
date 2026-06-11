@@ -11,6 +11,7 @@ _OPERATOR_MODULES: list[str] = [
     "arg",
     "argsort",
     "constant",
+    "elementwise_math",
     "gather",
     "index_select",
     "item",
