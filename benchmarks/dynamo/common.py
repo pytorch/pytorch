@@ -3896,6 +3896,10 @@ def parse_args(args=None):
     parsed = parser.parse_args(args)
     if parsed.batch_invariant and not parsed.accuracy:
         parser.error("--batch-invariant requires --accuracy")
+    if parsed.dashboard and parsed.performance:
+        # Dashboard memory should measure the warmed model, not compile/autotune
+        # transients.
+        parsed.use_warm_peak_memory = True
     return parsed
 
 
@@ -4326,6 +4330,25 @@ def run(runner, args, original_dir=None):
             # These seem unhappy with numerics of larger cuBLASLt workspace
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        if (
+            args.training
+            and args.only is not None
+            and args.only
+            in {
+                "DistillGPT2",
+            }
+        ):
+            # With the harness-wide fallback_random=True, inductor falls back
+            # to ATen rng for the dropout decomposition. That fallback Philox
+            # path indexes randoms by flat element offset, whereas eager CUDA
+            # rng indexes by (thread_id, intra_thread_iter), so the two produce
+            # different dropout masks for the same seed and trip DistillGPT2's
+            # tight accuracy tolerance (observed on gfx942). Setting
+            # fallback_random=False re-enables inductor's replace_random passes,
+            # which align the masks with eager. This is correct/harmless on
+            # other backends since it only changes how inductor lowers rng.
+            inductor_config.fallback_random = False
 
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ and not args.multiprocess:

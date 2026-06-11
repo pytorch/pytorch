@@ -80,7 +80,7 @@ class TestFullyShardFrozen(FSDPTest):
             fully_shard(mlp, reshard_after_forward=reshard_after_forward)
         fully_shard(model, reshard_after_forward=reshard_after_forward)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
         if freeze_after_init:
             for param_name, param in itertools.chain(
                 model.named_parameters(), ref_model.named_parameters()

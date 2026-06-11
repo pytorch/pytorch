@@ -1455,6 +1455,82 @@ function test_per_pool_summarization_interleaved() {
 }
 
 // ============================================================
+// unpickleData tests
+// ============================================================
+
+// Load unpickleData from MemoryViz.js
+const memvizPath = path.resolve(__dirname, '../../torch/utils/viz/MemoryViz.js');
+let memvizSrc = fs.readFileSync(memvizPath, 'utf-8');
+const funcStart = memvizSrc.indexOf('function unpickleData(buffer)');
+const funcEnd = memvizSrc.indexOf('\nfunction ', funcStart + 1);
+const unpickleDataSrc = memvizSrc.slice(funcStart, funcEnd);
+const { unpickleData } = vm.runInThisContext(
+  `(function() { ${unpickleDataSrc}\nreturn { unpickleData }; })()`,
+  { filename: memvizPath });
+
+function makePickle(proto_version, opcodes) {
+  const bytes = [0x80, proto_version, ...opcodes, '.'.charCodeAt(0)];
+  return new Uint8Array(bytes).buffer;
+}
+
+function test_unpickle_protocol5_accepted() {
+  console.log('test_unpickle_protocol5_accepted');
+  // Protocol 5 pickle containing EMPTY_DICT + STOP
+  const buf = makePickle(5, ['}'.charCodeAt(0)]);
+  const result = unpickleData(buf);
+  assert(typeof result === 'object' && result !== null, 'protocol 5 dict parsed');
+  assertEqual(Object.keys(result).length, 0, 'empty dict');
+}
+
+function test_unpickle_protocol4_still_works() {
+  console.log('test_unpickle_protocol4_still_works');
+  const buf = makePickle(4, ['}'.charCodeAt(0)]);
+  const result = unpickleData(buf);
+  assert(typeof result === 'object' && result !== null, 'protocol 4 still works');
+}
+
+function test_unpickle_protocol6_rejected() {
+  console.log('test_unpickle_protocol6_rejected');
+  const buf = makePickle(6, ['}'.charCodeAt(0)]);
+  let threw = false;
+  try {
+    unpickleData(buf);
+  } catch (e) {
+    threw = true;
+    assertContains(e.message, 'Unhandled version 6', 'error message mentions version 6');
+  }
+  assert(threw, 'protocol 6 should throw');
+}
+
+function test_unpickle_bytearray8() {
+  console.log('test_unpickle_bytearray8');
+  // Build a protocol 5 pickle with BYTEARRAY8 opcode
+  // BYTEARRAY8 = 0x96, followed by 8-byte LE length, then raw bytes
+  const data = [0xDE, 0xAD, 0xBE, 0xEF];
+  const len_bytes = [data.length, 0, 0, 0, 0, 0, 0, 0]; // 4 as uint64 LE
+  const opcodes = [0x96, ...len_bytes, ...data];
+  const buf = makePickle(5, opcodes);
+  const result = unpickleData(buf);
+  assert(result instanceof Uint8Array, 'BYTEARRAY8 produces Uint8Array');
+  assertEqual(result.length, 4, 'bytearray length is 4');
+  assertEqual(result[0], 0xDE, 'first byte');
+  assertEqual(result[3], 0xEF, 'last byte');
+}
+
+function test_unpickle_protocol5_dict_with_values() {
+  console.log('test_unpickle_protocol5_dict_with_values');
+  // Build a protocol 5 pickle for {"a": 42}:
+  // PROTO 5, EMPTY_DICT, SHORT_BINUNICODE "a", BININT1 42, SETITEM, STOP
+  const key = [0x8C, 1, 'a'.charCodeAt(0)]; // SHORT_BINUNICODE len=1 "a"
+  const val = ['K'.charCodeAt(0), 42];       // BININT1 42
+  const setitem = ['s'.charCodeAt(0)];       // SETITEM
+  const opcodes = ['}'.charCodeAt(0), ...key, ...val, ...setitem];
+  const buf = makePickle(5, opcodes);
+  const result = unpickleData(buf);
+  assertEqual(result.a, 42, 'dict value parsed correctly');
+}
+
+// ============================================================
 // Run all tests
 // ============================================================
 
@@ -1505,6 +1581,11 @@ test_per_pool_summarization();
 test_per_pool_summarization_with_frees();
 test_per_pool_summarization_initially_allocated();
 test_per_pool_summarization_interleaved();
+test_unpickle_protocol5_accepted();
+test_unpickle_protocol4_still_works();
+test_unpickle_protocol6_rejected();
+test_unpickle_bytearray8();
+test_unpickle_protocol5_dict_with_values();
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
