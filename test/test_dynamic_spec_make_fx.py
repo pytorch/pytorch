@@ -371,7 +371,27 @@ class <lambda>(torch.nn.Module):
             ignore_empty_lines=True,
         )
 
-    def test_assumption_runtime_enforced(self):
+    def test_unbound_derived_dim_raises(self):
+        """A derived dim (``A * 2``) whose ``IntVar`` never appears as a bare
+        slot leaves a pending check that can never drain. ``_finalize_spec_wiring``
+        must run for any spec (not just ones with assumptions) so this surfaces
+        as an error instead of silently dropping the relation."""
+        A = VAR("a")
+
+        def f(x):
+            return x.sum(0)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"pending check\(s\) reference unbound IntVar\(s\) \['a'\]",
+        ):
+            make_fx(
+                f,
+                tracing_mode="fake",
+                dynamic_shapes={"x": T([A * 2, STATIC])},
+            )(torch.randn(8, 3))
+
+    def test_assumption(self):
         """A relational ``assumptions=[A > B]`` is wired into the shape env:
         the assumed-true branch is taken at trace time and the relation
         is materialized as a runtime assertion."""

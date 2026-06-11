@@ -1332,7 +1332,7 @@ class TestContainerSpec(TestCase):
         """
         import dataclasses
 
-        from torch._dynamo.functional_export import _walk_spec
+        from torch.fx.experimental._spec_binding import _walk_spec
 
         @dataclasses.dataclass
         class _Box:
@@ -1421,7 +1421,7 @@ class TestContainerSpec(TestCase):
         """When user_spec=None, the walker must return exactly
         len(pytree.tree_leaves(value)) — i.e. no-spec subtrees stay in
         lockstep with pytree's flatten."""
-        from torch._dynamo.functional_export import _walk_spec
+        from torch.fx.experimental._spec_binding import _walk_spec
 
         cases = [
             torch.randn(3),
