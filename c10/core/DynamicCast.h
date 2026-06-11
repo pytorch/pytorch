@@ -4,6 +4,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Load.h>
 #include <c10/util/TypeCast.h>
+#include <torch/headeronly/core/Dispatch_v2.h>
 
 namespace c10 {
 
@@ -62,7 +63,7 @@ namespace c10 {
 // Fetch a value with dynamic type src_type from ptr, and cast it to static type
 // dest_t.
 #define FETCH_AND_CAST_CASE(type, scalartype) \
-  case ScalarType::scalartype:                \
+  case scalartype:                            \
     return c10::convert<dest_t>(c10::load<type>(ptr));
 
 template <typename dest_t>
@@ -71,10 +72,12 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(
     const void* ptr) {
   C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
   switch (src_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(FETCH_AND_CAST_CASE)
-    FETCH_AND_CAST_CASE(uint16_t, UInt16)
-    FETCH_AND_CAST_CASE(uint32_t, UInt32)
-    FETCH_AND_CAST_CASE(uint64_t, UInt64)
+    AT_FORALL_SCALAR_TYPES_V2(
+        AT_WRAP(FETCH_AND_CAST_CASE),
+        AT_EXPAND(AT_ALL_SCALAR_TYPES_WITH_COMPLEX),
+        kUInt16,
+        kUInt32,
+        kUInt64)
     default:
       ERROR_UNSUPPORTED_CAST
   }
@@ -85,7 +88,7 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(
 // Cast a value with static type src_t into dynamic dest_type, and store it to
 // ptr.
 #define CAST_AND_STORE_CASE(type, scalartype) \
-  case ScalarType::scalartype:                \
+  case scalartype:                            \
     *(type*)ptr = c10::convert<type>(value);  \
     return;
 template <typename src_t>
@@ -95,10 +98,12 @@ C10_HOST_DEVICE inline void cast_and_store(
     src_t value) {
   C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
   switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CAST_AND_STORE_CASE)
-    CAST_AND_STORE_CASE(uint16_t, UInt16)
-    CAST_AND_STORE_CASE(uint32_t, UInt32)
-    CAST_AND_STORE_CASE(uint64_t, UInt64)
+    AT_FORALL_SCALAR_TYPES_V2(
+        AT_WRAP(CAST_AND_STORE_CASE),
+        AT_EXPAND(AT_ALL_SCALAR_TYPES_WITH_COMPLEX),
+        kUInt16,
+        kUInt32,
+        kUInt64)
     default:;
   }
   C10_DIAGNOSTIC_POP()
