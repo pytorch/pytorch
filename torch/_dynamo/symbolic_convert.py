@@ -253,6 +253,25 @@ def _import_module(name: str) -> types.ModuleType:
     return importlib.import_module(name)
 
 
+def _registered_module_for_globals(
+    module_name: object, f_globals: dict[str, Any]
+) -> tuple[str, types.ModuleType] | None:
+    if not isinstance(module_name, str) or module_name.startswith("namedtuple_"):
+        return None
+
+    if "torch_package" in module_name:
+        module = torch.package.package_importer._package_imported_modules.get(
+            module_name
+        )
+    else:
+        module = sys.modules.get(module_name)
+
+    if isinstance(module, types.ModuleType) and module.__dict__ is f_globals:
+        return module_name, module
+
+    return None
+
+
 @dataclasses.dataclass
 class SpeculationEntry:
     filename: str
@@ -6164,22 +6183,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def get_globals_source_and_value(
         self, name: str
     ) -> tuple[Any, VariableTracker, Source]:
-        # NamedTuple's `__new__` has a fake global scope that's not an actual
-        # module. TODO generalize the check for other non-importable cases.
-        # https://github.com/python/cpython/blob/8421b03b16a4852a527256cb7cdce2ab2d318548/Lib/collections/__init__.py#L441-L447
-        if "__name__" in self.f_globals and not self.f_globals["__name__"].startswith(
-            "namedtuple_"
-        ):
-            module_name = self.f_globals["__name__"]
+        registered_module = _registered_module_for_globals(
+            self.f_globals.get("__name__"), self.f_globals
+        )
+        if registered_module is not None:
+            module_name, fglobals_value = registered_module
             module_source = self.import_source(module_name)
-            if "torch_package" in module_name:
-                fglobals_value = (
-                    torch.package.package_importer._package_imported_modules[
-                        module_name
-                    ]
-                )  # type: ignore[assignment]
-            else:
-                fglobals_value = _import_module(module_name)
             # Don't use lazy vt because we will do a setattr afterwards
             # TODO: fix InstructionTranslator -> InstructionTranslatorBase
             # pyrefly: ignore[bad-argument-type]
@@ -6235,7 +6244,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     hints=[],
                 )
             name = inst.argval
-            _fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
+            _fglobals_value, fglobals_vt, global_source = (
+                self.get_globals_source_and_value(name)
+            )
+            if isinstance(global_source, DictGetItemSource):
+                unimplemented(
+                    gb_type="STORE_GLOBAL in non-module globals",
+                    context=name,
+                    explanation=(
+                        "Dynamo cannot safely replay global writes for an inlined "
+                        "function whose globals dict is not the registered module "
+                        "__dict__."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 
