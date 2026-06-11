@@ -66,7 +66,9 @@ std::string remove_duplicate_separator_of_path(const std::string& path) {
   return result;
 }
 
-std::string normalize_path_separator(const std::string& orig_path) {
+std::string normalize_path_separator(
+    const std::string& orig_path,
+    bool normalize_backslash_on_all_platforms = false) {
   /*
   On Windows and Linux have different separator:
   On Windows use "\", and the path like: C:\Users\Test\file.txt
@@ -80,16 +82,12 @@ std::string normalize_path_separator(const std::string& orig_path) {
   "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
   */
   std::string normalized_path = orig_path;
+  if (normalize_backslash_on_all_platforms) {
+    std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
+  }
 #ifdef _WIN32
   std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
 #endif
-  normalized_path = remove_duplicate_separator_of_path(normalized_path);
-  return normalized_path;
-}
-
-std::string normalize_package_path_separator(const std::string& orig_path) {
-  std::string normalized_path = orig_path;
-  std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
   normalized_path = remove_duplicate_separator_of_path(normalized_path);
   return normalized_path;
 }
@@ -137,9 +135,9 @@ std::string detect_file_prefix(
   }
 
   const std::string normalized_filename0 =
-      normalize_package_path_separator(found_filenames[0]);
+      normalize_path_separator(found_filenames[0], true);
   const std::string normalized_filename1 =
-      normalize_package_path_separator(found_filenames[1]);
+      normalize_path_separator(found_filenames[1], true);
   size_t pos = normalized_filename0.find('/');
   std::string prefix0 = normalized_filename0.substr(0, pos);
   pos = normalized_filename1.find('/');
@@ -169,6 +167,8 @@ const char* extension_file_ext() {
 }
 
 bool is_wrapper_library(const std::string& path) {
+  // Linux-to-Windows AOTI cross-compilation stores a Windows DLL payload with
+  // the historical .wrapper.so package suffix.
   return c10::ends_with(path, ".wrapper.so") ||
       c10::ends_with(path, std::string(".wrapper") + extension_file_ext());
 }
@@ -389,7 +389,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     }
   }
 
-  return std::make_tuple(cmd, target_file);
+  return std::make_tuple(std::move(cmd), std::move(target_file));
 }
 
 std::string compile_so(
@@ -461,7 +461,7 @@ std::unordered_set<std::string> find_model_names(
   std::regex re(pattern);
 
   for (const auto& path : paths) {
-    const std::string normalized_path = normalize_package_path_separator(path);
+    const std::string normalized_path = normalize_path_separator(path, true);
     std::smatch match;
     if (std::regex_search(normalized_path, match, re) && match.size() > 1) {
       model_names.insert(match[1].str());
@@ -635,7 +635,7 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     std::string metadata_filename;
     std::string metadata_package_path;
     for (auto const& zip_filename_str : found_filenames) {
-      auto cur_filename = normalize_package_path_separator(zip_filename_str);
+      auto cur_filename = normalize_path_separator(zip_filename_str, true);
       if (path_starts_with_directory(cur_filename, model_directory) &&
           c10::ends_with(cur_filename, metadata_suffix)) {
         metadata_filename = zip_filename_str;
@@ -831,7 +831,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     // zip_filename_str can't be normalize_path_separator, because it should be
     // as index for mz_zip_reader_extract_file_to_file.
     for (auto const& zip_filename_str : found_filenames) {
-      auto cur_filename = normalize_package_path_separator(zip_filename_str);
+      auto cur_filename = normalize_path_separator(zip_filename_str, true);
       // Only compile files in the specified model directory
       if (path_starts_with_directory(cur_filename, model_directory) ||
           path_starts_with_directory(cur_filename, const_directory)) {
@@ -968,9 +968,11 @@ std::vector<at::Tensor> AOTIModelPackageLoader::run(
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::boxed_run(
-    std::vector<at::Tensor>&& inputs,
+    std::vector<at::Tensor>&&
+        inputs, // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
     void* stream_handle) {
-  return runner_->boxed_run(std::move(inputs), stream_handle);
+  std::vector<at::Tensor> moved_inputs = std::move(inputs);
+  return runner_->boxed_run(std::move(moved_inputs), stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
