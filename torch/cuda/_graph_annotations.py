@@ -238,9 +238,6 @@ def _get_annotatable_types() -> set[Any]:
 # Pending scopes: (annotation, toolsIds discovered for the scope).
 _pending_scopes: list[tuple[Any, list[int]]] = []
 
-# Capture graph ID saved by resolve_pending_annotations for remap_to_exec_graph.
-_last_capture_graph_id: int | None = None
-
 
 @contextmanager  # type: ignore[arg-type]
 def mark_kernels(annotation: str | dict[str, Any]):
@@ -325,6 +322,11 @@ def mark_kernels(annotation: str | dict[str, Any]):
         )
 
     if tools_ids:
+        # Stamp the capturing graph with its capture id (toolsId high bits) so
+        # remap can later match these annotations to this graph's exec id
+        # without relying on keep_graph or call ordering.
+        capturing = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+        capturing._capture_graph_id = tools_ids[0] >> 32
         _pending_scopes.append((annotation, tools_ids))
 
 
@@ -338,10 +340,6 @@ def resolve_pending_annotations() -> None:
         for annotation, tools_ids in _pending_scopes:
             for tools_id in tools_ids:
                 per_tools_id[tools_id].append(annotation)
-
-        global _last_capture_graph_id
-        if per_tools_id:
-            _last_capture_graph_id = next(iter(per_tools_id)) >> 32
 
         for tools_id, annotations in per_tools_id.items():
             if len(annotations) == 1:
@@ -369,9 +367,16 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     32 bits. After instantiation, the profiler uses the exec graph's ID.
     This function rewrites the keys so annotations match the trace.
 
+    The graph's capture id is read from the ``_capture_graph_id`` stamped on it
+    by ``mark_kernels`` during capture, so only the annotations belonging to
+    this graph are rekeyed. This is order-independent and correct when several
+    graphs are captured in sequence: call once per graph. Graphs that recorded
+    no annotations have no capture id and are skipped.
+
     Must be called after the ``torch.cuda.graph()`` context exits.
     """
-    if not _kernel_annotations:
+    capture_graph_id = torch_cuda_graph._capture_graph_id
+    if not _kernel_annotations or capture_graph_id is None:
         return
 
     exec_handle = _cuda_runtime.cudaGraphExec_t(  # pyrefly: ignore[missing-attribute]
@@ -383,15 +388,27 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
         )
     )
 
-    # Only remap annotations from the most recent capture graph.
-    # Previously remapped annotations (from earlier captures) keep their
-    # correct exec graph IDs.
-    capture_graph_id = _last_capture_graph_id
+    remapped = _rekey_annotations(_kernel_annotations, capture_graph_id, exec_graph_id)
+    _kernel_annotations.clear()
+    _kernel_annotations.update(remapped)
+
+
+def _rekey_annotations(
+    annotations: dict[int, list[Any]],
+    capture_graph_id: int,
+    exec_graph_id: int,
+) -> dict[int, list[Any]]:
+    """Rekey one graph's annotations from its capture id to its exec id.
+
+    A toolsId packs the graph id in the upper 32 bits and the node id in the
+    lower 32. Only entries whose upper bits match ``capture_graph_id`` are
+    rewritten to ``exec_graph_id``; entries from other graphs (already remapped
+    to their own exec ids, or pending their own remap) are kept as-is. When two
+    capture-side ids collide on the same rekeyed id their lists are merged.
+    """
     remapped: dict[int, list[Any]] = {}
-    for tools_id, ann_list in _kernel_annotations.items():
-        graph_id = tools_id >> 32
-        if capture_graph_id is not None and graph_id != capture_graph_id:
-            # Belongs to a different graph — keep as-is.
+    for tools_id, ann_list in annotations.items():
+        if tools_id >> 32 != capture_graph_id:
             remapped[tools_id] = ann_list
             continue
         node_id = tools_id & 0xFFFFFFFF
@@ -400,9 +417,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
             remapped[new_tools_id].extend(ann_list)
         else:
             remapped[new_tools_id] = list(ann_list)
-
-    _kernel_annotations.clear()
-    _kernel_annotations.update(remapped)
+    return remapped
 
 
 def get_kernel_annotations() -> dict[int, list[Any]]:
