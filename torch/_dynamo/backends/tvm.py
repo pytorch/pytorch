@@ -162,20 +162,19 @@ def tvm(
         shape_info, _ = m.get_input_info()
         active_inputs = set(shape_info.keys())
         for idx, arg in enumerate(args, 0):
-            if arg.dim() != 0:
-                if arg.requires_grad:
-                    arg = arg.detach()
-                inp_name = f"inp_{idx}"
-                if inp_name not in active_inputs:
-                    log.warning(
-                        "input %s skipped as not found in tvm's runtime library",
-                        inp_name,
-                    )
-                    continue
-                m.set_input(
+            inp_name = f"inp_{idx}"
+            if inp_name not in active_inputs:
+                log.warning(
+                    "input %s skipped as not found in tvm's runtime library",
                     inp_name,
-                    to_tvm_tensor(arg),
                 )
+                continue
+            if arg.requires_grad:
+                arg = arg.detach()
+            m.set_input(
+                inp_name,
+                to_tvm_tensor(arg),
+            )
         m.run()
         return [to_torch_tensor(m.get_output(i)) for i in range(m.get_num_outputs())]
 
