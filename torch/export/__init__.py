@@ -134,7 +134,7 @@ def export(
          This is a newer unbacked unified API across compile, pre-compile,
          export, etc., and is the recommended way to specify dynamic
          shapes for export going forward. It is the same spec API exposed
-         via ``shapes_spec=`` in :func:`torch.compile`.
+         via ``dynamic_shapes=`` in :func:`torch.compile`.
 
          The keys of ``ParamsSpec`` are **parameter names of the callable
          being traced** (for an ``nn.Module``, the parameters of
