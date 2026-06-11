@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfNoDill,
+    skipIfRocm,
     skipIfXpu,
     slowTest,
     TEST_CUDA,
@@ -3109,6 +3110,7 @@ class TestDataLoaderDeviceType(TestCase):
 
             next(iter(loader))
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179979")
     @parametrize(
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
