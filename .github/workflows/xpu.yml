@@ -123,7 +123,7 @@ jobs:
       build-environment: win-vs2022-xpu-n-1-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2025.2'
+      xpu-version: '2025.3'
       vc-year: '2022'
     secrets: inherit
 
@@ -135,6 +135,6 @@ jobs:
       build-environment: win-vs2022-xpu-n-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2025.3'
+      xpu-version: '2026.0'
       vc-year: '2022'
     secrets: inherit

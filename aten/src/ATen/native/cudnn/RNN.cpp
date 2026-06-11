@@ -1367,7 +1367,7 @@ copy_weights_to_flat_buf_views(
     }
   }
 
-  return std::make_tuple(weight_buf, params_arr);
+  return std::make_tuple(std::move(weight_buf), std::move(params_arr));
 }
 
 } // namespace cudnn_rnn
@@ -1732,7 +1732,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     output.transpose_(0, 1);
   }
 
-  return std::make_tuple(output, hy, cy, reserve, weight_buf);
+  return std::make_tuple(
+      std::move(output),
+      std::move(hy),
+      std::move(cy),
+      std::move(reserve),
+      std::move(weight_buf));
 }
 
 std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
