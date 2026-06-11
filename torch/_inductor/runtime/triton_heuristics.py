@@ -196,6 +196,13 @@ def autotune_hints_to_configs(
     configs: list[Config] = []
     for hint in hints:
         if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
+            if device_props.warp_size is None:
+                log.debug(
+                    "Skipping %s autotune hint because device %s does not report warp_size",
+                    AutotuneHint.ONE_ELEMENT_PER_THREAD,
+                    device_props.type,
+                )
+                continue
             if len(size_hints) == 1:
                 xyz_options = ((block_size // 4, None, None),)
             elif len(size_hints) == 2:
@@ -715,6 +722,7 @@ class CachingAutotuner(KernelInterface):
             and bool(device_prop.major)
             and (device_prop.major >= 8 or torch.version.hip)
             and device_prop.regs_per_multiprocessor is not None
+            and device_prop.warp_size is not None
         )
 
     def _iter_rblock_scale_candidates(self):
@@ -733,8 +741,10 @@ class CachingAutotuner(KernelInterface):
             )
         if not device_prop.multi_processor_count:
             raise AssertionError("device_prop.multi_processor_count is not set")
+        if device_prop.warp_size is None:
+            raise AssertionError("device_prop.warp_size is not set")
         seen_config_hashes: OrderedSet[Hashable] | None = None
-        warp_size = device_prop.warp_size_or_default
+        warp_size = device_prop.warp_size
         for result in self.compile_results:
             triton_config = result.config
             compiled_binary = result.kernel
@@ -776,14 +786,14 @@ class CachingAutotuner(KernelInterface):
             nreg_per_warp = nreg * warp_size
             nreg_per_block = nreg_per_warp * triton_config.num_warps
 
-            # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
+            # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processor / (warp_size * num_warps)'
             # The formula below is a tighter upper bound since we have the assumption that
             #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
             # due to the if condition above and:
             #   regs_per_multiprocessor / nreg_per_block
-            #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
-            #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
-            #   = max_threads_per_multi_processor / (32 * num_warps)
+            #   = regs_per_multiprocessor / (nreg * warp_size * num_warps)
+            #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * warp_size * num_warps)
+            #   = max_threads_per_multi_processor / (warp_size * num_warps)
             # Using a tighter upper bound can reveal more optimization opportunities.
             max_blocks_per_sm = max(
                 device_prop.regs_per_multiprocessor // nreg_per_block, 1
@@ -3435,6 +3445,7 @@ def triton_config(
     xnumel = size_hints["x"]
     ynumel = size_hints.get("y")
     znumel = size_hints.get("z")
+    warp_size = device_props.warp_size_or_default()
 
     # Increase x to satisfy min_elem_per_thread requirements.
     block_size = max(
@@ -4191,6 +4202,7 @@ def _reduction_configs(
     num_dynamic=0,
 ) -> list[Config]:
     reduction_hint = inductor_meta.get("reduction_hint")
+    device_props = triton_meta["device"]
 
     # Convert reductions to 1D, to simplify heuristics.
     rnumel = get_total_reduction_numel(size_hints)
@@ -4773,6 +4785,7 @@ def _persistent_reduction_configs(
     max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
         "max_autotune_pointwise"
     )
+    device_props = triton_meta["device"]
 
     if torch.version.hip:
         xblock_vals = [1, 4, 8, 16, 32, 64, 128, 256]
