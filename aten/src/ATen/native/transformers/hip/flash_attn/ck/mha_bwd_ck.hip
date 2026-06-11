@@ -126,7 +126,6 @@ aiter::mha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
 
     return aiter::mha_bwd_args{
         // aiter args
-        static_cast<int>(mask.type),
         hdim <= 192,   // use_asm_v3: ASM v3 only supports head dim <= 192
         true,   // v3_atomic_fp32
         1,      // v3_bf16_cvt
@@ -137,7 +136,7 @@ aiter::mha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
         hdim,   // hdim_v
         dtype,  // data_type
         false,  // is_group_mode
-        static_cast<int>(mask.type),  // ck_mask_type
+        static_cast<int>(mask.type),  // mask_type
         enable_bias ? static_cast<int>(bias_enum::elementwise_bias) : static_cast<int>(bias_enum::no_bias),
         bias_requires_grad,  // has_dbias
         has_dropout,
@@ -159,6 +158,8 @@ aiter::mha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
         dv.data_ptr(),
         dbias_ptr,
         dq_acc.data_ptr(),  // dq_acc_ptr
+        nullptr,  // sink_ptr
+        nullptr,  // d_sink_ptr
         nullptr,  // seqstart_q_ptr
         nullptr,  // seqstart_k_ptr
         nullptr,  // seqlen_q_ptr
