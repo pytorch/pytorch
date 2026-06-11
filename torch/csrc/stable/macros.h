@@ -50,7 +50,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
   std::cerr << '[' << std::put_time(&tm, "%H:%M:%S") << ' ' << file << ':'
             << line << "] Exception across libtorch C API boundary: "
             << torch_exception_get_what();
-  throw std::runtime_error(ss.str());
+  throw std::runtime_error(std::move(ss).str());
 }
 HIDDEN_NAMESPACE_END(torch, stable, detail)
 
