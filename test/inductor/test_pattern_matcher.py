@@ -2678,12 +2678,25 @@ class TestPatternMatcher(TestCase):
                 msg=f"{target}: {node.meta}",
             )
 
-        seeds_node = next(
-            node
-            for node in gm.graph.nodes
-            if node.target == torch.ops.prims.inductor_seeds.default
-        )
-        self.assertEqual(seeds_node.meta["val"].shape, torch.Size([1]))
+        expected_metadata = {
+            torch.ops.prims.inductor_seeds.default: (torch.Size([1]), torch.int64),
+            torch.ops.prims.inductor_lookup_seed.default: (torch.Size([]), torch.int64),
+            torch.ops.prims.inductor_random.default: (torch.Size([4]), torch.float32),
+        }
+        for target, (shape, dtype) in expected_metadata.items():
+            node = next(node for node in gm.graph.nodes if node.target == target)
+            self.assertEqual(
+                node.meta["val"].shape, shape, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta["val"].dtype, dtype, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta["tensor_meta"].shape, shape, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta["tensor_meta"].dtype, dtype, msg=f"{target}: {node.meta}"
+            )
 
     def test_metadata_propagation_register_replacement(self):
         """Verify metadata from matched nodes transfers to replacement nodes."""
