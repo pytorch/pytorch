@@ -1,7 +1,8 @@
+import contextlib
 import functools
 import inspect
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
@@ -34,7 +35,10 @@ def _get_default_gpu_device_type() -> str:
         for device_type in GPU_BENCHMARK_DEVICE_TYPES
         if getattr(torch, device_type).is_available()
     ]
-    assert len(avail_gpus) <= 1
+    if len(avail_gpus) > 1:
+        raise AssertionError(
+            f"expected at most one available GPU type, got {avail_gpus}"
+        )
     return "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
 
 
@@ -44,6 +48,46 @@ def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
     if isinstance(device_type, torch.device):
         return device_type.type
     return torch.device(device_type).type
+
+
+_GpuBenchmarkLockContext = Callable[[], contextlib.AbstractContextManager[None]]
+_gpu_benchmark_lock_context: _GpuBenchmarkLockContext | None = None
+
+
+def set_gpu_benchmark_lock_context(
+    context_factory: _GpuBenchmarkLockContext | None,
+) -> _GpuBenchmarkLockContext | None:
+    """Override the process-local GPU benchmark lock context.
+
+    This lets benchmark harnesses provide the context used by Inductor GPU
+    benchmark calls. Some benchmark helpers delegate to other benchmark
+    methods, so harness contexts should support nested entry from the same
+    thread. Returning the previous context lets callers restore it in tests.
+    """
+    global _gpu_benchmark_lock_context
+    previous = _gpu_benchmark_lock_context
+    _gpu_benchmark_lock_context = context_factory
+    return previous
+
+
+@contextlib.contextmanager
+def maybe_gpu_benchmark_lock() -> Iterator[None]:
+    """Optionally enter the registered GPU benchmark lock context."""
+    context_factory = _gpu_benchmark_lock_context
+    if context_factory is None:
+        yield
+        return
+    with context_factory():
+        yield
+
+
+def gpu_benchmark_lock(fn: Callable[P, T]) -> Callable[P, T]:
+    @wraps(fn)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        with maybe_gpu_benchmark_lock():
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 # Device-type → benchmarking function registry.
@@ -93,7 +137,8 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
             return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
 
         distort_method = config.test_configs.distort_benchmarking_result
-        assert isinstance(ms, float)
+        if not isinstance(ms, float):
+            raise AssertionError(f"Expected float, got {type(ms)}")
         if distort_method == "inverse":
             return 1.0 / ms if ms else 0.0
         elif distort_method == "random":
@@ -117,12 +162,12 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
 def may_ban_benchmarking() -> None:
     if torch._inductor.config.deterministic:
         raise RuntimeError("""In the deterministic mode of Inductor, we will avoid those
-        benchmarkings that would cause non deterministic results. Only benchmarkings in the vetted
-        scenarios are allowed. Example include autotuning for triton configs of pointwise kernels.
+        benchmarkings that would cause non-deterministic results. Only benchmarkings in the vetted
+        scenarios are allowed. Examples include autotuning for triton configs of pointwise kernels.
 
         When you see this exception, you can do one of the following two things:
         1. if the benchmarking you are doing does not introduce any non-determinism, you can just
-        add is_vetted_benchmarking=True to you benchmark_gpu call. That would solve the issue.
+        add is_vetted_benchmarking=True to your benchmark_gpu call. That would solve the issue.
 
         2. if the benchmarking you are doing indeed introduces non-determinism, you'll need to disable
         such feature in deterministic mode or find an alternative implementation that is deterministic.
@@ -235,7 +280,8 @@ class Benchmarker:
             fn_kwargs = fn_kwargs or {}
             inferred_device = self.infer_device(*fn_args, **fn_kwargs)
 
-        assert isinstance(inferred_device, torch.device)
+        if not isinstance(inferred_device, torch.device):
+            raise AssertionError(f"Expected torch.device, got {type(inferred_device)}")
 
         fn_args = fn_args or tuple()
         fn_kwargs = fn_kwargs or {}
@@ -311,6 +357,7 @@ class Benchmarker:
         raise NotImplementedError
 
     @time_and_count
+    @gpu_benchmark_lock
     def benchmark_gpu_with_cuda_graph(
         self: Self,
         _callable: Callable[[], Any],
@@ -445,6 +492,7 @@ class TritonBenchmarker(Benchmarker):
 
     @may_distort_benchmarking_result
     @time_and_count
+    @gpu_benchmark_lock
     # pyrefly: ignore [bad-override]
     def benchmark_gpu(
         self: Self,
@@ -545,6 +593,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
     @may_distort_benchmarking_result
     @time_and_count
+    @gpu_benchmark_lock
     def benchmark_gpu(  # type: ignore[override]
         self: Self,
         _callable: Callable[[], Any],
@@ -673,6 +722,7 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
     """Benchmarker that uses torch.profiler for GPU kernel benchmarking."""
 
     @time_and_count
+    @gpu_benchmark_lock
     def benchmark_gpu(  # type: ignore[override]
         self: Self,
         _callable: Callable[[], Any],

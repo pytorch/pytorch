@@ -226,7 +226,7 @@ namespace {
     auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     if (grid.numel() == 0 || input.numel() == 0) {
       grad_grid.zero_();
-      return std::make_tuple(grad_input, grad_grid);
+      return std::make_tuple(std::move(grad_input), std::move(grad_grid));
     }
     // If interpolation mode is Nearest, then grad_grid is not filled in the
     // loop below.
@@ -440,7 +440,7 @@ namespace {
         }
       }
     });
-    return std::make_tuple(grad_input, grad_grid);
+    return std::make_tuple(std::move(grad_input), std::move(grad_grid));
   }
 
 }  // namespace
@@ -729,7 +729,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (grid.numel() == 0 || input.numel() == 0) {
     grad_grid.zero_();
-    return std::make_tuple(grad_input, grad_grid);
+    return std::make_tuple(std::move(grad_input), std::move(grad_grid));
   }
   // If interpolation mode is Nearest, then grad_grid is not filled in the
   // loop below.
@@ -914,7 +914,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
       }
     }
   });
-  return std::make_tuple(grad_input, grad_grid);
+  return std::make_tuple(std::move(grad_input), std::move(grad_grid));
 }
 
 Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,

@@ -20,6 +20,7 @@ from torch._jit_internal import (
     BroadcastingList1,
     BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
     BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
+    unused as _jit_unused,
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
@@ -944,6 +945,17 @@ max_pool3d = boolean_dispatch(
 )
 
 
+@_jit_unused
+def _check_unpool_output_size(output_size: list[int], dim: int) -> None:
+    torch._check_value(
+        output_size[dim] >= 0,
+        lambda: (
+            "max_unpooling: output_size must contain non-negative spatial "
+            f"dimensions, but got output_size[{dim}]={output_size[dim]}"
+        ),
+    )
+
+
 def _unpool_output_size(
     input: Tensor,
     kernel_size: list[int],
@@ -978,6 +990,16 @@ def _unpool_output_size(
                 )
 
         ret = output_size
+    if torch.jit.is_scripting():
+        for d in range(len(kernel_size)):
+            if ret[d] < 0:
+                raise ValueError(
+                    "max_unpooling: output_size must contain non-negative spatial "
+                    f"dimensions, but got output_size[{d}]={ret[d]}"
+                )
+    else:
+        for d in range(len(kernel_size)):
+            _check_unpool_output_size(ret, d)
     return ret
 
 
@@ -1115,6 +1137,12 @@ def lp_pool3d(
             ceil_mode=ceil_mode,
         )
     kd, kw, kh = _triple(kernel_size)
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool3d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool3d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1156,6 +1184,12 @@ def lp_pool2d(
             ceil_mode=ceil_mode,
         )
     kw, kh = _pair(kernel_size)
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool2d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool2d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1193,6 +1227,12 @@ def lp_pool1d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool1d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool1d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -3660,6 +3700,7 @@ def linear_cross_entropy(
     linear_weight: Tensor,
     target: Tensor,
     *,
+    linear_bias: Tensor | None = None,
     weight: Tensor | None = None,
     reduction: str = "mean",
     ignore_index: int | None = None,
@@ -3687,6 +3728,13 @@ def linear_cross_entropy(
         input (Tensor) : input samples.
         linear_weight (Tensor) : linear weight.
         target (Tensor) : Ground truth class indices or class probabilities;
+        linear_bias (Tensor, optional): bias added to the linear
+            projection (shape ``(C,)`` or ``(C, d_1, ..., d_K)`` for
+            K-dimensional loss, matching :attr:`linear_weight`).
+            With ``options != None``, K-dimensional bias
+            (``out_features != ()``) falls back to the reference
+            implementation with a warning; the chunked path supports
+            only ``(C,)``-shaped bias. Default: ``None``.
         weight (Tensor, optional): a manual rescaling weight given to each class.
         reduction (str, optional): Specifies the reduction to apply to
             the output: ``'none'`` | ``'mean'`` |
@@ -3773,13 +3821,14 @@ def linear_cross_entropy(
         where :math:`N` is batch size and :math:`C` is number of classes.
 
     """
-    if has_torch_function_variadic(input, linear_weight, target, weight):
+    if has_torch_function_variadic(input, linear_weight, target, linear_bias, weight):
         return handle_torch_function(
             linear_cross_entropy,
-            (input, linear_weight, target, weight),
+            (input, linear_weight, target, linear_bias, weight),
             input,
             linear_weight,
             target,
+            linear_bias=linear_bias,
             weight=weight,
             reduction=reduction,
             ignore_index=ignore_index,
@@ -3803,6 +3852,14 @@ def linear_cross_entropy(
         )
     num_classes = linear_weight.shape[0]
     out_features = linear_weight.shape[1:-1]
+    if linear_bias is not None and tuple(linear_bias.shape) != (
+        num_classes,
+        *out_features,
+    ):
+        raise RuntimeError(
+            "expected linear_bias shape "
+            f"{(num_classes, *out_features)}, got {tuple(linear_bias.shape)}"
+        )
     if len(out_features) > 0 and len(num_batches) == 0:
         raise RuntimeError(
             f"K-dimensional loss defined by linear_weight shape {tuple(linear_weight.shape)} requires"
@@ -3824,24 +3881,26 @@ def linear_cross_entropy(
     # linear_weight.shape[0], not per-position over num_classes.
     if options is not None and (
         out_features
-        or reduction not in {"mean", "sum"}
+        or reduction not in {"mean", "sum", "none"}
         or label_smoothing != 0.0
         or target.dtype != torch.int64
         or torch.jit.is_tracing()
     ):
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
-            "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
-            " == int64, out_features == (), and not under torch.jit.trace."
-            f" Got reduction={reduction!r}, label_smoothing={label_smoothing}, "
-            f"target.dtype={target.dtype}, out_features={tuple(out_features)}, "
-            f"tracing={torch.jit.is_tracing()}.",
+            "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
+            " == int64, out_features == (). Got "
+            f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
+            f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
+            f", tracing={torch.jit.is_tracing()}"
+            f", linear_bias.shape="
+            f"{tuple(linear_bias.shape) if linear_bias is not None else None}.",
             stacklevel=2,
         )
 
     if (
         options is not None
-        and reduction in {"mean", "sum"}
+        and reduction in {"mean", "sum", "none"}
         and label_smoothing == 0.0
         and target.dtype == torch.int64
         and not out_features
@@ -3864,38 +3923,61 @@ def linear_cross_entropy(
             device=input.device,
         )
 
-        # Force allow_retain_graph=True under torch.compile: the default
-        # second-backward guard uses a Python ``ctx._gi = None`` mutation
-        # that Dynamo doesn't preserve, breaking double-backward.
-        if not options.allow_retain_graph and torch.compiler.is_compiling():
-            warnings.warn(
-                "linear_cross_entropy: forcing allow_retain_graph=True under "
-                "torch.compile (adds one gradient-sized allocation/call). "
-                "Construct options with allow_retain_graph=True to silence.",
-                stacklevel=2,
-            )
-            options = dataclasses.replace(options, allow_retain_graph=True)
-
         # Local import avoids a circular init via torch.library.custom_op.
         from torch.nn.modules.linear_cross_entropy import (
             _linear_cross_entropy_batch_chunked,
+            _linear_cross_entropy_batch_chunked_no_reduction,
         )
 
-        result = _linear_cross_entropy_batch_chunked(
-            input,
-            linear_weight,
-            target,
-            weight,
-            reduction,
-            ignore_index,
-            label_smoothing,
-            options.batch_chunk_size,
-            options.acc_policy,
-            options.acc_dtype,
-            options.allow_retain_graph,
-            input.requires_grad and torch.is_grad_enabled(),
-            linear_weight.requires_grad and torch.is_grad_enabled(),
-        )[0]
+        if reduction == "none":
+            # reduction='none' recomputes grads in backward (no forward
+            # precompute), so allow_retain_graph / compute_* flags do not
+            # apply -- the op takes a reduced argument list.
+            result = _linear_cross_entropy_batch_chunked_no_reduction(
+                input,
+                linear_weight,
+                target,
+                linear_bias,
+                weight,
+                ignore_index,
+                options.batch_chunk_size,
+                options.acc_policy,
+                options.acc_dtype,
+            )
+        else:
+            # Force allow_retain_graph=True under torch.compile: the default
+            # mode's second-backward guard relies on a Python ``ctx._gi = None``
+            # mutation that Dynamo's autograd tracing does not preserve, so
+            # without this override double-backward under torch.compile would
+            # silently return wrong gradients.
+            if not options.allow_retain_graph and torch.compiler.is_compiling():
+                warnings.warn(
+                    "linear_cross_entropy: forcing allow_retain_graph=True under "
+                    "torch.compile (adds one gradient-sized allocation/call). "
+                    "Construct options with allow_retain_graph=True to silence.",
+                    stacklevel=2,
+                )
+                options = dataclasses.replace(options, allow_retain_graph=True)
+
+            result = _linear_cross_entropy_batch_chunked(
+                input,
+                linear_weight,
+                target,
+                linear_bias,
+                weight,
+                reduction,
+                ignore_index,
+                label_smoothing,
+                options.batch_chunk_size,
+                options.acc_policy,
+                options.acc_dtype,
+                options.allow_retain_graph,
+                input.requires_grad and torch.is_grad_enabled(),
+                linear_weight.requires_grad and torch.is_grad_enabled(),
+                linear_bias is not None
+                and linear_bias.requires_grad
+                and torch.is_grad_enabled(),
+            )[0]
 
         if not has_batches:
             result = result.squeeze(0)
@@ -3905,8 +3987,12 @@ def linear_cross_entropy(
         linear_weight = linear_weight.reshape(
             (math.prod(out_features, start=num_classes), in_features)
         )
+        if linear_bias is not None:
+            linear_bias = linear_bias.reshape(
+                math.prod(out_features, start=num_classes)
+            )
 
-    logits = linear(input, linear_weight)
+    logits = linear(input, linear_weight, linear_bias)
     # recover logits shape that corresponds to the shape of specified
     # linear_weight:
     logits = logits.reshape(logits_shape)
