@@ -7,9 +7,12 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import _maybe_run_with_interpreter, reenter_make_fx
+from torch._higher_order_ops.utils import (
+    _maybe_run_with_interpreter,
+    reenter_make_fx,
+    register_fake,
+)
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -21,6 +24,7 @@ from .utils import (
     _from_fun,
     _stack_pytree,
     _unstack_pytree,
+    check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
     fill_none_with_masks,
     filter_with_masks,
@@ -39,6 +43,61 @@ class MapImpl(HigherOrderOperator):
     def __call__(self, *args, **kwargs):
         # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
+
+    # pyrefly: ignore [bad-override]
+    def gen_schema(self, f, xs, pos_args):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+
+        # Mutation semantics for map:
+        # - xs is mutable: each iteration sees a storage-disjoint slice
+        #   (xs[t] and xs[t+1] share no storage), so in-place writes are
+        #   race-free regardless of evaluation order, preserving map's
+        #   "iterations are independent" contract.
+        # - pos_args is NOT mutable: every iteration sees the same
+        #   tensor, so mutating it makes iterations depend on each
+        #   other, breaking the independence contract and introducing a
+        #   data race under any parallel lowering. Users who need a
+        #   shared mutable buffer should use scan / while_loop, where
+        #   sequential iteration is part of the contract.
+        xs_slices = [first_slice_copy(x) for x in xs]
+        all_inputs = tuple(xs_slices + list(pos_args))
+
+        body_gm: torch.fx.GraphModule = materialize_as_graph(f, all_inputs)
+        (
+            _,
+            _,
+            _,
+            mutated_inputs,
+            outputs,
+        ) = check_input_alias_and_mutation_return_outputs(body_gm)
+
+        n_xs = len(xs)
+        pos_args_mutated = [i for i in mutated_inputs if i >= n_xs]
+        if pos_args_mutated:
+            raise RuntimeError(
+                "For map, f cannot mutate pos_args inputs but found "
+                f"{[i - n_xs for i in pos_args_mutated]}-th pos_args inputs "
+                "are mutated. Map iterations are independent, so mutating "
+                "a shared pos_args buffer is undefined under parallel "
+                "lowering. Use scan or while_loop if sequential buffer "
+                "updates are required."
+            )
+        mutated_set = set(mutated_inputs)
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("f", body_gm)
+
+        for idx, x in enumerate(xs):
+            schema_gen.add_arg(f"xs{idx}", x, is_mutated=idx in mutated_set)
+
+        for idx, arg in enumerate(pos_args):
+            schema_gen.add_arg(f"additional_input{idx}", arg)
+
+        for out in outputs:
+            schema_gen.add_output(out)
+
+        schema_gen.add_schema_tree_spec(f, xs, pos_args)
+        return schema_gen.gen_schema()
 
 
 map_impl = MapImpl()
@@ -287,20 +346,19 @@ def map_proxy_torch_dispatch_mode(mode, f, xs, args):
     return trace_map(mode, map_impl, f, xs, args)
 
 
-@map_impl.py_impl(FakeTensorMode)
-def map_fake_tensor_mode(mode, f, xs, args):
+@register_fake(map_impl, skip_cache=True)
+def map_fake_tensor_mode(f, xs, args):
     from torch._higher_order_ops.utils import first_slice_copy
 
-    with mode:
-        # Use first_slice_copy instead of _unstack_pytree to avoid
-        # iterating over batch dim, which would guard on symbolic sizes.
-        first_row = pytree.tree_map(first_slice_copy, xs)
-        example_output = f(*first_row, *args)
+    # Use first_slice_copy instead of _unstack_pytree to avoid
+    # iterating over batch dim, which would guard on symbolic sizes.
+    first_row = pytree.tree_map(first_slice_copy, xs)
+    example_output = f(*first_row, *args)
 
-        flat_xs, _ = pytree.tree_flatten(xs)
-        batch_size = flat_xs[0].shape[0]
+    flat_xs, _ = pytree.tree_flatten(xs)
+    batch_size = flat_xs[0].shape[0]
 
-        return _broadcast_to_batch(example_output, batch_size)
+    return _broadcast_to_batch(example_output, batch_size)
 
 
 @map_impl.py_functionalize_impl

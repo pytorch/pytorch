@@ -428,7 +428,7 @@ class SynchronizedDataLoaderPattern(Pattern):
         # actually point to an already freed string when the even is a PyCall.
         # Just silently skip this to unblock testing.
         try:
-            event.name
+            _ = event.name
         except UnicodeDecodeError:
             return False
 

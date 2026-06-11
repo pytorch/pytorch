@@ -1,6 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSStream.h>
@@ -122,6 +121,12 @@ bool is_available() {
 
 bool is_macos_13_or_newer(MacOSVersion version) {
   return MPSDevice::getInstance()->isMacOS13Plus(version);
+}
+
+bool is_apple_family_or_newer(AppleGPUFamily family) {
+  // some ops which are on MPSGraph behave differently between GPU families
+  auto mtl_family = static_cast<MTLGPUFamily>(family);
+  return [MPSDevice::getInstance()->device() supportsFamily:mtl_family];
 }
 
 } // namespace at::mps
