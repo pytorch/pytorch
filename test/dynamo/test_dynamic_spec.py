@@ -9,15 +9,20 @@ import torch.fx.experimental._config as _fx_experimental_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.experimental.dynamic_spec import (
-    DictSpec,
+    DictSpec as DICT,
     IntVar,
     ObjectSpec,
+    ObjectSpec as OBJ,
     ParamsSpec,
+    ParamsSpec as PARAMS,
     SeqSpec,
+    SeqSpec as L,
     ShapesSpec,
     ShapeVar,
+    ShapeVar as VAR,
     STATIC,
     TensorSpec,
+    TensorSpec as T,
 )
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
@@ -502,7 +507,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend="eager",
-            dynamic_shapes={"x": TensorSpec([ShapeVar("batch"), 3])},
+            dynamic_shapes={"x": T([VAR("batch"), 3])},
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
@@ -516,7 +521,7 @@ class TestShapeVarCompile(TestCase):
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            dynamic_shapes={"x": TensorSpec([ShapeVar("batch"), STATIC])},
+            dynamic_shapes={"x": T([VAR("batch"), STATIC])},
         )
         for n in [4, 8, 16, 32]:
             fn(torch.randn(n, 3))
@@ -540,7 +545,7 @@ class TestShapeVarCompile(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            dynamic_shapes={"x": TensorSpec([ShapeVar(), STATIC])},
+            dynamic_shapes={"x": T([VAR(), STATIC])},
         )
         with self.assertRaises(GuardOnDataDependentSymNode) as cm:
             compiled(torch.randn(10, 3))
@@ -556,7 +561,7 @@ class TestShapeVarCompile(TestCase):
         """A ``None`` entry is implicit static.
         Each distinct shape at dim 1 triggers a recompile."""
         backend = EagerAndRecordGraphs()
-        ts = TensorSpec([ShapeVar("batch"), None])
+        ts = T([VAR("batch"), None])
         fn = torch.compile(
             lambda x: x + 1,
             fullgraph=True,
@@ -584,7 +589,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            dynamic_shapes={"x": TensorSpec([ShapeVar("batch")])},
+            dynamic_shapes={"x": T([VAR("batch")])},
         )
 
         compiled(torch.randn(2), 10)
@@ -609,7 +614,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            dynamic_shapes={"x": TensorSpec([ShapeVar("batch"), STATIC])},
+            dynamic_shapes={"x": T([VAR("batch"), STATIC])},
         )
         x = torch.randn(12, 3)
         compiled(x, torch.randn(4, 3))
@@ -635,7 +640,7 @@ class TestShapeVarCompile(TestCase):
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), STATIC])}),
+            dynamic_shapes=PARAMS({"x": T([VAR("batch"), STATIC])}),
         )
         for n in [4, 8, 16]:
             fn(torch.randn(n, 3))
@@ -649,7 +654,7 @@ class TestShapeVarCompile(TestCase):
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            dynamic_shapes={"x": TensorSpec([ShapeVar("batch"), STATIC])},
+            dynamic_shapes={"x": T([VAR("batch"), STATIC])},
         )
         for n in [4, 8, 16]:
             fn(torch.randn(n, 3))
@@ -678,16 +683,14 @@ class TestShapeVarCompile(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            dynamic_shapes={
-                "x": TensorSpec([ShapeVar("batch", min=10, max=100), STATIC])
-            },
+            dynamic_shapes={"x": T([VAR("batch", min=10, max=100), STATIC])},
         )
         # min=10 > 5 → branch resolves statically, no DDE.
         compiled(torch.randn(20, 3))
 
     def test_shapes_spec_with_dynamic_raises(self):
         """Setting both shapes_spec and dynamic should raise ValueError."""
-        ts = TensorSpec([ShapeVar("batch"), STATIC])
+        ts = T([VAR("batch"), STATIC])
         for dynamic in (True, False):
             with self.assertRaisesRegex(
                 ValueError,
@@ -706,9 +709,7 @@ class TestShapeVarCompile(TestCase):
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            dynamic_shapes={
-                "x": TensorSpec([ShapeVar("batch", optimization_hint=32), STATIC])
-            },
+            dynamic_shapes={"x": T([VAR("batch", optimization_hint=32), STATIC])},
         )
         fn(torch.randn(8, 3))
         shape = _tensor_placeholder_shape(backend.graphs[0])
@@ -755,7 +756,7 @@ class TestShapeVarDedup(TestCase):
     def test_tensor_dim_vs_tensor_dim(self):
         """Two tensor dims sharing one ShapeVar: x.shape[0] == y.shape[0]
         must not DDE inside the compiled fn."""
-        B = ShapeVar("batch")
+        B = VAR("batch")
 
         def fn(x, y):
             if x.shape[0] == y.shape[0]:
@@ -767,8 +768,8 @@ class TestShapeVarDedup(TestCase):
             backend="eager",
             fullgraph=True,
             dynamic_shapes={
-                "x": TensorSpec([B, STATIC]),
-                "y": TensorSpec([B, STATIC]),
+                "x": T([B, STATIC]),
+                "y": T([B, STATIC]),
             },
         )
         out = compiled(torch.randn(8, 3), torch.randn(8, 4))
@@ -777,7 +778,7 @@ class TestShapeVarDedup(TestCase):
     def test_tensor_dim_vs_int(self):
         """A tensor dim and a scalar int sharing one ShapeVar: comparing
         them inside the compiled fn must not DDE."""
-        B = ShapeVar("batch")
+        B = VAR("batch")
 
         def fn(x, n):
             if x.shape[0] == n:
@@ -789,7 +790,7 @@ class TestShapeVarDedup(TestCase):
             backend="eager",
             fullgraph=True,
             dynamic_shapes={
-                "x": TensorSpec([B, STATIC]),
+                "x": T([B, STATIC]),
                 "n": B,
             },
         )
@@ -822,7 +823,7 @@ class TestShapeVarDedup(TestCase):
         guards that propagation by inspecting ``var_to_range`` for both
         of two tensor positions sharing one ShapeVar.
         """
-        B = ShapeVar("b", min=4, max=16)
+        B = VAR("b", min=4, max=16)
         from typing import cast
 
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -852,8 +853,8 @@ class TestShapeVarDedup(TestCase):
             backend=grab_env,
             fullgraph=True,
             dynamic_shapes={
-                "x": TensorSpec([B, None]),
-                "y": TensorSpec([B, None]),
+                "x": T([B, STATIC]),
+                "y": T([B, STATIC]),
             },
         )
         compiled(torch.randn(8, 3), torch.randn(8, 4))
@@ -878,8 +879,8 @@ class TestShapeVarDedup(TestCase):
     def test_distinct_shape_vars_still_dde(self):
         """Sanity check: distinct ShapeVars do not share a symbol, so
         comparing them still DDEs (no dedup contamination across vars)."""
-        A = ShapeVar("a")
-        B = ShapeVar("b")
+        A = VAR("a")
+        B = VAR("b")
 
         def fn(x, y):
             if x.shape[0] == y.shape[0]:
@@ -891,8 +892,8 @@ class TestShapeVarDedup(TestCase):
             backend="eager",
             fullgraph=True,
             dynamic_shapes={
-                "x": TensorSpec([A, STATIC]),
-                "y": TensorSpec([B, STATIC]),
+                "x": T([A, STATIC]),
+                "y": T([B, STATIC]),
             },
         )
         with self.assertRaisesRegex(
@@ -912,7 +913,7 @@ class TestDerivedDimSpec(TestCase):
         raises with the failed guard expression. The derived spec also lets
         ``y.size()[0] == 2 * x.size()[0]`` inside the compiled fn resolve
         without DDE."""
-        B = ShapeVar("batch")
+        B = VAR("batch")
 
         def fn(x, y):
             if y.size()[0] == 2 * x.size()[0]:
@@ -924,8 +925,8 @@ class TestDerivedDimSpec(TestCase):
             backend="eager",
             fullgraph=True,
             dynamic_shapes={
-                "x": TensorSpec([B, STATIC]),
-                "y": TensorSpec([B * 2, STATIC]),
+                "x": T([B, STATIC]),
+                "y": T([B * 2, STATIC]),
             },
         )
         # Correct: y.shape[0] = 8 = 2 * x.shape[0]
@@ -939,14 +940,14 @@ class TestDerivedDimSpec(TestCase):
 
         # Sanity: WITHOUT the derived spec the same conditional DDEs.
         torch._dynamo.reset()
-        Y = ShapeVar("y_dim")
+        Y = VAR("y_dim")
         compiled_no_derived = torch.compile(
             fn,
             backend="eager",
             fullgraph=True,
             dynamic_shapes={
-                "x": TensorSpec([B, None]),
-                "y": TensorSpec([Y, None]),
+                "x": T([B, STATIC]),
+                "y": T([Y, STATIC]),
             },
         )
         with self.assertRaisesRegex(
@@ -960,8 +961,8 @@ class TestDerivedDimSpec(TestCase):
         Correct shape runs; mismatched shape raises. The derived spec also
         lets ``z.size()[0] == x.size()[0] * y.size()[0] + 1`` resolve
         without DDE."""
-        A = ShapeVar("a")
-        B = ShapeVar("b")
+        A = VAR("a")
+        B = VAR("b")
 
         def fn(x, y, z):
             if z.size()[0] == x.size()[0] * y.size()[0] + 1:
@@ -973,9 +974,9 @@ class TestDerivedDimSpec(TestCase):
             backend="eager",
             fullgraph=True,
             dynamic_shapes={
-                "x": TensorSpec([A, STATIC]),
-                "y": TensorSpec([B, STATIC]),
-                "z": TensorSpec([A * B + 1, STATIC]),
+                "x": T([A, STATIC]),
+                "y": T([B, STATIC]),
+                "z": T([A * B + 1, STATIC]),
             },
         )
         # Correct: z.shape[0] = 3 * 4 + 1 = 13
@@ -989,15 +990,15 @@ class TestDerivedDimSpec(TestCase):
 
         # Sanity: WITHOUT the derived spec the same conditional DDEs.
         torch._dynamo.reset()
-        Z = ShapeVar("z_dim")
+        Z = VAR("z_dim")
         compiled_no_derived = torch.compile(
             fn,
             backend="eager",
             fullgraph=True,
             dynamic_shapes={
-                "x": TensorSpec([A, None]),
-                "y": TensorSpec([B, None]),
-                "z": TensorSpec([Z, None]),
+                "x": T([A, STATIC]),
+                "y": T([B, STATIC]),
+                "z": T([Z, STATIC]),
             },
         )
         with self.assertRaisesRegex(
@@ -1010,8 +1011,8 @@ class TestDerivedDimSpec(TestCase):
 
     def test_orphan_intvar_raises(self):
         """B is used in derived expression but never as a bare slot → finalize raises."""
-        A = ShapeVar("a")
-        B = ShapeVar("b")
+        A = VAR("a")
+        B = VAR("b")
 
         def fn(x):
             return x.sum()
@@ -1021,7 +1022,7 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            dynamic_shapes={"x": TensorSpec([A * B, STATIC])},
+            dynamic_shapes={"x": T([A * B, STATIC])},
         )
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as cm:
             compiled(torch.randn(4, 3))
@@ -1037,7 +1038,7 @@ class TestDerivedDimSpec(TestCase):
         """Scalar arg slot can be a derived expression: n must equal 2 * x.shape[0].
         Correct value runs; mismatched value raises. The derived spec also
         lets ``n == 2 * x.size()[0]`` resolve without DDE."""
-        B = ShapeVar("batch")
+        B = VAR("batch")
 
         def fn(x, n):
             if n == 2 * x.size()[0]:
@@ -1048,7 +1049,7 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            dynamic_shapes={"x": TensorSpec([B, STATIC]), "n": B * 2},
+            dynamic_shapes={"x": T([B, STATIC]), "n": B * 2},
         )
         # Correct: n = 8 = 2 * x.size()[0]
         out = compiled(torch.randn(4, 3), 8)
@@ -1066,7 +1067,7 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            dynamic_shapes={"x": TensorSpec([B, None]), "n": N},
+            dynamic_shapes={"x": T([B, STATIC]), "n": N},
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
@@ -1110,8 +1111,8 @@ class TestDerivedDimSpec(TestCase):
         """Composite slot (z = A * B) wired BEFORE bare-IntVar slots: the
         derived check is deferred, then emitted once both A and B are bound.
         Correct shape runs; mismatched shape raises with the failed guard."""
-        A = ShapeVar("a")
-        B = ShapeVar("b")
+        A = VAR("a")
+        B = VAR("b")
 
         def fn(z, x, y):
             # z processed first (dim references unbound A and B);
@@ -1125,9 +1126,9 @@ class TestDerivedDimSpec(TestCase):
             backend="eager",
             fullgraph=True,
             dynamic_shapes={
-                "z": TensorSpec([A * B, STATIC]),
-                "x": TensorSpec([A, STATIC]),
-                "y": TensorSpec([B, STATIC]),
+                "z": T([A * B, STATIC]),
+                "x": T([A, STATIC]),
+                "y": T([B, STATIC]),
             },
         )
         # Correct: z.shape[0] = 3 * 4 = 12
@@ -1141,15 +1142,15 @@ class TestDerivedDimSpec(TestCase):
 
         # Sanity: WITHOUT the derived spec the same conditional DDEs.
         torch._dynamo.reset()
-        Z = ShapeVar("z_dim")
+        Z = VAR("z_dim")
         compiled_no_derived = torch.compile(
             fn,
             backend="eager",
             fullgraph=True,
             dynamic_shapes={
-                "z": TensorSpec([Z, None]),
-                "x": TensorSpec([A, None]),
-                "y": TensorSpec([B, None]),
+                "z": T([Z, STATIC]),
+                "x": T([A, STATIC]),
+                "y": T([B, STATIC]),
             },
         )
         with self.assertRaisesRegex(
@@ -1168,7 +1169,7 @@ class TestDerivedDimSpec(TestCase):
         ``u_i == 2 * u_x``) but ShapeEnv doesn't transitively conclude
         ``u_y == u_z`` at compile time, so ``if y.size()[0] == z.size()[0]``
         would DDE."""
-        B = ShapeVar("batch")
+        B = VAR("batch")
 
         def fn(x, y, z):
             return x.sum() + y.sum() + z.sum()
@@ -1178,9 +1179,9 @@ class TestDerivedDimSpec(TestCase):
             backend="eager",
             fullgraph=True,
             dynamic_shapes={
-                "x": TensorSpec([B, STATIC]),
-                "y": TensorSpec([B * 2, STATIC]),
-                "z": TensorSpec([B * 2, STATIC]),
+                "x": T([B, STATIC]),
+                "y": T([B * 2, STATIC]),
+                "z": T([B * 2, STATIC]),
             },
         )
         # y.shape[0] and z.shape[0] both = 8 (= 2 * x.shape[0])
@@ -1199,8 +1200,8 @@ class TestAssumptionsSpec(TestCase):
     def test_simple_assumption(self):
         """Assumption ``A > B`` enables ``if x.shape[0] > y.shape[0]`` to
         resolve without DDE."""
-        A = ShapeVar("a")
-        B = ShapeVar("b")
+        A = VAR("a")
+        B = VAR("b")
 
         def fn(x, y):
             if x.shape[0] > y.shape[0]:
@@ -1213,8 +1214,8 @@ class TestAssumptionsSpec(TestCase):
             fullgraph=True,
             dynamic_shapes=ShapesSpec(
                 params={
-                    "x": TensorSpec([A, STATIC]),
-                    "y": TensorSpec([B, STATIC]),
+                    "x": T([A, STATIC]),
+                    "y": T([B, STATIC]),
                 },
                 assumptions=[A > B],
             ),
@@ -1235,12 +1236,10 @@ class TestAssumptionsSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            dynamic_shapes=ShapesSpec(
-                params={
-                    "x": TensorSpec([A, STATIC]),
-                    "y": TensorSpec([B, STATIC]),
-                },
-            ),
+            dynamic_shapes={
+                "x": T([A, STATIC]),
+                "y": T([B, STATIC]),
+            },
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
@@ -1249,8 +1248,8 @@ class TestAssumptionsSpec(TestCase):
             compiled_no_assumption(torch.ones(5, 2), torch.ones(3, 2))
 
     def test_orphan_intvar_in_assumption_raises(self):
-        A = ShapeVar("a")
-        B = ShapeVar("b")
+        A = VAR("a")
+        B = VAR("b")
 
         def fn(x):
             return x.sum()
@@ -1260,7 +1259,7 @@ class TestAssumptionsSpec(TestCase):
             backend="eager",
             fullgraph=True,
             dynamic_shapes=ShapesSpec(
-                params={"x": TensorSpec([A, STATIC])},
+                params={"x": T([A, STATIC])},
                 assumptions=[A + B > 0],  # B never bound
             ),
         )
@@ -1278,9 +1277,9 @@ class TestAssumptionsSpec(TestCase):
     def test_multiple_orphan_assumptions(self):
         """Multiple assumptions with multiple unbound IntVars: error lists
         all offending checks with user-friendly expressions."""
-        A = ShapeVar("a")
-        B = ShapeVar("b")
-        C = ShapeVar("c")
+        A = VAR("a")
+        B = VAR("b")
+        C = VAR("c")
 
         def fn(x):
             return x.sum()
@@ -1291,7 +1290,7 @@ class TestAssumptionsSpec(TestCase):
             backend="eager",
             fullgraph=True,
             dynamic_shapes=ShapesSpec(
-                params={"x": TensorSpec([C, STATIC])},
+                params={"x": T([C, STATIC])},
                 assumptions=[A + B > 0, A * 2 == B],
             ),
         )
@@ -1441,9 +1440,7 @@ class TestObjectSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            dynamic_shapes={
-                "obj": ObjectSpec({"w": TensorSpec([ShapeVar("h"), STATIC])})
-            },
+            dynamic_shapes={"obj": OBJ({"w": T([VAR("h"), STATIC])})},
         )
 
         compiled(Container(torch.randn(4, 3)))
@@ -1478,9 +1475,7 @@ class TestObjectSpecCompile(TestCase):
         compiled = torch.compile(
             m,
             backend=backend,
-            dynamic_shapes={
-                "self": ObjectSpec({"weight": TensorSpec([ShapeVar("h"), STATIC])})
-            },
+            dynamic_shapes={"self": OBJ({"weight": T([VAR("h"), STATIC])})},
         )
 
         compiled()
@@ -1533,7 +1528,7 @@ seq_spec:
     def test_compile_list_arg_marks_dynamic(self):
         """List arg of two tensors with dim 0 dynamic via SeqSpec; no
         recompile on different dim-0 sizes."""
-        B = ShapeVar("b")
+        B = VAR("b")
         cnts = torch._dynamo.testing.CompileCounter()
 
         def fn(xs: list[torch.Tensor]) -> torch.Tensor:
@@ -1543,7 +1538,7 @@ seq_spec:
             fn,
             backend=cnts,
             fullgraph=True,
-            dynamic_shapes={"xs": SeqSpec([TensorSpec([B, 3]), TensorSpec([B, 5])])},
+            dynamic_shapes={"xs": L([T([B, 3]), T([B, 5])])},
         )
         compiled([torch.ones(4, 3), torch.ones(4, 5)])
         compiled([torch.ones(7, 3), torch.ones(7, 5)])  # same dim 0 dyn
@@ -1551,7 +1546,7 @@ seq_spec:
 
     def test_compile_out_of_range_element_treated_static(self):
         """Indices beyond the SeqSpec length are unspecified == static."""
-        B = ShapeVar("b")
+        B = VAR("b")
         cnts = torch._dynamo.testing.CompileCounter()
 
         def fn(xs: list[torch.Tensor]) -> torch.Tensor:
@@ -1561,7 +1556,7 @@ seq_spec:
             fn,
             backend=cnts,
             fullgraph=True,
-            dynamic_shapes={"xs": SeqSpec([TensorSpec([B, 3])])},
+            dynamic_shapes={"xs": L([T([B, 3])])},
         )
         compiled([torch.ones(4, 3), torch.ones(4, 3)])
         self.assertEqual(cnts.frame_count, 1)
@@ -1591,9 +1586,7 @@ class TestDictSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            dynamic_shapes={
-                "cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
-            },
+            dynamic_shapes={"cfg": DICT({"x": T([VAR("h"), STATIC])})},
         )
 
         compiled({"x": torch.randn(4, 3)})
@@ -1616,9 +1609,7 @@ class TestDictSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            dynamic_shapes={
-                "cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
-            },
+            dynamic_shapes={"cfg": DICT({"x": T([VAR("h"), STATIC])})},
         )
 
         x = torch.randn(4, 3)
@@ -1648,7 +1639,7 @@ class TestDictSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            dynamic_shapes={"cfg": DictSpec({0: TensorSpec([ShapeVar("h"), STATIC])})},
+            dynamic_shapes={"cfg": DICT({0: T([VAR("h"), STATIC])})},
         )
 
         compiled({0: torch.randn(4, 3)})
@@ -1661,7 +1652,7 @@ class TestDictSpecCompile(TestCase):
     def test_nested_dict_of_list_of_tensors(self):
         """Nested: ``cfg["xs"][i]`` honors a DictSpec → SeqSpec → TensorSpec
         chain."""
-        B = ShapeVar("b")
+        B = VAR("b")
         cnts = torch._dynamo.testing.CompileCounter()
 
         def fn(cfg):
@@ -1671,11 +1662,7 @@ class TestDictSpecCompile(TestCase):
             fn,
             backend=cnts,
             fullgraph=True,
-            dynamic_shapes={
-                "cfg": DictSpec(
-                    {"xs": SeqSpec([TensorSpec([B, 3]), TensorSpec([B, 3])])}
-                )
-            },
+            dynamic_shapes={"cfg": DICT({"xs": L([T([B, 3]), T([B, 3])])})},
         )
         compiled({"xs": [torch.ones(4, 3), torch.ones(4, 3)]})
         compiled({"xs": [torch.ones(7, 3), torch.ones(7, 3)]})
@@ -1691,7 +1678,7 @@ class TestDictSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend="eager",
-            dynamic_shapes={"x": DictSpec({"k": TensorSpec([ShapeVar("h"), STATIC])})},
+            dynamic_shapes={"x": DICT({"k": T([VAR("h"), STATIC])})},
         )
 
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
@@ -1722,9 +1709,9 @@ class TestVarargsCompile(TestCase):
             f,
             backend=backend,
             dynamic_shapes={
-                "x": TensorSpec([ShapeVar("a"), STATIC]),
-                "*args": [TensorSpec([ShapeVar("b"), STATIC])],
-                "**kwargs": {"foo": TensorSpec([ShapeVar("c"), STATIC])},
+                "x": T([VAR("a"), STATIC]),
+                "*args": [T([VAR("b"), STATIC])],
+                "**kwargs": {"foo": T([VAR("c"), STATIC])},
             },
         )
 
@@ -1756,8 +1743,8 @@ class TestVarargsCompile(TestCase):
             backend=backend,
             dynamic_shapes={
                 "*args": [
-                    TensorSpec([ShapeVar("a"), STATIC]),
-                    TensorSpec([ShapeVar("b"), STATIC]),
+                    T([VAR("a"), STATIC]),
+                    T([VAR("b"), STATIC]),
                 ],
             },
         )
@@ -1788,8 +1775,8 @@ class TestVarargsCompile(TestCase):
             dynamic_shapes={
                 # Spec covers only the first 2 *args entries.
                 "*args": [
-                    TensorSpec([ShapeVar("a"), STATIC]),
-                    TensorSpec([ShapeVar("b"), STATIC]),
+                    T([VAR("a"), STATIC]),
+                    T([VAR("b"), STATIC]),
                 ],
             },
         )
@@ -1821,8 +1808,8 @@ class TestVarargsCompile(TestCase):
             backend=backend,
             dynamic_shapes={
                 "**kwargs": {
-                    "a": TensorSpec([ShapeVar("a"), STATIC]),
-                    "b": TensorSpec([ShapeVar("b"), STATIC]),
+                    "a": T([VAR("a"), STATIC]),
+                    "b": T([VAR("b"), STATIC]),
                 },
             },
         )
@@ -1856,9 +1843,7 @@ class TestWalkSpecRaises(TestCase):
         compiled = torch.compile(
             fn,
             backend="eager",
-            dynamic_shapes={
-                "cfg": ObjectSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
-            },
+            dynamic_shapes={"cfg": OBJ({"x": T([VAR("h"), STATIC])})},
         )
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
             compiled({"x": torch.randn(4, 3)})
@@ -1881,9 +1866,7 @@ class TestWalkSpecRaises(TestCase):
         compiled = torch.compile(
             fn,
             backend="eager",
-            dynamic_shapes={
-                "obj": DictSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
-            },
+            dynamic_shapes={"obj": DICT({"x": T([VAR("h"), STATIC])})},
         )
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
             compiled(Container(torch.randn(4, 3)))
@@ -1902,7 +1885,7 @@ class TestWalkSpecRaises(TestCase):
         compiled = torch.compile(
             fn,
             backend="eager",
-            dynamic_shapes={"cfg": SeqSpec([TensorSpec([ShapeVar("h"), STATIC])])},
+            dynamic_shapes={"cfg": L([T([VAR("h"), STATIC])])},
         )
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
             compiled({"x": torch.randn(4, 3)})
@@ -1921,7 +1904,7 @@ class TestWalkSpecRaises(TestCase):
         compiled = torch.compile(
             fn,
             backend="eager",
-            dynamic_shapes={"cfg": TensorSpec([ShapeVar("h"), STATIC])},
+            dynamic_shapes={"cfg": T([VAR("h"), STATIC])},
         )
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
             compiled({"x": torch.randn(4, 3)})
