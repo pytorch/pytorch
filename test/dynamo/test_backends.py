@@ -300,6 +300,138 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
 
+    def _collect_aot_autograd_backend_nodes(self, fn, args, **compile_kwargs):
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        traced_nodes = []
+
+        def my_compiler(gm, _example_inputs):
+            traced_nodes.extend(
+                node
+                for submodule in gm.modules()
+                if isinstance(submodule, torch.fx.GraphModule)
+                for node in submodule.graph.nodes
+                if node.op == "call_function"
+                and isinstance(node.target, torch._ops.OpOverload)
+            )
+            return make_boxed_func(gm.forward)
+
+        opt_f = torch.compile(
+            fn,
+            backend=aot_autograd(fw_compiler=my_compiler),
+            fullgraph=True,
+            **compile_kwargs,
+        )
+        self.assertTrue(same(opt_f(*args), fn(*args)))
+        self.assertNotEqual(traced_nodes, [])
+        return traced_nodes
+
+    def _collect_aot_autograd_backend_targets(self, fn, args, **compile_kwargs):
+        return [
+            node.target
+            for node in self._collect_aot_autograd_backend_nodes(
+                fn, args, **compile_kwargs
+            )
+        ]
+
+    def test_aot_autograd_uses_scalar_overload_for_python_numbers(self):
+        def f(x):
+            return (
+                x + 2,
+                torch.div(x, 2, rounding_mode="floor"),
+                torch.floor_divide(x, 2),
+            )
+
+        targets = self._collect_aot_autograd_backend_targets(f, (torch.randn(3, 3),))
+        self.assertIn(torch.ops.aten.add.Scalar, targets)
+        self.assertIn(torch.ops.aten.div.Scalar_mode, targets)
+        self.assertIn(torch.ops.aten.floor_divide.Scalar, targets)
+        self.assertNotIn(torch.ops.aten.add.Tensor, targets)
+        self.assertNotIn(torch.ops.aten.div.Tensor_mode, targets)
+        self.assertNotIn(torch.ops.aten.floor_divide.default, targets)
+
+    def test_aot_autograd_uses_scalar_overload_for_python_numbers_in_hops(self):
+        def true_fn(x):
+            return (
+                x + 2,
+                torch.div(x, 2, rounding_mode="floor"),
+                torch.floor_divide(x, 2),
+            )
+
+        def false_fn(x):
+            return (
+                x + 3,
+                torch.div(x, 3, rounding_mode="floor"),
+                torch.floor_divide(x, 3),
+            )
+
+        def f(x):
+            return torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+        targets = self._collect_aot_autograd_backend_targets(f, (torch.randn(3, 3),))
+        self.assertIn(torch.ops.aten.add.Scalar, targets)
+        self.assertIn(torch.ops.aten.div.Scalar_mode, targets)
+        self.assertIn(torch.ops.aten.floor_divide.Scalar, targets)
+        self.assertNotIn(torch.ops.aten.add.Tensor, targets)
+        self.assertNotIn(torch.ops.aten.div.Tensor_mode, targets)
+        self.assertNotIn(torch.ops.aten.floor_divide.default, targets)
+
+    def test_aot_autograd_keeps_tensor_overload_with_scalar_alpha(self):
+        def f(x, y):
+            return torch.add(x, y, alpha=2)
+
+        targets = self._collect_aot_autograd_backend_targets(
+            f, (torch.randn(3, 3), torch.randn(3, 3))
+        )
+        self.assertIn(torch.ops.aten.add.Tensor, targets)
+        self.assertNotIn(torch.ops.aten.add.Scalar, targets)
+
+    def test_aot_autograd_uses_scalar_overload_for_symbolic_shapes(self):
+        def f(x):
+            return x + x.shape[0]
+
+        targets = self._collect_aot_autograd_backend_targets(
+            f, (torch.randn(3, 3),), dynamic=True
+        )
+        self.assertIn(torch.ops.aten.add.Scalar, targets)
+        self.assertNotIn(torch.ops.aten.add.Tensor, targets)
+
+    def test_aot_autograd_tensorifies_scalar_lhs_floor_divide(self):
+        def f(x):
+            return 2 // x
+
+        nodes = self._collect_aot_autograd_backend_nodes(f, (torch.randn(3, 3),))
+        floor_divide_nodes = [
+            node for node in nodes if node.target == torch.ops.aten.floor_divide.default
+        ]
+        self.assertEqual(len(floor_divide_nodes), 1)
+        floor_divide_node = floor_divide_nodes[0]
+        self.assertIsInstance(floor_divide_node.args[0], torch.fx.Node)
+        self.assertEqual(
+            floor_divide_node.args[0].target,
+            torch.ops.aten.scalar_tensor.default,
+        )
+
+    def test_aot_autograd_tensorifies_symbolic_lhs_floor_divide(self):
+        def f(x, y):
+            return x.shape[0] // y
+
+        nodes = self._collect_aot_autograd_backend_nodes(
+            f, (torch.randn(3, 3), torch.ones(3, 3)), dynamic=True
+        )
+        floor_divide_nodes = [
+            node for node in nodes if node.target == torch.ops.aten.floor_divide.default
+        ]
+        self.assertEqual(len(floor_divide_nodes), 1)
+        floor_divide_node = floor_divide_nodes[0]
+        self.assertIsInstance(floor_divide_node.args[0], torch.fx.Node)
+        self.assertEqual(
+            floor_divide_node.args[0].target,
+            torch.ops.aten.scalar_tensor.default,
+        )
+        self.assertIsInstance(floor_divide_node.args[0].args[0], torch.fx.Node)
+
     def test_lookup_backend(self):
         from torch._dynamo import lookup_backend
 

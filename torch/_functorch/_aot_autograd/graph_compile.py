@@ -13,6 +13,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import numbers
 import operator
 import threading
 import time
@@ -20,7 +21,7 @@ import traceback
 from collections import defaultdict
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, nullcontext
-from typing import Any
+from typing import Any, get_args, get_origin
 
 import torch
 import torch.utils._pytree as pytree
@@ -43,6 +44,8 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
 from torch.fx.graph_module import GraphModule
+from torch.fx.node import map_arg
+from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import py_sym_types
@@ -335,6 +338,240 @@ def _apply_tensorify_python_scalars(module: torch.fx.GraphModule) -> None:
         tensorify_python_scalars(module, fake_mode.shape_env, fake_mode)
 
 
+def _is_python_scalar(arg: Any) -> bool:
+    return isinstance(arg, (numbers.Number, *py_sym_types))
+
+
+def _contains_python_scalar(arg: Any) -> bool:
+    if _is_python_scalar(arg):
+        return True
+    if isinstance(arg, (tuple, list)):
+        return any(_contains_python_scalar(x) for x in arg)
+    if isinstance(arg, dict):
+        return any(_contains_python_scalar(x) for x in arg.values())
+    return False
+
+
+def _value_matches_type_hint(type_hint: Any, value: Any) -> bool:
+    origin = get_origin(type_hint)
+    if type_hint is Any:
+        return True
+
+    if origin is None:
+        if type_hint is int and isinstance(value, torch.dtype):
+            return True
+        if type_hint is int and isinstance(value, torch.SymInt):
+            return True
+        if type_hint is float and isinstance(value, torch.SymFloat):
+            return True
+        if type_hint is bool and isinstance(value, torch.SymBool):
+            return True
+        if type_hint is numbers.Number:
+            return _is_python_scalar(value)
+        return isinstance(type_hint, type) and isinstance(value, type_hint)
+
+    if origin is list:
+        if not isinstance(value, (list, tuple)):
+            return False
+        (element_type,) = get_args(type_hint)
+        return all(_value_matches_type_hint(element_type, x) for x in value)
+
+    if origin is tuple:
+        if not isinstance(value, tuple):
+            return False
+        element_types = get_args(type_hint)
+        if len(element_types) == 2 and element_types[1] is Ellipsis:
+            return all(_value_matches_type_hint(element_types[0], x) for x in value)
+        return len(value) == len(element_types) and all(
+            _value_matches_type_hint(element_type, element_value)
+            for element_type, element_value in zip(element_types, value)
+        )
+
+    if origin is dict:
+        if not isinstance(value, dict):
+            return False
+        key_type, value_type = get_args(type_hint)
+        return all(
+            _value_matches_type_hint(key_type, key)
+            and _value_matches_type_hint(value_type, element_value)
+            for key, element_value in value.items()
+        )
+
+    if origin is set:
+        if not isinstance(value, set):
+            return False
+        (element_type,) = get_args(type_hint)
+        return all(_value_matches_type_hint(element_type, x) for x in value)
+
+    if origin is frozenset:
+        if not isinstance(value, frozenset):
+            return False
+        (element_type,) = get_args(type_hint)
+        return all(_value_matches_type_hint(element_type, x) for x in value)
+
+    return any(
+        _value_matches_type_hint(option, value) for option in get_args(type_hint)
+    )
+
+
+def _resolve_python_scalar_packet_overload(
+    target: torch._ops.OpOverload,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> torch._ops.OpOverload:
+    signatures, schemas = get_signature_for_torch_op(
+        target.overloadpacket, return_schemas=True
+    )
+    if signatures is None or schemas is None:
+        return target
+
+    matched_overloads: list[torch._ops.OpOverload] = []
+    for candidate_signature, schema in zip(signatures, schemas):
+        try:
+            bound_args = candidate_signature.bind(*args, **kwargs)
+        except TypeError:
+            continue
+
+        if all(
+            _value_matches_type_hint(
+                candidate_signature.parameters[arg_name].annotation,
+                arg_value,
+            )
+            for arg_name, arg_value in bound_args.arguments.items()
+        ):
+            overload_name = schema.overload_name or "default"
+            matched_overloads.append(getattr(target.overloadpacket, overload_name))
+
+    if len(matched_overloads) != 1:
+        return target
+    return matched_overloads[0]
+
+
+def _resolve_python_scalar_aten_overload(
+    target: torch._ops.OpOverload,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> torch._ops.OpOverload:
+    if (
+        not target._schema.name.startswith("aten::")
+        or not torch._C._should_allow_numbers_as_tensors(target.overloadpacket.__name__)
+        or not (_contains_python_scalar(args) or _contains_python_scalar(kwargs))
+    ):
+        return target
+
+    new_target = _resolve_python_scalar_packet_overload(target, args, kwargs)
+    if new_target.overloadpacket != target.overloadpacket:
+        return target
+    return new_target
+
+
+def _python_scalar_tensor_dtype(value: Any) -> torch.dtype | None:
+    if isinstance(value, (bool, torch.SymBool)):
+        return torch.bool
+    if isinstance(value, (int, torch.SymInt)):
+        return torch.int64
+    if isinstance(value, (float, torch.SymFloat)):
+        return torch.get_default_dtype()
+    return None
+
+
+def _scalar_tensor_value(value: Any, dtype: torch.dtype, device: torch.device) -> Any:
+    fake_mode = detect_fake_mode()
+    if fake_mode is not None:
+        with fake_mode:
+            return torch.ops.aten.scalar_tensor.default(
+                value,
+                dtype=dtype,
+                device=device,
+            )
+    return torch.ops.aten.scalar_tensor.default(value, dtype=dtype, device=device)
+
+
+def _tensorify_scalar_lhs_floor_divide(
+    module: torch.fx.GraphModule,
+    node: torch.fx.Node,
+    args: tuple[Any, ...],
+) -> bool:
+    if (
+        node.target != torch.ops.aten.floor_divide.default
+        or len(node.args) != 2
+        or len(args) != 2
+        or node.kwargs
+    ):
+        return False
+
+    lhs, rhs = args
+    if not _is_python_scalar(lhs) or not isinstance(rhs, torch.Tensor):
+        return False
+
+    dtype = _python_scalar_tensor_dtype(lhs)
+    if dtype is None:
+        return False
+
+    node_lhs = node.args[0]
+    if isinstance(node_lhs, torch.fx.Node):
+        lhs_arg = node_lhs
+    elif _is_python_scalar(node_lhs) and not isinstance(node_lhs, py_sym_types):
+        lhs_arg = node_lhs
+    else:
+        return False
+
+    with module.graph.inserting_before(node):
+        lhs_tensor = module.graph.call_function(
+            torch.ops.aten.scalar_tensor.default,
+            (lhs_arg,),
+            {
+                "dtype": dtype,
+                "device": rhs.device,
+            },
+        )
+    lhs_tensor.meta["val"] = _scalar_tensor_value(lhs, dtype, rhs.device)
+
+    new_args = list(node.args)
+    new_args[0] = lhs_tensor
+    node.args = tuple(new_args)
+    return True
+
+
+def _apply_python_scalar_overload_resolution_to_subgraph(
+    module: torch.fx.GraphModule,
+) -> None:
+    env: dict[torch.fx.Node, Any] = {}
+    updated = False
+    for node in module.graph.nodes:
+        if node.op == "call_function" and isinstance(
+            node.target, torch._ops.OpOverload
+        ):
+            try:
+                args = map_arg(node.args, env.__getitem__)
+                kwargs = map_arg(node.kwargs, env.__getitem__)
+            except KeyError:
+                pass
+            else:
+                new_target = _resolve_python_scalar_aten_overload(
+                    node.target,
+                    args,
+                    kwargs,
+                )
+                if new_target != node.target:
+                    node.target = new_target
+                    updated = True
+                elif _tensorify_scalar_lhs_floor_divide(module, node, args):
+                    updated = True
+
+        if "val" in node.meta:
+            env[node] = node.meta["val"]
+
+    if updated:
+        module.recompile()
+
+
+def _apply_python_scalar_overload_resolution(module: torch.fx.GraphModule) -> None:
+    for submodule in module.modules():
+        if isinstance(submodule, torch.fx.GraphModule):
+            _apply_python_scalar_overload_resolution_to_subgraph(submodule)
+
+
 def aot_stage2_compile(
     aot_state: AOTState,
     aot_graph_capture: AOTGraphCapture,
@@ -469,6 +706,8 @@ def aot_stage2_inference(
         )
 
         fw_module = remat_using_tags_for_fwd_loss_bwd_graph(fw_module)
+
+    _apply_python_scalar_overload_resolution(fw_module)
 
     if _has_invoke_subgraph_node(fw_module):
         trace_structured(
@@ -2460,6 +2699,9 @@ def aot_stage2_autograd(
     )
 
     min_cut_info_str = getattr(fx_g.graph, "_min_cut_info_str", None)
+
+    _apply_python_scalar_overload_resolution(fw_module)
+    _apply_python_scalar_overload_resolution(bw_module)
 
     fw_module_str, bw_module_str = _log_fw_bw_graphs(
         fw_module, bw_module, maybe_subclass_meta, fw_metadata, aot_config
