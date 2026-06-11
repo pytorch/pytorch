@@ -3376,8 +3376,18 @@ def native_group_norm(
         + f"but got input of shape {input.shape} and num_groups = {num_groups}",
     )
 
-    computation_dtype = utils.get_computation_dtype(input.dtype)
-    input_acc = _maybe_convert_to_dtype(input, computation_dtype)
+    # Match eager-mode contiguous behavior, for test_meta.
+    memory_format = (
+        utils.suggest_memory_format(input)
+        if input.device.type == "cpu"
+        else torch.contiguous_format
+    )
+    input_ = input.contiguous(memory_format=memory_format)
+    weight_ = weight.contiguous() if weight is not None else None
+    bias_ = bias.contiguous() if bias is not None else None
+
+    computation_dtype = utils.get_computation_dtype(input_.dtype)
+    input_acc = _maybe_convert_to_dtype(input_, computation_dtype)
     # num_channels / num_groups and flattened inner dimension are the reduction axes
     reduction_dims = [2, 3]
     input_reshaped = torch.reshape(
@@ -3389,15 +3399,15 @@ def native_group_norm(
         input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
-    if input.device.type == "cpu" and weight is not None:
+    if input.device.type == "cpu" and weight_ is not None:
         weight_reshaped = torch.reshape(
-            weight, [1, num_groups, num_channels // num_groups, 1]
+            weight_, [1, num_groups, num_channels // num_groups, 1]
         )
         w = rstd * weight_reshaped
         b = -mean * w
-        if bias is not None:
+        if bias_ is not None:
             bias_reshaped = torch.reshape(
-                bias, [1, num_groups, num_channels // num_groups, 1]
+                bias_, [1, num_groups, num_channels // num_groups, 1]
             )
             b = b + bias_reshaped
         w = w.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
@@ -3410,11 +3420,11 @@ def native_group_norm(
         out = (input_reshaped - mean) * rstd
         out = out.view(input.shape)
         broadcast_dims = [0] + list(range(2, input.ndim))
-        if weight is not None:
-            unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
+        if weight_ is not None:
+            unsqueeze_weight = _unsqueeze_multiple(weight_, broadcast_dims)
             out = out * unsqueeze_weight
-        if bias is not None:
-            unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
+        if bias_ is not None:
+            unsqueeze_bias = _unsqueeze_multiple(bias_, broadcast_dims)
             out = out + unsqueeze_bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
