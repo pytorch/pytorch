@@ -102,7 +102,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "tbb==2023.0.0 | "
         "tcmlib==1.5.0 | "
         "umf==1.1.0 | "
-        "intel-pti==0.17.0"
+        "intel-pti==0.17.0 | "
+        "pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }
 
@@ -431,14 +432,6 @@ def generate_wheels_matrix(
 
             # TODO: Enable python 3.15 on non linux OSes
             if os not in ["linux", "linux-aarch64"] and (
-                python_version == "3.15" or python_version == "3.15t"
-            ):
-                continue
-
-            # TODO: Re-enable XPU for python 3.15 once the triton XPU 3.15
-            # wheel build is fixed (tracked in #184901). Triton XPU is
-            # currently skipped for 3.15/3.15t in build-triton-wheel.yml.
-            if arch_version in XPU_ARCHES and (
                 python_version == "3.15" or python_version == "3.15t"
             ):
                 continue

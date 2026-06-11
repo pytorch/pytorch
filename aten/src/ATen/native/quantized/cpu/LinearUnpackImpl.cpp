@@ -8,6 +8,7 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -52,7 +53,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeight::unpack() {
   packB->unpack(weight_ptr_int8);
 
   return std::tuple<at::Tensor, std::optional<at::Tensor>>(
-      weight_origin, bias_);
+      std::move(weight_origin), bias_);
 }
 #endif // USE_FBGEMM
 
@@ -109,7 +110,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsQnnp::
     }
 
     return std::tuple<at::Tensor, std::optional<at::Tensor>>(
-        weight_origin, bias_);
+        std::move(weight_origin), bias_);
   }
 }
 #endif // USE_PYTORCH_QNNPACK

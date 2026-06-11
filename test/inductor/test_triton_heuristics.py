@@ -4,6 +4,7 @@ import functools
 import os
 import sys
 import tempfile
+import types
 import unittest
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch
@@ -48,7 +49,9 @@ from torch._inductor.runtime.hints import (
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
+    _check_max_grid_x,
     _enforce_reduction_config_block_minimums,
+    _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
     autotune_hints_to_configs,
@@ -61,6 +64,7 @@ from torch._inductor.runtime.triton_heuristics import (
     triton_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import fresh_cache
 
 
 @triton.jit
@@ -322,6 +326,8 @@ class TestTritonHeuristics(TestCase):
             num_stages=None,
             num_elements_per_warp=None,
             min_elem_per_thread=None,
+            *,
+            warp_size=32,
         ):
             seen_num_elements_per_warp.add(num_elements_per_warp)
             return None
@@ -415,6 +421,43 @@ class TestTritonHeuristics(TestCase):
                 config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
             )
             self.assertEqual(len(configs), expected_count)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_compile_time_autotune_not_repeated_at_runtime(self):
+        def fn(x):
+            return (x + 1).sum(dim=1)
+
+        x = torch.randn(2048, 2048, device=GPU_TYPE)
+        benchmark_calls = []
+
+        def fake_benchmark_all_configs(autotuner, *args, **kwargs):
+            benchmark_calls.append(autotuner.inductor_meta.get("kernel_name"))
+            return {
+                launcher: float(idx) for idx, launcher in enumerate(autotuner.launchers)
+            }
+
+        torch._dynamo.reset()
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "triton.autotune_at_compile_time": True,
+                    "max_autotune_pointwise": True,
+                    "compile_threads": 1,
+                }
+            ),
+            patch.object(
+                CachingAutotuner,
+                "benchmark_all_configs",
+                fake_benchmark_all_configs,
+            ),
+        ):
+            compiled = torch.compile(fn, backend="inductor")
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(len(benchmark_calls), 1)
+
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(len(benchmark_calls), 1)
 
 
 _PLUGIN_FACTORY_PATH = (
@@ -1050,6 +1093,70 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertGreaterEqual(y * z, 131070)
 
 
+class TestFastLauncherDeviceSupport(TestCase):
+    @staticmethod
+    def _make_autotuner(device_type):
+        def triton_():
+            pass
+
+        device = DeviceProperties(
+            type=device_type,
+            index=0,
+            multi_processor_count=1,
+            cc=0,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+        triton_meta = {
+            "signature": {},
+            "device": device,
+            "constants": {},
+            "configs": [],
+        }
+        return CachingAutotuner(
+            fn=triton_,
+            triton_meta=triton_meta,
+            configs=[triton_config({"x": 1}, 1)],
+            save_cache_hook=False,
+            mutated_arg_names=[],
+            reset_to_zero_arg_names=[],
+            optimize_mem=False,
+            heuristic_type=HeuristicType.POINTWISE,
+            inductor_meta={"use_fast_triton_launcher": True},
+        )
+
+    @staticmethod
+    def _make_static_launcher():
+        class Kernel:
+            function = 1
+            num_warps = 4
+            shared = 0
+            arg_tys = ""
+            has_global_scratch = False
+            has_profile_scratch = False
+
+            def run(self):
+                pass
+
+        def launcher_template():
+            pass
+
+        kernel = Kernel()
+        launcher = types.FunctionType(
+            launcher_template.__code__, {"runner": kernel.run}, "launcher"
+        )
+        launcher._is_static = True
+        return launcher
+
+    def test_fast_launcher_not_built_for_xpu(self):
+        autotuner = self._make_autotuner("xpu")
+        launcher = self._make_static_launcher()
+
+        with patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
+            self.assertIsNone(autotuner._build_fast_launcher(launcher))
+            fast_launcher.assert_not_called()
+
+
 class TestDynamicScaleRblockCacheInteraction(TestCase):
     """Tests for _dynamic_scale_rblock + autotune cache interaction.
 
@@ -1311,6 +1418,71 @@ class TestCheckLauncherCallArgs(TestCase):
         autotuner = self._make_autotuner()
         # Should not raise, even with many args.
         autotuner._check_launcher_call_args(raw_launcher, (1, 2, 3, 4, 5))
+
+
+class TestWarpSizeUnification(TestCase):
+    """Tests for the unified warp_size threading through config helpers."""
+
+    def test_warp_size_or_default(self):
+        none_props = DeviceProperties(
+            type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=None
+        )
+        self.assertEqual(none_props.warp_size_or_default, 32)
+
+        w32 = DeviceProperties(
+            type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=32
+        )
+        self.assertEqual(w32.warp_size_or_default, 32)
+
+        w64 = DeviceProperties(
+            type="hip", index=0, multi_processor_count=80, cc=80, warp_size=64
+        )
+        self.assertEqual(w64.warp_size_or_default, 64)
+
+    def test_num_warps_halves_on_wave64(self):
+        # wave64 (AMD CDNA/gfx9) halves the range so total threads match wave32.
+        self.assertEqual(_num_warps(8, max_num_warps=8, warp_size=64), 4)
+
+    def test_num_warps_does_not_halve_on_wave32(self):
+        # wave32 (NVIDIA and AMD RDNA) must not halve.
+        self.assertEqual(_num_warps(8, max_num_warps=8, warp_size=32), 8)
+        # Default warp_size is 32; confirm the default path matches wave32.
+        self.assertEqual(_num_warps(8, max_num_warps=8), 8)
+
+    def test_check_max_grid_x_respects_warp_size_hip(self):
+        # _check_max_grid_x only uses warp_size on the HIP path, where the
+        # bound is on total threads (num_blocks * num_warps * warp_size).
+        # Force the HIP branch so the assertion exercises that path even on
+        # a non-HIP build.
+        size_hints = {"x": 2**32}
+        with patch.object(torch.version, "hip", "6.0.0"):
+            x32, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=32)
+            x64, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=64)
+        # Doubling warp_size halves the per-block thread budget, so x must
+        # double to keep total threads under 2**31 - 1.
+        self.assertEqual(x64, 2 * x32)
+        self.assertLessEqual(x32, TRITON_MAX_BLOCK["X"])
+        self.assertLessEqual(x64, TRITON_MAX_BLOCK["X"])
+
+    def test_check_max_grid_x_ignores_warp_size_on_nvidia(self):
+        # NVIDIA bounds num_blocks directly, so warp_size must not change x.
+        size_hints = {"x": 2**32}
+        with patch.object(torch.version, "hip", None):
+            x32, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=32)
+            x64, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=64)
+        self.assertEqual(x32, x64)
+
+    def test_triton_config_uses_warp_size_for_min_elem(self):
+        # min_elem_per_thread * warp_size * num_warps drives the floor for
+        # block_size; doubling warp_size should at least double the XBLOCK.
+        size_hints = {"x": 4096}
+        cfg32 = triton_config(
+            size_hints, 128, num_warps=1, min_elem_per_thread=4, warp_size=32
+        )
+        cfg64 = triton_config(
+            size_hints, 128, num_warps=1, min_elem_per_thread=4, warp_size=64
+        )
+        self.assertEqual(cfg64.kwargs["XBLOCK"], 2 * cfg32.kwargs["XBLOCK"])
 
 
 if __name__ == "__main__":
