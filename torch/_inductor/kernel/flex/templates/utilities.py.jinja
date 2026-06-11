@@ -43,10 +43,27 @@ def load_checked_2d(
     IS_DIVISIBLE_N: tl.constexpr,
     M_LEN: tl.constexpr,
     N_LEN: tl.constexpr,
+    INDEX_DTYPE: tl.constexpr = tl.int32,
 ):
-    # Calculate final pointer if strides are provided
+    # Calculate final pointer if strides are provided. The caller
+    # controls the index dtype via INDEX_DTYPE; Inductor's existing
+    # `can_use_32bit_indexing` heuristic in `select_algorithm.py` picks
+    # `tl.int64` when any input's element count exceeds INT32_MAX, and
+    # `tl.int32` otherwise. Casting the offsets here prevents the
+    # int32 multiply from wrapping for large paged-KV layouts. Without
+    # this cast a paged KV cache whose K-load element offset exceeds
+    # INT32_MAX (e.g. a bf16 cache with > 131072 16-token pages and
+    # H_kv=8, head_dim=128) wraps to a negative offset and the load
+    # dereferences invalid memory on AMD — either trapping or silently
+    # returning garbage. NVIDIA is unaffected because its PTX uses
+    # plain 64-bit `ld.global.*` and the pattern-match that produces
+    # the buggy AMD instruction sequence does not exist there.
     if stride_m is not None and stride_n is not None:
-        ptr = ptr + offs_m[:, None] * stride_m + offs_n[None, :] * stride_n
+        ptr = (
+            ptr
+            + offs_m[:, None].to(INDEX_DTYPE) * stride_m
+            + offs_n[None, :].to(INDEX_DTYPE) * stride_n
+        )
 
     # Handle all masking cases
     if not IS_DIVISIBLE_M and not IS_DIVISIBLE_N:

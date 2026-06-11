@@ -164,8 +164,8 @@
         )
         {%- else %}
         # load Q and do: they stay in SRAM throughout the inner loop.
-        q = load_checked_2d(Q2, offs_m2, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
-        do = load_checked_2d(DO2, offs_m2, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
+        q = load_checked_2d(Q2, offs_m2, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM, INDEX_DTYPE)
+        do = load_checked_2d(DO2, offs_m2, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM, INDEX_DTYPE)
         {%- endif %}
         if PRESCALE_QK:
             q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
@@ -268,8 +268,8 @@
         )
         {%- else %}
         # load K and V: they stay in SRAM throughout the inner loop.
-        k = load_checked_2d(K, offs_n1, offs_k, stride_kn, stride_kd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM)
-        v = load_checked_2d(V, offs_n1, offs_v, stride_vn, stride_vd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM)
+        k = load_checked_2d(K, offs_n1, offs_k, stride_kn, stride_kd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM, INDEX_DTYPE)
+        v = load_checked_2d(V, offs_n1, offs_v, stride_vn, stride_vd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM, INDEX_DTYPE)
         {%- endif %}
         if PRESCALE_QK:
             k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
@@ -452,10 +452,15 @@ def bwd_dq_block_mn(
     )
     kT = tl.trans(k)
     {%- else %}
-    kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
-    vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_v[:, None] * stride_vd
+    # Cast offsets to INDEX_DTYPE before the precomputed pointer arithmetic;
+    # otherwise the multiply happens in default int32 and wraps on AMD when
+    # the source tensor's byte size exceeds the buffer-resource NUM_RECORDS
+    # cap (~2 GiB). load_checked_2d cannot re-cast here because both strides
+    # are None below.
+    kT_ptrs = K + offs_n2[None, :].to(INDEX_DTYPE) * stride_kn + offs_k[:, None].to(INDEX_DTYPE) * stride_kd
+    vT_ptrs = V + offs_n2[None, :].to(INDEX_DTYPE) * stride_vn + offs_v[:, None].to(INDEX_DTYPE) * stride_vd
     # NB reversed order to since K is transposed
-    kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN)
+    kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN, INDEX_DTYPE)
     {%- endif %}
     qk = tl.dot(q, kT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
@@ -535,7 +540,7 @@ def bwd_dq_block_mn(
     )
     vT = tl.trans(v)
     {%- else %}
-    vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN)
+    vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN, INDEX_DTYPE)
     {%- endif %}
     dp = tl.dot(do, vT, input_precision=FLOAT32_PRECISION)
     ds = p * (dp - Di[:, None])
@@ -679,10 +684,13 @@ def bwd_dkdv_block_mn(
     )
     qT = tl.trans(q)
     {%- else %}
-    qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
-    do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_v[None, :] * stride_dod
+    # See note in bwd_dq_block_mn: cast offsets here too so int32 multiplies
+    # do not wrap when the source tensor's byte size exceeds the AMD
+    # buffer-resource NUM_RECORDS cap (~2 GiB).
+    qT_ptrs = Q + offs_m1[None, :].to(INDEX_DTYPE) * stride_qm + offs_k[:, None].to(INDEX_DTYPE) * stride_qd
+    do_ptrs = DO + offs_m1[:, None].to(INDEX_DTYPE) * stride_dom + offs_v[None, :].to(INDEX_DTYPE) * stride_dod
     # NB reversed order since Q is transposed
-    qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN)
+    qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN, INDEX_DTYPE)
     {%- endif %}
     # Load LSE before computing qk to reduce pipeline stall.
     if IS_DIVISIBLE:
@@ -761,7 +769,7 @@ def bwd_dkdv_block_mn(
         [(q_start + offset).to(tl.int32), 0],
     )
     {%- else %}
-    do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
+    do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM, INDEX_DTYPE)
     {%- endif %}
     # Compute dV.
     ppT = pT
