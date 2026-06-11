@@ -8,6 +8,10 @@
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
+namespace libkineto {
+struct ITraceActivity;
+}
+
 namespace torch {
 
 namespace profiler::impl {
@@ -121,6 +125,9 @@ struct TORCH_API ProfilerResult {
   }
 
   void save(const std::string& path);
+#ifdef USE_KINETO
+  const std::vector<const libkineto::ITraceActivity*>* traceActivities();
+#endif
 
  private:
   uint64_t trace_start_ns_ = 0;
