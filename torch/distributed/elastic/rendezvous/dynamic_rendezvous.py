@@ -708,6 +708,9 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
 
                 # Attempt to sync our changes back to other nodes.
                 self._state_holder.mark_dirty()
+                has_set = self._state_holder.sync()
+                if has_set is False:
+                    _delay(seconds=(0, 0.3))
 
     def _keep_alive(self) -> None:
         msg = (
