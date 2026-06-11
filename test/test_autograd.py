@@ -49,6 +49,7 @@ from torch.autograd.profiler_util import (
     FunctionEventAvg,
 )
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -83,7 +84,6 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
     slowTest,
-    TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
@@ -11611,6 +11611,7 @@ for shape in [(1,), ()]:
             y = f(a)
         memory_without_grad = torch.get_device_module(device_type).memory_allocated()
         self.assertGreater(memory_with_grad, memory_without_grad)
+
         del a
         del y
 
@@ -11621,7 +11622,7 @@ for shape in [(1,), ()]:
             memory_with_hooks = torch.get_device_module(device_type).memory_allocated()
             self.assertEqual(memory_with_hooks, memory_without_grad)
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "test requires CUDA and XPU")
     def test_scalar_grad_mixed_device(self):
         device_type = torch.accelerator.current_accelerator().type
         x = torch.tensor(1.0, requires_grad=True)
