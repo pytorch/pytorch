@@ -62,7 +62,14 @@ static std::optional<c10::Device> compute_target_device(std::vector<at::Tensor>&
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the device
   // Barring that, we take the first tensor from a TensorList arg.
+  // Prefer a non-CPU device to handle cases like scalar op (e.g. 2 // privateuseone_tensor)
+  // where the first tensor arg is a CPU scalar tensor promoted from a Python int.
   if (!t_args.empty()) {
+    for (const auto& t : t_args) {
+        if (t.device().type() != c10::DeviceType::CPU) {
+            return t.device();
+        }
+    }
     return t_args[0].device();
   } else {
     // We need to loop through all of the (potentially multiple) TensorList arguments
