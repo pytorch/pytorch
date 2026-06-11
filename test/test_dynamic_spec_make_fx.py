@@ -65,7 +65,7 @@ class _ModXN(torch.nn.Module):
 
 
 class TestMakeFxDynamicSpec(TestCase):
-    """make_fx(_dynamic_spec=...) support for the ShapesSpec / ParamsSpec API."""
+    """make_fx(dynamic_shapes=...) support for the ShapesSpec / ParamsSpec API."""
 
     def setUp(self):
         super().setUp()
@@ -78,7 +78,7 @@ class TestMakeFxDynamicSpec(TestCase):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": T([VAR("batch"), STATIC])},
+            dynamic_shapes={"x": T([VAR("batch"), STATIC])},
         )(torch.randn(8, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -102,7 +102,7 @@ class f(torch.nn.Module):
         gm = make_fx(
             _ModX(),
             tracing_mode="fake",
-            _dynamic_spec={"x": T([VAR("batch"), STATIC])},
+            dynamic_shapes={"x": T([VAR("batch"), STATIC])},
         )(torch.randn(8, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -116,7 +116,7 @@ class f(torch.nn.Module):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": T([STATIC, STATIC])},
+            dynamic_shapes={"x": T([STATIC, STATIC])},
         )(torch.randn(4, 5))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -134,7 +134,7 @@ class f(torch.nn.Module):
             make_fx(
                 f,
                 tracing_mode="fake",
-                _dynamic_spec={"x": T([VAR("batch"), 3])},
+                dynamic_shapes={"x": T([VAR("batch"), 3])},
             )(torch.randn(4, 5))
 
     def test_no_params_spec_short_circuits(self):
@@ -144,7 +144,7 @@ class f(torch.nn.Module):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec=ShapesSpec(),
+            dynamic_shapes=ShapesSpec(),
         )(torch.randn(4, 5))
 
         # No ShapeVars declared -> dims remain static.
@@ -159,7 +159,7 @@ class f(torch.nn.Module):
         gm = make_fx(
             _ModXYIndep(),
             tracing_mode="fake",
-            _dynamic_spec={
+            dynamic_shapes={
                 "x": T([VAR("a"), STATIC]),
                 "y": T([VAR("b"), STATIC]),
             },
@@ -185,7 +185,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             _ModXYIndep(),
             tracing_mode="fake",
-            _dynamic_spec={"x": T([a, STATIC]), "y": T([a, STATIC])},
+            dynamic_shapes={"x": T([a, STATIC]), "y": T([a, STATIC])},
         )(torch.randn(5, 3), torch.randn(5, 3))
 
         self.assertExpectedInline(
@@ -207,7 +207,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             _ModXN(),
             tracing_mode="fake",
-            _dynamic_spec={"x": T([STATIC]), "n": IntVar("n")},
+            dynamic_shapes={"x": T([STATIC]), "n": IntVar("n")},
         )(torch.randn(4), 7)
 
         sym_placeholders = [
@@ -230,7 +230,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": T([VAR("batch"), STATIC])},
+            dynamic_shapes={"x": T([VAR("batch"), STATIC])},
         )(torch.randn(8, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -245,12 +245,12 @@ class <lambda>(torch.nn.Module):
         for bad_mode in ("real", "symbolic"):
             with self.assertRaisesRegex(
                 ValueError,
-                r"make_fx\(_dynamic_spec=\.\.\.\) requires tracing_mode='fake'",
+                r"make_fx\(dynamic_shapes=\.\.\.\) requires tracing_mode='fake'",
             ):
                 make_fx(
                     f,
                     tracing_mode=bad_mode,
-                    _dynamic_spec={"x": T([VAR("batch"), STATIC])},
+                    dynamic_shapes={"x": T([VAR("batch"), STATIC])},
                 )(torch.randn(4, 5))
 
     def test_invalid_spec_type_raises(self):
@@ -264,7 +264,7 @@ class <lambda>(torch.nn.Module):
             make_fx(
                 f,
                 tracing_mode="fake",
-                _dynamic_spec=42,  # neither dict nor Spec object
+                dynamic_shapes=42,  # neither dict nor Spec object
             )(torch.randn(2))
 
     def test_symbolic_dim_flows_through_ops(self):
@@ -277,7 +277,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": T([VAR("batch"), STATIC])},
+            dynamic_shapes={"x": T([VAR("batch"), STATIC])},
         )(torch.randn(6, 4))
 
         self.assertExpectedInline(
@@ -301,7 +301,7 @@ class f(torch.nn.Module):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": T([VAR("batch", min=4, max=128), STATIC])},
+            dynamic_shapes={"x": T([VAR("batch", min=4, max=128), STATIC])},
         )(torch.randn(10, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -332,7 +332,7 @@ class f(torch.nn.Module):
             make_fx(
                 f,
                 tracing_mode="fake",
-                _dynamic_spec={"x": T([VAR("batch"), STATIC])},
+                dynamic_shapes={"x": T([VAR("batch"), STATIC])},
             )(torch.randn(8, 3))
 
     def test_derived_dim_in_traced_graph(self):
@@ -352,7 +352,7 @@ class f(torch.nn.Module):
         gm = make_fx(
             M(),
             tracing_mode="fake",
-            _dynamic_spec={
+            dynamic_shapes={
                 "x": T([B, STATIC]),
                 "y": T([B * 2, STATIC]),
             },
@@ -389,7 +389,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             M(),
             tracing_mode="fake",
-            _dynamic_spec=ShapesSpec(
+            dynamic_shapes=ShapesSpec(
                 params=PARAMS({"x": T([A, STATIC]), "y": T([B, STATIC])}),
                 assumptions=[A > B],
             ),
@@ -418,14 +418,12 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             _ModX(),
             tracing_mode="fake",
-            _dynamic_spec={"x": T([b, STATIC])},
+            dynamic_shapes={"x": T([b, STATIC])},
         )(torch.randn(8, 3))
 
         sym = _first_tensor_placeholder_shape(gm)[0]
         self.assertIsInstance(sym, torch.SymInt)
-        self.assertEqual(
-            sym.node.shape_env.var_to_hint_override.get(sym.node.expr), 32
-        )
+        self.assertEqual(sym.node.shape_env.var_to_hint_override.get(sym.node.expr), 32)
 
     def test_scalar_input_optimization_hint(self):
         """An ``IntVar``'s ``optimization_hint`` lands in the shape env's
@@ -433,13 +431,11 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             _ModXN(),
             tracing_mode="fake",
-            _dynamic_spec={"x": T([STATIC]), "n": IntVar("n", optimization_hint=512)},
+            dynamic_shapes={"x": T([STATIC]), "n": IntVar("n", optimization_hint=512)},
         )(torch.randn(4), 7)
 
         sym = next(
-            v
-            for v in _user_input_placeholder_vals(gm)
-            if isinstance(v, torch.SymInt)
+            v for v in _user_input_placeholder_vals(gm) if isinstance(v, torch.SymInt)
         )
         self.assertEqual(
             sym.node.shape_env.var_to_hint_override.get(sym.node.expr), 512
@@ -459,7 +455,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             M(),
             tracing_mode="fake",
-            _dynamic_spec={
+            dynamic_shapes={
                 "d": DICT({"b": T([VAR("B"), STATIC])}),  # "a" omitted -> static
                 "xs": L([STATIC, T([VAR("X"), STATIC])]),  # pos 0 static
                 "p": OBJ({"second": T([VAR("P"), STATIC])}),  # "first" -> static

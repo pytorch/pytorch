@@ -2667,7 +2667,7 @@ class _MakefxTracer:
         parent_tracer: _MakefxTracer | None = None,
         proxy_module_inputs: bool = False,
         _disable_torch_fn_metadata_mode: bool = False,
-        _dynamic_spec: ShapesSpec | None = None,
+        dynamic_shapes: ShapesSpec | None = None,
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
@@ -2710,17 +2710,17 @@ class _MakefxTracer:
         # sub-tracers via ``_make_sub_tracer`` to produce a separate
         # subgraph for each branch/body.
 
-        # ``_dynamic_spec`` is pre-normalized by ``make_fx()``; assign as-is.
-        self._dynamic_spec: ShapesSpec | None = _dynamic_spec
-        # ``_dynamic_spec`` requires ``tracing_mode="fake"`` so the spec
+        # ``dynamic_shapes`` is pre-normalized by ``make_fx()``; assign as-is.
+        self.dynamic_shapes: ShapesSpec | None = dynamic_shapes
+        # ``dynamic_shapes`` requires ``tracing_mode="fake"`` so the spec
         # is the *sole* source of dynamism:
         #   - ``"real"``: no fakification → spec would be silently
         #     ignored (footgun).
         #   - ``"symbolic"``: every dim becomes a backed symbol by
         #     default.
-        if self._dynamic_spec is not None and self.tracing_mode != "fake":
+        if self.dynamic_shapes is not None and self.tracing_mode != "fake":
             raise ValueError(
-                f"make_fx(_dynamic_spec=...) requires tracing_mode='fake' "
+                f"make_fx(dynamic_shapes=...) requires tracing_mode='fake' "
                 f"(got tracing_mode={self.tracing_mode!r}). 'real' would "
                 f"silently ignore the spec; 'symbolic' conflicts with the "
                 f"spec's unbacked-by-default semantics."
@@ -2871,7 +2871,7 @@ class _MakefxTracer:
             self._restore_modes(*prev_modes)
 
     def _convert_args_to_fake(self, f: Callable[..., Any], args: T) -> T:
-        """Fakify ``args``. If ``self._dynamic_spec`` is set, create
+        """Fakify ``args``. If ``self.dynamic_shapes`` is set, create
         tensors with dynamic dims accordingly.
         """
         if self.tracing_mode == "real":
@@ -2885,7 +2885,7 @@ class _MakefxTracer:
         # leaf_specs aligned to the flat layout).
         # Both fake_tensor_mode and shape_env are guaranteed set for tracing.
         shape_env: ShapeEnv = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
-        user_spec = self._dynamic_spec
+        user_spec = self.dynamic_shapes
         if user_spec is not None:
             # Wire assumptions BEFORE processing any inputs so derived /
             # assumption checks can drain as inputs bind.
@@ -3123,7 +3123,7 @@ def make_fx(
     record_stack_traces: bool = False,
     proxy_module_inputs: bool = False,
     _disable_torch_fn_metadata_mode: bool = False,
-    _dynamic_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
+    dynamic_shapes: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
 ) -> Callable[..., GraphModule]:
     """
     Given a function f, return a new function which when executed with valid
@@ -3135,14 +3135,14 @@ def make_fx(
     ``tracing_mode``:
         - ``"real"``: no fakification, traces with real tensors.
         - ``"fake"``: tensors become FakeTensors. By default all dims are
-          static (concrete); if ``_dynamic_spec`` is set, the spec
+          static (concrete); if ``dynamic_shapes`` is set, the spec
           controls which dims become unbacked symbolic sizes — everything
           not declared by the spec stays static.
         - ``"symbolic"``: tensors become FakeTensors and **every dim becomes a
           backed symbolic size**. NOTE: using backed symbols this way is generally
           **not recommended and not sound** — backed symbols come with assumptions
           and can be constrained by guards silently. Kept for backward compatibility.
-          Prefer ``"fake"`` + ``_dynamic_spec`` to declare dynamism explicitly with
+          Prefer ``"fake"`` + ``dynamic_shapes`` to declare dynamism explicitly with
           unbacked symbols.
     """
 
@@ -3165,7 +3165,7 @@ def make_fx(
         or config.trace.provenance_tracking_level == 1,
         proxy_module_inputs=proxy_module_inputs,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
-        _dynamic_spec=_coerce_to_shapes_spec(_dynamic_spec),
+        dynamic_shapes=_coerce_to_shapes_spec(dynamic_shapes),
     )
 
     @functools.wraps(f)
