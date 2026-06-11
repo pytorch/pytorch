@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     run_tests,
     skipIfCrossRef,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -1175,6 +1176,7 @@ class inner_f(torch.nn.Module):
                 )
         self.assertEqual(joint._aot_state.fw_metadata.static_input_indices, [0, 1])
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182599")
     def test_no_annotation_on_gradient_acc_nodes(self):
         """Test basic linear module with aot_export_joint_with_descriptors"""
 
