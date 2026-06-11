@@ -20,7 +20,7 @@ from torch._dynamo.exc import UserErrorType
 from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
-from torch._guards import TracingContext
+from torch._guards import detect_fake_mode, TracingContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -757,6 +757,18 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
     def process_inputs(self, *inputs: Any) -> Any:
         self._inputs = inputs
         results = self.dynamo_bytecode_flatten(*inputs)
+        fake_mode = detect_fake_mode()
+        if fake_mode is not None and pytree.tree_any(
+            lambda x: isinstance(x, torch.Tensor) and not fake_mode.is_our_fake(x),
+            results,
+        ):
+            # Bytecode replay can recover tensors captured from module
+            # attributes as extra FX placeholder values. These tensors are not
+            # visible in AOTAutograd's user-facing call signature, so allow the
+            # active FakeTensorMode to convert them at dispatch time. This must
+            # remain enabled for AOT's backward trace too, since autograd can
+            # save the recovered tensors from the forward.
+            fake_mode.allow_non_fake_inputs = True
         return results
 
     def process_outputs(self, outputs: Any) -> Any:
@@ -777,6 +789,23 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
         has_orig_self = (fn_args[0] == "self") if len(fn_args) > 0 else False
         if has_orig_self:
             free_vars.insert(0, "self")
+        # Rename any non-first `self` in fn_args to a unique name. The base
+        # CodeGen.gen_fn_def prepends `"self"` for the GraphModule's bound-
+        # method receiver whenever fn_args[0] != "self", which collides with
+        # a schema param literally named `self` (e.g. `aten.where.self(Tensor
+        # cond, Tensor self, Tensor other)` -> `def forward(self, cond, self,
+        # other)` -> `SyntaxError: duplicate argument 'self' in function
+        # definition`). Both the function-def arg list (via super().gen_fn_def)
+        # and the body binding (via gen_var_bindings) reference fn_args, so
+        # the rename is consistent end-to-end.
+        fn_args = list(fn_args)
+        first_pos = 1 if has_orig_self else 0
+        for i in range(first_pos, len(fn_args)):
+            if fn_args[i] == "self":
+                new_name = "self_"
+                while new_name in fn_args:
+                    new_name += "_"
+                fn_args[i] = new_name
         fn_definition = super().gen_fn_def(
             fn_args[:], maybe_return_annotation, expanded_def=expanded_def
         )
