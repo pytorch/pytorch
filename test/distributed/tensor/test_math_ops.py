@@ -1554,12 +1554,19 @@ class DistMathOpsTest(DTensorTestBase):
                         device_mesh,
                         [Shard(shard_dim)],
                     )
+
                     out = fn(x)
-                    (out[0] if isinstance(out, tuple) else out).sum().backward()
-                    dt_out = fn(dt_x)
-                    (
-                        dt_out[0] if isinstance(dt_out, tuple) else dt_out
-                    ).sum().backward()
+                    out_val = out[0] if isinstance(out, tuple) else out
+                    out_val.sum().backward()
+
+                    with CommDebugMode() as comm_mode:
+                        dt_out = fn(dt_x)
+                        dt_out_val = dt_out[0] if isinstance(dt_out, tuple) else dt_out
+                        dt_out_val.sum().backward()
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+
+                    self.assertEqual(dt_out_val.full_tensor(), out_val)
+                    self.assertTrue(dt_out_val.placements[0].is_shard(shard_dim))
                     self.assertEqual(dt_x.grad.full_tensor(), x.grad)
                     self.assertTrue(dt_x.grad.placements[0].is_shard(shard_dim))
 
