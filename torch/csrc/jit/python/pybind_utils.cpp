@@ -493,7 +493,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
             " is not compatible with interface ",
             interfaceType->repr_str(),
             "\n",
-            why_not.str()));
+            std::move(why_not).str()));
       }
       return res;
     }
@@ -850,7 +850,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
       for (const auto& err : errors) {
         ss << err.what() << "\n\n";
       }
-      throw std::runtime_error(ss.str());
+      throw std::runtime_error(std::move(ss).str());
     }
 
     return std::make_pair(std::move(found_op), std::move(stack));
