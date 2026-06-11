@@ -122,6 +122,8 @@ from .object_protocol import (
     generic_str,
     maybe_get_python_type,
     pysequence_check,
+    ternary_iop,
+    ternary_op,
     vt_add,
     vt_getitem,
     vt_identity_compare,
@@ -573,8 +575,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     ]:
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
-            pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
-            operator.pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
             # operator.matmul
@@ -1827,7 +1827,10 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         try:
-            fn = args[0].get_function()
+            if isinstance(args[0], variables.NestedUserFunctionVariable):
+                fn = args[0].get_function(allow_sourced_cells=True)
+            else:
+                fn = args[0].get_function()
         except NotImplementedError:
             fail(args, kwargs)
 
@@ -2773,6 +2776,24 @@ class BuiltinVariable(BaseBuiltinVariable):
         # PyNumber_Divmod dispatches through the nb_divmod slot with no
         # in-place form. https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1056
         return binary_op(tx, a, b, "nb_divmod", "divmod()")
+
+    def call_pow(
+        self,
+        tx: "InstructionTranslatorBase",
+        a: VariableTracker,
+        b: VariableTracker,
+        c: VariableTracker | None = None,
+    ) -> VariableTracker | None:
+        return ternary_op(tx, a, b, c, "nb_power", "** or pow()")
+
+    def call_ipow(
+        self,
+        tx: "InstructionTranslatorBase",
+        a: VariableTracker,
+        b: VariableTracker,
+        c: VariableTracker | None = None,
+    ) -> VariableTracker | None:
+        return ternary_iop(tx, a, b, c, "nb_inplace_power", "nb_power", "**=")
 
     def call_not_(
         self, tx: "InstructionTranslatorBase", a: VariableTracker

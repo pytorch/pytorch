@@ -1,3 +1,4 @@
+# Owner(s): ["module: cuda"]
 name: Limited CI on H100
 
 on:
