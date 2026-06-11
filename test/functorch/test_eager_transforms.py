@@ -4621,7 +4621,6 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result, expected)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_ensemble_regression(self, device, mechanism):
         def make_spirals(n_samples, noise_std=0.0, rotations=1.0):

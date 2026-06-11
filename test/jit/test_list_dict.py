@@ -11,7 +11,6 @@ from textwrap import dedent
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 import torch
-import torch._dynamo.config
 import torch.nn as nn
 from torch import Tensor
 from torch.testing import FileCheck
@@ -1184,7 +1183,6 @@ class TestList(JitTestCase):
 
         self.checkScript(test_list_remove2, ())
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_extend_list_mutable(self):
         @torch.jit.script
         def extend_list(a: List[Tensor], b: List[Tensor]) -> List[Tensor]:
