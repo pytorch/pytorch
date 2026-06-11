@@ -266,23 +266,24 @@ def common_reduction_strategy(
     reduction_strategy = OpStrategy([])
 
     for op_spec in input_strategy.strategies:
+        is_reduction_linear = reduction_linear
         if reduction_op == "avg":
             output_spec = op_spec.output_spec
             local_shape = list(output_spec.tensor_meta.shape)  # type:ignore[union-attr]
             for dim in reduce_dims:
                 if not is_tensor_evenly_shardable_on_dim(local_shape, output_spec, dim):
                     # reduce(avg) is not linear for unevenly sharded tensors
-                    reduction_linear = False
+                    is_reduction_linear = False
                     break
 
         for p in op_spec.output_spec.placements:
             # when the partial reduction op matches the global reduction op,
             # we can delay redistribution (i.e max, max)
             if isinstance(p, Partial) and p.reduce_op != reduction_op:
-                reduction_linear = False
+                is_reduction_linear = False
                 break
 
-        if not reduction_linear:
+        if not is_reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
             input_placements = replicate_reduction_dims(
@@ -1458,7 +1459,6 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
 
 _LINALG_NUM_PLACEMENTS = {
     # 1 in 1 out
-    aten.cholesky.default: 2,
     aten.cholesky_inverse.default: 2,
     aten.linalg_matrix_exp.default: 2,
     # 2 in 1 out
@@ -1514,7 +1514,6 @@ def _get_ndim(tensor_meta: Any) -> int:
 
 @register_single_dim_strategy(
     [
-        aten.cholesky.default,
         aten.cholesky_inverse.default,
         aten.linalg_matrix_exp.default,
         aten.cholesky_solve.default,
@@ -1651,6 +1650,8 @@ def linalg_cross_strategy(
         aten._upsample_nearest_exact2d.default,
         aten._upsample_nearest_exact3d.default,
         aten._upsample_bilinear2d_aa.default,
+        aten._upsample_bicubic2d_aa.default,
+        aten._upsample_lanczos2d_aa.default,
         aten.upsample_bicubic2d.default,
         aten.upsample_bilinear2d.default,
         aten.upsample_linear1d.default,
@@ -1663,6 +1664,8 @@ def linalg_cross_strategy(
         aten._upsample_nearest_exact2d_backward.default,
         aten._upsample_nearest_exact3d_backward.default,
         aten._upsample_bilinear2d_aa_backward.default,
+        aten._upsample_bicubic2d_aa_backward.default,
+        aten._upsample_lanczos2d_aa_backward.default,
         aten.upsample_bicubic2d_backward.default,
         aten.upsample_bilinear2d_backward.default,
         aten.upsample_linear1d_backward.default,
@@ -1790,9 +1793,9 @@ def _adjust_group_norm_scalars(
     for d in local_shape[2:]:
         hxw_local *= d
     args = list(schema.args_schema)
-    # Find scalar arg positions: first 1-3 args are tensors (input, weight?, bias?),
-    # then N, C, HxW, group, eps. Count tensor args to find the offset.
-    num_tensor_args = sum(isinstance(a, DTensorSpec) for a in args)
+    # Find scalar arg positions: tensor slots (DTensorSpec or None for optionals)
+    # precede N, C, HxW. Count both to find the offset.
+    num_tensor_args = sum(isinstance(a, (DTensorSpec, type(None))) for a in args)
     args[num_tensor_args] = n_local
     args[num_tensor_args + 1] = c_local
     args[num_tensor_args + 2] = hxw_local

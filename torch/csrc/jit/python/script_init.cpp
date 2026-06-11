@@ -684,7 +684,7 @@ static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       auto ad = item.a.toGenericDict();
       auto bd = item.b.toGenericDict();
       for (auto& item : ad) {
-        // Dictionaory keys cannot contain List/Dicts that require tags
+        // Dictionary keys cannot contain List/Dicts that require tags
         // so we do not have to check them.
         // Furthermore without ordered dicts it is expensive to find the
         // equivalent key
@@ -802,7 +802,7 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   return result;
 }
 
-static constexpr std::array<const char*, 48> magic_method_names = {
+static constexpr std::initializer_list<const char*> magic_method_names = {
     "__lt__",      "__le__",      "__eq__",        "__ne__",
     "__ge__",      "__gt__",      "__not__",       "__abs__",
     "__add__",     "__and__",     "__floordiv__",  "__index__",
@@ -1052,7 +1052,7 @@ void initJitScriptBindings(PyObject* module) {
                       err << qualname->qualifiedName() << ' ';
                     }
                     err << "which does not have a __setstate__ method defined!";
-                    throw std::runtime_error(err.str());
+                    throw std::runtime_error(std::move(err).str());
                   }
                 }
 
@@ -1062,7 +1062,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               })
           .def(py::pickle(
               [](const Object& self)
@@ -1079,7 +1079,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               },
               [](const std::tuple<py::object, std::string>& state_tup)
                   -> Object {
@@ -1116,7 +1116,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __setstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               }));
 
   py::class_<Object::Property>(m, "ScriptObjectProperty")
@@ -1156,7 +1156,8 @@ void initJitScriptBindings(PyObject* module) {
         if (!method) {
           std::stringstream ss;
           ss << std::hex << static_cast<const void*>(&self);
-          return py::str("<torch.ScriptObject object at " + ss.str() + ">");
+          return py::str(
+              "<torch.ScriptObject object at " + std::move(ss).str() + ">");
         }
         return invokeScriptMethodFromPython(*method, args, kwargs);
       });
@@ -2591,12 +2592,17 @@ void initJitScriptBindings(PyObject* module) {
   // and graph type remapping.  Modelled after the backend-lowering pass in
   // backend_init.cpp which does unsafeChangeAttributeType + remapTypes.
   //
-  // Returns a cloned root module with the replacement applied. This avoids
-  // mutating a live module hierarchy after methods may already have created
-  // optimized executors.
+  // Mutates ``root`` in place and returns it.  We deliberately do NOT
+  // ``root.clone()`` first, because ``Module::clone_impl`` reuses
+  // ``root``'s CompilationUnit and allocates a fresh ClassType per
+  // source ClassType with ``shouldMangle=true``. Callers that need the
+  // pre-swap module must clone before invoking this.  All current
+  // callers (regional-AOTI ``create_lowered_from_scripted_merge``)
+  // discard ``root`` immediately after the swap, so in-place mutation
+  // is the desired behaviour.
   //
   // Args:
-  //   root   – top-level ScriptModule to clone and update.
+  //   root   – top-level ScriptModule to update in place.
   //   qualified_name – fully qualified path to the submodule to replace.
   //   new_submodule – the replacement ScriptModule.
   m.def(
@@ -2604,14 +2610,13 @@ void initJitScriptBindings(PyObject* module) {
       [](Module& root,
          const std::string& qualified_name,
          Module& new_submodule) {
-        auto cloned_root = root.clone();
         auto parent_and_attr =
-            lookupParentModuleAndAttribute(cloned_root, qualified_name);
+            lookupParentModuleAndAttribute(root, qualified_name);
         auto parent = parent_and_attr.first;
         const auto& attr_name = parent_and_attr.second;
         auto old_submodule = parent.attr(attr_name).toModule();
         auto old_type = old_submodule.type();
-        auto duplicate_types = getSharedModuleTypes(cloned_root);
+        auto duplicate_types = getSharedModuleTypes(root);
 
         if (duplicate_types.count(parent.type()) > 0) {
           throw py::cast_error(c10::str(
@@ -2621,7 +2626,7 @@ void initJitScriptBindings(PyObject* module) {
         }
 
         auto remapped_submodule = cloneSubmoduleToCompilationUnit(
-            new_submodule, cloned_root._ivalue()->compilation_unit());
+            new_submodule, root._ivalue()->compilation_unit());
         auto new_type = remapped_submodule.type();
 
         // 1. Update the parent's ClassType to accept the new submodule type.
@@ -2642,7 +2647,7 @@ void initJitScriptBindings(PyObject* module) {
           }
           return it->second;
         };
-        for (auto module : cloned_root.modules()) {
+        for (auto module : root.modules()) {
           auto module_type = module.type();
           for (auto& fn : module_type->methods()) {
             auto method = module.get_method(fn->name());
@@ -2653,7 +2658,7 @@ void initJitScriptBindings(PyObject* module) {
             fn->setSchema(new_schema);
           }
         }
-        return cloned_root;
+        return root;
       });
 
   m.def("_get_file_format", [](const std::string& path) {

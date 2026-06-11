@@ -140,11 +140,11 @@ if [[ "${XPU_DRIVER_TYPE,,}" == "lts" ]]; then
     XPU_DRIVER_VERSION="/lts/2523"
 fi
 
-# Default use Intel® oneAPI Deep Learning Essentials 2025.2
-if [[ "$XPU_VERSION" == "2025.3" ]]; then
-    XPU_PACKAGES_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/b3e6c1bf-a6d5-4580-8b1d-80cbfd38c8af/intel-deep-learning-essentials-2025.3.2.36_offline.sh"
+# Default use Intel® oneAPI Deep Learning Essentials 2025.3
+if [[ "$XPU_VERSION" == "2026.0" ]]; then
+    XPU_PACKAGES_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/8170208e-86db-4faa-a0d6-1ecf62699574/intel-deep-learning-essentials-2026.0.0.624_offline.sh"
 else
-    XPU_PACKAGES_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/de3686c4-d3e1-41da-bf3b-bf5908da075c/intel-deep-learning-essentials-2025.2.1.24_offline.sh"
+    XPU_PACKAGES_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/b3e6c1bf-a6d5-4580-8b1d-80cbfd38c8af/intel-deep-learning-essentials-2025.3.2.36_offline.sh"
 fi
 
 # The Driver installation depends on the base OS
