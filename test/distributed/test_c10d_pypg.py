@@ -3,6 +3,7 @@
 import time
 import unittest
 import weakref
+from datetime import timedelta
 
 import test_c10d_common
 
@@ -117,6 +118,63 @@ class DummyAttrProcessGroup(dist.ProcessGroup):
         return self._group_desc
 
 
+class StoreProcessGroup(dist.ProcessGroup):
+    """
+    A ProcessGroup constructed with the 3-arg (store, rank, size) constructor.
+    Used to verify the store is accessible and that a Python subclass built
+    this way is routed through the PyProcessGroup trampoline.
+    """
+
+    def __init__(self, store, rank, world):
+        super().__init__(store, rank, world)
+        self._rank = rank
+        self._world = world
+
+    def getBackendName(self):
+        return "store-pg"
+
+
+class ReconfigurableProcessGroup(dist.ProcessGroup):
+    """
+    A Python ProcessGroup that records reconfigure calls. Used to verify the
+    torch.distributed reconfigure helpers delegate to ProcessGroup.
+    """
+
+    def __init__(self, rank, world):
+        super().__init__(rank, world)
+        self.reconfigure_opts = None
+
+    @property
+    def supports_reconfigure(self):
+        return True
+
+    def get_reconfigure_handle(self):
+        return "handle-for-rank-0"
+
+    def reconfigure(self, opts):
+        self.reconfigure_opts = opts
+        return create_work(None)
+
+
+class WindowProcessGroup(dist.ProcessGroup):
+    """
+    A Python ProcessGroup that records new_window calls. Used to verify the
+    torch.distributed window helpers delegate to ProcessGroup.
+    """
+
+    def __init__(self, rank, world):
+        super().__init__(rank, world)
+        self.new_window_tensor = "unset"
+
+    @property
+    def supports_window(self):
+        return True
+
+    def new_window(self, tensor=None):
+        self.new_window_tensor = tensor
+        return "fake-window"
+
+
 # We cannot use parametrize as some tests are defined on the base class and use _get_process_group
 class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
     def setUp(self):
@@ -209,11 +267,67 @@ class TestPyProcessGroup(TestCase):
         pg._set_group_desc("desc")
         self.assertEqual(pg.group_desc, "py:desc")
 
+    def test_store_constructor(self):
+        store = dist.HashStore()
+        store.set("test_key", "test_value")
+
+        pg = StoreProcessGroup(store, 0, 1)
+
+        # The store passed to the 3-arg constructor is accessible via the PG
+        # and is the same store object we passed in.
+        group_store = pg.get_group_store()
+        self.assertIs(group_store, store)
+        self.assertEqual(group_store.get("test_key"), b"test_value")
+
+        # A Python subclass built via the 3-arg constructor must be routed
+        # through the PyProcessGroup trampoline so the getBackendName override
+        # dispatches back into Python; a raw C++ ProcessGroup would return the
+        # base backend name ("undefined") instead.
+        self.assertEqual(pg.name(), "store-pg")
+
     def test_abort_shutdown(self) -> None:
         # verify this are noops
         pg = DummyAttrProcessGroup(0, 1)
         pg.abort()
         pg.shutdown()
+
+    def test_reconfigure_delegation(self) -> None:
+        pg = ReconfigurableProcessGroup(0, 1)
+
+        self.assertTrue(dist._supports_reconfigure(group=pg))
+        self.assertEqual(dist._get_reconfigure_handle(group=pg), "handle-for-rank-0")
+
+        timeout = timedelta(seconds=30)
+        work = dist._reconfigure(
+            uuid=7,
+            handles=["a", "b"],
+            group=pg,
+            timeout=timeout,
+            hints={"k": "v"},
+        )
+        self.assertIsNotNone(work)
+
+        # The helper builds a ReconfigureOptions and forwards it unchanged.
+        opts = pg.reconfigure_opts
+        self.assertIsNotNone(opts)
+        self.assertEqual(opts.uuid, 7)
+        self.assertEqual(opts.handles, ["a", "b"])
+        self.assertEqual(opts.timeout, timeout)
+        self.assertEqual(opts.hints, {"k": "v"})
+
+    def test_window_delegation(self) -> None:
+        pg = WindowProcessGroup(0, 1)
+
+        self.assertTrue(dist._supports_window(group=pg))
+
+        # With no tensor, new_window is called with tensor=None.
+        self.assertEqual(dist._new_window(group=pg), "fake-window")
+        self.assertIsNone(pg.new_window_tensor)
+
+        # A tensor is forwarded through to ProcessGroup.new_window.
+        t = torch.zeros(4)
+        self.assertEqual(dist._new_window(t, group=pg), "fake-window")
+        self.assertIs(pg.new_window_tensor, t)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
     def test_block_current_stream(self) -> None:
