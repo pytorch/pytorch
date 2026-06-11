@@ -1,10 +1,15 @@
 # Owner(s): ["module: cuda"]
 
+import os
+import subprocess
+import sys
+import tempfile
+import textwrap
+from itertools import product
+
 import torch
 from torch.cuda.jiterator import _create_jit_fn as create_jit_fn
 from torch.cuda.jiterator import _create_multi_output_jit_fn as create_multi_output_jit_fn
-import sys
-from itertools import product
 from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, TEST_CUDA, NoTest
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_device_type import (
@@ -162,6 +167,48 @@ class TestPythonJiterator(TestCase):
     def test_invalid_function_name(self, code_string):
         with self.assertRaises(Exception):
             create_jit_fn(code_string)
+
+    def test_corrupt_kernel_cache_recompiles(self, device):
+        script = textwrap.dedent("""
+            import torch
+
+            x = torch.Tensor([[32, 32], [16, 16], [8, 8]]).cuda()
+            y = x.prod(1)
+            torch.cuda.synchronize()
+            torch.testing.assert_close(
+                y.cpu(),
+                torch.tensor([1024.0, 256.0, 64.0]),
+                rtol=0,
+                atol=0,
+            )
+        """)
+
+        with tempfile.TemporaryDirectory() as cache_dir:
+            env = os.environ.copy()
+            env["PYTORCH_KERNEL_CACHE_PATH"] = cache_dir
+            env["USE_PYTORCH_KERNEL_CACHE"] = "1"
+
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                env=env,
+                stderr=subprocess.STDOUT,
+            )
+            cache_files = [
+                os.path.join(cache_dir, name)
+                for name in os.listdir(cache_dir)
+                if name.startswith("reduction_prod_")
+            ]
+            self.assertEqual(len(cache_files), 1)
+
+            with open(cache_files[0], "wb"):
+                pass
+
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                env=env,
+                stderr=subprocess.STDOUT,
+            )
+            self.assertGreater(os.path.getsize(cache_files[0]), 0)
 
 
 instantiate_device_type_tests(TestPythonJiterator, globals(), only_for="cuda")
