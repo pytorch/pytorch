@@ -944,7 +944,8 @@ def _warn_tf32_disabled() -> None:
 
 
 def _sfdp_params_check(match):
-    assert all(k in match.kwargs for k in ("query", "key", "value"))
+    if not all(k in match.kwargs for k in ("query", "key", "value")):
+        raise AssertionError("expected query, key, value in match.kwargs")
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
     value = match.kwargs["value"].meta["val"]
@@ -1430,7 +1431,10 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
         for pattern, replacement, args, workaround, extra_check in candidates:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
-            assert isinstance(workaround, dict)
+            if not isinstance(workaround, dict):
+                raise AssertionError(
+                    f"expected workaround to be a dict, got {type(workaround)}"
+                )
             name = pattern.__name__
             pattern_name = name
 
@@ -1461,7 +1465,10 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 )
             inference_workaround = {}
             if workaround:
-                assert len(workaround) <= 2
+                if len(workaround) > 2:
+                    raise AssertionError(
+                        f"expected len(workaround) <= 2, got {len(workaround)}"
+                    )
                 if "inv_scale" in workaround:
                     inference_workaround["inv_scale"] = workaround["inv_scale"]
                 if "dropout_p" in workaround:
