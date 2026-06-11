@@ -583,6 +583,7 @@ def promote_constants(
     inputs: Sequence[_T],
     override_return_dtype: torch.dtype | None = None,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
+    round_scalar_constants: bool = False,
     round_scalars_to_tensor_dtype: bool = False,
 ) -> Sequence[_T | BaseView | BaseConstant]:
     if not (override_return_dtype is None or type_promotion_kind is None):
@@ -614,15 +615,17 @@ def promote_constants(
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     tensor_dtype = ex.get_dtype()
 
-    # Round scalars to the tensor's dtype to match eager: comparison ops
-    # round on all devices, and ops like add/sub round on CPU and MPS, whose
-    # eager kernels cast scalar operands to the common dtype (CUDA and the
-    # CPU mul/div kernels keep scalars at opmath precision instead).
+    # Round scalars to the tensor's dtype to match eager: comparison ops and
+    # callers passing round_scalar_constants (e.g. remainder) round on all
+    # devices, and ops like add/sub round on CPU and MPS, whose eager kernels
+    # cast scalar operands to the common dtype (CUDA and the CPU mul/div
+    # kernels keep scalars at opmath precision instead).
     if tensor_dtype in (
         torch.bfloat16,
         torch.float16,
     ) and (
         override_return_dtype == torch.bool
+        or round_scalar_constants
         or (
             round_scalars_to_tensor_dtype
             and ex.get_device_or_error().type in ("cpu", "mps")
@@ -8374,7 +8377,21 @@ register_lowering(aten.clamp_max)(minimum)
 neg = register_pointwise(aten.neg)
 abs = register_pointwise(aten.abs)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
-register_pointwise(aten.remainder)
+
+register_op_dtype_propagation_rules(
+    "remainder",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    override_return_dtype=None,
+)
+
+
+@register_lowering(aten.remainder, broadcast=True)
+def remainder(a, b):
+    a, b = promote_constants((a, b), round_scalar_constants=True)
+    fn = ops_wrapper("remainder")
+    return make_pointwise(fn)(a, b)
+
+
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 
