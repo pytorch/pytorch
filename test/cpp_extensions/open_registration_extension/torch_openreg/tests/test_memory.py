@@ -467,6 +467,45 @@ class TestPinMemory(TestCase):
         )
         self.assertTrue(shared_tensor.is_pinned())
 
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
+    def test_pin_memory_openreg_basic(self):
+        t = torch.randn(10, dtype=torch.float32)
+        self.assertFalse(t.is_pinned())
+
+        pinned = t.pin_memory("openreg")
+        self.assertEqual(pinned.device.type, "cpu")
+        self.assertEqual(pinned.shape, t.shape)
+        self.assertEqual(pinned.dtype, t.dtype)
+        self.assertTrue(pinned.is_pinned("openreg"))
+
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
+    def test_pin_memory_openreg_varied_sizes(self):
+        # Use uint8 so `numel()` directly corresponds to bytes, which makes it
+        # easier to exercise the host allocator's page-size alignment logic.
+        sizes = [0, 1, 4095, 4096, 4097, 8192]
+        for size in sizes:
+            t = torch.empty(size, dtype=torch.uint8)
+            pinned = t.pin_memory("openreg")
+            self.assertEqual(pinned.numel(), size)
+            self.assertEqual(pinned.dtype, t.dtype)
+            self.assertEqual(pinned.device.type, "cpu")
+
+            # Zero-size tensors may not allocate any storage, but should still
+            # be safe to pin.
+            if size != 0:
+                self.assertTrue(pinned.is_pinned("openreg"))
+
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
+    def test_pin_memory_openreg_repeated_cycles(self):
+        # Keep this test lightweight but exercise repeated alloc/free cycles
+        # through the OpenReg pinned allocator.
+        for i in range(50):
+            pinned = torch.empty(4096, dtype=torch.uint8).pin_memory("openreg")
+            self.assertTrue(pinned.is_pinned("openreg"))
+            del pinned
+            if i % 10 == 0:
+                gc.collect()
+
 
 class TestMultiDeviceAllocation(TestCase):
     """Test basic multi-device allocation functionality."""
