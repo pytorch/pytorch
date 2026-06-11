@@ -1524,7 +1524,9 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
-        return DataPtrVariable(self)
+        result = DataPtrVariable(self)
+        result.as_sym_node(tx)
+        return result
 
     def method_const_data_ptr(
         self,
@@ -2490,6 +2492,28 @@ class TensorVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__pow__(x)`` calls — the
+        # ``operator.pow`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)) or z:
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.pow, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):
             return False
@@ -2922,6 +2946,26 @@ class SymNodeVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if z is not None:
+            return VariableTracker.build(tx, NotImplemented)
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.pow, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
     def method___abs__(
         self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
     ) -> VariableTracker:
@@ -3334,6 +3378,7 @@ class DataPtrVariable(VariableTracker):
         self.from_tensor = from_tensor
         self.method_name = method_name
         self.tensor_version = from_tensor._get_fake_version()
+        self._sym_node: VariableTracker | None = None
 
     def python_type(self) -> type:
         return int
@@ -3341,6 +3386,8 @@ class DataPtrVariable(VariableTracker):
     def as_sym_node(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.method_name != "data_ptr":
             raise AssertionError(self.method_name)
+        if self._sym_node is not None:
+            return self._sym_node
         from ..data_ptr_op import _data_ptr
 
         proxy = tx.output.create_proxy(
@@ -3349,7 +3396,8 @@ class DataPtrVariable(VariableTracker):
             (self.from_tensor.as_proxy(),),
             {},
         )
-        return SymNodeVariable.create(tx, proxy)
+        self._sym_node = SymNodeVariable.create(tx, proxy)
+        return self._sym_node
 
     @classmethod
     def _strip_data_ptr_preserving_aliases(cls, node: torch.fx.Node) -> torch.fx.Node:

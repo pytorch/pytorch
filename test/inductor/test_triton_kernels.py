@@ -167,8 +167,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # No need to assert anything, the goal is to make sure dynamo does
         # not crash
 
+    @skipIfWindows(msg="AOTI/Cpp_Wrapper have not enabled on Windows")
     @requires_gpu
-    def test_data_ptr_packing(self):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_data_ptr_packing(self, cpp_wrapper):
         @triton.jit
         def add_kernel(xy, z, BLOCK_SIZE: "tl.constexpr", n_elements):
             pid = tl.program_id(axis=0)
@@ -195,8 +197,9 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         x = torch.randn(17, device=GPU_TYPE)
         y = torch.randn(17, device=GPU_TYPE)
-        actual = torch.compile(f, fullgraph=True)(x, y)
-        self.assertEqual(actual, x + y)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            actual = torch.compile(f, fullgraph=True)(x, y)
+            self.assertEqual(actual, x + y)
 
     @requires_gpu
     def test_triton_kernel_dunder_name_no_name_mangling(self):
@@ -6003,6 +6006,30 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         out, code = run_and_get_code(torch.compile(fn), a, b, c)
         self.assertEqual(out, fn(a, b, c))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
+
+    @requires_cuda_and_triton
+    def test_fusion_cast_epilogue(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.to(torch.float16)
+
+        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
 
 if HAS_CUDA_AND_TRITON:

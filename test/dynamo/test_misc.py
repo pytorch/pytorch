@@ -2278,6 +2278,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.tensor([1.0, 2.0, 3.0])
         self.assertEqual(f(x), x + 1)
 
+    def test_check_tensor_predicate_raises_clear_error(self):
+        @torch.compile(backend="eager")
+        def f(x):
+            torch._check(x > 0)
+            return torch.log(x)
+
+        with self.assertRaisesRegex(
+            TypeError, r"cond must be a bool.*torch[.]_check_tensor_all"
+        ) as cm:
+            f(torch.rand(1))
+
+        self.assertNotIn("FakeTensor", str(cm.exception))
+
     def test_check_with_closure_constant(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(x):
@@ -14811,6 +14824,32 @@ fn
         self.assertIsNotNone(backend.graph)
         FileCheck().check("torch.ops.prims._data_ptr.default").run(backend.graph.code)
 
+    def test_data_ptr_read_before_storage_mutation(self):
+        class CaptureGraph:
+            def __init__(self):
+                self.graph = None
+
+            def __call__(self, gm, example_inputs):
+                self.graph = gm
+                return gm
+
+        def f(x):
+            ptr = x.data_ptr()
+            x.untyped_storage().resize_(x.untyped_storage().size() * 8 + 1024)
+            return torch.tensor([ptr])
+
+        backend = CaptureGraph()
+        x = torch.randn(4)
+        expected_ptr = x.data_ptr()
+
+        actual = torch.compile(f, backend=backend, fullgraph=True)(x)
+
+        self.assertEqual(actual, torch.tensor([expected_ptr]))
+        self.assertIsNotNone(backend.graph)
+        FileCheck().check("torch.ops.prims._data_ptr.default").check(
+            "torch.ops.inductor.resize_storage_bytes_"
+        ).run(backend.graph.code)
+
     def test_const_data_ptr_tensor_constructor_unsupported(self):
         def f(x):
             return torch.tensor([x.const_data_ptr()])
@@ -15285,6 +15324,71 @@ fn
             "Reconstruct user defined class without a source",
         ):
             fn(t)
+
+    @expectedFailureDynamic
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_over_nonconstant(self):
+        class Outer:
+            def __init__(self):
+                self.scale = 3
+
+        outer = Outer()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(t):
+            class Wrapper:
+                def __init__(self, t):
+                    self.t = t
+
+                def compute(self):
+                    return self.t.sin() * outer.scale
+
+            obj = Wrapper(t)
+            return obj.compute()
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), t.sin() * outer.scale)
+        # Same value: the EQUALS_MATCH guard on outer.scale holds, no recompile.
+        self.assertEqual(fn(t), t.sin() * outer.scale)
+        self.assertEqual(cnt.frame_count, 1)
+        # Mutating the closed-over non-constant trips the guard -> recompile with
+        # the new value (proves scale is guarded, not baked in as a constant).
+        outer.scale = 5
+        self.assertEqual(fn(t), t.sin() * outer.scale)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @expectedFailureDynamic
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_over_nonconstant_method(self):
+        class Outer:
+            def __init__(self):
+                self.scale = 2
+
+            def get_scale(self):
+                return self.scale
+
+        outer = Outer()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(t):
+            class Wrapper:
+                def keys(self):
+                    return outer.get_scale()
+
+            return Wrapper().keys() + t.sum()
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), outer.get_scale() + t.sum())
+        self.assertEqual(fn(t), outer.get_scale() + t.sum())
+        self.assertEqual(cnt.frame_count, 1)
+        # Mutating the closed-over value re-guards and recompiles.
+        outer.scale = 7
+        self.assertEqual(fn(t), outer.get_scale() + t.sum())
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_dunder_weakref(self):
         class Foo:
