@@ -487,7 +487,11 @@ def _preserve_requires_grad_pass(
         raise AssertionError(
             f"input_specs length {len(sig.input_specs)} does not match placeholders length {len(placeholders)}"
         )
-    i = 0
+    user_input_to_arg = {}
+    for flat_arg_index, user_input in enumerate(sig.user_inputs):
+        if isinstance(user_input, str) and flat_arg_index < len(flat_fake_args):
+            user_input_to_arg[user_input] = flat_fake_args[flat_arg_index]
+
     for node, spec in zip(placeholders, sig.input_specs):
         if spec.kind in (
             InputKind.PARAMETER,
@@ -501,10 +505,9 @@ def _preserve_requires_grad_pass(
                 spec.target
             ].requires_grad
         elif spec.kind == InputKind.USER_INPUT:
-            fake_arg = flat_fake_args[i]
+            fake_arg = user_input_to_arg.get(spec.arg.name)
             if isinstance(fake_arg, torch.Tensor):
                 node.meta["val"].requires_grad = fake_arg.requires_grad
-            i += 1
         elif spec.kind == InputKind.CONSTANT_TENSOR:
             if spec.target is None:
                 raise AssertionError(
@@ -525,6 +528,67 @@ def _preserve_requires_grad_pass(
             continue
         else:
             raise AssertionError(spec.kind)
+
+
+def _remove_extra_duplicate_user_inputs(
+    gm: torch.fx.GraphModule,
+    sig: ExportGraphSignature,
+    flat_fake_args: list[Any],
+) -> None:
+    def compatible_tensor_values(lhs: Any, rhs: Any) -> bool:
+        if not isinstance(lhs, torch.Tensor) or not isinstance(rhs, torch.Tensor):
+            return False
+
+        def compatible_dims(lhs_dims: Any, rhs_dims: Any) -> bool:
+            if len(lhs_dims) != len(rhs_dims):
+                return False
+            for lhs_dim, rhs_dim in zip(lhs_dims, rhs_dims):
+                if isinstance(lhs_dim, int) and isinstance(rhs_dim, int):
+                    if lhs_dim != rhs_dim:
+                        return False
+            return True
+
+        return (
+            lhs.dtype == rhs.dtype
+            and lhs.device == rhs.device
+            and lhs.layout == rhs.layout
+            and compatible_dims(lhs.shape, rhs.shape)
+            and compatible_dims(lhs.stride(), rhs.stride())
+        )
+
+    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    if len(sig.input_specs) != len(placeholders):
+        return
+
+    changed = False
+    user_input_index = 0
+    prior_user_placeholders: list[torch.fx.Node] = []
+    input_specs = []
+    for node, spec in zip(placeholders, sig.input_specs):
+        if spec.kind != InputKind.USER_INPUT:
+            input_specs.append(spec)
+            continue
+
+        if user_input_index >= len(flat_fake_args):
+            for base_node in reversed(prior_user_placeholders):
+                if compatible_tensor_values(
+                    base_node.meta.get("val"), node.meta.get("val")
+                ):
+                    node.replace_all_uses_with(base_node)
+                    gm.graph.erase_node(node)
+                    changed = True
+                    break
+            else:
+                input_specs.append(spec)
+        else:
+            input_specs.append(spec)
+            prior_user_placeholders.append(node)
+        user_input_index += 1
+
+    if changed:
+        sig.input_specs = input_specs
+        gm.graph.lint()
+        gm.recompile()
 
 
 def _remap_constants(
@@ -657,6 +721,36 @@ def _tracked_fake_for_source_in_shape_env(shape_env: Any, source: Source) -> Any
     return None
 
 
+def _module_attr_fqn_from_source(source: Source) -> tuple[str, str] | None:
+    def module_path(module_source: Source) -> list[str] | None:
+        if (
+            isinstance(module_source, LocalSource)
+            and module_source.local_name == "self"
+        ):
+            return []
+        if (
+            isinstance(module_source, DictGetItemSource)
+            and isinstance(module_source.index, str)
+            and isinstance(module_source.base, AttrSource)
+            and module_source.base.member == "_modules"
+        ):
+            parent_path = module_path(module_source.base.base)
+            if parent_path is not None:
+                return [*parent_path, module_source.index]
+        return None
+
+    if (
+        isinstance(source, DictGetItemSource)
+        and isinstance(source.index, str)
+        and isinstance(source.base, AttrSource)
+        and source.base.member in ("_parameters", "_buffers")
+    ):
+        path = module_path(source.base.base)
+        if path is not None:
+            return source.base.member, ".".join((*path, source.index))
+    return None
+
+
 def _unlift_symbolic_placeholders(
     gm: torch.fx.GraphModule,
     graph_signature,
@@ -687,6 +781,23 @@ def _unlift_symbolic_placeholders(
         for name, source in input_name_to_source.items()
         if source is not None
     }
+    module_attr_input_names: set[str] = set()
+
+    def record_module_attr_input(name: str, source: Source) -> bool:
+        module_attr = _module_attr_fqn_from_source(source)
+        if module_attr is None:
+            return False
+        attr_kind, fqn = module_attr
+        if attr_kind == "_parameters":
+            graph_signature.inputs_to_parameters[name] = fqn
+        else:
+            graph_signature.inputs_to_buffers[name] = fqn
+        module_attr_input_names.add(name)
+        return True
+
+    for name, source in input_name_to_source.items():
+        if source is not None:
+            record_module_attr_input(name, source)
 
     def first_non_placeholder_node() -> torch.fx.Node | None:
         # The placeholder boundary mutates as lifted inputs are unlifted.
@@ -723,7 +834,8 @@ def _unlift_symbolic_placeholders(
         placeholders_by_name[node.name] = node
         input_name_to_source[node.name] = source
         source_to_input_name[source] = node.name
-        reintroduced_user_inputs.append(node.name)
+        if not record_module_attr_input(node.name, source):
+            reintroduced_user_inputs.append(node.name)
 
     for source in public_input_sources:
         if source in source_to_input_name:
@@ -787,11 +899,76 @@ def _unlift_symbolic_placeholders(
         gm.graph.erase_node(node)
         removed_placeholders.add(node.name)
 
+    def compatible_tensor_values(lhs: Any, rhs: Any) -> bool:
+        if not isinstance(lhs, torch.Tensor) or not isinstance(rhs, torch.Tensor):
+            return False
+
+        def compatible_dims(lhs_dims: Any, rhs_dims: Any) -> bool:
+            if len(lhs_dims) != len(rhs_dims):
+                return False
+            for lhs_dim, rhs_dim in zip(lhs_dims, rhs_dims):
+                if isinstance(lhs_dim, int) and isinstance(rhs_dim, int):
+                    if lhs_dim != rhs_dim:
+                        return False
+            return True
+
+        return (
+            lhs.dtype == rhs.dtype
+            and lhs.device == rhs.device
+            and lhs.layout == rhs.layout
+            and compatible_dims(lhs.shape, rhs.shape)
+            and compatible_dims(lhs.stride(), rhs.stride())
+        )
+
+    for source in public_input_sources:
+        base_node_name = source_to_input_name.get(source)
+        if base_node_name is None:
+            continue
+        base_node = placeholders_by_name.get(base_node_name)
+        if base_node is None or base_node.users:
+            continue
+        public_value = source_to_public_input_value.get(source)
+        for node in list(gm.graph.find_nodes(op="placeholder")):
+            if (
+                node.name == base_node.name
+                or node.name in removed_placeholders
+                or input_name_to_source.get(node.name) is not None
+                or not node.users
+                or not compatible_tensor_values(public_value, node.meta.get("val"))
+            ):
+                continue
+            node.replace_all_uses_with(base_node)
+            gm.graph.erase_node(node)
+            removed_placeholders.add(node.name)
+            break
+
+    public_input_source_set = set(public_input_sources)
+    preceding_public_placeholders: list[torch.fx.Node] = []
+    for node in list(gm.graph.find_nodes(op="placeholder")):
+        source = input_name_to_source.get(node.name)
+        if source in public_input_source_set:
+            preceding_public_placeholders.append(node)
+            continue
+        if (
+            node.name in removed_placeholders
+            or source is not None
+            or not isinstance(node.meta.get("val"), torch.Tensor)
+        ):
+            continue
+        for base_node in reversed(preceding_public_placeholders):
+            if compatible_tensor_values(
+                base_node.meta.get("val"), node.meta.get("val")
+            ):
+                node.replace_all_uses_with(base_node)
+                gm.graph.erase_node(node)
+                removed_placeholders.add(node.name)
+                break
+
     if removed_placeholders or reintroduced_user_inputs:
         remaining_user_inputs = [
             name
             for name in graph_signature.user_inputs
-            if name not in removed_placeholders
+            if name not in removed_placeholders and name not in module_attr_input_names
         ]
         remaining_user_inputs.extend(reintroduced_user_inputs)
         if public_input_sources:
@@ -873,12 +1050,7 @@ def _produce_aten_artifact(
     # e.g. AOTAutograd in this case.
     _replace_unbacked_bindings(gm)
 
-    total_non_user_inputs = (
-        len(graph_signature.parameters)
-        + len(graph_signature.buffers)
-        + len(graph_signature.input_tokens)
-    )
-    set_missing_meta_vals(gm, flat_fake_args, total_non_user_inputs)
+    set_missing_meta_vals(gm, flat_fake_args, graph_signature)
 
     export_graph_signature: ExportGraphSignature | None
     export_graph_signature = _convert_to_export_graph_signature(
@@ -924,6 +1096,7 @@ def _produce_aten_artifact(
     # Prettify names for placeholder nodes.
     if export_graph_signature is None:
         raise AssertionError("export_graph_signature must not be None")
+    _remove_extra_duplicate_user_inputs(gm, export_graph_signature, flat_fake_args)
     if _prettify_placeholder_names:
         placeholder_naming_pass(
             gm,
@@ -2424,21 +2597,24 @@ def _export_to_aten_ir_make_fx(
     )
 
 
-def set_missing_meta_vals(gm, flat_args, num_params_buffers):
+def set_missing_meta_vals(gm, flat_args, graph_signature):
     # Sets missing metadata to address two problems:
     # 1. aot_export adds symint metadata for placeholders with int values; since
     #    these become specialized, we replace such metadata with the original values.
     # 2. any tensor attributes that are not params / buffers, i.e., are constants
     #    need to have their metadata set before lifting them because it is needed
     #    for computing the exported program's signature.
-    index = 0
+    user_input_to_arg = {}
+    for flat_arg_index, user_input in enumerate(graph_signature.user_inputs):
+        if isinstance(user_input, str) and flat_arg_index < len(flat_args):
+            user_input_to_arg[user_input] = flat_args[flat_arg_index]
+
     for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if index >= num_params_buffers:
-                user_arg = flat_args[index - num_params_buffers]
-                if not isinstance(user_arg, torch.Tensor):
-                    node.meta["val"] = user_arg
-            index += 1
+        if node.op != "placeholder" or node.name not in user_input_to_arg:
+            continue
+        user_arg = user_input_to_arg[node.name]
+        if not isinstance(user_arg, torch.Tensor):
+            node.meta["val"] = user_arg
 
 
 def _find_node(gm: torch.fx.GraphModule, name: str) -> torch.fx.Node:

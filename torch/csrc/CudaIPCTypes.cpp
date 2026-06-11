@@ -23,7 +23,7 @@ struct CudaIPCGlobalEntities {
   // This class is used as a singleton (see cuda_ipc_global_entities)
   // This variable is used to track its lifetime to avoid accessing it
   // after it was destroyed which would lead to segmentation faults
-  // Note that a trvial type is used which doesn't suffer from construction
+  // Note that a trivial type is used which doesn't suffer from construction
   // and destruction order issues
   static bool alive;
 

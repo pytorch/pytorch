@@ -1129,6 +1129,17 @@ def placeholder_naming_pass(
                 is_placeholder=True,
             )
 
+    for user_input_name in user_input_names:
+        if user_input_name and user_input_name not in name_map:
+            _rename_without_collisions(
+                name_map,
+                find_available,
+                used_names,
+                user_input_name,
+                user_input_name,
+                is_placeholder=True,
+            )
+
     # use graph signature input specs to map param/buffer/constant names
     # name effect tokens as token, token_1, ... (these aren't visible to user)
     for spec in export_graph_signature.input_specs:
@@ -1372,8 +1383,7 @@ def _collect_all_valid_cia_ops_for_namespace(
     cia_ops = set()
     for op in op_namespace:
         op_packet = getattr(op_namespace, op)
-        for overload in op_packet.overloads():
-            op_overload = getattr(op_packet, overload)
+        for op_overload in op_packet.op_overloads():
             if _is_preservable_cia_op(op_overload):
                 cia_ops.add(op_overload)
     return cia_ops

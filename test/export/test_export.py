@@ -1251,7 +1251,6 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(output_after[1][0], output_before[1][0]))
         self.assertTrue(torch.allclose(output_after[1][1], output_before[1][1]))
 
-    @testing.expectedFailureStrictV2
     @skipIfCrossRef
     def test_custom_tag_metadata_re_export(self):
         class Foo(torch.nn.Module):
