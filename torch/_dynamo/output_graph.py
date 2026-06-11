@@ -24,7 +24,6 @@ import contextlib
 import copy
 import dataclasses
 import functools
-import heapq
 import inspect
 import itertools
 import logging
@@ -543,11 +542,24 @@ class ExportMetaData:
     ] = dc_field(default_factory=dict)
 
 
-_IN_PLACE_OPERATORS = frozenset({
-    "iadd", "iand", "iconcat", "ifloordiv", "ilshift",
-    "imatmul", "imod", "imul", "ior", "ipow", "irshift",
-    "isub", "itruediv", "ixor",
-})
+_IN_PLACE_OPERATORS = frozenset(
+    {
+        "iadd",
+        "iand",
+        "iconcat",
+        "ifloordiv",
+        "ilshift",
+        "imatmul",
+        "imod",
+        "imul",
+        "ior",
+        "ipow",
+        "irshift",
+        "isub",
+        "itruediv",
+        "ixor",
+    }
+)
 
 
 def _is_safe_to_reorder(node: fx.Node) -> bool:
@@ -567,7 +579,10 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
         name = getattr(node.target, "__name__", "")
         if name.endswith("_"):
             return False
-        if getattr(node.target, "__module__", "") == "_operator" and name in _IN_PLACE_OPERATORS:
+        if (
+            getattr(node.target, "__module__", "") == "_operator"
+            and name in _IN_PLACE_OPERATORS
+        ):
             return False
         if isinstance(node.kwargs.get("out"), fx.Node):
             return False
@@ -582,127 +597,38 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
     return True
 
 
-def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
-    """
-    Reorder graph nodes into a canonical topological order that is deterministic
-    regardless of the order in which nodes were originally traced, and rename
-    them to canonical names.
+def _canonical_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> tuple[Any, ...]:
+    """Canonical heap key for Dynamo output graph nodes.
 
-    This ensures that structurally equivalent graphs (e.g., same model traced with
-    different dict iteration orders across distributed ranks) produce identical node
-    names and ordering, which is required for cross-rank synchronization in the AOT
-    partitioner.
-
-    Uses Kahn's algorithm with a canonical tiebreaker:
     - Placeholders sorted by grapharg source name
     - get_attr nodes sorted by target
     - Computation nodes sorted by (target, canonical indices of inputs)
-
-    Nodes that aren't provably pure act as barriers: they are chained in
-    original order, and pure nodes are confined to their barrier segment.
-
-    Operates in-place on the graph to preserve node object identity (required
-    by GraphRegionTracker and other infrastructure that holds node references).
     """
-    indeg: dict[fx.Node, int] = {
-        node: len(node.all_input_nodes) for node in graph.nodes
-    }
-
-    # Nodes that aren't provably pure act as barriers. We partition the graph
-    # into segments separated by barrier nodes and add synthetic edges:
-    #   prev_barrier -> reorderable_nodes_in_segment -> next_barrier
-    extra_users: dict[fx.Node, list[fx.Node]] = collections.defaultdict(list)
-    prev_barrier: fx.Node | None = None
-    segment_reorderable: list[fx.Node] = []
-    for node in graph.nodes:
-        if node.op in ("placeholder", "get_attr", "output"):
-            continue
-        is_barrier = not _is_safe_to_reorder(node)
-        if is_barrier:
-            for reorderable in segment_reorderable:
-                extra_users[reorderable].append(node)
-                indeg[node] += 1
-            segment_reorderable = []
-        if prev_barrier is not None:
-            extra_users[prev_barrier].append(node)
-            indeg[node] += 1
-        if is_barrier:
-            prev_barrier = node
+    if node.op == "placeholder":
+        grapharg = node.meta.get("grapharg")
+        if grapharg is not None and grapharg.source is not None:
+            source_name = grapharg.source.name
         else:
-            segment_reorderable.append(node)
-
-    canonical_idx: dict[fx.Node, int] = {}
-
-    def _canonical_key(node: fx.Node) -> tuple[Any, ...]:
-        if node.op == "placeholder":
-            grapharg = node.meta.get("grapharg")
-            if grapharg is not None and grapharg.source is not None:
-                source_name = grapharg.source.name
-            else:
-                source_name = ""
-            return (0, source_name)
-        elif node.op == "get_attr":
-            return (1, str(node.target))
-        elif node.op == "output":
-            return (3,)
-        else:
-            input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
-            return (2, str(node.target), input_indices)
-
-    # Counter prevents heapq from comparing fx.Node objects (no __lt__).
-    counter = 0
-    ready: list[tuple[tuple[Any, ...], int, fx.Node]] = []
-    for node in graph.nodes:
-        if indeg[node] == 0:
-            heapq.heappush(ready, (_canonical_key(node), counter, node))
-            counter += 1
-
-    canonical_order: list[fx.Node] = []
-
-    while ready:
-        _, _, cur = heapq.heappop(ready)
-        canonical_order.append(cur)
-        canonical_idx[cur] = len(canonical_idx)
-
-        for user in itertools.chain(cur.users, extra_users.get(cur, ())):
-            indeg[user] -= 1
-            if indeg[user] == 0:
-                heapq.heappush(ready, (_canonical_key(user), counter, user))
-                counter += 1
-
-    if len(canonical_order) != len(list(graph.nodes)):
-        remaining = [n for n in indeg if indeg[n] != 0]
-        raise RuntimeError(
-            f"Canonicalization failed: processed {len(canonical_order)} of "
-            f"{len(list(graph.nodes))} nodes. Remaining: {remaining}"
-        )
-
-    # Reorder nodes in-place to preserve node object identity.
-    cursor = graph._root  # type: ignore[attr-defined]
-    for node in canonical_order:
-        cursor.append(node)
-        cursor = node
-
-    _rename_nodes_to_canonical(graph)
-
-    return graph
+            source_name = ""
+        return (0, source_name)
+    elif node.op == "get_attr":
+        return (1, str(node.target))
+    elif node.op == "output":
+        return (3,)
+    else:
+        input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
+        return (2, str(node.target), input_indices)
 
 
-def _rename_nodes_to_canonical(graph: fx.Graph) -> None:
-    """Rename all nodes in the graph to canonical names based on their target.
+def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
+    """Canonicalize a Dynamo output graph's node order and names.
 
-    Uses the same naming scheme as FX Graph.create_node (auto-generated names
-    from the target string). After renaming, replaces the graph's namespace so
-    future node creation stays consistent.
+    Delegates to ``torch.fx.passes.canonicalize.canonicalize_graph`` with
+    Dynamo-specific key generation and barrier detection.
     """
-    from torch.fx.graph import _Namespace
+    from torch.fx.passes.canonicalize import canonicalize_graph
 
-    ns = _Namespace()
-    for node in graph.nodes:
-        candidate = graph._target_to_str(node.target)
-        new_name = ns.create_name(candidate, node)
-        node.name = new_name
-    graph._graph_namespace = ns
+    return canonicalize_graph(graph, _canonical_key, _is_safe_to_reorder)
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
