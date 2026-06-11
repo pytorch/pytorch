@@ -1039,6 +1039,7 @@ def softmax_single_dim_strategy(
     ],
     schema_info=RuntimeSchemaInfo(2),
     allow_uneven_sharding=True,
+    allow_unbacked_sharding=False,
 )
 def softmax_backward_single_dim_strategy(
     op: torch._ops.OpOverload,
