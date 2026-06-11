@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import dis
+import linecache
 import logging
 import re
 import sys

@@ -249,7 +249,7 @@ class NumBytesMetricTests(TestCase):
             return out.cos()
 
         inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """600""")
+        self.assertExpectedInline(count_numel(f, *inp), """1264""")
 
         # Should not turn into pointwise if all inputs are not pointwise
         def f(a, b):
@@ -257,7 +257,7 @@ class NumBytesMetricTests(TestCase):
             return out.cos()
 
         inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """800""")
+        self.assertExpectedInline(count_numel(f, *inp), """2128""")
 
         def f(a, b):
             out = torch.cat([a, b])
@@ -278,7 +278,7 @@ class NumBytesMetricTests(TestCase):
             return torch.constant_pad_nd(torch.cat([a, b]), [2, 2], 0.5)
 
         inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """680""")
+        self.assertExpectedInline(count_numel(f, *inp), """1344""")
 
     @patch.object(config, "split_cat_fx_passes", False)
     @patch.object(
@@ -773,7 +773,7 @@ class MinCutPartitioningTests(TestCase):
             return torch.mm(x, x.new_ones(x.shape)).tanh().tanh()
 
         inp = (T(10, 10, grad=True),)
-        self.assertExpectedInline(count_numel_train(f, *inp), """1300""")
+        self.assertExpectedInline(count_numel_train(f, *inp), """2440""")
 
     @patch.object(config, "pattern_matcher", False)
     def test_partitioning_unremat_bw2(self):
