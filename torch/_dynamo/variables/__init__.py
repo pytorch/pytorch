@@ -110,7 +110,6 @@ from .iter import (
     ChainVariable,
     CountIteratorVariable,
     FilterVariable,
-    IsliceVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
@@ -288,6 +287,5 @@ __all__ = [
     "WithEnterFunctionVariable",
     "WithExitFunctionVariable",
     "XPUDeviceVariable",
-    "IsliceVariable",
     "ZipLongestVariable",
 ]

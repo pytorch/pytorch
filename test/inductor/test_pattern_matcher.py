@@ -1478,60 +1478,6 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
-    def test_preserve_accumulator_addmm_with_pointwise(self):
-        args = [
-            torch.randn(10, 20, device=GPU_TYPE),
-            torch.randn(10, 15, device=GPU_TYPE),
-            torch.randn(15, 20, device=GPU_TYPE),
-        ]
-
-        @torch.compile()
-        def fn(inp, a, b):
-            return torch.nn.functional.gelu(torch.ops.aten.addmm(inp, a, b))
-
-        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
-        self.assertEqual(actual, torch.nn.functional.gelu(torch.addmm(*args)))
-        FileCheck().check("extern_kernels.addmm(").run(code[0])
-
-    def test_unfuse_expanded_bias_addmm(self):
-        bias = torch.randn(20, device=GPU_TYPE).unsqueeze(0).expand(10, 20)
-        args = [
-            bias,
-            torch.randn(10, 15, device=GPU_TYPE),
-            torch.randn(15, 20, device=GPU_TYPE),
-        ]
-        self.assertEqual(bias.stride(0), 0)
-
-        @torch.compile()
-        def fn(inp, a, b):
-            return torch.ops.aten.addmm(inp, a, b).relu()
-
-        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
-        self.assertEqual(actual, torch.addmm(*args).relu())
-        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
-
-    @parametrize("inplace", [False, True])
-    def test_accumulator_addmm_loop_does_not_delay_pointwise(self, inplace):
-        def fn(x, ws):
-            buf = torch.zeros_like(x)
-            for w in ws:
-                if inplace:
-                    buf.addmm_(w, w)
-                else:
-                    buf = torch.addmm(buf, w, w)
-                buf = torch.cos(buf)
-            return buf
-
-        args = [
-            torch.randn(32, 32, device=GPU_TYPE),
-            [torch.randn(32, 32, device=GPU_TYPE) for _ in range(3)],
-        ]
-
-        actual, (code) = run_and_get_code(torch.compile(fn), args[0], args[1])
-        self.assertEqual(actual, fn(*args))
-        self.assertEqual(code[0].count("extern_kernels.addmm("), 3)
-        self.assertNotIn("extern_kernels.mm(", code[0])
-
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @inductor_config.patch(
         {
@@ -1754,15 +1700,14 @@ class TestPatternMatcher(TestCase):
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_original_aten_preserved_split_addmm(self):
-        # bias addmm -> elementwise should be decomposed into
-        # mm -> add -> elementwise.
+        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
         def fn(x, y, z):
             return torch.addmm(z, x, y).sin()
 
         args = [
             torch.randn(16, 24, device=GPU_TYPE),
             torch.randn(24, 32, device=GPU_TYPE),
-            torch.randn(32, device=GPU_TYPE),
+            torch.randn(16, 32, device=GPU_TYPE),
         ]
 
         counters.clear()

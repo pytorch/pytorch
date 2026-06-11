@@ -993,7 +993,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   ErrorType getError() override;
 
   bool supportsShrinking() const override {
+#ifdef NCCL_HAS_COMM_SHRINK
     return true;
+#else
+    return false;
+#endif
   }
 
   // Backend-style shrink override that returns a Backend instance.
@@ -1088,7 +1092,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
 
-  // Ensure thaht if record is True, the work obj will be enqueued via
+  // Ensure that if record is True, the work obj will be enqueued via
   // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,

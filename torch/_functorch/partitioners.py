@@ -1508,6 +1508,19 @@ def _size_of(node: fx.Node) -> int:
             return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
+        elif isinstance(val, (torch.ScriptObject, FakeScriptObject)):
+            # A (Fake)ScriptObject may hold tensors internally, so we cannot
+            # soundly compute its size here. Only treat it as zero size when the
+            # user has explicitly opted in via this escape hatch.
+            if config.unsafe_treat_script_objects_as_zero_size:
+                return 0
+            raise RuntimeError(
+                f"Cannot compute the size of {type(val)} on node {node}. A "
+                "ScriptObject may hold tensors internally and the partitioner "
+                "has no general way to measure its memory footprint. Set "
+                "torch._functorch.config.unsafe_treat_script_objects_as_zero_size"
+                " = True to assume such objects are zero size (unsound)."
+            )
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
     if node.op == "get_attr" or (
@@ -1539,8 +1552,7 @@ def pointwise_ops() -> list[torch._ops.OpOverloadPacket]:
         if not isinstance(opoverloadpacket, torch._ops.OpOverloadPacket):
             continue
 
-        for overload in opoverloadpacket.overloads():
-            op_overload = getattr(opoverloadpacket, overload)
+        for op_overload in opoverloadpacket.op_overloads():
             if torch.Tag.pointwise in op_overload.tags:
                 # currently aot autograd uses packet not overload
                 ops.append(opoverloadpacket)
@@ -2905,6 +2917,7 @@ def get_default_op_list() -> OpTypes:
     default_recomputable_ops += [
         prims.div,
         prims.convert_element_type,
+        prims.prepare_softmax_online,
         aten.clone,
         aten._to_copy,
         aten.full_like,
