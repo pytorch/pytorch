@@ -35,6 +35,7 @@ from torchgen.model import (
     NativeFunction,
     NativeFunctionsGroup,
     SchemaKind,
+    should_generate_inplace_meta_kernel,
     TensorOptionsArguments,
 )
 from torchgen.utils import mapMaybe, Target
@@ -405,13 +406,7 @@ class RegisterDispatchKey:
             if not self.backend_index.has_kernel(f):
                 if (
                     self.backend_index.dispatch_key == DispatchKey.Meta
-                    and f.func.kind() is SchemaKind.inplace
-                    and
-                    # Defer to composites for meta implementation
-                    not f.has_composite_kernel
-                    and
-                    # Inplace list operations are not supported
-                    len(f.func.returns) == 1
+                    and should_generate_inplace_meta_kernel(f, self.backend_index)
                 ):
                     inplace_meta = True
                 elif (

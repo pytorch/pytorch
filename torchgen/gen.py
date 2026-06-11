@@ -70,6 +70,7 @@ from torchgen.model import (
     OptionalType,
     SchemaKind,
     SelfArgument,
+    should_generate_inplace_meta_kernel,
     STRUCTURED_DISPATCH_KEYS,
     TensorOptionsArguments,
     Type,
@@ -2295,6 +2296,20 @@ def gen_source_files(
                         DispatchKey.CompositeExplicitAutogradNonFunctional,
                     ):
                         is_registered = True
+                    # Unstructured inplace ops get auto-generated meta kernels
+                    # (see gen_unstructured in register_dispatch_key.py), so
+                    # their dispatch headers need to be included too.
+                    elif dispatch_key == DispatchKey.Meta:
+                        fns = (
+                            g.functions()
+                            if isinstance(g, NativeFunctionsGroup)
+                            else [g]
+                        )
+                        if any(
+                            should_generate_inplace_meta_kernel(f, backend_index)
+                            for f in fns
+                        ):
+                            is_registered = True
                     if not is_registered:
                         continue
 

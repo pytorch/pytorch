@@ -2862,6 +2862,21 @@ def gets_generated_out_inplace_wrapper(
     )
 
 
+def should_generate_inplace_meta_kernel(
+    f: NativeFunction, backend_index: BackendIndex
+) -> bool:
+    """Whether an unstructured inplace op should get an auto-generated meta kernel.
+
+    See gen_unstructured() in torchgen/dest/register_dispatch_key.py.
+    """
+    return (
+        f.func.kind() is SchemaKind.inplace
+        and not backend_index.has_kernel(f)
+        and not f.has_composite_kernel
+        and len(f.func.returns) == 1
+    )
+
+
 # NativeFunction objects that are views (f.is_view_op returns True)
 # are added into a `NativeFunctionsViewGroup`, which we can use to
 # easily access the generated (optional) view_copy NativeFunction.
