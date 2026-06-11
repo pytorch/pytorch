@@ -57,8 +57,11 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   py::dict frame_state;
   // Actions to apply to all frames with this code object
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  // Opaque guard receipt used by Dynamo guard shadow diagnostics.
+  void* last_success_receipt{nullptr};
 
   ExtraState(PyCodeObject* orig_code_arg);
+  ~ExtraState();
   CacheEntry* get_first_entry();
   void move_to_front(CacheEntry* cache_entry);
   void move_to_back(CacheEntry* cache_entry);

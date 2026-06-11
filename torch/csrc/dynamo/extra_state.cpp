@@ -22,7 +22,13 @@ CacheEntry* ExtraState::get_first_entry() {
 }
 
 ExtraState::ExtraState(PyCodeObject* orig_code_arg)
-    : orig_code(orig_code_arg) {}
+    : orig_code(orig_code_arg),
+      last_success_receipt(
+          torch::dynamo::create_guard_last_success_receipt()) {}
+
+ExtraState::~ExtraState() {
+  torch::dynamo::destroy_guard_last_success_receipt(last_success_receipt);
+}
 
 void ExtraState::move_to_front(CacheEntry* cache_entry) {
   CHECK(cache_entry->_owner == this);
@@ -58,6 +64,7 @@ void ExtraState::invalidate(
   CHECK(cache_entry->_owner == this);
   CHECK(!this->cache_entry_list.empty());
   CHECK(cache_entry == &*cache_entry->_owner_loc);
+  torch::dynamo::reset_guard_last_success_receipt(last_success_receipt);
   cache_entry->invalidate(std::move(deleted_guard_manager));
   // Move the cache entry to the end of the list because these will always
   // return False.
@@ -138,22 +145,56 @@ void lookup(
     PyObject** maybe_cached_code,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
+  const bool collect_stats = torch::dynamo::guard_lookup_stats_enabled();
+  const bool unsafe_mock_guard_bypass =
+      torch::dynamo::unsafe_mock_guard_bypass_enabled() &&
+      !is_skip_guard_eval_unsafe;
+  const uint64_t lookup_start_ns =
+      collect_stats ? torch::dynamo::guard_lookup_time_ns() : 0;
+  uint64_t backend_match_ns = 0;
+  uint64_t slow_guard_ns = 0;
+  uint64_t move_to_front_ns = 0;
   size_t index = 0;
   CacheEntry* found = nullptr;
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
 
+    const uint64_t backend_match_start_ns =
+        collect_stats ? torch::dynamo::guard_lookup_time_ns() : 0;
     bool valid =
         backend == Py_False || backend_match(cache_entry.backend, backend);
+    if (collect_stats) {
+      backend_match_ns +=
+          torch::dynamo::guard_lookup_time_ns() - backend_match_start_ns;
+    }
 
     if (valid) {
       try {
-        if (is_skip_guard_eval_unsafe) {
-          valid = torch::dynamo::run_root_guard_manager(
-              cache_entry.diff_guard_root_mgr, f_locals);
+        if (unsafe_mock_guard_bypass) {
+          torch::dynamo::record_unsafe_mock_guard_bypass_stats(index);
+          valid = true;
         } else {
-          valid = torch::dynamo::run_root_guard_manager(
-              cache_entry.root_mgr, f_locals);
+          auto run_slow_guard = [&](void* root_mgr) {
+            const uint64_t slow_guard_start_ns =
+                collect_stats ? torch::dynamo::guard_lookup_time_ns() : 0;
+            const bool slow_guard_result =
+                torch::dynamo::run_root_guard_manager_with_last_success_receipt(
+                    extra_state->last_success_receipt,
+                    &cache_entry,
+                    root_mgr,
+                    f_locals,
+                    is_skip_guard_eval_unsafe);
+            if (collect_stats) {
+              slow_guard_ns +=
+                  torch::dynamo::guard_lookup_time_ns() - slow_guard_start_ns;
+            }
+            return slow_guard_result;
+          };
+          if (is_skip_guard_eval_unsafe) {
+            valid = run_slow_guard(cache_entry.diff_guard_root_mgr);
+          } else {
+            valid = run_slow_guard(cache_entry.root_mgr);
+          }
         }
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
@@ -180,10 +221,32 @@ void lookup(
     ++index;
   }
   if (found) {
+    const uint64_t move_to_front_start_ns =
+        collect_stats ? torch::dynamo::guard_lookup_time_ns() : 0;
     extra_state->move_to_front(found);
+    if (collect_stats) {
+      move_to_front_ns =
+          torch::dynamo::guard_lookup_time_ns() - move_to_front_start_ns;
+      torch::dynamo::record_guard_lookup_stats(
+          torch::dynamo::guard_lookup_time_ns() - lookup_start_ns,
+          backend_match_ns,
+          slow_guard_ns,
+          move_to_front_ns,
+          extra_state->cache_entry_list.size(),
+          index);
+    }
     *maybe_cached_code = found->code.ptr();
     *trace_annotation = found->trace_annotation.c_str();
     return;
+  }
+  if (collect_stats) {
+    torch::dynamo::record_guard_lookup_stats(
+        torch::dynamo::guard_lookup_time_ns() - lookup_start_ns,
+        backend_match_ns,
+        slow_guard_ns,
+        move_to_front_ns,
+        extra_state->cache_entry_list.size(),
+        extra_state->cache_entry_list.size());
   }
   *maybe_cached_code = py::none().ptr();
 }
@@ -192,6 +255,8 @@ CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guarded_code,
     PyObject* backend) {
+  torch::dynamo::reset_guard_last_success_receipt(
+      extra_state->last_success_receipt);
   extra_state->cache_entry_list.emplace_front(guarded_code, backend);
   auto new_iter = extra_state->cache_entry_list.begin();
   new_iter->_owner = extra_state;
