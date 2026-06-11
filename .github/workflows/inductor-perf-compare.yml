@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 name: inductor-A100-perf-compare
 
 on:
@@ -64,7 +65,6 @@ jobs:
       build-environment: ${{ needs.build.outputs.build-environment }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.build.outputs.test-matrix-osdc }}
       # disable monitor in perf tests for more investigation
       disable-monitor: false
       monitor-log-interval: 15

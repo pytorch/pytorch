@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: test-scripts-and-ci-tools
 
 on:

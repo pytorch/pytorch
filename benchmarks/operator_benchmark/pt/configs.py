@@ -26,7 +26,7 @@ conv_1d_configs_short = op_bench.config_list(
         [256, 256, 3, 2, 4, 64],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
     },
     tags=["short"],
 )
@@ -38,7 +38,7 @@ conv_1d_configs_long = op_bench.cross_product_configs(
     stride=[1, 2],
     N=[8],
     L=[128],
-    device=["cpu", "cuda"],
+    device=["cpu", "cuda", "xpu"],
     tags=["long"],
 )
 
@@ -48,7 +48,7 @@ convtranspose_1d_configs_short = op_bench.config_list(
         [2016, 1026, 1024, 256, 1, 224],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
     },
     tags=["short"],
 )
@@ -70,7 +70,7 @@ conv_2d_configs_short = op_bench.config_list(
         [256, 256, 3, 1, 1, 16, 16, 1, 0],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
     },
     tags=["short"],
 )
@@ -85,7 +85,7 @@ conv_2d_configs_long = op_bench.cross_product_configs(
     W=[32],
     G=[1],
     pad=[0],
-    device=["cpu", "cuda"],
+    device=["cpu", "cuda", "xpu"],
     tags=["long"],
 )
 
@@ -105,7 +105,7 @@ conv_2d_pw_configs_short = op_bench.config_list(
         [256, 256, 1, 1, 16, 16, 1, 0],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
     },
     tags=["short"],
 )
@@ -119,7 +119,7 @@ conv_2d_pw_configs_long = op_bench.cross_product_configs(
     W=[32],
     G=[1],
     pad=[0],
-    device=["cpu", "cuda"],
+    device=["cpu", "cuda", "xpu"],
     tags=["long"],
 )
 
@@ -130,7 +130,7 @@ conv_3d_configs_short = op_bench.config_list(
         [64, 64, 3, 1, 8, 4, 16, 16],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
         "dtype": [torch.float32],
     },
     tags=["short"],
@@ -144,7 +144,7 @@ conv_3d_configs_long = op_bench.cross_product_configs(
     D=[128],
     H=[128],
     W=[128],
-    device=["cpu", "cuda"],
+    device=["cpu", "cuda", "xpu"],
     dtype=[torch.float32, torch.float16, torch.bfloat16],
     tags=["long"],
 )
@@ -157,7 +157,7 @@ linear_configs_short = op_bench.config_list(
         [16, 512, 256],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
     },
     tags=["short"],
 )
