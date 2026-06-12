@@ -459,6 +459,74 @@ class MixOrderReductionTest(TestBase):
             # TMA descriptors point at the right tile each iteration.
             FileCheck().check("xoffset += XBLOCK").run(bwd_wrapper)
 
+    @unittest.skipUnless(
+        has_triton_tma_device(), "Test requires Triton TMA device support"
+    )
+    @parametrize("allow_multi_stages", (False, True))
+    @parametrize("shape", ((32768, 256), (32768 + 1023, 768)))
+    @inductor_config.patch(
+        {
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+            # Pin the split size so each program runs several loop iterations
+            # (iterations = RSPLIT_SIZE // XBLOCK) regardless of the input size
+            # and SM count. This is what lets a small input surface the
+            # stale-xoffset bug that test_rms_norm_bwd_tma reproduces at 1M rows.
+            "triton.mix_order_reduction_split_size": 64,
+        }
+    )
+    def test_rms_norm_bwd_tma_small(self, allow_multi_stages, shape):
+        """
+        Small, CI-friendly variant of test_rms_norm_bwd_tma (regression test for
+        https://github.com/pytorch/pytorch/issues/186241).
+
+        With the split size pinned, every program advances its TMA descriptor
+        offset across multiple loop iterations, so a stale xoffset still
+        produces wrong results at these sizes. The non-divisible-M shape also
+        exercises the masked tail with TMA descriptors.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, w, eps):
+            orig_dtype = x.dtype
+            x = x.float()
+            rsqrt = torch.rsqrt((x * x).sum(dim=-1) / x.shape[-1] + eps)
+            return (x * rsqrt[:, None] * w).to(dtype=orig_dtype)
+
+        def fwd_bwd(compiled_f):
+            x.grad = None
+            w.grad = None
+            out = compiled_f(x, w, eps)
+            out.backward(dy)
+            return x.grad, w.grad
+
+        torch.manual_seed(1337)
+        M, N = shape
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        dy = torch.randn_like(x)
+        eps = 1e-5
+
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": False,
+                "triton.mix_order_reduction_allow_multi_stages": allow_multi_stages,
+            },
+        )
+
+        ref = fwd_bwd(f)
+        act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+        if inductor_config.triton.mix_order_reduction:
+            FileCheck().check("xoffset += XBLOCK").run(bwd_wrapper)
+
     @parametrize(
         "wbdtype",
         [
@@ -1380,6 +1448,28 @@ class MixOrderReductionHeuristicTest(TestBase):
         for tma in (False, True):
             stages = self._gen_num_stages(tma=tma, allow_multi_stages=False)
             self.assertEqual(stages, {1}, f"tma={tma}: expected {{1}}, got {stages}")
+
+    def test_tma_caps_num_stages_across_shapes(self):
+        """
+        The NUM_STAGES cap with TMA must hold for every (rsplit_size, rnumel)
+        combination the heuristic can produce, not just the shape from the
+        original issue: the underlying failure (triton-lang/triton#10474) is in
+        Triton's software pipeliner for in-loop tensor descriptors, independent
+        of the tile shape.
+        """
+        for rsplit_size in (16, 64, 128, 256):
+            for rnumel in (256, 1024, 8192, 16384):
+                stages = self._gen_num_stages(
+                    tma=True,
+                    allow_multi_stages=True,
+                    rsplit_size=rsplit_size,
+                    rnumel=rnumel,
+                )
+                self.assertTrue(
+                    all(s <= 2 for s in stages),
+                    f"rsplit_size={rsplit_size}, rnumel={rnumel}: "
+                    f"NUM_STAGES must be capped at 2 with TMA, got {stages}",
+                )
 
 
 @inductor_config.patch(
