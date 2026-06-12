@@ -2571,46 +2571,6 @@ class TestTensorCreation(TestCase):
         d = torch.arange(-4.0, 4.0, 0.01, dtype=torch.float32, device=device)
         self.assertEqual(d.shape[0], 800)
 
-    def test_arange_int64_fractional(self, device):
-        self.assertEqual(
-            torch.arange(0, 0.5, 1, dtype=torch.int64, device=device),
-            torch.tensor([0], dtype=torch.int64, device=device))
-        self.assertEqual(
-            torch.arange(0, 1.5, 1, dtype=torch.int64, device=device),
-            torch.tensor([0, 1], dtype=torch.int64, device=device))
-
-        for end in [0.5, 1.5, 2.7, 3.0]:
-            i64 = torch.arange(0, end, 1, dtype=torch.int64, device=device)
-            i32 = torch.arange(0, end, 1, dtype=torch.int32, device=device)
-            self.assertEqual(i64.numel(), i32.numel())
-
-        self.assertEqual(
-            torch.arange(0, 5, 2, dtype=torch.int64, device=device),
-            torch.tensor([0, 2, 4], dtype=torch.int64, device=device))
-
-        self.assertEqual(
-            torch.arange(0, 5.0, 1, dtype=torch.int64, device=device),
-            torch.tensor([0, 1, 2, 3, 4], dtype=torch.int64, device=device))
-
-        self.assertEqual(
-            torch.arange(0, 64, 0.5, dtype=torch.int64, device=device).numel(), 128)
-        self.assertEqual(
-            torch.arange(0.5, 5, 1, dtype=torch.int64, device=device).numel(),
-            torch.arange(0.5, 5, 1, dtype=torch.int32, device=device).numel())
-        self.assertEqual(
-            torch.arange(5, 0, -0.5, dtype=torch.int64, device=device).numel(),
-            torch.arange(5, 0, -0.5, dtype=torch.int32, device=device).numel())
-
-    def test_arange_int64_fractional_compile(self, device):
-        # Validates size computation only under torch.compile (inductor).
-        @torch.compile(fullgraph=True, backend="inductor")
-        def f(start, end, step, device):
-            return torch.arange(start, end, step, dtype=torch.int64, device=device)
-
-        self.assertEqual(f(0, 0.5, 1, device).numel(), 1)
-        self.assertEqual(f(0, 1.5, 1, device).numel(), 2)
-        self.assertEqual(f(0, 64, 0.5, device).numel(), 128)
-
     # TODO: this test should be updated
     @onlyCPU
     def test_arange_inference(self, device):

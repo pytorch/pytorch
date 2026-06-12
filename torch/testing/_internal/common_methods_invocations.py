@@ -854,6 +854,10 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(1, args=(3, 1))
     if dtype in (torch.int32, torch.int64):
         yield SampleInput(0, args=(64, 0.5), kwargs={"dtype": dtype, "device": device})
+        yield SampleInput(0, args=(0.5, 1), kwargs={"dtype": dtype, "device": device})
+        yield SampleInput(0, args=(1.5, 1), kwargs={"dtype": dtype, "device": device})
+        yield SampleInput(0.5, args=(5, 1), kwargs={"dtype": dtype, "device": device})
+        yield SampleInput(5, args=(0, -0.5), kwargs={"dtype": dtype, "device": device})
 
 def sample_inputs_randn(op, device, dtype, requires_grad, **kwargs):
     shapes = (
