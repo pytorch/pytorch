@@ -21,12 +21,9 @@
 #include <type_traits>
 #include <utility>
 
-namespace c10 {
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
 
-DispatchKey computeDispatchKey(
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device);
+namespace c10 {
 
 inline ScalarType dtype_or_default(std::optional<ScalarType> dtype) {
   return dtype.value_or(get_default_dtype_as_scalartype());
@@ -785,3 +782,5 @@ inline bool backend_supports_empty_operator(const TensorOptions& options) {
 } // namespace detail
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

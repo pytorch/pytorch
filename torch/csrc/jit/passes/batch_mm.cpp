@@ -65,7 +65,7 @@ c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
 
 // Note [Overlapping trees]
 // Additionally it wouldn't be too hard to add support for partially overlapping
-// trees. Right now the it's forbidden in the algorithm (only a single tree will
+// trees. Right now it's forbidden in the algorithm (only a single tree will
 // be allowed), so theoretically we might miss some optimization options,
 // especially that the rejected tree could be much larger. I didn't implement
 // that because it's not necessary for the simple RNN cases I saw, so I decided
@@ -110,7 +110,7 @@ static bool shape_is_fast_for_reduce(
   return m < 512 || ((l < 256 && r < 256) || (l > 256 && r > 256));
 }
 
-RegisterOperators mm_tree_reduction_reg({Operator(
+static RegisterOperators mm_tree_reduction_reg({Operator(
     "prim::MMTreeReduce(...) -> Tensor",
     [](Stack& stack) {
       auto num_inputs = pop(stack).toInt();
@@ -319,11 +319,11 @@ static void BatchMMTreeReduce(Block* block, AliasDb& alias_db) {
 }
 
 static bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
-  // Cutoff chosed by benchmarking on a TITAN V
+  // Cutoff chose by benchmarking on a TITAN V
   return other_side_input.numel() <= 1024 * 2048;
 }
 
-RegisterOperators mm_batch_side_reg({Operator(
+static RegisterOperators mm_batch_side_reg({Operator(
     prim::MMBatchSide,
     [](const Node* node) -> Operation {
       size_t num_other_side_inputs = node->inputs().size() - 1;

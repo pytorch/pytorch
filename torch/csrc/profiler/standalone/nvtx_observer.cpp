@@ -20,8 +20,12 @@ struct NVTXThreadLocalState : ProfilerStateBase {
     return ActiveProfilerType::NVTX;
   }
 
-  void reportMemoryUsage(void*, int64_t, size_t, size_t, c10::Device) override {
-  }
+  void reportMemoryUsage(
+      void* /*ptr*/,
+      int64_t /*alloc_size*/,
+      size_t /*total_allocated*/,
+      size_t /*total_reserved*/,
+      c10::Device /*device*/) override {}
 
   static NVTXThreadLocalState* getTLS() {
     auto tls = ProfilerStateBase::get(/*global=*/false);
@@ -124,7 +128,8 @@ static void updateOutputTensorTracker(const at::RecordFunction& fn) {
 }
 
 template <bool report_input_shapes>
-std::unique_ptr<at::ObserverContext> enterNVTX(const at::RecordFunction& fn) {
+static std::unique_ptr<at::ObserverContext> enterNVTX(
+    const at::RecordFunction& fn) {
   if (NVTXThreadLocalState::getTLS() != nullptr) {
     auto input_op_ids = getInputTensorOpIds(fn);
     torch::profiler::impl::cudaStubs()->rangePush(

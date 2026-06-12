@@ -11,7 +11,7 @@
 
 #if !AT_ONEDNN_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor onednn_relu(const Tensor& input) {
   TORCH_CHECK(false, "onednn_relu: ATen not compiled with ONEDNN support");
@@ -25,7 +25,7 @@ Tensor onednn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
   TORCH_CHECK(false, "onednn_relu_backward: ATen not compiled with ONEDNN support");
 }
 
-}}
+}
 
 #else // AT_ONEDNN_ENABLED
 

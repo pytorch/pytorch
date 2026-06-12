@@ -30,21 +30,10 @@ _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY = [
     aten.less.Scalar,
     aten.not_equal.Tensor,
     aten.not_equal.Scalar,
-    aten.cat.names,
-    aten.sum.dim_DimnameList,
-    aten.mean.names_dim,
-    aten.prod.dim_Dimname,
-    aten.all.dimname,
-    aten.norm.names_ScalarOpt_dim,
-    aten.norm.names_ScalarOpt_dim_dtype,
     aten.var.default,
     aten.var.dim,
-    aten.var.names_dim,
-    aten.var.correction_names,
     aten.std.default,
     aten.std.dim,
-    aten.std.names_dim,
-    aten.std.correction_names,
     aten.absolute.default,
     aten.arccos.default,
     aten.arccosh.default,
@@ -58,9 +47,7 @@ _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY = [
     aten.negative.default,
     aten.square.default,
     aten.size.int,
-    aten.size.Dimname,
     aten.stride.int,
-    aten.stride.Dimname,
     aten.repeat_interleave.self_Tensor,
     aten.repeat_interleave.self_int,
     aten.sym_size.int,
@@ -73,9 +60,7 @@ _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY = [
     aten.conv2d.padding,
     aten.mish_backward.default,
     aten.silu_backward.default,
-    aten.index_add.dimname,
     aten.pad_sequence.default,
-    aten.index_copy.dimname,
     aten.upsample_nearest1d.vec,
     aten.upsample_nearest2d.vec,
     aten.upsample_nearest3d.vec,
@@ -103,35 +88,21 @@ _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY = [
     aten.__or__.Scalar,
     aten.__xor__.Tensor,
     aten.__xor__.Scalar,
-    aten.scatter.dimname_src,
-    aten.scatter.dimname_value,
-    aten.scatter_add.dimname,
     aten.is_complex.default,
-    aten.logsumexp.names,
     aten.where.ScalarOther,
     aten.where.ScalarSelf,
     aten.where.Scalar,
     aten.where.default,
     aten.item.default,
-    aten.any.dimname,
     aten.std_mean.default,
     aten.std_mean.dim,
-    aten.std_mean.names_dim,
-    aten.std_mean.correction_names,
     aten.var_mean.default,
     aten.var_mean.dim,
-    aten.var_mean.names_dim,
-    aten.var_mean.correction_names,
     aten.broadcast_tensors.default,
     aten.stft.default,
     aten.stft.center,
     aten.istft.default,
-    aten.index_fill.Dimname_Scalar,
-    aten.index_fill.Dimname_Tensor,
-    aten.index_select.dimname,
     aten.diag.default,
-    aten.cumsum.dimname,
-    aten.cumprod.dimname,
     aten.meshgrid.default,
     aten.meshgrid.indexing,
     aten.fft_fft.default,
@@ -163,22 +134,10 @@ _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY = [
     aten.pairwise_distance.default,
     aten.pdist.default,
     aten.special_ndtr.default,
-    aten.cummax.dimname,
-    aten.cummin.dimname,
-    aten.logcumsumexp.dimname,
     aten.max.other,
-    aten.max.names_dim,
     aten.min.other,
-    aten.min.names_dim,
     aten.linalg_eigvals.default,
-    aten.median.names_dim,
-    aten.nanmedian.names_dim,
-    aten.mode.dimname,
-    aten.gather.dimname,
-    aten.sort.dimname,
-    aten.sort.dimname_stable,
     aten.argsort.default,
-    aten.argsort.dimname,
     aten.rrelu.default,
     aten.conv_transpose1d.default,
     aten.conv_transpose2d.input,
@@ -196,7 +155,12 @@ _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY = [
 
 
 def make_test_cls_with_mocked_export(
-    cls, cls_prefix, fn_suffix, mocked_export_fn, xfail_prop=None
+    cls,
+    cls_prefix,
+    fn_suffix,
+    mocked_export_fn,
+    xfail_prop=None,
+    test_only_if_no_xfail=False,
 ):
     MockedTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
     MockedTestClass.__qualname__ = MockedTestClass.__name__
@@ -212,6 +176,12 @@ def make_test_cls_with_mocked_export(
             new_fn.__name__ = new_name
             if xfail_prop is not None and hasattr(fn, xfail_prop):
                 new_fn = unittest.expectedFailure(new_fn)
+            elif test_only_if_no_xfail and any(
+                x.startswith("_expected_failure") for x in dir(fn)
+            ):
+                new_fn = unittest.skip(
+                    "Will only be tested if no other tests are failing"
+                )(new_fn)
             setattr(MockedTestClass, new_name, new_fn)
         # NB: Doesn't handle slots correctly, but whatever
         elif not hasattr(MockedTestClass, name):
@@ -246,9 +216,15 @@ def expectedFailureTrainingIRToRunDecompNonStrict(fn):
     return fn
 
 
-# Controls tests generated in test/export/test_export_nonstrict.py
-def expectedFailureNonStrict(fn):
-    fn._expected_failure_non_strict = True
+# Controls tests generated in test/export/test_export_strict_v2.py
+def expectedFailureStrictV2(fn):
+    fn._expected_failure_strict_v2 = True
+    return fn
+
+
+# Controls tests generated in test/export/test_export_strict.py
+def expectedFailureStrict(fn):
+    fn._expected_failure_strict = True
     return fn
 
 
@@ -288,6 +264,16 @@ def expectedFailurePreDispatchRunDecomp(fn):
 
 def expectedFailureCppSerDes(fn):
     fn._expected_failure_cpp_serdes = True
+    return fn
+
+
+def expectedFailureCppRuntime(fn):
+    fn._expected_failure_cpp_runtime = True
+    return fn
+
+
+def expectedFailureCppRuntimeNonStrict(fn):
+    fn._expected_failure_cpp_runtime_non_strict = True
     return fn
 
 

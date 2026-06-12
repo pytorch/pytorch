@@ -100,7 +100,7 @@ ONE_UPGRADER_SRC = CodeTemplate(
 
 ONE_UPGRADER_IN_VERSION_MAP = CodeTemplate(
     """Upgrader({${upgrader_min_version}, ${upgrader_max_version}, "${upgrader_name}", ${bytecode_func_index}})"""
-)  # noqa: E501
+)
 
 ONE_OPERATOR_IN_VERSION_MAP = CodeTemplate(
     """
@@ -129,11 +129,8 @@ UPGRADER_CPP_SRC = CodeTemplate(
     MOBILE_UPGRADERS_HEADER_DESCRIPTION
     + """
 #include <caffe2/serialize/versions.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
-
-namespace c10 {
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
 
 namespace torch {
 namespace jit {
@@ -275,7 +272,11 @@ def construct_version_maps(
             continue
         upgrader_ranges = torch._C._get_upgrader_ranges(op_name)
         upgrader_entries = sorted_version_map[op_name]
-        assert len(upgrader_ranges) == len(upgrader_entries)
+        if len(upgrader_ranges) != len(upgrader_entries):
+            raise AssertionError(
+                f"upgrader_ranges and upgrader_entries length mismatch for {op_name}: "
+                f"{len(upgrader_ranges)} != {len(upgrader_entries)}"
+            )
         for idx, upgrader_entry in enumerate(upgrader_entries):
             upgrader_name = upgrader_entry.upgrader_name
             bytecode_function_index = upgrader_bytecode_function_to_index_map[
@@ -308,7 +309,7 @@ def get_upgrader_bytecode_function_to_index_map(
     upgrader_bytecode_function_to_index_map = {}
     index = 0
     for upgrader_bytecode in upgrader_dict:
-        for upgrader_name in upgrader_bytecode.keys():
+        for upgrader_name in upgrader_bytecode:
             if upgrader_name in EXCLUE_UPGRADER_SET:
                 continue
             upgrader_bytecode_function_to_index_map[upgrader_name] = index
@@ -317,7 +318,6 @@ def get_upgrader_bytecode_function_to_index_map(
 
 
 def write_cpp(cpp_path: str, upgrader_dict: list[dict[str, Any]]) -> None:
-    body_parts = []
     upgrader_bytecode_function_to_index_map = (
         get_upgrader_bytecode_function_to_index_map(upgrader_dict)
     )
@@ -335,7 +335,6 @@ def write_cpp(cpp_path: str, upgrader_dict: list[dict[str, Any]]) -> None:
             operator_list_str = ""
             for table_name, contents in bytecode.items():
                 element = ByteCode[table_name]
-                body_string = ""
                 if element is ByteCode.instructions:
                     instruction_list_str = construct_instruction(contents)
                 elif element is ByteCode.constants:
@@ -364,10 +363,8 @@ def write_cpp(cpp_path: str, upgrader_dict: list[dict[str, Any]]) -> None:
         operator_version_map=version_map_src,
         upgrader_bytecode="".join(all_upgrader_src_string).lstrip("\n"),
     )
-    body_parts.append(upgrader_file_content)
     print("writing file to : ", cpp_path + "/" + UPGRADER_MOBILE_FILE_NAME)
     with open(os.path.join(cpp_path, UPGRADER_MOBILE_FILE_NAME), "wb") as out_file:
-        final_output = "".join(body_parts)
         out_file.write(upgrader_file_content.encode("utf-8"))
 
 

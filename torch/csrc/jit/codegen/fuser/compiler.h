@@ -45,12 +45,12 @@ TORCH_API void registerFusionBackend(
     at::Device::Type backend_type,
     FusedKernelConstructor ctor);
 TORCH_API bool hasFusionBackend(at::Device::Type backend_type);
-struct TORCH_API RegisterFusionBackend {
-  RegisterFusionBackend(
-      at::Device::Type backend_type,
-      FusedKernelConstructor ctor) {
+struct TORCH_API RegisterFusionBackend{RegisterFusionBackend(
+    at::Device::Type backend_type,
+    FusedKernelConstructor ctor){
     registerFusionBackend(backend_type, std::move(ctor));
-  }
-};
+} // namespace torch::jit::fuser
+}
+;
 
 } // namespace torch::jit::fuser
