@@ -586,8 +586,12 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
             return False
         if isinstance(node.kwargs.get("out"), fx.Node):
             return False
-        # Targets with no FX Node arguments are likely state-changing
-        # (e.g., _vmap_increment_nesting, _set_fwd_grad_enabled).
+        # Non-OpOverload targets with no FX Node arguments are likely
+        # state-changing (e.g., _vmap_increment_nesting,
+        # _set_fwd_grad_enabled). This is intentionally conservative:
+        # pure constant-producing ops would also be treated as barriers,
+        # but those are rare in Dynamo output graphs (constants are
+        # typically lifted as placeholders or get_attr nodes).
         if not node.all_input_nodes:
             return False
         # functorch batch dim ops modify the vmap interpreter stack.
