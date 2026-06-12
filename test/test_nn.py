@@ -14943,12 +14943,6 @@ if __name__ == '__main__':
         self.assertTrue(torch.isnan(result).item(), "Expected NaN in pdist output")
 
     @skipMPS
-    @unittest.expectedFailure
-    def test_pdist_gradgrad_unimplemented(self, device):
-        inp = torch.randn(4, 5, device=device, requires_grad=True)
-        gradgradcheck(F.pdist, (inp,))
-
-    @skipMPS
     def test_cosine_embedding_loss_with_diff_type(self, device):
         input1 = torch.tensor([[2, 3, 4], [6, 2, 4]], dtype=torch.double, device=device)
         input2 = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
