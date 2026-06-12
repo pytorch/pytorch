@@ -182,4 +182,21 @@ bool check_mxfp4_recipe(
     std::vector<ScalingType>& recipe_b,
     ArrayRef<Tensor>& scales_b);
 
+/**
+ * Validate v2 _scaled_mm inputs and per-recipe scale shapes/dtypes.
+ * Centralized here so it can be called from both TORCH_META_FUNC (so
+ * `torch.compile` tracing fails fast with a precise message) and the
+ * eager IMPL_FUNCs.
+ */
+TORCH_API
+void validate_scaled_mm_v2_inputs(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    ArrayRef<Tensor> scale_a,
+    ArrayRef<ScalingType> recipe_a,
+    ArrayRef<SwizzleType> swizzle_a,
+    ArrayRef<Tensor> scale_b,
+    ArrayRef<ScalingType> recipe_b,
+    ArrayRef<SwizzleType> swizzle_b);
+
 } // namespace at::scaled

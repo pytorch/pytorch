@@ -38,11 +38,14 @@
 
 namespace at::meta {
 
+namespace scaled_blas = at::native::scaled;
+
 // V2: Computes matrix multiply + bias while applying scaling to input and output matrices.
 // Scales are only applicable when matrices are of Float8 / Float4 type and assumed to be 1.0
-// by default. Shape inference + output allocation runs here; backend-specific
-// dtype/scale/recipe/swizzle validation lives in TORCH_IMPL_FUNC. The output dtype defaults
-// to `mat_a`'s dtype when `out_dtype` is unset, matching the legacy functional.
+// by default. Shape inference + full input validation runs here in eager (before
+// TORCH_IMPL_FUNC) and during `torch.compile` tracing, so the same errors that the C++
+// kernel would otherwise raise late surface here. The output dtype defaults to `mat_a`'s
+// dtype when `out_dtype` is unset, matching the legacy functional.
 //
 // Arguments:
 //  - `mat_a`: the first operand, `torch.float8_e4m3fn[uz]`, `torch.float8_e5m2[uz]`,
@@ -79,18 +82,31 @@ TORCH_META_FUNC(_scaled_mm_v2)(
     auto mat_a_dim = contraction_dim[0];
     auto mat_b_dim = contraction_dim[1];
     TORCH_CHECK_VALUE(
-        self.size(mat_a_dim) == mat2.size(mat_b_dim), "mat_a and mat_b shapes cannot be multiplied (",
-        self.size(0), "x", self.size(1), " and ", mat2.size(0), "x", mat2.size(1), ") ",
+        self.sym_size(mat_a_dim) == mat2.sym_size(mat_b_dim), "mat_a and mat_b shapes cannot be multiplied (",
+        self.sym_size(0), "x", self.sym_size(1), " and ", mat2.sym_size(0), "x", mat2.sym_size(1), ") ",
         "with contraction dims mat_a: ", mat_a_dim, ", mat_b: ", mat_b_dim);
   } else {
     TORCH_CHECK_VALUE(
-        self.size(1) == mat2.size(0), "mat_a and mat_b shapes cannot be multiplied (",
-        self.size(0), "x", self.size(1), " and ", mat2.size(0), "x", mat2.size(1), ")");
+        self.sym_size(1) == mat2.sym_size(0), "mat_a and mat_b shapes cannot be multiplied (",
+        self.sym_size(0), "x", self.sym_size(1), " and ", mat2.sym_size(0), "x", mat2.sym_size(1), ")");
   }
 
   TORCH_CHECK_VALUE(
-      !bias.has_value() || bias->numel() == mat2.size(1),
-      "Bias must be size ", mat2.size(1), " but got ", bias->numel());
+      !bias.has_value() || bias->sym_numel() == mat2.sym_size(1),
+      "Bias must be size ", mat2.sym_size(1), " but got ", bias->sym_numel());
+
+  // Layout / per-recipe scale-shape validation. Materialize the lists so the
+  // helper sees ArrayRef<Tensor> rather than ITensorListRef.
+  std::vector<Tensor> scale_a_vec(scale_a.begin(), scale_a.end());
+  std::vector<Tensor> scale_b_vec(scale_b.begin(), scale_b.end());
+  auto recipe_a_enum = scaled_blas::convert_int_to_enum<at::blas::ScalingType>(recipe_a);
+  auto recipe_b_enum = scaled_blas::convert_int_to_enum<at::blas::ScalingType>(recipe_b);
+  auto swizzle_a_enum = scaled_blas::convert_int_to_enum<at::blas::SwizzleType>(swizzle_a);
+  auto swizzle_b_enum = scaled_blas::convert_int_to_enum<at::blas::SwizzleType>(swizzle_b);
+  scaled_blas::validate_scaled_mm_v2_inputs(
+      self, mat2,
+      scale_a_vec, recipe_a_enum, swizzle_a_enum,
+      scale_b_vec, recipe_b_enum, swizzle_b_enum);
 
   const auto out_dtype_ = out_dtype.value_or(self.scalar_type());
   set_output_raw_strided(
