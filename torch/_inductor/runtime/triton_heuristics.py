@@ -3073,6 +3073,15 @@ def cached_autotune(
     has additional debugging, error handling, and on-disk caching.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
+
+    # The host builds one TensorDescriptor with a fixed block, so the kernel must
+    # run with XBLOCK pinned to that block for the descriptor to stay valid.
+    host_tma_block = inductor_meta.get("host_tma_descriptor_block_size")
+    if host_tma_block is not None:
+        for tconfig in configs:
+            if "XBLOCK" in tconfig.kwargs:
+                tconfig.kwargs["XBLOCK"] = host_tma_block
+
     if size_hints is not None and heuristic_type in (
         HeuristicType.REDUCTION,
         HeuristicType.PERSISTENT_REDUCTION,

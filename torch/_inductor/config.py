@@ -2072,6 +2072,30 @@ class triton:
     use_tensor_descriptor = False
 
     # (Experimental)
+    # When generating tl.make_tensor_descriptor() loads/stores (use_tensor_descriptor),
+    # build the TensorDescriptor once on the host and pass it in as a kernel argument
+    # instead of reconstructing it inside every CTA. This removes the per-CTA descriptor
+    # construction overhead that makes the device-side TMA path slower than the no-TMA
+    # baseline for memory-bound pointwise/reduction kernels (issue #185819).
+    #
+    # Requires a fixed (pinned) block shape, so kernels using this path are not autotuned
+    # over the TMA'd block dimension. Only the JIT/Python wrapper path is currently
+    # supported; cpp_wrapper/AOTI is a follow-up.
+    use_host_side_tma_descriptor = (
+        os.environ.get("TORCHINDUCTOR_HOST_SIDE_TMA", "0") == "1"
+    )
+
+    # Pinned block size (innermost dim) for host-side TMA descriptors. Used both
+    # for the descriptor's block_shape and to pin the kernel's XBLOCK, so the one
+    # host-created descriptor is valid for the (single) kernel config.
+    #
+    # 4096 is a safe default: on GB200 SiLU it removes the device-side regression
+    # at every size and beats the no-TMA baseline at large sizes, while keeping
+    # XBLOCK moderate enough to avoid register pressure on heavier pointwise
+    # kernels. A size-aware heuristic (scale with numel) is a follow-up.
+    host_side_tma_block_size = 4096
+
+    # (Experimental)
     # Whether to allow reordering tensor descriptor matches with descending
     # strides, at the expense of transposing values after load / before store.
     transpose_discontiguous_tensor_descriptor = True

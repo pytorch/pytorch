@@ -107,6 +107,7 @@ from .common import (
     RemovedArg,
     SizeArg,
     TensorArg,
+    TMADescriptorArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -761,15 +762,20 @@ class BlockDescriptorOptions:
 class TensorDescriptorOptions(BlockDescriptorOptions):
     def format(self, name: str, roffset=True) -> str:
         """
-        Codegen a call to tl.make_tensor_descriptor()
+        Codegen a call to tl.make_tensor_descriptor(), or, when host-side TMA is
+        enabled, the kernel-arg reference itself: the descriptor is built once
+        on the host and passed in as `name` (typed tensordesc<>), so the kernel
+        references the argument directly instead of constructing one per CTA.
 
         Args:
             name: variable name for pointer
             roffset: unused, but kept for compatibility with BlockPtrOptions.format()
 
         Returns:
-            "tl.make_tensor_descriptor(...)"
+            "tl.make_tensor_descriptor(...)", or `name` for the host-side path.
         """
+        if V.kernel.register_host_tma_descriptor(self, name):
+            return name
 
         f = V.kernel.index_to_str
         args = [
@@ -3181,6 +3187,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             collections.defaultdict(dict)
         )
         self.tma_min_block_sizes = dict[str, int]()
+        self.host_tma_descriptor_inputs: dict[str, list[int]] = {}
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._pdl_load_index = 0
@@ -3880,6 +3887,26 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             index,
             expand_shape=expand_shape,
         )
+
+    def register_host_tma_descriptor(
+        self, indexing: TensorDescriptorOptions, name: str
+    ) -> bool:
+        """
+        To support host-side TMA tensor descriptors, record the
+        pinned block shape for kernel arg `name`, so the launcher builds the
+        TensorDescriptor on the host and the signature is upgraded to
+        tensordesc<> and returns True; the caller then references `name`
+        directly instead of emitting a per-CTA tl.make_tensor_descriptor().
+        Returns False to fall back to device-side creation.
+        """
+        if not (
+            config.triton.use_host_side_tma_descriptor and has_triton_stable_tma_api()
+        ):
+            return False
+        if self.inside_reduction or len(indexing.block_shape) != 1:
+            return False
+        self.host_tma_descriptor_inputs[name] = [config.triton.host_side_tma_block_size]
+        return True
 
     def codegen_block_ptr(
         self,
