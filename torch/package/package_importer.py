@@ -147,13 +147,14 @@ class PackageImporter(Importer):
 
         self._mangler = PackageMangler()
 
-        # used for reduce deserializaiton
+        # used for reduce deserialization
         self.storage_context: Any = None
         self.last_map_location = None
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
 
+    # pyrefly: ignore [bad-override]
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
         the module. Modules are loaded locally
@@ -293,7 +294,7 @@ class PackageImporter(Importer):
 
         @contextmanager
         def set_deserialization_context():
-            # to let reduce_package access deserializaiton context
+            # to let reduce_package access deserialization context
             self.storage_context = storage_context
             self.last_map_location = map_location
             try:
@@ -483,10 +484,7 @@ class PackageImporter(Importer):
                 return self.modules[name]
             parent_module = self.modules[parent]
 
-            try:
-                parent_module.__path__  # type: ignore[attr-defined]
-
-            except AttributeError:
+            if not hasattr(parent_module, "__path__"):
                 # when we attempt to import a package only containing pybinded files,
                 # the parent directory isn't always a package as defined by python,
                 # so we search if the package is actually there or not before calling the error.

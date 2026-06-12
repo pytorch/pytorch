@@ -32,7 +32,7 @@
     if (status != ZE_RESULT_SUCCESS) {                                    \
       std::stringstream ss;                                               \
       ss << "L0 runtime error: " << std::hex << std::uppercase << status; \
-      throw std::runtime_error(ss.str());                                 \
+      throw std::runtime_error(std::move(ss).str());                      \
     }                                                                     \
   }
 
@@ -61,7 +61,7 @@ syclDevicePtr_t getPointer(
 
     return data_ptr;
   }
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     // valid nullptr
     return data_ptr;
   }
@@ -573,11 +573,7 @@ bool StaticXpuLauncher_init(PyObject* module) {
     }
     Py_DECREF(static_method);
   }
-  Py_INCREF(&StaticXpuLauncherType);
-  if (PyModule_AddObject(
-          module, "_StaticXpuLauncher", (PyObject*)&StaticXpuLauncherType) <
-      0) {
-    Py_DECREF(&StaticXpuLauncherType);
+  if (PyModule_AddType(module, &StaticXpuLauncherType) < 0) {
     return false;
   }
   return true;

@@ -252,14 +252,14 @@ void FunctionExtractor::DebugPrintScopeContexts(
       for (const auto& child_scope : it.second->children_) {
         ss << child_scope->name().toDisplayString() << ' ';
       }
-      return ss.str();
+      return std::move(ss).str();
     }());
     GRAPH_UPDATE("Node types: \n", [&]() {
       std::stringstream ss;
       for (auto n : it.second->nlist_) {
         ss << "  " << *n;
       }
-      return ss.str();
+      return std::move(ss).str();
     }());
     GRAPH_UPDATE("Node count: ", it.second->nlist_.size());
   }
@@ -710,14 +710,8 @@ void FunctionExtractor::ConvertScopeToFunction(
       ctx_nlist.insert(last_n_it, func_n);
 
       // remove replaced nodes from list
-      ctx_nlist.erase(
-          std::remove_if(
-              ctx_nlist.begin(),
-              ctx_nlist.end(),
-              [&old_nodes](Node* n) {
-                return old_nodes.find(n) != old_nodes.end();
-              }),
-          ctx_nlist.end());
+      std::erase_if(
+          ctx_nlist, [&old_nodes](Node* n) { return old_nodes.contains(n); });
 
       GRAPH_DEBUG("Parent total nodes after remove: ", ctx_nlist.size());
 

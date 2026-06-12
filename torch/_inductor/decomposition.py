@@ -32,11 +32,11 @@ from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    suggest_memory_format,
     type_to_dtype,
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
-from torch.utils._ordered_set import OrderedSet
 
 from . import config, inductor_prims
 from .utils import (
@@ -61,6 +61,8 @@ quantized_decomposed = torch.ops.quantized_decomposed
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
+        aten.adaptive_max_pool2d,
+        aten.adaptive_max_pool3d,
         aten.index_select,
         aten.addmv,
         aten.arange,
@@ -100,6 +102,7 @@ inductor_decompositions = get_decompositions(
         aten.triu_indices,
         aten.unbind_copy.int,
         aten.upsample_bilinear2d.vec,
+        aten.hann_window,
         quantized.linear_dynamic_fp16_unpacked_weight,
         _quantized.wrapped_quantized_linear,
     ]
@@ -130,10 +133,15 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.baddbmm,  # upcasts to fp32, perf issue
     # FMA ops - we have lowerings that use FMA to match eager CUDA behavior
     aten.addcmul,
+    aten.addcmul_,
     aten._foreach_addcmul.Scalar,
+    aten._foreach_addcmul_,
     aten.addcdiv,
     aten.addcdiv_,
     aten._foreach_addcdiv.Scalar,
+    aten._foreach_addcdiv_,
+    aten.lerp,
+    aten.lerp_,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -146,6 +154,38 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition([aten.lerp.Scalar])
+def _lerp_scalar(start: torch.Tensor, end: torch.Tensor, weight: float) -> torch.Tensor:
+    # Decompose into sub + add(alpha=weight) so that the add lowering emits FMA,
+    # matching eager CUDA's dual-formula (see aten/src/ATen/native/Lerp.h).
+    # Convert end to start's memory format so the output preserves start's layout,
+    # matching eager TensorIterator behavior.
+    fmt = suggest_memory_format(start)
+    if fmt != torch.contiguous_format:
+        end = end.contiguous(memory_format=fmt)
+    diff = end - start
+    if weight >= 0.5 or weight <= -0.5:
+        return torch.add(end, diff, alpha=-(1.0 - weight))
+    return torch.add(start, diff, alpha=weight)
+
+
+@register_decomposition([aten.lerp.Tensor])
+def _lerp_tensor(
+    start: torch.Tensor, end: torch.Tensor, weight: torch.Tensor
+) -> torch.Tensor:
+    # Same dual-formula as foreach_lerp polyfill: decompose into sub + addcmul.
+    # Convert end to start's memory format so the output preserves start's layout.
+    fmt = suggest_memory_format(start)
+    if fmt != torch.contiguous_format:
+        end = end.contiguous(memory_format=fmt)
+    diff = end - start
+    mask = weight.abs() >= 0.5
+    neg_omw = -(1.0 - weight)
+    w = torch.where(mask, neg_omw, weight)
+    base = torch.where(mask, end, start)
+    return torch.addcmul(base, w, diff, value=1)
 
 
 @register_decomposition([aten.embedding_dense_backward])
@@ -281,7 +321,13 @@ def convolution_backward(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if not output_mask[2] or not is_gpu(grad_output.device.type):
         return NotImplemented
-    grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
+    if statically_known_true(input.size(1) == 0) and statically_known_true(
+        bias_sizes[0] != 0
+    ):
+        # deal with the `input_channel=0` case
+        grad_bias = grad_output.new_zeros(bias_sizes)
+    else:
+        grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
     grad_inp, grad_weight, _ = aten.convolution_backward(
         grad_output,
         input,
@@ -311,6 +357,13 @@ def bmm(
     batch2: torch.Tensor,
     out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
+    # Outer-product specialization: [B, M, 1] x [B, 1, N] -> [B, M, N].
+    # This avoids introducing a reduction and maps directly to broadcasted mul.
+    if statically_known_true(self.shape[2] == 1) and statically_known_true(
+        batch2.shape[1] == 1
+    ):
+        return (self * batch2).contiguous()
+
     # TODO: Re-enable for mps once our reductions are performant enough
     # (https://github.com/pytorch/pytorch/issues/150121)
     if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:
@@ -340,6 +393,16 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    if mat1.device.type not in ["cpu", "mps"]:
+        if (
+            statically_known_true(mat1.size(-1) == 1)
+            and statically_known_true(mat1.size(0) != 1)
+            and statically_known_true(mat2.size(1) != 1)
+        ):
+            counters["inductor"]["decompose_addmm"] += 1
+            out = mat1 * mat2
+            return alpha * out + beta * self
+
     if self.device.type == "cpu":
         if statically_known_true(mat1.size(0) == 1) and statically_known_true(
             mat2.size(-1) == 1
@@ -377,9 +440,14 @@ def mm(
             input2.shape[1] == 1
         ):
             return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
-    if self.device.type == "cpu":
-        if (
-            statically_known_true(self.size(-1) == 1)
+    # Non-CPU/MPS: always decompose. CPU: only for small tensors.
+    if (
+        statically_known_true(self.size(-1) == 1)
+        and statically_known_true(self.size(0) != 1)
+        and statically_known_true(input2.size(1) != 1)
+    ):
+        if self.device.type not in ["cpu", "mps"] or (
+            self.device.type == "cpu"
             and statically_known_true(self.size(0) > 0)
             and statically_known_true(input2.size(0) == 1)
             and (self.dtype == input2.dtype)
@@ -387,6 +455,7 @@ def mm(
         ):
             counters["inductor"]["decompose_mm"] += 1
             return self * input2
+    if self.device.type == "cpu":
         if statically_known_true(self.size(0) == 1) and statically_known_true(
             input2.size(-1) == 1
         ):
@@ -667,7 +736,8 @@ def full_like(
         return result.to(memory_format=memory_format)
 
     else:
-        assert layout == torch.strided
+        if layout != torch.strided:
+            raise AssertionError(f"expected torch.strided layout, got {layout}")
         shape, permutation = _get_shape_permutation_like(self)
         result = torch.full(
             shape,
@@ -715,22 +785,22 @@ def _rand_like(
     return result.permute(permutation).clone()
 
 
-@register_decomposition(aten.rand_like)
+@decomp.register_decomposition([aten.rand_like], extra_random_decomps)
 def rand_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.rand, self, **kwargs)
 
 
-@register_decomposition(aten.randn_like)
+@decomp.register_decomposition([aten.randn_like], extra_random_decomps)
 def randn_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.randn, self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.default)
+@decomp.register_decomposition([aten.randint_like.default], extra_random_decomps)
 def randint_like(self: torch.Tensor, high: int, **kwargs: Any) -> torch.Tensor:
     return _rand_like(functools.partial(aten.randint.low, 0, high), self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.low_dtype)
+@decomp.register_decomposition([aten.randint_like.low_dtype], extra_random_decomps)
 def randint_like_low(
     self: torch.Tensor, low: int, high: int, **kwargs: Any
 ) -> torch.Tensor:
@@ -829,32 +899,8 @@ def grid_sampler_2d(
     )
     return output
 
-
-# _foreach_addcmul.Scalar decomposition - uses mul+add instead of FMA
-# When emulate_precision_casts is enabled, we skip this decomposition
-# and use the inductor lowering which preserves FMA semantics
-@register_decomposition(aten._foreach_addcmul.Scalar)
-def _foreach_addcmul_scalar(
-    self: list[torch.Tensor],
-    left_tensors: list[torch.Tensor],
-    right_tensors: list[torch.Tensor],
-    scalar: float = 1,
-) -> list[torch.Tensor]:
-    return aten._foreach_add.List(
-        self, aten._foreach_mul.List(left_tensors, right_tensors), alpha=scalar
-    )
-
-
-@register_decomposition(aten._foreach_addcdiv.Scalar)
-def _foreach_addcdiv_scalar(
-    self: list[torch.Tensor],
-    left_tensors: list[torch.Tensor],
-    right_tensors: list[torch.Tensor],
-    scalar: float = 1,
-) -> list[torch.Tensor]:
-    return aten._foreach_add.List(
-        self, aten._foreach_div.List(left_tensors, right_tensors), alpha=scalar
-    )
+    # _foreach_addcmul and _foreach_addcdiv decompositions removed —
+    # the inductor lowering in lowering.py handles these with FMA.
 
 
 @register_decomposition(aten._foreach_lerp.Scalar)
@@ -933,31 +979,6 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
         return decompositions
     result = fast_random_decomps()
-    if config.emulate_precision_casts:
-        # When emulating precision casts, skip decomposition of addcmul ops
-        # so that we use the inductor lowering which preserves FMA semantics.
-        # For _foreach_addcdiv, we use the native CUDA kernel.
-        # The decomposed version uses separate mul+add/div+add ops which don't match
-        # eager's FMA rounding behavior.
-        # Note: We check against OpOverloadPacket to match all overloads (default, out, etc.)
-        ops_to_skip = OrderedSet(
-            [
-                aten.addcmul,
-                aten._foreach_addcmul.Scalar,
-                aten._foreach_addcdiv.Scalar,
-            ]
-        )
-
-        def should_skip(op: Any) -> bool:
-            # Check if op is directly in the skip set
-            if op in ops_to_skip:
-                return True
-            # For OpOverload, also check if its OpOverloadPacket is in the skip set
-            if hasattr(op, "overloadpacket"):
-                return op.overloadpacket in ops_to_skip
-            return False
-
-        result = {k: v for k, v in result.items() if not should_skip(k)}
     return result
 
 
@@ -1053,6 +1074,14 @@ def index_reduce(
     *,
     include_self: bool = True,
 ) -> torch.Tensor:
+    torch._check(
+        self.device == index.device and self.device == src.device,
+        lambda: (
+            f"index_reduce(): self, index and source expected to be in the same device, "
+            f"but got (self) {self.device}, (index) {index.device}, "
+            f"and (source) {src.device}"
+        ),
+    )
     if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(
         self.dtype
     ):
@@ -1181,24 +1210,6 @@ def max_pool3d_with_indices(
     )
 
 
-@register_decomposition(aten.adaptive_max_pool2d)
-def adaptive_max_pool2d(
-    x: torch.Tensor, output_size: list[int]
-) -> tuple[torch.Tensor, torch.Tensor]:
-    *batch, h_in, w_in = x.shape
-    h_out, w_out = output_size
-
-    if h_out == 0 or w_out == 0:
-        o_size = [*batch, h_out, w_out]
-        return x.new_empty(o_size), x.new_empty(o_size, dtype=torch.int64)
-
-    if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
-        return aten.max_pool2d_with_indices(x, kernel_size)
-
-    return NotImplemented
-
-
 @register_decomposition(aten.searchsorted.Scalar)
 def searchsorted_scalar(
     sorted_sequence: torch.Tensor,
@@ -1235,7 +1246,7 @@ def bucketize_scalar(
     ).squeeze(0)
 
 
-@register_decomposition(aten.rrelu_with_noise_functional)
+@decomp.register_decomposition(aten.rrelu_with_noise_functional, extra_random_decomps)
 def rrelu_with_noise_functional(
     self: torch.Tensor,
     noise: torch.Tensor,
@@ -1268,8 +1279,12 @@ def repeat_interleave_Tensor(
         return NotImplemented
     if repeat.device.type == "mps":
         return NotImplemented
-    assert repeat.dtype in [torch.int32, torch.int64]
-    assert repeat.ndim == 1
+    if repeat.dtype not in [torch.int32, torch.int64]:
+        raise AssertionError(
+            f"expected repeat dtype int32 or int64, got {repeat.dtype}"
+        )
+    if repeat.ndim != 1:
+        raise AssertionError(f"expected repeat.ndim == 1, got {repeat.ndim}")
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
     indices = torch.searchsorted(
@@ -1292,9 +1307,8 @@ def conv1d_to_conv2d(
     # input:  (N, C_in, L_in)
     # weight: (C_out, C_in // groups, K)
     # bias:   (C_out,)
-    assert input.dim() == 3 and weight.dim() == 3, (
-        "Expect (N,C_in,L) and (C_out,C_in//groups,K)"
-    )
+    if not (input.dim() == 3 and weight.dim() == 3):
+        raise AssertionError("Expect (N,C_in,L) and (C_out,C_in//groups,K)")
 
     # pyrefly: ignore [bad-assignment]
     stride = stride[0]

@@ -52,7 +52,7 @@ struct NullableType : public Type {
   NullableType(std::unique_ptr<Type> type) : type(std::move(type)) {}
 
   bool is_matching(PyObject* object) override {
-    return object == Py_None || type->is_matching(object);
+    return Py_IsNone(object) || type->is_matching(object);
   }
 
   std::unique_ptr<Type> type;
@@ -143,14 +143,14 @@ std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
     result = std::make_unique<MultiType>(MultiType{"float", "int", "long"});
   } else if (type_name == "int") {
     result = std::make_unique<MultiType>(MultiType{"int", "long"});
-  } else if (type_name.find("tuple[") == 0) {
+  } else if (type_name.starts_with("tuple[")) {
     auto type_list = type_name.substr(6);
     type_list.pop_back();
     std::vector<std::unique_ptr<Type>> types;
     for (auto& type : _splitString(type_list, ","))
       types.emplace_back(_buildType(type, false));
     result = std::make_unique<TupleType>(std::move(types));
-  } else if (type_name.find("sequence[") == 0) {
+  } else if (type_name.starts_with("sequence[")) {
     auto subtype = type_name.substr(9);
     subtype.pop_back();
     result = std::make_unique<SequenceType>(_buildType(subtype, false));
@@ -182,10 +182,10 @@ std::pair<Option, std::string> _parseOption(
       printable_option += kwonly_part;
     } else if (out_pos >= 2) {
       printable_option.erase(out_pos - 2);
-      printable_option += ")";
+      printable_option += ')';
     } else {
       printable_option.erase(out_pos);
-      printable_option += ")";
+      printable_option += ')';
     }
     has_out = true;
   }
@@ -282,9 +282,9 @@ std::string _formattedArgDesc(
       result += py_typename(arg) + " of ";
       auto num_elements = PySequence_Length(arg);
       if (is_tuple) {
-        result += "(";
+        result += '(';
       } else {
-        result += "[";
+        result += '[';
       }
       for (const auto i : c10::irange(num_elements)) {
         if (i != 0) {
@@ -296,11 +296,11 @@ std::string _formattedArgDesc(
       }
       if (is_tuple) {
         if (num_elements == 1) {
-          result += ",";
+          result += ',';
         }
-        result += ")";
+        result += ')';
       } else {
-        result += "]";
+        result += ']';
       }
     } else {
       result += py_typename(arg);
@@ -313,7 +313,7 @@ std::string _formattedArgDesc(
   }
   if (!arguments.empty())
     result.erase(result.length() - 2);
-  result += ")";
+  result += ')';
   return result;
 }
 
@@ -327,7 +327,7 @@ std::string _argDesc(
     result += kwarg.first + "=" + py_typename(kwarg.second) + ", ";
   if (!arguments.empty())
     result.erase(result.length() - 2);
-  result += ")";
+  result += ')';
   return result;
 }
 
@@ -419,7 +419,7 @@ std::string format_invalid_args(
       auto& printable_option_str = pair.second;
       error_msg += " * ";
       error_msg += printable_option_str;
-      error_msg += "\n";
+      error_msg += '\n';
       if (_argcountMatch(option, args, kwargs)) {
         std::vector<std::string> unmatched_kwargs;
         if (has_kwargs)
@@ -430,12 +430,12 @@ std::string format_invalid_args(
           for (auto& kwarg : unmatched_kwargs)
             error_msg += kwarg + ", ";
           error_msg.erase(error_msg.length() - 2);
-          error_msg += "\n";
+          error_msg += '\n';
         } else {
           error_msg +=
               "      didn't match because some of the arguments have invalid types: ";
           error_msg += _formattedArgDesc(option, args, kwargs);
-          error_msg += "\n";
+          error_msg += '\n';
         }
       }
     }

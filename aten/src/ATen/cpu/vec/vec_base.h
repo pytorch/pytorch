@@ -26,6 +26,7 @@
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <ostream>
 #include <type_traits>
 
 #include <ATen/NumericUtils.h>
@@ -68,7 +69,7 @@ Windows llvm will not have this definition.
 #define VECTOR_WIDTH 64
 #define int_vector __m512i
 #elif defined(__aarch64__) && \
-    !defined(CPU_CAPABILITY_SVE) // CPU_CAPABILITY_AVX512
+    !defined(CPU_CAPABILITY_SVE256) // CPU_CAPABILITY_AVX512
 // SVE code expects 256-vectors; leave that set for SVE?
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(16)))
@@ -282,7 +283,8 @@ struct Vectorized {
   }
   static Vectorized<T> loadu(const void* ptr, int64_t count) {
     Vectorized vector;
-    std::memcpy(vector.values, ptr, count * sizeof(T));
+    std::memcpy(
+        vector.values, ptr, std::min<int64_t>(count, size()) * sizeof(T));
     return vector;
   }
   static Vectorized<T> loadu_one_fourth(const void* ptr) {
@@ -293,7 +295,7 @@ struct Vectorized {
   }
 
   void store(void* ptr, int count = size()) const {
-    std::memcpy(ptr, values, count * sizeof(T));
+    std::memcpy(ptr, values, std::min<int64_t>(count, size()) * sizeof(T));
   }
   int zero_mask() const {
     // returns an integer mask where all zero elements are translated to 1-bit
@@ -1524,6 +1526,34 @@ inline void transpose_mxn(
     T* dst,
     int64_t ld_dst) {
   transpose_mxn<T>(src, ld_src, dst, ld_dst, M, N);
+}
+
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
+  stream << val.val_;
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
+  stream << static_cast<int>(val.val_);
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
+  stream << static_cast<unsigned int>(val.val_);
+  return stream;
+}
+
+template <typename T>
+std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
+  T buf[Vectorized<T>::size()];
+  vec.store(buf);
+  stream << "vec[";
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    if (i != 0) {
+      stream << ", ";
+    }
+    stream << buf[i];
+  }
+  stream << ']';
+  return stream;
 }
 
 } // namespace CPU_CAPABILITY

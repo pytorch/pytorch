@@ -431,98 +431,52 @@ kernel void masked_fill_scalar_strided(
   }
 }
 
-template <typename T, typename index_t>
+template <typename T, typename index_t, typename OffsetT>
 kernel void index_copy_dense(
     device T* output,
-    constant T* input,
     constant T* source,
     constant index_t* indices,
-    constant uint& dim,
-    constant long* sizes,
-    constant uint& ndim,
-    constant uint& indices_numel,
-    uint thread_index [[thread_position_in_grid]]) {
-  // first copy input to output
-  output[thread_index] = input[thread_index];
-
-  // calculate pos in the tensor using a signed counter
-  long pos[max_ndim];
-  long linear_idx = thread_index;
-  for (int i = static_cast<int>(ndim) - 1; i >= 0; --i) {
-    pos[i] = linear_idx % sizes[i];
-    linear_idx /= sizes[i];
-  }
-
-  // check if this position's dim coordinate is in the indices
-  long dim_pos = pos[dim];
-
-  // search through indices to see if current dim pos should be updated
-  for (uint i = 0; i < indices_numel; i++) {
-    if (indices[i] == dim_pos) {
-      // this position should be updated from source
-      // calculate source offset where the source tensor has the same shape
-      // except along dim where it has size = indices_numel
-      long source_offset = 0;
-      long stride = 1;
-      for (int j = static_cast<int>(ndim) - 1; j >= 0; --j) {
-        if (j == static_cast<int>(dim)) {
-          // for the indexed dimension, use position i
-          source_offset += i * stride;
-          stride *= indices_numel;
-        } else {
-          // for other dimensions use the same position
-          source_offset += pos[j] * stride;
-          stride *= sizes[j];
-        }
-      }
-
-      output[thread_index] = source[source_offset];
-      break;
-    }
-  }
+    constant long& dim_size,
+    constant long& inner,
+    constant long& indices_numel,
+    uint3 gid [[thread_position_in_grid]]) {
+  OffsetT after = gid.x;
+  OffsetT i = gid.y;
+  OffsetT before = gid.z;
+  OffsetT idx = indices[i];
+  output[(before * OffsetT(dim_size) + idx) * OffsetT(inner) + after] =
+      source[(before * OffsetT(indices_numel) + i) * OffsetT(inner) + after];
 }
 
-template <typename T, typename index_t>
+template <typename T, typename index_t, typename OffsetT>
 kernel void index_copy_strided(
     device T* output,
-    constant T* input,
     constant T* source,
     constant index_t* indices,
-    constant uint& dim,
-    constant long* sizes,
-    constant uint& ndim,
-    constant uint& indices_numel,
-    constant long* input_strides,
-    constant long* output_strides,
-    constant long* source_strides,
-    constant long& indices_stride,
+    constant long& dim_size,
+    constant long& dim_out_stride, // result.stride(dim)
+    constant long& dim_source_stride, // source.stride(dim)
+    constant long* slice_sizes, // result sizes with dim removed
+    constant long* slice_out_strides, // result strides with dim removed
+    constant long* slice_source_strides, // source strides with dim removed
+    constant uint& slice_ndim, // ndim - 1
+    constant long& slice_numel,
+    constant long& indices_stride, // index.stride(0)
     uint thread_index [[thread_position_in_grid]]) {
-  int pos[max_ndim];
-  pos_from_thread_index(int(thread_index), pos, sizes, ndim);
-
-  // compute offsets for the output and input tensors
-  long output_offset = offset_from_coord(pos, output_strides, ndim);
-  long input_offset = offset_from_coord(pos, input_strides, ndim);
-
-  output[output_offset] = input[input_offset];
-
-  // save the original coordinate along the dim we're updating
-  int orig_dim = pos[dim];
-
-  // find the last index in the indices array that equals this coordinate
-  int last_matching_index = -1;
-  for (uint i = 0; i < indices_numel; i++) {
-    if (indices[i * indices_stride] == orig_dim) {
-      last_matching_index = int(i);
-    }
+  OffsetT j = OffsetT(thread_index) % OffsetT(slice_numel);
+  OffsetT i = OffsetT(thread_index) / OffsetT(slice_numel);
+  OffsetT idx = indices[i * OffsetT(indices_stride)];
+  if (idx < 0) {
+    idx += OffsetT(dim_size);
   }
-
-  // if a matching index was found, use it to update the output
-  if (last_matching_index != -1) {
-    pos[dim] = last_matching_index;
-    long source_offset = offset_from_coord(pos, source_strides, ndim);
-    output[output_offset] = source[source_offset];
-  }
+  OffsetT slice_pos[max_ndim];
+  pos_from_thread_index(j, slice_pos, slice_sizes, slice_ndim);
+  OffsetT out_offset =
+      offset_from_coord(slice_pos, slice_out_strides, slice_ndim);
+  OffsetT src_offset =
+      offset_from_coord(slice_pos, slice_source_strides, slice_ndim);
+  output[out_offset + idx * OffsetT(dim_out_stride)] =
+      source[src_offset + i * OffsetT(dim_source_stride)];
 }
 
 // Scatter-based index_fill: each thread writes exactly one element.
@@ -673,34 +627,36 @@ kernel void index_fill_strided_from_mask(
       constant long&,                              \
       uint);
 
-#define INSTANTIATE_INDEX_COPY(T, index_t)                      \
-  template [[host_name("index_copy_dense_" #T "_" #index_t)]]   \
-  kernel void index_copy_dense<T, index_t>(                     \
-      device T*,                                                \
-      constant T*,                                              \
-      constant T*,                                              \
-      constant index_t*,                                        \
-      constant uint&,                                           \
-      constant long*,                                           \
-      constant uint&,                                           \
-      constant uint&,                                           \
-      uint);                                                    \
-                                                                \
-  template [[host_name("index_copy_strided_" #T "_" #index_t)]] \
-  kernel void index_copy_strided<T, index_t>(                   \
-      device T*,                                                \
-      constant T*,                                              \
-      constant T*,                                              \
-      constant index_t*,                                        \
-      constant uint&,                                           \
-      constant long*,                                           \
-      constant uint&,                                           \
-      constant uint&,                                           \
-      constant long*,                                           \
-      constant long*,                                           \
-      constant long*,                                           \
-      constant long&,                                           \
+#define INSTANTIATE_INDEX_COPY_W(T, index_t, OffsetT, OBITS)               \
+  template [[host_name("index_copy_dense_" #T "_" #index_t "_" #OBITS)]]   \
+  kernel void index_copy_dense<T, index_t, OffsetT>(                       \
+      device T*,                                                           \
+      constant T*,                                                         \
+      constant index_t*,                                                   \
+      constant long&,                                                      \
+      constant long&,                                                      \
+      constant long&,                                                      \
+      uint3);                                                              \
+                                                                           \
+  template [[host_name("index_copy_strided_" #T "_" #index_t "_" #OBITS)]] \
+  kernel void index_copy_strided<T, index_t, OffsetT>(                     \
+      device T*,                                                           \
+      constant T*,                                                         \
+      constant index_t*,                                                   \
+      constant long&,                                                      \
+      constant long&,                                                      \
+      constant long&,                                                      \
+      constant long*,                                                      \
+      constant long*,                                                      \
+      constant long*,                                                      \
+      constant uint&,                                                      \
+      constant long&,                                                      \
+      constant long&,                                                      \
       uint);
+
+#define INSTANTIATE_INDEX_COPY(T, index_t)      \
+  INSTANTIATE_INDEX_COPY_W(T, index_t, int, 32) \
+  INSTANTIATE_INDEX_COPY_W(T, index_t, long, 64)
 
 #define REGISTER_MASKED_FILL_SCALAR(SIZE, DTYPE)                            \
   template [[host_name("masked_fill_scalar_strided_" #SIZE)]] kernel void   \
@@ -760,14 +716,6 @@ INSTANTIATE_INDEX_FILL(uchar);
 INSTANTIATE_INDEX_FILL(float2);
 INSTANTIATE_INDEX_FILL(half2);
 
-[[host_name("index_fill_set_mask")]]
-kernel void index_fill_set_mask(
-    device bool*,
-    constant long*,
-    constant long&,
-    constant long&,
-    uint);
-
 #define INSTANTIATE_INDEX_FILL_FROM_MASK(T)                  \
   template [[host_name("index_fill_dense_from_mask_" #T)]]   \
   kernel void index_fill_dense_from_mask<T>(                 \
@@ -799,3 +747,237 @@ INSTANTIATE_INDEX_FILL_FROM_MASK(uchar)
 INSTANTIATE_INDEX_FILL_FROM_MASK(bool)
 INSTANTIATE_INDEX_FILL_FROM_MASK(float2)
 INSTANTIATE_INDEX_FILL_FROM_MASK(half2)
+
+// Nonzero kernel implementation using prefix-sum + scatter approach.
+//
+// Step 1 (count_nonzero_prefix_sum): Each threadgroup computes an exclusive
+// prefix sum of the nonzero flags over its chunk. Per-threadgroup totals are
+// written to block_sums.
+//
+// Step 2 (prefix_sum_blocks): A single threadgroup computes the exclusive
+// prefix sum of block_sums → block_offsets and writes the total nonzero count
+// to a 1-element buffer. The host reads back only that single int, then
+// allocates the output tensor.
+//
+// Step 3 (scatter_nonzero_indices): Each thread with a nonzero element writes
+// its multi-dimensional indices into the output at the position determined by
+// block_offsets[tgid] + prefix[tid].
+
+template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
+inline bool is_nonzero(T val) {
+  return val != T(0);
+}
+
+template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+inline bool is_nonzero(T val) {
+  return val.x != 0 || val.y != 0;
+}
+
+template <typename T>
+[[max_total_threads_per_threadgroup(1024)]]
+kernel void count_nonzero_prefix_sum(
+    const device T* input [[buffer(0)]],
+    device int* prefix [[buffer(1)]],
+    device int* block_sums [[buffer(2)]],
+    uint tid [[thread_position_in_grid]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint tgsize [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
+  uint num_simds = (tgsize + simdgroup_size - 1) / simdgroup_size;
+
+  int flag = is_nonzero(input[tid]) ? 1 : 0;
+
+  // Inclusive prefix sum within SIMD group using shuffle
+  int val = flag;
+  for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
+    int other = simd_shuffle_and_fill_up(val, 0, static_cast<ushort>(offset));
+    val += other;
+  }
+
+  // The last lane in each simd group writes its total.
+  // For full groups this is lane 31; for the last (partial) group we compute
+  // which lane is actually last.
+  threadgroup int simdgroup_totals[32];
+  bool is_last_lane_in_simd;
+  if (simd_group_id < num_simds - 1) {
+    is_last_lane_in_simd = (simd_lane_id == simdgroup_size - 1);
+  } else {
+    uint lanes_in_last = tgsize - simd_group_id * simdgroup_size;
+    is_last_lane_in_simd = (simd_lane_id == lanes_in_last - 1);
+  }
+  if (is_last_lane_in_simd) {
+    simdgroup_totals[simd_group_id] = val;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // First simd group computes exclusive prefix sum of simd group totals
+  threadgroup int simdgroup_offsets[32];
+  if (simd_group_id == 0) {
+    int sg_val =
+        (simd_lane_id < num_simds) ? simdgroup_totals[simd_lane_id] : 0;
+    for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
+      int other =
+          simd_shuffle_and_fill_up(sg_val, 0, static_cast<ushort>(offset));
+      sg_val += other;
+    }
+    int exclusive = simd_shuffle_and_fill_up(sg_val, 0, static_cast<ushort>(1));
+    simdgroup_offsets[simd_lane_id] = exclusive;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  int exclusive_val = val - flag + simdgroup_offsets[simd_group_id];
+
+  prefix[tid] = exclusive_val;
+
+  if (lid == tgsize - 1) {
+    block_sums[tgid] =
+        simdgroup_offsets[num_simds - 1] + simdgroup_totals[num_simds - 1];
+  }
+}
+
+// Step 2: exclusive prefix sum of block_sums → block_offsets, and write
+// total nonzero count to a 1-element buffer.  Runs in a single threadgroup.
+// Each thread handles ceil(num_blocks / tgsize) consecutive blocks via a
+// serial loop, then the per-thread totals are scanned in parallel.
+[[max_total_threads_per_threadgroup(1024)]]
+kernel void prefix_sum_blocks(
+    const device int* block_sums [[buffer(0)]],
+    device int* block_offsets [[buffer(1)]],
+    device int* total_nonzero [[buffer(2)]],
+    constant uint& num_blocks [[buffer(3)]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint tgsize [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
+  uint num_simds = (tgsize + simdgroup_size - 1) / simdgroup_size;
+
+  // Each thread handles a contiguous chunk of blocks
+  uint chunk_size = (num_blocks + tgsize - 1) / tgsize;
+  uint start = lid * chunk_size;
+  uint end = min(start + chunk_size, num_blocks);
+
+  // Serial sum over this thread's chunk
+  int chunk_total = 0;
+  for (uint i = start; i < end; i++) {
+    chunk_total += block_sums[i];
+  }
+
+  // Parallel inclusive prefix sum of chunk_totals across threads
+  int val = chunk_total;
+  for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
+    int other = simd_shuffle_and_fill_up(val, 0, static_cast<ushort>(offset));
+    val += other;
+  }
+
+  threadgroup int simdgroup_totals[32];
+  bool is_last_lane_in_simd;
+  if (simd_group_id < num_simds - 1) {
+    is_last_lane_in_simd = (simd_lane_id == simdgroup_size - 1);
+  } else {
+    uint lanes_in_last = tgsize - simd_group_id * simdgroup_size;
+    is_last_lane_in_simd = (simd_lane_id == lanes_in_last - 1);
+  }
+  if (is_last_lane_in_simd) {
+    simdgroup_totals[simd_group_id] = val;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  threadgroup int simdgroup_offsets[32];
+  if (simd_group_id == 0) {
+    int sg_val =
+        (simd_lane_id < num_simds) ? simdgroup_totals[simd_lane_id] : 0;
+    for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
+      int other =
+          simd_shuffle_and_fill_up(sg_val, 0, static_cast<ushort>(offset));
+      sg_val += other;
+    }
+    int exclusive = simd_shuffle_and_fill_up(sg_val, 0, static_cast<ushort>(1));
+    simdgroup_offsets[simd_lane_id] = exclusive;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // This thread's exclusive offset = inclusive_scan - chunk_total +
+  // simdgroup_offset
+  int thread_offset = val - chunk_total + simdgroup_offsets[simd_group_id];
+
+  // Write block_offsets for this thread's chunk using a serial exclusive scan
+  int running = thread_offset;
+  for (uint i = start; i < end; i++) {
+    block_offsets[i] = running;
+    running += block_sums[i];
+  }
+
+  if (lid == tgsize - 1) {
+    *total_nonzero =
+        simdgroup_offsets[num_simds - 1] + simdgroup_totals[num_simds - 1];
+  }
+}
+
+// Scatter the multi-dimensional indices of nonzero elements.
+// Output layout: out[position * ndim + d] = index along dimension d.
+template <typename T>
+[[max_total_threads_per_threadgroup(1024)]]
+kernel void scatter_nonzero_indices(
+    const device T* input [[buffer(0)]],
+    const device int* prefix [[buffer(1)]],
+    device int64_t* output [[buffer(2)]],
+    constant int& ndim [[buffer(3)]],
+    constant int64_t* sizes [[buffer(4)]],
+    constant int* block_offsets [[buffer(5)]],
+    constant int& max_entries [[buffer(6)]],
+    uint tid [[thread_position_in_grid]],
+    uint tgid [[threadgroup_position_in_grid]]) {
+  if (!is_nonzero(input[tid]))
+    return;
+
+  int pos = block_offsets[tgid] + prefix[tid];
+  if (pos >= max_entries)
+    return;
+
+  uint flat = tid;
+  for (int d = ndim - 1; d >= 0; d--) {
+    int64_t dim_size = sizes[d];
+    output[pos * ndim + d] =
+        static_cast<int64_t>(flat % static_cast<uint>(dim_size));
+    flat /= static_cast<uint>(dim_size);
+  }
+}
+
+#define REGISTER_NONZERO_KERNELS(DTYPE)                                      \
+  template [[host_name("count_nonzero_prefix_sum_" #DTYPE)]] [[kernel]] void \
+  count_nonzero_prefix_sum<DTYPE>(                                           \
+      const device DTYPE* input [[buffer(0)]],                               \
+      device int* prefix [[buffer(1)]],                                      \
+      device int* block_sums [[buffer(2)]],                                  \
+      uint tid [[thread_position_in_grid]],                                  \
+      uint lid [[thread_position_in_threadgroup]],                           \
+      uint tgsize [[threads_per_threadgroup]],                               \
+      uint tgid [[threadgroup_position_in_grid]],                            \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                       \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]]);                \
+                                                                             \
+  template [[host_name("scatter_nonzero_indices_" #DTYPE)]] [[kernel]] void  \
+  scatter_nonzero_indices<DTYPE>(                                            \
+      const device DTYPE* input [[buffer(0)]],                               \
+      const device int* prefix [[buffer(1)]],                                \
+      device int64_t* output [[buffer(2)]],                                  \
+      constant int& ndim [[buffer(3)]],                                      \
+      constant int64_t* sizes [[buffer(4)]],                                 \
+      constant int* block_offsets [[buffer(5)]],                             \
+      constant int& max_entries [[buffer(6)]],                               \
+      uint tid [[thread_position_in_grid]],                                  \
+      uint tgid [[threadgroup_position_in_grid]])
+
+REGISTER_NONZERO_KERNELS(float);
+REGISTER_NONZERO_KERNELS(half);
+REGISTER_NONZERO_KERNELS(bfloat);
+REGISTER_NONZERO_KERNELS(long);
+REGISTER_NONZERO_KERNELS(int);
+REGISTER_NONZERO_KERNELS(short);
+REGISTER_NONZERO_KERNELS(char);
+REGISTER_NONZERO_KERNELS(uchar);
+REGISTER_NONZERO_KERNELS(bool);
+REGISTER_NONZERO_KERNELS(float2);
+REGISTER_NONZERO_KERNELS(half2);

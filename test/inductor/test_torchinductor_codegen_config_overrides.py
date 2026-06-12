@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 import importlib
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 from unittest import skipIf
 
 import torch
@@ -30,8 +30,8 @@ class CodegenInductorTest(InductorTestCase):
         self,
         func: Callable[..., Any],
         *args,
-        compile_kwargs: Optional[dict] = None,
-        config_patches: Optional[dict] = None,
+        compile_kwargs: dict | None = None,
+        config_patches: dict | None = None,
         atol: float | None = 1e-05,
         rtol: float | None = 1e-08,
     ):
@@ -59,7 +59,7 @@ class CodegenInductorTest(InductorTestCase):
 
         return result, code
 
-    def count_code(self, substr: str, code: list[str], expected: Optional[int]):
+    def count_code(self, substr: str, code: list[str], expected: int | None):
         count = sum(prog.count(substr) for prog in code)
         if expected is not None:
             self.assertEqual(count, expected)
@@ -126,10 +126,11 @@ class CodegenInductorTest(InductorTestCase):
         def func(x):
             return torch.var_mean(x, dim=1)
 
-        # Use a large number to force codegen to prefer welford reduction,
-        # in order to test effectiveness of config flag disable_welford_reduction
+        # Use a reduction larger than the CUDA two-step variance threshold to
+        # force codegen to prefer Welford reduction, in order to test
+        # effectiveness of config flag disable_welford_reduction.
         # This test should run fine on GPU as the configuration is not specific to MTIA backend.
-        x = torch.randn((4, 18000), device=torch.device(GPU_TYPE))
+        x = torch.randn((4, 65536), device=torch.device(GPU_TYPE))
         config_patches = {
             "mtia.disable_welford_reduction": disable_welford_reduction,
         }

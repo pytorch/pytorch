@@ -90,12 +90,21 @@
         stride_kv_num_blks_h = {{stride("KV_NUM_BLKS", 1)}}
         stride_kv_idx_h = {{stride("KV_IDX", 1)}}
         stride_kv_idx_m = {{stride("KV_IDX", 2)}}
+        {%- if HAS_FULL_BLOCKS %}
+        stride_full_kv_num_blks_h = {{stride("FULL_KV_NUM_BLKS", 1)}}
+        stride_full_kv_idx_h = {{stride("FULL_KV_IDX", 1)}}
+        stride_full_kv_idx_m = {{stride("FULL_KV_IDX", 2)}}
+        {%- endif %}
 
         sparse_idx_hq2 = off_hq2 % SPARSE_HQ
         sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq2
 
         sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + off_pid_mask
         sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + off_pid_mask * stride_kv_idx_m  # noqa: B950
+        {%- if HAS_FULL_BLOCKS %}
+        sparse_full_kv_num_blks_offset = sparse_hz_offset * stride_full_kv_num_blks_h + off_pid_mask
+        sparse_full_kv_idx_offset = sparse_hz_offset * stride_full_kv_idx_h + off_pid_mask * stride_full_kv_idx_m  # noqa: B950
+        {%- endif %}
 
         # Offset Q, DQ, DO, DELTA & LSE. These inputs are offsetted by query heads.
         q_adj2 = (stride_qh * off_hq2 + stride_qz * off_zq).to(tl.int64)
@@ -155,8 +164,8 @@
         )
         {%- else %}
         # load Q and do: they stay in SRAM throughout the inner loop.
-        q = load_checked_2d(Q2, offs_m2, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
-        do = load_checked_2d(DO2, offs_m2, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
+        q = load_checked_2d(Q2, offs_m2, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM, INDEX_DTYPE)
+        do = load_checked_2d(DO2, offs_m2, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM, INDEX_DTYPE)
         {%- endif %}
         if PRESCALE_QK:
             q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
@@ -190,9 +199,9 @@
         if HAS_FULL_BLOCKS:
             # ~~~~~~~~~~~ partial unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # FULL_KV_IDX and FULL_KV_NUM_BLKS are always contiguous.
-            kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
+            kv_indices = FULL_KV_IDX + sparse_full_kv_idx_offset
             kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-            sparse_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+            sparse_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_full_kv_num_blks_offset)
 
             offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
             dq = bwd_dq_inner(
@@ -207,7 +216,7 @@
             )
 
         # Write back dQ.
-        dq_ptrs = DQ2 + offs_m2[:, None] * stride_dqm + offs_k[None, :] * stride_dqd
+        dq_ptrs = DQ2 + offs_m2[:, None].to(INDEX_DTYPE) * stride_dqm + offs_k[None, :].to(INDEX_DTYPE) * stride_dqd
         dq *= SM_SCALE
         if IS_DIVISIBLE and SAFE_HEAD_DIM:
             tl.store(dq_ptrs, dq)
@@ -223,6 +232,11 @@
         stride_q_num_blks_h = {{stride("Q_NUM_BLKS", 1)}}
         stride_q_idx_h = {{stride("Q_IDX", 1)}}
         stride_q_idx_n = {{stride("Q_IDX", 2)}}
+        {%- if HAS_FULL_BLOCKS %}
+        stride_full_q_num_blks_h = {{stride("FULL_Q_NUM_BLKS", 1)}}
+        stride_full_q_idx_h = {{stride("FULL_Q_IDX", 1)}}
+        stride_full_q_idx_n = {{stride("FULL_Q_IDX", 2)}}
+        {%- endif %}
 
 
         dv = tl.zeros([BLOCK_N1, V_HEAD_DIM_ROUNDED], dtype=tl.float32)
@@ -254,8 +268,8 @@
         )
         {%- else %}
         # load K and V: they stay in SRAM throughout the inner loop.
-        k = load_checked_2d(K, offs_n1, offs_k, stride_kn, stride_kd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM)
-        v = load_checked_2d(V, offs_n1, offs_v, stride_vn, stride_vd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM)
+        k = load_checked_2d(K, offs_n1, offs_k, stride_kn, stride_kd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM, INDEX_DTYPE)
+        v = load_checked_2d(V, offs_n1, offs_v, stride_vn, stride_vd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM, INDEX_DTYPE)
         {%- endif %}
         if PRESCALE_QK:
             k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
@@ -281,6 +295,10 @@
 
             sparse_q_num_blks_offset = sparse_hz_offset * stride_q_num_blks_h + pid_mask
             sparse_q_idx_offset = sparse_hz_offset * stride_q_idx_h + pid_mask * stride_q_idx_n  # noqa: B950
+            {%- if HAS_FULL_BLOCKS %}
+            sparse_full_q_num_blks_offset = sparse_hz_offset * stride_full_q_num_blks_h + pid_mask
+            sparse_full_q_idx_offset = sparse_hz_offset * stride_full_q_idx_h + pid_mask * stride_full_q_idx_n  # noqa: B950
+            {%- endif %}
 
             # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # Q_IDX and Q_NUM_BLKS are always contiguous.
@@ -321,9 +339,9 @@
             if HAS_FULL_BLOCKS:
                 # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
                 # FULL_Q_IDX and FULL_Q_NUM_BLKS are always contiguous.
-                q_indices = FULL_Q_IDX + sparse_q_idx_offset
+                q_indices = FULL_Q_IDX + sparse_full_q_idx_offset
                 q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
-                sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_q_num_blks_offset)
+                sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_full_q_num_blks_offset)
 
                 offs_m1 = q_start + tl.arange(0, BLOCK_M1)
                 dk, dv = bwd_dkdv_inner(
@@ -339,7 +357,7 @@
                 )
 
         # Write back dV and dK.
-        dv_ptrs = DV + offs_n1[:, None] * stride_dvm + offs_v[None, :] * stride_dvd
+        dv_ptrs = DV + offs_n1[:, None].to(INDEX_DTYPE) * stride_dvm + offs_v[None, :].to(INDEX_DTYPE) * stride_dvd
 
         index_n = offs_n1[:, None]
         index_k = offs_k[None, :]
@@ -434,10 +452,10 @@ def bwd_dq_block_mn(
     )
     kT = tl.trans(k)
     {%- else %}
-    kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
-    vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_v[:, None] * stride_vd
+    kT_ptrs = K + offs_n2[None, :].to(INDEX_DTYPE) * stride_kn + offs_k[:, None].to(INDEX_DTYPE) * stride_kd
+    vT_ptrs = V + offs_n2[None, :].to(INDEX_DTYPE) * stride_vn + offs_v[:, None].to(INDEX_DTYPE) * stride_vd
     # NB reversed order to since K is transposed
-    kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN)
+    kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN, INDEX_DTYPE)
     {%- endif %}
     qk = tl.dot(q, kT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
@@ -457,12 +475,23 @@ def bwd_dq_block_mn(
         h="off_hq",
         m="m",
         n="n",
-        out="qk"
+        out="qk",
+        input_shapes={
+            "score": ("BLOCK_M2", "BLOCK_N2"),
+            "m": ("BLOCK_M2", "1"),
+            "n": ("1", "BLOCK_N2"),
+        },
+        input_dtypes={
+            "b": "index",
+            "h": "index",
+            "m": "index",
+            "n": "index",
+        }
     ) | indent_except_first(1) }}
 
 
     {# Note: Selective masking DQ
-    We load elements beyond KV_LEN w/ zero, some score mods may convert this elements to NaN
+    We load elements beyond KV_LEN w/ zero, some score mods may convert these elements to NaN
     Example: lambda x, *_: 1 / score, this NaN would propagate regardless of other masking
     We only need to do this on the m1 dim since these elements take part in the final reduction
     for DQ #}
@@ -478,6 +507,17 @@ def bwd_dq_block_mn(
             h="off_hq",
             m="m",
             n="n",
+            input_shapes={
+                "score": ("BLOCK_M2", "BLOCK_N2"),
+                "m": ("BLOCK_M2", "1"),
+                "n": ("1", "BLOCK_N2"),
+            },
+            input_dtypes={
+                "b": "index",
+                "h": "index",
+                "m": "index",
+                "n": "index",
+            }
         ) | indent_except_first(2) }}
 
         # apply mask for partial masked block
@@ -495,7 +535,7 @@ def bwd_dq_block_mn(
     )
     vT = tl.trans(v)
     {%- else %}
-    vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN)
+    vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN, INDEX_DTYPE)
     {%- endif %}
     dp = tl.dot(do, vT, input_precision=FLOAT32_PRECISION)
     ds = p * (dp - Di[:, None])
@@ -508,7 +548,19 @@ def bwd_dq_block_mn(
         h="off_hq",
         m="m",
         n="n",
-        grad_score_mod="ds"
+        grad_score_mod="ds",
+        input_shapes={
+            "score": ("BLOCK_M2", "BLOCK_N2"),
+            "grad_score_mod": ("BLOCK_M2", "BLOCK_N2"),
+            "m": ("BLOCK_M2", "1"),
+            "n": ("1", "BLOCK_N2"),
+        },
+        input_dtypes={
+            "b": "index",
+            "h": "index",
+            "m": "index",
+            "n": "index",
+        }
     ) | indent_except_first(1) }}
     {# See Note Selective masking DQ #}
     if not IS_DIVISIBLE:
@@ -521,7 +573,20 @@ def bwd_dq_block_mn(
             subgraph_number=3,
             output_name=None,
             mask="scatter_mask",
-            input_shapes={"m": ("BLOCK_M2", "1"), "n": ("1", "BLOCK_N2"), "b": ("1", "1"), "h": ("1", "1")},
+            input_shapes={
+                "score": ("BLOCK_M2", "BLOCK_N2"),
+                "grad_score_mod": ("BLOCK_M2", "BLOCK_N2"),
+                "m": ("BLOCK_M2", "1"),
+                "n": ("1", "BLOCK_N2"),
+                "b": ("1", "1"),
+                "h": ("1", "1"),
+            },
+            input_dtypes={
+                "b": "index",
+                "h": "index",
+                "m": "index",
+                "n": "index",
+            },
             score="pre_mod_scores",
             b="off_z",
             h="off_hq",
@@ -614,10 +679,10 @@ def bwd_dkdv_block_mn(
     )
     qT = tl.trans(q)
     {%- else %}
-    qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
-    do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_v[None, :] * stride_dod
+    qT_ptrs = Q + offs_m1[None, :].to(INDEX_DTYPE) * stride_qm + offs_k[:, None].to(INDEX_DTYPE) * stride_qd
+    do_ptrs = DO + offs_m1[:, None].to(INDEX_DTYPE) * stride_dom + offs_v[None, :].to(INDEX_DTYPE) * stride_dod
     # NB reversed order since Q is transposed
-    qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN)
+    qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN, INDEX_DTYPE)
     {%- endif %}
     # Load LSE before computing qk to reduce pipeline stall.
     if IS_DIVISIBLE:
@@ -643,11 +708,22 @@ def bwd_dkdv_block_mn(
         h="off_hq",
         m="m",
         n="n",
-        out="qkT"
+        out="qkT",
+        input_shapes={
+            "score": ("BLOCK_N1", "BLOCK_M1"),
+            "m": ("1", "BLOCK_M1"),
+            "n": ("BLOCK_N1", "1"),
+        },
+        input_dtypes={
+            "b": "index",
+            "h": "index",
+            "m": "index",
+            "n": "index",
+        }
     ) | indent_except_first(1) }}
 
     {# Note: Selective masking DK/DV
-    We load elements beyond Q_LEN w/ zero, some score mods may convert this elements to NaN
+    We load elements beyond Q_LEN w/ zero, some score mods may convert these elements to NaN
     Example: lambda x, *_: 1 / score, this NaN would propagate regardless of other masking
     We only need to do this on the m1 dim since these elements take part in the final reduction
     for DK/DV #}
@@ -662,6 +738,16 @@ def bwd_dkdv_block_mn(
             h="off_hq",
             m="m",
             n="n",
+            input_shapes={
+                "m": ("1", "BLOCK_M1"),
+                "n": ("BLOCK_N1", "1"),
+            },
+            input_dtypes={
+                "b": "index",
+                "h": "index",
+                "m": "index",
+                "n": "index",
+            }
         ) | indent_except_first(2) }}
         # (grads) apply mask for fully masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
@@ -675,7 +761,7 @@ def bwd_dkdv_block_mn(
         [(q_start + offset).to(tl.int32), 0],
     )
     {%- else %}
-    do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
+    do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM, INDEX_DTYPE)
     {%- endif %}
     # Compute dV.
     ppT = pT
@@ -696,7 +782,19 @@ def bwd_dkdv_block_mn(
         h="off_hq",
         m="m",
         n="n",
-        grad_score_mod="dsT"
+        grad_score_mod="dsT",
+        input_shapes={
+            "score": ("BLOCK_N1", "BLOCK_M1"),
+            "grad_score_mod": ("BLOCK_N1", "BLOCK_M1"),
+            "m": ("1", "BLOCK_M1"),
+            "n": ("BLOCK_N1", "1"),
+        },
+        input_dtypes={
+            "b": "index",
+            "h": "index",
+            "m": "index",
+            "n": "index",
+        }
     ) | indent_except_first(1) }}
 
     {# See Note: Selective masking DK/DV#}
@@ -714,7 +812,20 @@ def bwd_dkdv_block_mn(
             subgraph_number=3,
             output_name=None,
             mask="scatter_mask",
-            input_shapes={"idx_m": ("1", "BLOCK_M1"), "idx_n": ("BLOCK_N1", "1"), "idx_b": ("1", "1"), "idx_h": ("1", "1")},
+            input_shapes={
+                "score": ("BLOCK_N1", "BLOCK_M1"),
+                "grad_score_mod": ("BLOCK_N1", "BLOCK_M1"),
+                "m": ("1", "BLOCK_M1"),
+                "n": ("BLOCK_N1", "1"),
+                "b": ("1", "1"),
+                "h": ("1", "1"),
+            },
+            input_dtypes={
+                "b": "index",
+                "h": "index",
+                "m": "index",
+                "n": "index",
+            },
             score="pre_mod_scores",
             b="idx_b",
             h="idx_h",

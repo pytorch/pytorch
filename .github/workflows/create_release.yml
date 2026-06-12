@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng"]
 name: Create Release
 
 on:
@@ -82,7 +83,7 @@ jobs:
           cp -r "$PWD" "/tmp/$PT_RELEASE_NAME"
           mv "/tmp/$PT_RELEASE_NAME" .
           # Cleanup
-          rm -rf "$PT_RELEASE_NAME"/{.circleci,.ci}
+          rm -rf "$PT_RELEASE_NAME"/.ci
           find "$PT_RELEASE_NAME" -name '.git*' -exec rm -rv {} \; || true
           # Create archive
           tar -czf "$PT_RELEASE_FILE" "$PT_RELEASE_NAME"

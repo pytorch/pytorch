@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 name: inductor-perf-nightly-x86-zen
 
 on:
@@ -61,6 +62,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   get-label-type:

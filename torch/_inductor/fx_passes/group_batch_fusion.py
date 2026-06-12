@@ -15,7 +15,9 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     CallFunctionVarArgs,
+    CallMethodVarArgs,
     get_arg_value,
+    MatchResult,
     stable_topological_sort,
 )
 from ..utils import OPTIMUS_EXCLUDE_POST_GRAD
@@ -347,7 +349,8 @@ class GroupLinearFusion(GroupFusion):
             if CallFunctionVarArgs(aten.addmm.default).match(node):
                 bias, input, weight = node.args
             else:
-                assert CallFunctionVarArgs(aten.mm.default).match(node)
+                if not CallFunctionVarArgs(aten.mm.default).match(node):
+                    raise AssertionError(f"expected aten.mm node, got {node}")
                 input, weight = node.args
                 bias = None
 
@@ -493,7 +496,7 @@ class BatchLinearLHSFusion(BatchFusion):
     """
 
     def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
-        if CallFunctionVarArgs(torch.nn.functional.linear).match(
+        if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
@@ -517,7 +520,10 @@ class BatchLinearLHSFusion(BatchFusion):
             if batch_input is None:
                 batch_input = input
             else:
-                assert batch_input is input
+                if batch_input is not input:
+                    raise AssertionError(
+                        f"expected batch_input to be input, got {batch_input}"
+                    )
             batch_weights.append(weight)
             batch_weights_meta.append(weight.meta["example_value"])
             if bias:
@@ -610,7 +616,7 @@ def is_linear_node_can_be_fused(node: torch.fx.Node):
 class PreGradBatchLinearFusion(BatchFusion):
     """
     Batch linear fusion in pre grad pass.
-    Fuse linear with same size with torch.baddmm
+    Fuse linear with same size with torch.baddbmm
     """
 
     def _getitem_args(self, getitem_node: torch.fx.Node):
@@ -621,7 +627,7 @@ class PreGradBatchLinearFusion(BatchFusion):
         return getitem_node.args[0]
 
     def match(self, node: torch.fx.Node):
-        if CallFunctionVarArgs(torch.nn.functional.linear).match(
+        if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
@@ -715,7 +721,7 @@ class PreGradBatchLinearFusion(BatchFusion):
                     bmm_meta = bmm.meta["example_value"]
                 except Exception as e:
                     log.debug(
-                        f" exception when update bmm meta data with stack error tracekey {e}"  # noqa: G004
+                        f" exception when update bmm meta data with stack error traceback {e}"  # noqa: G004
                     )
                     bmm_meta = None
 
@@ -801,9 +807,8 @@ class BatchLayernormFusion(BatchFusion):
             group_biases = None  # type: ignore[assignment]
         if all(weight is None for weight in group_weights):
             group_weights = None  # type: ignore[assignment]
-        assert all(eps == group_epss[0] for eps in group_epss), (
-            "all epsilon values must be equal"
-        )
+        if not all(eps == group_epss[0] for eps in group_epss):
+            raise AssertionError("all epsilon values must be equal")
 
         with graph.inserting_before(subset[0]):  # type: ignore[operator]
             stack_input = graph.call_function(  # type: ignore[operator]
@@ -1057,7 +1062,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
 
     def match(self, node: torch.fx.Node):
         input = get_arg_value(node, 0, "input")
-        if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
+        if self._match_op(node) and is_node_meta_valid(node):
             # check the input has the same shape and its users have the same target
             # check all clamp operators have the same min and max values, and
             # nan_to_num operators use the same default value.
@@ -1070,6 +1075,9 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         else:
             group_key = None
         return group_key
+
+    def _match_op(self, node: torch.fx.Node) -> MatchResult:
+        return CallFunctionVarArgs(self.op).match(node)
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_nodes = []
@@ -1133,6 +1141,11 @@ class BatchReLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
 class BatchDetachPreGradFusion(BatchMathOpsPreGradFusion):
     def __init__(self, **kwargs):
         super().__init__(torch.detach, **kwargs)
+
+    def _match_op(self, node: torch.fx.Node) -> MatchResult:
+        return CallFunctionVarArgs(torch.detach).match(node) or CallMethodVarArgs(
+            "detach"
+        ).match(node)
 
 
 @register_fusion("batch_nan_to_num")
@@ -1371,7 +1384,8 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
         if isinstance(gm, _LazyGraphModule):
             _LazyGraphModule.recompile()
         else:
-            assert isinstance(gm, torch.fx.GraphModule)
+            if not isinstance(gm, torch.fx.GraphModule):
+                raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
             gm.recompile()
         graph_str = gm.print_readable(
             print_output=False, include_stride=True, include_device=True
@@ -1435,7 +1449,7 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
 
     for i, rule in enumerate(fusions):
         with GraphTransformObserver(
-            graph.owning_module,
+            graph.owning_module,  # pyrefly: ignore[bad-argument-type]
             f"group_batch_fusion_{i}",
         ):
             apply_group_batch_fusion(graph, rule)  # type: ignore[arg-type]

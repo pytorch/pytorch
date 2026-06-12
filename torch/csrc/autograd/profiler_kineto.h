@@ -8,6 +8,10 @@
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
+namespace libkineto {
+struct ITraceActivity;
+}
+
 namespace torch {
 
 namespace profiler::impl {
@@ -58,6 +62,10 @@ struct TORCH_API KinetoEvent {
   bool isAsync() const;
   uint64_t correlationId() const;
   uint64_t linkedCorrelationId() const;
+  uint32_t flowId() const;
+  uint32_t flowType() const;
+  bool flowStart() const;
+  int64_t externalId() const;
   int64_t deviceResourceId() const;
   std::string backend() const;
   bool isPythonFunction() const;
@@ -66,6 +74,14 @@ struct TORCH_API KinetoEvent {
   void getPerfEventCounters(torch::profiler::perf_counters_t& /*in*/) const;
   extra_meta_t extraMeta() const;
   std::string metadataJson() const;
+
+  const c10::ArrayRef<torch::profiler::impl::shape> structuredInputShapes()
+      const;
+  const c10::ArrayRef<torch::profiler::impl::shape> structuredInputStrides()
+      const;
+  int64_t pythonId() const;
+  int64_t pythonParentId() const;
+  int64_t pythonModuleId() const;
 
  private:
   torch::profiler::impl::ProfilerVoidEventStub fallbackStart() const;
@@ -79,6 +95,8 @@ struct TORCH_API KinetoEvent {
   std::vector<std::string> dtypes_;
   std::vector<c10::IValue> concrete_inputs_;
   std::unordered_map<std::string, c10::IValue> kwinputs_;
+  std::vector<torch::profiler::impl::shape> structured_input_shapes_;
+  std::vector<torch::profiler::impl::shape> structured_input_strides_;
 };
 
 // Consolidating events returned directly from Kineto
@@ -107,6 +125,9 @@ struct TORCH_API ProfilerResult {
   }
 
   void save(const std::string& path);
+#ifdef USE_KINETO
+  const std::vector<const libkineto::ITraceActivity*>* traceActivities();
+#endif
 
  private:
   uint64_t trace_start_ns_ = 0;
@@ -179,9 +200,13 @@ TORCH_API void enableProfilerWithEventPostProcess(
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
+using ActivityFilter = std::unordered_map<
+    torch::profiler::impl::ActivityType,
+    std::unordered_set<std::string>>;
 TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
-    const std::set<torch::profiler::impl::ActivityType>& activities);
+    const std::set<torch::profiler::impl::ActivityType>& activities,
+    const ActivityFilter& activity_filter = {});
 
 TORCH_API void toggleCollectionDynamic(
     const bool enable,

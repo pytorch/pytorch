@@ -56,54 +56,6 @@ with open(filename) as fh:
         TIMM_MODELS[model_name] = int(batch_size)
 
 
-# TODO - Figure out the reason of cold start memory spike
-
-BATCH_SIZE_DIVISORS = {
-    "beit_base_patch16_224": 2,
-    "deit_base_distilled_patch16_224": 2,
-    "gluon_xception65": 2,
-    "mobilevit_s": 2,
-    "swin_base_patch4_window7_224": 2,
-}
-
-REQUIRE_HIGHER_TOLERANCE = {
-    "inception_v3",
-    "mobilenetv3_large_100",
-    "convnextv2_nano.fcmae_ft_in22k_in1k",
-}
-
-REQUIRE_HIGHER_TOLERANCE_FP16_XPU = {
-    "botnet26t_256",
-}
-
-REQUIRE_HIGHER_TOLERANCE_AMP = {}
-
-REQUIRE_EVEN_HIGHER_TOLERANCE = {
-    "deit_base_distilled_patch16_224",
-    "vit_base_patch16_siglip_256",
-}
-
-# These models need higher tolerance in MaxAutotune mode
-REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE = {}
-
-REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {
-    "adv_inception_v3",
-}
-
-SCALED_COMPUTE_LOSS = {
-    "mobilevit_s",
-}
-
-FORCE_AMP_FOR_FP16_BF16_MODELS = {}
-
-SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {}
-
-REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
-    "inception_v3",
-    "mobilenetv3_large_100",
-}
-
-
 def refresh_model_names():
     import glob
 
@@ -191,6 +143,11 @@ class TimmRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
+        # Sentinel; captured lazily on first load_model call (which runs
+        # AFTER main() in common.py has applied any --inductor-config CLI
+        # overrides). Capturing eagerly here would always see the unmodified
+        # default and silently override the user-specified value.
+        self._orig_emulate_precision_casts = None
 
     @property
     def _config(self):
@@ -199,6 +156,26 @@ class TimmRunner(BenchmarkRunner):
     @property
     def _skip(self):
         return self._config["skip"]
+
+    @property
+    def _batch_size(self):
+        return self._config["batch_size"]
+
+    @property
+    def _tolerance(self):
+        return self._config["tolerance"]
+
+    @property
+    def _accuracy(self):
+        return self._config["accuracy"]
+
+    @property
+    def _require_larger_multiplier_for_smaller_tensor(self):
+        return self._config["require_larger_multiplier_for_smaller_tensor"]
+
+    @property
+    def _emulate_precision_casts(self):
+        return self._config["emulate_precision_casts"]
 
     @property
     def skip_models_for_cpu(self):
@@ -214,7 +191,7 @@ class TimmRunner(BenchmarkRunner):
 
     @property
     def force_amp_for_fp16_bf16_models(self):
-        return FORCE_AMP_FOR_FP16_BF16_MODELS
+        return self._config["dtype"]["force_amp_for_fp16_bf16_models"]
 
     @property
     def force_fp16_for_bf16_models(self):
@@ -227,15 +204,11 @@ class TimmRunner(BenchmarkRunner):
     @property
     def skip_accuracy_check_as_eager_non_deterministic(self):
         if self.args.accuracy and self.args.training:
-            return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
+            return self._accuracy["skip"]["eager_not_deterministic"]
         return set()
 
     @property
     def guard_on_nn_module_models(self):
-        return {}
-
-    @property
-    def inline_inbuilt_nn_modules_models(self):
         return {}
 
     @download_retry_decorator
@@ -285,9 +258,10 @@ class TimmRunner(BenchmarkRunner):
         input_size = data_config["input_size"]
         recorded_batch_size = TIMM_MODELS[model_name]
 
-        if model_name in BATCH_SIZE_DIVISORS:
+        batch_size_divisors = self._batch_size["divisors"]
+        if model_name in batch_size_divisors:
             recorded_batch_size = max(
-                int(recorded_batch_size / BATCH_SIZE_DIVISORS[model_name]), 1
+                int(recorded_batch_size / batch_size_divisors[model_name]), 1
             )
         batch_size = batch_size or recorded_batch_size
 
@@ -309,15 +283,39 @@ class TimmRunner(BenchmarkRunner):
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
 
-        if model_name in SCALED_COMPUTE_LOSS:
+        if model_name in self._config["scaled_compute_loss"]:
             self.compute_loss = self.scaled_compute_loss
+
+        # See yaml note for emulate_precision_casts. This preserves the
+        # bf16 downcast-upcast pairs (fp16 untested) that inductor would
+        # otherwise elide when fusing across mixed-precision boundaries
+        # (e.g. bf16 conv-bias-add fused into an fp32 cat-prep store),
+        # which is what eager autocast actually does.
+        #
+        # Baseline is captured on the FIRST load_model call so that any
+        # --inductor-config emulate_precision_casts=... CLI override (applied
+        # by main() in common.py between __init__ and this point) is included
+        # in the baseline. Per-call assignment then sets the flag to
+        # (baseline OR model-in-yaml-list), which both preserves the user
+        # override across every model and toggles the flag back to baseline
+        # for non-listed models (no carry-over across iter_models).
+        if self._orig_emulate_precision_casts is None:
+            self._orig_emulate_precision_casts = (
+                torch._inductor.config.emulate_precision_casts
+            )
+        if self._orig_emulate_precision_casts:
+            torch._inductor.config.emulate_precision_casts = True
+        else:
+            torch._inductor.config.emulate_precision_casts = (
+                model_name in self._emulate_precision_casts
+            )
 
         if is_training and not use_eval_mode:
             model.train()
         else:
             model.eval()
 
-        self.validate_model(model, example_inputs)
+        self.validate_model(model_name, model, example_inputs)
 
         return device, model_name, model, example_inputs, batch_size
 
@@ -345,34 +343,34 @@ class TimmRunner(BenchmarkRunner):
             return torch.no_grad()
 
     def use_larger_multiplier_for_smaller_tensor(self, name):
-        return name in REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR
+        return name in self._require_larger_multiplier_for_smaller_tensor
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         tolerance = 1e-3
 
-        if self.args.freezing and name in REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING:
+        if self.args.freezing and name in self._tolerance["freezing"]:
             # the conv-batchnorm fusion used under freezing may cause relatively
-            # large numerical difference. We need are larger tolerance.
+            # large numerical difference. We need a larger tolerance.
             # Check https://github.com/pytorch/pytorch/issues/120545 for context
             tolerance = 8 * 1e-2
 
         if is_training:
             from torch._inductor import config as inductor_config
 
-            if name == "beit_base_patch16_224":
+            if name in self._tolerance["highest_training"]:
                 tolerance = 16 * 1e-2
-            elif name in REQUIRE_EVEN_HIGHER_TOLERANCE or (
+            elif name in self._tolerance["even_higher"] or (
                 inductor_config.max_autotune
-                and name in REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE
+                and name in self._tolerance["even_higher_max_autotune"]
             ):
                 tolerance = 8 * 1e-2
-            elif name in REQUIRE_HIGHER_TOLERANCE or (
-                self.args.amp and name in REQUIRE_HIGHER_TOLERANCE_AMP
+            elif name in self._tolerance["higher_training"] or (
+                self.args.amp and name in self._tolerance["higher_amp"]
             ):
                 tolerance = 4 * 1e-2
             elif (
-                name in REQUIRE_HIGHER_TOLERANCE_FP16_XPU
+                name in self._tolerance["higher_fp16_xpu"]
                 and self.args.float16
                 and current_device == "xpu"
             ):

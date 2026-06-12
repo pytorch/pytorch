@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from .triton_compat import (  # noqa: F401
+from .triton_compat import (
     _log2,
     builtins_use_semantic_kwarg,
     JITFunction,
@@ -34,10 +34,27 @@ def set_driver_to_cpu():
     )
 
 
+def _is_backend_active(name, backend):
+    if backend.driver.is_active():
+        return True
+    # Triton may fail to detect the GPU in subprocess workers when using
+    # ctypes-based driver detection (triton-lang/triton#9578). Fall back
+    # to torch's own device checks which are more reliable in these environments.
+    if name == "nvidia":
+        import torch
+
+        return torch.cuda.is_available() and torch.version.hip is None
+    if name == "amd":
+        import torch
+
+        return torch.cuda.is_available() and torch.version.hip is not None
+    return False
+
+
 def set_driver_to_gpu():
     driver = triton.runtime.driver
     for name, backend in triton.backends.backends.items():
-        if backend.driver.is_active() and name != "cpu":
+        if _is_backend_active(name, backend) and name != "cpu":
             # After https://github.com/triton-lang/triton/commit/b844d519bc5e86edf00fe6b3c6c2d1badcd509a4,
             # `driver.active` can be of `LazyProxy` type and the sign of this - `_obj` attribute.
             if (
@@ -72,6 +89,25 @@ def promote_to_tensor(x):
 
 
 @triton.jit
+def fp8e4m3fn_to_float32(x):
+    x_u32 = x.to(tl.uint32)
+    sign = (x_u32 & 0x80) << 24
+    exp = (x_u32 >> 3) & 0xF
+    mant = x_u32 & 0x7
+
+    normal_bits = sign | ((exp + 120) << 23) | (mant << 20)
+    normal = normal_bits.to(tl.float32, bitcast=True)
+
+    subnormal_abs = mant.to(tl.float32) * 0.001953125
+    subnormal_bits = subnormal_abs.to(tl.uint32, bitcast=True) | sign
+    subnormal = subnormal_bits.to(tl.float32, bitcast=True)
+
+    nan = (sign | 0x7FF00000).to(tl.float32, bitcast=True)
+    result = tl.where(exp == 0, subnormal, normal)
+    return tl.where((exp == 0xF) & (mant == 0x7), nan, result)
+
+
+@triton.jit
 def div_floor_integer(a, b):
     # NOTE: a // b is C division, but we want floor division
     # Based on c10::div_floor_integer
@@ -86,6 +122,23 @@ def remainder_integer(a, b):
     # NOTE: a % b matches C division, not floor division
     remainder = a % b
     return tl.where((remainder != 0) & ((a < 0) != (b < 0)), remainder + b, remainder)
+
+
+@triton.jit
+def pow_integer(base, exponent):
+    # Triton has no exact integer pow primitive; use repeated squaring for
+    # nonnegative integer exponents so integral scalar pow does not round
+    # through libdevice.pow before casting back to int.
+    exponent_dtype: tl.constexpr = tl.core.get_int_dtype(
+        exponent.dtype.primitive_bitwidth, signed=False
+    )
+    exp = exponent.to(exponent_dtype)
+    result = tl.full(base.shape, 1, base.dtype)
+    for _ in tl.static_range(exponent_dtype.primitive_bitwidth):
+        result = tl.where((exp & 1) != 0, result * base, result)
+        exp = exp >> 1
+        base = base * base
+    return result
 
 
 @triton.jit
@@ -213,6 +266,23 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
 
 
 @triton.jit
+def online_softmax_combine_with_sum(
+    lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math: tl.constexpr
+):
+    out_max = maximum(lhs_max, rhs_max)
+
+    lhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    )
+    rhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
+    )
+
+    out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    return out_max, out_sum
+
+
+@triton.jit
 def welford_reduce(value, mean, m2, weight, first_iteration):
     if first_iteration:
         new_weight = tl.full(weight.shape, 1, weight.dtype)
@@ -228,7 +298,9 @@ def welford_reduce(value, mean, m2, weight, first_iteration):
 
 @triton.jit
 def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
-    delta = mean_2 - mean_1
+    # Guard against inf - inf = NaN when both means are infinite and equal.
+    # This occurs during FP16/BF16 LayerNorm when inputs overflow to inf.
+    delta = tl.where(mean_1 == mean_2, 0.0, mean_2 - mean_1)
     new_weight = weight_1 + weight_2
     w2_over_w = tl.where(new_weight == 0.0, 0.0, weight_2 / new_weight)
     return (
@@ -247,6 +319,65 @@ def welford(mean, m2, weight, dim):
 def device_assert_then(cond, msg, r):
     tl.device_assert(cond, msg)
     return r
+
+
+@triton.jit
+def rand_eager_kernel(seed, offset_blocks, tid: tl.tensor, VEC: tl.constexpr):
+    inv = 1.0 / 4294967296.0
+    half = inv * 0.5
+
+    tid_u64 = tid.to(tl.uint64)
+
+    subseq = tid_u64 // VEC
+    which4 = (tid_u64 % VEC) // 4
+    lane = tid_u64 % 4
+
+    offblk = offset_blocks.to(tl.uint64) + which4
+
+    u0, u1, u2, u3 = tl.philox(
+        seed,
+        (offblk & 0xFFFFFFFF).to(tl.uint32),
+        ((offblk >> 32) & 0xFFFFFFFF).to(tl.uint32),
+        (subseq & 0xFFFFFFFF).to(tl.uint32),
+        ((subseq >> 32) & 0xFFFFFFFF).to(tl.uint32),
+    )
+
+    v01 = tl.where(lane == 0, u0, u1)
+    v23 = tl.where(lane == 2, u2, u3)
+    rand_int = tl.where((lane == 0) | (lane == 1), v01, v23)
+
+    return 1.0 - (rand_int.to(tl.float32) * inv + half)
+
+
+@triton.jit
+def _random_4x_to_block(r0, r1, r2, r3):
+    # Pack lanes by logical offset so the random stream is independent of XBLOCK.
+    size: tl.constexpr = r0.numel
+    return tl.reshape(tl.join(tl.join(r0, r2), tl.join(r1, r3)), [size * 4])
+
+
+@triton.jit
+def rand4x(seed, offsets, BLOCK: tl.constexpr):
+    offsets = offsets.to(tl.uint32)
+    seed = tl.min(seed + offsets * 0, axis=0)
+    if BLOCK >= 4 and BLOCK % 4 == 0:
+        base = tl.min(offsets, axis=0)
+        reduced_offsets = base // 4 + tl.arange(0, BLOCK // 4)
+        r0, r1, r2, r3 = tl.rand4x(seed, reduced_offsets)
+        return _random_4x_to_block(r0, r1, r2, r3)
+    return tl.rand(seed, offsets)
+
+
+@triton.jit
+def randn4x(seed, offsets, BLOCK: tl.constexpr):
+    offsets = offsets.to(tl.uint32)
+    seed = tl.min(seed + offsets * 0, axis=0)
+    if BLOCK >= 4 and BLOCK % 4 == 0:
+        base = tl.min(offsets, axis=0)
+        reduced_offsets = base // 4 + tl.arange(0, BLOCK // 4)
+        r0, r1, r2, r3 = tl.randn4x(seed, reduced_offsets)
+        return _random_4x_to_block(r0, r1, r2, r3)
+    return tl.randn(seed, offsets)
 
 
 @triton.jit
@@ -341,6 +472,9 @@ def bucketize_binary_search(
             is_above = values >= bucket_upper_bound
         else:
             is_above = values > bucket_upper_bound
+
+        if is_floating(values):
+            is_above = is_above | (values != values)
 
         low = tl.where(is_above & mask, mid + 1, low)
         high = tl.where(is_above, high, mid)
@@ -514,9 +648,13 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 @triton.jit
 def frexp(x):
     # TODO(isuruf): use inline_asm_elementwise here
-    y = libdevice.ilogb(x) + 1
-    exponent = tl.where(x == 0, 0, y)
-    mantissa = tl.where(x == 0, 0, libdevice.ldexp(x, -y))
+    zero = x == 0
+    not_finite = libdevice.isinf(x).to(tl.int1) | libdevice.isnan(x).to(tl.int1)
+    special = zero | not_finite
+    safe_x = tl.where(special, 1.0, x)
+    y = libdevice.ilogb(safe_x) + 1
+    exponent = tl.where(special, 0, y)
+    mantissa = tl.where(zero, 0, tl.where(not_finite, x, libdevice.ldexp(safe_x, -y)))
     return mantissa, exponent
 
 
@@ -746,7 +884,8 @@ def constexpr_next_power_of_2(
     """
     A version triton.next_power_of_two that can be used within a kernel on constants.
     """
-    assert isinstance(n, tl.constexpr)
+    if not isinstance(n, tl.constexpr):
+        raise AssertionError(f"Expected tl.constexpr, got {type(n)}")
     return tl.constexpr(triton.next_power_of_2(n.value))
 
 
@@ -759,3 +898,27 @@ def if_mask(mask: Any, val, *, _builder: object = None) -> tl.constexpr:
     if isinstance(mask, tl.constexpr) and mask.value is None:
         return tl.constexpr(None)
     return val
+
+
+@triton.jit
+def inline_asm_pack(x, pack: tl.constexpr):
+    """Ravel to 1D and pad (via join with zeros) so numel is divisible by pack."""
+    result = x.ravel()
+    # Only pad when the block size is smaller than pack. When block >= pack
+    # the numel is already divisible by pack (both are powers of 2).
+    n_pad: tl.constexpr = _log2(pack) - _log2(result.numel)
+    for _ in tl.static_range(n_pad):
+        result = tl.reshape(
+            tl.join(result, tl.zeros_like(result)), (result.shape[0] * 2,)
+        )
+    return result
+
+
+@triton.jit
+def inline_asm_unpack(x, orig, pack: tl.constexpr):
+    """Unpad and reshape back to orig's shape."""
+    result = x
+    n_pad: tl.constexpr = _log2(pack) - _log2(orig.numel)
+    for _ in tl.static_range(n_pad):
+        result, _ = tl.split(tl.reshape(result, (result.shape[0] // 2, 2)))
+    return tl.reshape(result, orig.shape)

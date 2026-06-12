@@ -30,7 +30,7 @@ __all__ = [
     "Module",
 ]
 
-_grad_t = Union[tuple[Tensor, ...], Tensor]
+_grad_t = tuple[Tensor, ...] | Tensor
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
@@ -817,7 +817,7 @@ class Module:
                 raise AttributeError("`" + atoms[-1] + "` is not an nn.Module")
         setattr(parent, atoms[-1], module)
 
-    def get_parameter(self, target: str) -> "Parameter":
+    def get_parameter(self, target: str) -> Parameter:
         """Return the parameter given by ``target`` if it exists, otherwise throw an error.
 
         See the docstring for ``get_submodule`` for a more detailed
@@ -853,7 +853,7 @@ class Module:
 
         return param
 
-    def get_buffer(self, target: str) -> "Tensor":
+    def get_buffer(self, target: str) -> Tensor:
         """Return the buffer given by ``target`` if it exists, otherwise throw an error.
 
         See the docstring for ``get_submodule`` for a more detailed
@@ -2520,7 +2520,7 @@ class Module:
             for key in state_dict:
                 if key.startswith(prefix) and key != extra_state_key:
                     input_name = key[len(prefix) :].split(".", 1)
-                    # Must be Module if it have attributes
+                    # Must be Module if it has attributes
                     if len(input_name) > 1:
                         if input_name[0] not in self._modules:
                             unexpected_keys.append(key)
@@ -2610,8 +2610,8 @@ class Module:
                 out = hook(module, incompatible_keys)
                 if out is not None:
                     raise AssertionError(
-                        "Hooks registered with ``register_load_state_dict_post_hook`` are not"
-                        "expected to return new values, if incompatible_keys need to be modified,"
+                        "Hooks registered with ``register_load_state_dict_post_hook`` are not "
+                        "expected to return new values, if incompatible_keys need to be modified, "
                         "it should be done inplace."
                     )
 

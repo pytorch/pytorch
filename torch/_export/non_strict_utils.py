@@ -9,7 +9,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import torch
 import torch.utils._pytree as pytree
@@ -25,7 +25,8 @@ from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_value
+from torch._opaque_base import OpaqueBase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -177,7 +178,7 @@ def fakify(
     if (
         _is_constant_argument(t)
         or isinstance(t, (torch.ScriptObject, torch.nn.Module))
-        or is_opaque_type(type(t))
+        or is_opaque_value(t)
     ):
         return t
 
@@ -257,11 +258,18 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
 
         # Propagate outer tensor constraints to inner tensors if not already present
         for attr in attrs:
-            inner_tensor = getattr(t, attr)
-            inner_source = AttrSource(source, attr)
-            inner_contexts[attr] = _create_symbolic_context_for_tensor(
-                inner_tensor, inner_source, t_constraints, sources, mode
-            )
+            match getattr(t, attr):
+                case torch.Tensor() as inner_value:
+                    inner_source = AttrSource(source, attr)
+                    inner_contexts[attr] = _create_symbolic_context_for_tensor(
+                        inner_value, inner_source, t_constraints, sources, mode
+                    )
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
 
         symbolic_context = SubclassSymbolicContext(
             dynamic_sizes=dynamic_sizes,
@@ -532,13 +540,15 @@ def _flatten_dynamic_shapes(
 
 
 def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
-    for attr in [
+    for attr in (
         "_dynamo_weak_dynamic_indices",
         "_dynamo_dynamic_indices",
         "_dynamo_dynamic_range",
         "_dynamo_static_indices",
         "_dynamo_unbacked_indices",
-    ]:
+        "_dynamo_propagated_dynamic_indices",
+        "_has_dynamo_dim_marking",
+    ):
         if hasattr(tensor, attr):
             delattr(tensor, attr)
 
@@ -615,7 +625,7 @@ def produce_guards_and_solve_constraints(
         raise constraint_violation_error
 
 
-def is_int(x: object) -> bool:
+def is_int(x: object) -> TypeGuard[int | torch.SymInt]:
     return isinstance(x, int) or (isinstance(x, torch.SymInt) and x.node.expr.is_number)
 
 
@@ -984,7 +994,7 @@ def _fakify_script_objects(
         for obj, fqns in constant_attrs.items():
             if torch._library.fake_class_registry._is_script_object(
                 obj
-            ) or is_opaque_type(obj):
+            ) or is_opaque_value(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
@@ -1055,6 +1065,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 args = ()
                 if func in (
                     torch.distributed.all_reduce,
+                    torch.distributed.reduce_scatter_single,
                     torch.distributed.reduce_scatter_tensor,
                     torch.distributed._reduce_scatter_base,
                 ):
@@ -1073,20 +1084,51 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 return torch._refs.tensor, args, kwargs
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
 
+            def is_scalar_tensor_index(item):
+                if not isinstance(item, torch.Tensor) or item.ndim != 0:
+                    return False
+
+                from torch._prims_common import is_integer_dtype
+
+                return is_integer_dtype(item.dtype)
+
+            def maybe_tensor_index_item(item):
+                if is_scalar_tensor_index(item):
+                    return item.item()
+                return item
+
             def rewrite(dim, item):
                 # Redirect to torch.select for indexing.
                 if item is None:
                     return dim + 1, (torch.unsqueeze, [dim])
                 if isinstance(item, (int, torch.SymInt)):
                     return dim, (torch.select, [dim, item])
+                if is_scalar_tensor_index(item):
+                    return dim, (
+                        lambda t, dim, item: torch.select(
+                            t, dim, maybe_tensor_index_item(item)
+                        ),
+                        [dim, item],
+                    )
                 # Redirect to torch.ops.aten.slice for slicing.
                 if isinstance(item, slice):
-                    step = item.step or 1
-                    if item.start is None and item.stop is None and step == 1:
+                    step = 1 if item.step is None else item.step
+                    if (
+                        item.start is None
+                        and item.stop is None
+                        and isinstance(step, int)
+                        and step == 1
+                    ):
                         # no-op
                         return dim + 1, (lambda t: t, [])
                     return dim + 1, (
-                        torch.ops.aten.slice,
+                        lambda t, dim, start, stop, step: torch.ops.aten.slice(
+                            t,
+                            dim,
+                            maybe_tensor_index_item(start),
+                            maybe_tensor_index_item(stop),
+                            maybe_tensor_index_item(step),
+                        ),
                         [dim, item.start, item.stop, step],
                     )
                 # Otherwise do nothing.
@@ -1098,12 +1140,16 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             t = args[0]
             n_none_slices = t.ndim + 1
             for i, item in enumerate(items):
-                if isinstance(item, torch.SymInt) or (
-                    isinstance(item, slice)
-                    and any(
-                        isinstance(s, torch.SymInt)
-                        for s in (item.start, item.stop, item.step)
+                if (
+                    isinstance(item, torch.SymInt)
+                    or (
+                        isinstance(item, slice)
+                        and any(
+                            isinstance(s, torch.SymInt) or is_scalar_tensor_index(s)
+                            for s in (item.start, item.stop, item.step)
+                        )
                     )
+                    or is_scalar_tensor_index(item)
                 ):
                     has_symint = True
                 if item is Ellipsis:

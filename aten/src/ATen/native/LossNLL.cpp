@@ -502,14 +502,14 @@ static Tensor cross_entropy_loss_prob_target(
     int64_t reduction,
     double label_smoothing) {
   const auto class_dim = self.dim() == 1 ? 0 : 1;
-  const auto n_classes = self.size(class_dim);
+  const auto n_classes = self.sym_size(class_dim);
   TORCH_CHECK(
-      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
+      !weight.defined() || (weight.dim() == 1 && weight.sym_numel() == n_classes),
       "cross_entropy: weight tensor should be defined either for all ",
       n_classes,
       " classes or no classes"
       " but got weight tensor of shape: ",
-      weight.sizes());
+      weight.sym_sizes());
 
   auto input = at::log_softmax(self, class_dim, self.scalar_type());
   Tensor target;
@@ -686,9 +686,21 @@ Tensor nll_loss_nd_symint(
         false, "Expected 1 or more dimensions (got ", self.dim(), ")");
   }
 
-  if (self.dim() != 1 && self.sym_sizes()[0] != target.sym_sizes()[0]) {
-    TORCH_CHECK_VALUE(
-        false,
+  if (self.dim() != 1) {
+    auto sizes_match = self.sym_sizes()[0].sym_eq(target.sym_sizes()[0]);
+    if (TORCH_GUARD_OR_FALSE(sizes_match.sym_not())) {
+      // Statically known mismatch - raise ValueError for eager mode
+      TORCH_CHECK_VALUE(
+          false,
+          "Expected input batch_size (",
+          self.sym_sizes()[0],
+          ") to match target batch_size (",
+          target.sym_sizes()[0],
+          ").");
+    }
+    // For unbacked symbolic shapes, emit runtime check.
+    TORCH_SYM_CHECK(
+        sizes_match,
         "Expected input batch_size (",
         self.sym_sizes()[0],
         ") to match target batch_size (",

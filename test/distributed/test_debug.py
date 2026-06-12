@@ -2,8 +2,13 @@
 
 import os
 import shutil
+import socket
 import tempfile
+import threading
 import time
+import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from unittest.mock import patch
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -15,11 +20,24 @@ import torch.distributed.debug as debug_module
 from torch.distributed.debug import start_debug_server, stop_debug_server
 from torch.distributed.debug._frontend import (
     DebugHandler,
+    fetch_thread_pool,
+    format_fetch_summary,
     NavLink,
     PeriodicDumper,
+    Response,
     Route,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+try:
+    import aiohttp  # noqa: F401  # type: ignore[import]
+
+    from torch.distributed.debug._frontend import fetch_aiohttp
+
+    HAS_AIOHTTP = True
+except ImportError:
+    HAS_AIOHTTP = False
 
 
 session = requests.Session()
@@ -255,6 +273,371 @@ class TestPeriodicDumper(TestCase):
             dumper.start()
             dumper.stop()
             dumper.stop()
+
+
+class TestFetchUnavailableWorkers(TestCase):
+    @staticmethod
+    def _get_refused_port() -> int:
+        """Return a port that will refuse connections."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("localhost", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        return port
+
+    def test_fetch_thread_pool_connection_refused(self) -> None:
+        port = self._get_refused_port()
+        resps = fetch_thread_pool(
+            [f"http://localhost:{port}/handler/ping"], timeout=1.0
+        )
+        self.assertEqual(len(resps), 1)
+        self.assertEqual(resps[0].status_code, 503)
+        self.assertIn("ConnectionError:", resps[0].text)
+
+    def test_fetch_thread_pool_timeout(self) -> None:
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("localhost", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+        try:
+            resps = fetch_thread_pool(
+                [f"http://localhost:{port}/handler/ping"], timeout=0.5
+            )
+            self.assertEqual(len(resps), 1)
+            self.assertEqual(resps[0].status_code, 408)
+            self.assertIn("Timeout:", resps[0].text)
+        finally:
+            server.close()
+
+    @unittest.skipUnless(HAS_AIOHTTP, "aiohttp not installed")
+    def test_fetch_aiohttp_connection_refused(self) -> None:
+        port = self._get_refused_port()
+        resps = fetch_aiohttp([f"http://localhost:{port}/handler/ping"], timeout=1.0)
+        self.assertEqual(len(resps), 1)
+        self.assertEqual(resps[0].status_code, 503)
+        self.assertIn("Error:", resps[0].text)
+
+    @unittest.skipUnless(HAS_AIOHTTP, "aiohttp not installed")
+    def test_fetch_aiohttp_timeout(self) -> None:
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("localhost", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+        try:
+            resps = fetch_aiohttp(
+                [f"http://localhost:{port}/handler/ping"], timeout=0.5
+            )
+            self.assertEqual(len(resps), 1)
+            # aiohttp may report timeout as 408 or wrap it in a ClientError (503)
+            self.assertIn(resps[0].status_code, (408, 503))
+        finally:
+            server.close()
+
+    def test_mixed_available_and_unavailable(self) -> None:
+        class _OKHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"pong")
+
+            def log_message(self, *args):
+                pass
+
+        http_server = HTTPServer(("localhost", 0), _OKHandler)
+        good_port = http_server.server_address[1]
+        t = threading.Thread(target=http_server.serve_forever, daemon=True)
+        t.start()
+
+        bad_port = self._get_refused_port()
+        try:
+            urls = [
+                f"http://localhost:{good_port}/handler/ping",
+                f"http://localhost:{bad_port}/handler/ping",
+            ]
+            resps = fetch_thread_pool(urls, timeout=1.0)
+            self.assertEqual(len(resps), 2)
+            self.assertEqual(resps[0].status_code, 200)
+            self.assertEqual(resps[0].text, "pong")
+            self.assertNotEqual(resps[1].status_code, 200)
+        finally:
+            http_server.shutdown()
+
+
+class TestFormatFetchSummary(TestCase):
+    def test_all_success_returns_none(self) -> None:
+        addrs = ["http://host0:1", "http://host1:1"]  # @lint-ignore
+        resps = [Response(200, "ok"), Response(200, "ok")]
+        self.assertIsNone(format_fetch_summary(addrs, resps))
+
+    def test_partial_failure(self) -> None:
+        addrs = ["http://h0:1", "http://h1:1", "http://h2:1"]  # @lint-ignore
+        resps = [
+            Response(200, "ok"),
+            Response(503, "Worker unavailable"),
+            Response(200, "ok"),
+        ]
+        summary = format_fetch_summary(addrs, resps)
+        self.assertIsNotNone(summary)
+        self.assertIn("PARTIAL DATA", summary)
+        self.assertIn("2/3", summary)
+        self.assertIn("Rank 1", summary)
+
+    def test_all_failed(self) -> None:
+        addrs = ["http://h0:1", "http://h1:1"]  # @lint-ignore
+        resps = [Response(503, "unavailable"), Response(408, "timeout")]
+        summary = format_fetch_summary(addrs, resps)
+        self.assertIsNotNone(summary)
+        self.assertIn("0/2", summary)
+
+    def test_timeout_message_included(self) -> None:
+        addrs = ["http://h0:1"]  # @lint-ignore
+        resps = [Response(408, "Request timed out after 10.0s")]
+        summary = format_fetch_summary(addrs, resps)
+        self.assertIn("timed out", summary)
+
+
+class TestFetchTimeout(TestCase):
+    def test_handler_default_fetch_timeout(self) -> None:
+        from torch.distributed.debug._frontend import _DEFAULT_FETCH_TIMEOUT
+
+        handler = _StubHandler("test", "data")
+        self.assertEqual(handler.fetch_timeout, _DEFAULT_FETCH_TIMEOUT)
+
+    def test_handler_fetch_timeout_override(self) -> None:
+        handler = _StubHandler("test", "data")
+        handler.fetch_timeout = 5.0
+        self.assertEqual(handler.fetch_timeout, 5.0)
+
+    def test_fetch_all_requires_timeout(self) -> None:
+        from torch.distributed.debug._frontend import fetch_all
+
+        with self.assertRaises(TypeError):
+            # fetch_all requires timeout as a keyword-only argument
+            fetch_all("test_endpoint")  # type: ignore[call-arg]
+
+
+class TestHandlerPartialDumps(TestCase):
+    import torch.distributed.debug._debug_handlers
+
+    @patch("torch.distributed.debug._debug_handlers.fetch_all")
+    def test_stacks_handler_partial_dump(self, mock_fetch_all) -> None:
+        from torch.distributed.debug._debug_handlers import StacksHandler
+
+        mock_fetch_all.return_value = (
+            [
+                "http://h0:1/handler/dump_traceback?",  # @lint-ignore
+                "http://h1:1/handler/dump_traceback?",  # @lint-ignore
+            ],
+            [Response(200, "stack0"), Response(503, "Worker unavailable")],
+        )
+        handler = StacksHandler()
+        content = handler.dump()
+        self.assertIn("PARTIAL DATA", content)
+        self.assertIn("1/2", content)
+        self.assertIn("stack0", content)
+        self.assertIn("Error: 503", content)
+
+    @patch("torch.distributed.debug._debug_handlers.fetch_all")
+    def test_stacks_handler_all_success(self, mock_fetch_all) -> None:
+        from torch.distributed.debug._debug_handlers import StacksHandler
+
+        mock_fetch_all.return_value = (
+            [
+                "http://h0:1/handler/dump_traceback?",  # @lint-ignore
+                "http://h1:1/handler/dump_traceback?",  # @lint-ignore
+            ],
+            [Response(200, "stack0"), Response(200, "stack1")],
+        )
+        handler = StacksHandler()
+        content = handler.dump()
+        self.assertNotIn("PARTIAL", content)
+        self.assertIn("stack0", content)
+        self.assertIn("stack1", content)
+
+    def test_periodic_dumper_writes_partial_data(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            partial_content = (
+                "PARTIAL DATA: 1/2 workers responded\n"
+                "  Rank 1: Worker unavailable\n"
+                "\n"
+                "=== Rank 0 ===\ndata0\n"
+                "=== Rank 1 ===\nError: 503"
+            )
+            h = _StubHandler("partial_stacks", partial_content)
+            dumper = PeriodicDumper([h], tmp, interval_seconds=0.1)
+            dumper.start()
+            time.sleep(0.25)
+            dumper.stop()
+
+            files = os.listdir(tmp)
+            self.assertGreater(len(files), 0)
+            with open(os.path.join(tmp, files[0])) as f:
+                content = f.read()
+            self.assertIn("PARTIAL DATA", content)
+            self.assertIn("1/2 workers responded", content)
+
+
+class TestTorchCommsHealthCheckHandler(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        self.handler = TorchCommsHealthCheckHandler()
+
+    def test_routes(self) -> None:
+        routes = self.handler.routes()
+        self.assertEqual(len(routes), 1)
+        self.assertEqual(routes[0].path, "/torchcomms_health_check")
+
+    def test_nav_links(self) -> None:
+        links = self.handler.nav_links()
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0].path, "/torchcomms_health_check")
+        self.assertEqual(links[0].label, "TorchComms Health")
+
+    def test_templates(self) -> None:
+        templates = self.handler.templates()
+        self.assertIn("torchcomms_health_check.html", templates)
+        self.assertIn("Health Status", templates["torchcomms_health_check.html"])
+
+    def test_dump_filename(self) -> None:
+        self.assertEqual(self.handler.dump_filename(), "torchcomms_health_check")
+
+    # -- _any_unhealthy tests --
+
+    def test_any_unhealthy_all_healthy(self) -> None:
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        resps = [
+            Response(200, '{"healthy": true}'),
+            Response(200, '{"healthy": true}'),
+        ]
+        self.assertFalse(TorchCommsHealthCheckHandler._any_unhealthy(resps))
+
+    def test_any_unhealthy_one_unhealthy(self) -> None:
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        resps = [
+            Response(200, '{"healthy": true}'),
+            Response(200, '{"healthy": false}'),
+        ]
+        self.assertTrue(TorchCommsHealthCheckHandler._any_unhealthy(resps))
+
+    def test_any_unhealthy_non_200_ignored(self) -> None:
+        """Non-200 responses (unreachable ranks) must not trigger a dump.
+
+        Only ranks that are reachable and positively report unhealthy should
+        cause an FR dump.  Treating connection failures as unhealthy would
+        cause expensive dumps whenever a single rank is temporarily unreachable.
+        """
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        resps = [Response(503, "unavailable")]
+        self.assertFalse(TorchCommsHealthCheckHandler._any_unhealthy(resps))
+
+    def test_any_unhealthy_bad_json_ignored(self) -> None:
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        resps = [Response(200, "not json")]
+        self.assertFalse(TorchCommsHealthCheckHandler._any_unhealthy(resps))
+
+    def test_any_unhealthy_missing_key_defaults_healthy(self) -> None:
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        resps = [Response(200, '{"uptime": 42}')]
+        self.assertFalse(TorchCommsHealthCheckHandler._any_unhealthy(resps))
+
+    def test_any_unhealthy_empty_list(self) -> None:
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        self.assertFalse(TorchCommsHealthCheckHandler._any_unhealthy([]))
+
+    # -- dump() tests --
+
+    @patch("torch.distributed.debug._debug_handlers.fetch_all")
+    @patch("torch.distributed.debug._debug_handlers.format_fetch_summary")
+    def test_dump_all_healthy(self, mock_summary, mock_fetch_all) -> None:
+        addrs = ["http://h0:1", "http://h1:1"]  # @lint-ignore
+        resps = [
+            Response(200, '{"healthy": true}'),
+            Response(200, '{"healthy": true}'),
+        ]
+        mock_fetch_all.return_value = (addrs, resps)
+        mock_summary.return_value = None
+
+        result = self.handler.dump()
+        self.assertIsNotNone(result)
+        self.assertIn("Rank 0", result)
+        self.assertIn("Rank 1", result)
+        self.assertNotIn("Unhealthy", result)
+        mock_fetch_all.assert_called_once()
+
+    @patch("torch.distributed.debug._debug_handlers.fetch_all")
+    @patch("torch.distributed.debug._debug_handlers.format_fetch_summary")
+    def test_dump_partial_failure(self, mock_summary, mock_fetch_all) -> None:
+        addrs = ["http://h0:1", "http://h1:1"]  # @lint-ignore
+        resps = [
+            Response(200, '{"healthy": true}'),
+            Response(503, "Worker unavailable"),
+        ]
+        mock_fetch_all.return_value = (addrs, resps)
+        mock_summary.return_value = "PARTIAL DATA: 1/2 workers responded"
+
+        result = self.handler.dump()
+        self.assertIn("PARTIAL DATA", result)
+        self.assertIn("Error: 503", result)
+        # no unhealthy rank (503 is not parsed as json), so no FR dump
+        self.assertNotIn("Unhealthy", result)
+
+    @patch("torch.distributed.debug._debug_handlers.fetch_all")
+    @patch("torch.distributed.debug._debug_handlers.format_fetch_summary")
+    def test_dump_unhealthy_triggers_fr_dump(
+        self, mock_summary, mock_fetch_all
+    ) -> None:
+        health_addrs = ["http://h0:1", "http://h1:1"]  # @lint-ignore
+        health_resps = [
+            Response(200, '{"healthy": true}'),
+            Response(200, '{"healthy": false}'),
+        ]
+        dump_addrs = ["http://h0:1", "http://h1:1"]  # @lint-ignore
+        dump_resps = [
+            Response(200, "fr_trace_rank0"),
+            Response(200, "fr_trace_rank1"),
+        ]
+        mock_fetch_all.side_effect = [
+            (health_addrs, health_resps),
+            (dump_addrs, dump_resps),
+        ]
+        mock_summary.return_value = None
+
+        result = self.handler.dump()
+        self.assertIn("Unhealthy rank detected, triggering FR dump", result)
+        self.assertIn("fr_trace_rank0", result)
+        self.assertIn("fr_trace_rank1", result)
+        self.assertEqual(mock_fetch_all.call_count, 2)
+        # second call should be for torchcomms_fr_dump_file
+        self.assertEqual(
+            mock_fetch_all.call_args_list[1][0][0], "torchcomms_fr_dump_file"
+        )
+
+    @patch("torch.distributed.debug._debug_handlers.fetch_all")
+    @patch("torch.distributed.debug._debug_handlers.format_fetch_summary")
+    def test_dump_fr_dump_partial_failure(self, mock_summary, mock_fetch_all) -> None:
+        health_addrs = ["http://h0:1"]  # @lint-ignore
+        health_resps = [Response(200, '{"healthy": false}')]
+        dump_addrs = ["http://h0:1"]  # @lint-ignore
+        dump_resps = [Response(503, "dump failed")]
+        mock_fetch_all.side_effect = [
+            (health_addrs, health_resps),
+            (dump_addrs, dump_resps),
+        ]
+        mock_summary.return_value = None
+
+        result = self.handler.dump()
+        self.assertIn("Unhealthy rank detected", result)
+        self.assertIn("Error: 503", result)
 
 
 if __name__ == "__main__":

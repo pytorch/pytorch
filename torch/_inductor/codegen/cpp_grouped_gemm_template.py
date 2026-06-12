@@ -27,7 +27,6 @@ from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
     create_epilogue_with_attr,
-    DTYPE_TO_CPP,
     GemmBlocking,
     get_gemm_template_output_and_compute_dtype,
 )
@@ -42,7 +41,7 @@ GEMM_TEMPLATE = r"""
 extern "C" {{export_declaration}}
 {{kernel.def_kernel(inputs=kernel_args, outputs=Y_list, aliases=aliases)}}
 {
-    {{kernel.maybe_codegen_profile()}}
+    {{kernel.maybe_codegen_profile(template.get_kernel_prefix_name())}}
     {{ template.codegen_blocks(
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOuts[0], config, L1_cache_size, L2_cache_size, X_list[0], W_list[0]
     ) }}
@@ -54,12 +53,15 @@ extern "C" {{export_declaration}}
     #pragma omp parallel num_threads({{num_threads}})
     {%- endif %}
     {
-        {{ template.codegen_multi_threads_params()|indent(8, false) }}
+        {{ micro_gemm.codegen_init(kernel) }}
+        #pragma omp for schedule(static, 1)
+        for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
+            {{ template.codegen_multi_threads_params()|indent(12, false) }}
 {%- else %}
     {
         {{ template.codegen_single_thread_params(is_dynamic_M)|indent(8, false) }}
-{%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
+{%- endif %}
 {%- set acc_buf_name_list=[] %}
 {%- set acc_buf_name_prefix = "local_acc_buf_" %}
 {%- for gemm_idx in range(0, gemm_grouped_num, 1) %}
@@ -139,8 +141,14 @@ extern "C" {{export_declaration}}
                 }
             }
         }
+{%- if num_threads > 1 %}
+        }
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
+{%- else %}
+        {{ micro_gemm.codegen_finalize(kernel) }}
+    }
+{%- endif %}
 }
 """
 
@@ -213,7 +221,8 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
     ) -> DataProcessorTemplateWrapper:
         # Input nodes order: x, optional[x1], ... w0, w1, ... optional[b0], optional[b1], ...
         gemm_grouped_num = len(has_bias)
-        assert act_mapping
+        if not act_mapping:
+            raise AssertionError("expected non-empty act_mapping")
         act_deduplicated = get_deduplicated_act(act_mapping)
         wgt_start_idx = len(act_deduplicated)
         bias_start_idx = wgt_start_idx + gemm_grouped_num
@@ -226,7 +235,8 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             inputs: list[_T],
             layout_or_out: _U,
         ) -> tuple[list[_T], _U]:
-            assert input_indices is not None, "input_indices must be set"
+            if input_indices is None:
+                raise AssertionError("input_indices must be set")
             return [inputs[idx] for idx in input_indices], layout_or_out
 
         new_inputs, new_layout = reorder_and_filter(input_nodes, layout)
@@ -239,7 +249,8 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             for idx in range(wgt_start_idx, wgt_start_idx + gemm_grouped_num):
                 if isinstance(inputs[idx], torch.Tensor):
                     W = inputs[idx]
-                    assert isinstance(W, torch.Tensor), "W must be a torch.Tensor"
+                    if not isinstance(W, torch.Tensor):
+                        raise AssertionError("W must be a torch.Tensor")
                     # pyrefly: ignore [unsupported-operation]
                     new_inputs[idx] = W.to_dense() if W.is_mkldnn else W
             return new_inputs, layout_or_out
@@ -258,7 +269,8 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             for bias_idx in range(bias_start_idx, len(new_inputs)):
                 # pyrefly: ignore [bad-argument-type]
                 new_bias = expand_bias(new_inputs[bias_idx], X)
-                assert new_bias is not None
+                if new_bias is None:
+                    raise AssertionError("expected new_bias to be not None")
                 # pyrefly: ignore [unsupported-operation]
                 new_inputs[bias_idx] = new_bias
             return new_inputs, layout_or_out
@@ -281,7 +293,8 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             alpha=alpha,
             num_threads=num_threads,
         )
-        assert micro_gemm is not None
+        if micro_gemm is None:
+            raise AssertionError("expected micro_gemm to be not None")
         _, block_n, _ = micro_gemm.register_blocking
         new_size, padded_n = cls.get_padded_size(
             n, block_n, k, should_block_weight=True
@@ -312,14 +325,20 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         def postprocessor(output: _T) -> _T:
             if isinstance(output, ir.TensorBox):
                 template_buffer = ir.InputsKernel.unwrap_storage_for_input(output)
-                assert isinstance(template_buffer, ir.CppTemplateBuffer)
+                if not isinstance(template_buffer, ir.CppTemplateBuffer):
+                    raise AssertionError(
+                        "expected template_buffer to be ir.CppTemplateBuffer"
+                    )
                 new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
                 W_nodes = new_input_nodes[
                     wgt_start_idx : wgt_start_idx + gemm_grouped_num
                 ]
                 W_tensor = []
                 for W_node in W_nodes:
-                    assert W_node.get_name() in V.graph.constants
+                    if W_node.get_name() not in V.graph.constants:
+                        raise AssertionError(
+                            f"expected {W_node.get_name()} in V.graph.constants"
+                        )
                     # pyrefly: ignore [bad-argument-type]
                     W_tensor.append(V.graph.constants[W_node.get_name()])
                 # pyrefly: ignore [unsupported-operation]
@@ -333,7 +352,8 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                 prune_tensors(input_nodes, new_input_nodes)
                 for idx in range(wgt_start_idx, wgt_start_idx + gemm_grouped_num):
                     W_packed = new_input_nodes[idx]
-                    assert isinstance(W_packed, torch.Tensor)
+                    if not isinstance(W_packed, torch.Tensor):
+                        raise AssertionError("expected W_packed to be a torch.Tensor")
                     W_packed_constant = V.graph.add_tensor_constant(W_packed)
                     template_buffer.inputs[idx] = (
                         ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
@@ -359,6 +379,9 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         template.maybe_append_choice(choices)
         return template
 
+    def get_kernel_prefix_name(self) -> str:
+        return f"grouped_gemm_g{self.gemm_grouped_num}m{self.m}n{self.n}k{self.k}"
+
     def render(  # type: ignore[override,return,no-untyped-def]
         self,
         kernel: CppTemplateKernel,
@@ -367,7 +390,8 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         epilogue_nodes: list[ir.IRNode] | None = None,
         **kwargs,
     ) -> str:
-        assert self.act_mapping
+        if not self.act_mapping:
+            raise AssertionError("expected non-empty self.act_mapping")
         act_deduplicated = get_deduplicated_act(self.act_mapping)
         wgt_start_idx = len(act_deduplicated)
         bias_start_idx = wgt_start_idx + self.gemm_grouped_num
@@ -389,7 +413,10 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             W_list = template_buffer_node.inputs[
                 wgt_start_idx : wgt_start_idx + self.gemm_grouped_num
             ]
-            assert isinstance(template_buffer_node.outputs, list)
+            if not isinstance(template_buffer_node.outputs, list):
+                raise AssertionError(
+                    "expected template_buffer_node.outputs to be a list"
+                )
             Y_list = template_buffer_node.outputs
             counters["inductor"]["cpp_grouped_gemm_template"] += 1
             multi_output_buffers = template_buffer_node.outputs
@@ -412,8 +439,12 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             alpha=self.alpha,
             num_threads=self.num_threads,
         )
-        assert micro_gemm is not None
-        assert self.register_blocking == micro_gemm.register_blocking
+        if micro_gemm is None:
+            raise AssertionError("expected micro_gemm to be not None")
+        if self.register_blocking != micro_gemm.register_blocking:
+            raise AssertionError(
+                "expected self.register_blocking == micro_gemm.register_blocking"
+            )
         self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
@@ -421,12 +452,14 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         L1_cache_size = torch.cpu.get_capabilities().get(
             "l1d_cache_size", 0
         )  # per core cache size in Bytes
-        assert L1_cache_size > 0, f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+        if L1_cache_size <= 0:
+            raise AssertionError(f"Expect L1_cache_size > 0 but got {L1_cache_size}")
 
         L2_cache_size = torch.cpu.get_capabilities().get(
             "l2_cache_size", 0
         )  # per core cache size in Bytes
-        assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+        if L2_cache_size <= 0:
+            raise AssertionError(f"Expect L2_cache_size > 0 but got {L2_cache_size}")
 
         epilogues: list[ir.IRNode] = []
         reindexers: list[Callable[[list[Any]], list[Any]] | None] = []
@@ -439,9 +472,10 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                 ir.Buffer(name=gemm_output_name, layout=template_buffer.layout)
             )
 
-        assert not self.epilogue_creator, (
-            "epilogue_creator is not supported yet in Grouped GEMM Template"
-        )
+        if self.epilogue_creator:
+            raise AssertionError(
+                "epilogue_creator is not supported yet in Grouped GEMM Template"
+            )
 
         kernel_args: dict[str, ir.IRNode | None] = {}
         for x_idx in range(wgt_start_idx):
@@ -498,7 +532,6 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             kernel=kernel,
             export_declaration=get_export_declaration(),
             acc_buf_dtype=torch.float,
-            DTYPE_TO_CPP=DTYPE_TO_CPP,
             L1_cache_size=L1_cache_size,
             L2_cache_size=L2_cache_size,
             config=config,

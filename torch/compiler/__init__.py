@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import io
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -20,6 +21,8 @@ __all__ = [
     "substitute_in_graph",
     "list_backends",
     "disable",
+    "set_default_backend",
+    "get_default_backend",
     "set_stance",
     "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
@@ -56,9 +59,11 @@ def compile(*args, **kwargs):
 
 def reset() -> None:
     """
-    This function clears all compilation caches and restores the system to its initial state.
-    It is recommended to call this function, especially after using operations like `torch.compile(...)`
-    to ensure a clean state before another unrelated compilation
+    Reset the in-process compiler state.
+
+    This function clears Dynamo's in-memory compilation caches and related
+    process-local state used by :func:`torch.compile`. It does not delete
+    filesystem caches, such as Inductor's disk cache.
     """
     import torch._dynamo
 
@@ -233,7 +238,7 @@ def assume_constant_result(fn):
         fn: The function to be marked as having a constant result.
 
     .. warning::
-        `assume_constant_result` can if invalid cause safety and soundness issues, :func:`torch.compile`
+        `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`
         will not attempt to validate whether the constant assumption is true or not
 
     """
@@ -255,6 +260,39 @@ def disable(fn=None, recursive=True, *, reason=None):
     import torch._dynamo
 
     return torch._dynamo.disable(fn, recursive, reason=reason)
+
+
+def set_default_backend(backend: str | Callable[..., Any] | None) -> None:
+    """Set the default backend for ``torch.compile`` when no ``backend`` argument is specified.
+
+    Passing ``None`` resets the default back to ``"inductor"``.
+
+    Args:
+        backend: A backend name (string), a callable backend, or ``None``.
+
+    Example::
+
+        >>> torch.compiler.set_default_backend("eager")
+        >>> torch.compiler.get_default_backend()
+        'eager'
+        >>> torch.compiler.set_default_backend(None)  # reset
+        >>> torch.compiler.get_default_backend()
+        'inductor'
+    """
+    from torch._dynamo.backends.registry import set_default_backend
+
+    set_default_backend(backend)
+
+
+def get_default_backend() -> str | Callable[..., Any]:
+    """Return the current default backend for ``torch.compile``.
+
+    Returns:
+        The current default backend (string or callable). Initially ``"inductor"``.
+    """
+    from torch._dynamo.backends.registry import get_default_backend
+
+    return get_default_backend()
 
 
 def set_stance(
@@ -355,12 +393,12 @@ def set_enable_guard_collectives(enabled: bool):
     for all ranks to compile at the same time to run compiler collectives).  Like
     compiler collectives, you can only run this on SPMD programs; you will hang
     otherwise.  Note that a guard collective is only issued if there is any
-    compiled code to guard on; if this the first time we encounter a frame or
+    compiled code to guard on; if this is the first time we encounter a frame or
     the frame is skipped, we don't issue collectives.
 
     Returns the previous setting of enabled.
     """
-    from torch._C._dynamo.eval_frame import set_guard_complete_hook  # noqa: F401
+    from torch._C._dynamo.eval_frame import set_guard_complete_hook
     from torch._dynamo.eval_frame import guard_collectives_hook
 
     if enabled:
@@ -400,8 +438,8 @@ def cudagraph_mark_step_begin():
 
 
 def wrap_numpy(fn):
-    r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
-    from ``torch.Tensor``s to ``torch.Tensor``s.
+    r"""Decorator that turns a function from ``np.ndarray``\ s to ``np.ndarray``\ s into a function
+    from ``torch.Tensor``\ s to ``torch.Tensor``\ s.
 
     It is designed to be used with :func:`torch.compile` with ``fullgraph=True``. It allows to
     compile a NumPy function as if it were a PyTorch function. This allows you to run NumPy code
@@ -433,6 +471,7 @@ def wrap_numpy(fn):
 
 _is_compiling_flag: bool = False
 _is_exporting_flag: bool = False
+_is_non_strict_tracing_flag: bool = False
 
 
 def is_compiling() -> bool:
@@ -457,6 +496,119 @@ def is_compiling() -> bool:
         return _is_compiling_flag
 
 
+def _is_non_strict_tracing() -> bool:
+    """
+    Indicates whether we are inside a non-strict make_fx-based tracing session.
+    """
+    return _is_non_strict_tracing_flag
+
+
+@contextlib.contextmanager
+def _non_strict_tracing_context():
+    """Context manager that sets the non-strict tracing flag."""
+    global _is_non_strict_tracing_flag
+    old = _is_non_strict_tracing_flag
+    try:
+        _is_non_strict_tracing_flag = True
+        yield
+    finally:
+        _is_non_strict_tracing_flag = old
+
+
+@contextlib.contextmanager
+def _compile_session_context():
+    """Context manager that sets _is_compiling_flag for the duration of a
+    torch.compile session.
+    """
+    global _is_compiling_flag
+    old = _is_compiling_flag
+    try:
+        _is_compiling_flag = True
+        yield
+    finally:
+        _is_compiling_flag = old
+
+
+@contextlib.contextmanager
+def _patch_autograd_grad():
+    """Patch autograd.grad for non-strict make_fx tracing.
+
+    This patch installs autograd hooks so traced backward nodes preserve
+    stack trace, seq_nr, and autograd_backward metadata before delegating to
+    the real torch.autograd.grad.
+    """
+    import functools
+
+    import torch.autograd
+    from torch._dynamo.utils import warn_once
+    from torch._functorch._aot_autograd.logging_utils import (
+        setup_stacktrace_preservation_hooks_from_tensors,
+    )
+
+    warn_once(
+        "torch.compiler._patch_autograd_grad() is deprecated; "
+        "use torch.compiler._patch_engine_backward() instead."
+    )
+    # TODO: Remove this helper once Titan no longer depends on it.
+
+    _orig_grad = torch.autograd.grad
+
+    @functools.wraps(_orig_grad)
+    def _patched_grad(outputs, inputs, *args, **kwargs):
+        if not _is_non_strict_tracing():
+            raise AssertionError(
+                "_patch_autograd_grad() must be used under "
+                "_non_strict_tracing_context()"
+            )
+
+        setup_stacktrace_preservation_hooks_from_tensors(outputs)
+        return _orig_grad(outputs, inputs, *args, **kwargs)
+
+    torch.autograd.grad = _patched_grad
+    try:
+        yield
+    finally:
+        torch.autograd.grad = _orig_grad
+
+
+@contextlib.contextmanager
+def _patch_engine_backward():
+    """Patch _engine_run_backward for non-strict make_fx tracing.
+
+    This patch installs autograd hooks so traced backward nodes preserve
+    stack trace, seq_nr, and autograd_backward metadata before delegating to
+    the real autograd engine entrypoint used by backward().
+    """
+    import functools
+
+    import torch.autograd
+    import torch.autograd.graph
+    from torch._functorch._aot_autograd.logging_utils import (
+        setup_stacktrace_preservation_hooks_from_tensors,
+    )
+
+    _orig_engine_run_backward = torch.autograd.graph._engine_run_backward
+
+    @functools.wraps(_orig_engine_run_backward)
+    def _patched_engine_backward(outputs, *args, **kwargs):
+        if not _is_non_strict_tracing():
+            raise AssertionError(
+                "_patch_engine_backward() must be used under "
+                "_non_strict_tracing_context()"
+            )
+
+        setup_stacktrace_preservation_hooks_from_tensors(outputs)
+        return _orig_engine_run_backward(outputs, *args, **kwargs)
+
+    torch.autograd.graph._engine_run_backward = _patched_engine_backward
+    torch.autograd._engine_run_backward = _patched_engine_backward
+    try:
+        yield
+    finally:
+        torch.autograd.graph._engine_run_backward = _orig_engine_run_backward
+        torch.autograd._engine_run_backward = _orig_engine_run_backward
+
+
 def is_dynamo_compiling() -> bool:
     """
     Indicates whether a graph is traced via TorchDynamo.
@@ -477,7 +629,7 @@ def is_dynamo_compiling() -> bool:
 
 def is_exporting() -> bool:
     """
-    Indicated whether we're under exporting.
+    Indicates whether we're under exporting.
 
     It's stricter than is_compiling() flag, as it would only be set to True when
     torch.export is used.
@@ -658,7 +810,13 @@ def skip_all_guards_unsafe(guard_entries):
     return [False for entry in guard_entries]
 
 
-def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = None):
+def nested_compile_region(
+    fn=None,
+    *,
+    options: NestedCompileRegionOptions | None = None,
+    max_reuse_entries: int = 8,
+    reuse_hash_fn=None,
+):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
     compile region (which is often repeated in the full model) whose code can be
@@ -688,6 +846,17 @@ def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = 
         options: Optional backend to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
+        max_reuse_entries: Maximum number of reuse cache entries per function
+            before raising an error. If this limit is hit, guards keep failing
+            across invocations and hierarchical compilation is not effective.
+        reuse_hash_fn: Optional callable that takes the same ``*args, **kwargs``
+            as the wrapped function and returns an integer hash key. When
+            provided, Dynamo traces this function to obtain a constant integer
+            and uses it as the cache key for subgraph reuse, bypassing the
+            automatic fingerprint/guard machinery. Two calls that produce the
+            same hash key reuse the same cached subgraph. The hash function
+            must be fully traceable (no graph breaks) and must return a
+            constant integer.
     """
 
     if options is not None:
@@ -702,7 +871,12 @@ def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = 
         mark_compile_region as _mark_compile_region,
     )
 
-    return _mark_compile_region(fn, options=options)
+    return _mark_compile_region(
+        fn,
+        options=options,
+        max_reuse_entries=max_reuse_entries,
+        reuse_hash_fn=reuse_hash_fn,
+    )
 
 
 def load_compiled_function(
@@ -722,7 +896,7 @@ def load_compiled_function(
         file: A file-like object containing the serialized compiled function.
         f_globals: Optional global scope enclosing the compiled function.
         external_data: Optional data to be loaded into the runtime environment
-                       of the compiled function. This should contains the same
+                       of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
 
     Returns:

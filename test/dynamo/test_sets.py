@@ -178,7 +178,7 @@ Attempted to wrap a set with tensors
 
 from user code:
    File "test_sets.py", line N, in fn
-    for i in s:""",  # noqa: B950
+    for i in s:""",
         )
 
     def test_set_multiple_types(self):
@@ -447,7 +447,7 @@ class _FrozensetBase:
     @make_dynamo_test
     def test_in_frozenset(self):
         item = self.thetype("abc")
-        container = self.thetype([frozenset("abc")])  # noqa: C405
+        container = self.thetype([frozenset("abc")])
         self.assertIn(item, container)
 
     @make_dynamo_test
@@ -653,6 +653,12 @@ class _SetBase(_FrozensetBase):
 class FrozensetTests(_FrozensetBase, _BaseSetTests):
     thetype = frozenset
 
+    @make_dynamo_test
+    def test_copy_preserves_identity(self):
+        p = frozenset("abc")
+        self.assertTrue(id(p) == id(p.copy()))
+        self.assertTrue(id(p) == id(frozenset.copy(p)))
+
 
 class SetTests(_SetBase, _BaseSetTests):
     thetype = set
@@ -679,6 +685,17 @@ class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
         pass
 
     thetype = CustomFrozenset
+
+    @make_dynamo_test
+    def test_copy_returns_base_frozenset(self):
+        p = self.thetype("abc")
+        result = p.copy()
+        self.assertTrue(type(result) is frozenset)
+        self.assertTrue(id(result) != id(p))
+
+        result = frozenset.copy(p)
+        self.assertTrue(type(result) is frozenset)
+        self.assertTrue(id(result) != id(p))
 
     def test_in_frozenset(self):
         super().test_in_frozenset()
@@ -769,6 +786,21 @@ class OrderedSetTests(_SetBase, _BaseSetTests):
         # Test ^
         result = s1 ^ s2
         self.assertIsInstance(result, self.thetype)
+
+    @make_dynamo_test
+    def test_construct_from_generator(self):
+        s = self.thetype(x.upper() for x in ["a", "b", "c"])
+        self.assertEqual(list(s), ["A", "B", "C"])
+
+    @make_dynamo_test
+    def test_construct_from_map(self):
+        s = self.thetype(map(str, [1, 2, 3]))
+        self.assertEqual(list(s), ["1", "2", "3"])
+
+    @make_dynamo_test
+    def test_construct_from_range(self):
+        s = self.thetype(range(4))
+        self.assertEqual(list(s), [0, 1, 2, 3])
 
 
 if __name__ == "__main__":

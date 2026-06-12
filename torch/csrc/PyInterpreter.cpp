@@ -959,7 +959,7 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
 std::string ConcretePyInterpreterVTable::name() const {
   std::stringstream ss;
   ss << getPyInterpreter();
-  return ss.str();
+  return std::move(ss).str();
 }
 
 PyInterpreterHolder self_interpreter;
@@ -967,7 +967,7 @@ PyInterpreterHolder self_interpreter;
 } // anonymous namespace
 
 py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
-  return op.getPythonOp(getPyInterpreter(), [&]() -> PyObject* {
+  return op.getPythonOp([&]() -> PyObject* {
     // Parse the name into namespace and name (no overload_name)
     // TODO: put this into the library
     const auto& schema = op.schema();
