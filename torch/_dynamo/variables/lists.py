@@ -907,9 +907,7 @@ class RangeVariable(BaseListVariable):
                 self, name, handler=_RANGE_HANDLERS[name]
             )
 
-        from .object_protocol import object_generic_getattr
-
-        return object_generic_getattr(tx, self, name)
+        return super().getattro_impl(tx, name)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython range_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L572

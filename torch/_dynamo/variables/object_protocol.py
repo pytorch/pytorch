@@ -1706,12 +1706,11 @@ def virtual_iterator_next(
 #     LOAD_ATTR / getattr() -> GetAttrBuiltinVariable -> generic_getattr
 #         -> obj.getattro_impl(tx, name)
 #
-# The base VariableTracker.getattro_impl currently uses const_getattr
-# (literal-only).  object_generic_getattr() below implements the full
-# PyObject_GenericGetAttr algorithm (MRO walk + descriptor protocol)
-# and is available for VTs to opt into; it will become the base default
-# once downstream VTs have the necessary slot coverage (hash_impl,
-# richcompare_impl, etc.).
+# The base VariableTracker.getattro_impl tries object_generic_getattr()
+# first (MRO walk + descriptor protocol), falling back to const_getattr
+# on _UnhandledDescriptorError.  Callers of object_generic_getattr
+# directly must handle _UnhandledDescriptorError at every step (2, 4,
+# and 7), not just for unrecognized descriptor types.
 #
 # VTs with custom tp_getattro (TensorVariable, NNModuleVariable,
 # UserDefinedClassVariable, SuperVariable) override getattro_impl.
@@ -1897,11 +1896,9 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Step 7: AttributeError.
-    raise_observed_exception(
-        AttributeError,
-        tx,
-        args=[f"'{py_type.__name__}' object has no attribute '{name}'"],
+    # Step 7: Attribute not found -- signal to caller to fall back.
+    raise _UnhandledDescriptorError(
+        f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
     )
 
 

@@ -575,6 +575,53 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")()
         self.assertTrue(result)
 
+    # --- ConstantVariable: trampoline methods (format/join have call_method) ---
+
+    def test_str_format_via_trampoline(self):
+        def fn():
+            return "hello {}".format("world")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "hello world")
+
+    def test_str_join_via_trampoline(self):
+        def fn():
+            return ", ".join(["a", "b", "c"])
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "a, b, c")
+
+    # --- ConstantVariable: other constant types ---
+
+    def test_float_method_via_generic_getattr(self):
+        def fn():
+            return (3.14).is_integer()
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertFalse(result)
+
+    def test_int_method_via_generic_getattr(self):
+        def fn():
+            return (255).bit_length()
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 8)
+
+    def test_complex_real_imag(self):
+        def fn():
+            c = 3 + 4j
+            return c.real, c.imag
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, (3.0, 4.0))
+
+    def test_bytes_method_via_generic_getattr(self):
+        def fn():
+            return b"hello".decode("utf-8")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "hello")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
