@@ -21,7 +21,6 @@ from torch._higher_order_ops.partitioner import (
 )
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
-    check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
     fill_none_with_masks,
     filter_with_masks,
@@ -304,44 +303,12 @@ class ScanOp(HigherOrderOperator):
         #   already expressible via the ys output path at no extra cost.
         #   If xs-like in-place updates are required, pass the buffer via
         #   additional_inputs and index into it inside combine_fn.
-        n_init = len(init)
-        n_xs = len(xs)
-
-        # Two sources of truth for mutated indices:
-        #   1. mutated_arg_indices kwarg: passed by Dynamo when speculating
-        #      the body subgraph (it already saw the mutations during
-        #      bytecode-level tracing and computed the parent-side index
-        #      set). This avoids re-tracing the body here.
-        #   2. fall back to re-analyzing combine_gm: needed for eager /
-        #      torch.export entry points that go straight to gen_schema
-        #      without a Dynamo pass.
-        if mutated_arg_indices:
-            mutated_set = {int(i) for i in mutated_arg_indices.split(",") if i}
-            outputs = get_graph_output_example_values(combine_gm)
-        else:
-            (
-                _,
-                _,
-                _,
-                detected,
-                outputs,
-            ) = check_input_alias_and_mutation_return_outputs(combine_gm)
-            mutated_set = set(detected)
-
-        init_mutated = sorted(i for i in mutated_set if i < n_init)
-        xs_mutated = sorted(i for i in mutated_set if n_init <= i < n_init + n_xs)
-        if init_mutated or xs_mutated:
-            parts = []
-            if init_mutated:
-                parts.append(f"init {init_mutated}")
-            if xs_mutated:
-                parts.append(f"xs {[i - n_init for i in xs_mutated]}")
-            raise RuntimeError(
-                "For scan, combine_fn can only mutate additional_inputs, "
-                f"but found mutations at: {', '.join(parts)}. Update the "
-                "carry via the combine_fn return value; for in-place lifted "
-                "buffers use additional_inputs."
-            )
+        outputs = get_graph_output_example_values(combine_gm)
+        mutated_set = (
+            {int(i) for i in mutated_arg_indices.split(",") if i}
+            if mutated_arg_indices
+            else set()
+        )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("combine_fn", combine_gm)
@@ -352,11 +319,12 @@ class ScanOp(HigherOrderOperator):
         for idx, arg in enumerate(xs):
             schema_gen.add_arg(f"xs{idx}", arg)
 
+        offset = len(init) + len(xs)
         for idx, arg in enumerate(additional_inputs):
             schema_gen.add_arg(
                 f"additional_input{idx}",
                 arg,
-                is_mutated=(n_init + n_xs + idx) in mutated_set,
+                is_mutated=(offset + idx) in mutated_set,
             )
 
         for out in outputs:
