@@ -342,7 +342,7 @@ class TestDynamismExpression(TestCase):
         res = gm(*inp)
         self.assertTrue(torchdynamo.utils.same(ref, res))
 
-    @testing.expectedFailureDynamicSpecConversion  # backed raises ConstraintViolationError; unbacked has no range gate so export succeeds
+    @testing.expectedFailureDynamicSpecConversion  # backed binds the example size (3) to the symbol and flags 3 not in range [6, inf] at export. unbacked is agnostic to the example value: it adds a runtime assertion (size >= 6) but never verifies the example, so export succeeds
     def test_export_constraints_error_not_in_range(self):
         class InvalidInputConflictWithInputConstraints(torch.nn.Module):
             def forward(self, x):
