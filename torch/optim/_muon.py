@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code=arg-type
-"""Implementation of the Muon optimizer."""
+"""Implementation of the Muon optimizer with optional Gram Newton-Schulz support."""
 
 import math
 from collections.abc import MutableMapping
+from enum import Enum
+from typing import TypedDict
 
 import torch
 from torch import Tensor
@@ -17,7 +19,31 @@ from .optimizer import (
 )
 
 
-__all__ = ["Muon"]
+__all__ = ["GramNewtonSchulzConfig", "Muon", "NewtonSchulzAlgorithm"]
+
+
+class NewtonSchulzAlgorithm(str, Enum):
+    """Orthogonalization algorithm used inside Muon."""
+
+    STANDARD = "standard"
+    GRAM = "gram"
+
+
+# Allow Muon state dicts containing the enum to deserialize under
+# torch.load(weights_only=True).
+torch.serialization.add_safe_globals([NewtonSchulzAlgorithm])
+
+
+class GramNewtonSchulzConfig(TypedDict, total=False):
+    """Schema for the ``gram_newton_schulz_config`` dict consumed by Muon.
+
+    All keys are optional; missing keys fall back to module-level defaults
+    (see ``DEFAULT_GRAM_NS_COEFFICIENTS``, ``DEFAULT_GRAM_NS_RESET_ITERATIONS``).
+    """
+
+    gram_ns_coefficients: list[list[float]]
+    gram_ns_reset_iterations: list[int]
+
 
 # Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
 # github permlink: https://github.com/KellerJordan/Muon/blob/f90a42b28e00b8d9d2d05865fe90d9f39abcbcbd/muon.py#L16
@@ -26,6 +52,19 @@ DEFAULT_A = 3.4445
 DEFAULT_B = -4.7750
 DEFAULT_C = 2.0315
 DEFAULT_NS_STEPS = 5
+DEFAULT_GRAM_NS_RESET_ITERATIONS: list[int] = []
+# Default per-iteration (a, b, c) for Gram NS: same constants as vanilla Muon
+# repeated for every NS step. Schedules like YOU_COEFFICIENTS can be opted into
+# via gram_newton_schulz_config["gram_ns_coefficients"], but they typically
+# require a non-empty gram_ns_reset_iterations to stay numerically stable.
+# Keeping the default identical to vanilla Muon makes Gram NS a drop-in
+# replacement that does not depend on a reset schedule.
+DEFAULT_GRAM_NS_COEFFICIENTS: list[list[float]] = [
+    [DEFAULT_A, DEFAULT_B, DEFAULT_C] for _ in range(DEFAULT_NS_STEPS)
+]
+
+# Valid keys in gram_newton_schulz_config, derived from the TypedDict schema.
+_GRAM_CONFIG_KEYS: frozenset[str] = frozenset(GramNewtonSchulzConfig.__annotations__)
 
 
 def _zeropower_via_newtonschulz(
@@ -70,6 +109,186 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
+def _zeropower_via_newtonschulz_batched(
+    grads: list[Tensor],
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+) -> list[Tensor]:
+    """Batched standard NS for a list of same-shape square 2D gradients.
+
+    Stacks gradients into a 3D batch and runs the quintic NS iteration with
+    bmm/baddbmm so same-shape squares fuse into one batched matmul per op
+    instead of sequential per-tensor mm/addmm. Caller guarantees all entries
+    are 2D and square with identical shape.
+    """
+    a, b, c = ns_coefficients
+    X = torch.stack([g.bfloat16() for g in grads])  # (batch, M, M)
+    X = X / X.norm(dim=(-2, -1), keepdim=True).clamp(min=eps)
+    for _ in range(ns_steps):
+        gram = X @ X.mT
+        gram_update = torch.baddbmm(gram, gram, gram, beta=b, alpha=c)
+        X = torch.baddbmm(X, gram_update, X, beta=a)
+    return list(X.unbind(0))
+
+
+def _gram_newton_schulz(
+    X: Tensor,
+    gram_ns_coefficients: list[list[float]],
+    gram_ns_reset_iterations: list[int],
+) -> Tensor:
+    """Gram Newton-Schulz orthogonalization for a single 2D matrix.
+
+    Works in the Gram space (R = X @ X^T), accumulating Q and applying
+    X = Q @ X once at the end. More efficient for rectangular matrices
+    where M << N or M >> N because the iteration body operates on the
+    smaller (M, M) Gram matrix rather than the full (M, N) input.
+    """
+    R = X @ X.T
+    I = torch.eye(R.size(0), device=X.device, dtype=X.dtype)  # noqa: E741
+    Q: Tensor = I
+
+    for i, (a, b, c) in enumerate(gram_ns_coefficients):
+        if i in gram_ns_reset_iterations and i != 0:
+            X = Q @ X
+            R = X @ X.T
+            Q = I
+
+        Z = torch.addmm(R, R, R, beta=b, alpha=c)
+        if i == 0 or i in gram_ns_reset_iterations:
+            Q = Z + a * I
+        else:
+            Q = torch.addmm(Q, Q, Z, beta=a)
+        if (
+            i < len(gram_ns_coefficients) - 1
+            and i + 1 not in gram_ns_reset_iterations
+        ):
+            RZ = torch.addmm(R, R, Z, beta=a)
+            R = torch.addmm(RZ, Z, RZ, beta=a)
+
+    return Q @ X
+
+
+def _gram_newton_schulz_batched(
+    X: Tensor,
+    gram_ns_coefficients: list[list[float]],
+    gram_ns_reset_iterations: list[int],
+) -> Tensor:
+    """Batched Gram Newton-Schulz orthogonalization.
+
+    X must be a 3D tensor of shape (batch, M, N) where M <= N. Processes
+    all matrices in the batch simultaneously using batched matmuls.
+    """
+    R = X @ X.mT  # (batch, M, M)
+    batch_size = R.size(0)
+    I = (  # noqa: E741
+        torch.eye(R.size(-1), device=X.device, dtype=X.dtype)
+        .unsqueeze(0)
+        .expand(batch_size, -1, -1)
+        .contiguous()
+    )
+    Q: Tensor = I
+
+    for i, (a, b, c) in enumerate(gram_ns_coefficients):
+        if i in gram_ns_reset_iterations and i != 0:
+            X = Q @ X
+            R = X @ X.mT
+            Q = I
+
+        Z = torch.baddbmm(R, R, R, beta=b, alpha=c)
+        if i == 0 or i in gram_ns_reset_iterations:
+            Q = Z + a * I
+        else:
+            Q = torch.baddbmm(Q, Q, Z, beta=a)
+        if (
+            i < len(gram_ns_coefficients) - 1
+            and i + 1 not in gram_ns_reset_iterations
+        ):
+            RZ = torch.baddbmm(R, R, Z, beta=a)
+            R = torch.baddbmm(RZ, Z, RZ, beta=a)
+
+    return Q @ X
+
+
+def _zeropower_via_gram_newtonschulz(
+    grad: Tensor,
+    gram_ns_coefficients: list[list[float]],
+    gram_ns_reset_iterations: list[int],
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+) -> Tensor:
+    """Orthogonalize a 2D gradient using Gram Newton-Schulz iteration.
+
+    Uses the Gram NS method for rectangular matrices. For square matrices
+    (where the Gram reformulation has no asymptotic advantage), falls back
+    to the standard NS path so the caller does not need to pre-route.
+    """
+    if len(grad.shape) != 2:
+        raise ValueError("Input tensor gradient must be a 2D matrix")
+    if grad.size(0) == grad.size(1):
+        return _zeropower_via_newtonschulz(grad, ns_coefficients, ns_steps, eps)
+
+    X = grad.float()
+    should_transpose = X.size(0) > X.size(1)
+    if should_transpose:
+        X = X.T
+    X = (X / (X.norm() + eps)).half()
+    X = _gram_newton_schulz(X, gram_ns_coefficients, gram_ns_reset_iterations)
+    if should_transpose:
+        X = X.T
+    return X
+
+
+def _zeropower_via_gram_newtonschulz_batched(
+    grads: list[Tensor],
+    gram_ns_coefficients: list[list[float]],
+    gram_ns_reset_iterations: list[int],
+    eps: float,
+) -> list[Tensor]:
+    """Batched Gram NS orthogonalization for same-shape 2D gradients.
+
+    Stacks gradients into a 3D batch, runs batched Gram NS, then unstacks.
+    Caller guarantees all entries are 2D, identically-shaped, and rectangular
+    (square shapes should be routed to the standard NS path instead).
+    """
+    should_transpose = grads[0].size(0) > grads[0].size(1)
+    X = torch.stack([g.float() for g in grads])  # (batch, M, N)
+    if should_transpose:
+        X = X.mT  # (batch, N, M) so rows <= cols
+    X = (X / (X.norm(dim=(-2, -1), keepdim=True) + eps)).half()
+    X = _gram_newton_schulz_batched(
+        X, gram_ns_coefficients, gram_ns_reset_iterations
+    )
+    if should_transpose:
+        X = X.mT
+    return list(X.unbind(0))
+
+
+def _parse_gram_newton_schulz_config(
+    gram_newton_schulz_config: GramNewtonSchulzConfig | None,
+) -> tuple[list[list[float]], list[int]]:
+    """Validate and unpack a ``gram_newton_schulz_config`` dict.
+
+    Returns ``(gram_ns_coefficients, gram_ns_reset_iterations)``, filling in
+    defaults for missing keys. ``None`` or ``{}`` yields all defaults.
+    """
+    cfg = gram_newton_schulz_config or {}
+    unknown = set(cfg) - _GRAM_CONFIG_KEYS
+    if unknown:
+        raise ValueError(
+            f"Unknown keys in gram_newton_schulz_config: {sorted(unknown)}. "
+            f"Supported keys: {sorted(_GRAM_CONFIG_KEYS)}"
+        )
+    gram_ns_coefficients = cfg.get("gram_ns_coefficients")
+    if gram_ns_coefficients is None:
+        gram_ns_coefficients = [list(c) for c in DEFAULT_GRAM_NS_COEFFICIENTS]
+    gram_ns_reset_iterations = cfg.get("gram_ns_reset_iterations")
+    if gram_ns_reset_iterations is None:
+        gram_ns_reset_iterations = list(DEFAULT_GRAM_NS_RESET_ITERATIONS)
+    return gram_ns_coefficients, gram_ns_reset_iterations
+
+
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
     """Default learning rate adjustment used by Muon."""
     A, B = param_shape[:2]
@@ -97,6 +316,8 @@ class Muon(Optimizer):
         ns_steps: int = DEFAULT_NS_STEPS,
         adjust_lr_fn: str | None = None,
         foreach: bool | None = None,
+        ns_algorithm: NewtonSchulzAlgorithm = NewtonSchulzAlgorithm.STANDARD,
+        gram_newton_schulz_config: GramNewtonSchulzConfig | None = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -113,6 +334,22 @@ class Muon(Optimizer):
             raise ValueError(
                 f"Adjust learning rate function {adjust_lr_fn} is not supported"
             )
+        ns_algorithm = NewtonSchulzAlgorithm(ns_algorithm)
+        if (
+            ns_algorithm is not NewtonSchulzAlgorithm.GRAM
+            and gram_newton_schulz_config is not None
+        ):
+            # Reject the config when gram NS is off so callers cannot silently
+            # configure gram-only knobs that would have no effect.
+            raise ValueError(
+                "gram_newton_schulz_config is only valid when "
+                "ns_algorithm=NewtonSchulzAlgorithm.GRAM; got "
+                f"gram_newton_schulz_config={gram_newton_schulz_config!r} "
+                f"with ns_algorithm={ns_algorithm}."
+            )
+        gram_ns_coefficients, gram_ns_reset_iterations = (
+            _parse_gram_newton_schulz_config(gram_newton_schulz_config)
+        )
 
         defaults = {
             "lr": lr,
@@ -124,6 +361,9 @@ class Muon(Optimizer):
             "ns_steps": ns_steps,
             "adjust_lr_fn": adjust_lr_fn,
             "foreach": foreach,
+            "ns_algorithm": ns_algorithm,
+            "gram_ns_coefficients": gram_ns_coefficients,
+            "gram_ns_reset_iterations": gram_ns_reset_iterations,
         }
         super().__init__(params, defaults)
 
@@ -140,6 +380,18 @@ class Muon(Optimizer):
         # that state dicts saved by older versions of Muon load cleanly.
         for group in self.param_groups:
             group.setdefault("foreach", None)
+            group.setdefault("ns_algorithm", NewtonSchulzAlgorithm.STANDARD)
+            group.setdefault(
+                "gram_ns_coefficients",
+                [list(c) for c in DEFAULT_GRAM_NS_COEFFICIENTS],
+            )
+            group.setdefault(
+                "gram_ns_reset_iterations",
+                list(DEFAULT_GRAM_NS_RESET_ITERATIONS),
+            )
+            # ns_algorithm round-trips through JSON / pickle as a plain string;
+            # normalize back to the enum so dispatch comparisons are stable.
+            group["ns_algorithm"] = NewtonSchulzAlgorithm(group["ns_algorithm"])
 
     def _init_group(
         self,
@@ -208,6 +460,9 @@ class Muon(Optimizer):
                 ns_steps=group["ns_steps"],
                 adjust_lr_fn=group["adjust_lr_fn"],
                 has_complex=has_complex,
+                ns_algorithm=group["ns_algorithm"],
+                gram_ns_coefficients=group["gram_ns_coefficients"],
+                gram_ns_reset_iterations=group["gram_ns_reset_iterations"],
             )
         return loss
 
@@ -264,6 +519,27 @@ Muon.__doc__ = (
     implementation, and "match_rms_adamw", which refers to Moonshot's implementation. This gives users the
     flexibility to choose between the two. If `adjust_lr_fn` is not specified, the default is "original".
 
+    Setting ``ns_algorithm=NewtonSchulzAlgorithm.GRAM`` selects an alternate
+    orthogonalization path that computes the Newton-Schulz iteration in
+    Gram space (``R = X @ X^T``) for rectangular matrices, falling back to
+    the standard iteration on square matrices. The Gram path is typically
+    faster on tall or wide rectangular params (``M << N`` or ``M >> N``)
+    because the iteration body operates on the smaller (M, M) Gram matrix
+    rather than the full (M, N) input. Note that Gram NS is *not* bit-equivalent
+    to standard NS on rectangular params -- it converges to a different (but
+    still valid) orthogonalization; end-to-end model quality is comparable in
+    practice. Pass ``gram_newton_schulz_config`` (only when ``ns_algorithm``
+    is GRAM) to override the gram-specific coefficients / reset schedule.
+
+    When ``foreach=True``, same-shape parameter groups are batched through
+    the NS routine: for STANDARD this routes same-shape square groups
+    (with more than one tensor) through ``bmm`` / ``baddbmm`` so they fuse
+    into a single batched matmul per op; for GRAM rectangular groups
+    likewise go through batched Gram NS. The multi-tensor path therefore
+    diverges slightly from the single-tensor path on those configurations
+    (different reduction order across the batch dim), but the difference
+    stays within float-precision tolerance and is irrelevant for training.
+
     For further details regarding the algorithm we refer to `Muon: An optimizer for hidden layers in neural networks`_
     and `Muon is Scalable for LLM Training`_.
     """
@@ -283,10 +559,26 @@ Muon.__doc__ = (
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original" and "match_rms_adamw".
             If not specified, we will default to use "original". (default: None)
         foreach (bool, optional): whether to use the multi-tensor (``torch._foreach_*``) implementation. The
-            multi-tensor path fuses the momentum and parameter updates across same-shape 2D params; the
-            Newton-Schulz iteration itself is still performed per-tensor, so numerics match the single-tensor
-            path. If ``None`` (the default), the single-tensor path is used to preserve historical behavior;
-            pass ``foreach=True`` to opt in. (default: None)
+            multi-tensor path fuses the momentum and parameter updates across same-shape 2D params; with the
+            standard NS algorithm and only rectangular shapes (or square shapes with one tensor each), numerics
+            match the single-tensor path. Same-shape square groups with more than one tensor go through batched
+            ``bmm`` / ``baddbmm`` when ``foreach=True``, which is within float-precision tolerance of per-tensor
+            execution but not bit-identical. If ``None`` (the default), the single-tensor path is used to
+            preserve historical behavior; pass ``foreach=True`` to opt in. (default: None)
+        ns_algorithm (NewtonSchulzAlgorithm, optional): which orthogonalization algorithm to use. One of
+            ``NewtonSchulzAlgorithm.STANDARD`` (the original Muon iteration) or ``NewtonSchulzAlgorithm.GRAM``
+            (the Gram-space variant; see the class description above for when this is faster).
+            (default: ``NewtonSchulzAlgorithm.STANDARD``)
+        gram_newton_schulz_config (dict, optional): configuration dict for the Gram NS path. Only valid when
+            ``ns_algorithm=NewtonSchulzAlgorithm.GRAM``; passing it with any other algorithm raises
+            ``ValueError``. Supported keys (all optional):
+
+            - ``"gram_ns_coefficients"`` (list[list[float]]): per-iteration ``(a, b, c)`` triples; one inner
+              list per NS step.
+            - ``"gram_ns_reset_iterations"`` (list[int]): iteration indices at which to materialize ``X``
+              from the accumulated ``Q`` and reset ``Q`` to the identity.
+
+            (default: None)
 
     Example:
         >>> # xdoctest: +SKIP
@@ -320,6 +612,94 @@ Muon.__doc__ = (
 )
 
 
+def _ns_eager(
+    inputs: list[Tensor],
+    *,
+    ns_algorithm: NewtonSchulzAlgorithm,
+    is_square: bool,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+    gram_ns_coefficients: list[list[float]],
+    gram_ns_reset_iterations: list[int],
+) -> list[Tensor]:
+    """Eager NS dispatch for one same-shape group of tensors.
+
+    Routes by ``(ns_algorithm, is_square, len(inputs))``.
+
+    - STANDARD, square, len > 1: batched bmm/baddbmm path.
+    - STANDARD, otherwise: per-tensor standard NS (rectangular standard NS
+      has no natural batching).
+    - GRAM, rectangular, len > 1: batched Gram NS.
+    - GRAM, rectangular, len == 1: single Gram NS.
+    - GRAM, square: fall back to the standard NS routing (Gram offers no
+      advantage on square shapes and ``_zeropower_via_gram_newtonschulz``
+      already falls back internally for the single-tensor case).
+    """
+    if ns_algorithm is NewtonSchulzAlgorithm.STANDARD or is_square:
+        if is_square and len(inputs) > 1:
+            return _zeropower_via_newtonschulz_batched(
+                inputs, ns_coefficients, ns_steps, eps
+            )
+        return [
+            _zeropower_via_newtonschulz(t, ns_coefficients, ns_steps, eps)
+            for t in inputs
+        ]
+    if len(inputs) == 1:
+        return [
+            _zeropower_via_gram_newtonschulz(
+                inputs[0],
+                gram_ns_coefficients,
+                gram_ns_reset_iterations,
+                ns_coefficients,
+                ns_steps,
+                eps,
+            )
+        ]
+    return _zeropower_via_gram_newtonschulz_batched(
+        inputs, gram_ns_coefficients, gram_ns_reset_iterations, eps
+    )
+
+
+def _run_ns(
+    updates: list[Tensor],
+    *,
+    ns_algorithm: NewtonSchulzAlgorithm,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+    gram_ns_coefficients: list[list[float]],
+    gram_ns_reset_iterations: list[int],
+) -> list[Tensor]:
+    """Top-level NS dispatcher.
+
+    Groups updates by shape so same-shape tensors can be batched through the
+    appropriate NS routine, then writes the orthogonalized outputs back into
+    a list aligned with the input order.
+    """
+    shape_groups: dict[tuple[int, int], list[int]] = {}
+    for i, update in enumerate(updates):
+        shape_groups.setdefault((update.size(0), update.size(1)), []).append(i)
+
+    results: list[Tensor] = list(updates)
+    for indices in shape_groups.values():
+        group_inputs = [updates[idx] for idx in indices]
+        is_square = group_inputs[0].size(0) == group_inputs[0].size(1)
+        group_results = _ns_eager(
+            group_inputs,
+            ns_algorithm=ns_algorithm,
+            is_square=is_square,
+            ns_coefficients=ns_coefficients,
+            ns_steps=ns_steps,
+            eps=eps,
+            gram_ns_coefficients=gram_ns_coefficients,
+            gram_ns_reset_iterations=gram_ns_reset_iterations,
+        )
+        for idx, r in zip(indices, group_results, strict=True):
+            results[idx] = r
+    return results
+
+
 def _single_tensor_muon(
     params: list[Tensor],
     grads: list[Tensor],
@@ -334,10 +714,17 @@ def _single_tensor_muon(
     eps: float,
     adjust_lr_fn: str | None,
     has_complex: bool,
+    ns_algorithm: NewtonSchulzAlgorithm = NewtonSchulzAlgorithm.STANDARD,
+    gram_ns_coefficients: list[list[float]] | None = None,
+    gram_ns_reset_iterations: list[int] | None = None,
 ) -> None:
     lr = _to_scalar(lr)
     if has_complex:
         raise ValueError("Complex parameters are not supported")
+    if gram_ns_coefficients is None:
+        gram_ns_coefficients = [list(c) for c in DEFAULT_GRAM_NS_COEFFICIENTS]
+    if gram_ns_reset_iterations is None:
+        gram_ns_reset_iterations = list(DEFAULT_GRAM_NS_RESET_ITERATIONS)
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -348,7 +735,19 @@ def _single_tensor_muon(
         buf.lerp_(grad, 1 - momentum)
         update = grad.lerp(buf, momentum) if nesterov else buf
 
-        update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
+        if ns_algorithm is NewtonSchulzAlgorithm.GRAM:
+            update = _zeropower_via_gram_newtonschulz(
+                update,
+                gram_ns_coefficients,
+                gram_ns_reset_iterations,
+                ns_coefficients,
+                ns_steps,
+                eps,
+            )
+        else:
+            update = _zeropower_via_newtonschulz(
+                update, ns_coefficients, ns_steps, eps
+            )
 
         adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
 
@@ -370,6 +769,9 @@ def _multi_tensor_muon(
     eps: float,
     adjust_lr_fn: str | None,
     has_complex: bool,
+    ns_algorithm: NewtonSchulzAlgorithm = NewtonSchulzAlgorithm.STANDARD,
+    gram_ns_coefficients: list[list[float]] | None = None,
+    gram_ns_reset_iterations: list[int] | None = None,
 ) -> None:
     lr = _to_scalar(lr)
     if has_complex:
@@ -379,6 +781,10 @@ def _multi_tensor_muon(
     for g in grads:
         if g.ndim != 2:
             raise ValueError("Param gradient must be a 2D matrix")
+    if gram_ns_coefficients is None:
+        gram_ns_coefficients = [list(c) for c in DEFAULT_GRAM_NS_COEFFICIENTS]
+    if gram_ns_reset_iterations is None:
+        gram_ns_reset_iterations = list(DEFAULT_GRAM_NS_RESET_ITERATIONS)
 
     # Phase 1: momentum buffer update fused across all params.
     # buf <- lerp(buf, grad, 1 - momentum) for every param in one call.
@@ -388,11 +794,19 @@ def _multi_tensor_muon(
     else:
         updates = list(muon_momentum_bufs)
 
-    # Phase 2: Newton-Schulz per tensor. Standard NS has no natural batching,
-    # so per-tensor preserves bit-for-bit numerics with _single_tensor_muon.
-    updates = [
-        _zeropower_via_newtonschulz(u, ns_coefficients, ns_steps, eps) for u in updates
-    ]
+    # Phase 2: shape-grouped NS. For STANDARD this batches same-shape square
+    # groups (len > 1) via bmm/baddbmm; rectangular shapes still run per-tensor.
+    # For GRAM, rectangular shapes batch into the Gram NS routine; square groups
+    # fall back to standard (with the same batching when len > 1).
+    updates = _run_ns(
+        updates,
+        ns_algorithm=ns_algorithm,
+        ns_coefficients=ns_coefficients,
+        ns_steps=ns_steps,
+        eps=eps,
+        gram_ns_coefficients=gram_ns_coefficients,
+        gram_ns_reset_iterations=gram_ns_reset_iterations,
+    )
 
     # Phase 3: weight-decay shrink (uniform scale across all params) followed
     # by the shape-grouped negative-lr add. Group by shape so we can issue one
@@ -435,6 +849,9 @@ def muon(
     eps: float,
     adjust_lr_fn: str | None,
     has_complex: bool,
+    ns_algorithm: NewtonSchulzAlgorithm = NewtonSchulzAlgorithm.STANDARD,
+    gram_ns_coefficients: list[list[float]] | None = None,
+    gram_ns_reset_iterations: list[int] | None = None,
 ) -> None:
     r"""Functional API that performs Muon algorithm computation.
 
@@ -457,4 +874,7 @@ def muon(
         eps=eps,
         adjust_lr_fn=adjust_lr_fn,
         has_complex=has_complex,
+        ns_algorithm=ns_algorithm,
+        gram_ns_coefficients=gram_ns_coefficients,
+        gram_ns_reset_iterations=gram_ns_reset_iterations,
     )
