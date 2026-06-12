@@ -7,6 +7,7 @@
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/UpSample.cuh>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -90,6 +91,81 @@ __global__ void upsample_bicubic2d_out_frame(
           coefficients[3],
           t_y));
     }
+  }
+}
+
+// Parallelized across batch*channels via blockIdx.z.
+// Faster than upsample_bicubic2d_out_frame when the output spatial size is
+// small (e.g. Kimi K2.5 position embeddings: 64x64 to 74x74 with 1152 channels).
+template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(1024)
+__global__ void upsample_bicubic2d_out_frame_parallel(
+    const int num_elements,
+    const accscalar_t height_scale,
+    const accscalar_t width_scale,
+    const bool align_corners,
+    const PackedTensorAccessor64<const scalar_t, 4> idata,
+    PackedTensorAccessor64<scalar_t, 4> odata) {
+  int index = threadIdx.x + blockIdx.x * blockDim.x;
+
+  const int batchsize = idata.size(0);
+  const int channels = idata.size(1);
+  const int input_height = idata.size(2);
+  const int input_width = idata.size(3);
+  const int output_height = odata.size(2);
+  const int output_width = odata.size(3);
+
+  if (index >= num_elements) {
+    return;
+  }
+
+  const int output_x = index % output_width;
+  const int output_y = index / output_width;
+
+  if (input_height == output_height && input_width == output_width) {
+    for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
+      int n = i / channels;
+      int c = i % channels;
+      const scalar_t val = idata[n][c][output_y][output_x];
+      odata[n][c][output_y][output_x] = val;
+    }
+    return;
+  }
+
+  accscalar_t real_x = area_pixel_compute_source_index(
+      width_scale, output_x, align_corners, /*cubic=*/true);
+  int in_x = floorf(real_x);
+  accscalar_t t_x = real_x - in_x;
+
+  accscalar_t real_y = area_pixel_compute_source_index(
+      height_scale, output_y, align_corners, /*cubic=*/true);
+  int in_y = floorf(real_y);
+  accscalar_t t_y = real_y - in_y;
+
+  for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
+    int n = i / channels;
+    int c = i % channels;
+    accscalar_t coefficients[4];
+
+    for (const auto k : c10::irange(4)) {
+      coefficients[k] = cubic_interp1d(
+          upsample_get_value_bounded<scalar_t>(
+              idata, n, c, input_height, input_width, in_y - 1 + k, in_x - 1),
+          upsample_get_value_bounded<scalar_t>(
+              idata, n, c, input_height, input_width, in_y - 1 + k, in_x + 0),
+          upsample_get_value_bounded<scalar_t>(
+              idata, n, c, input_height, input_width, in_y - 1 + k, in_x + 1),
+          upsample_get_value_bounded<scalar_t>(
+              idata, n, c, input_height, input_width, in_y - 1 + k, in_x + 2),
+          t_x);
+    }
+
+    odata[n][c][output_y][output_x] = static_cast<scalar_t>(cubic_interp1d(
+        coefficients[0],
+        coefficients[1],
+        coefficients[2],
+        coefficients[3],
+        t_y));
   }
 }
 
@@ -204,17 +280,38 @@ static void upsample_bicubic2d_out_cuda_template(
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales_w);
 
-        upsample_bicubic2d_out_frame<scalar_t, accscalar_t>
-            <<<ceil_div(num_output_elements, max_threads),
-               max_threads,
-               0,
-               stream>>>(
-                num_output_elements,
-                rheight,
-                rwidth,
-                align_corners,
-                idata,
-                odata);
+        const int num_blocks = ceil_div(num_output_elements, max_threads);
+
+        // For small output spatial sizes the original kernel underutilizes
+        // the GPU because it loops over batch*channels sequentially.
+        // The parallel variant spreads that work across blockIdx.z instead.
+        // Threshold of 18432 covers all VLM position embedding resizing
+        // shapes (up to ~130x130 grids from 2048x2048 images) while
+        // staying well below the crossover point where the original
+        // kernel catches up (~65k+ output elements).
+        if (num_output_elements <= 18432 && input.size(0) * input.size(1) > 0) {
+          int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
+          int grid_z = std::min<int>(maxGridSize[2],
+                                     input.size(0) * input.size(1));
+          dim3 grid(num_blocks, 1, grid_z);
+          upsample_bicubic2d_out_frame_parallel<scalar_t, accscalar_t>
+              <<<grid, max_threads, 0, stream>>>(
+                  num_output_elements,
+                  rheight,
+                  rwidth,
+                  align_corners,
+                  idata,
+                  odata);
+        } else {
+          upsample_bicubic2d_out_frame<scalar_t, accscalar_t>
+              <<<num_blocks, max_threads, 0, stream>>>(
+                  num_output_elements,
+                  rheight,
+                  rwidth,
+                  align_corners,
+                  idata,
+                  odata);
+        }
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }

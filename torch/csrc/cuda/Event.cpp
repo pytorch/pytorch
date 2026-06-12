@@ -1,9 +1,9 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
+#include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Event.h>
 #include <torch/csrc/cuda/Module.h>
-#include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -23,19 +23,21 @@ static PyObject* THCPEvent_pynew(
   unsigned char enable_timing = 0;
   unsigned char blocking = 0;
   unsigned char interprocess = 0;
+  unsigned char external = 0;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   constexpr const char* kwlist[] = {
-      "enable_timing", "blocking", "interprocess", nullptr};
+      "enable_timing", "blocking", "interprocess", "external", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|bbb",
+          "|bbbb",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &enable_timing,
           &blocking,
-          &interprocess)) {
+          &interprocess,
+          &external)) {
     return nullptr;
   }
 
@@ -47,7 +49,8 @@ static PyObject* THCPEvent_pynew(
   THCPEvent* self = (THCPEvent*)ptr.get();
   unsigned int flags = (blocking ? cudaEventBlockingSync : cudaEventDefault) |
       (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
-      (interprocess ? cudaEventInterprocess : cudaEventDefault);
+      (interprocess ? cudaEventInterprocess : cudaEventDefault) |
+      (external ? cudaEventExternal : cudaEventDefault);
 
   new (&self->cuda_event) at::cuda::CUDAEvent(flags);
 
@@ -89,8 +92,7 @@ static PyObject* THCPEvent_from_ipc_handle(
   }
   THCPEvent* self = (THCPEvent*)ptr.get();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  cudaIpcEventHandle_t handle;
+  cudaIpcEventHandle_t handle{};
   std::memcpy(&handle, handle_string.c_str(), handle_string.size());
   new (&self->cuda_event) at::cuda::CUDAEvent(device.index(), &handle);
 
@@ -103,7 +105,7 @@ static void THCPEvent_dealloc(THCPEvent* self) {
     pybind11::gil_scoped_release no_gil{};
     self->cuda_event.~CUDAEvent();
   }
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  THPEvent_dealloc_common(reinterpret_cast<THPEvent*>(self));
 }
 
 static PyObject* THCPEvent_get_cuda_event(THCPEvent* self, void* unused) {
@@ -125,9 +127,17 @@ static PyObject* THCPEvent_get_device(THCPEvent* self, void* unused) {
 static PyObject* THCPEvent_record(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS {
     auto self = (THCPEvent*)_self;
-    auto stream = (THCPStream*)_stream;
+    TORCH_CHECK(
+        THPStream_Check(_stream),
+        "expected stream to be a torch.Stream or torch.cuda.Stream object");
+    auto stream = (THPStream*)_stream;
+    c10::cuda::CUDAStream cuda_stream =
+        c10::cuda::CUDAStream(c10::Stream::unpack3(
+            stream->stream_id,
+            static_cast<c10::DeviceIndex>(stream->device_index),
+            static_cast<c10::DeviceType>(stream->device_type)));
     pybind11::gil_scoped_release no_gil{};
-    self->cuda_event.record(stream->cuda_stream);
+    self->cuda_event.record(cuda_stream);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -136,9 +146,17 @@ static PyObject* THCPEvent_record(PyObject* _self, PyObject* _stream) {
 static PyObject* THCPEvent_wait(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS {
     auto self = (THCPEvent*)_self;
-    auto stream = (THCPStream*)_stream;
+    TORCH_CHECK(
+        THPStream_Check(_stream),
+        "expected stream to be a torch.Stream or torch.cuda.Stream object");
+    auto stream = (THPStream*)_stream;
+    c10::cuda::CUDAStream cuda_stream =
+        c10::cuda::CUDAStream(c10::Stream::unpack3(
+            stream->stream_id,
+            static_cast<c10::DeviceIndex>(stream->device_index),
+            static_cast<c10::DeviceType>(stream->device_type)));
     pybind11::gil_scoped_release no_gil{};
-    self->cuda_event.block(stream->cuda_stream);
+    self->cuda_event.block(cuda_stream);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -154,6 +172,9 @@ static PyObject* THCPEvent_query(PyObject* _self, PyObject* noargs) {
 static PyObject* THCPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
   auto self = (THCPEvent*)_self;
+  TORCH_CHECK(
+      THCPEvent_Check(_other),
+      "expected other to be a torch.cuda.Event object");
   auto other = (THCPEvent*)_other;
   return PyFloat_FromDouble(self->cuda_event.elapsed_time(other->cuda_event));
   END_HANDLE_TH_ERRORS
@@ -172,8 +193,7 @@ static PyObject* THCPEvent_synchronize(PyObject* _self, PyObject* noargs) {
 static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = (THCPEvent*)_self;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  cudaIpcEventHandle_t handle;
+  cudaIpcEventHandle_t handle{};
   self->cuda_event.ipc_handle(&handle);
   return PyBytes_FromStringAndSize((const char*)&handle, sizeof(handle));
   END_HANDLE_TH_ERRORS
@@ -183,6 +203,7 @@ static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
 static struct PyGetSetDef THCPEvent_properties[] = {
     {"device", (getter)THCPEvent_get_device, nullptr, nullptr, nullptr},
     {"cuda_event", (getter)THCPEvent_get_cuda_event, nullptr, nullptr, nullptr},
+    {"event_id", (getter)THCPEvent_get_cuda_event, nullptr, nullptr, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(*c-arrays*, *global-variables)
@@ -224,7 +245,7 @@ PyTypeObject THCPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    0, /* tp_weaklistoffset (inherited from THPEventType via tp_base) */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THCPEvent_methods, /* tp_methods */

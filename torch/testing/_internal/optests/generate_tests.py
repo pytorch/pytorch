@@ -10,7 +10,8 @@ import re
 import tempfile
 import threading
 import unittest
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import torch
 import torch._dynamo
@@ -45,10 +46,12 @@ def is_abstract(tensor: torch.Tensor) -> bool:
 
 def safe_schema_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
+    rtol: float | None = None,
+    atol: float | None = None,
 ) -> Any:
     if copy_inputs:
         args, kwargs = deepcopy_tensors((args, kwargs))
@@ -61,10 +64,12 @@ def safe_schema_check(
 
 def safe_autograd_registration_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
+    rtol: float | None = None,
+    atol: float | None = None,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return
@@ -80,10 +85,12 @@ def safe_autograd_registration_check(
 
 def safe_fake_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
+    rtol: float | None = None,
+    atol: float | None = None,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
@@ -94,11 +101,13 @@ def safe_fake_check(
 
 def safe_aot_autograd_check(
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     dynamic: bool,
     *,
     copy_inputs: bool = True,
+    rtol: float | None = None,
+    atol: float | None = None,
 ) -> Any:
     # NB: copy_inputs does nothing for aot_autograd_check: it always needs to copy
     # inputs.
@@ -111,7 +120,20 @@ def safe_aot_autograd_check(
 
     # aot_autograd_check runs func(*args, **kwargs) multiple times
     # and assumes `func` does not modify its inputs.
-    return aot_autograd_check(func, args, kwargs, dynamic, check_gradients="auto")
+    if rtol and atol:
+        assert_equals_fn = functools.partial(
+            torch.testing.assert_close, rtol=rtol, atol=atol
+        )
+    else:
+        assert_equals_fn = torch.testing.assert_close
+    return aot_autograd_check(
+        func,
+        args,
+        kwargs,
+        dynamic,
+        check_gradients="auto",
+        assert_equals_fn=assert_equals_fn,
+    )
 
 
 def deepcopy_tensors(inputs: Any) -> Any:
@@ -155,10 +177,10 @@ DEPRECATED_DEFAULT_TEST_UTILS = DEFAULT_TEST_UTILS + [
 
 def generate_opcheck_tests(
     testcase: Any,
-    namespaces: List[str],
-    failures_dict_path: Optional[str] = None,
-    additional_decorators: Optional[Dict[str, Callable]] = None,
-    test_utils: List[str] = DEFAULT_TEST_UTILS,
+    namespaces: list[str],
+    failures_dict_path: str | None = None,
+    additional_decorators: dict[str, Callable] | None = None,
+    test_utils: list[str] = DEFAULT_TEST_UTILS,
 ) -> None:
     """Given an existing TestCase, use the existing tests to generate
     additional validation tests for custom operators.
@@ -247,7 +269,8 @@ def generate_opcheck_tests(
                 for mark in pytestmark:
                     if isinstance(mark, pytest.Mark) and mark.name == "parametrize":
                         argnames, argvalues = mark.args
-                        assert not mark.kwargs, "NYI"
+                        if mark.kwargs:
+                            raise AssertionError("NYI: mark.kwargs is not empty")
                         # Special case for device, we want to run on all
                         # devices
                         if argnames != "device":
@@ -361,7 +384,7 @@ def validate_failures_dict_formatting(failures_dict_path: str) -> None:
 
 
 def validate_failures_dict_structure(
-    failure_dict: "FailuresDict", test_utils: List[str], testcase: Any
+    failure_dict: "FailuresDict", test_utils: list[str], testcase: Any
 ) -> None:
     """Validates the failures dict.
 
@@ -447,7 +470,7 @@ class OpCheckMode(TorchFunctionMode):
 
     def __init__(
         self,
-        namespaces: List[str],
+        namespaces: list[str],
         test_util_name: str,
         test_util: Callable,
         failures_dict: "FailuresDict",
@@ -468,13 +491,13 @@ class OpCheckMode(TorchFunctionMode):
         # Location of the failures dict. Makes it so that the error message is better.
         self.failures_dict_path = failures_dict_path
 
-        # OpCheckMode surpresses errors, collects them here, and then raises them on exit.
+        # OpCheckMode suppresses errors, collects them here, and then raises them on exit.
         # Maps qualname -> List[(Exception, func, maybe args, maybe kwargs)]
         self.seen_ops_to_errors = {}
 
     def maybe_raise_errors_on_exit(self) -> None:
         # Check expected failures first
-        for qualname in self.seen_ops_to_errors.keys():
+        for qualname in self.seen_ops_to_errors:
             option = self.failures_dict.get_status(qualname, self.test_name)
             if len(self.seen_ops_to_errors[qualname]) == 0:
                 if should_update_failures_dict():
@@ -496,7 +519,7 @@ class OpCheckMode(TorchFunctionMode):
                         )
                 continue
         failed_ops = []
-        for qualname in self.seen_ops_to_errors.keys():
+        for qualname in self.seen_ops_to_errors:
             option = self.failures_dict.get_status(qualname, self.test_name)
             if option != "xsuccess":
                 continue
@@ -533,11 +556,20 @@ class OpCheckMode(TorchFunctionMode):
         self.prev_dynamo_disable = os.environ.get("TORCHDYNAMO_DISABLE", "")
         _is_inside_opcheck_mode.value = True
         os.environ["TORCHDYNAMO_DISABLE"] = "1"
+        # When running this test mode, we want to disable
+        # default torch.compile custom op checker
+        self.prev_functorch_config_for_checking_custom_op = (
+            torch._functorch.config.check_custom_op_aliasing
+        )
+        torch._functorch.config.check_custom_op_aliasing = False
         return super().__enter__(*args, **kwargs)
 
     def __exit__(self, *args, **kwargs):
         _is_inside_opcheck_mode.value = self.prev_is_opcheck_mode
         os.environ["TORCHDYNAMO_DISABLE"] = self.prev_dynamo_disable
+        torch._functorch.config.check_custom_op_aliasing = (
+            self.prev_functorch_config_for_checking_custom_op
+        )
         try:
             self.maybe_raise_errors_on_exit()
             if should_update_failures_dict():
@@ -583,7 +615,7 @@ class OpCheckMode(TorchFunctionMode):
 
         option = self.failures_dict.get_status(qualname, self.test_name)
         if option == "xsuccess" or option == "xfail":
-            # Surpress all errors during execution. Raise them during __exit__.
+            # Suppress all errors during execution. Raise them during __exit__.
             try:
                 if qualname not in self.seen_ops_to_errors:
                     self.seen_ops_to_errors[qualname] = []
@@ -617,14 +649,21 @@ def should_print_better_repro() -> None:
 
 
 def opcheck(
-    op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    op: torch._ops.OpOverload | torch._ops.OpOverloadPacket | CustomOpDef,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None = None,
     *,
-    test_utils: Union[str, Sequence[str]] = DEFAULT_TEST_UTILS,
+    test_utils: str | Sequence[str] = DEFAULT_TEST_UTILS,
     raise_exception: bool = True,
-) -> Dict[str, str]:
+    rtol: float | None = None,
+    atol: float | None = None,
+) -> dict[str, str]:
     """See torch.library.opcheck for docstring"""
+
+    if (rtol is None) ^ (atol is None):
+        raise ValueError(
+            "opcheck(op, ...): if you specify one of rtol/atol, you must specify both"
+        )
 
     if kwargs is None:
         kwargs = {}
@@ -653,7 +692,7 @@ def opcheck(
     for test_util in test_utils:
         tester = ALL_TEST_UTILS[test_util]
         try:
-            tester(op, args, kwargs)
+            tester(op, args, kwargs, rtol=rtol, atol=atol)
             results_dict[test_util] = "SUCCESS"
         except Exception as ex:
             if raise_exception:
@@ -672,8 +711,8 @@ class OpCheckError(Exception):
 def generate_repro(
     test: str,
     op: torch._ops.OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     *,
     save_data: bool,
     dry_run: bool = False,
@@ -738,7 +777,7 @@ def resolve_unique_overload_or_throw(
 DUMP_OPTIONS = {"indent": 2, "sort_keys": True}
 
 
-FailuresDictData = Dict[str, Dict[str, Dict[str, str]]]
+FailuresDictData = dict[str, dict[str, dict[str, str]]]
 
 
 VERSION = 1
@@ -770,11 +809,15 @@ class FailuresDict:
                 }
             else:
                 dct = json.loads(contents)
-                assert "data" in dct
-                assert "_version" in dct and dct["_version"] == VERSION
+                if "data" not in dct:
+                    raise AssertionError("Expected 'data' in dct")
+                if "_version" not in dct or dct["_version"] != VERSION:
+                    raise AssertionError(
+                        f"Expected '_version' in dct with value {VERSION}"
+                    )
         return FailuresDict(path, dct["data"])
 
-    def _save(self, to_str=False) -> Optional[str]:
+    def _save(self, to_str=False) -> str | None:
         to_dump = {
             "_description": DESCRIPTION,
             "data": self.data,
@@ -806,7 +849,7 @@ class FailuresDict:
         test_name: str,
         status: str,
         *,
-        comment: Optional[str] = None,
+        comment: str | None = None,
     ):
         if qualname not in self.data:
             self.data[qualname] = {}

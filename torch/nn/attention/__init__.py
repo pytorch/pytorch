@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
-""" This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention """
+"""This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention"""
+
 import contextlib
-from typing import Iterable, List, Union
+from collections.abc import Iterable
+from typing import Union
 from warnings import warn
 
 import torch.backends.cuda
@@ -13,7 +15,17 @@ from torch.backends.cuda import (
 )
 
 
-__all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
+__all__: list[str] = [
+    "SDPBackend",
+    "sdpa_kernel",
+    "WARN_FOR_UNFUSED_KERNELS",
+    "register_flash_attention_impl",
+    "activate_flash_attention_impl",
+    "list_flash_attention_impls",
+    "current_flash_attention_impl",
+    "restore_flash_attention_impl",
+]
+
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses
@@ -25,9 +37,6 @@ __all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 WARN_FOR_UNFUSED_KERNELS = False
 
 
-# Hacks for Sphinx documentation:
-# https://stackoverflow.com/questions/38765577/overriding-sphinx-autodoc-alias-of-for-import-of-private-class
-SDPBackend = SDPBackend
 r"""An enum-like class that contains the different backends for scaled dot product attention.
     This backend class is designed to be used with the sdpa_kernel context manager.
 
@@ -37,6 +46,7 @@ r"""An enum-like class that contains the different backends for scaled dot produ
         - FLASH_ATTENTION: The flash attention backend for scaled dot product attention.
         - EFFICIENT_ATTENTION: The efficient attention backend for scaled dot product attention.
         - CUDNN_ATTENTION: The cuDNN backend for scaled dot product attention.
+        - OVERRIDEABLE: The overridable backend for extension.
 
     See :func:`torch.nn.attention.sdpa_kernel` for more details.
 
@@ -53,10 +63,10 @@ def _raise_kernel_warnings(params: SDPAParams) -> None:
     """
     if WARN_FOR_UNFUSED_KERNELS:
         if not can_use_efficient_attention(params):
-            warn("Efficient attention can't be used because:")
+            warn("Efficient attention can't be used because:", stacklevel=2)
             can_use_efficient_attention(params, True)
         if not can_use_flash_attention(params):
-            warn("Flash attention can't be used because:")
+            warn("Flash attention can't be used because:", stacklevel=2)
             can_use_flash_attention(params, True)
 
 
@@ -65,6 +75,7 @@ _backend_names = {
     "flash": "FLASH_ATTENTION",
     "mem_efficient": "EFFICIENT_ATTENTION",
     "math": "MATH",
+    "overrideable": "OVERRIDEABLE",
 }
 
 
@@ -72,24 +83,35 @@ def _backend_from_string(name: str):
     return getattr(SDPBackend, name)
 
 
-def _cur_sdpa_kernel_backends():
-    backends: List[SDPBackend] = []
+def _cur_sdpa_kernel_backends(with_priority: bool = False):
+    backends = []
     for name, val in _backend_names.items():
-        if getattr(torch.backends.cuda, f"{name}_sdp_enabled")():
+        if getattr(torch._C, f"_get_{name}_sdp_enabled")():
             backends.append(getattr(SDPBackend, val))
+    if with_priority:
+        curr_priority = torch._C._get_sdp_priority_order()
+        backends = sorted(
+            backends, key=lambda backend: curr_priority.index(int(backend))
+        )
     return backends
 
 
-def _sdpa_kernel(backends: Iterable[SDPBackend]):
+def _sdpa_kernel(backends: Iterable, set_priority: bool = False) -> None:
     for name, val in _backend_names.items():
         enabled = getattr(SDPBackend, val) in backends
-        getattr(torch.backends.cuda, f"enable_{name}_sdp")(enabled)
+        getattr(torch._C, f"_set_sdp_use_{name}")(enabled)
+    if set_priority:
+        # backends should be a unique list
+        user_priority = [int(backend) for backend in backends]
+        previous_priority = torch._C._get_sdp_priority_order()
+        for backend in previous_priority:
+            if backend not in user_priority:
+                user_priority.append(int(backend))
+        torch._C._set_sdp_priority_order(user_priority)
 
 
 @contextlib.contextmanager
-def sdpa_kernel(
-    backends: Union[List[SDPBackend], SDPBackend], set_priority: bool = False
-):
+def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = False):
     r"""
     Context manager to select which backend to use for scaled dot product attention.
 
@@ -97,7 +119,7 @@ def sdpa_kernel(
 
     Args:
         backends (Union[List[SDPBackend], SDPBackend]): A backend or list of backends for scaled dot product attention.
-        set_priority_order (bool=False): Whether the ordering of the backends is interpreted as their priority order.
+        set_priority (bool=False): Whether the ordering of the backends is interpreted as their priority order.
 
     Example:
 
@@ -105,6 +127,7 @@ def sdpa_kernel(
 
         from torch.nn.functional import scaled_dot_product_attention
         from torch.nn.attention import SDPBackend, sdpa_kernel
+
         # Only enable flash attention backend
         with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
             scaled_dot_product_attention(...)
@@ -113,38 +136,31 @@ def sdpa_kernel(
         with sdpa_kernel([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]):
             scaled_dot_product_attention(...)
 
+        # Enable the cuDNN or flash attention backends, and in that order
+        with sdpa_kernel(
+            [SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION], set_priority=True
+        ):
+            scaled_dot_product_attention(...)
+
     This context manager can be used to select which backend to use for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored, enabling all backends.
     """
-    assert isinstance(
-        backends, (list, SDPBackend)
-    ), "Backend must be an instance of SDPBackend or a list of SDPBackend instances"
+    if not isinstance(backends, (list, SDPBackend)):
+        raise AssertionError(
+            f"Backend must be an instance of SDPBackend or a list of SDPBackend instances, got {type(backends).__name__}"
+        )
 
     if isinstance(backends, SDPBackend):
         backends = [backends]
 
-    backends_set = set(backends)
-    user_priority = None
-    previous_priority = None
+    backends = list(dict.fromkeys(backends))
 
-    if set_priority:
-        user_priority = [
-            int(x) for idx, x in enumerate(backends) if backends.index(x) == idx  # type: ignore[call-overload]
-        ]
-        previous_priority = torch._C._get_sdp_priority_order()
-        for backend in previous_priority:
-            if backend not in user_priority:
-                user_priority.append(int(backend))
-    previous_backends = _cur_sdpa_kernel_backends()
+    previous_backends = _cur_sdpa_kernel_backends(with_priority=set_priority)
     try:
-        if set_priority:
-            torch._C._set_sdp_priority_order(user_priority)  # type: ignore[arg-type]
-        _sdpa_kernel(backends_set)
+        _sdpa_kernel(backends, set_priority)
         yield {}
     finally:
-        _sdpa_kernel(previous_backends)
-        if set_priority:
-            torch._C._set_sdp_priority_order(previous_priority)  # type: ignore[arg-type]
+        _sdpa_kernel(previous_backends, set_priority)
 
 
 # variadic version of sdpa_kernel for dynamo to use while reconstructing
@@ -157,3 +173,25 @@ def _sdpa_kernel_variadic(*backends: SDPBackend):
 def _get_flash_version() -> str:
     """This returns the closest matching tag for the flash attention backend"""
     return "2.5.7"
+
+
+from . import _registry
+
+
+# Re-export registry types and functions for public API
+_FlashAttentionImpl = _registry._FlashAttentionImpl
+_RegisterFn = _registry._RegisterFn
+register_flash_attention_impl = _registry.register_flash_attention_impl
+activate_flash_attention_impl = _registry.activate_flash_attention_impl
+list_flash_attention_impls = _registry.list_flash_attention_impls
+current_flash_attention_impl = _registry.current_flash_attention_impl
+restore_flash_attention_impl = _registry.restore_flash_attention_impl
+
+register_flash_attention_impl.__module__ = __name__
+activate_flash_attention_impl.__module__ = __name__
+list_flash_attention_impls.__module__ = __name__
+current_flash_attention_impl.__module__ = __name__
+restore_flash_attention_impl.__module__ = __name__
+
+# Import built-in implementations to trigger self-registration
+from . import _fa3, _fa4

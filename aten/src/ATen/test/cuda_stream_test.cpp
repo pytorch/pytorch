@@ -69,6 +69,39 @@ TEST(TestStream, CopyAndMoveTest) {
   ASSERT_EQ_CUDA(moveStream.stream(), cuda_stream);
 }
 
+// Verifies stream priority is handled properly
+TEST(TestStream, StreamPriorityTest) {
+  if (!at::cuda::is_available()) return;
+  auto [least_priority, greatest_priority] =
+      at::cuda::CUDAStream::priority_range();
+  EXPECT_EQ(least_priority, 0);
+
+  auto stream = at::cuda::getStreamFromPool(-1);
+  EXPECT_EQ(stream.priority(), -1);
+  EXPECT_GT(10, at::cuda::max_compile_time_stream_priorities);
+  stream = at::cuda::getStreamFromPool(-10);
+  EXPECT_EQ(stream.priority(), greatest_priority);
+  stream = at::cuda::getStreamFromPool(0);
+  EXPECT_EQ(stream.priority(), 0);
+  stream = at::cuda::getStreamFromPool(10);
+  EXPECT_EQ(stream.priority(), 0);
+}
+
+TEST(TestStream, GenericStream) {
+  if (!at::cuda::is_available()) return;
+
+  c10::cuda::CUDAStream cuda_stream = c10::cuda::getStreamFromPool();
+  c10::Stream generic_stream = cuda_stream.unwrap();
+  c10::cuda::CUDAStream wrapped_stream = c10::cuda::CUDAStream(generic_stream);
+  EXPECT_EQ(cuda_stream, wrapped_stream);
+  EXPECT_EQ(
+      (cudaStream_t)cuda_stream,
+      reinterpret_cast<cudaStream_t>(generic_stream.native_handle()));
+  EXPECT_EQ(
+      cuda_stream.stream(),
+      reinterpret_cast<cudaStream_t>(generic_stream.native_handle()));
+}
+
 // Verifies streams are set properly
 TEST(TestStream, GetAndSetTest) {
   if (!at::cuda::is_available()) return;

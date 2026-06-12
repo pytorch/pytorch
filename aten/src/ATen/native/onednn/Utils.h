@@ -5,6 +5,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/strides.h>
+#include <unordered_map>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -39,7 +40,7 @@ void check_onednn_binary_fusion_inputs(
 inline std::vector<int64_t> padding_r(
     IntArrayRef padding, IntArrayRef output_padding)
 {
-  // ConvTranpose padding adjustment
+  // ConvTranspose padding adjustment
   //
   // PyTorch uses padding/output_padding:
   //   osize = (isize - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + output_padding + 1
@@ -76,11 +77,11 @@ using AttrFunction = std::function<ideep::attr_t(
     torch::List<std::optional<at::Scalar>>,
     std::optional<std::string_view>)>;
 
-const std::map<std::string_view, AttrFunction>& fusion_unary_attr_map();
+const std::unordered_map<std::string_view, AttrFunction>& fusion_unary_attr_map();
 
-const std::map<std::string_view, ideep::algorithm>& fusion_unary_alg_map();
+const std::unordered_map<std::string_view, ideep::algorithm>& fusion_unary_alg_map();
 
-const std::map<std::string_view, ideep::algorithm>& fusion_binary_alg_map();
+const std::unordered_map<std::string_view, ideep::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_ONEDNN_ENABLED()
 }
@@ -88,6 +89,10 @@ const std::map<std::string_view, ideep::algorithm>& fusion_binary_alg_map();
 #if defined(__aarch64__)
 inline bool onednn_bf16_device_check_arm() {
   return cpuinfo_initialize() && cpuinfo_has_arm_bf16();
+}
+
+inline bool mkldnn_fp16_device_check_arm() {
+  return cpuinfo_initialize() && cpuinfo_has_arm_neon_fp16();
 }
 
 inline bool is_arm_neoverse() {
@@ -99,6 +104,10 @@ inline bool is_arm_neoverse() {
 }
 #else
 constexpr bool onednn_bf16_device_check_arm() {
+  return false;
+}
+
+inline bool mkldnn_fp16_device_check_arm() {
   return false;
 }
 
@@ -121,7 +130,7 @@ inline bool onednn_fp16_device_check() {
 #if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
   return ideep::has_fp16_type_support();
 #else
-  return false;
+  return mkldnn_fp16_device_check_arm();
 #endif
 }
 

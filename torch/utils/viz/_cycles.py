@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import gc
 import sys
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple
 import types
 import weakref
 import json
@@ -15,14 +15,14 @@ logger = logging.getLogger(__name__)
 def observe_garbage(observer):
     enabled = True
 
-    def disable():
+    def disable() -> None:
         # when GC runs during exit, things like `sys` will already be unloaded
         # so we have to disable the callback to avoid hitting errors.
         nonlocal enabled
         enabled = False
     atexit.register(disable)
 
-    def gc_callback(phase, info):
+    def gc_callback(phase, info) -> None:
         nonlocal enabled
         if not enabled:
             return
@@ -66,11 +66,11 @@ def observe_garbage(observer):
     gc.callbacks.append(gc_callback)
 
     # provide a way to disarm the callback
-    def remove():
+    def remove() -> None:
         gc.callbacks.remove(gc_callback)
     return remove
 
-# Function to visualize cycles adapated from refcycle:
+# Function to visualize cycles adapted from refcycle:
 # Copyright 2013 Mark Dickinson
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -101,17 +101,17 @@ def annotated_references(obj):
     need for a list.  Descriptions are currently strings.
 
     """
-    references: Dict[int, List[str]] = {}
+    references: dict[int, list[str]] = {}
 
-    def add_reference(name, obj):
+    def add_reference(name, obj) -> None:
         references.setdefault(id(obj), []).append(name)
 
-    def add_attrs(*attrs):
+    def add_attrs(*attrs) -> None:
         for attr in attrs:
             if hasattr(obj, attr):
                 add_reference(attr, getattr(obj, attr))
 
-    def add_cell_references():
+    def add_cell_references() -> None:
         try:
             add_attrs("cell_contents")
         except ValueError:
@@ -121,7 +121,7 @@ def annotated_references(obj):
             # annotate
             pass
 
-    def add_function_references():
+    def add_function_references() -> None:
         add_attrs("__defaults__",
                   "__closure__",
                   "__globals__",
@@ -134,23 +134,23 @@ def annotated_references(obj):
                   "__kwdefaults__")
 
 
-    def add_sequence_references():
+    def add_sequence_references() -> None:
         for position, item in enumerate(obj):
             add_reference(f"[{position}]", item)
 
-    def add_dict_references():
+    def add_dict_references() -> None:
         for key, value in obj.items():
             add_reference("key", key)
             add_reference(f"[{repr(key)}]", value)
 
-    def add_set_references():
+    def add_set_references() -> None:
         for elt in obj:
             add_reference("element", elt)
 
-    def add_bound_method_references():
+    def add_bound_method_references() -> None:
         add_attrs("__self__", "__func__", "im_class")
 
-    def add_weakref_references():
+    def add_weakref_references() -> None:
         # For subclasses of weakref, we can't reliably distinguish the
         # callback (if any) from other attributes.
         if type(obj) is weakref.ref:
@@ -160,7 +160,7 @@ def annotated_references(obj):
                 add_reference("__callback__", target)
 
 
-    def add_frame_references():
+    def add_frame_references() -> None:
         f_locals = obj.f_locals
         add_attrs("f_back", "f_code", "f_builtins", "f_globals", "f_trace", "f_locals")
         # Some badly-behaved code replaces the f_locals dict with
@@ -170,7 +170,7 @@ def annotated_references(obj):
             for name, local in obj.f_locals.items():
                 add_reference(f"local {name}", local)
 
-    def add_getset_descriptor_references():
+    def add_getset_descriptor_references() -> None:
         add_attrs("__objclass__", "__name__", "__doc__")
 
     type_based_references = {
@@ -212,7 +212,7 @@ def object_annotation(obj):
     """
 
     def format_sequence(obj):
-        body = ','.join(repr(x) if isinstance(x, BASE_TYPES) else type(x).__name__ for i, x in zip(range(8), obj))
+        body = ','.join(repr(x) if isinstance(x, BASE_TYPES) else type(x).__name__ for x in obj[:8])
         if len(obj) > 8:
             body = f'{body}, ...{len(obj) - 8}'
         return body
@@ -249,6 +249,8 @@ def object_annotation(obj):
         if len(filename) > FRAME_FILENAME_LIMIT:
             filename = "..." + filename[-(FRAME_FILENAME_LIMIT - 3):]
         return f"frame\n{filename}:{obj.f_lineno}"
+    elif is_cuda_tensor(obj):
+        return f"object\n{type(obj).__module__}.{type(obj).__name__} ({obj.shape})"
     else:
         return f"object\n{type(obj).__module__}.{type(obj).__name__}"
 
@@ -256,9 +258,9 @@ def object_annotation(obj):
 
 class Node(NamedTuple):
     label: str
-    context: Optional[str]
+    context: str | None
     root: bool
-    referrents: List[Tuple[str, int]]
+    referrents: list[tuple[str, int]]
 
 def create_graph(objects, *, context=None, filter=None):
     if context is None:
@@ -266,8 +268,9 @@ def create_graph(objects, *, context=None, filter=None):
     if filter is None:
         filter = is_cuda_tensor
 
+    objects = [obj for obj in objects if not isinstance(obj, weakref.ProxyTypes)]
     nodes = [Node(object_annotation(obj), context(obj), filter(obj), []) for obj in objects]
-    node_referrers: List[List[int]] = [[] for obj in objects]
+    node_referrers: list[list[int]] = [[] for obj in objects]
 
     id_to_node = {id(obj): i for i, obj in enumerate(objects)}
     for obj in objects:
@@ -276,7 +279,7 @@ def create_graph(objects, *, context=None, filter=None):
         references = annotated_references(obj)
         for referrent in gc.get_referents(obj):
             rid = id(referrent)
-            tidx = id_to_node.get(rid, None)
+            tidx = id_to_node.get(rid)
             if tidx is None:
                 continue
             labels = references.get(rid, ["?"])
@@ -293,8 +296,8 @@ def create_graph(objects, *, context=None, filter=None):
         to_keep.add(idx)
         referrers = node_referrers[idx]
         to_search.extend(referrers)
-    id_to_filtered_id: Dict[int, int] = {}
-    filtered: List[Any] = []
+    id_to_filtered_id: dict[int, int] = {}
+    filtered: list[Any] = []
     for i, n in enumerate(nodes):
         if i in to_keep:
             id_to_filtered_id[i] = len(id_to_filtered_id)
@@ -310,7 +313,11 @@ def escape(n):
 
 
 def is_cuda_tensor(obj):
-    return isinstance(obj, torch.Tensor) and obj.is_cuda and not isinstance(obj, torch._subclasses.FakeTensor)
+    return (
+        isinstance(obj, torch.Tensor) and
+        obj.device.type == "cuda" and
+        not isinstance(obj, torch._subclasses.FakeTensor)
+    )
 
 def cuda_allocation_context():
     snapshot = torch.cuda.memory._snapshot()
@@ -335,7 +342,7 @@ def cuda_allocation_context():
 def to_dot(nodes):
     lines = ["digraph GraphName {", "node [shape=rect];", 'rankdir=LR;']
     for i, n in enumerate(nodes):
-        lines.append(f'{i} [label={escape(n.label)}, color={ "red" if n.root else "black"}];')
+        lines.append(f'{i} [label={escape(n.label)}, color={"red" if n.root else "black"}];')
 
     for i, f in enumerate(nodes):
         for label, j in f.referrents:
@@ -362,16 +369,14 @@ _template = """
 
     #main {
       flex: 2;
-      overflow: auto;
+      height: 60vh;
+      overflow: clip;
     }
 
     #preContainer {
       flex: 1;
+      height: 40vh;
       overflow: auto;
-    }
-
-    svg {
-        overflow: scroll;
     }
 
     pre {
@@ -391,8 +396,61 @@ _template = """
 <script src='https://cdnjs.cloudflare.com/ajax/libs/viz.js/1.8.0/viz-lite.js'></script>
 <script>
 let dot = $DOT
-let image = Viz(dot, {format: 'svg'});
-document.getElementById('main').innerHTML = image
+let image = Viz(dot, {format: 'svg', 'totalMemory': 1024*1024*1024});
+let main = document.getElementById('main')
+main.innerHTML = image
+let svg = main.firstElementChild
+// Panning and zooming logic
+let isPanning = false;
+let startX, startY;
+let viewBox = { x: 0, y: 0, width: parseFloat(svg.getAttribute('width')), height: parseFloat(svg.getAttribute('height')) };
+svg.removeAttribute('width');
+svg.removeAttribute('height');
+function updateViewBox() {
+    svg.setAttribute('viewBox', `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`);
+}
+updateViewBox()
+svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+svg.addEventListener('mousedown', function(e) {
+    isPanning = true;
+    startX = e.clientX;
+    startY = e.clientY;
+});
+svg.addEventListener('mousemove', function(e) {
+    if (!isPanning) return;
+    const dx = (e.clientX - startX) * (viewBox.width / svg.clientWidth);
+    const dy = (e.clientY - startY) * (viewBox.height / svg.clientHeight);
+    viewBox.x -= dx;
+    viewBox.y -= dy;
+    startX = e.clientX;
+    startY = e.clientY;
+    updateViewBox();
+});
+svg.addEventListener('mouseup', function() {
+    isPanning = false;
+});
+svg.addEventListener('mouseleave', function() {
+    isPanning = false;
+});
+svg.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    const zoomFactor = 0.1;
+    const zoomAmount = e.deltaY > 0 ? 1 + zoomFactor : 1 - zoomFactor;
+    // Calculate mouse position relative to the SVG
+    const rect = svg.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    const mouseXRel = mouseX / svg.clientWidth;
+    const mouseYRel = mouseY / svg.clientHeight;
+    // Adjust viewBox to zoom around the mouse position
+    const newWidth = viewBox.width * zoomAmount;
+    const newHeight = viewBox.height * zoomAmount;
+    viewBox.x += (viewBox.width - newWidth) * mouseXRel;
+    viewBox.y += (viewBox.height - newHeight) * mouseYRel;
+    viewBox.width = newWidth;
+    viewBox.height = newHeight;
+    updateViewBox();
+});
 $LISTENERS
 </script>
 </body>
@@ -416,7 +474,7 @@ def to_html(nodes):
 def observe_tensor_cycles(callback):
     torch.cuda.memory._record_memory_history(max_entries=100000)
 
-    def observer(garbage):
+    def observer(garbage) -> None:
         if garbage:
             if not any(is_cuda_tensor(obj) for obj in garbage):
                 logger.info("No CUDA Tensors found in garbage")
@@ -430,7 +488,7 @@ def warn_tensor_cycles():
     Install a warning that reports whenever a cycle that is holding CUDA memory is observed.
 
     The warning produces an .html file that visualizes the cycle,
-    and links it to the stack frame that allocted the CUDA tensor.
+    and links it to the stack frame that allocated the CUDA tensor.
 
     Reference cycles are freed by the cycle collector rather than being cleaned up
     when the objects in the cycle first become unreachable. If a cycle points to a tensor,
@@ -440,8 +498,8 @@ def warn_tensor_cycles():
     """
     logger.info("Watching Python reference cycles for CUDA Tensors.")
 
-    def write_and_log(html):
-        with NamedTemporaryFile('w', suffix='.html', delete=False) as f:
+    def write_and_log(html) -> None:
+        with NamedTemporaryFile('w', suffix='.html') as f:
             f.write(html)
             logger.warning('Reference cycle includes a CUDA Tensor see visualization of cycle %s', f.name)
     return observe_tensor_cycles(write_and_log)

@@ -27,7 +27,7 @@ namespace c10::xpu {
  * threads as the SYCL specification described.
  */
 
-static constexpr int max_compile_time_stream_priorities = 2;
+static constexpr int max_compile_time_stream_priorities = 3;
 
 /*
  * This serves as a wrapper around c10::Stream and acts as a representation for
@@ -44,7 +44,7 @@ class C10_XPU_API XPUStream {
   }
 
   /// Construct a XPUStream from a Stream with no error checking.
-  explicit XPUStream(Unchecked, Stream stream) : stream_(stream) {}
+  explicit XPUStream(Unchecked /*unused*/, Stream stream) : stream_(stream) {}
 
   bool operator==(const XPUStream& other) const noexcept {
     return unwrap() == other.unwrap();
@@ -57,6 +57,11 @@ class C10_XPU_API XPUStream {
   /// Implicit conversion to sycl::queue&.
   operator sycl::queue&() const {
     return queue();
+  }
+
+  /// Implicit conversion to sycl::queue*.
+  operator sycl::queue*() const {
+    return &queue();
   }
 
   /// Implicit conversion to Stream (a.k.a., forget that the stream is a
@@ -104,6 +109,11 @@ class C10_XPU_API XPUStream {
     }
   }
 
+  bool is_capturing() const {
+    return queue().ext_oneapi_get_state() ==
+        sycl::ext::oneapi::experimental::queue_state::recording;
+  }
+
   /// Return the priority that this stream is associated with. Lower numbers
   /// represent higher priority.
   int priority() const;
@@ -132,7 +142,8 @@ class C10_XPU_API XPUStream {
 
   /// Return the range of priority **supported by PyTorch**.
   static std::tuple<int, int> priority_range() {
-    return std::make_tuple(0, -max_compile_time_stream_priorities + 1);
+    // See Note [XPU Stream priorities]
+    return std::make_tuple(1, -max_compile_time_stream_priorities + 2);
   }
 
  private:
@@ -158,14 +169,21 @@ C10_XPU_API XPUStream
 getStreamFromPool(const int priority, DeviceIndex device = -1);
 
 /**
- * Get a XPUStream from a externally allocated one.
+ * Get an XPUStream from an external SYCL queue.
  *
- * This is mainly for interoperability with different libraries where we
- * want to operate on a non-torch allocated stream for data exchange or similar
- * purposes
+ * This function allows interoperability with other libraries by enabling
+ * the use of an external SYCL queue that was not created by PyTorch. This
+ * can be useful for data exchange or other operations where integration
+ * with non-PyTorch queues is required.
+ *
+ * NOTE: It is the user's responsibility to ensure that the referenced SYCL
+ * queue remains alive while the corresponding XPUStream, or any c10::Stream
+ * derived from it, is in use. The different SYCL queue pointers will result in
+ * distinct XPUStream instances, even if the SYCL queues they dereference are
+ * equivalent.
  */
-C10_API XPUStream
-getStreamFromExternal(sycl::queue* ext_stream, DeviceIndex device_index);
+C10_XPU_API XPUStream
+getStreamFromExternal(sycl::queue* ext_queue, DeviceIndex device_index);
 
 /**
  * Get the current XPU stream, for the passed XPU device, or for the current

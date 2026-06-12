@@ -5,7 +5,7 @@
 #include <c10/xpu/XPUStream.h>
 #include <c10/xpu/test/impl/XPUTest.h>
 
-bool has_xpu() {
+static bool has_xpu() {
   return c10::xpu::device_count() > 0;
 }
 
@@ -113,10 +113,6 @@ TEST(XPUGuardTest, EventBehavior) {
   event2.synchronize();
   EXPECT_TRUE(event2.query());
   EXPECT_NE(event1.eventId(), event2.eventId());
-#if SYCL_COMPILER_VERSION < 20250000
-  ASSERT_THROW(event1.elapsedTime(event2), c10::Error);
-#else
   event1.elapsedTime(event2);
-#endif
   sycl::free(deviceData2, c10::xpu::get_device_context());
 }

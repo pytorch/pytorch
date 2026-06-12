@@ -4,12 +4,13 @@
 #include <c10/util/TypeSafeSignMath.h>
 #include <cmath>
 
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
 #if defined(__CUDA_ARCH__)
 #include <c10/cuda/CUDAMathCompat.h>
-#define C10_COMPAT_COPYSIGN c10::cuda::compat::copysign
 #elif defined(__HIPCC__)
 #include <c10/hip/HIPMathCompat.h>
-#define C10_COMPAT_COPYSIGN c10::hip::compat::copysign
+#endif
+#define C10_COMPAT_COPYSIGN c10::cuda::compat::copysign
 #else
 #include <c10/util/copysign.h>
 #define C10_COMPAT_COPYSIGN c10::copysign
@@ -58,6 +59,16 @@ inline C10_HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b)
 
 template <typename scalar_t>
 inline C10_HOST_DEVICE scalar_t div_floor_integer(scalar_t a, scalar_t b) {
+  if (C10_UNLIKELY(b == 0)) {
+    return scalar_t(0);
+  }
+
+  if (C10_UNLIKELY(
+          std::is_signed<scalar_t>::value &&
+          a == std::numeric_limits<scalar_t>::min() && b == scalar_t(-1))) {
+    return a;
+  }
+
   if (c10::signs_differ(a, b)) {
     // Subtracts one from the results of truncation division if the
     // divisor and dividend have different sign(bit)s and the remainder of
@@ -67,6 +78,36 @@ inline C10_HOST_DEVICE scalar_t div_floor_integer(scalar_t a, scalar_t b) {
     return rem ? quot - 1 : quot;
   }
   return a / b;
+}
+
+template <
+    typename scalar_t,
+    std::enable_if_t<std::is_floating_point_v<scalar_t>, int> = 0>
+inline C10_HOST_DEVICE scalar_t div_mod(scalar_t a, scalar_t b)
+    __ubsan_ignore_float_divide_by_zero__ {
+  if (C10_UNLIKELY(b == 0)) {
+    // Divide by zero: return standard IEEE result
+    return std::fmod(a, b);
+  }
+
+  auto mod = std::fmod(a, b);
+  if (mod == 0) {
+    mod = C10_COMPAT_COPYSIGN(scalar_t(0), b);
+  } else if ((b < 0) != (mod < 0)) {
+    mod += b;
+  }
+  return mod;
+}
+
+template <
+    typename scalar_t,
+    std::enable_if_t<std::is_integral_v<scalar_t>, int> = 0>
+inline C10_HOST_DEVICE scalar_t div_mod(scalar_t a, scalar_t b) {
+  auto mod = a % b;
+  if (mod != 0 && (b < 0) != (mod < 0)) {
+    mod += b;
+  }
+  return mod;
 }
 
 } // namespace c10

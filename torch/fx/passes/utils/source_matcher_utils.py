@@ -1,7 +1,8 @@
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any
 
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
@@ -34,28 +35,29 @@ logger = _init_logger()
 @dataclass
 class SourcePartition:
     # Nodes in a particular partition
-    nodes: List[Node]
+    nodes: list[Node]
 
     # The source these nodes decomposed from
     source: Any
 
     # Nodes in the graph that are needed as inputs to the partition
-    input_nodes: List[Node] = field(default_factory=list)
+    # These do not include the params of the partition
+    input_nodes: list[Node] = field(default_factory=list)
 
     # Nodes in the partition that are being used by nodes outside of the
     # partition
-    output_nodes: List[Node] = field(default_factory=list)
+    output_nodes: list[Node] = field(default_factory=list)
 
     # Parameters that are being used
-    params: List[Node] = field(default_factory=list)
+    params: list[Node] = field(default_factory=list)
 
 
 @compatibility(is_backward_compatible=False)  # type: ignore[misc]
 def get_source_partitions(
     graph: Graph,
-    wanted_sources: List[Any],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Dict[Any, List[SourcePartition]]:
+    wanted_sources: list[Any],
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> dict[Any, list[SourcePartition]]:
     """
     Args:
         graph: The graph we want to partition
@@ -68,7 +70,12 @@ def get_source_partitions(
         that correspond to the list of nodes that were decomposed from the given
         source.
     """
-    modules: Dict[Type, Dict[str, List[Node]]] = {}
+    modules: dict[type, dict[str, list[Node]]] = {}
+
+    def add_to_partition(src: Any, fqn: str, node: Node) -> None:
+        diff_modules = modules.setdefault(src, {})
+        partition = diff_modules.setdefault(fqn, [])
+        partition.append(node)
 
     for node in graph.nodes:
         # The metadata source_fn should contain a tuple of a unique name for the
@@ -80,36 +87,61 @@ def get_source_partitions(
         # be different from "source_fn_stack", for example for the add_ node
         # decomposed from batch norm. We should remove the check on "source_fn_stack"
         # after we fix "torch_fn". T199561090
-        if (source_fn_st := node.meta.get("source_fn_stack", None)) is None and (
-            torch_fn := node.meta.get("torch_fn", None)
-        ) is not None:
-            node_fqn, source_fn = torch_fn
-            source_fn_name = source_fn.split(".")[1]
-            if source_fn_name in wanted_sources:
-                diff_modules = modules.setdefault(source_fn_name, {})
-                partition = diff_modules.setdefault(node_fqn, [])
-                partition.append(node)
+        source_fn_st = node.meta.get("source_fn_stack", None)
+        if source_fn_st is None:
+            matched = False
+            torch_fn = node.meta.get("torch_fn", None)
+            if torch_fn is not None:
+                node_fqn, source_fn = torch_fn
+                source_fn_name = source_fn.split(".")[1]
+                if source_fn_name in wanted_sources:
+                    add_to_partition(source_fn_name, node_fqn, node)
+                    matched = True
+            # Fallback: when source_fn_stack is not populated (e.g. strict=False export),
+            # use nn_module_stack to resolve the originating module type.
+            # Only apply to call_function nodes to avoid incorrectly including
+            # placeholder, get_attr, or output nodes in partitions.
+            if not matched and node.op == "call_function":
+                nn_module_stack = node.meta.get("nn_module_stack", None)
+                if nn_module_stack:
+                    # Get the innermost module (last entry in the ordered dict)
+                    innermost_fqn, innermost_cls = list(nn_module_stack.values())[-1]
+                    for src in wanted_sources:
+                        if isinstance(src, type):
+                            if isinstance(innermost_cls, type) and issubclass(
+                                innermost_cls, src
+                            ):
+                                add_to_partition(src, innermost_fqn, node)
+                                break
+                            elif isinstance(innermost_cls, str):
+                                src_str = src.__module__ + "." + src.__qualname__
+                                if innermost_cls == src_str:
+                                    add_to_partition(src, innermost_fqn, node)
+                                    break
+                        elif innermost_cls == src:
+                            add_to_partition(src, innermost_fqn, node)
+                            break
 
-        if (source_fn_st := node.meta.get("source_fn_stack", None)) is not None:
+        if source_fn_st is not None:
             source_fn = source_fn_st[-1]
             if source_fn[1] in wanted_sources:
-                diff_modules = modules.setdefault(source_fn[1], {})
-                partition = diff_modules.setdefault(source_fn[0], [])
-                partition.append(node)
+                add_to_partition(source_fn[1], source_fn[0], node)
 
-    def make_partition(nodes: List[Node], module_type: Type) -> SourcePartition:
+    def make_partition(nodes: list[Node], module_type: type) -> SourcePartition:
         input_nodes = set()
         output_nodes = set()
         params = set()
         for node in nodes:
             for arg in node.args:
-                if isinstance(arg, Node) and arg not in nodes:
+                if isinstance(arg, Node) and arg not in nodes and arg.op != "get_attr":
                     input_nodes.add(arg)
 
             if node.op == "get_attr":
                 params.add(node)
+                # get_attr nodes won't be output nodes
+                continue
 
-            for user in node.users.keys():
+            for user in node.users:
                 if user not in nodes:
                     output_nodes.add(node)
 
@@ -121,7 +153,7 @@ def get_source_partitions(
             list(params),  # type: ignore[arg-type]
         )
 
-    ret: Dict[Type[Any], List[SourcePartition]] = {}
+    ret: dict[type[Any], list[SourcePartition]] = {}
 
     if filter_fn:
         # for each partition, we apply filter_fn to filter out all partitions that doesn't satisfy the
@@ -153,7 +185,7 @@ def check_subgraphs_connected(
     """
 
     for node in reversed(subgraph1.nodes):
-        for user in node.users.keys():
+        for user in node.users:
             if user in subgraph2.nodes:
                 return True
     return False
