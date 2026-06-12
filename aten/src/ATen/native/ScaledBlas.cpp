@@ -36,6 +36,72 @@
 #include <ATen/ops/matmul.h>
 #endif
 
+namespace at::meta {
+
+// V2: Computes matrix multiply + bias while applying scaling to input and output matrices.
+// Scales are only applicable when matrices are of Float8 / Float4 type and assumed to be 1.0
+// by default. Shape inference + output allocation runs here; backend-specific
+// dtype/scale/recipe/swizzle validation lives in TORCH_IMPL_FUNC. The output dtype defaults
+// to `mat_a`'s dtype when `out_dtype` is unset, matching the legacy functional.
+//
+// Arguments:
+//  - `mat_a`: the first operand, `torch.float8_e4m3fn[uz]`, `torch.float8_e5m2[uz]`,
+//    or `torch.float4_e2m1fn_x2`
+//  - `mat_b`: the second operand, dtype matching the constraints for `mat_a`
+//  - `scale_a`: tensor list with the inverse scale(s) of `mat_a`; shape/strides/dtype depend
+//    on the scaling scheme and may include 1 (single-level) or 2 (two-level NVFP4) entries
+//  - `recipe_a`: int list mapping to `ScalingType` enum entries for `scale_a`
+//  - `swizzle_a`: int list mapping to `SwizzleType` enum entries for `scale_a`
+//  - `scale_b`/`recipe_b`/`swizzle_b`: as above, for `mat_b`
+//  - `bias`: optional bias, `torch.float16` or `torch.bfloat16`
+//  - `out_dtype`: optional output dtype; defaults to `mat_a.dtype()`
+//  - `contraction_dim`: optional pair `(a_dim, b_dim)` overriding the default `(1, 0)`
+//    contraction; useful for packed formats (e.g. NVFP4 x2) where cheap `.t()` is unavailable
+//  - `use_fast_accum`: enables fast tensor-core accumulation (Hopper+ only); ignored otherwise
+TORCH_META_FUNC(_scaled_mm_v2)(
+    const Tensor& self,
+    const Tensor& mat2,
+    const at::ITensorListRef& scale_a,
+    at::IntArrayRef recipe_a,
+    at::IntArrayRef swizzle_a,
+    const at::ITensorListRef& scale_b,
+    at::IntArrayRef recipe_b,
+    at::IntArrayRef swizzle_b,
+    at::OptionalTensorRef bias,
+    std::optional<c10::ScalarType> out_dtype,
+    at::IntArrayRef contraction_dim,
+    bool use_fast_accum) {
+  TORCH_CHECK_VALUE(self.dim() == 2, "mat_a must be a matrix");
+  TORCH_CHECK_VALUE(mat2.dim() == 2, "mat_b must be a matrix");
+
+  if (!contraction_dim.empty()) {
+    TORCH_CHECK_VALUE(contraction_dim.size() == 2, "contraction_dim must have exactly 2 elements");
+    auto mat_a_dim = contraction_dim[0];
+    auto mat_b_dim = contraction_dim[1];
+    TORCH_CHECK_VALUE(
+        self.size(mat_a_dim) == mat2.size(mat_b_dim), "mat_a and mat_b shapes cannot be multiplied (",
+        self.size(0), "x", self.size(1), " and ", mat2.size(0), "x", mat2.size(1), ") ",
+        "with contraction dims mat_a: ", mat_a_dim, ", mat_b: ", mat_b_dim);
+  } else {
+    TORCH_CHECK_VALUE(
+        self.size(1) == mat2.size(0), "mat_a and mat_b shapes cannot be multiplied (",
+        self.size(0), "x", self.size(1), " and ", mat2.size(0), "x", mat2.size(1), ")");
+  }
+
+  TORCH_CHECK_VALUE(
+      !bias.has_value() || bias->numel() == mat2.size(1),
+      "Bias must be size ", mat2.size(1), " but got ", bias->numel());
+
+  const auto out_dtype_ = out_dtype.value_or(self.scalar_type());
+  set_output_raw_strided(
+      0,
+      {self.size(0), mat2.size(1)},
+      {},
+      self.options().dtype(out_dtype_));
+}
+
+} // namespace at::meta
+
 namespace at::native {
 
 using at::blas::ScalingType;
@@ -331,66 +397,38 @@ std::array<ScaleKernelDispatchEntry, 2> scale_kernel_dispatch = {{
      ScaledGemmImplementation::ROWWISE_ROWWISE},
 }};
 
-Tensor& _scaled_mm_cpu_v2_out(
+TORCH_IMPL_FUNC(_scaled_mm_cpu_v2_out)(
     const Tensor& mat_a,
     const Tensor& mat_b,
-    ArrayRef<Tensor> scale_a,
+    const at::ITensorListRef& scale_a_list,
     IntArrayRef scale_recipe_a,
     IntArrayRef swizzle_a,
-    ArrayRef<Tensor> scale_b,
+    const at::ITensorListRef& scale_b_list,
     IntArrayRef scale_recipe_b,
     IntArrayRef swizzle_b,
-    const std::optional<Tensor>& bias,
-    const std::optional<c10::ScalarType> out_dtype,
+    at::OptionalTensorRef bias,
+    std::optional<c10::ScalarType> out_dtype,
     IntArrayRef contraction_dim,
     bool use_fast_accum,
-    Tensor& out) {
-  TORCH_CHECK_VALUE(mat_a.dim() == 2, "mat_a must be a matrix");
-  TORCH_CHECK_VALUE(mat_b.dim() == 2, "mat_b must be a matrix");
+    const Tensor& out) {
+  // Materialize the scale lists so the existing acceptance helpers (which
+  // take ArrayRef<Tensor>) work unchanged.
+  std::vector<Tensor> scale_a(scale_a_list.begin(), scale_a_list.end());
+  std::vector<Tensor> scale_b(scale_b_list.begin(), scale_b_list.end());
+  ArrayRef<Tensor> scale_a_ref(scale_a);
+  ArrayRef<Tensor> scale_b_ref(scale_b);
 
   // If any of M, K, N is 0 - return early (the tensorwise/rowwise float8 gemm kernels
-  // do not support this case).
+  // do not support this case). The output has already been sized by the
+  // structured-op meta function; we only need to zero-fill when K=0.
   if (mat_a.size(0) == 0 || mat_a.size(1) == 0 || mat_b.size(1) == 0) {
-    // `out` was created with `at::empty`. In the case where we are multiplying
-    // MxK by KxN and K is the zero dim, we need to initialize here to properly
-    // return a tensor of zeros.
-    at::native::resize_output(out, {mat_a.size(0), mat_b.size(1)});
     if (mat_a.size(1) == 0) {
-      out.zero_();
+      const_cast<Tensor&>(out).zero_();
     }
-
-    return out;
+    return;
   }
 
-  // Check if the input matrix sizes can be multiplied
-  // - if optional contraction dims are provided, use those
-  //   -- mostly for < 1B formats (i.e. nvfp4x2) where cheap .t() is not available.
-  if (contraction_dim.size() > 0) {
-    TORCH_CHECK_VALUE(contraction_dim.size() == 2, "contraction_dim must have exactly 2 elements");
-    auto mat_a_dim = contraction_dim[0];
-    auto mat_b_dim = contraction_dim[1];
-    TORCH_CHECK_VALUE(
-        mat_a.size(mat_a_dim) == mat_b.size(mat_b_dim), "mat_a and mat_b shapes cannot be multiplied (",
-        mat_a.size(0), "x", mat_a.size(1), " and ", mat_b.size(0), "x", mat_b.size(1), ") ",
-        "with contraction dims mat_a: ", mat_a_dim, ", mat_b: ", mat_b_dim);
-  } else {
-    TORCH_CHECK_VALUE(
-        mat_a.size(1) == mat_b.size(0), "mat_a and mat_b shapes cannot be multiplied (",
-        mat_a.size(0), "x", mat_a.size(1), " and ", mat_b.size(0), "x", mat_b.size(1), ")");
-  }
-
-  TORCH_CHECK_VALUE(
-    !bias || bias->numel() == mat_b.sizes()[1],
-    "Bias must be size ",
-    mat_b.sizes()[1],
-    " but got ",
-    bias->numel());
-
-  TORCH_CHECK_VALUE(
-    !out_dtype || *out_dtype == out.scalar_type(),
-    "out_dtype must match output matrix type");
-
-  if (bias) {
+  if (bias.has_value()) {
     TORCH_CHECK_VALUE(
         bias->scalar_type() == kFloat ||
             bias->scalar_type() == c10::ScalarType::BFloat16 ||
@@ -398,9 +436,6 @@ Tensor& _scaled_mm_cpu_v2_out(
         "Bias must be Float32 or BFloat16 or Half, but got ",
         bias->scalar_type());
   }
-
-  // Align with CUDA's default out to be bf16
-  const auto out_dtype_ = out_dtype.value_or(c10::ScalarType::BFloat16);
 
   // Conversion of implicitly-defined enums to explicit
   auto scale_recipe_a_enum = convert_int_to_enum<ScalingType>(scale_recipe_a);
@@ -424,10 +459,10 @@ Tensor& _scaled_mm_cpu_v2_out(
       scale_kernel_dispatch,
       mat_a.scalar_type(),
       scale_recipe_a_enum,
-      scale_a,
+      scale_a_ref,
       mat_b.scalar_type(),
       scale_recipe_b_enum,
-      scale_b);
+      scale_b_ref);
 
   if (gemm_impl == ScaledGemmImplementation::NONE) {
     const std::optional<at::Tensor> scale_a_opt = scale_a.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_a[0]};
@@ -436,9 +471,9 @@ Tensor& _scaled_mm_cpu_v2_out(
     invalid_scaling_config(mat_a, mat_b, scale_a_opt, scale_b_opt);
   }
 
-  at::native::resize_output(out, {mat_a.size(0), mat_b.size(1)});
-
-  auto bias_ = bias.value_or(Tensor());
+  std::optional<Tensor> bias_opt = bias.has_value()
+      ? std::optional<Tensor>{*bias}
+      : std::optional<Tensor>{std::nullopt};
 
   if (gemm_impl == ScaledGemmImplementation::TENSORWISE_TENSORWISE ||
       gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE) {
@@ -447,49 +482,15 @@ Tensor& _scaled_mm_cpu_v2_out(
       mat_b,
       scale_a[0],
       scale_b[0],
-      bias,
+      bias_opt,
       std::nullopt,  // scale-result
-      out_dtype_,
+      out.scalar_type(),
       use_fast_accum,
       gemm_impl,
-      out);
+      const_cast<Tensor&>(out));
   } else {
     TORCH_CHECK_VALUE(false, "Invalid state - found an implementation, but not really");
   }
-
-  return out;
-}
-
-Tensor _scaled_mm_cpu_v2(
-    const Tensor& mat_a,
-    const Tensor& mat_b,
-    ArrayRef<Tensor> scale_a,
-    IntArrayRef scale_recipe_a,
-    IntArrayRef swizzle_a,
-    ArrayRef<Tensor> scale_b,
-    IntArrayRef scale_recipe_b,
-    IntArrayRef swizzle_b,
-    const std::optional<Tensor>& bias,
-    const std::optional<c10::ScalarType> out_dtype,
-    IntArrayRef contraction_dim,
-    bool use_fast_accum) {
-  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
-  Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
-
-  return _scaled_mm_cpu_v2_out(
-    mat_a,
-    mat_b,
-    scale_a,
-    scale_recipe_a,
-    swizzle_a,
-    scale_b,
-    scale_recipe_b,
-    swizzle_b,
-    bias,
-    out_dtype,
-    contraction_dim,
-    use_fast_accum,
-    out);
 }
 
 // TODO(vasiliy, future PR): figure out why we need to declare this function, when
