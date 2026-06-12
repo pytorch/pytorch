@@ -1,16 +1,22 @@
 # CPython Dynamo Agentic Coverage Plan
 
-Status: Cycle 1 top-10 exhausted (G1-G10) and the relevance CSVs were
-regenerated per the README (6 landed rows dropped, 4 deferred rows tagged).
-The new actionable top-10 is G11-G20, drawn from the re-ranked CSV. G11
-(`CPython313-test_iter-TestCase.test_reduce_mutating_builtins_iter`,
-relevance 80.2) was triaged and DEFERRED as a CPython C-implementation-detail
-test (see G11 entry below). G12
-(`CPython313-test_list-ListTest.test_free_after_iterating`, relevance 80.0) was
-triaged and DEFERRED as a CPython object-lifetime / GC-internals test (see G12
-entry below). G13/G14/G18 landed (G15/G16/G17 were G14 collateral); G19
-(`CPython313-test_deque-TestBasic.test_basics`, relevance 78.9) is the next
-unworked actionable gate.
+Status: Cycle 2 top-10 exhausted (G11-G20). G13/G14/G18/G19/G20 landed
+(G15/G16/G17 were G14 collateral); G11/G12 were triaged and DEFERRED (CPython
+C-implementation-detail / object-lifetime-GC internals, sentinels left in
+place). G19 (`test_deque-TestBasic.test_basics`) landed via deque `__init__`
+support. G20 (`test_range-RangeTest.test_range_iterators`) landed via `object()`
+support on top of the native itertools iterator-variable stack (chain /
+zip_longest / islice), which also makes that otherwise-pathological test
+practical under Dynamo. The relevance CSVs were regenerated per the README (32
+landed/collateral rows dropped, deferred rows kept and tagged). The new
+actionable top-10 is Cycle 3, G21-G30, drawn from the re-ranked CSV. G21
+(`test_range-RangeTest.test_user_index_method`) landed via `__index__`
+coercion in `range()` and slice subscript. G22
+(`test_sort-TestDecorateSortUndecorate.test_reverse_stability`) was triaged and
+DEFERRED (data-dependent sort over dynamic random values; needs random -> SymInt
+routing or data-dependent sort support; sentinel left in place). G23
+(`test_list-ListTest.test_init`, relevance 78.4) is the next unworked actionable
+gate.
 
 Goal: improve `PYTORCH_TEST_WITH_DYNAMO=1` coverage for CPython tests by
 working the highest-value expected failures first. The actionable gates come
@@ -835,6 +841,332 @@ Exit criteria:
 - Fast CPU validation (affected-file substitute) passes modulo documented
   baseline failures.
 - Commit exactly this gate.
+
+## Gates (Cycle 3: actionable top-10, G21-G30)
+
+These are the ten highest-ranked rows whose `deferred` column is empty in the
+regenerated `cpython_dynamo_expected_failure_relevance.csv`. Gate numbers
+continue from G21. Work them in order; triage each for in-scope vs deferred per
+`CPYTHON_MIRRORING.md` before implementing. Each gate is one focused commit:
+remove only the proven sentinel, add focused Dynamo regression coverage when the
+fix is semantic, target test passes under `PYTORCH_TEST_WITH_DYNAMO=1`, affected
+CPython file has no new real failures, CPU fast validation (affected-file
+substitute) passes modulo baseline, exactly one gate commit.
+
+### G21: Range With User __index__
+
+Status: FIXED (Cycle 3). Classification (a): genuine in-scope object-protocol
+gap. CPython applies `PyNumber_Index` (`__index__`) to `range()` arguments and
+to slice members in range subscript; Dynamo did neither. `call_range`
+(`builtin.py`) returned None for `UserDefinedObjectVariable` args (graph break
+"Failed to trace builtin operator range"); after fixing that, `range(10)[:I(5)]`
+crashed because `validate_sequence_index` (`object_protocol.py`) coerced a
+non-slice index via `__index__` but never the members of a slice key.
+
+Fix: `call_range` coerces `UserDefinedObjectVariable` args via `nb_index_impl`
+and retries the constant/symint path; `validate_sequence_index` applies
+`__index__` to each non-None slice member (CPython `PySlice_Unpack`), a shared
+fix for list/tuple/str/bytes slicing too. `nb_index_impl` already propagates a
+raising `__index__` and the non-int `TypeError`.
+
+Files changed:
+- `torch/_dynamo/variables/builtin.py` (`call_range`)
+- `torch/_dynamo/variables/object_protocol.py` (`validate_sequence_index`)
+- `test/dynamo/test_sequence_ops.py` (`TestRangeUserIndex`: args, slice,
+  raising `__index__`, non-int `__index__`)
+
+Sentinel removed: `CPython313-test_range-RangeTest.test_user_index_method`.
+Validation: target passes; full `test_range.py` 14 passed / 14 skipped;
+`test_getitem` + `test_sequence_ops` + `test_misc` 965 passed (no regressions).
+
+Original gate scaffolding preserved below.
+
+Target sentinel:
+
+```
+CPython313-test_range-RangeTest.test_user_index_method
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_range.py::RangeTest::test_user_index_method
+```
+
+Relevance score: 78.5. Baseline failure kind: Failed to trace builtin operator.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/builtin.py
+torch/_dynamo/variables/iter.py
+torch/_dynamo/variables/lists.py
+```
+
+### G22: Sort Reverse Stability
+
+Status: DEFERRED (Cycle 3). Triaged as requiring broad changes (random ->
+SymInt routing and/or data-dependent sort), out of scope for a focused gate.
+Sentinel LEFT IN PLACE; CSV row tagged `deferred`. No source change made.
+
+Root-cause classification: out of scope (data-dependent control flow on dynamic
+values). The CSV failure kind ("Attempted to call function marked as skipped")
+is stale. The test builds `data = [(random.randrange(100), i) for i in
+range(200)]` and sorts it with `cmp_to_key(my_cmp)` where `my_cmp` does
+`(x0 > y0) - (x0 < y0)` on the random ints. Two compounding blockers, both
+rooted in how Dynamo models random values:
+
+1. `random.randrange` routes through `RandomVariable` -> `call_random_fn`, which
+   deliberately makes the value DYNAMIC (a `RandomValueSource` graph input,
+   re-run at runtime) rather than a baked constant. So the ints are
+   tensor-backed `UnspecializedPythonVariable`s with no static constant.
+   `_handle_insert_op_in_graph`'s unspec branch calls
+   `unwrap_unspec_args_kwargs` -> `as_python_constant`, which raises
+   `AsPythonConstantNotImplementedError` -> graph break "unimplemented builtin
+   op on tensor arguments". A local fallback (keep the op symbolic when no
+   constant is available) fixes plain arithmetic (`add`/`mul` work) but then
+   `(x0 > y0) - (x0 < y0)` becomes bool-tensor minus bool-tensor ->
+   "Subtraction with two bool tensors is not supported": the tensor model
+   diverges from Python int/bool semantics.
+
+2. Even with perfect scalar handling, `list.sort(key=...)` over 200 elements
+   keyed on dynamic random values requires data-dependent ordering decisions
+   Dynamo cannot make at trace time without baking a specific order, which
+   contradicts the dynamic-random model (the graph re-runs the random calls).
+
+Making this gate pass would require routing random scalars through
+`wrap_symint`/`wrap_symfloat` (the `call_random_fn` TODO) and/or supporting
+data-dependent sort -- both broad, cross-cutting changes. Deferred.
+
+Target sentinel:
+
+```
+CPython313-test_sort-TestDecorateSortUndecorate.test_reverse_stability
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_sort.py::TestDecorateSortUndecorate::test_reverse_stability
+```
+
+Relevance score: 78.5.
+
+### G23: List Init
+
+Target sentinel:
+
+```
+CPython313-test_list-ListTest.test_init
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_list.py::ListTest::test_init
+```
+
+Relevance score: 78.4. Baseline failure kind: Observed exception. (list.__init__
+re-init; the list analog of the G19 deque.__init__ fix.)
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/lists.py
+torch/_dynamo/variables/builtin.py
+```
+
+### G24: Dict Splittable Pop
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_splittable_pop
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_splittable_pop
+```
+
+Relevance score: 77.9. Baseline failure kind: Observed exception.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/variables/builtin.py
+```
+
+### G25: Sort Bad Decorator
+
+Target sentinel:
+
+```
+CPython313-test_sort-TestDecorateSortUndecorate.test_baddecorator
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_sort.py::TestDecorateSortUndecorate::test_baddecorator
+```
+
+Relevance score: 77.9. Baseline failure kind: Unsupported method call.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/lists.py
+torch/_dynamo/variables/builtin.py
+torch/_dynamo/variables/user_defined.py
+```
+
+### G26: Dict Views Mapping
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_views_mapping
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_views_mapping
+```
+
+Relevance score: 77.8. Baseline failure kind: builtin isinstance() cannot
+determine type of argument.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/variables/builtin.py
+torch/_dynamo/variables/user_defined.py
+```
+
+### G27: Dict Non-Str Single-Instance Setitem
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_object_set_item_single_instance_non_str_key
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_object_set_item_single_instance_non_str_key
+```
+
+Relevance score: 77.7. Baseline failure kind: Expected str key, got
+<class 'int'> (splitdict / non-str key store specialization).
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/variables/builtin.py
+```
+
+### G28: Deque Subclass Basics
+
+Target sentinel:
+
+```
+CPython313-test_deque-TestSubclass.test_basics
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_deque.py::TestSubclass::test_basics
+```
+
+Relevance score: 77.4. Baseline failure kind: Unsupported function call.
+(Deque-subclass construction; sibling of the G19 deque work.)
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/lists.py
+torch/_dynamo/variables/user_defined.py
+torch/_dynamo/variables/builtin.py
+```
+
+### G29: Dict Reentrant Insertion
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_reentrant_insertion
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_reentrant_insertion
+```
+
+Relevance score: 77.3. Baseline failure kind: Read uninitialized cell. (Likely
+local class-body closure-cell construction, the deferred-G3 pattern; triage for
+out-of-scope before implementing.)
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/symbolic_convert.py
+torch/_dynamo/variables/user_defined.py
+```
+
+### G30: Dict Str/Non-Str Key
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_str_nonstr
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_str_nonstr
+```
+
+Relevance score: 77.3. Baseline failure kind: Read uninitialized cell. (Same
+closure-cell pattern as G29; triage for out-of-scope before implementing.)
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/symbolic_convert.py
+torch/_dynamo/variables/user_defined.py
+```
 
 ## Proposed Gate Changes Awaiting Human Approval
 

@@ -5,14 +5,6 @@ CPython313-test_list-ListTest.test_deopt_from_append_list,82.7
 CPython313-test_dict-DictTest.test_copy_maintains_tracking,82.4
 CPython313-test_iter-TestCase.test_reduce_mutating_builtins_iter,80.2
 CPython313-test_list-ListTest.test_free_after_iterating,80.0
-CPython313-test_list-ListTest.test_contains_order,79.8
-CPython313-test_set-TestSet.test_discard,79.7
-CPython313-test_set-TestSet.test_remove,79.7
-CPython313-test_set-TestSetSubclass.test_discard,79.7
-CPython313-test_set-TestSetSubclass.test_remove,79.7
-CPython313-test_dict-DictTest.test_errors_in_view_containment_check,79.4
-CPython313-test_deque-TestBasic.test_basics,78.9
-CPython313-test_range-RangeTest.test_range_iterators,78.5
 CPython313-test_range-RangeTest.test_user_index_method,78.5
 CPython313-test_sort-TestDecorateSortUndecorate.test_reverse_stability,78.5
 CPython313-test_list-ListTest.test_init,78.4
@@ -33,7 +25,6 @@ CPython313-test_set-TestBasicOpsSingleton.test_iteration,76.9
 CPython313-test_set-TestBasicOpsString.test_iteration,76.9
 CPython313-test_set-TestBasicOpsTriple.test_iteration,76.9
 CPython313-test_set-TestBasicOpsTuple.test_iteration,76.9
-CPython313-test_tuple-TupleTest.test_contains_order,76.8
 CPython313-test_tuple-TupleTest.test_free_after_iterating,76.7
 CPython313-test_operator-PyOperatorTestCase.test_contains,76.5
 CPython313-test_operator-PyOperatorTestCase.test_delitem,76.5
@@ -64,8 +55,6 @@ CPython313-test_operator-COperatorTestCase.test_index,75.5
 CPython313-test_operator-COperatorTestCase.test_setitem,75.5
 CPython313-test_list-ListTest.test_preallocation,75.1
 CPython313-test_collections-TestCounter.test_update,75.0
-CPython313-test_set-TestFrozenSet.test_hash,74.7
-CPython313-test_set-TestFrozenSetSubclass.test_hash,74.7
 CPython313-test_dict-DictTest.test_splittable_setdefault,74.6
 CPython313-test_collections-TestChainMap.test_basics,74.2
 CPython313-test_list-ListTest.test_keywords_in_subclass,74.2
@@ -136,7 +125,6 @@ CPython313-test_itertools-TestBasicOps.test_zip_longest_tuple_reuse,70.7
 CPython313-test_deque-TestBasic.test_delitem,70.4
 CPython313-test_range-RangeTest.test_index,70.3
 CPython313-test_range-RangeTest.test_range_iterators_invocation,70.2
-CPython313-test_list-ListTest.test_contains_fake,70.0
 CPython313-test_list-ListTest.test_repr,70.0
 CPython313-test_operator-PyOperatorTestCase.test_abs,70.0
 CPython313-test_operator-PyOperatorTestCase.test_add,70.0
@@ -304,7 +292,6 @@ CPython313-test_heapq-TestErrorHandlingC.test_len_only,67.8
 CPython313-test_heapq-TestHeapC.test_heappop_max,67.8
 CPython313-test_heapq-TestHeapC.test_push_pop,67.8
 CPython313-test_heapq-TestHeapPython.test_push_pop,67.8
-CPython313-test_deque-TestSequence.test_contains_order,67.3
 CPython313-test_deque-TestBasic.test_sizeof,67.2
 CPython313-test_int-IntTestCases.test_int_memoryview,67.0
 CPython313-test_math-MathTests.test_mtestfile,67.0
@@ -320,11 +307,8 @@ CPython313-test_operator-COperatorTestCase.test_methodcaller,66.9
 CPython313-test_operator-CPyOperatorPickleTestCase.test_attrgetter,66.9
 CPython313-test_operator-CPyOperatorPickleTestCase.test_itemgetter,66.9
 CPython313-test_operator-CPyOperatorPickleTestCase.test_methodcaller,66.9
-CPython313-test_ordered_dict-CPythonBuiltinDictTests.test_clear,66.7
-CPython313-test_ordered_dict-CPythonOrderedDictSubclassTests.test_clear,66.7
 CPython313-test_ordered_dict-CPythonOrderedDictSubclassTests.test_pop,66.7
 CPython313-test_ordered_dict-CPythonOrderedDictSubclassTests.test_setdefault,66.7
-CPython313-test_ordered_dict-CPythonOrderedDictTests.test_clear,66.7
 CPython313-test_ordered_dict-CPythonOrderedDictTests.test_pop,66.7
 CPython313-test_ordered_dict-CPythonOrderedDictTests.test_setdefault,66.7
 CPython313-test_ordered_dict-PurePythonOrderedDictSubclassTests.test_clear,66.7
@@ -333,7 +317,6 @@ CPython313-test_ordered_dict-PurePythonOrderedDictSubclassTests.test_setdefault,
 CPython313-test_ordered_dict-PurePythonOrderedDictTests.test_clear,66.7
 CPython313-test_ordered_dict-PurePythonOrderedDictTests.test_pop,66.7
 CPython313-test_ordered_dict-PurePythonOrderedDictTests.test_setdefault,66.7
-CPython313-test_tuple-TupleTest.test_contains_fake,66.7
 CPython313-test_itertools-TestBasicOps.test_batched,66.4
 CPython313-test_itertools-TestBasicOps.test_combinations_with_replacement_tuple_reuse,66.4
 CPython313-test_itertools-TestBasicOps.test_combinatorics,66.4
@@ -502,7 +485,6 @@ CPython313-test_builtin-BuiltinTest.test_min,62.6
 CPython313-test_math-IsCloseTests.test_decimals,62.6
 CPython313-test_math-MathTests.testFactorialNonIntegers,62.6
 CPython313-test_math-MathTests.testHypotAccuracy,62.6
-CPython313-test_userlist-UserListTest.test_contains_order,62.6
 CPython313-test_collections-TestOneTrickPonyABCs.test_AsyncIterable,62.5
 CPython313-test_collections-TestOneTrickPonyABCs.test_Callable,62.5
 CPython313-test_builtin-BuiltinTest.test_format,62.4
@@ -622,7 +604,6 @@ CPython313-test_heapq-TestHeapC.test_heappushpop,61.2
 CPython313-test_heapq-TestHeapPython.test_comparison_operator,61.2
 CPython313-test_heapq-TestHeapPython.test_heapify,61.2
 CPython313-test_slice-SliceTest.test_cycle,61.2
-CPython313-test_binop-RatTestCase.test_constructor,61.1
 CPython313-test_collections-TestCollectionABCs.test_illegal_patma_flags,61.1
 CPython313-test_float-GeneralFloatCases.test_float_with_comma,61.0
 CPython313-test_float-GeneralFloatCases.test_floatasratio,61.0
@@ -640,17 +621,8 @@ CPython313-test_math-MathTests.testLog2Exact,60.4
 CPython313-test_math-MathTests.testPerm,60.4
 CPython313-test_math-MathTests.testRemainder,60.4
 CPython313-test_list-ListTest.test_reversed_pickle,60.2
-CPython313-test_ordered_dict-CPythonBuiltinDictTests.test_popitem,60.2
-CPython313-test_ordered_dict-CPythonOrderedDictSubclassTests.test_468,60.2
-CPython313-test_ordered_dict-CPythonOrderedDictSubclassTests.test_equality,60.2
-CPython313-test_ordered_dict-CPythonOrderedDictSubclassTests.test_iterators,60.2
-CPython313-test_ordered_dict-CPythonOrderedDictSubclassTests.test_popitem,60.2
 CPython313-test_ordered_dict-CPythonOrderedDictSubclassTests.test_reference_loop,60.2
 CPython313-test_ordered_dict-CPythonOrderedDictSubclassTests.test_sizeof_exact,60.2
-CPython313-test_ordered_dict-CPythonOrderedDictTests.test_468,60.2
-CPython313-test_ordered_dict-CPythonOrderedDictTests.test_equality,60.2
-CPython313-test_ordered_dict-CPythonOrderedDictTests.test_iterators,60.2
-CPython313-test_ordered_dict-CPythonOrderedDictTests.test_popitem,60.2
 CPython313-test_ordered_dict-CPythonOrderedDictTests.test_reference_loop,60.2
 CPython313-test_ordered_dict-CPythonOrderedDictTests.test_sizeof_exact,60.2
 CPython313-test_ordered_dict-PurePythonOrderedDictSubclassTests.test_468,60.2
@@ -787,7 +759,6 @@ CPython313-test_float-FormatFunctionsTestCase.test_getformat,57.4
 CPython313-test_ordered_dict-CPythonOrderedDictSubclassTests.test_highly_nested,57.4
 CPython313-test_ordered_dict-CPythonOrderedDictTests.test_highly_nested,57.4
 CPython313-test_deque-TestBasic.test_repr,57.2
-CPython313-test_deque-TestSequence.test_contains_fake,57.2
 CPython313-test_contextlib-ContextManagerTestCase.test_param_errors,57.1
 CPython313-test_contextlib-TestExitStack.test_callback,57.1
 CPython313-test_set-TestFrozenSetSubclass.test_cyclical_repr,57.1
@@ -1264,7 +1235,6 @@ CPython313-test_enum-TestSpecial.test_floatenum_fromhex,47.9
 CPython313-test_enum-TestSpecial.test_intenum_from_bytes,47.9
 CPython313-test_enum-TestSpecial.test_multiple_inherited_mixin,47.9
 CPython313-test_class-ClassTests.test_specialization_class_call_doesnt_crash,47.8
-CPython313-test_userlist-UserListTest.test_contains_fake,47.7
 CPython313-test_userlist-UserListTest.test_repr,47.7
 CPython313-test_userlist-UserListTest.test_repr_deep,47.7
 CPython313-test_types-ClassCreationTests.test_one_argument_type,47.6
@@ -1766,7 +1736,6 @@ CPython313-test_exceptions-ExceptionTests.test_WindowsError,37.0
 CPython313-test_exceptions-ExceptionTests.test_exception_target_in_nested_scope,37.0
 CPython313-test_exceptions-NameErrorTests.test_issue45826,37.0
 CPython313-test_exceptions-NameErrorTests.test_issue45826_focused,37.0
-CPython313-test_numeric_tower-HashTest.test_fractions,36.6
 CPython313-test_patma-TestInheritance.test_multiple_inheritance_mapping,36.6
 CPython313-test_patma-TestInheritance.test_multiple_inheritance_sequence,36.6
 CPython313-test_patma-TestPatma.test_patma_202,36.6
@@ -1804,7 +1773,6 @@ CPython313-test_raise-TestContext.test_context_manager,35.8
 CPython313-test_raise-TestContext.test_reraise_cycle_broken,35.8
 CPython313-test_cmath-CMathTests.test_user_object,35.7
 CPython313-test_descr-ClassPropertiesAndMethods.test_metaclass,35.6
-CPython313-test_descr-ClassPropertiesAndMethods.test_subclass_right_op,35.6
 CPython313-test_enum-TestIntFlagClass.test_bad_new_super,35.6
 CPython313-test_enum-TestIntFlagClass.test_invalid_names,35.6
 CPython313-test_enum-TestIntFlagFunction.test_bad_new_super,35.6
