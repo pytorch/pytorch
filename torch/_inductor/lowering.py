@@ -740,13 +740,12 @@ def make_pointwise(
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
-                # Use FMA for add-with-alpha on CUDA floating-point.
-                # Eager CUDA computes a + alpha * b as fma(b, alpha, a).
+                # Use FMA for add-with-alpha on Triton GPU floating-point.
+                # Eager CUDA/ROCm computes a + alpha * b as fma(b, alpha, a).
                 if use_fma_for_alpha and isinstance(inputs[0], IRNode):
                     inp_device = inputs[0].get_device()
                     if (
                         inputs[0].get_dtype().is_floating_point
-                        and not torch.version.hip
                         and inp_device is not None
                         and inp_device.type == "cuda"
                     ):
@@ -8184,7 +8183,9 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
-    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
+    # FMA is available for floating-point types on Triton GPU backends.
+    # On ROCm, mul_rn falls back to regular multiplication in the backend
+    # override, but we can still use tl.fma for the final multiply-add.
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
@@ -8258,11 +8259,12 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
-    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
+    # FMA is available for floating-point types on Triton GPU backends.
+    # On ROCm, div_rn falls back to regular division in the backend
+    # override, but we can still use tl.fma for the final multiply-add.
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
-        and not torch.version.hip
         and device is not None
         and device.type in ["cuda", "xpu"]
     )
