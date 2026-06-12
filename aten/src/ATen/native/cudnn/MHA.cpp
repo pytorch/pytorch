@@ -1535,7 +1535,6 @@ void run_cudnn_SDP_fprop_nestedtensor(
       TORCH_CHECK(softmaxstats.dim() == 3);
     }
   }
-}
 
   MHACacheKeyWrapper key(
       b,

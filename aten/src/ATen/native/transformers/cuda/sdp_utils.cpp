@@ -722,6 +722,8 @@ bool check_cudnn_query_seq_len_nested(sdp_params const& params, bool debug) {
           "length <= 128.");
     }
     return false;
+  }
+  return true;
 }
 
 bool check_cudnn_d256_bprop_head_dim(
