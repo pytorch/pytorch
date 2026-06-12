@@ -1,7 +1,8 @@
 # Owner(s): ["module: inductor"]
+import unittest
+
 from torch._inductor import config
 from torch._inductor.test_case import run_tests
-from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import HAS_CPU, TRITON_HAS_CPU
 
 
@@ -53,7 +54,11 @@ if HAS_CPU and TRITON_HAS_CPU:
     )
 
     for name in TRITON_CPU_SLOW_TESTS:
-        setattr(CpuTritonTests, name, slowTest(getattr(CpuTritonTests, name)))
+        setattr(
+            CpuTritonTests,
+            name,
+            unittest.skip("Triton CPU: slow test")(getattr(CpuTritonTests, name)),
+        )
 
 
 if __name__ == "__main__":
