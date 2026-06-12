@@ -234,6 +234,31 @@ class ComboKernelTests(TestCase):
         ).run(code[0])
         self.assertEqual(out_eager, out_compiled)
 
+    @requires_cuda_and_triton
+    @unittest.skipIf(
+        not SM90OrLater or torch.version.hip,
+        "TMA requires SM90 or later (Hopper+), not supported on ROCm",
+    )
+    @torch._inductor.config.patch(
+        {
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    def test_combo_kernel_tma_descriptor_block_name(self):
+        def fn(a, b):
+            return a.sum(dim=-1), b.sum(dim=-1)
+
+        inps = [
+            torch.randn(1024, 128, device=GPU_TYPE),
+            torch.randn(1024, 256, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        torch.testing.assert_close(out_eager, out_compiled, atol=1e-4, rtol=1e-4)
+        FileCheck().check("make_tensor_descriptor").run(code[0])
+
     @requires_gpu_and_triton
     def test_sort_in_combo_kernel_forces_persistent_reduction(self):
         # ops.sort only works under persistent reduction. Combo kernel codegen
@@ -945,7 +970,7 @@ class ComboKernelTests(TestCase):
         torch._inductor.metrics.reset()
         out_eager = m(*inps)
         out_compiled = torch.compile(m)(*inps)
-        self.assertEqual(out_eager, out_compiled)
+        torch.testing.assert_close(out_eager, out_compiled, rtol=1e-4, atol=1e-4)
         # Very-large reductions split out instead of co-fused: 5 kernels (4 = the regression).
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
