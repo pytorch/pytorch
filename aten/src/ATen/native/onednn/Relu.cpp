@@ -29,7 +29,7 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
 
 #else // AT_MKLDNN_ENABLED
 
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
 
 namespace at::native {
