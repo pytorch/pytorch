@@ -6,6 +6,7 @@ import enum
 import functools
 import logging
 import re
+import sys
 import threading
 import traceback
 import unittest.mock
@@ -29,6 +30,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    import dis
     from collections.abc import Callable, Generator, Iterator
     from types import CodeType
 
@@ -37,6 +39,7 @@ if TYPE_CHECKING:
     from torch._dynamo.backends.distributed import DDPOptimizerContext
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.guards import GuardCheckSpec
+    from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -207,7 +210,7 @@ class GuardSource(enum.Enum):
 Base class for a "GuardBuilder" role.
 
 The GuardBuilderBase role is to represent a scope within which to build a guard. The name is a little
-confusing, as its not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
+confusing, as it's not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
 to torchdynamo's GuardBuilder.
 
 Note: create_fn is invoked with a GuardBuilderBase and a Guard. A GuardBuilder is chosen based
@@ -230,6 +233,8 @@ class SLoc:
         floc = (
             self.framework_loc
             if isinstance(self.framework_loc, str)
+            else ""
+            if self.framework_loc is None
             else format_frame(self.framework_loc)
         )
         if self.maybe_user_loc is not None:
@@ -708,7 +713,7 @@ class GuardsSet:
 
 """
 A GuardsContext is a checkpointable representation of all the guards in the current tracing
-context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
+context. Its lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
 directly outside of it. For passing around internal state representations of this object,
 prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 """
@@ -759,6 +764,16 @@ class HopSubgraphCache:
 
     @abstractmethod
     def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None: ...
+
+    @abstractmethod
+    def add_functionalize_schema_entry(
+        self, key: object, schema: torch._C.FunctionSchema
+    ) -> None: ...
+
+    @abstractmethod
+    def get_functionalize_schema_entry(
+        self, key: object
+    ) -> torch._C.FunctionSchema | None: ...
 
     @abstractmethod
     def add_lazy_bwd_entry(
@@ -831,6 +846,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
+        self.functionalize_schema_cache: dict[object, torch._C.FunctionSchema] = {}
         self.dynamo_installed_submodules: dict[CodeType, list[str]] = defaultdict(list)
         self.lazy_bwd_cache: dict[
             str, dict[tuple[object], tuple[torch.fx.GraphModule, int]]
@@ -869,6 +885,16 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None:
         return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_functionalize_schema_entry(
+        self, key: object, schema: torch._C.FunctionSchema
+    ) -> None:
+        self.functionalize_schema_cache[key] = schema
+
+    def get_functionalize_schema_entry(
+        self, key: object
+    ) -> torch._C.FunctionSchema | None:
+        return self.functionalize_schema_cache.get(key, None)
 
     def add_lazy_bwd_entry(
         self,
@@ -1043,7 +1069,7 @@ class InlinedCodeCache:
 
     instructions: list[Any]
     indexof: dict[Any, int]
-    code_options: dict[str, Any]
+    code_options: CodeOptions
 
 
 class TracingContext:
@@ -1083,6 +1109,7 @@ class TracingContext:
         # to frame_summary_stack (prepping this variable for the inner frame's
         # progress)
         self.loc_in_frame: tuple[str, int, str] | None = None
+        self.loc_in_frame_positions: dis.Positions | None = None
         # this is only set after aot_autograd
         self.fw_metadata: ViewAndMutationMeta | None = None
         # this is only set when the DDPOptimizer is used
@@ -1159,7 +1186,18 @@ class TracingContext:
         if self.loc_in_frame is None:
             raise AssertionError("loc_in_frame must not be None")
         filename, lineno, frame_name = self.loc_in_frame
-        return traceback.FrameSummary(filename, lineno, frame_name, lookup_line=False)
+        # colno/end_colno kwargs were added to FrameSummary in 3.11
+        kwargs: dict[str, Any] = {}
+        if sys.version_info >= (3, 11) and self.loc_in_frame_positions is not None:
+            kwargs["colno"] = self.loc_in_frame_positions.col_offset
+            kwargs["end_colno"] = self.loc_in_frame_positions.end_col_offset
+        return traceback.FrameSummary(
+            filename,
+            lineno,
+            frame_name,
+            lookup_line=False,
+            **kwargs,
+        )
 
     # Call this when you want to call into some code that isn't necessarily
     # associated with the current frame state
@@ -1170,6 +1208,7 @@ class TracingContext:
         with (
             unittest.mock.patch.object(tc, "frame_summary_stack", []),
             unittest.mock.patch.object(tc, "loc_in_frame", None),
+            unittest.mock.patch.object(tc, "loc_in_frame_positions", None),
         ):
             try:
                 yield
@@ -1206,7 +1245,9 @@ class TracingContext:
         if frame_summary is not None:
             tc.frame_summary_stack.append(frame_summary)
         old = tc.loc_in_frame
+        old_positions = tc.loc_in_frame_positions
         tc.loc_in_frame = None
+        tc.loc_in_frame_positions = None
         try:
             yield
         except Exception as e:
@@ -1217,6 +1258,7 @@ class TracingContext:
             if frame_summary is not None:
                 tc.frame_summary_stack.pop()
             tc.loc_in_frame = old
+            tc.loc_in_frame_positions = old_positions
 
     @staticmethod
     @contextlib.contextmanager
@@ -1235,10 +1277,17 @@ class TracingContext:
             tc.output_strides = old_output_strides
 
     @staticmethod
-    def set_current_loc(filename: str, lineno: int, frame_name: str) -> None:
+    def set_current_loc(
+        filename: str,
+        lineno: int,
+        frame_name: str,
+        positions: dis.Positions | None = None,
+    ) -> None:
         # Save the current location in the frame. Lazily generate the
         # framesummary.
-        TracingContext.get().loc_in_frame = (filename, lineno, frame_name)
+        tc = TracingContext.get()
+        tc.loc_in_frame = (filename, lineno, frame_name)
+        tc.loc_in_frame_positions = positions
 
     @staticmethod
     def get_traced_code() -> list[CodeType] | None:
@@ -1341,6 +1390,14 @@ class Source:
         return False
 
     def reconstruct(self, codegen: PyCodegen) -> None:
+        raise NotImplementedError
+
+    def reconstruct_pycode(self, codegen: PyCodegen) -> str:
+        """
+        Reconstructs the source into a string of Python code. This method should
+        be eventually implemented for all subclasses of Source to achieve full
+        coverage of python wrapper code generation.
+        """
         raise NotImplementedError
 
     @functools.cached_property
