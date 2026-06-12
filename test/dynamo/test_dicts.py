@@ -30,6 +30,18 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
+class _BadCmpExc(Exception):
+    pass
+
+
+class _BadCmpKey:
+    def __eq__(self, other: object) -> bool:
+        raise _BadCmpExc
+
+    def __hash__(self) -> int:
+        return 1
+
+
 class SimpleDict(dict):
     pass
 
@@ -2237,6 +2249,15 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     def assertNotEqual(self, x, y):
         self.assertFalse(x == y, f"Expected {x} to not be equal to {y}")
+
+    @make_dynamo_test
+    def test_cmp_eq_key_raises(self):
+        # A key whose __eq__ raises must propagate that exception during dict
+        # comparison, mirroring CPython's PyObject_RichCompareBool lookup.
+        d1 = self.thetype({_BadCmpKey(): 1})
+        d2 = self.thetype({1: 1})
+        with self.assertRaises(_BadCmpExc):
+            d1 == d2  # noqa: B015
 
     @make_dynamo_test
     def test_cmp_eq(self):

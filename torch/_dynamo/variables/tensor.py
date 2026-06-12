@@ -2977,15 +2977,6 @@ class SymNodeVariable(VariableTracker):
         # searched for a dict key.
         return hash(self.evaluate_expr())
 
-    def is_python_equal(self, other: object) -> bool:
-        if isinstance(other, SymNodeVariable):
-            return self.evaluate_expr() == other.evaluate_expr()
-        # could be constant variable as well
-        return (
-            isinstance(other, VariableTracker)
-            and self.evaluate_expr() == other.as_python_constant()
-        )
-
 
 class NumpyNdarrayVariable(TensorVariable):
     """

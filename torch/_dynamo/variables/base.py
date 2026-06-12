@@ -1330,23 +1330,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return NO_SUCH_SUBOBJ
 
-    def is_python_equal(self, other: object) -> bool:
-        """
-        NB - Deliberately not overriding the __eq__ method because that can
-        disable the __hash__ for the vt itself.
-        """
-        unimplemented(
-            gb_type="Dynamo cannot determine the equality comparison of an object",
-            context=f"is_python_equal {self}",
-            explanation=f"Dynamo does not know the equality comparison of the underlying python object for {self}",
-            hints=[
-                (
-                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
-                ),
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
     def nb_index_impl(
         self,
         tx: Any,
