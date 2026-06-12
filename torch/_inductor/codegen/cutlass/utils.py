@@ -171,7 +171,7 @@ def try_import_cutlass() -> bool:
             import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
             import cutlass_library.generator
             import cutlass_library.library
-            import cutlass_library.manifest  # noqa: F401
+            import cutlass_library.manifest
             import pycute  # type: ignore[import-not-found]  # noqa: F401
 
             # On XPU, the CUTLASS at TORCHINDUCTOR_CUTLASS_DIR may be
@@ -241,8 +241,7 @@ def _try_swap_sycl_tla() -> None:
 
             if hasattr(_sys_gen, "GenerateIntelXe"):
                 log.debug(
-                    "Using system-installed CUTLASS library "
-                    "(SYCL-TLA) for XPU ops."
+                    "Using system-installed CUTLASS library (SYCL-TLA) for XPU ops."
                 )
                 found = True
         except ImportError:
@@ -250,7 +249,7 @@ def _try_swap_sycl_tla() -> None:
 
         if not found:
             # Try 2: sibling sycl-tla/python directory
-            import torch  # noqa: F811
+            import torch
 
             torch_root = os.path.abspath(os.path.dirname(torch.__file__))
             sycl_tla_python = os.path.abspath(
@@ -437,9 +436,11 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
                         saved_modules[mod_name] = _sys.modules.pop(mod_name)
 
                 _found = False
+                sys_gen = None
                 try:
                     # Try 1: system pip-installed SYCL-TLA
                     import cutlass_library.generator as sys_gen  # type: ignore[no-redef]
+
                     if hasattr(sys_gen, "GenerateIntelXe"):
                         _found = True
                 except ImportError:
@@ -447,9 +448,7 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
 
                 if not _found:
                     # Try 2: sibling sycl-tla/python directory
-                    _torch_root = os.path.abspath(
-                        os.path.dirname(torch.__file__)
-                    )
+                    _torch_root = os.path.abspath(os.path.dirname(torch.__file__))
                     _sycl_tla_python = os.path.abspath(
                         os.path.join(
                             _torch_root,
@@ -464,6 +463,7 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
                         _sys.path.insert(0, _sycl_tla_python)
                         try:
                             import cutlass_library.generator as sib_gen  # type: ignore[no-redef]
+
                             if hasattr(sib_gen, "GenerateIntelXe"):
                                 _found = True
                                 sys_gen = sib_gen
@@ -471,24 +471,26 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
                             pass
 
                 if _found:
-                    sys_gen.GenerateIntelXe(
+                    sys_gen.GenerateIntelXe(  # type: ignore[union-attr]
                         manifest, args.toolkit_version, arch=int(arch)
                     )
                     log.debug(
-                        "Using %s CUTLASS library (SYCL-TLA) "
-                        "for XPU ops generation.",
-                        "system-installed" if not os.path.isdir(
+                        "Using %s CUTLASS library (SYCL-TLA) for XPU ops generation.",
+                        "system-installed"
+                        if not os.path.isdir(
                             os.path.join(
                                 os.path.abspath(os.path.dirname(torch.__file__)),
-                                os.pardir, os.pardir, os.pardir,
-                                "sycl-tla", "python",
+                                os.pardir,
+                                os.pardir,
+                                os.pardir,
+                                "sycl-tla",
+                                "python",
                             )
-                        ) else "sibling sycl-tla",
+                        )
+                        else "sibling sycl-tla",
                     )
                 else:
-                    raise ImportError(
-                        "System cutlass_library lacks GenerateIntelXe"
-                    )
+                    raise ImportError("System cutlass_library lacks GenerateIntelXe")
             except ImportError:
                 log.warning(
                     "GenerateIntelXe not available in CUTLASS library. "
