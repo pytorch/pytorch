@@ -114,6 +114,7 @@ from .iter import (
     ItertoolsVariable,
     MapVariable,
     RepeatIteratorVariable,
+    ZipLongestVariable,
     ZipVariable,
 )
 from .lazy import LazyConstantVariable, LazyVariableTracker
@@ -286,4 +287,5 @@ __all__ = [
     "WithEnterFunctionVariable",
     "WithExitFunctionVariable",
     "XPUDeviceVariable",
+    "ZipLongestVariable",
 ]
