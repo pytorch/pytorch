@@ -33,7 +33,7 @@ std::vector<Tensor> foreach_binary_op(
   }
 
   tensor_lists.emplace_back(tensors.vec());
-  tensor_lists.emplace_back(vec_res);
+  tensor_lists.emplace_back(std::move(vec_res));
 
   using opmath_t = at::opmath_type<T>;
   multi_tensor_apply<2, opmath_t>(
@@ -46,7 +46,7 @@ std::vector<Tensor> foreach_binary_op(
           /* res_arg_index */ 1>(),
 
       Op<opmath_t>());
-  return tensor_lists[1];
+  return std::move(tensor_lists[1]);
 }
 
 template <typename T, template <class> class Op>

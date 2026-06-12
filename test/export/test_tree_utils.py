@@ -17,8 +17,8 @@ class TestTreeUtils(TestCase):
         reordered_kwargs = reorder_kwargs(user_kwargs, orig_spec)
 
         # Key ordering should be the same
-        self.assertEqual(reordered_kwargs.popitem()[0], original_kwargs.popitem()[0]),
-        self.assertEqual(reordered_kwargs.popitem()[0], original_kwargs.popitem()[0]),
+        self.assertEqual(reordered_kwargs.popitem()[0], original_kwargs.popitem()[0])
+        self.assertEqual(reordered_kwargs.popitem()[0], original_kwargs.popitem()[0])
 
     def test_equivalence_check(self):
         tree1 = {"a": torch.tensor(0), "b": torch.tensor(1), "c": None}

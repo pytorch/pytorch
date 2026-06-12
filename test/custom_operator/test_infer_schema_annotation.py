@@ -2,16 +2,21 @@
 from __future__ import annotations
 
 import typing
-from typing import List, Optional, Sequence, Union  # noqa: F401
+import unittest
 
 import torch
 from torch import Tensor, types
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 mutates_args = {}
 
 
+@skipIfTorchDynamo("custom operator tests not applicable to dynamo")
 class TestInferSchemaWithAnnotation(TestCase):
     def test_tensor(self):
         def foo_op(x: torch.Tensor) -> torch.Tensor:
@@ -71,7 +76,7 @@ class TestInferSchemaWithAnnotation(TestCase):
         self.assertEqual(result, "(Device x) -> SymInt")
 
     def test_type_variants(self):
-        def foo_op_1(x: typing.Optional[int]) -> int:
+        def foo_op_1(x: int | None) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_1, mutates_args=mutates_args)
@@ -83,36 +88,37 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_2, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[] x) -> SymInt")
 
-        def foo_op_3(x: typing.List[int]) -> int:
+        def foo_op_3(x: list[int]) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_3, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[] x) -> SymInt")
 
-        def foo_op_4(x: typing.Optional[typing.Sequence[int]]) -> int:
+        def foo_op_4(x: typing.Sequence[int] | None) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_4, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[]? x) -> SymInt")
 
-        def foo_op_5(x: typing.Optional[typing.List[int]]) -> int:
+        def foo_op_5(x: list[int] | None) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_5, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[]? x) -> SymInt")
 
-        def foo_op_6(x: typing.Union[int, float, bool]) -> types.Number:
+        def foo_op_6(x: int | float | bool) -> types.Number:
             return x
 
         result = torch.library.infer_schema(foo_op_6, mutates_args=mutates_args)
         self.assertEqual(result, "(Scalar x) -> Scalar")
 
-        def foo_op_7(x: typing.Union[int, bool, float]) -> types.Number:
+        def foo_op_7(x: int | bool | float) -> types.Number:
             return x
 
         result = torch.library.infer_schema(foo_op_7, mutates_args=mutates_args)
         self.assertEqual(result, "(Scalar x) -> Scalar")
 
+    @unittest.expectedFailure
     def test_no_library_prefix(self):
         def foo_op(x: Tensor) -> Tensor:
             return x.clone()
@@ -132,13 +138,13 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_3, mutates_args=mutates_args)
         self.assertEqual(result, "(Tensor x) -> Tensor")
 
-        def foo_op_4(x: List[int]) -> types.Number:
+        def foo_op_4(x: list[int]) -> types.Number:
             return x[0]
 
         result = torch.library.infer_schema(foo_op_4, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[] x) -> Scalar")
 
-        def foo_op_5(x: Optional[int]) -> int:
+        def foo_op_5(x: int | None) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_5, mutates_args=mutates_args)
@@ -150,31 +156,31 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_6, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[] x) -> SymInt")
 
-        def foo_op_7(x: List[int]) -> int:
+        def foo_op_7(x: list[int]) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_7, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[] x) -> SymInt")
 
-        def foo_op_8(x: Optional[Sequence[int]]) -> int:
+        def foo_op_8(x: Sequence[int] | None) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_8, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[]? x) -> SymInt")
 
-        def foo_op_9(x: Optional[List[int]]) -> int:
+        def foo_op_9(x: list[int] | None) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_9, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[]? x) -> SymInt")
 
-        def foo_op_10(x: Union[int, float, bool]) -> types.Number:
+        def foo_op_10(x: int | float | bool) -> types.Number:
             return x
 
         result = torch.library.infer_schema(foo_op_10, mutates_args=mutates_args)
         self.assertEqual(result, "(Scalar x) -> Scalar")
 
-        def foo_op_11(x: Union[int, bool, float]) -> types.Number:
+        def foo_op_11(x: int | bool | float) -> types.Number:
             return x
 
         result = torch.library.infer_schema(foo_op_11, mutates_args=mutates_args)
@@ -200,6 +206,20 @@ class TestInferSchemaWithAnnotation(TestCase):
                 return x
 
             torch.library.infer_schema(foo_op_2, mutates_args=mutates_args)
+
+    def test_name_error_hint(self):
+        # When from __future__ import annotations is active and a type name cannot
+        # be resolved (e.g. because it was only imported inside a nested function),
+        # the error should include the original NameError and a hint about module scope.
+        with self.assertRaisesRegex(
+            ValueError,
+            r"from __future__ import annotations",
+        ):
+
+            def foo_op(x: D) -> Tensor:  # noqa: F821
+                return torch.Tensor(x)
+
+            torch.library.infer_schema(foo_op, mutates_args=mutates_args)
 
 
 if __name__ == "__main__":

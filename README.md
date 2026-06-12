@@ -35,6 +35,8 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
     - [Using pre-built images](#using-pre-built-images)
     - [Building the image yourself](#building-the-image-yourself)
   - [Building the Documentation](#building-the-documentation)
+    - [Troubleshooting CI Errors](#troubleshooting-ci-errors)
+    - [Building a PDF](#building-a-pdf)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Resources](#resources)
@@ -71,7 +73,7 @@ Elaborating Further:
 
 If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 
-![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
+![Tensor illustration](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/tensor_illustration.png)
 
 PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
 computation by a huge amount.
@@ -133,7 +135,7 @@ This enables you to train bigger deep learning models than before.
 
 ### Extensions Without Pain
 
-Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
+Writing new neural network modules, or interfacing with PyTorch's Tensor API, was designed to be straightforward
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API
@@ -160,16 +162,16 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 #### Prerequisites
 If you are installing from source, you will need:
-- Python 3.9 or later
-- A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required, on Linux)
+- Python 3.10 or later
+- A compiler that fully supports C++20, such as clang or gcc (gcc 11.3.0 or newer is required, on Linux)
 - Visual Studio or Visual Studio Build Tool (Windows only)
+- At least 10 GB of free disk space
+- 30-60 minutes for the initial build (subsequent rebuilds are much faster)
 
 \* PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from
 https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
 come with Visual Studio Code by default.
-
-\* We highly recommend installing an [Anaconda](https://www.anaconda.com/download) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
 An example of environment setup is shown below:
 
@@ -180,7 +182,6 @@ $ source <CONDA_INSTALL_DIR>/bin/activate
 $ conda create -y -n <CONDA_NAME>
 $ conda activate <CONDA_NAME>
 ```
-
 * Windows:
 
 ```bash
@@ -190,16 +191,23 @@ $ conda activate <CONDA_NAME>
 $ call "C:\Program Files\Microsoft Visual Studio\<VERSION>\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
 ```
 
+A conda environment is not required.  You can also do a PyTorch build in a
+standard virtual environment, e.g., created with tools like `uv`, provided
+your system has installed all the necessary dependencies unavailable as pip
+packages (e.g., CUDA, MKL.)
+
 ##### NVIDIA CUDA Support
 If you want to compile with CUDA support, [select a supported version of CUDA from our support matrix](https://pytorch.org/get-started/locally/), then install the following:
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads)
-- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v8.5 or above
+- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v9.0 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
-Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
+Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/backend/latest/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver, and NVIDIA hardware.
 
 If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
-Other potentially useful environment variables may be found in `setup.py`.
+Other potentially useful environment variables may be found in `setup.py`.  If
+CUDA is installed in a non-standard location, set PATH so that the nvcc you
+want to use can be found (e.g., `export PATH=/usr/local/cuda-12.8/bin:$PATH`).
 
 If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to install PyTorch for Jetson Nano are [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
@@ -215,15 +223,16 @@ Other potentially useful environment variables may be found in `setup.py`.
 
 ##### Intel GPU Support
 If you want to compile with Intel GPU support, follow these
-- [PyTorch Prerequisites for Intel GPUs](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html) instructions.
+- [PyTorch Prerequisites for Intel GPUs](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html) instructions.
 - Intel GPU is supported for Linux and Windows.
 
 If you want to disable Intel GPU support, export the environment variable `USE_XPU=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
 #### Get the PyTorch Source
+
 ```bash
-git clone --recursive https://github.com/pytorch/pytorch
+git clone https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
 git submodule sync
@@ -235,9 +244,8 @@ git submodule update --init --recursive
 **Common**
 
 ```bash
-conda install cmake ninja
-# Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
-pip install -r requirements.txt
+# Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section above
+pip install --group dev
 ```
 
 **On Linux**
@@ -245,21 +253,13 @@ pip install -r requirements.txt
 ```bash
 pip install mkl-static mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda121  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
+# magma installation: run with active conda environment. specify CUDA version to install
+.ci/docker/common/install_magma_conda.sh 12.4
 
 # (optional) If using torch.compile with inductor/triton, install the matching version of triton
 # Run from the pytorch directory after cloning
 # For Intel GPU support, please explicitly `export USE_XPU=1` before running command.
 make triton
-```
-
-**On MacOS**
-
-```bash
-# Add this package on intel x86 processor machines only
-pip install mkl-static mkl-include
-# Add these packages if torch.distributed is needed
-conda install pkg-config libuv
 ```
 
 **On Windows**
@@ -268,35 +268,36 @@ conda install pkg-config libuv
 pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed.
 # Distributed package support on Windows is a prototype feature and is subject to changes.
-conda install -c conda-forge libuv=1.39
+conda install -c conda-forge libuv=1.51
 ```
 
 #### Install PyTorch
+
 **On Linux**
 
-If you would like to compile PyTorch with [new C++ ABI](https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html) enabled, then first run this command:
-```bash
-export _GLIBCXX_USE_CXX11_ABI=1
-```
-
-Please **note** that starting from PyTorch 2.5, the PyTorch build with XPU supports both new and old C++ ABIs. Previously, XPU only supported the new C++ ABI. If you want to compile with Intel GPU support, please follow [Intel GPU Support](#intel-gpu-support).
-
 If you're compiling for AMD ROCm then first run this command:
+
 ```bash
 # Only run this if you're compiling for ROCm
 python tools/amd_build/build_amd.py
 ```
 
 Install PyTorch
+
 ```bash
+# the CMake prefix for conda environment
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
+
+# the CMake prefix for non-conda environment, e.g. Python venv
+# call following after activating the venv
+export CMAKE_PREFIX_PATH="${VIRTUAL_ENV}:${CMAKE_PREFIX_PATH}"
 ```
 
 **On macOS**
 
 ```bash
-python3 setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 **On Windows**
@@ -305,10 +306,10 @@ If you want to build legacy python code, please refer to [Building on legacy cod
 
 **CPU-only builds**
 
-In this mode PyTorch computations will run on your CPU, not your GPU
+In this mode PyTorch computations will run on your CPU, not your GPU.
 
 ```cmd
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
@@ -317,7 +318,7 @@ Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In ord
 
 In this mode PyTorch computations will leverage your GPU via CUDA for faster number crunching
 
-[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.
+[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build PyTorch with CUDA.
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto an already installed CUDA run CUDA installation once again and check the corresponding checkbox.
 Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 
@@ -328,7 +329,6 @@ Additional libraries such as
 [Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) to install them.
 
 You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
-
 
 ```cmd
 cmd
@@ -349,8 +349,29 @@ for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\
 :: [Optional] If you want to override the CUDA host compiler
 set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
 
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
+```
 
+**Intel GPU builds**
+
+In this mode PyTorch with Intel GPU support will be built.
+
+Please make sure [the common prerequisites](#prerequisites) as well as [the prerequisites for Intel GPU](#intel-gpu-support) are properly installed and the environment variables are configured prior to starting the build. For build tool support, `Visual Studio 2022` is required.
+
+Then PyTorch can be built with the command:
+
+```cmd
+:: CMD Commands:
+:: Set the CMAKE_PREFIX_PATH to help find corresponding packages
+:: %CONDA_PREFIX% only works after `conda activate custom_env`
+
+if defined CMAKE_PREFIX_PATH (
+    set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library;%CMAKE_PREFIX_PATH%"
+) else (
+    set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library"
+)
+
+python -m pip install --no-build-isolation -v -e .
 ```
 
 ##### Adjust Build Options (Optional)
@@ -360,16 +381,18 @@ the following. For example, adjusting the pre-detected directories for CuDNN or 
 with such a step.
 
 On Linux
+
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-python setup.py build --cmake-only
+CMAKE_ONLY=1 python setup.py build
 ccmake build  # or cmake-gui build
 ```
 
 On macOS
+
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
+MACOSX_DEPLOYMENT_TARGET=11.0 CMAKE_ONLY=1 python setup.py build
 ccmake build  # or cmake-gui build
 ```
 
@@ -377,7 +400,7 @@ ccmake build  # or cmake-gui build
 
 #### Using pre-built images
 
-You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+You can also pull a pre-built docker image from Docker Hub and run with docker v23.0+
 
 ```bash
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
@@ -389,11 +412,11 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 #### Building the image yourself
 
-**NOTE:** Must be built with a docker version > 18.06
+**NOTE:** Must be built with a Docker version >= 23.0
 
-The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
+The Dockerfile is supplied to build images with CUDA 12.1 support and cuDNN v9.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
-unset to use the default.
+unset to use the default, as the Dockerfile uses system Python.
 
 ```bash
 make -f docker.Makefile
@@ -409,8 +432,17 @@ make -f docker.Makefile
 
 ### Building the Documentation
 
-To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
-readthedocs theme.
+To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org)
+and the `pytorch_sphinx_theme2`.
+
+Before you build the documentation locally, ensure `torch` is
+installed in your environment. For small fixes, you can install the
+nightly version as described in [Getting Started](https://pytorch.org/get-started/locally/).
+
+For more complex fixes, such as adding a new module and docstrings for
+the new module, you might need to install torch [from source](#from-source).
+See [Docstring Guidelines](https://github.com/pytorch/pytorch/wiki/Docstring-Guidelines)
+for docstring conventions.
 
 ```bash
 cd docs/
@@ -424,22 +456,103 @@ Run `make` to get a list of all available output formats.
 If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`
 
-> Note: if you installed `nodejs` with a different package manager (e.g.,
-`conda`) then `npm` will probably install a version of `katex` that is not
-compatible with your version of `nodejs` and doc builds will fail.
-A combination of versions that is known to work is `node@6.13.1` and
-`katex@0.13.18`. To install the latter with `npm` you can run
-```npm install -g katex@0.13.18```
+> [!NOTE]
+> If you see a numpy incompatibility error, run:
+> ```
+> pip install 'numpy<2'
+> ```
+
+
+#### Troubleshooting CI Errors
+Your build may show errors you didn't have locally - here's how to find the errors relevant to the docs.
+
+If the build has any errors, you will see something like this on the PR:
+
+<img width="781" height="400" alt="Monosnap Update installation instructions for doc build · Pull Request #169534 · pytorch:pytorch 2025-12-18 18-22-53" src="https://github.com/user-attachments/assets/49a3dfe7-81c2-4246-852b-bc3f807e95af" />
+
+Any doc-related errors will occur in jobs that include "doc" somewhere in the title. It doesn't look like any of these jobs are relevant to our docs.
+
+
+Let's take a look anyway. Click on the job to see the logs:
+
+<img width="1187" height="668" alt="Monosnap Update installation instructions for doc build · pytorch:pytorch@7380336 2025-12-18 18-24-15" src="https://github.com/user-attachments/assets/117df543-8356-4323-8e1c-ef02a95554ba" />
+
+And we can be sure that this job does not involve docs.
+
+Looking at this build, we can see these jobs are relevant to our docs - and they didn't have any errors:
+
+<img width="777" height="395" alt="Check the docs jobs" src="https://github.com/user-attachments/assets/5d7c196b-2d40-49ad-87e3-f57de6e14a5b" />
+
+You might also see a comment on the PR like this:
+
+<img width="651" height="246" alt="PR Comment" src="https://github.com/user-attachments/assets/27e0120a-ba33-4b1c-b4a5-bf3064520586" />
+
+We can see that some of these issues are relevant to our docs.
+
+Open the logs by clicking on the `gh` link:
+
+<img width="873" height="360" alt="View Logs" src="https://github.com/user-attachments/assets/ab5b862f-8026-489c-b95e-a6cd4257e4b7" />
+
+And here we can see there is a doc-related error:
+
+<img width="1117" height="433" alt="Doc Error" src="https://github.com/user-attachments/assets/0a275921-736d-43a7-ab0f-3e8854d43280" />
+
+You can always find the relevant doc builds by going to the `Checks` tab on your PR, and scrolling down to `pull`.
+
+<img width="481" height="561" alt="checks" src="https://github.com/user-attachments/assets/eef18f2b-7134-4e2e-bd90-bcdc12800132" />
+
+You can either click through or toggle the accordion to see all of the jobs here, where you can see the docs jobs highlighted:
+
+<img width="570" height="611" alt="jobs" src="https://github.com/user-attachments/assets/f62812ca-caee-421b-863c-54f38fd28d46" />
+
+If you click through, you'll see the doc jobs at the bottom, like this:
+
+<img width="354" height="312" alt="View Docs jobs" src="https://github.com/user-attachments/assets/8fadb935-5314-4c4b-a1b5-133781754f03" />
+
+
+#### Building a PDF
+
+To compile a PDF of all PyTorch documentation, ensure you have
+`texlive` and LaTeX installed. On macOS, you can install them using:
+
+```
+brew install --cask mactex
+```
+
+To create the PDF:
+
+1. Run:
+
+   ```
+   make latexpdf
+   ```
+
+   This will generate the necessary files in the `build/latex` directory.
+
+2. Navigate to this directory and execute:
+
+   ```
+   make LATEXOPTS="-interaction=nonstopmode"
+   ```
+
+   This will produce a `pytorch.pdf` with the desired content. Run this
+   command one more time so that it generates the correct table
+   of contents and index.
+
+> [!NOTE]
+> To view the Table of Contents, switch to the **Table of Contents**
+> view in your PDF viewer.
+
 
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](https://pytorch.org/previous-versions).
+on [our website](https://pytorch.org/get-started/previous-versions).
 
 
 ## Getting Started
 
-Three-pointers to get you started:
+Pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
@@ -475,14 +588,14 @@ We appreciate all contributions. If you are planning to contribute back bug-fixe
 If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
 Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
 
-To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
+To learn more about making a contribution to PyTorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
 
 ## The Team
 
 PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
 
-PyTorch is currently maintained by [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
-A non-exhaustive but growing list needs to mention: [Trevor Killeen](https://github.com/killeent), [Sasank Chilamkurthy](https://github.com/chsasank), [Sergey Zagoruyko](https://github.com/szagoruyko), [Adam Lerer](https://github.com/adamlerer), [Francisco Massa](https://github.com/fmassa), [Alykhan Tejani](https://github.com/alykhantejani), [Luca Antiga](https://github.com/lantiga), [Alban Desmaison](https://github.com/albanD), [Andreas Koepf](https://github.com/andreaskoepf), [James Bradbury](https://github.com/jamesb93), [Zeming Lin](https://github.com/ebetica), [Yuandong Tian](https://github.com/yuandong-tian), [Guillaume Lample](https://github.com/glample), [Marat Dukhan](https://github.com/Maratyszcza), [Natalia Gimelshein](https://github.com/ngimel), [Christian Sarofeen](https://github.com/csarofeen), [Martin Raison](https://github.com/martinraison), [Edward Yang](https://github.com/ezyang), [Zachary Devito](https://github.com/zdevito).
+PyTorch is currently maintained by [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), [Alban Desmaison](https://github.com/albanD), [Piotr Bialecki](https://github.com/ptrblck) and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
+A non-exhaustive but growing list needs to mention: [Trevor Killeen](https://github.com/killeent), [Sasank Chilamkurthy](https://github.com/chsasank), [Sergey Zagoruyko](https://github.com/szagoruyko), [Adam Lerer](https://github.com/adamlerer), [Francisco Massa](https://github.com/fmassa), [Alykhan Tejani](https://github.com/alykhantejani), [Luca Antiga](https://github.com/lantiga), [Alban Desmaison](https://github.com/albanD), [Andreas Koepf](https://github.com/andreaskoepf), [James Bradbury](https://github.com/jekbradbury), [Zeming Lin](https://github.com/ebetica), [Yuandong Tian](https://github.com/yuandong-tian), [Guillaume Lample](https://github.com/glample), [Marat Dukhan](https://github.com/Maratyszcza), [Natalia Gimelshein](https://github.com/ngimel), [Christian Sarofeen](https://github.com/csarofeen), [Martin Raison](https://github.com/martinraison), [Edward Yang](https://github.com/ezyang), [Zachary Devito](https://github.com/zdevito). <!-- codespell:ignore -->
 
 Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
 

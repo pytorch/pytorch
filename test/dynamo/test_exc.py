@@ -1,14 +1,30 @@
 # Owner(s): ["module: dynamo"]
 
-import logging
+import linecache
+import os
+import pickle
+import re
+import sys
+import tempfile
 import unittest
+from typing import cast
 
 import torch
 import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import (
+    BackendCompilerFailed,
+    InvalidBackend,
+    ResetRequired,
+    ShortenTraceback,
+    TorchDynamoException,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
+from torch._dynamo.variables.base import SourceLocation
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -19,8 +35,111 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
+# Module-level storage avoids free-variable issues when capturing comptime state.
+_source_location_capture: dict[str, SourceLocation] = {}
+
+
+def _capture_y_source_location(ctx) -> None:
+    tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+    y_vt = tx.symbolic_locals.get("y")
+    if y_vt is not None and y_vt.source_location is not None:
+        _source_location_capture["source_location"] = y_vt.source_location
+
+
+def _format_multiline_source_location() -> str:
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as source_file:
+        source_file.write("value = (\n    foo\n    + bar\n)\n")
+        source_path = source_file.name
+
+    try:
+        source_location = SourceLocation(
+            filename=source_path,
+            lineno=1,
+            end_lineno=4,
+            # Span covers the parenthesized expression `( ... )`.
+            col_offset=8,
+            end_col_offset=1,
+        )
+        return source_location.format().replace(source_path, "<source_path>")
+    finally:
+        os.unlink(source_path)
+        linecache.clearcache()
+
+
 class ExcTests(LoggingTestCase):
     maxDiff = None
+
+    @torch._dynamo.config.patch(suppress_errors=True)
+    def test_user_error_backend_soft_fail(self):
+        def backend(_, __):
+            raise UserError(UserErrorType.INVALID_INPUT, "backend user error")
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend=backend)(x), fn(x))
+
+    def test_user_error_separated_from_unsupported(self):
+        err = UserError(UserErrorType.INVALID_INPUT, "bad input")
+
+        self.assertIsInstance(err, TorchDynamoException)
+        self.assertNotIsInstance(err, Unsupported)
+        self.assertEqual(err.error_type, UserErrorType.INVALID_INPUT)
+        self.assertEqual(err.msg, "bad input")
+        self.assertEqual(err.message, "bad input")
+        self.assertEqual(str(err), "bad input")
+
+    @torch._dynamo.config.patch(suppress_errors=False)
+    def test_backend_compiler_failed_pickles_without_frame(self):
+        def backend_fn(gm, example_inputs):
+            exc = RuntimeError("backend exploded")
+            exc.frame = sys._getframe()
+            raise exc
+
+        def fn(x):
+            return x + 1
+
+        with self.assertRaises(BackendCompilerFailed) as cm:
+            torch.compile(fn, backend=backend_fn)(torch.ones(1))
+
+        err = cm.exception
+
+        restored = pickle.loads(pickle.dumps(err))
+
+        self.assertIsInstance(restored, BackendCompilerFailed)
+        self.assertEqual(restored.args, err.args)
+        self.assertEqual(str(restored), str(err))
+        self.assertEqual(restored.backend_name, "backend_fn")
+        self.assertIsInstance(restored.inner_exception, RuntimeError)
+        self.assertEqual(str(restored.inner_exception), "backend exploded")
+        self.assertEqual(
+            restored.inner_exception._dynamo_original_exception_type,
+            "builtins.RuntimeError",
+        )
+        self.assertIsNone(restored.first_useful_frame)
+
+    def test_dynamo_exceptions_pickle_without_rerunning_init(self):
+        cases = [
+            InvalidBackend("bad_backend"),
+            ResetRequired(),
+            ShortenTraceback("shortened", first_useful_frame=sys._getframe()),
+            UserError(UserErrorType.INVALID_INPUT, "bad input"),
+        ]
+
+        for err in cases:
+            with self.subTest(exc_type=type(err).__name__):
+                restored = pickle.loads(pickle.dumps(err))
+
+                self.assertIsInstance(restored, type(err))
+                self.assertEqual(restored.args, err.args)
+                self.assertEqual(str(restored), str(err))
+
+        self.assertIsNone(pickle.loads(pickle.dumps(cases[2])).first_useful_frame)
+        self.assertEqual(
+            pickle.loads(pickle.dumps(cases[3])).error_type,
+            UserErrorType.INVALID_INPUT,
+        )
 
     def test_unsupported_real_stack(self):
         # exercise Unsupported constructor and augment_exc_message
@@ -37,7 +156,13 @@ class ExcTests(LoggingTestCase):
                 torch.randn(1)
             ),
             """\
-'skip function graph_break in file _dynamo/decorators.py'
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
 
 from user code:
    File "test_exc.py", line N, in fn001
@@ -92,7 +217,7 @@ from user code:
                 raise NotImplementedError
 
             # Ensure graph break is not possible
-            for i in range(3):
+            for _ in range(3):
                 comptime(f)
 
         torch.compile(fn001, backend="eager")(torch.randn(1))
@@ -115,17 +240,37 @@ from user code:
         )
 
     @torch._dynamo.config.patch(inject_BUILD_SET_unimplemented_TESTING_ONLY=True)
-    @make_logging_test(dynamo=logging.DEBUG)
+    @make_logging_test(graph_breaks=True)
     def test_unsupported_error(self, records):
         def fn001(x):
             return {1, 2}
 
         torch.compile(fn001, backend="eager")(torch.randn(1))
 
-        # TODO: There is no graph break log!  This is because the graph break
-        # logging is not in a centralized location; unsupported
-        # instruction bypasses it
-        self.getRecord(records, "Graph break:")
+        record = self.getRecord(records, "missing BUILD_SET handler")
+        self.assertExpectedInline(
+            munge_exc(record.getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break in user code at test_exc.py:N
+Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
+
+missing BUILD_SET handler
+  Explanation: Missing BUILD_SET bytecode handler (for testing purposes).
+
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0200.html
+
+Stack variable source attribution:
+
+User code traceback:
+  File "test_exc.py", line N, in test_unsupported_error
+    torch.compile(fn001, backend="eager")(torch.randn(1))
+  File "test_exc.py", line N, in fn001
+    return {1, 2}
+""",
+        )
 
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_internal_error_no_suppress(self):
@@ -171,13 +316,24 @@ from user code:
             munge_exc(record.getMessage()),
             """\
 Graph break in user code at test_exc.py:N
-Reason: Unsupported: 'skip function graph_break in file _dynamo/decorators.py'
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+
 User code traceback:
+  File "test_exc.py", line N, in test_graph_break_log
+    torch.compile(fn001, backend="eager")(torch.randn(1))
   File "test_exc.py", line N, in fn001
     return fn002(x)
   File "test_exc.py", line N, in fn002
     torch._dynamo.graph_break()
-""",  # noqa: B950
+""",
         )
 
     @make_logging_test(graph_breaks=True)
@@ -239,45 +395,39 @@ translation validation failed.
 
 Model:
   ==> L['shape'][0]: 0
-  ==> L['shape'][1]: 1
-  ==> L['shape'][2]: 1
+  ==> L['shape'][1]: 0
+  ==> L['shape'][2]: 0
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
-  ==> s0: 3
-  ==> s1: 0
-  ==> s2: 1
-  ==> s3: 1
+  ==> s3: 0
+  ==> s52: 0
+  ==> s77: 3
+  ==> s86: 0
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
-  ==> (== L['shape'][0] s1)
-  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][0] s86)
+  ==> (== L['shape'][1] s52)
   ==> (== L['shape'][2] s3)
-  ==> (== L['x'].size()[0] s0)
-  ==> (> s0 1)
-  ==> (True)
+  ==> (== L['x'].size()[0] s77)
+  ==> (> s77 1)
 
 Target Expressions:
-  ==> (!= (+ s1 s2 s3) s0)
-  ==> (<= (+ s1 s2 s3) s0)
-  ==> (<= (+ s1 s2) (+ s0 (* -1 s3)))
-  ==> (<= (+ s1 s2) s0)
-  ==> (<= 0 s1)
-  ==> (<= 0 s2)
+  ==> (!= (+ s3 s52 s86) s77)
   ==> (<= 0 s3)
-  ==> (<= 2 s0)
-  ==> (<= s1 (+ s0 (* -1 s2)))
+  ==> (<= 0 s52)
+  ==> (<= 0 s86)
+  ==> (<= 2 s77)
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
-  ==> (== L['shape'][0] s1)
-  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][0] s86)
+  ==> (== L['shape'][1] s52)
   ==> (== L['shape'][2] s3)
-  ==> (== L['x'].size()[0] s0)
-  ==> (> s0 0)
-  ==> (>= 0 s1)
-  ==> (And (<= (+ s1 s2) s0) (<= (* -1 s0) (+ s1 s2)))
+  ==> (== L['x'].size()[0] s77)
+  ==> (> s77 0)
+  ==> (>= 0 s86)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
@@ -303,49 +453,134 @@ Failed Source Expressions:
             BisectValidationException,
             lambda: fn(torch.randn(20), (5, 10, 5)),
             """\
-translation validation failed when evaluating: Eq(s1 + s2 + s3, s0)
+translation validation failed when evaluating: Eq(s3 + s52 + s86, s77)
 
 Failure occurred while running node:
     %split : [num_users=3] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
 
 Model:
-  ==> L['shape'][0]: 1
-  ==> L['shape'][1]: 1
+  ==> L['shape'][0]: 0
+  ==> L['shape'][1]: 0
   ==> L['shape'][2]: 0
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
-  ==> s0: 3
-  ==> s1: 1
-  ==> s2: 1
   ==> s3: 0
+  ==> s52: 0
+  ==> s77: 3
+  ==> s86: 0
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
-  ==> (== L['shape'][0] s1)
-  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][0] s86)
+  ==> (== L['shape'][1] s52)
   ==> (== L['shape'][2] s3)
-  ==> (== L['x'].size()[0] s0)
-  ==> (> s0 1)
+  ==> (== L['x'].size()[0] s77)
+  ==> (> s77 1)
 
 Target Expressions:
-  ==> (!= (+ s1 s2 s3) s0)
-  ==> (<= 0 s1)
-  ==> (<= 0 s2)
+  ==> (!= (+ s3 s52 s86) s77)
   ==> (<= 0 s3)
-  ==> (<= 2 s0)
+  ==> (<= 0 s52)
+  ==> (<= 0 s86)
+  ==> (<= 2 s77)
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
-  ==> (== L['shape'][0] s1)
-  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][0] s86)
+  ==> (== L['shape'][1] s52)
   ==> (== L['shape'][2] s3)
-  ==> (== L['x'].size()[0] s0)
-  ==> (> s0 0)
+  ==> (== L['x'].size()[0] s77)
+  ==> (> s77 0)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
         )
+
+    def test_source_location_format_no_col_info(self):
+        source_location = SourceLocation(filename=__file__, lineno=1)
+        result = source_location.format()
+        self.assertIn(f'File "{__file__}", line 1', result)
+        self.assertNotIn("^", result)
+
+    def test_source_location_format_with_col_info(self):
+        source_location = SourceLocation(
+            filename=__file__,
+            lineno=1,
+            end_lineno=1,
+            col_offset=0,
+            end_col_offset=10,
+        )
+        result = source_location.format()
+        self.assertIn(f'File "{__file__}", line 1', result)
+        self.assertIn("^" * 10, result)
+
+    def test_source_location_format_without_source_line(self):
+        source_location = SourceLocation(
+            filename="<string>",
+            lineno=1,
+            end_lineno=1,
+            col_offset=0,
+            end_col_offset=10,
+        )
+        result = source_location.format()
+        self.assertEqual(result, '  File "<string>", line 1\n')
+
+    def test_source_location_format_multiline(self):
+        result = _format_multiline_source_location()
+
+        self.assertExpectedInline(
+            re.sub(r"(?m)^[ ]*[~^]+\n?", "", result),
+            """\
+  File "<source_path>", line 1
+    value = (
+        foo
+        + bar
+    )
+""",
+        )
+
+        if sys.version_info >= (3, 11):
+            self.assertExpectedInline(
+                result,
+                """\
+  File "<source_path>", line 1
+    value = (
+            ~
+        foo
+        ~~~
+        + bar
+        ^~~~~
+    )
+    ~
+""",
+            )
+
+    def test_vt_source_location_set_during_tracing(self):
+        _source_location_capture.clear()
+
+        def fn(x):
+            y = x + 1
+            comptime(_capture_y_source_location)
+            return y
+
+        torch.compile(fn, backend="eager")(torch.ones(3))
+
+        source_location = _source_location_capture.get("source_location")
+        self.assertIsNotNone(source_location)
+        source_location = cast(SourceLocation, source_location)
+        self.assertEqual(source_location.filename, __file__.replace(".pyc", ".py"))
+        self.assertIsNotNone(source_location.lineno)
+
+    @make_logging_test(graph_breaks=True)
+    def test_graph_break_source_attribution_on_stack(self, records):
+        def fn(x):
+            return (x + 1, torch._dynamo.graph_break())[0]  # noqa: GB_REGISTRY
+
+        torch.compile(fn, backend="eager")(torch.ones(3))
+
+        record = self.getRecord(records, "Graph break in user code")
+        self.assertIn("Stack variable source attribution", record.getMessage())
 
 
 if __name__ == "__main__":

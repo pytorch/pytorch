@@ -1,38 +1,42 @@
 # Owner(s): ["oncall: profiler"]
 
+import gc
+import re
+import textwrap
+import unittest
+import weakref
+from typing import Any
+
+import torch
+import torch.nn as nn
+import torch.optim
+import torch.utils.data
+from torch._C._profiler import _ExtraFields_PyCall, _TensorMetadata
+from torch.profiler import _utils, profile
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+    IS_WINDOWS,
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
+
+
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
 # This causes an issue in the multithreading test because we check all events
 # in that test with their tids. The events that correspond to these lingering
 # threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
+# The work around is turning off monitoring thread when tqdm is loaded.
 # Since these are unit tests, it is safe to turn off monitor thread.
 try:
     import tqdm
 
     tqdm.tqdm.monitor_interval = 0
 except ImportError:
-    None
+    pass
 
-import gc
-import re
-import sys
-import textwrap
-import unittest
-import weakref
-from typing import Any, Dict, List
-
-import torch
-import torch.nn as nn
-import torch.optim
-import torch.utils.data
-from torch._C._profiler import _TensorMetadata
-from torch.profiler import _utils, profile
-from torch.testing._internal.common_utils import run_tests, TestCase
-
-
-Json = Dict[str, Any]
-
-from torch._C._profiler import _ExtraFields_PyCall
+Json = dict[str, Any]
 
 
 def find_node_with_name(nodes, name):
@@ -57,7 +61,6 @@ class SimpleNet(nn.Module):
         return self.fc2(self.fc1(x))
 
 
-@unittest.skipIf(sys.version_info >= (3, 13), "segfaults")
 class TestTorchTidyProfiler(TestCase):
     def _get_tensor_fields(self, node, index):
         self.assertIsNotNone(node)
@@ -100,7 +103,7 @@ class TestTorchTidyProfiler(TestCase):
             return self._get_tensor_fields(find_node_with_name(nodes, op_name), index)
 
         a_impl, a_storage_data, a_id = get_fields("aten::add", 0)
-        b_impl, b_storage_data, b_id = get_fields("aten::mul", 0)
+        b_impl, b_storage_data, _ = get_fields("aten::mul", 0)
 
         # Profiler matches ground truth from Python API.
         self.assertEqual(a_storage_data, a_initial_storage_data)
@@ -364,6 +367,10 @@ class TestTorchTidyProfiler(TestCase):
                 0          1      Free""",
         )
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO or IS_LINUX or IS_MACOS or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/87581",
+    )
     def test_module_and_optimizer_ids(self) -> None:
         model = torch.nn.Linear(2, 1, bias=True)
         optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
@@ -429,7 +436,7 @@ class TestTorchTidyProfiler(TestCase):
             self.assertEqual(state[0][0], "momentum_buffer")
             self.assertEqual(state[0][1].id, weight_momenumtum_id)
 
-        # Check that we handle first step (lazy initalization) and steady state.
+        # Check that we handle first step (lazy initialization) and steady state.
         check(cold_start=True)
         check(cold_start=False)
 
@@ -455,7 +462,7 @@ class TestTorchTidyProfiler(TestCase):
 
         nodes = p.profiler.kineto_results.experimental_event_tree()
 
-        def find_chain(names: List[str]):
+        def find_chain(names: list[str]):
             out = []
             for name in names:
                 root = [out[-1]] if out else nodes
@@ -467,7 +474,7 @@ class TestTorchTidyProfiler(TestCase):
             -1
         ].extra_fields
         _, uniform_node = find_chain(["aten::rand", "aten::uniform_"])
-        x_impl, x_storage_data, x_id = self._get_tensor_fields(uniform_node, 0)
+        _, x_storage_data, x_id = self._get_tensor_fields(uniform_node, 0)
 
         # Make sure IDs are consistent between allocations and op inputs
         self.assertEqual(allocation.ptr, x_storage_data)

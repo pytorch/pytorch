@@ -34,9 +34,12 @@ struct TORCH_API MPSGuardImpl final
   static constexpr c10::DeviceType static_type = c10::DeviceType::MPS;
 
   // constructor
-  MPSGuardImpl() {}
+  MPSGuardImpl() = default;
   explicit MPSGuardImpl(c10::DeviceType t) {
-    TORCH_INTERNAL_ASSERT(t == c10::DeviceType::MPS);
+    TORCH_CHECK(
+        t == DeviceType::MPS,
+        "MPSGuardImpl initialized with non-MPS DeviceType: ",
+        t);
   }
 
   // returns the type
@@ -57,14 +60,14 @@ struct TORCH_API MPSGuardImpl final
   }
 
   void setDevice(Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.is_mps());
+    TORCH_CHECK(d.is_mps(), "Expected a MPS device, but got ", d);
   }
 
   void uncheckedSetDevice(Device d) const noexcept override {
     // TODO: Currently setting only device 0
   }
 
-  Stream getStream(Device d) const noexcept override {
+  Stream getStream(Device d) const override {
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
 
@@ -78,9 +81,21 @@ struct TORCH_API MPSGuardImpl final
   }
 
   // NB: These do NOT set the current device
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream s) const override {
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
+  DeviceCapability getDeviceCapability(Device /* unused */) const override {
+    DeviceCapability cap;
+    cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
+        (1ULL << kIndex_Char) | (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
+        (1ULL << kIndex_Long) | (1ULL << kIndex_Half) | (1ULL << kIndex_Float) |
+        (1ULL << kIndex_ComplexHalf) | (1ULL << kIndex_ComplexFloat) |
+        (1ULL << kIndex_Bool) | (1ULL << kIndex_BFloat16) |
+        (1ULL << kIndex_UInt32) | (1ULL << kIndex_UInt16) |
+        (1ULL << kIndex_UInt64);
+    return cap;
+  }
+
   DeviceIndex deviceCount() const noexcept override {
     if (at::hasMPS()) {
       // TODO: extend it for multi-device case

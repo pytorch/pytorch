@@ -5,10 +5,11 @@ import io
 import itertools
 import os
 import warnings
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from functools import wraps
 from pstats import Stats
-from typing import Any, Callable, cast, Dict, List, Optional, Sequence, TypeVar, Union
+from typing import Any, cast, TypeVar
 
 import torch
 import torch.distributed as dist
@@ -31,30 +32,51 @@ R = TypeVar("R")
 
 
 def _get_failure_dict(
-    results: List[Union[T, WRAPPED_EXCEPTION]]
-) -> Dict[int, WRAPPED_EXCEPTION]:
+    results: list[T | WRAPPED_EXCEPTION],
+) -> dict[int, WRAPPED_EXCEPTION]:
     return cast(
-        Dict[int, WRAPPED_EXCEPTION],
+        dict[int, WRAPPED_EXCEPTION],
         {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)},
     )
 
 
 def _all_gather_keys(
-    local_dict: Dict[Any, Any], group: Optional[dist.ProcessGroup] = None
-) -> List[Any]:
+    local_dict: dict[str, Any], group: dist.ProcessGroup | None = None
+) -> set[str]:
     """Gathers all keys, and returns them sorted."""
     keys = list(local_dict.keys())
-    gathered_keys: List[List[Any]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
+    gathered_keys: list[list[str]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
 
     dist.all_gather_object(gathered_keys, keys, group=group)
-    return sorted(set(itertools.chain.from_iterable(gathered_keys)))
+    return set(itertools.chain.from_iterable(gathered_keys))
+
+
+def _assert_same_keys(
+    state_dict: dict[str, Any], process_group: dist.ProcessGroup | None = None
+) -> None:
+    """
+    Asserts that all ranks have the same keys in their state dict.
+    This is a collective call which requires all ranks in ``process_group`` to
+    join. It will also induce cross-rank communication and block CPU.
+    """
+
+    if dist.get_world_size(process_group) == 1:
+        return
+
+    all_keys = _all_gather_keys(state_dict, process_group)
+    my_keys = set(state_dict.keys())
+    diff = all_keys - my_keys
+    if len(diff) > 0:
+        raise AssertionError(
+            f"Key(s) present in other ranks but not this one, difference: {diff}"
+        )
 
 
 class _DistWrapper:
     """
     This is a wrapper around PG that provides a series of features around object collectives.
 
-    It works without distributed initialized, where most collectives turns into nops.
+    It works without distributed initialized, where most collectives turn into nops.
 
     All variants that take functions are exception robust, meaning that if one or more
     ranks raise errors, all ranks will observe those.
@@ -62,7 +84,7 @@ class _DistWrapper:
 
     def __init__(
         self,
-        group: Optional[dist.ProcessGroup],
+        group: dist.ProcessGroup | None,
         use_dist: bool,
         coordinator_rank: int,
     ):
@@ -70,9 +92,15 @@ class _DistWrapper:
         self.use_dist = use_dist
         self.coordinator_rank = coordinator_rank
         if self.use_dist:
+            self.global_coordinator_rank = (
+                dist.get_global_rank(group, coordinator_rank)
+                if group is not None
+                else coordinator_rank
+            )
             self.rank = dist.get_rank(group)
             self.is_coordinator = self.rank == coordinator_rank
         else:
+            self.global_coordinator_rank = 0
             self.rank = 0
             self.is_coordinator = True
 
@@ -84,22 +112,22 @@ class _DistWrapper:
             return dist.get_world_size(self.group)
         return 1
 
-    def broadcast_object(self, object: Optional[T]) -> T:
+    def broadcast_object(self, object: T | None) -> T:
         """Implement functionality similar to c10d::broadcast_object_list but without distributed enabled."""
         object_list = [object]
         if self.use_dist:
             dist.broadcast_object_list(
                 object_list=object_list,
                 group=self.group,
-                src=self.coordinator_rank,
+                src=self.global_coordinator_rank,
             )
         return cast(T, object_list[0])
 
-    def gather_object(self, object: T) -> Optional[List[T]]:
+    def gather_object(self, object: T) -> list[T] | None:
         """Implement functionality similar to c10d::gather_object but without distributed enabled."""
         if self.use_dist:
             gather_objs = (
-                cast(List[T], [None] * dist.get_world_size(self.group))
+                cast(list[T], [None] * dist.get_world_size(self.group))
                 if self.is_coordinator
                 else None
             )
@@ -107,7 +135,7 @@ class _DistWrapper:
             dist.gather_object(
                 obj=object,
                 object_gather_list=gather_objs if self.is_coordinator else None,
-                dst=self.coordinator_rank,
+                dst=self.global_coordinator_rank,
                 group=self.group,
             )
             result = gather_objs
@@ -115,10 +143,10 @@ class _DistWrapper:
             result = [object]
         return result
 
-    def all_gather_object(self, object: T) -> List[T]:
+    def all_gather_object(self, object: T) -> list[T]:
         """Implement functionality similar to c10d::all_gather_object but without distributed enabled."""
         if self.use_dist:
-            gather_objs = cast(List[T], [None] * dist.get_world_size(self.group))
+            gather_objs = cast(list[T], [None] * dist.get_world_size(self.group))
 
             dist.all_gather_object(
                 object_list=gather_objs, obj=object, group=self.group
@@ -127,20 +155,21 @@ class _DistWrapper:
             gather_objs = [object]
         return gather_objs
 
-    def scatter_object(self, object_list: Optional[List[T]]) -> T:
+    def scatter_object(self, object_list: list[T] | None) -> T:
         """Implement functionality similar to c10d::scatter_object but without distributed enabled."""
         if self.use_dist:
-            gather_result = cast(List[T], [None])
+            gather_result = cast(list[T], [None])
             dist.scatter_object_list(
                 scatter_object_output_list=gather_result,
                 scatter_object_input_list=object_list if self.is_coordinator else None,
-                src=self.coordinator_rank,
+                src=self.global_coordinator_rank,
                 group=self.group,
             )
 
             local_reply = gather_result[0]
         else:
-            assert object_list is not None
+            if object_list is None:
+                raise AssertionError("object_list is None")
             local_reply = object_list[0]
         return local_reply
 
@@ -148,7 +177,7 @@ class _DistWrapper:
         self,
         step: str,
         map_fun: Callable[[], T],
-        reduce_fun: Callable[[List[T]], List[R]],
+        reduce_fun: Callable[[list[T]], list[R]],
     ) -> R:
         """
         Compute a value on each rank, then do centralized reduce on a single rank, followed by a scatter.
@@ -159,24 +188,25 @@ class _DistWrapper:
             Call ``reduce_fun`` on all those values
             Scatter to each rank part of the result.
         """
-        local_data: Union[WRAPPED_EXCEPTION, T]
+        local_data: WRAPPED_EXCEPTION | T
         try:
             local_data = map_fun()
         except BaseException as e:
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
-        all_results: Optional[List[Union[R, CheckpointException]]] = None
+        all_results: list[R | CheckpointException] | None = None
         if self.is_coordinator:
-            assert all_data is not None
+            if all_data is None:
+                raise AssertionError("all_data is None")
             node_failures = _get_failure_dict(all_data)
 
             if len(node_failures) == 0:
                 try:
                     # N.B. why can't mypy cast List[R] to List[Union[R, WRAPPED_EXCEPTION]]?
                     all_results = cast(
-                        List[Union[R, CheckpointException]],
-                        reduce_fun(cast(List[T], all_data)),
+                        list[R | CheckpointException],
+                        reduce_fun(cast(list[T], all_data)),
                     )
                 except BaseException as e:
                     node_failures[self.rank] = _wrap_exception(e)
@@ -195,7 +225,7 @@ class _DistWrapper:
         self,
         step: str,
         map_fun: Callable[[], T],
-        reduce_fun: Callable[[List[T]], R],
+        reduce_fun: Callable[[list[T]], R],
     ) -> R:
         """
         Compute a value on each rank, then do centralized reduce on a single rank, followed by a broadcast.
@@ -206,36 +236,39 @@ class _DistWrapper:
             Call ``reduce_fun`` on all those values
             Broadcast the reduced value to all ranks.
         """
-        local_data: Union[T, WRAPPED_EXCEPTION]
+        local_data: T | WRAPPED_EXCEPTION
         try:
             local_data = map_fun()
         except BaseException as e:
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
-        result: Optional[Union[R, CheckpointException]] = None
+        result: R | CheckpointException | None = None
         if self.is_coordinator:
-            assert all_data is not None
+            if all_data is None:
+                raise AssertionError("all_data is None")
             node_failures = _get_failure_dict(all_data)
             if len(node_failures) == 0:
                 try:
-                    result = reduce_fun(cast(List[T], all_data))
+                    result = reduce_fun(cast(list[T], all_data))
                 except BaseException as e:
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
                 result = CheckpointException(step, node_failures)
 
+        # pyrefly: ignore [bad-argument-type]
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
+        # pyrefly: ignore [redundant-cast]
         return cast(R, final_result)
 
     def all_gather(
         self,
         step: str,
         map_fun: Callable[[], T],
-    ) -> List[T]:
+    ) -> list[T]:
         """
         Compute a value on each rank, then all_gather them.
 
@@ -243,7 +276,7 @@ class _DistWrapper:
             Run ``map_cp`` on all ranks
             all_gather the values to all ranks
         """
-        result: Union[T, WRAPPED_EXCEPTION]
+        result: T | WRAPPED_EXCEPTION
         try:
             result = map_fun()
         except BaseException as e:
@@ -254,7 +287,7 @@ class _DistWrapper:
         node_failures = _get_failure_dict(all_results)
         if len(node_failures) > 0:
             raise CheckpointException(step, node_failures)
-        return cast(List[T], all_results)
+        return cast(list[T], all_results)
 
     def broadcast(
         self,
@@ -268,16 +301,28 @@ class _DistWrapper:
             Run ``map_cp`` on rank 0
             broadcast the value
         """
-        result: Optional[Union[T, CheckpointException]] = None
+        result: T | CheckpointException | None = None
         if self.is_coordinator:
             try:
                 result = map_fun()
             except BaseException as e:
                 result = CheckpointException(step, {self.rank: _wrap_exception(e)})
+        # pyrefly: ignore [bad-argument-type]
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
+        # pyrefly: ignore [redundant-cast]
         return cast(T, final_result)
+
+    def barrier(self) -> None:
+        """
+        Add a synchronization point across all processes when using distributed.
+        If torch.distributed is initialized, this function will invoke a barrier across the global process group.
+        If torch.distributed is not initialized, this function is a no-op.
+        """
+        if not self.use_dist:
+            return
+        dist.barrier(group=self.group)
 
 
 def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
@@ -331,11 +376,11 @@ def find_state_dict_object(state_dict: STATE_DICT_TYPE, index: MetadataIndex) ->
     return obj
 
 
-def _element_wise_add(a: Sequence[int], b: Sequence[int]) -> List[int]:
+def _element_wise_add(a: Sequence[int], b: Sequence[int]) -> list[int]:
     return [i_a + i_b for i_a, i_b in zip(a, b)]
 
 
-def _element_wise_sub(a: Sequence[int], b: Sequence[int]) -> List[int]:
+def _element_wise_sub(a: Sequence[int], b: Sequence[int]) -> list[int]:
     return [i_a - i_b for i_a, i_b in zip(a, b)]
 
 
@@ -347,13 +392,13 @@ class _ReaderView(io.IOBase):
         self.base_stream = base_stream
         self.seek(0)
 
-    def seek(self, __offset: int, __whence: int = os.SEEK_SET) -> int:
-        if __whence == os.SEEK_SET:
-            __offset = self.offset + __offset
-        elif __whence == os.SEEK_END:
-            __whence = os.SEEK_SET
-            __offset = (self.offset + self.len) - __offset
-        return self.base_stream.seek(__offset, __whence)
+    def seek(self, offset: int, whence: int = os.SEEK_SET, /) -> int:
+        if whence == os.SEEK_SET:
+            offset = self.offset + offset
+        elif whence == os.SEEK_END:
+            whence = os.SEEK_SET
+            offset = (self.offset + self.len) - offset
+        return self.base_stream.seek(offset, whence)
 
     def tell(self) -> int:
         return self.base_stream.tell() - self.offset
@@ -365,9 +410,17 @@ class _ReaderView(io.IOBase):
         return self.base_stream.seekable()
 
     def readinto(self, b):
+        max_size = self.len - self.tell()
+        if max_size == 0:
+            return 0
+        if len(b) > max_size:
+            b = memoryview(b)[:max_size]
         return self.base_stream.readinto(b)  # type: ignore[attr-defined]
 
     def read(self, size=-1):
+        max_size = self.len - self.tell()
+        if size == -1 or size > max_size:
+            size = max_size
         return self.base_stream.read(size)
 
 
@@ -390,7 +443,7 @@ ENABLE_PROFILE = False
 @contextmanager
 def _profile():
     # Only log the profiling when it is enable and is on rank0  or dist is not
-    # avaiable.
+    # available.
     if ENABLE_PROFILE and (not dist.is_available() or dist.get_rank() == 0):
         profiler = cProfile.Profile()
         profiler.enable()
@@ -410,17 +463,20 @@ def _api_bc_check(func):
         if len(args) == 2:
             warnings.warn(
                 f"The argument order of {func.__name__} has been changed. "
-                "Please check the document to avoid future breakages."
+                "Please check the document to avoid future breakages.",
+                stacklevel=2,
             )
             sig = inspect.signature(func)
             kwonlyargs = [
                 p.name for p in sig.parameters.values() if p.kind == p.KEYWORD_ONLY
             ]
             if "storage_writer" in kwonlyargs:
-                assert "storage_writer" not in kwargs, (args, kwargs)
+                if "storage_writer" in kwargs:
+                    raise AssertionError(f"storage_writer in kwargs: {(args, kwargs)}")
                 kwargs["storage_writer"] = args[1]
             elif "storage_reader" in kwonlyargs:
-                assert "storage_reader" not in kwargs, (args, kwargs)
+                if "storage_reader" in kwargs:
+                    raise AssertionError(f"storage_reader in kwargs: {(args, kwargs)}")
                 kwargs["storage_reader"] = args[1]
             else:
                 raise RuntimeError(f"Unexpected kwonlyargs = {kwonlyargs}")
