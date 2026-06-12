@@ -628,13 +628,13 @@ print(t.is_pinned())
     @serialTest()
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
-        total_memory = torch.cuda.get_device_properties(0).total_memory
+        available_memory = torch.cuda.mem_get_info(0)[0]
         oom_regex = (
             "would exceed allowed memory"
             if TEST_CUDAMALLOCASYNC
             else "Tried to allocate"
         )
-        size = int(total_memory * 0.5)
+        size = int(available_memory * 0.5)
         a = torch.empty(size, dtype=torch.int8, device="cuda")
         with self.assertRaisesRegex(RuntimeError, oom_regex):
             b = torch.empty(size, dtype=torch.int8, device="cuda")
@@ -4483,6 +4483,44 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    def test_cuda_graph_many_if_nodes_across_graphs(self):
+        pred = torch.zeros((), device="cuda", dtype=torch.bool)
+        x = torch.zeros((), device="cuda")
+        for _ in range(40):
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                g.begin_capture_to_if_node(pred)
+                x.add_(1.0)
+                g.end_capture_to_conditional_node()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    def test_cuda_graph_many_if_nodes_in_one_graph(self):
+        pred = torch.zeros((), device="cuda", dtype=torch.bool)
+        x = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            for _ in range(40):
+                g.begin_capture_to_if_node(pred)
+                x.add_(1.0)
+                g.end_capture_to_conditional_node()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_cuda_graph_tensor_item_not_allowed(self):
         test_script = """\
 import torch
@@ -5798,11 +5836,9 @@ class TestCudaAllocator(TestCase):
 
     def test_allocator_backend(self):
         def check_output(script: str) -> str:
-            return (
-                subprocess.check_output([sys.executable, "-c", script])
-                .decode("ascii")
-                .strip()
-            )
+            return subprocess.check_output(
+                [sys.executable, "-c", script], env={}, text=True
+            ).strip()
 
         test_script = """\
 import os
