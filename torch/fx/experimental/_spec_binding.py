@@ -97,10 +97,6 @@ def _walk_spec(
         return out
 
     if isinstance(user_spec, ObjectSpec):
-        # By the time we get here, callers have already validated that arg_value
-        # is pytree-flattenable. The only ObjectSpec-specific requirement is that
-        # the registered handler also expose a ``flatten_with_keys_fn`` so we can
-        # address children by attribute name.
         node_type = pytree._get_node_type(arg_value)
         handler = pytree.SUPPORTED_NODES.get(node_type)
         if handler is None:
@@ -112,11 +108,6 @@ def _walk_spec(
                 f"or `pytree.register_pytree_node(...)`."
             )
         if handler.flatten_with_keys_fn is None:
-            # Note: this requirement is not ObjectSpec-specific -- plain export()
-            # and the legacy dynamic_shapes API also fail on types registered
-            # without a `flatten_with_keys_fn` (their input-path construction
-            # uses `tree_flatten_with_path`). We just catch it earlier here with
-            # a clearer message.
             raise ValueError(
                 f"{where}: export requires "
                 f"`flatten_with_keys_fn` to be registered for type "
@@ -141,9 +132,8 @@ def _walk_spec(
             )
         out = []
         for key_entry, child in key_children:
-            # Only ``GetAttrKey`` entries can match an ObjectSpec entry
-            # (ObjectSpec addresses by attribute name); any other key shape
-            # contributes a static subtree.
+            # Only ``GetAttrKey`` entries can match an ObjectSpec entry; any
+            # other key shape contributes a static subtree.
             if isinstance(key_entry, pytree.GetAttrKey) and key_entry.name in user_spec:
                 out += _walk_spec(
                     user_spec._fields[key_entry.name],

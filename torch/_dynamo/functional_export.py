@@ -937,9 +937,10 @@ def _dynamo_graph_capture_for_export(
         # This sets the is_exporting flag when building guards.
         with _compiling_state_context():
             # Only a ShapesSpec/ParamsSpec object opts into the new spec API.
-            # A bare dict/tuple in export's `dynamic_shapes` is the legacy
-            # format (Dim/tuple/None) and must NOT be routed through
-            # _bind_spec_to_args.
+            # A bare dict/tuple in export's `dynamic_shapes` is now bound to
+            # the Dim export API.
+            # TODO: inspect dictionary leaves and enable dict for ParamsSpec
+            # here too, like make_fx and compile.
             user_spec: ShapesSpec | None = None
             if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
                 user_spec = _coerce_to_shapes_spec(dynamic_shapes)
@@ -951,7 +952,7 @@ def _dynamo_graph_capture_for_export(
                 )
                 flattened_spec = ShapesSpec(
                     # leaf_specs is list[LeafSpec]; cast around list invariance
-                    # (ParamsSpec wants list[IntermediateSpec] and copies it).
+                    # (ParamsSpec wants list[IntermediateSpec]).
                     ParamsSpec({"*args": cast(list[IntermediateSpec], leaf_specs)}),
                     assumptions=user_spec._assumptions or None,
                 )
