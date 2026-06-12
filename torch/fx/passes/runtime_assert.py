@@ -1,3 +1,4 @@
+import dis
 import functools
 import logging
 import sys
@@ -82,11 +83,12 @@ def insert_deferred_runtime_asserts(
 
         # where s0, s1 are either SymInt graph inputs, or the result of added size calls
 
-    Redundant torch._check or torch.ops.aten._assert_scalar.default calls that assert
-    the same expression, and redundant constrain_range calls are also deduplicated.
-    Additionally, because single-symbol bound checks (e.g. u0 >= 0, u0 <= 5) accumulate
-    information in the ShapeEnv, the ShapeEnv contains min/max bounds for each symbol,
-    and we delete all previous calls, adding bound checks at the end of this pass.
+    Redundant compiler-generated asserts that assert the same expression, and
+    redundant constrain_range calls are also deduplicated. Additionally, because
+    single-symbol bound checks (e.g. u0 >= 0, u0 <= 5) accumulate information in
+    the ShapeEnv, the ShapeEnv contains min/max bounds for each symbol, and we
+    add bound checks at the end of this pass when an equivalent explicit assert
+    is not already present in the graph.
     """
 
     # Import sympy locally
@@ -239,8 +241,119 @@ def insert_deferred_runtime_asserts(
             isinstance(rhs, sympy.Symbol) and isinstance(lhs, sympy.Number)
         )
 
+    assert_targets = (
+        torch._check,
+        torch._assert_scalar,
+        torch.ops.aten._assert_scalar.default,
+    )
+    preserve_runtime_assert_key = "_fx_runtime_assert_preserve"
+
+    def _assertion_condition(node: fx.Node) -> Any:
+        if node.args:
+            return node.args[0]
+        return node.kwargs.get("cond", node.kwargs.get("self"))
+
+    def _assertion_message(
+        node: fx.Node, cond: Any, assert_expr: Optional["sympy.Expr"]
+    ) -> str:
+        def static_string_from_callable(fn: Callable[[], object]) -> str | None:
+            code = getattr(fn, "__code__", None)
+            if (
+                code is None
+                or code.co_argcount != 0
+                or code.co_posonlyargcount != 0
+                or code.co_kwonlyargcount != 0
+            ):
+                return None
+
+            # torch._check message callables are lazy. Preserve common constant
+            # string lambdas without executing arbitrary user code at compile time.
+            ignored_opnames = {
+                "CACHE",
+                "COPY_FREE_VARS",
+                "EXTENDED_ARG",
+                "NOP",
+                "RESUME",
+            }
+            instructions = [
+                inst
+                for inst in dis.get_instructions(fn)
+                if inst.opname not in ignored_opnames
+            ]
+            if (
+                len(instructions) == 1
+                and instructions[0].opname == "RETURN_CONST"
+                and isinstance(instructions[0].argval, str)
+            ):
+                return instructions[0].argval
+            if (
+                len(instructions) == 2
+                and instructions[0].opname == "LOAD_CONST"
+                and isinstance(instructions[0].argval, str)
+                and instructions[1].opname == "RETURN_VALUE"
+            ):
+                return instructions[0].argval
+            return None
+
+        msg = None
+        if len(node.args) > 1:
+            msg = node.args[1]
+        elif node.target is torch._check:
+            msg = node.kwargs.get("message")
+        else:
+            msg = node.kwargs.get("assert_msg")
+
+        if isinstance(msg, str):
+            return msg
+        if isinstance(msg, fx.Node) and msg.op == "get_attr":
+            attr = gm
+            if not isinstance(msg.target, str):
+                raise AssertionError(f"Expected str target, got {type(msg.target)}")
+            for atom in msg.target.split("."):
+                attr = getattr(attr, atom)
+            if callable(attr):
+                static_msg = static_string_from_callable(attr)
+                if static_msg is not None:
+                    return static_msg
+            if isinstance(attr, str):
+                return attr
+        return f"Runtime assertion failed for expression {assert_expr} on node '{cond}'"
+
+    def _is_user_runtime_assert(node: fx.Node) -> bool:
+        if node.target in (torch._check, torch._assert_scalar):
+            return True
+        return (
+            node.target is torch.ops.aten._assert_scalar.default
+            and node.meta.get(preserve_runtime_assert_key) is True
+        )
+
+    def _replace_with_aten_assert(
+        node: fx.Node, cond: Any, assert_expr: Optional["sympy.Expr"]
+    ) -> None:
+        with graph.inserting_before(node):
+            new_node = graph.call_function(
+                torch.ops.aten._assert_scalar.default,
+                (cond, _assertion_message(node, cond, assert_expr)),
+            )
+            new_node.meta.update(node.meta)
+            new_node.meta[preserve_runtime_assert_key] = True
+        node.replace_all_uses_with(new_node)
+        graph.erase_node(node)
+
+    user_assert_exprs: set[sympy.Expr] = set()
+    for node in graph.nodes:
+        if node.target in assert_targets and _is_user_runtime_assert(node):
+            cond = _assertion_condition(node)
+            if isinstance(cond, fx.Node):
+                assert_expr = _get_sym_val(cond)
+                if assert_expr is not None:
+                    user_assert_exprs.add(assert_expr)
+
     def add_runtime_asserts(ras: list[RuntimeAssert]) -> None:
         for ra in ras:
+            if ra.expr in user_assert_exprs:
+                added_asserts.add(ra.expr)
+                continue
             if (
                 # redundant
                 ra.expr in added_asserts
@@ -360,22 +473,32 @@ def insert_deferred_runtime_asserts(
                 add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
 
             # deduplicate asserts already present in graph, and remove trivial asserts
-            if node.target in (
-                torch._check,
-                torch.ops.aten._assert_scalar.default,
-            ):
-                cond = node.args[0] if node.args else node.kwargs.get("cond")
-                if (
-                    cond == True  # noqa: E712
-                    or (assert_expr := _get_sym_val(cond)) in expr_to_proxy
-                    and assert_expr in added_asserts
-                ):
+            if node.target in assert_targets:
+                cond = _assertion_condition(node)
+                assert_expr = _get_sym_val(cond) if isinstance(cond, fx.Node) else None
+                if cond == True:  # noqa: E712
                     arg = cond
                     gm.graph.erase_node(node)
                     if isinstance(arg, fx.Node) and not arg.users:
                         gm.graph.erase_node(arg)
                 else:
-                    added_asserts.add(assert_expr)  # type: ignore[arg-type]
+                    if _is_user_runtime_assert(node):
+                        if node.target is not torch.ops.aten._assert_scalar.default:
+                            _replace_with_aten_assert(node, cond, assert_expr)
+                        if assert_expr is not None:
+                            added_asserts.add(assert_expr)
+                    elif (
+                        assert_expr is not None
+                        and assert_expr in expr_to_proxy
+                        and assert_expr in added_asserts
+                    ):
+                        arg = cond
+                        gm.graph.erase_node(node)
+                        if isinstance(arg, fx.Node) and not arg.users:
+                            gm.graph.erase_node(arg)
+                    else:
+                        if assert_expr is not None:
+                            added_asserts.add(assert_expr)
 
             # hash cons, replace function calls that return torch.SymInts with direct references to
             # FX nodes built up to reify the sympy expression.
@@ -555,13 +678,17 @@ def insert_deferred_runtime_asserts(
                     # assert and also explicitly refine the range
                     # (refinement should not be necessary once runtime
                     # asserts cause refinement, but that's NYI)
-                    def convert(s: Any) -> int | None:
-                        if s in (int_oo, -int_oo):
+                    def convert(s: Any) -> int | float | None:
+                        if s in (sympy.oo, -sympy.oo, int_oo, -int_oo):
                             return None
                         try:
-                            return int(s)
-                        except TypeError:
+                            if vr.is_int:
+                                return int(s)
+                            if vr.is_float:
+                                return float(s)
+                        except (TypeError, OverflowError):
                             return None
+                        return None
 
                     with _set_node_metadata_hook(
                         gm,
@@ -575,25 +702,33 @@ def insert_deferred_runtime_asserts(
                         ),
                     ):
                         if (min_val := convert(vr.lower)) is not None:
-                            ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
-                            graph.call_function(
-                                torch.ops.aten._assert_scalar.default,
-                                (
-                                    ge,
-                                    f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
-                                ),
-                            )
-                            added_asserts.add(i0 >= min_val)
+                            ge_expr = i0 >= min_val
+                            if ge_expr in user_assert_exprs:
+                                added_asserts.add(ge_expr)
+                            else:
+                                ge = _sympy_interp(expr_to_proxy, ge_expr).node
+                                graph.call_function(
+                                    torch.ops.aten._assert_scalar.default,
+                                    (
+                                        ge,
+                                        f"Runtime assertion failed for expression {ge_expr} on node '{ge}'",
+                                    ),
+                                )
+                                added_asserts.add(ge_expr)
                         if (max_val := convert(vr.upper)) is not None:
-                            le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
-                            graph.call_function(
-                                torch.ops.aten._assert_scalar.default,
-                                (
-                                    le,
-                                    f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
-                                ),
-                            )
-                            added_asserts.add(i0 <= max_val)
+                            le_expr = i0 <= max_val
+                            if le_expr in user_assert_exprs:
+                                added_asserts.add(le_expr)
+                            else:
+                                le = _sympy_interp(expr_to_proxy, le_expr).node
+                                graph.call_function(
+                                    torch.ops.aten._assert_scalar.default,
+                                    (
+                                        le,
+                                        f"Runtime assertion failed for expression {le_expr} on node '{le}'",
+                                    ),
+                                )
+                                added_asserts.add(le_expr)
 
                 constrained_unbacked_symbols.add(i0)
                 add_runtime_asserts(ras)
