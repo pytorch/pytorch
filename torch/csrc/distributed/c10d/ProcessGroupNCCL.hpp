@@ -1041,6 +1041,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const c10::intrusive_ptr<Work>& work,
       const std::chrono::milliseconds& timeout);
 
+  // Helper to namespace scalable-init store keys across communicator
+  // initialization rounds.
+  static std::vector<std::string> buildScalableInitStoreKeys(
+      size_t numRoots,
+      uint64_t commCounter);
+
   void setEnableNanCheck(bool enableNanCheck);
 
   // APIs related to memory offload (require NCCL 2.29.7+ at runtime)

@@ -1,5 +1,6 @@
 #include <chrono>
 #include <iostream>
+#include <unordered_set>
 
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
@@ -17,6 +18,11 @@
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
+
+class ProcessGroupNCCLTestAccessor : public c10d::ProcessGroupNCCL {
+ public:
+  using ProcessGroupNCCL::buildScalableInitStoreKeys;
+};
 
 class NCCLTestBase {
  public:
@@ -857,6 +863,23 @@ TEST_F(ProcessGroupNCCLTest, testBackendName) {
   EXPECT_EQ(
       test.getProcessGroup()->getBackendName(),
       std::string(c10d::NCCL_BACKEND_NAME));
+}
+
+TEST_F(ProcessGroupNCCLTest, testScalableInitStoreKeysAreNamespacedPerRound) {
+  auto round1Keys =
+      ProcessGroupNCCLTestAccessor::buildScalableInitStoreKeys(/*numRoots=*/24, 1);
+  auto round12Keys =
+      ProcessGroupNCCLTestAccessor::buildScalableInitStoreKeys(/*numRoots=*/4, 12);
+
+  EXPECT_EQ(round1Keys.size(), 24);
+  EXPECT_EQ(round12Keys.size(), 4);
+  EXPECT_EQ(round1Keys[0], "UniqueNCCLID:1:0");
+  EXPECT_EQ(round12Keys[3], "UniqueNCCLID:12:3");
+  EXPECT_NE(round1Keys[23], round12Keys[3]);
+
+  std::unordered_set<std::string> uniqueKeys(
+      round1Keys.begin(), round1Keys.end());
+  EXPECT_EQ(uniqueKeys.size(), round1Keys.size());
 }
 
 TEST_F(ProcessGroupNCCLTest, testSplittingCommunicator) {
