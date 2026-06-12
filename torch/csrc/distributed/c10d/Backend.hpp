@@ -12,8 +12,20 @@
 
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Window.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
+
+// Feature macro: when defined, c10d::Backend (and ProcessGroup) expose the
+// fault-tolerance reconfigure APIs (supportsReconfigure /
+// get_reconfigure_handle / reconfigure). Downstream backends can guard their
+// overrides with #ifdef so they build against both old and new c10d headers.
+#define C10D_BACKEND_HAS_RECONFIGURE 1
+
+// Feature macro: when defined, c10d::Backend (and ProcessGroup) expose the
+// one-sided window APIs (supportsWindow / new_window) and the c10d::Window
+// interface. Downstream backends can guard their overrides with #ifdef.
+#define C10D_BACKEND_HAS_WINDOW 1
 
 constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
@@ -60,6 +72,11 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // (no regular collectives), consider calling abort() after rendezvous
     // to release the communicator.
     bool use_pg_for_symm_mem_rendezvous = false;
+
+    // When true, the communicator is created in the reconfigure regime: it is
+    // not initialized until reconfigure() is called. Backends that support
+    // fault tolerance honor this; others ignore it.
+    bool enable_reconfigure = false;
   };
 
   explicit Backend(int rank, int size);
@@ -121,6 +138,49 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         false,
         c10::str(
             "Backend ", getBackendName(), " does not support setting timeout"));
+  }
+
+  // Fault Tolerance / Reconfigure API
+  //
+  // Backends that support dynamic membership override these.
+  // supportsReconfigure advertises support; get_reconfigure_handle returns an
+  // opaque handle that peers exchange out-of-band; reconfigure (re)initializes
+  // the communicator with a new set of peers.
+  virtual bool supportsReconfigure() const {
+    return false;
+  }
+
+  virtual ReconfigureHandle get_reconfigure_handle() const {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support get_reconfigure_handle"));
+  }
+
+  virtual c10::intrusive_ptr<Work> reconfigure(
+      const ReconfigureOptions& /* opts */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support reconfigure"));
+  }
+
+  // Window & One-sided (RMA) API
+  //
+  // Backends that support one-sided operations advertise it via supportsWindow
+  // and return a concrete c10d::Window from new_window. The optional tensor, if
+  // provided, is registered with the new window.
+  virtual bool supportsWindow() const {
+    return false;
+  }
+
+  virtual c10::intrusive_ptr<Window> new_window(
+      const std::optional<at::Tensor>& /* tensor */ = std::nullopt) {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), " does not support new_window"));
   }
 
   virtual void startCoalescing() {
