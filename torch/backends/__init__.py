@@ -133,6 +133,7 @@ from torch.backends import (
     mkldnn as mkldnn,
     mps as mps,
     nnpack as nnpack,
+    onednn as onednn,
     openmp as openmp,
     opt_einsum as opt_einsum,
     python_native as python_native,

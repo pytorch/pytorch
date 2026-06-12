@@ -1579,7 +1579,7 @@ if torch._C._has_mkldnn:
 
         the above's packed weight nodes are duplicate if two linear calls have same input size.
         """
-        if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
+        if not (torch.backends.onednn.enabled and torch.backends.onednn.is_available()):
             return gm
 
         packed_weight_ops = [
@@ -1608,8 +1608,8 @@ if torch._C._has_mkldnn:
         # TODO: aarch64: enable op fusion for acl once it supports fused operators. Disabling it for now.
         # Otherwise even the matmul or innerproduct can not be accelerated with acl
         if (
-            not torch.backends.mkldnn.enabled
-            or not torch.backends.mkldnn.is_available()
+            not torch.backends.onednn.enabled
+            or not torch.backends.onednn.is_available()
         ):
             return
 
@@ -1624,7 +1624,7 @@ if torch._C._has_mkldnn:
 
     @functools.cache
     def _mkldnn_weight_pack_init():
-        if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
+        if torch.backends.onednn.enabled and torch.backends.onednn.is_available():
             _register_weight_pack_pass()
             _recover_linear()
             _register_quantization_weight_pack_pass()
