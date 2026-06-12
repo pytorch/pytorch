@@ -127,7 +127,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
     def test_static_int_spec_mismatch_raises(self):
         with self.assertRaisesRegex(
             ValueError,
-            r"shapes_spec declares L\['flat_args'\]\[1\] as static with value 10, but got 42",
+            r"shapes_spec declared L\['flat_args'\]\[1\] as static with value 10, but while tracing we found that it was actually 42",
         ):
             export(
                 _ModXN(),

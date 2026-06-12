@@ -918,7 +918,7 @@ def _check_leaf_spec_matches_value(
     if isinstance(user_spec, (DictSpec, SeqSpec, ObjectSpec)):
         raise NotImplementedError(
             f"{where}: container specs ({type(user_spec).__name__}) are "
-            f"not yet supported on the export path. Use the legacy "
+            f"not yet supported on the export path. Use the `Dim`-based "
             f"`dynamic_shapes` API instead."
         )
     match user_spec:
