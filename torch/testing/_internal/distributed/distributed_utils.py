@@ -2,32 +2,30 @@
 
 from contextlib import contextmanager
 from datetime import timedelta
-from functools import (
-    partial,
-    wraps,
-)
+from functools import partial, wraps
 
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 
+
 class MockProcessGroup(dist.ProcessGroup):
-
-    def __init__(self, rank, world):
-        super().__init__(rank, world)
-
     def getBackendName(self):
         return "mock_process_group"
+
 
 def create_mock_pg(prefix_store, rank, world_size, timeout):
     return MockProcessGroup(rank, world_size)
 
-dist.Backend.register_backend('mock_process_group', create_mock_pg)
+
+dist.Backend.register_backend("mock_process_group", create_mock_pg)
+
 
 def mock_init_dist(rank, world_size):
     # !!! WARNING !!!
     # Kids don't try this at home, this is a cute pile of hacks that
     # depends on a small mountain of c10d internals
-    assert not dist.is_initialized()
+    if dist.is_initialized():
+        raise AssertionError("Expected dist to not be initialized")
     store = dist.HashStore()
     # Trick _store_based_barrier into believing everyone else already checked-in
     # Zero is the group index
@@ -38,7 +36,9 @@ def mock_init_dist(rank, world_size):
         world_size=world_size,
         store=store,
         group_name="fake",
-        timeout=timedelta(seconds=1))
+        timeout=timedelta(seconds=1),
+    )
+
 
 @contextmanager
 def with_dist(rank=0, world_size=2):
@@ -50,6 +50,7 @@ def with_dist(rank=0, world_size=2):
         yield
     finally:
         dist.destroy_process_group()
+
 
 def with_fake_comms(func=None, rank=0, world_size=2):
     """
@@ -63,4 +64,5 @@ def with_fake_comms(func=None, rank=0, world_size=2):
     def wrapper(self, *args, **kwargs):
         with with_dist(rank, world_size):
             func(self, *args, **kwargs)
+
     return wrapper

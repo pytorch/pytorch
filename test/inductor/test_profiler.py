@@ -3,16 +3,22 @@ import json
 import os
 import tempfile
 import unittest
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import torch
 import torch._inductor.test_case
 import torch._inductor.utils
 from torch import _dynamo as torchdynamo
 from torch._inductor import config
-from torch.profiler import ProfilerActivity
+from torch.profiler import ProfilerActivity, record_function
 from torch.testing._internal.common_utils import TemporaryFileName
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU_AND_TRITON,
+    IS_BIG_GPU,
+)
+from torch.testing._internal.logging_utils import logs_to_string
+from torch.torch_version import TorchVersion
 from torch.utils._triton import has_triton
 
 
@@ -29,7 +35,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         def fn(x, y):
             return (x + y).sin().cos()
 
-        x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
+        x, y = (torch.rand((4, 4), device=GPU_TYPE) for _ in range(2))
 
         with torch.profiler.profile() as prof:
             fn(x, y)
@@ -42,17 +48,15 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         self.assertTrue("traceEvents" in trace_json)
         events = trace_json["traceEvents"]
 
-        kernel_name = "hipModuleLaunchKernel" if torch.version.hip else "cuLaunchKernel"
-
-        def nameMatchesLaunchKernel(event_name):
-            return kernel_name in event_name
-
-        self.assertTrue(
-            any(("name" in event and kernel_name == event["name"]) for event in events)
-        )
+        valid_names = {
+            "hipModuleLaunchKernel",
+            "cuLaunchKernel",
+            "triton_poi_fused_add_cos_sin_0",
+        }
+        self.assertTrue(any((event.get("name") in valid_names) for event in events))
 
     def _test_profiling_kernel_names(
-        self, fn, args, kernel_name_str: str, check_fn: Optional[Callable] = None
+        self, fn, args, kernel_name_str: str, check_fn: Callable | None = None
     ):
         """
         We expect a record_function event to be added on the CPU side, surrounding
@@ -95,17 +99,23 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         def fn(x, y):
             return (x + y).sin().cos()
 
-        args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+        args = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(2)]
 
         events = self._test_profiling_kernel_names(fn, args, "sin")
         event_found = False
         for event in events:
             if event.name == "triton_poi_fused_add_cos_sin_0":
                 event_found = True
-                self.assertTrue(event.input_shapes == [[4, 4], [4, 4], [4, 4], []])
+                # Note: depending on the triton version, we might get 4 or 5 args
+                # (including / not including the constexpr args). The last two are
+                # both empty args, so we just truncate the event.input_shapes to the
+                # first 4.
+                self.assertEqual(event.input_shapes[:4], [[4, 4], [4, 4], [4, 4], []])
         self.assertTrue(event_found)
 
-    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     def test_inductor_profiling_kernel_names_template(self):
         with config.patch(
             {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
@@ -114,7 +124,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             def fn(x, y):
                 return x @ y
 
-            args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+            args = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(2)]
 
             def check_fn():
                 # test_profiling_kernel_names will check this before asserting mm is in the trace.
@@ -135,7 +145,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             for event in events:
                 if event.name == "triton_tem_fused_mm_0":
                     event_found = True
-                    self.assertTrue(event.input_shapes == [[4, 4], [4, 4], [4, 4]])
+                    self.assertEqual(event.input_shapes[:3], [[4, 4], [4, 4], [4, 4]])
             self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
@@ -147,8 +157,8 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             def fn(x, y):
                 return torch._foreach_add(x, y)
 
-            x = [torch.rand((4, 4), device="cuda") for _ in range(3)]
-            y = [torch.rand((4, 4), device="cuda") for _ in range(3)]
+            x = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
+            y = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
 
             args = (x, y)
 
@@ -174,8 +184,13 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    @config.patch(
+        "compile_threads", 1
+    )  # This test monkey patches global variables, which workers don't see
     def test_inductor_profiling_triton_hooks(self):
         from triton.compiler import CompiledKernel  # @manual
+
+        from torch._inductor.runtime.triton_compat import knobs
 
         hooks_called = {"enter": False, "exit": False}
 
@@ -185,14 +200,18 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         def launch_exit_hook(lazy_dict):
             hooks_called["exit"] = True
 
-        CompiledKernel.launch_enter_hook = launch_enter_hook
-        CompiledKernel.launch_exit_hook = launch_exit_hook
+        if knobs:
+            knobs.runtime.launch_enter_hook = launch_enter_hook
+            knobs.runtime.launch_exit_hook = launch_exit_hook
+        else:
+            CompiledKernel.launch_enter_hook = launch_enter_hook
+            CompiledKernel.launch_exit_hook = launch_exit_hook
 
         def fn(x, y):
             return torch._foreach_add(x, y)
 
-        x = [torch.rand((4, 4), device="cuda") for _ in range(3)]
-        y = [torch.rand((4, 4), device="cuda") for _ in range(3)]
+        x = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
+        y = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
 
         args = (x, y)
         fn_opt = torch.compile(fn)
@@ -205,7 +224,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
     def test_pt2_triton_attributes(self):
         from torch._inductor.codecache import code_hash
 
-        device = "cuda"
+        device = GPU_TYPE
         debug = False  # set to True to get output file
 
         @torchdynamo.optimize("inductor")
@@ -220,7 +239,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         with config.patch(compile_threads=1):
             fn(*inputs)
 
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=not debug)
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=not debug)  # noqa: SIM115
         fp.close()
 
         with torch.profiler.profile(
@@ -230,12 +249,12 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
                 skip_first=3, wait=1, warmup=1, active=2, repeat=1
             ),
         ) as prof:
-            for idx in range(10):
+            for _ in range(10):
                 fn(*inputs)
                 prof.step()
 
         prof.export_chrome_trace(fp.name)
-        print("Trace written to {fp.name}, set debug=True to retain file.")
+        print(f"Trace written to {fp.name}, set debug=True to retain file.")
 
         triton_events = []
         with open(fp.name) as f:
@@ -243,7 +262,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             triton_events = [
                 event
                 for event in trace_json["traceEvents"]
-                if "kernel_backend" in event.get("args", {}).keys()
+                if "kernel_backend" in event.get("args", {})
             ]
 
         print(triton_events)
@@ -261,9 +280,6 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             self.assertEqual(args["kernel_backend"], "triton", msg=f"event = {e}")
 
             self.assertTrue("stream" in args, msg=f"event = {e}")
-            self.assertTrue("grid" in args, msg=f"event = {e}")
-            self.assertTrue(args["grid"].startswith("grid"), msg=f"event = {e}")
-
             self.assertTrue("kernel_file" in args, msg=f"event = {e}")
             kernel_file = args["kernel_file"]
             self.assertTrue(os.path.isfile(kernel_file), msg=f"event = {e}")
@@ -273,12 +289,67 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
                 args["kernel_hash"], get_hash(kernel_file), msg=f"event = {e}"
             )
 
+            self.assertTrue("kernel_kwargs" in args, msg=f"event = {e}")
+            self.assertTrue(
+                args["kernel_kwargs"].startswith("XBLOCK="), msg=f"event = {e}"
+            )
+
         for e in triton_events:
             check_triton_event(e)
+
+    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    def test_cupti_lazy_reinit(self):
+        x, y = (torch.randn(4, 4, device=GPU_TYPE) for _ in range(2))
+
+        def fn(x, y):
+            return (x + y).sin()
+
+        fn_c = torch.compile(fn, mode="reduce-overhead")
+
+        with torch.profiler.profile():
+            fn_c(x, y)
+
+        if TorchVersion(torch.version.cuda) >= "12.6":
+            self.assertEqual("0", os.environ.get("DISABLE_CUPTI_LAZY_REINIT", "0"))
+        else:
+            self.assertEqual("1", os.environ.get("DISABLE_CUPTI_LAZY_REINIT", "0"))
+
+    @torch._dynamo.config.patch("capture_profiler_record_function", True)
+    def test_inductor_remove_profiler_ops(self):
+        """
+        Test that inductor post_grad graph doesn't have profiler ops even when
+        dynamo produce those ops.
+        """
+
+        def fn(x):
+            with record_function("my_net1"):
+                a = x.sin()
+            with record_function("my_cos"):
+                b = a.cos()
+            with record_function("my_net2"):
+                c = b + 2
+            return c
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            torch.compile(fn, fullgraph=True)(torch.randn(10))
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertExpectedInline(
+            aot_graphs,
+            """\
+        sin: "f32[10][1]cpu" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+        cos: "f32[10][1]cpu" = torch.ops.aten.cos.default(sin);  sin = None
+        add: "f32[10][1]cpu" = torch.ops.aten.add.Tensor(cos, 2);  cos = None
+        return (add,)""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
 
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CUDA:
+    if HAS_GPU_AND_TRITON:
         run_tests()

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/Dimname.h>
 #include <ATen/core/class_type.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
@@ -330,10 +329,6 @@ TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    std::optional<at::DimnameList> value);
-TORCH_API void addInputs(
-    Node* n,
-    const char* name,
     const std::optional<at::MemoryFormat>& value);
 TORCH_API void addInputs(
     Node* n,
@@ -388,7 +383,7 @@ template <
          !std::is_convertible_v<
              std::decay_t<T>,
              c10::intrusive_ptr<c10::ivalue::Object>>)>>
-void addOutput(Node* node, T&&) {
+void addOutput(Node* node, T&& /*unused*/) {
   TORCH_CHECK(
       false,
       "Found an unsupported argument type ",

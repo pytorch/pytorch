@@ -29,6 +29,8 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
+
 namespace torch {
 namespace jit {
 struct Function;
@@ -660,7 +662,7 @@ struct TORCH_API TupleTypeFactory<TupleType> {
 template <>
 struct TORCH_API TupleTypeFactory<c10::DynamicType> {
   static DynamicTypePtr create(const std::vector<TypePtr>& elemTypes);
-  static DynamicTypePtr fallback(const Type&);
+  static DynamicTypePtr fallback(const Type& /*unused*/);
 };
 
 struct TORCH_API Tuple : c10::intrusive_ptr_target {
@@ -990,7 +992,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed_) {
       // This should be rare and shouldn't cause log spew. Its important to
-      // log errors and thats why we have this log here.
+      // log errors and that's why we have this log here.
       std::string msg = c10::str(
           "Skipping setting following error on the Future since "
           "it is already marked completed (this is not necessarily "
@@ -1501,7 +1503,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   // However, the CompilationUnit holds ownership of the type's graphs, so
   // inserting a constant object into a Graph would create a reference cycle if
   // that constant object held a shared_ptr to its CU. For these objects we
-  // instatiate them with non-owning references to its CU
+  // instantiate them with non-owning references to its CU
   Object(WeakOrStrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
     slots_.resize(numSlots);
   }
@@ -1682,7 +1684,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 namespace detail {
 
 struct _guarded_unsigned_long_unique_dummy final {
-  _guarded_unsigned_long_unique_dummy(int64_t){}
+  _guarded_unsigned_long_unique_dummy(int64_t /*unused*/){}
 };
 using _guarded_unsigned_long = std::conditional_t<
     std::is_same_v<unsigned long, uint32_t> ||
@@ -1734,6 +1736,8 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(c10::List<int64_t>, toIntList)
+DEFINE_TO(at::DimVector, toDimVector)
+DEFINE_TO(c10::List<c10::SymInt>, toSymIntList)
 DEFINE_TO(c10::List<double>, toDoubleList)
 DEFINE_TO(c10::List<c10::complex<double>>, toComplexDoubleList)
 DEFINE_TO(c10::List<bool>, toBoolList)
@@ -1753,7 +1757,6 @@ DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
-DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
 DEFINE_TO(c10::SymInt, toSymInt)
 DEFINE_TO(c10::SymFloat, toSymFloat)
@@ -1775,11 +1778,11 @@ template <class Elem>
 // native_functions.yaml still return std::vector.
 // C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow
 // and deprecated. Please use torch::List<T> instead.")
-std::vector<Elem> generic_to(IValue ivalue, _fake_type<std::vector<Elem>>) {
+std::vector<Elem> generic_to(IValue ivalue, _fake_type<std::vector<Elem>> /*unused*/) {
   // We need to do a deep copy of the vector because there might be other
   // references to this same IValue that also use the list. We can't just
   // move the elements out.
-  auto list = std::move(ivalue).to<List<Elem>>();
+  auto list = std::move(ivalue).template to<List<Elem>>();
   std::vector<Elem> result;
   result.reserve(list.size());
   for (Elem v : list) {
@@ -1825,18 +1828,18 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
 }
 
 template <typename T>
-T generic_to(IValue ivalue, _fake_type<T>) {
-  using ElemType = typename std::remove_pointer<T>::type::element_type;
-  return std::move(ivalue).toCustomClass<ElemType>();
+T generic_to(IValue ivalue, _fake_type<T> /*unused*/) {
+  using ElemType = typename std::remove_pointer_t<T>::element_type;
+  return std::move(ivalue).template toCustomClass<ElemType>();
 }
 
 template <typename T>
-tagged_capsule<T> generic_to(IValue ivalue, _fake_type<tagged_capsule<T>>) {
+tagged_capsule<T> generic_to(IValue ivalue, _fake_type<tagged_capsule<T>> /*unused*/) {
   return tagged_capsule<T>{std::move(ivalue)};
 }
 
 template <typename Elem>
-c10::List<Elem> generic_to(IValue ivalue, _fake_type<c10::List<Elem>>) {
+c10::List<Elem> generic_to(IValue ivalue, _fake_type<c10::List<Elem>> /*unused*/) {
   return impl::toTypedList<Elem>(std::move(ivalue).toList());
 }
 
@@ -1866,12 +1869,12 @@ std::vector<T> createVectorFromList(const c10::List<T>& impl) {
 }
 
 template <typename T>
-OptionalArray<T> generic_to(IValue ivalue, _fake_type<OptionalArray<T>>) {
+OptionalArray<T> generic_to(IValue ivalue, _fake_type<OptionalArray<T>> /*unused*/) {
   if (ivalue.isNone()) {
     return {};
   }
   return createVectorFromList<T>(
-    std::move(ivalue).to<c10::List<T>>()
+    std::move(ivalue).template to<c10::List<T>>()
   );
 }
 
@@ -1879,12 +1882,12 @@ namespace detail {
 template <typename Elem, size_t... I>
 std::array<Elem, sizeof...(I)> generic_to_array(
     IValue ivalue,
-    _fake_type<std::array<Elem, sizeof...(I)>>,
-    std::index_sequence<I...>) {
+    _fake_type<std::array<Elem, sizeof...(I)>> /*unused*/,
+    std::index_sequence<I...> /*unused*/) {
   // We need to do a deep copy of the array because there might be other
   // references to this same IValue that also use the list. We can't just
   // move the elements out.
-  auto list = std::move(ivalue).to<List<Elem>>();
+  auto list = std::move(ivalue).template to<List<Elem>>();
   TORCH_CHECK(
       list.size() == sizeof...(I),
       "Tried to convert a List with ",
@@ -1905,7 +1908,7 @@ std::array<Elem, N> generic_to(
 template <typename Key, typename Value>
 c10::Dict<Key, Value> generic_to(
     IValue ivalue,
-    _fake_type<c10::Dict<Key, Value>>) {
+    _fake_type<c10::Dict<Key, Value>> /*unused*/) {
   return impl::toTypedDict<Key, Value>(std::move(ivalue).toGenericDict());
 }
 
@@ -1914,7 +1917,7 @@ C10_DEPRECATED_MESSAGE(
     "IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")
 std::unordered_map<K, V> generic_to(
     IValue ivalue,
-    _fake_type<std::unordered_map<K, V>>) {
+    _fake_type<std::unordered_map<K, V>> /*unused*/) {
   std::unordered_map<K, V> specialized_dict;
 
   for (const auto& item : std::move(ivalue).toGenericDict()) {
@@ -1925,20 +1928,20 @@ std::unordered_map<K, V> generic_to(
 }
 
 template <typename T>
-std::optional<T> generic_to(IValue ivalue, _fake_type<std::optional<T>>) {
+std::optional<T> generic_to(IValue ivalue, _fake_type<std::optional<T>> /*unused*/) {
   if (ivalue.isNone()) {
     return std::nullopt;
   }
-  return std::move(ivalue).to<T>();
+  return std::move(ivalue).template to<T>();
 }
 
 namespace detail {
 template <typename Tuple, std::size_t... INDEX>
 Tuple generic_to_tuple_impl(
     const ivalue::TupleElements& t,
-    std::index_sequence<INDEX...>) {
+    std::index_sequence<INDEX...> /*unused*/) {
   return std::make_tuple(
-      t[INDEX].to<typename std::tuple_element<INDEX, Tuple>::type>()...);
+      t[INDEX].template to<std::tuple_element_t<INDEX, Tuple>>()...);
 }
 } // namespace detail
 
@@ -1950,7 +1953,7 @@ template <
             std::is_lvalue_reference<Args>...,
             std::negation<std::is_constructible<IValue, Args>>...>,
         std::nullptr_t> = nullptr>
-std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>>) {
+std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>> /*unused*/) {
   const auto& vals = ivalue.toTupleRef().elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
   return detail::generic_to_tuple_impl<std::tuple<Args...>>(vals, Indices{});
@@ -1989,6 +1992,20 @@ inline std::vector<int64_t> IValue::toIntVector() const {
       "called toIntVector on null intrusive_ptr IValue");
   return createVectorFromList<int64_t>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
+inline c10::List<c10::SymInt> IValue::toSymIntList() && {
+  AT_ASSERT(
+      isSymIntList() || isIntList(),
+      "Expected SymIntList or IntList but got ",
+      tagKind());
+  return c10::List<c10::SymInt>(moveToIntrusivePtr<c10::detail::ListImpl>());
+}
+inline c10::List<c10::SymInt> IValue::toSymIntList() const& {
+  AT_ASSERT(
+      isSymIntList() || isIntList(),
+      "Expected SymIntList or IntList but got ",
+      tagKind());
+  return c10::List<c10::SymInt>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline std::vector<c10::SymInt> IValue::toSymIntVector() const {
   AT_ASSERT(isSymIntList() || isIntList(), "Expected SymIntList or IntList but got ", tagKind());
@@ -2296,7 +2313,7 @@ inline IValue::IValue(std::optional<T> v) : IValue() {
   }
 }
 
-inline IValue::IValue(std::nullopt_t) : IValue() {}
+inline IValue::IValue(std::nullopt_t /*unused*/) : IValue() {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
     : tag(Tag::Object) {
@@ -2467,15 +2484,15 @@ namespace ivalue {
 namespace detail {
 
 template <typename T>
-IValue from_(T&& x, std::true_type) {
+IValue from_(T&& x, std::true_type /*unused*/) {
   return IValue(std::forward<T>(x));
 }
 template <typename T>
-IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
+IValue from_(c10::intrusive_ptr<T> x, std::false_type /*unused*/) {
   return IValue(std::move(x));
 }
 template <typename T>
-IValue from_(T&& /*x*/, std::false_type) {
+IValue from_(T&& /*x*/, std::false_type /*unused*/) {
   static_assert(
       guts::false_t<T>::value,
       "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
@@ -2531,19 +2548,19 @@ struct MaybeOwnedTraits<IValue> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type&) {
+  static bool debugBorrowIsValid(const borrow_type& /*unused*/) {
     return true;
   }
 };
 
 template <>
 struct IValue::TagType<c10::Type> {
-  static TORCH_API c10::TypePtr get(const IValue&);
+  static TORCH_API c10::TypePtr get(const IValue& /*v*/);
 };
 
 template <>
 struct IValue::TagType<c10::DynamicType> {
-  static TORCH_API c10::TypePtr get(const IValue&);
+  static TORCH_API c10::TypePtr get(const IValue& /*v*/);
 };
 
 template <typename T>
@@ -2552,3 +2569,5 @@ TypePtr IValue::type() const {
 }
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

@@ -22,12 +22,22 @@ namespace {
 using namespace vec;
 
 void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
-    iter.dtype(), "index_cpu", [&] {
-    cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-      *(scalar_t*)dst = c10::load((scalar_t*)(src + offset));
-    });
-  });
+  AT_DISPATCH_V2(
+    iter.dtype(),
+    "index_cpu",
+    AT_WRAP([&] {
+      cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
+        *(scalar_t*)dst = c10::load((scalar_t*)(src + offset));
+      });
+    }),
+    AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+    AT_EXPAND(AT_FLOAT8_TYPES),
+    AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+    kComplexHalf,
+    kBComplex32,
+    kHalf,
+    kBool,
+    kBFloat16);
 }
 
 // Given a linear index, returns the offset of the tensor.
@@ -184,8 +194,15 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
       }
     }),
     AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
-    AT_EXPAND(AT_FLOAT8_TYPES),
+    // AT_EXPAND(AT_FLOAT8_TYPES),
+    // TODO(#113663): clean up accumulation behavior in float8 dtypes, accumulate=True
+    // should not be supported here, then reenable AT_FLOAT8_DTYPES
+    kFloat8_e4m3fn,
+    kFloat8_e5m2,
+    kFloat8_e4m3fnuz,
+    kFloat8_e5m2fnuz,
     kComplexHalf,
+    kBComplex32,
     kHalf,
     kBool,
     kBFloat16);
@@ -197,7 +214,7 @@ void index_fill_kernel(
   int64_t self_dim_size,
   int64_t self_dim_stride,
   const Scalar& source) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf, kBComplex32,
     iter.dtype(), "index_fill_cpu", [&] {
     auto fill_val = source.to<scalar_t>();
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
@@ -256,7 +273,7 @@ void index_copy_kernel(
   int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf, kBComplex32,
     iter.dtype(), "index_copy_cpu", [&] {
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
@@ -331,7 +348,7 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
 }
 
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kBool, kBFloat16, kHalf,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(kComplexHalf, kBComplex32, kBool, kBFloat16, kHalf,
     iter.dtype(), "masked_fill", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
       auto mask_dtype = iter.input_dtype(0);
@@ -418,6 +435,7 @@ void masked_select_serial_kernel(TensorIterator& iter, int64_t result_stride) {
     AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
     AT_EXPAND(AT_FLOAT8_TYPES),
     kComplexHalf,
+    kBComplex32,
     kHalf,
     kBool,
     kBFloat16);
@@ -461,6 +479,7 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
     AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
     AT_EXPAND(AT_FLOAT8_TYPES),
     kComplexHalf,
+    kBComplex32,
     kHalf,
     kBool,
     kBFloat16);
@@ -487,40 +506,33 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
 
     for ([[maybe_unused]] const auto j : c10::irange(size1)) {
       // vectorized loop with negative stride for output
-      char** C10_RESTRICT data_ = data_arr.data();
       int64_t n = size0;
-
-      char* C10_RESTRICT data[ntensors];
-      for (const auto arg : c10::irange(ntensors)) {
-        data[arg] = data_[arg];
-      }
-
       int64_t i = 0;
 
-      // data[0] unaligned pre-pass
+      // data_arr[0] unaligned pre-pass
       int64_t offset = (j * n + (n - i - Vec::size())) % 32;
       offset = (offset >= n) ? n : offset;
       for (; i < offset; i++) {
-        scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
-        *out_ptr = c10::load((scalar_t *)(data[1] + i * stride));
+        scalar_t* out_ptr = (scalar_t*)(data_arr[0] - i * stride);
+        *out_ptr = c10::load((scalar_t *)(data_arr[1] + i * stride));
       }
       // Empirically found that it is faster to process 3 data items together vs 2 or 4
       for (; i <= n - 3 * Vec::size(); i += 3 * Vec::size()) {
-        auto out1 = Vec::loadu(data[1] + i * stride);
-        auto out2 = Vec::loadu(data[1] + (i + Vec::size()) * stride);
-        auto out3 = Vec::loadu(data[1] + (i + 2 * Vec::size()) * stride);
+        auto out1 = Vec::loadu(data_arr[1] + i * stride);
+        auto out2 = Vec::loadu(data_arr[1] + (i + Vec::size()) * stride);
+        auto out3 = Vec::loadu(data_arr[1] + (i + 2 * Vec::size()) * stride);
         // flip the vector: 1234 -> 4321
         out1 = flip(out1);
         out2 = flip(out2);
         out3 = flip(out3);
-        out1.store(data[0] - (i + Vec::size() - 1) * stride);
-        out2.store(data[0] - (i + 2 * Vec::size() - 1) * stride);
-        out3.store(data[0] - (i + 3 * Vec::size() - 1) * stride);
+        out1.store(data_arr[0] - (i + Vec::size() - 1) * stride);
+        out2.store(data_arr[0] - (i + 2 * Vec::size() - 1) * stride);
+        out3.store(data_arr[0] - (i + 3 * Vec::size() - 1) * stride);
       }
       if (i < n) {
         for (; i < n; i++) {
-          scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
-          *out_ptr = c10::load((scalar_t *)(data[1] + i * stride));
+          scalar_t* out_ptr = (scalar_t*)(data_arr[0] - i * stride);
+          *out_ptr = c10::load((scalar_t *)(data_arr[1] + i * stride));
         }
       }
 
@@ -554,15 +566,8 @@ void cpu_vflip_memcpy(at::TensorIterator& iter) {
     const int64_t stride = strides[0];
 
     for ([[maybe_unused]] const auto j : c10::irange(size1)) {
-      char** C10_RESTRICT data_ = data_arr.data();
       int64_t n = size0;
-
-      char* C10_RESTRICT data[ntensors];
-      for (const auto arg : c10::irange(ntensors)) {
-        data[arg] = data_[arg];
-      }
-
-      memcpy(data[0], data[1], n * stride);
+      memcpy(data_arr[0], data_arr[1], n * stride);
 
       // advance:
       for (const auto arg : c10::irange(data_arr.size())) {
@@ -743,21 +748,29 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         // });
 
         if (iter_dtype == kByte) {
-          return cpu_hflip_vec<uint8_t>(iter);
+          cpu_hflip_vec<uint8_t>(iter);
+          return;
         } else if (iter_dtype == kChar) {
-          return cpu_hflip_vec<int8_t>(iter);
+          cpu_hflip_vec<int8_t>(iter);
+          return;
         } else if (iter_dtype == kInt) {
-          return cpu_hflip_vec<int32_t>(iter);
+          cpu_hflip_vec<int32_t>(iter);
+          return;
         } else if (iter_dtype == kLong) {
-          return cpu_hflip_vec<int64_t>(iter);
+          cpu_hflip_vec<int64_t>(iter);
+          return;
         } else if (iter_dtype == kShort) {
-          return cpu_hflip_vec<int16_t>(iter);
+          cpu_hflip_vec<int16_t>(iter);
+          return;
         } else if (iter_dtype == kBool) {
-          return cpu_hflip_vec<bool>(iter);
+          cpu_hflip_vec<bool>(iter);
+          return;
         } else if (iter_dtype == kFloat) {
-          return cpu_hflip_vec<float>(iter);
+          cpu_hflip_vec<float>(iter);
+          return;
         } else if (iter_dtype == kDouble) {
-          return cpu_hflip_vec<double>(iter);
+          cpu_hflip_vec<double>(iter);
+          return;
         }
       }
       // other dtypes (float16, bfloat16, complex) are handled by cpu_kernel_vec (see below)
@@ -772,21 +785,31 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
           c == input_strides_2[1] &&
           c == iter.element_size(0) * iter.shape()[0]  // checks if dim=1 is contiguous as well
       ) {
-        return cpu_hflip_channels_last_vec(iter);
+        cpu_hflip_channels_last_vec(iter);
+        return;
       }
       // Special case: vertical flip using memcpy (faster than generic cpu_kernel_vec)
-      return cpu_vflip_memcpy(iter);
+      cpu_vflip_memcpy(iter);
+      return;
     }
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
-        [&iter] { cpu_kernel_vec(iter,
-          [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
-            return a;
-        },
-          [](Vectorized<scalar_t> a, Vectorized<scalar_t> /*dummy input*/) -> Vectorized<scalar_t> {
-            return a;
-        });
-    });
+    AT_DISPATCH_V2(
+        iter.dtype(),
+        "flip_cpu",
+        AT_WRAP([&iter] {
+          cpu_kernel_vec(iter,
+            [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
+              return a;
+            },
+            [](Vectorized<scalar_t> a, Vectorized<scalar_t> /*dummy input*/) -> Vectorized<scalar_t> {
+              return a;
+            });
+        }),
+        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+        AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+        kBool,
+        kHalf,
+        kBFloat16);
   }
 }
 

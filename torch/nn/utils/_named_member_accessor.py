@@ -1,7 +1,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Dict, Iterable, List, Tuple
+from collections.abc import Iterable
 
 import torch
 
@@ -77,6 +77,7 @@ def swap_tensor(
             setattr(module, name, tensor)
         elif hasattr(module, name):
             delattr(module, name)
+    # pyrefly: ignore [bad-return]
     return orig_tensor
 
 
@@ -113,7 +114,7 @@ class NamedMemberAccessor:
 
     def __init__(self, module: "torch.nn.Module") -> None:
         self.module = module
-        self.memo: Dict[str, torch.nn.Module] = {}
+        self.memo: dict[str, torch.nn.Module] = {}
 
     # Nested attribute access
 
@@ -145,7 +146,7 @@ class NamedMemberAccessor:
                     f"{module._get_name()} has no attribute `{attr}`"
                 ) from ex
             if not isinstance(submodule, torch.nn.Module):
-                raise TypeError(  # noqa: B904
+                raise TypeError(
                     f"submodule `{name}`: {submodule} is not an instance of torch.nn.Module"
                 )
             self.memo[name] = submodule
@@ -225,7 +226,7 @@ class NamedMemberAccessor:
 
     # Batched operations
 
-    def get_tensors(self, names: Iterable[str]) -> List[torch.Tensor]:
+    def get_tensors(self, names: Iterable[str]) -> list[torch.Tensor]:
         """
         Get the tensors specified by the given paths.
 
@@ -247,12 +248,16 @@ class NamedMemberAccessor:
             names = list(names)
         if not isinstance(values, (list, tuple)):
             values = list(values)
-        assert len(names) == len(values), "names and values must have the same length"
+        if len(names) != len(values):
+            raise AssertionError(
+                f"names and values must have the same length, "
+                f"got {len(names)} names and {len(values)} values"
+            )
 
-        for name, value in zip(names, values):
+        for name, value in zip(names, values, strict=True):
             self.set_tensor(name, value)
 
-    def set_tensors_dict(self, named_tensors: Dict[str, torch.Tensor]) -> None:
+    def set_tensors_dict(self, named_tensors: dict[str, torch.Tensor]) -> None:
         """
         Set the attributes specified by the given paths to values.
 
@@ -281,7 +286,7 @@ class NamedMemberAccessor:
         names: Iterable[str],
         values: Iterable[torch.Tensor],
         allow_missing: bool = False,
-    ) -> List[torch.Tensor]:
+    ) -> list[torch.Tensor]:
         """
         Swap the attributes specified by the given paths to values.
 
@@ -293,16 +298,20 @@ class NamedMemberAccessor:
             names = list(names)
         if not isinstance(values, (list, tuple)):
             values = list(values)
-        assert len(names) == len(values), "names and values must have the same length"
+        if len(names) != len(values):
+            raise AssertionError(
+                f"names and values must have the same length, "
+                f"got {len(names)} names and {len(values)} values"
+            )
 
         return [
             self.swap_tensor(name, value, allow_missing=allow_missing)
-            for name, value in zip(names, values)
+            for name, value in zip(names, values, strict=True)
         ]
 
     def swap_tensors_dict(
-        self, named_tensors: Dict[str, torch.Tensor], allow_missing: bool = False
-    ) -> Tuple[Dict[str, torch.Tensor], List[str]]:
+        self, named_tensors: dict[str, torch.Tensor], allow_missing: bool = False
+    ) -> tuple[dict[str, torch.Tensor], list[str]]:
         """
         Swap the attributes specified by the given paths to values.
 
@@ -332,7 +341,7 @@ class NamedMemberAccessor:
             raise RuntimeError(f"Missing key(s): {', '.join(map(repr, missing_keys))}.")
         return orig_named_tensors, missing_keys
 
-    def check_keys(self, keys: Iterable[str]) -> Tuple[List[str], List[str]]:
+    def check_keys(self, keys: Iterable[str]) -> tuple[list[str], list[str]]:
         """Check that the given keys are valid."""
         keys = set(keys)
         valid_keys = {name for name, _ in self.named_tensors(remove_duplicate=False)}
@@ -345,21 +354,21 @@ class NamedMemberAccessor:
     def named_parameters(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+    ) -> Iterable[tuple[str, torch.Tensor]]:
         """Iterate over all the parameters in the module."""
         yield from self.module.named_parameters(remove_duplicate=remove_duplicate)
 
     def named_buffers(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+    ) -> Iterable[tuple[str, torch.Tensor]]:
         """Iterate over all the buffers in the module."""
         yield from self.module.named_buffers(remove_duplicate=remove_duplicate)
 
     def named_tensors(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+    ) -> Iterable[tuple[str, torch.Tensor]]:
         """Iterate over all the tensors in the module."""
         yield from self.module.named_parameters(remove_duplicate=remove_duplicate)
         yield from self.module.named_buffers(remove_duplicate=remove_duplicate)
@@ -367,6 +376,6 @@ class NamedMemberAccessor:
     def named_modules(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, "torch.nn.Module"]]:
+    ) -> Iterable[tuple[str, "torch.nn.Module"]]:
         """Iterate over all the modules in the module."""
         yield from self.module.named_modules(remove_duplicate=remove_duplicate)

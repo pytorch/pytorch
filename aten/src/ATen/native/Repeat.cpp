@@ -74,7 +74,7 @@ Tensor repeat_interleave_symint(
   }
 
   Tensor repeats_ = repeats;
-  if (repeats.dim() == 0 || (repeats.dim() == 1 && repeats.sym_size(0) == 1)) {
+  if (repeats.dim() == 0 || (repeats.dim() == 1 && TORCH_GUARD_OR_FALSE(repeats.sym_size(0).sym_eq(1)))) {
     repeats_ = repeats.reshape({1}).expand_symint({input.sym_size(dim.value())});
   } else if (repeats.dim() == 1) {
     TORCH_CHECK(
@@ -105,7 +105,7 @@ Tensor repeat_interleave_symint(
     std::optional<SymInt> output_size) {
   Tensor input = dim_opt ? self : self.flatten();
   int64_t dim = c10::maybe_wrap_dim(dim_opt.value_or(0), self.dim());
-  TORCH_CHECK(repeats >= 0, "Repeats must be non-negative");
+  TORCH_SYM_CHECK(repeats.sym_ge(0), "Repeats must be non-negative");
 
   input = input.unsqueeze(dim + 1);
   auto expand_shape = input.sym_sizes().vec();
@@ -115,9 +115,13 @@ Tensor repeat_interleave_symint(
   // This argument doesn't really make sense for the scalar overload, but exists
   // for consistency with the tensor overload
   if (output_size) {
-    auto calculated_size = (repeats * expand_shape[dim]).guard_int(__FILE__, __LINE__);
-    TORCH_CHECK(*output_size == calculated_size, "repeat_interleave: Invalid output_size, expected ",
-                calculated_size, " but got ", *output_size);
+    auto calculated_size = repeats * expand_shape[dim];
+    TORCH_SYM_CHECK(
+        output_size->sym_eq(calculated_size),
+        "repeat_interleave: Invalid output_size, expected ",
+        calculated_size,
+        " but got ",
+        *output_size);
   }
 
   return input.clone(at::MemoryFormat::Contiguous).flatten(dim, dim + 1);

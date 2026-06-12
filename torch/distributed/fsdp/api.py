@@ -3,9 +3,9 @@ This file includes public APIs for FSDP such as the classes used for the
 constructor arguments.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Optional, Sequence, Type
 
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
@@ -217,13 +217,13 @@ class MixedPrecision:
 
     """
 
-    param_dtype: Optional[torch.dtype] = None
-    reduce_dtype: Optional[torch.dtype] = None
-    buffer_dtype: Optional[torch.dtype] = None
+    param_dtype: torch.dtype | None = None
+    reduce_dtype: torch.dtype | None = None
+    buffer_dtype: torch.dtype | None = None
     keep_low_precision_grads: bool = False
     cast_forward_inputs: bool = False
     cast_root_forward_inputs: bool = True
-    _module_classes_to_ignore: Sequence[Type[torch.nn.Module]] = (_BatchNorm,)
+    _module_classes_to_ignore: Sequence[type[torch.nn.Module]] = (_BatchNorm,)
 
 
 @dataclass
@@ -246,7 +246,8 @@ class StateDictType(Enum):
     This enum indicates that which type of ``state_dict`` the FSDP module is
     currently processing (returning or loading).
     The default value is FULL_STATE_DICT to comply the PyTorch convention.
-    ..note::
+
+    .. note::
         FSDP currently supports three types of ``state_dict``:
             1. ``state_dict/load_state_dict`: this pair of APIs return and load
                the non-sharded, unflattened parameters. The semantics is the
@@ -304,16 +305,21 @@ class FullStateDictConfig(StateDictConfig):
         >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
         >>> with FSDP.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
         >>>     state = fsdp.state_dict()
-        >>>     # `state` will be empty on non rank 0 and contain CPU tensors on rank 0.
+        >>> # `state` will be empty on non rank 0 and contain CPU tensors on rank 0.
         >>> # To reload checkpoint for inference, finetuning, transfer learning, etc:
-        >>> model = model_fn() # Initialize model in preparation for wrapping with FSDP
+        >>> model = model_fn()  # Initialize model in preparation for wrapping with FSDP
         >>> if dist.get_rank() == 0:
-        >>>     # Load checkpoint only on rank 0 to avoid memory redundancy
+        >>> # Load checkpoint only on rank 0 to avoid memory redundancy
         >>>     state_dict = torch.load("my_checkpoint.pt")
         >>>     model.load_state_dict(state_dict)
         >>> # All ranks initialize FSDP module as usual. `sync_module_states` argument
         >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
-        >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
+        >>> fsdp = FSDP(
+        ...     model,
+        ...     device_id=torch.cuda.current_device(),
+        ...     auto_wrap_policy=...,
+        ...     sync_module_states=True,
+        ... )
         >>> # After this point, all ranks have FSDP model with loaded checkpoint.
 
     Attributes:

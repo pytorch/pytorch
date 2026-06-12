@@ -4,12 +4,12 @@ import functools
 import itertools
 import logging
 import sys
-from typing import Callable, List, Optional
+from collections.abc import Callable, Iterable
 from unittest.mock import patch
 
 import sympy
 
-from .. import codecache, config, ir
+from .. import config, ir
 from ..autotune_process import CppBenchmarkRequest, TensorMeta
 from ..utils import IndentedBuffer, Placeholder, unique
 from ..virtualized import V
@@ -29,22 +29,28 @@ class CppTemplate(KernelTemplate):
         input_nodes,
         layout: ir.Layout,
         num_threads: int,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
     ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: ir.Buffer = ir.Buffer(name="buf_out", layout=layout)
+        self.index = next(self.index_counter)
+        self.output_node: ir.Buffer | list[ir.Buffer] = ir.Buffer(
+            name=f"buf_out{self.index}", layout=layout
+        )
         self.layout = layout
         self.num_threads = num_threads
         self.epilogue_creator = epilogue_creator
 
     def generate(self, **kwargs):
         kernel_name = f"cpp_{self.name}"
-        with patch.object(
-            V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
-        ), patch.object(ir.FlexibleLayout, "allow_indexing", True), CppTemplateKernel(
-            kernel_name=kernel_name, num_threads=self.num_threads
-        ) as kernel:
+        with (
+            patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
+            patch.object(ir.FlexibleLayout, "allow_indexing", True),
+            V.graph.set_current_device(self.layout.device),
+            CppTemplateKernel(
+                kernel_name=kernel_name, num_threads=self.num_threads
+            ) as kernel,
+        ):
             code = kernel.render(self, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
             log.debug("Generated Code:\n%s", code)
@@ -57,19 +63,26 @@ class CppTemplate(KernelTemplate):
         expected_args = list(
             unique(input_node.get_name() for input_node in self.input_nodes)
         )
-        expected_args.extend([self.output_node.get_name()])
-        assert list(call_args)[: len(expected_args)] == expected_args, (
-            call_args,
-            expected_args,
-        )
-        extra_args = V.graph.sizevars.size_hints(
+        if isinstance(self.output_node, Iterable):
+            expected_args.extend([node.get_name() for node in self.output_node])
+        else:
+            expected_args.extend([self.output_node.get_name()])
+        if list(call_args)[: len(expected_args)] != expected_args:
+            raise AssertionError(
+                (
+                    call_args,
+                    expected_args,
+                )
+            )
+        # extra_args are only used for benchmarking, not compiled kernel correctness
+        extra_args = V.graph.sizevars.optimization_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
         # Cast the size hint from int to ctypes.c_ulonglong explicitly
         # since in cpp kernel, we bind it to C long
         extra_args = tuple(ctypes.c_ulonglong(x) for x in extra_args)
 
-        kernel_hash_name = f"cpp_{self.name}_{next(self.index_counter)}"
+        kernel_hash_name = f"cpp_{self.name}_{self.index}"
 
         # Create the BenchmarkRequest for CPP
         bmreq = CppBenchmarkRequest(
@@ -83,7 +96,7 @@ class CppTemplate(KernelTemplate):
         def make_kernel_render(
             template_node: ir.CppTemplateBuffer,
             flag_template_buffer_has_other_users: bool,
-            epilogue_nodes: Optional[List[ir.IRNode]] = None,
+            epilogue_nodes: list[ir.IRNode] | None = None,
         ):
             kernel = CppTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME), num_threads=self.num_threads
@@ -102,7 +115,10 @@ class CppTemplate(KernelTemplate):
             kernel_hash_name,
             self.name,
             self.input_nodes,
-            self.output_node.get_layout(),
+            # pyrefly: ignore [bad-index, index-error]
+            self.output_node[0].get_layout()
+            if isinstance(self.output_node, Iterable)
+            else self.output_node.get_layout(),
             make_kernel_render,
             bmreq,
             self,
@@ -110,7 +126,7 @@ class CppTemplate(KernelTemplate):
 
     def header(self) -> IndentedBuffer:
         res = IndentedBuffer()
-        res.writeline(codecache.cpp_prefix())
+        res.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
         # TODO: add c10::ForcedUnroll test to test_aoti_abi_check
         res.splice("""#include <c10/util/Unroll.h>""")
         res.splice("""#include <torch/csrc/inductor/aoti_torch/c/shim.h>""")
@@ -119,7 +135,7 @@ class CppTemplate(KernelTemplate):
             "win32",
         ]
         if enable_kernel_profile:
-            res.writelines(["#include <ATen/record_function.h>"])
+            res.writelines(["#include <torch/csrc/inductor/aoti_runtime/utils.h>"])
         return res
 
     def render(self, **kwargs) -> str:

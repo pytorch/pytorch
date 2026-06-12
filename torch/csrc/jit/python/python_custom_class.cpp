@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
 
-#include <torch/csrc/jit/frontend/sugared_value.h>
-
 #include <fmt/format.h>
 
 namespace torch::jit {
@@ -66,7 +64,7 @@ void initPythonCustomClassBindings(PyObject* module) {
               return ScriptClassFunctionPtr(fn);
             }
 
-            throw AttributeError("%s does not exist", name.c_str());
+            throw AttributeError(fmt::format("{} does not exist", name));
           })
       .def_property_readonly("__doc__", [](const ScriptClass& self) {
         return self.class_type_.type_->expectRef<ClassType>().doc_string();

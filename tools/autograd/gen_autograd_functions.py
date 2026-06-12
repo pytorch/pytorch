@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api.autograd import (
     Derivative,
@@ -47,6 +47,10 @@ from torchgen.utils import FileManager
 from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
 FUNCTION_DECLARATION = CodeTemplate(
     """\
 #ifdef _WIN32
@@ -63,7 +67,7 @@ struct TORCH_API ${op} : public ${superclass} {
     ${release_variables}
   }
   ${will_release_variables}
-  void compiled_args(CompiledNodeArgs& args) override;
+  void compiled_args(CompiledNodeArgs& args) const override;
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
@@ -95,7 +99,7 @@ FUNCTION_DEFINITION = CodeTemplate(
     """\
 static variable_list ${op}_apply_functional(
   variable_list&& grads,
-  std::array<bool,${num_vars}> needs_input_grad${,unpacked_saved_vars_signature})
+  std::array<bool,${num_inputs}> needs_input_grad${,apply_functional_args_signature})
 {
   IndexRangeGenerator gen;
   ${compute_index_ranges}
@@ -103,24 +107,59 @@ static variable_list ${op}_apply_functional(
   ${body}
   return grad_inputs;
 }
+inline variable_list ${op}_apply_functional_ivalue(const variable_list& grads, const ivalue_list& args)
+{
+#ifdef C10_MOBILE
+  TORCH_INTERNAL_ASSERT(false, "compiled autograd doesn't work on mobile");
+#else
+  auto packed_args = PackedArgs(args);
+  auto needs_input_grad = packed_args.unpack<std::array<bool, ${num_inputs}>>();
+  ${unpack_ivalues}
+  return ${op}_apply_functional(variable_list(grads), needs_input_grad${,apply_functional_args});
+#endif
+}
 
 variable_list ${op}::apply(variable_list&& grads) {
   ${thread_lock}
   ${asserts}
   ${unpacks}
   ${compute_needs_input_grad}
-  return ${op}_apply_functional(std::move(grads), needs_input_grad${,unpacked_saved_vars});
+  return ${op}_apply_functional(std::move(grads), needs_input_grad${,apply_functional_args});
 }
 
-void ${op}::compiled_args(CompiledNodeArgs& args) {
+void ${op}::compiled_args(CompiledNodeArgs& args) const {
     ${compiled_args}
 }
 variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
-    ${apply_with_saved_before}
-    variable_list result = apply(variable_list(grads));
-    ${apply_with_saved_after}
-    return result;
+#ifdef C10_MOBILE
+  TORCH_INTERNAL_ASSERT(false, "compiled autograd doesn't work on mobile");
+#else
+  ${apply_with_saved_before}
+
+  static bool called = false;
+  if (!called) {
+    called = true;
+    ${compute_schema}
+    const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
+    pyinterface->bind_function(saved.get_py_compiler(), name(), ${op}_apply_functional_ivalue, schema);
+  }
+
+  variable_list output_result;
+
+  PackedArgs packed_args;
+  ${asserts}
+  ${unpacks}
+  ${compute_needs_input_grad}
+  packed_args.pack(needs_input_grad);
+  ${get_packed_args}
+
+  output_result = compiled_autograd_apply_functional(packed_args, next_edges(), saved, grads, name());
+
+  ${apply_with_saved_after}
+  return output_result;
+#endif
 }
+
 """
 )
 
@@ -233,7 +272,7 @@ PY_RAW_GETSETDEF_STRUCT = CodeTemplate(
 # Getter templates
 GETTER_DEFINITION = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   auto prop = static_cast<${op}*>(self->cdata.get())->${name};
   ${body}
@@ -244,7 +283,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
   ${body}
@@ -255,7 +294,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_RAW_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
   ${body}
@@ -266,7 +305,7 @@ PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_VEC_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto *node = static_cast<${op}*>(self->cdata.get());
   const auto& prop = node->${name}_;
@@ -282,7 +321,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_RAW_VEC_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto *node = static_cast<${op}*>(self->cdata.get());
   const auto& prop = node->${name}_;
@@ -298,7 +337,7 @@ PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_OPT = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
   if (!opt_prop.has_value()) {
@@ -313,7 +352,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_OPT_ARRAYREF = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
   if (!opt_prop.list.has_value()) {
@@ -516,8 +555,7 @@ def gen_autograd_functions_lib(
             fname,
             lambda: {
                 "generated_comment": "@"
-                + f"generated from {fm.template_dir_for_comments()}/"
-                + fname,
+                + f"generated from {fm.template_dir_for_comments()}/{fname}",
                 "autograd_function_declarations": declarations,
                 "autograd_function_definitions": definitions,
             },
@@ -583,24 +621,27 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     compiled_args: list[str] = []
     apply_with_saved_before: list[str] = []
     apply_with_saved_after: list[str] = []
-    unpacked_saved_vars: list[str] = []
-    unpacked_saved_vars_ref_type: list[str] = []
-    # Maps var_name to a unique index. The var_name is the
-    # name of an input to the operator that needs a gradient (like "self", "other").
-    # The index is the order in which they appear. We use this mapping
-    # to populate needs_input_grad in some order and then grab values from it.
-    var_name_map: dict[str, int] = {}
+    apply_functional_args: list[str] = []
+    apply_functional_args_ref_types: list[str] = []
+    # Maps the name of an input (to the original forward operator;
+    # examples are "self", "other") to the order in which they appear in the
+    # operator.
+    # For example; if the operator is foo(Tensor self, int64_t k, Tensor other),
+    # the mapping is: {"self": 0, "other": 1}.
+    # We use this mapping to populate needs_input_grad in some order and then grab
+    # values from it.
+    input_name_to_idx: dict[str, int] = {}
 
     for idx, arg in enumerate(info.args_with_derivatives):
         if arg.type in TENSOR_LIST_LIKE_CTYPES:
             size = f"{arg.name}_size_"
             saved_list_sizes.append(f"size_t {arg.name}_size_;")
-            unpacked_saved_vars.append(f"{arg.name}_size_")
-            unpacked_saved_vars_ref_type.append("size_t")
+            apply_functional_args.append(f"{arg.name}_size_")
+            apply_functional_args_ref_types.append("size_t")
         else:
             size = "1"
         compute_index_ranges.append(f"auto {arg.name}_ix = gen.range({size});")
-        var_name_map[arg.name] = idx
+        input_name_to_idx[arg.name] = idx
 
     def save_var(var: SavedAttribute, is_output: bool) -> None:
         name = var.nctype.name
@@ -620,7 +661,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             uses_cpp_saved_variable_cls = True
             saved_variables.append(f"SavedVariable {name}_;")
             release_variables.append(f"{name}_.reset_data();")
-            ptr = "shared_from_this()" if is_output else ""
+            ptr = "getptr()" if is_output else ""
             unpack.append(f"auto {name} = {name}_.unpack({ptr});")
             getter_definitions.append(
                 GETTER_DEFINITION_SAVEDVAR.substitute(
@@ -649,9 +690,12 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             # This special case is needed for `_foreach_pow.List` and `_foreach_pow.ScalarAndTensor`
             # as of https://github.com/pytorch/pytorch/pull/105504.
             if type == VectorCType(BaseCType(tensorT)):
-                assert (
+                if not (
                     info.func.func.name.name.base.startswith("_foreach") and is_output
-                )
+                ):
+                    raise AssertionError(
+                        "VectorCType(BaseCType(tensorT)) requires foreach function and is_output"
+                    )
             uses_cpp_saved_variable_cls = True
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
@@ -659,7 +703,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
             release_variables.append(f"{name}_.clear();")
             release_variables.append(f"{name}_released_ = true;")
-            ptr = "shared_from_this()" if is_output else "nullptr"
+            ptr = "getptr()" if is_output else "nullptr"
             unpack.append(f"auto {name} = unpack_list({name}_, {ptr});")
             asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
             getter_definitions.append(
@@ -790,7 +834,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             getter_definitions.append(
                 CodeTemplate(
                     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto *node = static_cast<${op}*>(self->cdata.get());
   const auto& prop = node->${name};
@@ -813,12 +857,15 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             # into the saved variable field.  If this is spuriously firing,
             # edit this field.  Otherwise, you probably need to add a case
             # above.
-            assert (
+            if not (
                 "ref" not in type.cpp_type().lower()
                 and "view" not in type.cpp_type().lower()
                 and "*" not in type.cpp_type()
                 and "&" not in type.cpp_type()
-            ), f"{type.cpp_type()} looks like it contains a non-owning reference"
+            ):
+                raise AssertionError(
+                    f"{type.cpp_type()} looks like it contains a non-owning reference"
+                )
             saved_variables.append(f"{type.cpp_type()} {name};")
 
             if type in MISC_GETTER_DEFS:
@@ -852,8 +899,8 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
         if unpacked_ref_type is None:
             unpacked_ref_type = f"{saved_variables[-1].split(' ')[0]}&"
-        unpacked_saved_vars.append(str(name))
-        unpacked_saved_vars_ref_type.append(unpacked_ref_type)
+        apply_functional_args.append(str(name))
+        apply_functional_args_ref_types.append(unpacked_ref_type)
 
     for var in sorted(info.all_saved_inputs, key=lambda sa: str(sa.nctype.name)):
         save_var(var, is_output=False)
@@ -868,8 +915,8 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         thread_lock = ""
 
     if uses_retain_variables(info):
-        unpacked_saved_vars.append("retain_variables")
-        unpacked_saved_vars_ref_type.append("bool")
+        apply_functional_args.append("retain_variables")
+        apply_functional_args_ref_types.append("bool")
         will_release_variables = WILL_RELEASE_VARIABLES.substitute()
     else:
         will_release_variables = ""
@@ -915,14 +962,15 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                 derivative_template.substitute(
                     name=var_names[0],
                     derivative=formula,
-                    idx=var_name_map[var_names[0]],
+                    idx=input_name_to_idx[var_names[0]],
                 ),
             )
 
         else:
             if "grad_input_mask" in formula:
                 masks = [
-                    f"needs_input_grad[{var_name_map[name]}]," for name in var_names
+                    f"needs_input_grad[{input_name_to_idx[name]}],"
+                    for name in var_names
                 ]
                 grad_input_mask = GRAD_INPUT_MASK.substitute(
                     n=len(var_names), masks=masks
@@ -930,14 +978,14 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             else:
                 grad_input_mask = ""
             needs_input_grad = [
-                f"needs_input_grad[{var_name_map[name]}]" for name in var_names
+                f"needs_input_grad[{input_name_to_idx[name]}]" for name in var_names
             ]
             needs_input_grad = " || ".join(needs_input_grad)
             copy_ranges: list[str] = []
             for i, n in enumerate(var_names):
                 copy_ranges.append(
                     DERIVATIVE_MULTI_COPY_RANGE.substitute(
-                        name=n, i=i, idx=var_name_map[n]
+                        name=n, i=i, idx=input_name_to_idx[n]
                     )
                 )
             return False, DERIVATIVE_MULTI.substitute(
@@ -957,7 +1005,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         body.append(derivative_text)
         need_any_grad_defined_var |= checks_any_grad_defined
 
-    for name in var_name_map:
+    for name in input_name_to_idx:
         masks.append(f"task_should_compute_output({{ {name}_ix }}),")
 
     # Since single-output derivative formulas need to check if grads are
@@ -981,17 +1029,39 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     compute_needs_input_grad = COMPUTE_NEEDS_INPUT_GRAD.substitute(
         n=len(masks), compute_index_ranges=compute_index_ranges, masks=masks
     )
-    unpacked_saved_vars_signature = [
-        f"{T} {x}" for T, x in zip(unpacked_saved_vars_ref_type, unpacked_saved_vars)
+    apply_functional_args_signature = [
+        f"{T} {x}"
+        for T, x in zip(apply_functional_args_ref_types, apply_functional_args)
     ]
+    get_packed_args = "\n".join(
+        f"packed_args.pack({name});" for name in apply_functional_args
+    )
+    unpack_ivalues = []
+    for typ, name in zip(apply_functional_args_ref_types, apply_functional_args):
+        typ = typ.removesuffix("&")
+        unpack_ivalues.append(f"auto {name} = packed_args.unpack<{typ}>();")
+
+    schema_args = [f"std::array<bool, {len(input_name_to_idx)}>"]
+    for typ in apply_functional_args_ref_types:
+        typ = typ.removesuffix("&")
+        typ = typ.removeprefix("const")
+        schema_args.append(typ.strip())
+    compute_schema = ["std::vector<at::TypePtr> schema = {"]
+    for schema_arg in schema_args:
+        compute_schema.append(
+            f"  torch::dynamo::autograd::IValuePacker<{schema_arg}>::packed_type(),"
+        )
+    compute_schema.append("};")
 
     return template.substitute(
         unpacks="\n".join(unpack),
         op=info.op,
-        unpacked_saved_vars=unpacked_saved_vars,
-        unpacked_saved_vars_signature=unpacked_saved_vars_signature,
+        compute_schema="\n".join(compute_schema),
+        apply_functional_args=apply_functional_args,
+        apply_functional_args_signature=apply_functional_args_signature,
         compute_needs_input_grad=compute_needs_input_grad,
-        num_vars=len(var_name_map),
+        num_inputs=len(input_name_to_idx),
+        unpack_ivalues="\n".join(unpack_ivalues),
         compute_index_ranges=compute_index_ranges,
         saved_variables=saved_variables,
         release_variables=release_variables,
@@ -1006,4 +1076,5 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         compiled_args=compiled_args,
         apply_with_saved_before=apply_with_saved_before,
         apply_with_saved_after=apply_with_saved_after,
+        get_packed_args=get_packed_args,
     )
