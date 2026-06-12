@@ -1719,7 +1719,10 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
             torch.compile(fn), x, running_mean, running_var, weight, bias
         )
         expected = fn(x, running_mean, running_var, weight, bias)
-        self.assertTrue(torch.allclose(result[0], expected[0], atol=1e-5))
+        self.assertEqual(result, expected)
+        # The store must fall back to scalar indexing, not TMA.
+        self.assertIn("tl.store", code)
+        self.assertNotIn("make_tensor_descriptor", code)
 
     def test_bool_dtype_skips_tma(self):
         """
