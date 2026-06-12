@@ -2511,14 +2511,21 @@ def meta_mm(a, b, out_dtype: torch.dtype | None = None):
         lambda: f"a and b must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
     )
     if out_dtype is not None:
-        torch._check(
-            out_dtype == a.dtype
-            or (
-                out_dtype == torch.float32
-                and a.dtype in (torch.float16, torch.bfloat16)
-            ),
-            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
-        )
+        # The out_dtype restriction below is a property of the in-tree CUDA/XPU
+        # backends (see aten/src/ATen/native/cuda/Blas.cpp and
+        # aten/src/ATen/native/mkldnn/xpu/Blas.cpp). Out-of-tree backends (e.g.
+        # accelerators registered via PrivateUse1) may support arbitrary
+        # out_dtype combinations, so only enforce it for the backends that have
+        # the restriction.
+        if device_hint(a) in ("cuda", "xpu"):
+            torch._check(
+                out_dtype == a.dtype
+                or (
+                    out_dtype == torch.float32
+                    and a.dtype in (torch.float16, torch.bfloat16)
+                ),
+                lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+            )
     result_dtype = a.dtype if out_dtype is None else out_dtype
     return a.new_empty((N, P), dtype=result_dtype)
 
@@ -4847,13 +4854,20 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
         f", {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].",
     )
     if out_dtype:
-        supported_out_dtype = (
-            batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
-        ) and out_dtype == torch.float32
-        torch._check(
-            out_dtype == batch1.dtype or supported_out_dtype,
-            lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
-        )
+        # The out_dtype restriction below is a property of the in-tree CUDA/XPU
+        # backends (see aten/src/ATen/native/cuda/Blas.cpp and
+        # aten/src/ATen/native/mkldnn/xpu/Blas.cpp). Out-of-tree backends (e.g.
+        # accelerators registered via PrivateUse1) may support arbitrary
+        # out_dtype combinations, so only enforce it for the backends that have
+        # the restriction.
+        if device_hint(batch1) in ("cuda", "xpu"):
+            supported_out_dtype = (
+                batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
+            ) and out_dtype == torch.float32
+            torch._check(
+                out_dtype == batch1.dtype or supported_out_dtype,
+                lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
+            )
         output = batch2.new_empty(output_size).to(out_dtype)
     else:
         # TODO: handle out
