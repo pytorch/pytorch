@@ -5713,6 +5713,9 @@ skipped_tests.add("test_custom_function_boxed_grads_materialize_grads")
 skipped_tests.add("test_custom_function_boxed_grads_direct_apply")
 skipped_tests.add("test_custom_function_boxed_grads_single_list_arg")
 
+# DTensor backward calls a skipped global-shape helper under compiled autograd.
+skipped_tests.add("test_compile_dtensor_local_tensor_act_backward_passthrough")
+
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 test_higher_order_ops = load_test_module("dynamo/test_higher_order_ops")

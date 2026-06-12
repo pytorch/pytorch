@@ -60,6 +60,13 @@ def get_loaded_async_collective_tensor_type() -> type["AsyncCollectiveTensor"] |
     return AsyncCollectiveTensor
 
 
+def import_async_collective_tensor_type() -> type["AsyncCollectiveTensor"]:
+    """Import and return the ACT type."""
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+    return AsyncCollectiveTensor
+
+
 def partial_flatten_asdict(obj: object) -> Any:
     if dataclasses.is_dataclass(obj):
         return {

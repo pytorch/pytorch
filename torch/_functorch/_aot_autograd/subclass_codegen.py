@@ -17,7 +17,7 @@ import torch
 from torch import SymInt
 
 from .schemas import ActInputPaths, OpaqueMeta, PlainTensorMeta, SubclassCreationMeta
-from .utils import get_loaded_async_collective_tensor_type
+from .utils import import_async_collective_tensor_type
 
 
 log = logging.getLogger(__name__)
@@ -320,9 +320,7 @@ def _codegen_subclass_wrapper_source(
     act_input_paths_by_input: dict[int, set[tuple[str, ...]]] = {}
     act_wait_fn = None
     if act_input_paths:
-        AsyncCollectiveTensor = get_loaded_async_collective_tensor_type()
-        if AsyncCollectiveTensor is None:
-            raise AssertionError("ACT input paths require the ACT type to be loaded")
+        AsyncCollectiveTensor = import_async_collective_tensor_type()
         act_wait_fn = state.add_global(
             state.fresh_name("_maybe_wait_act"),
             functools.partial(

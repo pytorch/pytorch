@@ -512,6 +512,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch({"fx_graph_cache": True, "compile_threads": 1})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_act_input_paths_cache_hit(self):
         import torch.distributed._functional_collectives as funcol
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
