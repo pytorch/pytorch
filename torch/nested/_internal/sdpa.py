@@ -55,7 +55,7 @@ def _validate_sdpa_input(
         )
     if query.dim() < 3 or key.dim() < 3 or value.dim() < 3:
         raise ValueError(
-            f"Expected query, key, and value to all be  at least 3 dimensional, but got query.dim: "
+            f"Expected query, key, and value to all be at least 3 dimensional, but got query.dim: "
             f"{query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead."
         )
     if query._ragged_idx != key._ragged_idx or query._ragged_idx != value._ragged_idx:
@@ -370,7 +370,7 @@ def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor) -> bool:
     # needing to call contiguous on the nested tensor input.
     # It checks that the storage offsets' adjacent_differences are a constant
     # multiple of the previous tensor in the nested tensor and that the strides
-    # are monitonically decreasing. This check is done after calling transpose on
+    # are monotonically decreasing. This check is done after calling transpose on
     # the nested tensor resulting in a Nt of shape [bsz, {seq_len}, num_heads, dim]
 
     # Returns a boolean indicating if contiguous needs to be called for input

@@ -6,7 +6,7 @@ Out-of-tree (OOT) accelerator backends need to maintain compatibility with PyTor
 
 This chapter guides third-party accelerator vendors through the process of integrating their repositories with PyTorch's CI ecosystem, ensuring continuous compatibility validation.
 
-## Why CI/CD Integration Matters
+## Why CI Integration Matters
 
 Integrating with PyTorch's CI ecosystem provides several key benefits:
 
@@ -22,10 +22,10 @@ When a PR is opened or updated in PyTorch, GitHub notifies the Relay Server via 
 
 ```{mermaid}
 flowchart TD
-    PyTorch["PyTorch\n(PR Event)"] -->|webhook| RS["Relay Server\n(Allowlist/Dispatch/Callback)"]
-    GH["GitHub APP\n(Auth&Bridge)"] <--> RS
-    RS <--> HUD["HUD\n(Dashboard)"]
-    RS -->|repo_dispatch| DA["Downstream A\n(e.g. Ascend)"]
+    PyTorch["PyTorch<br/>(PR Event)"] -->|webhook| RS["Relay Server<br/>(Allowlist/Dispatch/Callback)"]
+    GH["GitHub APP<br/>(Auth&Bridge)"] <--> RS
+    RS <--> HUD["HUD<br/>(Dashboard)"]
+    RS -->|repo_dispatch| DA[Downstream A]
     RS -->|repo_dispatch| DB[Downstream B]
     RS -->|repo_dispatch| DC[Downstream C]
     DA -->|callback| RS
@@ -101,7 +101,7 @@ Create a GitHub Actions workflow in your repository to receive ``repository_disp
      contents: read
 
    jobs:
-     cancel-pr:
+     cancel-workflow:
        if: ${{ github.event.client_payload.payload.action == 'closed' }}
        runs-on: ubuntu-latest
        steps:
@@ -165,7 +165,7 @@ Supported ``action`` values for ``pull_request`` events:
 | ``opened`` | New PR created |
 | ``synchronized`` | New commits pushed to an existing PR |
 | ``reopened`` | Previously closed PR reopened |
-| ``closed`` | PR closed or merged; triggers the ``cancel-pr`` job to stop in-progress runs |
+| ``closed`` | PR closed or merged; triggers the ``cancel-workflow`` job to stop in-progress runs |
 
 ## Troubleshooting
 
