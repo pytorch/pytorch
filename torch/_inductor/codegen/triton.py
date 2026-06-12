@@ -6406,6 +6406,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         if self.tma_min_block_sizes:
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
+        if self.host_tma_descriptor_inputs:
+            out["host_tma_descriptor_block_size"] = (
+                config.triton.host_side_tma_block_size
+            )
         if self.tiling_scores:
             out["tiling_scores"] = self.tiling_scores
         if self.min_xblock is not None:
@@ -6522,6 +6526,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if symbol in V.graph.sizevars.inv_precomputed_replacements:
                     signature[i] = SizeArg(
                         arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
+                    )
+
+        if self.host_tma_descriptor_inputs:
+            for i, arg in enumerate(signature):
+                if (
+                    isinstance(arg, TensorArg)
+                    and arg.name in self.host_tma_descriptor_inputs
+                ):
+                    signature[i] = TMADescriptorArg(
+                        name=arg.name,
+                        api_type="stable",
+                        block_shape=self.host_tma_descriptor_inputs[arg.name],
+                        dtype=arg.dtype,
                     )
 
         mutated_args: OrderedSet[str] = OrderedSet()
@@ -6856,7 +6873,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ):
         wrapper = V.graph.wrapper_code
         wrapper.write_triton_header_once()
-        _, call_args, _, arg_types = self.args.python_argdefs()
+        argdefs, call_args, _, arg_types = self.args.python_argdefs()
+
+        if self.host_tma_descriptor_inputs:
+            call_args = list(call_args)
+            for i, argdef in enumerate(argdefs):
+                block = self.host_tma_descriptor_inputs.get(argdef.name)
+                if block is None:
+                    continue
+                desc_var = f"{argdef.name}_host_tma_desc"
+                wrapper.writeline(
+                    f"{desc_var} = triton.tools.tensor_descriptor.TensorDescriptor"
+                    f".from_tensor({call_args[i]}.reshape(-1), {block})"
+                )
+                call_args[i] = desc_var
+
         self.add_numel_to_call_args(name, call_args, arg_types)
 
         for ws in self.args.workspace_args:
