@@ -36,6 +36,7 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker
 from .object_protocol import generic_getiter, generic_iternext
 
+
 # chain.from_iterable is a method descriptor that creates a new object on each
 # attribute access (a is b → False). Capture once at import time for stable
 # identity comparisons in ItertoolsVariable.call_function.
