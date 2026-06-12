@@ -15510,6 +15510,16 @@ class TestUtils(TestCase):
         self.assertEqual(list(state_dict._metadata.keys()), list(ddp_state_dict._metadata.keys()))
 
 
+def _make_misaligned_rmsnorm_input(test, M, N, dtype, offset=1):
+    from torch._native.ops.norm.norms import _required_align_bytes
+
+    buf = torch.randn(M * N + offset, dtype=dtype, device="cuda")
+    x = buf[offset:].view(M, N)
+    test.assertTrue(x.is_contiguous())
+    test.assertNotEqual(x.data_ptr() % _required_align_bytes(x, N), 0)
+    return x
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @skipIfNoCuteDSL
 @unittest.skipIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+")
@@ -15651,12 +15661,6 @@ class TestFusedRMSNormOverrideRouting(TestCase):
             _fused_rms_norm_backward_cond(gout, x, [N], rstd, w, [True, True])
         )
 
-    def _make_misaligned(self, M, N, dtype):
-        buf = torch.randn(M * N + 1, dtype=dtype, device="cuda")
-        x = buf[1:].view(M, N)
-        self.assertTrue(x.is_contiguous())
-        return x
-
     def test_fwd_cond_misaligned_input_gated_on_size(self):
         # A misaligned base pointer forces a clone before quack can run
         # (norms._reshape_2d). The clone's extra read+write only pays off when
@@ -15669,9 +15673,9 @@ class TestFusedRMSNormOverrideRouting(TestCase):
 
         N = 2048
         w = torch.randn(N, dtype=torch.bfloat16, device="cuda")
-        small = self._make_misaligned(8, N, torch.bfloat16)
+        small = _make_misaligned_rmsnorm_input(self, 8, N, torch.bfloat16)
         self.assertFalse(_fused_rms_norm_cond(small, [N], w, 1e-5))
-        large = self._make_misaligned(_MISALIGNED_MIN_NUMEL // N, N, torch.bfloat16)
+        large = _make_misaligned_rmsnorm_input(self, _MISALIGNED_MIN_NUMEL // N, N, torch.bfloat16)
         self.assertTrue(_fused_rms_norm_cond(large, [N], w, 1e-5))
 
     def test_bwd_cond_misaligned_input_gated_on_size(self):
@@ -15685,7 +15689,7 @@ class TestFusedRMSNormOverrideRouting(TestCase):
         M = 8
         w = torch.randn(N, dtype=torch.bfloat16, device="cuda")
         aligned = torch.randn(M, N, dtype=torch.bfloat16, device="cuda")
-        misaligned = self._make_misaligned(M, N, torch.bfloat16)
+        misaligned = _make_misaligned_rmsnorm_input(self, M, N, torch.bfloat16)
         rstd = torch.empty(M, dtype=torch.float32, device="cuda")
         mask = [True, True]
         self.assertFalse(
@@ -15696,7 +15700,7 @@ class TestFusedRMSNormOverrideRouting(TestCase):
         )
 
         M = _MISALIGNED_MIN_NUMEL // N
-        large = self._make_misaligned(M, N, torch.bfloat16)
+        large = _make_misaligned_rmsnorm_input(self, M, N, torch.bfloat16)
         rstd = torch.empty(M, dtype=torch.float32, device="cuda")
         self.assertTrue(
             _fused_rms_norm_backward_cond(large, large, [N], rstd, w, mask)
@@ -15791,7 +15795,7 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
         self.assertEqual(out, ref, atol=1e-12, rtol=0)
 
     @parametrize_test("dtype", [torch.float16, torch.bfloat16, torch.float32])
-    @parametrize_test("offset", [1, 2, 4])
+    @parametrize_test("offset", [1, 2, 3])
     def test_misaligned_base_pointer(self, dtype, offset):
         # A contiguous input sliced off a flat buffer (buf[offset:].view(M, N))
         # has clean strides but a base pointer that isn't 16B aligned. quack
@@ -15799,14 +15803,14 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
         # re-materialize an aligned buffer rather than crash with
         # "Misaligned Tensor data on argument #0". M*N is chosen above
         # _MISALIGNED_MIN_NUMEL so the cond routes to the clone path rather
-        # than falling back to aten.
+        # than falling back to aten. Offsets 1-3 stay misaligned for every
+        # dtype here (offset 4 would be 16B-aligned for fp32);
+        # _make_misaligned_rmsnorm_input asserts this.
         from torch._native.ops.norm.rmsnorm_impl import _MISALIGNED_MIN_NUMEL
 
         N = 2048
         M = _MISALIGNED_MIN_NUMEL // N
-        buf = torch.randn(M * N + offset, dtype=dtype, device="cuda")
-        x = buf[offset:].view(M, N)
-        self.assertTrue(x.is_contiguous())
+        x = _make_misaligned_rmsnorm_input(self, M, N, dtype, offset=offset)
         w = torch.randn(N, dtype=dtype, device="cuda")
         y, _ = torch.ops.aten._fused_rms_norm(x, [N], w, 1e-5)
         with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
@@ -15820,6 +15824,49 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
         torch.bfloat16: 3e-1,
         torch.float32: 1e-5,
     }
+
+    def _make_misaligned_weight(self, N, dtype):
+        from torch._native.ops.norm.norms import _required_align_bytes
+
+        wbuf = torch.randn(N + 1, dtype=dtype, device="cuda")
+        w = wbuf[1:]
+        self.assertTrue(w.is_contiguous())
+        self.assertNotEqual(w.data_ptr() % _required_align_bytes(w, N), 0)
+        return w
+
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_misaligned_weight(self, dtype):
+        # Weight has the same misaligned-base trap as the input: it is
+        # contiguous, so reshape(N).contiguous() in the impl is a no-op and
+        # would hand the kernel a misaligned pointer. norms._aligned_weight
+        # clones it unconditionally (no size gate; weight is only N elements).
+        N, M = 2048, 8
+        x = torch.randn(M, N, dtype=dtype, device="cuda")
+        w = self._make_misaligned_weight(N, dtype)
+        y, _ = torch.ops.aten._fused_rms_norm(x, [N], w, 1e-5)
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x, [N], w, 1e-5)
+        self.assertEqual(y, y_ref, atol=1e-1, rtol=0)
+
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_misaligned_weight_backward(self, dtype):
+        N, M = 2048, 8
+        x = torch.randn(M, N, dtype=dtype, device="cuda")
+        gout = torch.randn(M, N, dtype=dtype, device="cuda")
+        w = self._make_misaligned_weight(N, dtype)
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            _, rstd = torch.ops.aten._fused_rms_norm(x, [N], w, 1e-5)
+        gx, gw = torch.ops.aten._fused_rms_norm_backward(
+            gout, x, [N], rstd, w, [True, True]
+        )
+        with torch.backends.python_native.operations_disabled(
+            "_fused_rms_norm_backward"
+        ):
+            gx_ref, gw_ref = torch.ops.aten._fused_rms_norm_backward(
+                gout, x, [N], rstd, w, [True, True]
+            )
+        self.assertEqual(gx, gx_ref, atol=self._BWD_ATOL[dtype], rtol=0)
+        self.assertEqual(gw, gw_ref, atol=self._BWD_ATOL[dtype], rtol=0)
 
     @parametrize_test("dtype", [torch.float16, torch.bfloat16, torch.float32])
     @parametrize_test(

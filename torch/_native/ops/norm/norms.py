@@ -46,6 +46,16 @@ def _reshape_2d(t: torch.Tensor, M: int, N: int) -> torch.Tensor:
     return out if out.data_ptr() % align == 0 else out.clone()
 
 
+def _aligned_weight(w: torch.Tensor, N: int) -> torch.Tensor:
+    # Same trap as _reshape_2d: reshape(N).contiguous() is a no-op for a
+    # contiguous-but-offset weight, leaving a misaligned base. Weight is only
+    # N elements, so always clone rather than perf-gating like the input.
+    w = w.reshape(N).contiguous()
+    if w.data_ptr() % _required_align_bytes(w, N) != 0:
+        w = w.clone()
+    return w
+
+
 def _flatten_rstd(t: torch.Tensor, M: int) -> torch.Tensor:
     if t.ndim == 1 and t.shape[0] == M:
         return t
@@ -71,7 +81,7 @@ def quack_rmsnorm_fwd(
     rstd = torch.empty(M, device=x.device, dtype=torch.float32)
 
     if weight is not None:
-        weight = weight.reshape(N).contiguous()
+        weight = _aligned_weight(weight, N)
 
     dtype = _torch2cute(x)
     out_dtype = _torch2cute(out)
@@ -124,7 +134,7 @@ def quack_rmsnorm_bwd(
 
     # quack's kernel requires a contiguous 1-D weight with matching dtype.
     if weight is not None:
-        weight = weight.reshape(N).contiguous()
+        weight = _aligned_weight(weight, N)
 
     # quack treats `weight_dtype` (whether weight is present in the kernel)
     # and `has_dw_partial` (whether to accumulate dw) as independent flags.

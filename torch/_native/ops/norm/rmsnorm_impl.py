@@ -30,6 +30,9 @@ def _is_supported(input: torch.Tensor) -> bool:
 # pays off once quack's bandwidth advantage over aten can absorb it: measured
 # on B200 (fwd, bf16/fp32), clone+quack wins 1.8-2.9x at 2^24 elements and
 # loses below 2^23. Misaligned inputs smaller than this fall back to aten.
+# The threshold is a perf heuristic, not a correctness bound; it has not been
+# measured on H100 (SM90), where the crossover may differ. Make it per-arch
+# if H100 measurements show a meaningfully different break-even.
 _MISALIGNED_MIN_NUMEL = 1 << 24
 
 
