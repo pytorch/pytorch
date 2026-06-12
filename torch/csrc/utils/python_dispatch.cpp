@@ -116,6 +116,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
       if (c10::toFunctionalityKey(dispatch_key_) ==
               c10::DispatchKey::AutogradFunctionality &&
           dispatch_key_ != c10::DispatchKey::Autograd &&
+          dispatch_key_ != c10::DispatchKey::AutogradMeta &&
           op.operator_name().getNamespace() == "aten" &&
           ((fake_mode.has_value() &&
             cur_torch_dispatch_mode_state == *fake_mode) ||

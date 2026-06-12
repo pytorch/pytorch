@@ -1016,6 +1016,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
             and torch._C._to_functionality_key(final_key)  # type: ignore[attr-defined]
             == DispatchKey.AutogradFunctionality
             and final_key != DispatchKey.Autograd
+            and final_key != DispatchKey.AutogradMeta
             and final_key not in self.py_kernels
         )
 
