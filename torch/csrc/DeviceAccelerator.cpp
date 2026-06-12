@@ -113,6 +113,14 @@ void initModule(PyObject* module) {
         !torch::utils::is_device_in_bad_fork(device_type.value());
   });
 
+  m.def("_accelerator_isInBadFork", []() {
+    const auto device_type = at::accelerator::getAccelerator();
+    if (!device_type.has_value()) {
+      return false;
+    }
+    return torch::utils::is_device_in_bad_fork(device_type.value());
+  });
+
   m.def("_accelerator_emptyCache", []() { at::accelerator::emptyCache(); });
 
   m.def("_accelerator_emptyHostCache", []() {
