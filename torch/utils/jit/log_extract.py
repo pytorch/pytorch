@@ -1,12 +1,12 @@
 # mypy: allow-untyped-defs
 from contextlib import contextmanager
-from typing import Any, List, Tuple, cast
+from typing import Any, cast
 import random
 import torch
 import time
 from torch.utils.benchmark import Timer
 
-def extract_ir(filename: str) -> List[str]:
+def extract_ir(filename: str) -> list[str]:
     BEGIN = "<GRAPH_EXPORT>"
     END = "</GRAPH_EXPORT>"
     pfx = None
@@ -32,13 +32,17 @@ def make_tensor_from_type(inp_type: torch._C.TensorType):
     stride = inp_type.strides()
     device = inp_type.device()
     dtype = inp_type.dtype()
-    assert size is not None
-    assert stride is not None
-    assert device is not None
-    assert dtype is not None
+    if size is None:
+        raise AssertionError("make_tensor_from_type: 'size' is None (inp_type.sizes() returned None)")
+    if stride is None:
+        raise AssertionError("make_tensor_from_type: 'stride' is None (inp_type.strides() returned None)")
+    if device is None:
+        raise AssertionError("make_tensor_from_type: 'device' is None (inp_type.device() returned None)")
+    if dtype is None:
+        raise AssertionError("make_tensor_from_type: 'dtype' is None (inp_type.dtype() returned None)")
     return torch.empty_strided(size=size, stride=stride, device=device, dtype=dtype)
 
-def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
+def load_graph_and_inputs(ir: str) -> tuple[Any, list[Any]]:
     graph = torch._C.parse_ir(ir, parse_tensor_constants=True)
     graph.makeMultiOutputIntoTuple()
     inputs = []
@@ -81,7 +85,8 @@ def run_test(ir, inputs, *, warmup_runs=10, test_runs=20) -> float:
         if isinstance(input, torch.Tensor):
             is_cpu = input.device.type == "cpu"
             break
-    assert is_cpu is not None
+    if is_cpu is None:
+        raise AssertionError("No tensor found in inputs")
 
     out = time_cpu(graph, inputs, test_runs) if is_cpu else time_cuda(graph, inputs, test_runs)
     return out

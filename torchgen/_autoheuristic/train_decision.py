@@ -64,7 +64,6 @@ class AHTrainDecisionTree(AHTrain):
         Given a trained decision tree, and a dataframe containing the training data, returns a list of unsafe leaves.
         """
         X = df[feature_columns]
-        y = df["winner"]
         leaf_ids = model.apply(X)
         unique_leaves = np.unique(leaf_ids)
 
@@ -95,7 +94,7 @@ class AHTrainDecisionTree(AHTrain):
 
     def get_grid_search_values(self):
         """
-        Standard values for grid search. Can be overriden.
+        Standard values for grid search. Can be overridden.
         """
         return {
             "max_depth": [5, 6, 7],
@@ -136,7 +135,6 @@ class AHTrainDecisionTree(AHTrain):
         best_model = None
         best_model_safe_proba = 0
         best_model_num_correct = 0
-        best_model_num_wrong = 0
         best_model_unsafe_leaves = []
         columns = ["set", "crit", "max_depth", "min_samples_leaf"]
         metrics_columns = []
@@ -223,7 +221,6 @@ class AHTrainDecisionTree(AHTrain):
                             )
                             best_model = model
                             best_model_num_correct = num_correct
-                            best_model_num_wrong = num_wrong
                             best_model_safe_proba = safe_proba
                             best_model_unsafe_leaves = unsafe_leaves
 
@@ -436,7 +433,8 @@ class AHTrainDecisionTree(AHTrain):
 
         # Compute the winner and speedup for each valid input
         def get_winner_and_speedup(group):
-            assert len(group) >= 2, "Need at least 2 choices"
+            if len(group) < 2:
+                raise AssertionError("Need at least 2 choices")
 
             sorted_group = group.sort_values("median_execution_time")
             winner = sorted_group.iloc[0]["choice"]
@@ -449,9 +447,11 @@ class AHTrainDecisionTree(AHTrain):
             for row in group.itertuples():
                 choice2time[row.choice] = row.median_execution_time
 
-            assert (
-                len(unique_choices) == len(group)
-            ), f"len(unique_choices) != len(group): {len(unique_choices)} != {len(group)}"
+            if len(unique_choices) != len(group):
+                raise AssertionError(
+                    f"len(unique_choices) != len(group): "
+                    f"{len(unique_choices)} != {len(group)}"
+                )
 
             return pd.Series(
                 {
@@ -786,7 +786,6 @@ class DecisionEvaluator:
     def top_k_classes(self, model, probas, k, avail_choices):
         # Get classes and their corresponding probabilities
         classes = model.classes_
-        class_proba_pairs = list(zip(classes, probas))
 
         # Sort by probability (descending) and filter out zero probabilities
         sorted_classes = [
@@ -865,17 +864,17 @@ class DecisionEvaluator:
         """
 
         y_true = self.df["actual_winner"] if self.ranking else self.df["winner"]
-        i = 0
-        for pred, true, prob, leaf_id in zip(
-            self.predictions, y_true, self.probas, self.leaf_ids
+        for i, (pred, true, prob, leaf_id) in enumerate(
+            zip(self.predictions, y_true, self.probas, self.leaf_ids)
         ):
             avail_choices = self.df["avail_choices"].iloc[i]
             top_k_choices = self.top_k_classes(
                 self.model, prob, k=self.k, avail_choices=avail_choices
             )
-            assert (
-                true in avail_choices
-            ), f"Best choice {true} not in available choices {avail_choices}"
+            if true not in avail_choices:
+                raise AssertionError(
+                    f"Best choice {true} not in available choices {avail_choices}"
+                )
             default_config = self.train.get_default_config(self.df.iloc[i])
             self.eval_prediction(
                 avail_choices,
@@ -888,7 +887,6 @@ class DecisionEvaluator:
                 i,
             )
             self.eval_ranking_prediction(true, top_k_choices, i)
-            i += 1
 
         total = len(self.predictions)
         if return_safe_proba:

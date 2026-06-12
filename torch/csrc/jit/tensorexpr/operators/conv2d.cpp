@@ -341,8 +341,9 @@ bool mkldnnPrepackedConvIsSupported(
       input.dims[0] * input.dims[1] * input.dims[2] * input.dims[3] > 20480;
   GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: ", use_onednn);
   return use_onednn;
-#endif
+#else
   return false;
+#endif
 }
 
 Tensor computeConv2d(

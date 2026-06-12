@@ -1,0 +1,4 @@
+quack-kernels
+liger-kernel
+nvidia-cutlass-dsl==4.1.0.dev0
+matplotlib

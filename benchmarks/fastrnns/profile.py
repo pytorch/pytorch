@@ -40,7 +40,8 @@ def run_rnn(
                     param.grad.zero_()
         torch.cuda.synchronize()
 
-    assert device == "cuda"
+    if device != "cuda":
+        raise AssertionError(f"device must be 'cuda', but got '{device}'")
     creator_args = dict(
         seqLength=seqLength,
         numLayers=numLayers,

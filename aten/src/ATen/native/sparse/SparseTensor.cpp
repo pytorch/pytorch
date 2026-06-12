@@ -12,7 +12,6 @@
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
-#include <ATen/NamedTensorUtils.h>
 
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
@@ -55,7 +54,6 @@
 #include <ATen/ops/is_pinned_native.h>
 #include <ATen/ops/resize_as_sparse.h>
 #include <ATen/ops/resize_as_sparse_native.h>
-#include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/sparse_coo_tensor_native.h>
 #include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/sparse_mask_native.h>
@@ -66,6 +64,10 @@
 #include <ATen/ops/to_sparse_native.h>
 #include <ATen/ops/unique_dim.h>
 #include <ATen/ops/values_native.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/view_as_real_native.h>
+#include <ATen/ops/view_as_complex.h>
+#include <ATen/ops/view_as_complex_native.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/ones.h>
 #endif
@@ -92,7 +94,6 @@ bool is_coalesced_sparse(const SparseTensor& self) {
 
 bool is_coalesced_default(const Tensor& self) {
   TORCH_CHECK(false, "is_coalesced expected sparse coordinate tensor layout but got ", self.layout());
-  return false;
 }
 
 int64_t _nnz_sparse(const SparseTensor& self) {
@@ -274,7 +275,7 @@ Tensor sparse_coo_tensor(IntArrayRef size,
 
 // helper
 namespace {
-static inline Tensor expand_values_if_needed(const Tensor& values) {
+inline Tensor expand_values_if_needed(const Tensor& values) {
   // expand
   if (values.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
@@ -356,13 +357,14 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_,
     computed_sizes[static_cast<size_t>(sparse_dim + d)] = values.size(d + 1);
   }
 
-  return at::_sparse_coo_tensor_with_dims_and_tensors(
-      sparse_dim,
-      dense_dim,
-      computed_sizes,
+  return at::native::_sparse_coo_tensor_unsafe(
       indices,
       values,
-      values.options().layout(kSparse),
+      computed_sizes,
+      optTypeMetaToScalarType(options.dtype_opt()),
+      options.layout_opt(),
+      options.device_opt(),
+      options.pinned_memory_opt(),
       is_coalesced);
 }
 
@@ -370,9 +372,11 @@ void _validate_sparse_coo_tensor_args(
     const Tensor& indices,
     const Tensor& values_,
     ArrayRef<int64_t> size,
-    std::optional<bool> is_coalesced_) {
+    std::optional<bool> is_coalesced_,
+    std::optional<bool> check_pinning_) {
   Tensor values = expand_values_if_needed(values_);
   bool is_coalesced = is_coalesced_.value_or(false);
+  const bool check_pinning = check_pinning_.value_or(true);
 
   // the following checks are redundant because they are also checked in
   // SparseTensorImpl::set_indices_and_values_unsafe but we need to ensure them
@@ -388,21 +392,23 @@ void _validate_sparse_coo_tensor_args(
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
   TORCH_CHECK(
-      static_cast<int64_t>(size.size()) == sparse_dim + dense_dim,
-      "number of dimensions must be sparse_dim (",
-      sparse_dim,
-      ") + dense_dim (",
-      dense_dim,
-      "), but got ",
-      size.size());
+    sparse_dim + dense_dim == static_cast<int64_t>(size.size()),
+    "'len(size) == sparse_dim + dense_dim' is not satisfied: len(size) = ",
+    size.size(),
+    ", sparse_dim = ",
+    sparse_dim,
+    ", dense_dim = ",
+    dense_dim);
 
-  TORCH_CHECK(
-      indices.is_pinned() == values.is_pinned(),
-      "memory pinning of indices (=",
-      indices.is_pinned(),
-      ") must match memory pinning of values (=",
-      values.is_pinned(),
-      ")");
+  if (check_pinning) {
+    TORCH_CHECK(
+        indices.is_pinned() == values.is_pinned(),
+        "memory pinning of indices (=",
+        indices.is_pinned(),
+        ") must match memory pinning of values (=",
+        values.is_pinned(),
+        ")");
+  }
 
   // Check to make sure all indices are within the boundaries of `size`
   if (indices.numel() > 0) {
@@ -480,7 +486,7 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, a
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<bool> is_coalesced) {
-  if (at::globalContext().checkSparseTensorInvariants()) {
+  if (at::globalContext().checkSparseTensorInvariants().value_or(false)) {
     at::native::_validate_sparse_coo_tensor_args(indices, values_, size, is_coalesced);
   }
   return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory, is_coalesced);
@@ -584,9 +590,7 @@ SparseTensor& copy_sparse_wrapper_(
     bool non_blocking) {
   // TODO: Once copy_ is fully migrated to use dispatcher, handle named
   // inference using dispatcher instead of doing it everywhere
-  auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
-    NoNamesGuard guard;
     if (!self.is_sparse() || !src.is_sparse()) {
       TORCH_CHECK(false,
           "copy_() between dense and sparse Tensors is not implemented! Found self type = ",
@@ -596,7 +600,6 @@ SparseTensor& copy_sparse_wrapper_(
     }
     at::copy_sparse_to_sparse_(self, src, non_blocking);
   }
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
@@ -668,7 +671,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
       values.scalar_type(), "coalesce", [&] {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
-    scalar_t* values_ptr = values.data_ptr<scalar_t>();
+    const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
     scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
     for (const auto j : c10::irange(nnz)) {
       int64_t pos = indicesPermutationAccessor[j];
@@ -725,7 +728,7 @@ static std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inp
   // is that these primitives might project first argument onto second one or
   // the other way around depending on which arguments are coalesced and which are
   // larger. This function prepares inputs for `sparse_mask` such that `t` is
-  // projected onto `mask` by sorting `t` if uncoalesced and artifically marking it
+  // projected onto `mask` by sorting `t` if uncoalesced and artificially marking it
   // as coalesced all while `mask` is set to uncoalesced.
   // The result of this projectionk is going to be uncoalesced, so it is up to the
   // user to set the corresponding flag correctly with respect to the operations'
@@ -795,7 +798,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
 
   if (t.layout() == at::kSparse) {
     if (!t._nnz()) {
-      auto res = mask.clone().to(t.device(), t.scalar_type());
+      auto res = mask.to(t.device(), t.scalar_type(), /*non_blocking=*/false, /*copy=*/true);
       res._values().zero_();
       return res;
     }
@@ -891,6 +894,54 @@ Tensor _pin_memory_sparse_coo(const Tensor& self, std::optional<Device> device) 
       self._values().pin_memory(device),
       options,
       self.is_coalesced());
+}
+
+Tensor view_as_real_sparse(const Tensor& self) {
+  TORCH_CHECK(self.is_sparse() && self.is_complex(), "view_as_real_sparse is only supported for complex sparse tensors");
+  TORCH_CHECK(!self.is_conj(), "view_as_real_sparse doesn't work on unresolved conjugated tensors.  To resolve the conjugate tensor so you can view it as real, use self.resolve_conj(); however, be warned that the resulting tensor will NOT alias the original.");
+
+  auto new_sizes = self.sym_sizes().vec();
+  // last dimension will always have two elements containing the real and imag vals
+  new_sizes.push_back(2);
+
+  auto real_values = at::view_as_real(self._values());
+  const auto float_type = c10::toRealValueType(self.scalar_type());
+  auto options = self.options().dtype(float_type);
+
+  return at::_sparse_coo_tensor_with_dims_and_tensors_symint(
+      self.sparse_dim(),
+      self.dense_dim() + 1,  // Add one dense dimension for real/imag
+      new_sizes,
+      self._indices(),
+      real_values,
+      options,
+      self.is_coalesced()
+  );
+}
+
+Tensor view_as_complex_sparse(const Tensor& self) {
+  TORCH_CHECK(self.is_sparse() &&
+    (self.scalar_type() == kFloat || self.scalar_type() == kDouble || self.scalar_type() == kHalf),
+    "view_as_complex_sparse is only supported for half, float, and double sparse tensors");
+  TORCH_CHECK(self.dense_dim() > 0 && self.size(-1) == 2, "view_as_complex_sparse is only supported for sparse tensors with the last dim == 2 and dense_dim > 0.");
+
+  auto new_sizes = self.sym_sizes().vec();
+  // remove the last dimension. They will be combined to one complex dimension.
+  new_sizes.pop_back();
+
+  auto comlpex_values = at::view_as_complex(self._values());
+  const auto complex_type = c10::toComplexType(self.scalar_type());
+  auto options = self.options().dtype(complex_type);
+
+  return at::_sparse_coo_tensor_with_dims_and_tensors_symint(
+      self.sparse_dim(),
+      self.dense_dim() - 1,
+      new_sizes,
+      self._indices(),
+      comlpex_values,
+      options,
+      self.is_coalesced()
+  );
 }
 
 } // namespace at::native

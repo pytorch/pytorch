@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any
 
 import torch
 from torch.distributed.checkpoint.stateful import StatefulT
@@ -113,7 +114,7 @@ class TensorProperties:
 class TensorStorageMetadata:
     properties: TensorProperties
     size: torch.Size
-    chunks: List[ChunkStorageMetadata]
+    chunks: list[ChunkStorageMetadata]
 
 
 @dataclass
@@ -121,15 +122,16 @@ class BytesStorageMetadata:
     pass
 
 
-STORAGE_TYPES = Union[TensorStorageMetadata, BytesStorageMetadata]
-STATE_DICT_TYPE = Dict[str, Union[StatefulT, Any]]
+STORAGE_TYPES = TensorStorageMetadata | BytesStorageMetadata
+STATE_DICT_TYPE = dict[str, StatefulT | Any]
 
 
 @dataclass
 class StorageMeta:
-    checkpoint_id: Union[str, os.PathLike, None] = None
-    save_id: Optional[str] = None
-    load_id: Optional[str] = None
+    checkpoint_id: str | os.PathLike | None = None
+    save_id: str | None = None
+    load_id: str | None = None
+    modules: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -137,14 +139,15 @@ class Metadata:
     """This class represents the metadata of the checkpoint."""
 
     # Keys are the same from the `state_dict` used.
-    state_dict_metadata: Dict[str, STORAGE_TYPES]
+    state_dict_metadata: dict[str, STORAGE_TYPES]
     # It is the responsibility of the planner and storage plugins to ensure
     # backward compatibility of the planner_data and storage_data. DCP will
     # also ensure the backward compatibility of the metadata in this file and
     # the metadata of the built-in planner and storage plugins.
     planner_data: Any = None
     storage_data: Any = None
-    storage_meta: Optional[StorageMeta] = None
+    storage_meta: StorageMeta | None = None
+    version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -154,10 +157,10 @@ class MetadataIndex:
     fqn: str
     """Fully Qualified Name of the object"""
 
-    offset: Optional[torch.Size] = None
+    offset: torch.Size | None = None
     """If the object is a tensor, offset into the tensor we're looking for"""
 
-    index: Optional[int] = field(hash=False, compare=False, default=None)
+    index: int | None = field(hash=False, compare=False, default=None)
     """
     Index hint when searching for tensor chunk to speedup lookups (optional)
 
@@ -172,8 +175,8 @@ class MetadataIndex:
     def __init__(
         self,
         fqn: str,
-        offset: Optional[Sequence[int]] = None,
-        index: Optional[int] = None,
+        offset: Sequence[int] | None = None,
+        index: int | None = None,
     ):
         # We must use object.__setattr__ due to frozen=True
         object.__setattr__(self, "fqn", fqn)

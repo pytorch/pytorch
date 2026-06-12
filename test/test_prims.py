@@ -142,7 +142,7 @@ class TestPrims(TestCase):
             self.assertTrue(view._is_view())
 
         t_discontig = t.transpose(0, 1)
-        with self.assertRaises(ValueError, msg="no such view exists"):
+        with self.assertRaises(RuntimeError, msg="Attempting to view a collapsed tensor, but no such view exists!"):
             view = prims.collapse_view(t_discontig, 0, 2)
 
         copy = prims.collapse(t_discontig, 0, 1)
@@ -340,7 +340,17 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
     def test_clone_complex(self):
         with torch._dispatch.python.enable_python_dispatcher():
             x = torch.randn(4, dtype=torch.complex64, device='meta').conj()
-            out = x + 1
+            x + 1
+
+    def test_clone_meta_stride_preservation_dense(self):
+        tensor = torch.randn(1, 5).t()
+        meta_clone = prims._clone_meta(tensor, memory_format=torch.preserve_format)
+        self.assertEqual(tensor.stride(), meta_clone.stride())
+
+    def test_clone_meta_stride_preservation_sparse(self):
+        tensor = torch.arange(12).float().view(3, 4)[1:, ::2]
+        meta_clone = prims._clone_meta(tensor, memory_format=torch.preserve_format)
+        self.assertEqual(tensor.contiguous().stride(), meta_clone.stride())
 
     def test_check_deprecation_warning(self):
         with self.assertWarnsRegex(FutureWarning, 'will be removed in the future'):
@@ -408,7 +418,7 @@ class TestRefs(TestCase):
         # enables prim decomps
         with torch._dispatch.python.enable_python_dispatcher():
             x = torch.ones(4)
-            y = x.to(device="meta")
+            x.to(device="meta")
 
     def test_inferred_tags(self):
         self.assertEqual(torch.ops.prims.normal.default.tags, (torch.Tag.nondeterministic_seeded, torch.Tag.pt2_compliant_tag))

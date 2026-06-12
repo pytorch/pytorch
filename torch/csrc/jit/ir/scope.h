@@ -126,12 +126,12 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   std::optional<InlinedCallStackPtr> callee_;
   Function* fn_;
   // Reason for fn_name_ even though we have fn_
-  // Serialized callstack is used in circustmances where InlinedCallstack
+  // Serialized callstack is used in circumstances where InlinedCallstack
   // cannot be constructed during runtime, e.g. mobile runtime or
   // delegated backends.
   // Since in those cases we do not have Function* we store function name
   // fn_name does not give you access to the same information that Function*
-  // does, however in mobile/delegated backend runtime we use InlindedCallStack
+  // does, however in mobile/delegated backend runtime we use InlinedCallStack
   // for exception stack and for that purpose fn_name_ suffices.
   const std::string fn_name_;
   SourceRange source_range_;
@@ -190,7 +190,7 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
 
-  void setCallee(std::optional<InlinedCallStackPtr>);
+  void setCallee(std::optional<InlinedCallStackPtr> /*callee*/);
 
   bool operator==(const InlinedCallStack& rhs) const {
     // No need to compare fn_, since source_range equivalence check
@@ -208,7 +208,7 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
 };
 
 // {source range, node name, InlinedCallStack}
-// We store node name because same debug infor will be used for
+// We store node name because same debug info will be used for
 // profiling as well, so we need to know op names as well.
 using DebugInfoTuple =
     std::tuple<SourceRange, std::string, InlinedCallStackPtr>;

@@ -13,7 +13,7 @@ import time
 from enum import Enum
 from pathlib import Path
 from sysconfig import get_paths as gp
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 
 # PyTorch directory root
@@ -31,16 +31,11 @@ def scm_root() -> str:
 
 
 PYTORCH_ROOT = scm_root()
-IS_WINDOWS: bool = os.name == "nt"
 
 
 # Returns '/usr/local/include/python<version number>'
 def get_python_include_dir() -> str:
     return gp()["include"]
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    print(*args, file=sys.stderr, flush=True, **kwargs)
 
 
 class LintSeverity(str, Enum):
@@ -60,10 +55,6 @@ class LintMessage(NamedTuple):
     original: str | None
     replacement: str | None
     description: str | None
-
-
-def as_posix(name: str) -> str:
-    return name.replace("\\", "/") if IS_WINDOWS else name
 
 
 # c10/core/DispatchKey.cpp:281:26: error: 'k' used after it was moved [bugprone-use-after-move]
@@ -145,6 +136,9 @@ include_dir = [
     "/usr/lib/llvm-11/include/openmp",
     get_python_include_dir(),
     os.path.join(PYTORCH_ROOT, "third_party/pybind11/include"),
+    # For header-only lints (no compile_commands.json entry) to resolve <ATen/...>.
+    os.path.join(PYTORCH_ROOT, "aten/src"),
+    PYTORCH_ROOT,
 ] + clang_search_dirs()
 for dir in include_dir:
     include_args += ["--extra-arg", f"-I{dir}"]
@@ -154,11 +148,28 @@ def check_file(
     filename: str,
     binary: str,
     build_dir: Path,
+    std: str | None,
 ) -> list[LintMessage]:
+    # Explicitly pass include path for linters that only check headers.
+    # build/aten/src covers generated <ATen/...> headers (Functions.h etc.).
+    build_include_args = include_args + [
+        "--extra-arg",
+        f"-I{build_dir}",
+        "--extra-arg",
+        f"-I{build_dir}/aten/src",
+    ]
+    cmd = [
+        binary,
+        f"-p={build_dir}",
+        *build_include_args,
+        filename,
+    ]
+    # Only add -- and -std flag if std is explicitly specified
+    if std is not None:
+        cmd.extend(["--", f"-std={std}"])
+
     try:
-        proc = run_command(
-            [binary, f"-p={build_dir}", *include_args, filename],
-        )
+        proc = run_command(cmd)
     except OSError as err:
         return [
             LintMessage(
@@ -183,6 +194,8 @@ def check_file(
         for match in RESULTS_RE.finditer(proc.stdout.decode()):
             # Convert the reported path to an absolute path.
             abs_path = str(Path(match["file"]).resolve())
+            if not abs_path.startswith(PYTORCH_ROOT):
+                continue
             message = LintMessage(
                 path=abs_path,
                 name=match["code"],
@@ -220,6 +233,14 @@ def main() -> None:
         help=(
             "Where the compile_commands.json file is located. "
             "Gets passed to clang-tidy -p"
+        ),
+    )
+    parser.add_argument(
+        "--std",
+        default=None,
+        help=(
+            "C++ standard to use for compilation (e.g., c++17, c++20). "
+            "If not specified, uses the standard from compile_commands.json."
         ),
     )
     parser.add_argument(
@@ -282,6 +303,7 @@ def main() -> None:
                 filename,
                 binary_path,
                 abs_build_dir,
+                args.std,
             ): filename
             for filename in args.filenames
         }

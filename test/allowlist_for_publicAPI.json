@@ -552,7 +552,6 @@
   "torch.multiprocessing.reductions": [
     "ForkingPickler",
     "Union",
-    "check_serializing_named_tensor",
     "register_after_fork"
   ],
   "torch.multiprocessing.spawn": [
@@ -657,13 +656,6 @@
   "torch.nn.utils.convert_parameters": [
     "Iterable",
     "Optional"
-  ],
-  "torch.onnx": [
-    "Dict",
-    "OperatorExportTypes",
-    "Optional",
-    "TensorProtoDataType",
-    "TrainingMode"
   ],
   "torch.overrides": [
     "BaseTorchFunctionMode",
@@ -1028,10 +1020,10 @@
   "torch.types": [
     "Any",
     "Device",
+    "FileLike",
     "List",
     "Number",
     "Sequence",
-    "Tuple",
     "Union"
   ],
   "torch.utils.benchmark.utils.compare": [
@@ -1779,9 +1771,7 @@
     "Optional",
     "Union"
   ],
-  "torch.fx.experimental.migrate_gradual_types.constraint": [
-    "TensorType"
-  ],
+  "torch.fx.experimental.migrate_gradual_types.constraint": [],
   "torch.fx.experimental.migrate_gradual_types.constraint_generator": [
     "ApplyBroadcasting",
     "BatchNorm2d",
@@ -1837,6 +1827,7 @@
     "IndexSelect",
     "List",
     "Prod",
+    "Sequence",
     "T",
     "TGreatestUpperBound",
     "TVar",
@@ -1851,6 +1842,7 @@
     "BinConstraintD",
     "BinConstraintT",
     "Conj",
+    "Constraint",
     "ConstraintGenerator",
     "D",
     "DVar",
@@ -2007,8 +1999,6 @@
     "cast_symbool_to_symint_guardless",
     "constrain_range",
     "constrain_unify",
-    "definitely_false",
-    "definitely_true",
     "error",
     "eval_guards",
     "eval_is_non_overlapping_and_dense",
@@ -2018,7 +2008,7 @@
     "fx_placeholder_targets",
     "fx_placeholder_vals",
     "guard_bool",
-    "has_hint",
+    "has_guarding_hint",
     "is_symbolic",
     "parallel_and",
     "parallel_or",
@@ -2209,21 +2199,6 @@
     "Tuple",
     "abstractmethod"
   ],
-  "torch.onnx.verification": [
-    "Any",
-    "Callable",
-    "Collection",
-    "Dict",
-    "FrozenSet",
-    "List",
-    "Mapping",
-    "Number",
-    "Optional",
-    "Sequence",
-    "Set",
-    "Tuple",
-    "Union"
-  ],
   "torch.quantization.fx": [
     "convert",
     "fuse",
@@ -2383,15 +2358,6 @@
   ],
   "torch.utils.collect_env": [
     "namedtuple"
-  ],
-  "torch.utils.data.datapipes.gen_pyi": [
-    "Any",
-    "Dict",
-    "List",
-    "Set",
-    "Tuple",
-    "Union",
-    "defaultdict"
   ],
   "torch.utils.data.datapipes.utils.snapshot": [
     "IterDataPipe",
@@ -2695,35 +2661,6 @@
   "torch.mtia": [
     "DeferredMtiaCallError",
     "StreamContext"
-  ],
-  "torch.onnx.symbolic_helper": [
-    "Any",
-    "Callable",
-    "List",
-    "Literal",
-    "NoReturn",
-    "Number",
-    "Optional",
-    "Sequence",
-    "Set",
-    "Tuple",
-    "Union"
-  ],
-  "torch.onnx.symbolic_opset18": [
-    "amax",
-    "amin",
-    "aminmax",
-    "embedding_bag",
-    "linalg_vector_norm",
-    "max",
-    "maximum",
-    "min",
-    "minimum"
-  ],
-  "torch.onnx.symbolic_opset20": [
-    "_affine_grid_generator",
-    "_grid_sampler",
-    "convert_grid_sample_mode"
   ],
   "torch.utils.data.datapipes.dataframe.dataframe_wrapper": [
     "Any",

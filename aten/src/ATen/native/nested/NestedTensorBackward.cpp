@@ -2,12 +2,10 @@
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/NestedTensorImpl.h>
-#include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <c10/core/DeviceType.h>
 
@@ -31,7 +29,7 @@ std::tuple<Tensor, Tensor> matmul_backward_nested(
   if (grad_input_mask[1]) {
     grad_other = at::matmul(self.transpose(-1, -2), grad);
   }
-  return std::make_tuple(grad_self, grad_other);
+  return std::make_tuple(std::move(grad_self), std::move(grad_other));
 }
 
 std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
@@ -161,7 +159,6 @@ Tensor _nested_select_backward_symint(
   const Tensor& grad,
   const Tensor& nested_self,
   int64_t dim,
-  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   c10::SymInt index) {
   auto nt_self = get_nested_tensor_impl(nested_self);
   const Tensor& self_buffer = nt_self->get_buffer();
@@ -200,11 +197,12 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
     const std::optional<Tensor>& weight_opt /* optional */,
     const std::optional<Tensor>& bias_opt /*{ optional */,
     std::array<bool, 3> grad_input_mask) {
+  TORCH_CHECK_VALUE(weight_opt.has_value() && bias_opt.has_value(), "NestedTensor layer_norm requires weight and bias");
   // For NestedTensors weight and bias are non nested.
   auto* nt_impl_grad = get_nested_tensor_impl(grad);
   auto* nt_impl_input = get_nested_tensor_impl(input);
-  const auto& weight = *weight_opt;
-  const auto& bias = *bias_opt;
+  const auto& weight = weight_opt.value();
+  const auto& bias = bias_opt.value();
   const auto& sizes = nt_impl_input->get_nested_sizes();
   auto M_N = _check_nested_layer_norm_inputs(
       *nt_impl_input, normalized_shape, weight, bias);
@@ -219,7 +217,6 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
   Tensor dbeta;
   auto input_buffer = nt_impl_input->get_buffer();
   auto grad_buffer = nt_impl_grad->get_buffer();
-  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (grad_input_mask[0]) {
     dInput = at::native::empty_like(
         input_buffer,
@@ -271,7 +268,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
   }
   if (M > 0) {
     LayerNormBackwardKernel(
-        input_buffer.is_cuda() ? kCUDA : kCPU,
+        input_buffer.device().type(),
         grad_buffer,
         input_buffer,
         mean,

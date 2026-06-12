@@ -2,7 +2,6 @@
 # not a specific backend
 
 import operator
-from typing import List
 
 import torch
 import torch.ao.nn.qat as nnqat
@@ -98,7 +97,7 @@ executorch_weight_only_quint8_dtype_config = DTypeConfig(
 # =============================
 
 
-def _get_linear_configs() -> List[BackendPatternConfig]:
+def _get_linear_configs() -> list[BackendPatternConfig]:
     """
     Return all configs related to linear modules and ops.
     """
@@ -110,11 +109,11 @@ def _get_linear_configs() -> List[BackendPatternConfig]:
         executorch_default_dynamic_qint8_dtype_config,
         executorch_default_dynamic_float16_dtype_config,
     ]
-    linear_configs: List[BackendPatternConfig] = []
+    linear_configs: list[BackendPatternConfig] = []
     # linear module
     linear_configs.append(
         BackendPatternConfig(torch.nn.Linear)
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
         .set_root_module(torch.nn.Linear)
         .set_reference_quantized_module(nnqr.Linear)
@@ -123,7 +122,7 @@ def _get_linear_configs() -> List[BackendPatternConfig]:
     # linear qat module
     linear_configs.append(
         BackendPatternConfig(nnqat.Linear)
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
         .set_root_module(torch.nn.Linear)
         .set_reference_quantized_module(nnqr.Linear)
@@ -131,14 +130,14 @@ def _get_linear_configs() -> List[BackendPatternConfig]:
     # functional linear
     linear_configs.append(
         BackendPatternConfig(torch.nn.functional.linear)
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 1, "bias": 2})
     )
     return linear_configs
 
 
-def _get_conv_configs() -> List[BackendPatternConfig]:
+def _get_conv_configs() -> list[BackendPatternConfig]:
     """
     Return all configs related to conv modules and ops.
     """
@@ -154,7 +153,7 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
         # conv module
         conv_configs.append(
             BackendPatternConfig(convs.root)
-            .set_observation_type(observation_type)  # noqa: E131
+            .set_observation_type(observation_type)
             .set_dtype_configs(dtype_configs)
             .set_root_module(convs.root)
             .set_reference_quantized_module(convs.reference)
@@ -163,7 +162,7 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
         # conv qat module
         conv_configs.append(
             BackendPatternConfig(convs.qat)
-            .set_observation_type(observation_type)  # noqa: E131
+            .set_observation_type(observation_type)
             .set_dtype_configs(dtype_configs)
             .set_root_module(convs.root)
             .set_reference_quantized_module(convs.reference)
@@ -171,7 +170,7 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
         # functional conv
         conv_configs.append(
             BackendPatternConfig(convs.func)
-            .set_observation_type(observation_type)  # noqa: E131
+            .set_observation_type(observation_type)
             .set_dtype_configs(dtype_configs)
             ._set_input_type_to_index({"weight": 1, "bias": 2})
         )
@@ -181,21 +180,21 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
         # conv module + relu module
         conv_configs.append(
             BackendPatternConfig((convs.root, nn.ReLU))
-            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             .set_fuser_method(_sequential_wrapper2(convs.fused_conv_relu))
             .set_fused_module(convs.fused_conv_relu)
         )
         # conv module + functional relu
         conv_configs.append(
             BackendPatternConfig((convs.root, F.relu))
-            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             .set_fuser_method(_sequential_wrapper2(convs.fused_conv_relu))
             .set_fused_module(convs.fused_conv_relu)
         )
         # fused conv relu module
         conv_configs.append(
             BackendPatternConfig(convs.fused_conv_relu)
-            .set_observation_type(observation_type)  # noqa: E131
+            .set_observation_type(observation_type)
             .set_dtype_configs(dtype_configs)
             .set_root_module(convs.root)
             .set_reference_quantized_module(convs.reference)
@@ -204,7 +203,7 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
         # conv relu, qat fused module
         conv_configs.append(
             BackendPatternConfig(convs.relu_qat)
-            .set_observation_type(observation_type)  # noqa: E131
+            .set_observation_type(observation_type)
             .set_dtype_configs(dtype_configs)
             .set_root_module(convs.root)
             .set_reference_quantized_module(convs.reference)
@@ -212,25 +211,25 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
         # functional conv + relu module
         conv_configs.append(
             BackendPatternConfig((convs.func, nn.ReLU))
-            .set_observation_type(observation_type)  # noqa: E131
+            .set_observation_type(observation_type)
             .set_dtype_configs(dtype_configs)
         )
         # functional conv + functional relu
         conv_configs.append(
             BackendPatternConfig((convs.func, F.relu))
-            .set_observation_type(observation_type)  # noqa: E131
+            .set_observation_type(observation_type)
             .set_dtype_configs(dtype_configs)
         )
         # fused conv relu
         conv_configs.append(
             BackendPatternConfig(convs.fused_conv_relu)
-            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             .set_qat_module(convs.relu_qat)
         )
 
         conv_configs.append(
             BackendPatternConfig(convs.relu_qat)
-            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             .set_root_module(convs.root)
             .set_reference_quantized_module(convs.reference)
         )
@@ -240,21 +239,21 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
         # conv + batchnorm (+ relu)
         conv_configs.append(
             BackendPatternConfig((convs.root, convs.bn))
-            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             .set_fuser_method(fuse_conv_bn)
             .set_fused_module(convs.fused_conv_bn)
         )
         # conv + bn + relu module fusion
         conv_configs.append(
             BackendPatternConfig((convs.root, convs.bn, nn.ReLU))
-            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             .set_fuser_method(fuse_conv_bn_relu)
             .set_fused_module(convs.fused_conv_bn_relu)
         )
         # conv + bn + relu functional fusion
         conv_configs.append(
             BackendPatternConfig((convs.root, convs.bn, F.relu))
-            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             .set_root_module(convs.root)
             .set_fuser_method(fuse_conv_bn_relu)
             .set_fused_module(convs.fused_conv_bn_relu)
@@ -264,21 +263,21 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
         # fused conv bn
         conv_configs.append(
             BackendPatternConfig(convs.fused_conv_bn)
-            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             .set_qat_module(convs.bn_qat)
         )
 
         # fused conv bn relu
         conv_configs.append(
             BackendPatternConfig(convs.fused_conv_bn_relu)
-            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             .set_qat_module(convs.bn_relu_qat)
         )
 
         # conv bn, qat fused module
         conv_configs.append(
             BackendPatternConfig(convs.bn_qat)
-            .set_observation_type(observation_type)  # noqa: E131
+            .set_observation_type(observation_type)
             .set_dtype_configs(dtype_configs)
             .set_root_module(convs.root)
             .set_reference_quantized_module(convs.reference)
@@ -286,7 +285,7 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
         # conv bn relu, qat fused module
         conv_configs.append(
             BackendPatternConfig(convs.bn_relu_qat)
-            .set_observation_type(observation_type)  # noqa: E131
+            .set_observation_type(observation_type)
             .set_dtype_configs(dtype_configs)
             .set_root_module(convs.root)
             .set_reference_quantized_module(convs.reference)
@@ -294,7 +293,7 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
     return conv_configs
 
 
-def _get_binary_ops_configs() -> List[BackendPatternConfig]:
+def _get_binary_ops_configs() -> list[BackendPatternConfig]:
     """
     Return all configs related to binary ops.
     """
@@ -310,7 +309,7 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
         1: ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
         2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
     }
-    binary_op_configs: List[BackendPatternConfig] = []
+    binary_op_configs: list[BackendPatternConfig] = []
     for op in [
         operator.add,
         torch.add,
@@ -327,7 +326,7 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
         ]
         binary_op_configs.extend(
             BackendPatternConfig(bop_pattern)
-            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             ._set_num_tensor_args_to_observation_type(
                 num_tensor_args_to_observation_type_mapping
             )
@@ -336,7 +335,7 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
     return binary_op_configs
 
 
-def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
+def _get_share_qparams_ops_configs() -> list[BackendPatternConfig]:
     """
     Return the operator configs for the operators that works for both float and quantized
     input if input is quantized, the output Tensor shares the same quantization parameter
@@ -385,16 +384,16 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         "squeeze_",
         "leaky_relu",
     ]
-    share_qparams_op_configs: List[BackendPatternConfig] = [
+    share_qparams_op_configs: list[BackendPatternConfig] = [
         BackendPatternConfig(op)
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
         for op in share_qparams_ops
     ]
     return share_qparams_op_configs
 
 
-def _get_bn_configs() -> List[BackendPatternConfig]:
+def _get_bn_configs() -> list[BackendPatternConfig]:
     """
     Return all configs related to batchnorm.
     """
@@ -406,13 +405,13 @@ def _get_bn_configs() -> List[BackendPatternConfig]:
     bn_configs = []
     bn_configs.append(
         BackendPatternConfig(nn.BatchNorm2d)
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
     )
     return bn_configs
 
 
-def _get_cat_configs() -> List[BackendPatternConfig]:
+def _get_cat_configs() -> list[BackendPatternConfig]:
     dtype_configs = [
         qnnpack_default_op_qint8_symmetric_dtype_config,
         executorch_default_op_quint8_dtype_config,
@@ -436,7 +435,7 @@ def _get_cat_configs() -> List[BackendPatternConfig]:
     return cat_configs
 
 
-def _get_embedding_op_configs() -> List[BackendPatternConfig]:
+def _get_embedding_op_configs() -> list[BackendPatternConfig]:
     dtype_configs = [
         executorch_weight_only_quint8_dtype_config,
     ]
@@ -449,7 +448,7 @@ def _get_embedding_op_configs() -> List[BackendPatternConfig]:
             BackendPatternConfig(embedding_op)
             .set_observation_type(
                 ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-            )  # noqa: E131
+            )
             .set_dtype_configs(dtype_configs)
             .set_qat_module(qat_embedding_op)
             .set_root_module(embedding_op)
@@ -460,7 +459,7 @@ def _get_embedding_op_configs() -> List[BackendPatternConfig]:
             BackendPatternConfig(qat_embedding_op)
             .set_observation_type(
                 ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-            )  # noqa: E131
+            )
             .set_dtype_configs(dtype_configs)
             .set_root_module(embedding_op)
             .set_reference_quantized_module(ref_embedding_op)
@@ -471,7 +470,7 @@ def _get_embedding_op_configs() -> List[BackendPatternConfig]:
             BackendPatternConfig(torch.nn.functional.embedding)
             .set_observation_type(
                 ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-            )  # noqa: E131
+            )
             .set_dtype_configs(dtype_configs)
             ._set_input_type_to_index({"weight": 1})
         )

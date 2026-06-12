@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .parser.coverage_record import CoverageRecord
 
 
-# coverage_records: Dict[str, LineInfo] = {}
+# coverage_records: dict[str, LineInfo] = {}
 covered_lines: dict[str, set[int]] = {}
 uncovered_lines: dict[str, set[int]] = {}
 tests_type: TestStatusType = {"success": set(), "partial": set(), "fail": set()}
@@ -53,7 +53,8 @@ def transform_file_name(
         from package.oss.utils import get_pytorch_folder  # type: ignore[import]
 
         pytorch_foler = get_pytorch_folder()
-        assert file_path.startswith(pytorch_foler)
+        if not file_path.startswith(pytorch_foler):
+            raise AssertionError(f"file_path must start with {pytorch_foler}")
         file_path = file_path[len(pytorch_foler) + 1 :]
     return file_path
 
@@ -67,6 +68,7 @@ def is_intrested_file(
 
     # ignore files that are not belong to pytorch
     if platform == TestPlatform.OSS:
+        # pyrefly: ignore [missing-import]
         from package.oss.utils import get_pytorch_folder
 
         if not file_path.startswith(get_pytorch_folder()):

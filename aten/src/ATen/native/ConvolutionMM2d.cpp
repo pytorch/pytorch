@@ -8,6 +8,7 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Unfold2d.h>
 #include <c10/util/irange.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -25,7 +26,7 @@ namespace at::native {
 
 namespace {
 
-static Tensor compute_columns2d(
+Tensor compute_columns2d(
     const Tensor& input,
     IntArrayRef padding,
     IntArrayRef stride,
@@ -93,7 +94,7 @@ static Tensor compute_columns2d(
   return columns.contiguous();
 }
 
-static inline void slow_conv2d_shape_check(
+inline void slow_conv2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
@@ -183,7 +184,8 @@ static inline void slow_conv2d_shape_check(
   if (weight.defined()) {
     int64_t n_input_plane = weight.size(1);
     if (weight.dim() == 2) {
-      n_input_plane /= (kernel_height * kernel_width);
+      n_input_plane /= kernel_height;
+      n_input_plane /= kernel_width;
     }
     if (input.size(1) != 0) {
       check_dim_size(input, ndim, dim_planes, n_input_plane);
@@ -204,7 +206,7 @@ static inline void slow_conv2d_shape_check(
   }
 }
 
-static inline Tensor view_weight_2d(const Tensor& weight_,
+inline Tensor view_weight_2d(const Tensor& weight_,
     at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) {
   Tensor weight = weight_.contiguous(memory_format);
   if (weight.dim() == 4) {
@@ -219,7 +221,7 @@ static inline Tensor view_weight_2d(const Tensor& weight_,
 }
 
 template <typename scalar_t>
-static void slow_conv2d_update_output_frame(
+void slow_conv2d_update_output_frame(
     TensorAccessor<const scalar_t, 3> input,
     TensorAccessor<scalar_t, 3> output,
     TensorAccessor<const scalar_t, 2> weight,
@@ -479,7 +481,7 @@ void slow_conv2d_backward_weight_frame(
   }
 }
 
-static void slow_conv2d_backward_weight_out_cpu_template(
+void slow_conv2d_backward_weight_out_cpu_template(
     Tensor& grad_weight,
     const Tensor& input,
     const Tensor& grad_output_,
@@ -728,7 +730,8 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cpu(
       grad_weight,
       grad_bias);
 
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(
+      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 Tensor & thnn_conv2d_out(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding, Tensor & output) {
