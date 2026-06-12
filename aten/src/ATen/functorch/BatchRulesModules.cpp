@@ -5,8 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <ATen/functorch/PlumbingHelper.h>
-#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/DTensorState.h>
 
 #include <utility>
 
@@ -34,7 +33,8 @@ static std::tuple<Tensor, std::optional<int64_t>> embedding_batch_rule(
     const auto weight_ = reshape_dim_into(*weight_bdim, /*embedding_dim*/1, weight);
     auto result = at::embedding_symint(weight_, indices, std::move(padding_idx), scale_grad_by_freq, sparse);
     result = reshape_dim_outof(-1, batch_size, result);
-    return std::make_tuple(result, result.dim() - 2);
+    auto result_bdim = result.dim() - 2;
+    return std::make_tuple(std::move(result), result_bdim);
   }
   TORCH_INTERNAL_ASSERT(weight_bdim && indices_bdim);
   // B*, BED -> B*, (BE)D -> B*D
@@ -44,8 +44,13 @@ static std::tuple<Tensor, std::optional<int64_t>> embedding_batch_rule(
   const auto weight_ = reshape_dim_into(*weight_bdim, 0, weight);
   auto indices_ = moveBatchDimToFront(indices, indices_bdim);
 
-  const auto range = getStepTensor(indices, batch_size, num_embeddings);
-  indices_ = indices_ + range;
+  {
+    // getStepTensor returns a regular Tensor. If indices_ is a DTensor
+    // we want to allow this mixed DTensor-Tensor operation.
+    at::DTensorAllowImplicitReplication guard;
+    const auto range = getStepTensor(indices, batch_size, num_embeddings);
+    indices_ = indices_ + range;
+  }
   auto result = at::embedding_symint(weight_, indices_, std::move(padding_idx), scale_grad_by_freq, sparse);
   return std::make_tuple(std::move(result), 0);
 }
@@ -57,7 +62,7 @@ embedding_dense_backward_batch_rule(
     c10::SymInt num_weights, c10::SymInt padding_idx, bool scale_grad_by_freq) {
   Tensor grad = grad_;
   Tensor indices = indices_;
-  if (!indices_bdim && grad_bdim) {
+  if (!indices_bdim.has_value() && grad_bdim) {
     const auto bdim_size = grad.sym_size(*grad_bdim);
     grad = reshape_dim_into(*grad_bdim, -1, grad);
     auto result = at::embedding_dense_backward_symint(
@@ -65,7 +70,8 @@ embedding_dense_backward_batch_rule(
     result = reshape_dim_outof_symint(1, bdim_size, result);
     return std::make_tuple(std::move(result), 1);
   }
-  const auto bdim_size = indices.size(*indices_bdim);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const auto bdim_size = indices.size(indices_bdim.value());
   indices = moveBatchDimToFront(indices, indices_bdim);
   grad = moveBatchDimToFront(grad, grad_bdim);
   grad = ensure_has_bdim(grad, grad_bdim.has_value(), bdim_size);
@@ -110,7 +116,7 @@ embedding_dense_backward_batch_rule(
  */
 template<typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor, std::optional<int64_t>>
-grid_sample_batch_rule(const Tensor& input, std::optional<int64_t> input_bdim, const Tensor& grid, std::optional<int64_t> grid_bdim, ExtraArgs... extra_args) {
+static grid_sample_batch_rule(const Tensor& input, std::optional<int64_t> input_bdim, const Tensor& grid, std::optional<int64_t> grid_bdim, ExtraArgs... extra_args) {
   std::tuple<Tensor, std::optional<int64_t>> result;
   if (input_bdim && !grid_bdim) {
     auto new_input = reshape_dim_into(*input_bdim, 1, input);
@@ -161,20 +167,28 @@ grid_sample_backward_helper_in(
 
 static std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
 grid_sample_backward_helper_out(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::tuple<Tensor, Tensor> bw_out,
-    std::optional<int64_t> grad_input_out_bdim,
-    std::optional<int64_t> grad_grid_out_bdim,
+    int64_t grad_input_bdim,
+    int64_t grad_grid_bdim,
     int64_t bdim_size) {
   auto& [grad_input, grad_grid] = bw_out;
-  grad_input = reshape_dim_outof(*grad_input_out_bdim, bdim_size, grad_input);
-  grad_grid = reshape_dim_outof(*grad_grid_out_bdim, bdim_size, grad_grid);
-  return std::make_tuple(std::move(grad_input), grad_input_out_bdim, std::move(grad_grid), grad_grid_out_bdim);
+  std::optional<int64_t> grad_input_bdim_out, grad_grid_bdim_out;
+  if (grad_input.defined()) {
+    grad_input = reshape_dim_outof(grad_input_bdim, bdim_size, grad_input);
+    grad_input_bdim_out = grad_input_bdim;
+  }
+  if (grad_grid.defined()) {
+    grad_grid = reshape_dim_outof(grad_grid_bdim, bdim_size, grad_grid);
+    grad_grid_bdim_out = grad_grid_bdim;
+  }
+  return std::make_tuple(std::move(grad_input), grad_input_bdim_out, std::move(grad_grid), grad_grid_bdim_out);
 }
 
 
 template<typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
-grid_sample_backward_batch_rule(
+static grid_sample_backward_batch_rule(
     const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
     const Tensor& input, std::optional<int64_t> input_bdim,
     const Tensor& grid, std::optional<int64_t> grid_bdim,
@@ -205,40 +219,22 @@ static cudnn_grid_sample_backward_batch_rule(
   return grid_sample_backward_helper_out(std::move(bw_out), 0, 0, bdim_size);
 }
 
-// TODO: replace with targetable functionalization
+// uses functional formulation for one_hot under vmap to be compatible with
+// fakeTensor/dynamic shapes and compiled functorch transforms.
+// mirrors the meta path in aten/src/ATen/native/Onehot.cpp,
+// but requires explicit positive num_classes under vmap to avoid
+// data-dependent output shapes.
 static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
-    auto shape = self.sym_sizes().vec();
 
-    // empty tensor could be converted to one hot representation,
-    // but shape inference is not possible.
-    if (self.sym_numel() == 0) {
-        if (num_classes <= 0) {
-            TORCH_CHECK(false, "Can not infer total number of classes from empty tensor.");
-        } else {
-            shape.emplace_back(num_classes);
-            return at::empty_symint(shape, self.options());
-        }
-    }
-
+    // disallow implicit inference under vmap; this would be data-dependent
+    // and is intentionally guarded by Dynamo in torch/_dynamo/variables/torch.py.
     TORCH_CHECK(num_classes > 0, "When vmap-ing torch.nn.functional.one_hot, please "
         "provide an explicit positive num_classes argument.");
 
-    // Disabling all of the following checks. This is OK because scatter has checks too.
-    // Maybe one_hot should be a primitive wrt autograd so we don't have to deal with this.
-    // // non-empty tensor
-    // if (self.device().type() != at::kCUDA) {
-    //   //for cuda, rely on device assert thrown by scatter
-    //   TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
-    // }
-    // if (self.device().type() != at::kCUDA) {
-    //   //rely on device asserts from scatter to avoid sync here
-    //   TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
-    // }
-
-    shape.emplace_back(num_classes);
-    Tensor ret = at::zeros_symint(shape, self.options());
-    return ret.scatter(-1, self.unsqueeze(-1), 1);
+    const auto options = self.options();
+    at::Tensor index = at::arange(num_classes, options);
+    return at::eq(self.unsqueeze(-1), index).to(at::kLong);
 }
 
 template <typename A, A a, typename C>
@@ -250,7 +246,8 @@ struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
       const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
       c10::SymIntArrayRef output_size, c10::SymIntArrayRef input_size,
       T... extra_args) {
-    auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    auto grad_output_ = reshape_dim_into(grad_output_bdim.value(), 0, grad_output);
     TORCH_INTERNAL_ASSERT(!input_size.empty());
 
     // input_size is wrong so we correct it
@@ -258,11 +255,12 @@ struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
     physical_input_size[0] = grad_output_.sym_sizes()[0];
 
     auto out = Func(
-        grad_output_,
+        std::move(grad_output_),
         output_size,
-        physical_input_size,
+        std::move(physical_input_size),
         std::forward<T>(extra_args)...);
-    return std::make_tuple(reshape_dim_outof_symint(0, grad_output.sym_sizes()[*grad_output_bdim], out), 0);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return std::make_tuple(reshape_dim_outof_symint(0, grad_output.sym_sizes()[grad_output_bdim.value()], out), 0);
   }
 
 };

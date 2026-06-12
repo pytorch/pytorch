@@ -311,7 +311,7 @@ void GroupNormKernelImplChannelsLastInternal(
   const bool gamma_null = (gamma_data == nullptr);
   const bool beta_null = beta_data == nullptr;
 
-  // NB: About algorithm choosen:
+  // NB: About algorithm chosen:
   //
   // On channels last, GroupNorm has a input shape of {N, H, W, GD},
   // Mean and rstd are collected per each n and g, which involves reduction
@@ -570,10 +570,8 @@ ComputeInternalGradients(
   at::parallel_for(0, N * C, 1, [=](int64_t start, int64_t end) {
     constexpr int64_t K = Vec::size();
     const int64_t inner_size = HxW / K * K;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<opmath_t, K / 2> ds_arr;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<opmath_t, K / 2> db_arr;
+    std::array<opmath_t, K / 2> ds_arr{};
+    std::array<opmath_t, K / 2> db_arr{};
     for (const auto i : c10::irange(start, end)) {
       const T* dY_ptr = dY + i * HxW;
       const T* X_ptr = X + i * HxW;

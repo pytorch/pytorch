@@ -59,11 +59,9 @@ void spatial_dilated_max_pooling(
     T* oData) { // output arrays (data and max-index)
   at::parallel_for(0, iC, 0, [&](int64_t start, int64_t end) {
     for (const auto p : c10::irange(start, end)) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t row, col;
       const T* i_p = iData + p * iW * iH;
-      for (row = 0; row < oH; ++row) {
-        for (col = 0; col < oW; ++col) {
+      for (int64_t row = 0; row < oH; ++row) {
+        for (int64_t col = 0; col < oW; ++col) {
           int64_t h_start = row * sH - pH;
           int64_t w_start = col * sW - pW;
           int64_t h_end = std::min(h_start + (kH - 1) * dH + 1, iH);
@@ -79,10 +77,8 @@ void spatial_dilated_max_pooling(
           // local max
           auto max_val = std::numeric_limits<typename T::underlying>::lowest();
           int64_t tcntr = 0; // center point
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t x, y;
-          for (y = h_start; y < h_end; y += dH) {
-            for (x = w_start; x < w_end; x += dW) {
+          for (int64_t y = h_start; y < h_end; y += dH) {
+            for (int64_t x = w_start; x < w_end; x += dW) {
               tcntr = y * iW + x;
               auto val = (i_p + tcntr)->val_;
               if (val > max_val) {
@@ -161,11 +157,9 @@ void spatial_dilated_max_pooling3d(
             // local max
             auto max_val = std::numeric_limits<typename T::underlying>::lowest();
             int64_t tcntr = 0; // center point
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            int64_t t, x, y;
-            for (t = t_start; t < t_end; t += dT) {
-              for (y = h_start; y < h_end; y += dH) {
-                for (x = w_start; x < w_end; x += dW) {
+            for (int64_t t = t_start; t < t_end; t += dT) {
+              for (int64_t y = h_start; y < h_end; y += dH) {
+                for (int64_t x = w_start; x < w_end; x += dW) {
                   tcntr = t * iH * iW + y * iW + x;
                   auto val = (i_p + tcntr)->val_;
                   if (val > max_val) {
@@ -366,7 +360,7 @@ Tensor q_maxpool_3d(
   TORCH_CHECK(kT > 0 && kH > 0 && kW > 0, "kernel_size should be greater than zero.");
   TORCH_CHECK(sT > 0 && sH > 0 && sW > 0, "strides should be greater than zero.");
   TORCH_CHECK(
-      dT && dH > 0 && dW > 0,
+      dT > 0 && dH > 0 && dW > 0,
       "dilation should be greater than zero. "
       "Got (",
       dT,
@@ -599,7 +593,7 @@ void check_maxpool3d_params(
            batch_size /* batch size */,
            inH /* input height */,
            inW /* input width */,
-           (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
+           reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()) /* input */,
            inC /* input_pixel_stride */,
            (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
            outC /* output_pixel_stride */,

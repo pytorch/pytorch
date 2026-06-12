@@ -71,9 +71,11 @@ class HybridModel(torch.nn.Module):
             emb_lookups_cat = torch.cat(emb_lookups, dim=1)
 
         # Make sure combined PS dimension is always bigger or equal than the FC input
-        assert NUM_PS * EMBEDDING_DIM >= 512
+        if NUM_PS * EMBEDDING_DIM < 512:
+            raise AssertionError
         dim_normalizer = int(NUM_PS * EMBEDDING_DIM / 512)
         emb_lookups_reshaped = emb_lookups_cat.reshape(  # type: ignore[possibly-undefined]
+            # pyrefly: ignore [unbound-name]
             [emb_lookups_cat.shape[0] * dim_normalizer, 512]
         )
 
@@ -86,18 +88,18 @@ def _retrieve_embedding_parameters(emb_rref):
 
 def _print_header():
     _print_cont("\n")
-    _print_cont("%10s" % "")
+    _print_cont(" " * 10)
     for _ in [50, 75, 90, 95]:
-        _print_cont("%14s%10s" % ("sec/epoch", "epoch/sec"))
+        _print_cont(f"{'sec/epoch':14s}{'epoch/sec':10s}")
     _print_cont("\n")
 
 
 def _print_benchmark(prefix, nelem, measurements):
     measurements = sorted(measurements)
-    _print_cont("%8s:" % prefix)
+    _print_cont(f"{prefix:8s}:")
     for p in [50, 75, 90, 95]:
         v = np.percentile(measurements, p)
-        _print_cont("  p%02d:  %1.3fs  %6d/s" % (p, v, nelem / v))
+        _print_cont(f"  p{p:02d}:  {v:1.3f}s  {nelem / v:6d}/s")
     _print_cont("\n")
 
 
@@ -107,7 +109,8 @@ def _print_cont(msg):
 
 def _run_printable(cmd):
     proc = subprocess.run(shlex.split(cmd), capture_output=True, check=False)  # type: ignore[call-overload]
-    assert proc.returncode == 0
+    if proc.returncode != 0:
+        raise AssertionError
 
     buffer = io.BytesIO()
     torch.save(proc.stdout.decode("utf-8"), buffer)

@@ -11,8 +11,8 @@
 
 #if !AT_ONEDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor onednn_sigmoid(const Tensor& self) {
   TORCH_CHECK(false, "onednn_sigmoid: ATen not compiled with ONEDNN support");
@@ -30,8 +30,8 @@ Tensor& onednn_tanh_(Tensor& self) {
   TORCH_CHECK(false, "onednn_tanh_: ATen not compiled with ONEDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_ONEDNN_ENABLED
 

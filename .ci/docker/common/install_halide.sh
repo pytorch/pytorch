@@ -17,7 +17,7 @@ if [ -n "${UBUNTU_VERSION}" ];then
                   libopenblas-dev libeigen3-dev libatlas-base-dev libzstd-dev
 fi
 
-conda_install numpy scipy imageio cmake ninja
+pip_install numpy scipy imageio cmake ninja
 
 git clone --depth 1 --branch release/16.x --recursive https://github.com/llvm/llvm-project.git
 cmake -DCMAKE_BUILD_TYPE=Release \
@@ -35,7 +35,9 @@ git clone https://github.com/halide/Halide.git
 pushd Halide
 git checkout ${COMMIT} && git submodule update --init --recursive
 pip_install -r requirements.txt
-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -S . -B build
+# NOTE: pybind has a requirement for cmake > 3.5 so set the minimum cmake version here with a flag
+#       Context: https://github.com/pytorch/pytorch/issues/150420
+cmake -G Ninja -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -S . -B build
 cmake --build build
 test -e ${CONDA_PREFIX}/lib/python3 || ln -s python${ANACONDA_PYTHON_VERSION} ${CONDA_PREFIX}/lib/python3
 cmake --install build --prefix ${CONDA_PREFIX}

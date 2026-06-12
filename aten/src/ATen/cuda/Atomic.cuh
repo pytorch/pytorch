@@ -10,6 +10,10 @@
 #include <cuda_bf16.h>
 #endif
 
+#if defined(USE_ROCM)
+#include <ATen/cuda/detail/ROCmMacros.cuh>
+#endif
+
 template <typename T>
 struct AtomicFPOp;
 
@@ -330,19 +334,28 @@ inline __device__ void gpuAtomicAddNoReturn(int64_t *address, int64_t val) { gpu
 inline __device__ void gpuAtomicAddNoReturn(bool *address, bool val) { gpuAtomicAdd(address, val); }
 inline __device__ void gpuAtomicAddNoReturn(at::Half *address, at::Half val) { gpuAtomicAdd(address, val); }
 inline __device__ void gpuAtomicAddNoReturn(at::BFloat16 *address, at::BFloat16 val) { gpuAtomicAdd(address, val); }
-inline __device__ void gpuAtomicAddNoReturn(double *address, double val) { gpuAtomicAdd(address, val); }
 
-/* Special case fp32 atomic. */
+/* Note [HIP unsafeAtomicAdd]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Use unsafeAtomicAdd instead of atomicAdd for fp32 and fp64.
+ * On HIP, atomicAdd is always correct but is a slow CAS loop.
+ * unsafeAtomicAdd will use HW instructions and is much faster,
+ * but the caller must guarantee the pointer is GPU memory.
+ * If the pointer is system memory, the result is a silent no-op.
+ * This guarantee is upheld by all PyTorch uses of unsafeAtomicAdd.
+ * AMD HIP atomic header file is named amd_hip_atomic.h and is
+ * under the LLVM compiler directory.
+ */
 #if defined(USE_ROCM)
 inline __device__ void gpuAtomicAddNoReturn(float *address, float val) {
-#if defined(__gfx908__)
-  atomicAddNoRet(address, val);
-#else
+  if (__builtin_amdgcn_processor_is("gfx908"))
+    return atomicAddNoRet(address, val);
   (void)unsafeAtomicAdd(address, val);
-#endif
 }
+inline __device__ void gpuAtomicAddNoReturn(double *address, double val) { (void)unsafeAtomicAdd(address, val); }
 #else
 inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(double *address, double val) { gpuAtomicAdd(address, val); }
 #endif
 
 // Atomic multiplication implementation.
@@ -397,14 +410,7 @@ inline __device__ float gpuAtomicMul (float * address, float val) {
 
 template <typename T>
 __host__ __device__ T safe_max(T a, T b) {
-  #if defined(__HIPCC__)
-  // TODO: remove this special case for HIP when issue is fixed:
-  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
-    T max = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::max<T>(a, b));
-  #else
-    T max = at::_isnan(b) ? b : std::max<T>(a, b);
-  #endif
-
+  T max = at::_isnan(b) ? b : std::max<T>(a, b);
   return max;
 }
 
@@ -457,14 +463,7 @@ inline __device__ float gpuAtomicMax(float * address, float val) {
 
 template <typename T>
 __host__ __device__ T safe_min(T a, T b) {
-  #if defined(__HIPCC__)
-  // TODO: remove this special case for HIP when issue is fixed:
-  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
-    T min = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::min<T>(a, b));
-  #else
-    T min = at::_isnan(b) ? b : std::min<T>(a, b);
-  #endif
-
+  T min = at::_isnan(b) ? b : std::min<T>(a, b);
   return min;
 }
 

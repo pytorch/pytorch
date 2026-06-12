@@ -13,7 +13,7 @@ import os
 import time
 import traceback
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 __all__ = ["ErrorHandler"]
@@ -33,7 +33,7 @@ class ErrorHandler:
     Subclasses should override ``initialize()`` and ``record_exception()``.
     """
 
-    def _get_error_file_path(self) -> Optional[str]:
+    def _get_error_file_path(self) -> str | None:
         """
         Return the error file path.
 
@@ -52,7 +52,9 @@ class ErrorHandler:
         try:
             faulthandler.enable(all_threads=True)
         except Exception as e:
-            warnings.warn(f"Unable to enable fault handler. {type(e).__name__}: {e}")
+            warnings.warn(
+                f"Unable to enable fault handler. {type(e).__name__}: {e}", stacklevel=2
+            )
 
     def _write_error_file(self, file_path: str, error_msg: str) -> None:
         """Write error message to the file."""
@@ -60,11 +62,13 @@ class ErrorHandler:
             with open(file_path, "w") as fp:
                 fp.write(error_msg)
         except Exception as e:
-            warnings.warn(f"Unable to write error to file. {type(e).__name__}: {e}")
+            warnings.warn(
+                f"Unable to write error to file. {type(e).__name__}: {e}", stacklevel=2
+            )
 
     def record_exception(self, e: BaseException) -> None:
         """
-        Write a structured information about the exception into an error file in JSON format.
+        Write structured information about the exception into an error file in JSON format.
 
         If the error file cannot be determined, then logs the content
         that would have been written to the error file.
@@ -86,7 +90,7 @@ class ErrorHandler:
     def override_error_code_in_rootcause_data(
         self,
         rootcause_error_file: str,
-        rootcause_error: Dict[str, Any],
+        rootcause_error: dict[str, Any],
         error_code: int = 0,
     ):
         """Modify the rootcause_error read from the file, to correctly set the exit code."""
@@ -117,7 +121,7 @@ class ErrorHandler:
                     rootcause_error_file, rootcause_error, error_code
                 )
             logger.debug(
-                "child error file (%s) contents:\n" "%s",
+                "child error file (%s) contents:\n%s",
                 rootcause_error_file,
                 json.dumps(rootcause_error, indent=2),
             )

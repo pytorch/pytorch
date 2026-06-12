@@ -3,83 +3,116 @@ import logging
 import math
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dtensor_spec as dtensor_spec
 from torch._C._distributed_c10d import _resolve_process_group
+from torch._logging import warning_once
+from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed._local_tensor import (
+    local_tensor_mode,
+    maybe_run_for_local_tensor,
+)
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
-    _get_group_size_by_name,
     broadcast,
-    get_global_rank,
     get_group_rank,
     get_rank,
-    GroupMember,
+    GroupName,
     ProcessGroup,
     scatter,
     Work,
 )
+from torch.fx.experimental.symbolic_shapes import guard_or_false
+from torch.types import IntLikeType
 
 
 logger = logging.getLogger(__name__)
 
+# Opaque types must be registered before defining schemas that reference them,
+# so the schema parser recognizes the type names and uses PyObjectType (which
+# wraps Python objects as ConcretePyObjectHolder) instead of AnyType (which
+# calls toTypeInferredIValue and fails for Python-only opaque types).
+from torch.distributed.device_mesh import _register_distributed_opaque_types
 
-if not torch._running_with_deploy():
 
-    @torch.library.register_fake("_dtensor::shard_dim_alltoall")
-    def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
-        group_size = _get_group_size_by_name(group_name)
-        stacked_list = [torch.empty_like(input) for _ in range(group_size)]
-        group = _resolve_process_group(group_name)
-        group_rank = get_group_rank(group, get_rank())
+_register_distributed_opaque_types()
 
-        return (
-            torch.cat(stacked_list, dim=gather_dim)
-            .chunk(group_size, dim=shard_dim)[group_rank]
-            .contiguous()
-        )
+_dtensor_lib = torch.library.Library("_dtensor", "FRAGMENT")
+_dtensor_lib.define(
+    "mesh_get_process_group("
+    "torch.distributed.device_mesh.DeviceMesh mesh, int dim"
+    ") -> torch.distributed.distributed_c10d.ProcessGroup"
+)
 
-else:
-    import warnings
 
-    warnings.warn(
-        "PyTorch Distributed functional collectives do not work with torch::deploy."
-    )
+@torch.library.impl("_dtensor::mesh_get_process_group", "CompositeExplicitAutograd")
+def _mesh_get_process_group_impl(mesh, dim):
+    return mesh.get_group(dim)
+
+
+@torch.library.register_fake("_dtensor::mesh_get_process_group")
+def _mesh_get_process_group_fake(mesh, dim):
+    from torch._library.fake_class_registry import maybe_unwrap_fake_script_object
+
+    real_mesh = maybe_unwrap_fake_script_object(mesh)
+    return real_mesh.get_group(dim)
+
+
+@torch.library.register_fake("_dtensor::shard_dim_alltoall")
+def _shard_dim_alltoall_meta(
+    input, gather_dim, shard_dim, group_name: GroupName | ProcessGroup
+):
+    if isinstance(group_name, str):
+        # pyrefly: ignore[bad-argument-type]  # pyrefly bug
+        group_name = _resolve_process_group(group_name)
+    group_size = group_name.size()
+    stacked_list = [torch.empty_like(input) for _ in range(group_size)]
+    group_rank = get_group_rank(group_name, get_rank())
+
+    cat_tensor = torch.cat(stacked_list, dim=gather_dim)
+    # pyrefly: ignore [unsupported-operation]
+    chunk_size = cat_tensor.size(shard_dim) // group_size
+    chunk = torch.narrow(cat_tensor, shard_dim, group_rank * chunk_size, chunk_size)
+    return chunk.contiguous()
 
 
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
-    if mesh.device_type == "cpu":
+    if mesh.device_type == "cpu" and local_tensor_mode() is None:
         # Gloo does not support alltoall, so falling back to allgather + chunk
-
-        # TODO: This logs way too much
-        logger.warning(
-            "CPU process group does not support alltoall yet, falling back with allgather + chunk!"
+        warning_once(
+            logger,
+            "CPU process group does not support alltoall yet, falling back with allgather + chunk!",
         )
-        out = funcol.all_gather_tensor(input, gather_dim, (mesh, mesh_dim))
+        out = funcol.all_gather_single(input, gather_dim, (mesh, mesh_dim))
         if isinstance(out, funcol.AsyncCollectiveTensor):
             # stick to the same behavior for the alltoall case, remove this once we enable alltoall async
             out = out.wait()
-        out = torch.chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
+        from torch.distributed.tensor.placement_types import Shard
+
+        out = Shard._custom_chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
             mesh.get_local_rank(mesh_dim)
         ]
         return out.contiguous()
 
-    group_name = funcol._resolve_group_name((mesh, mesh_dim))
+    group = funcol._resolve_group((mesh, mesh_dim))
     # TODO: enable async op for shard_dim_alltoall
     return torch.ops._dtensor.shard_dim_alltoall(
-        input, gather_dim, shard_dim, group_name
+        input, gather_dim, shard_dim, funcol._group_or_group_name(group)
     )
 
 
 def mesh_scatter(
     output: torch.Tensor,
-    scatter_list: List[torch.Tensor],
+    scatter_list: list[torch.Tensor],
     mesh: DeviceMesh,
     mesh_dim: int = 0,
     async_op: bool = False,
-) -> Optional[Work]:
+    *,
+    group_src: int = 0,
+) -> Work | None:
     """
     scatter a list of tensors to a device mesh dimension. We by default
     use the first rank of the mesh dimension as the source of truth, i.e
@@ -94,6 +127,13 @@ def mesh_scatter(
             to scatter on, we by default choose the first rank on the
             mesh dimension as source of truth.
 
+    Keyword args:
+        group_src (int, optional): the group rank of the source data for the
+        logical/global tensor, on the specific mesh dimension. By default, we
+        use ``group_rank=0`` on each DeviceMesh dimension as the source data
+        to preserve the single-device semantic. If passing ``None`` explicitly,
+        this method simply uses its local data with no communication.
+
     Returns:
         A :class:`Work` object
     """
@@ -104,28 +144,24 @@ def mesh_scatter(
     if output.is_meta:
         return None
     dim_group = mesh.get_group(mesh_dim)
-    assert isinstance(dim_group, ProcessGroup)
-    # src need to be global rank
-    src_for_dim = 0
+    if not isinstance(dim_group, ProcessGroup):
+        raise AssertionError
 
-    if dim_group is not GroupMember.WORLD:
-        src_for_dim = get_global_rank(dim_group, 0)
-
-    if src_for_dim == get_rank():
+    if group_src == get_rank(dim_group):
         fut = scatter(
             output,
             scatter_list=scatter_list,
-            src=src_for_dim,
             group=dim_group,
             async_op=async_op,
+            group_src=group_src,
         )
     else:
         fut = scatter(
             output,
             scatter_list=None,
-            src=src_for_dim,
             group=dim_group,
             async_op=async_op,
+            group_src=group_src,
         )
 
     return fut
@@ -136,7 +172,9 @@ def mesh_broadcast(
     mesh: DeviceMesh,
     mesh_dim: int = 0,
     async_op: bool = False,
-) -> Optional[Work]:
+    *,
+    group_src: int = 0,
+) -> Work | None:
     """
     broadcast the tensor to a device mesh dimension. We by default
     use the first rank of the mesh dimension as the source of truth, i.e
@@ -150,6 +188,13 @@ def mesh_broadcast(
             to scatter on, we by default choose the first rank on the
             mesh dimension as source of truth.
 
+    Keyword args:
+        group_src (int, optional): the group rank of the source data for the
+        logical/global tensor, on the specific mesh dimension. By default, we
+        use ``group_rank=0`` on each DeviceMesh dimension as the source data
+        to preserve the single-device semantic. If passing ``None`` explicitly,
+        this method simply uses its local data with no communication.
+
     Returns:
         A :class:`Work` object
     """
@@ -160,25 +205,58 @@ def mesh_broadcast(
     if tensor.is_meta:
         return None
     dim_group = mesh.get_group(mesh_dim)
-    assert isinstance(dim_group, ProcessGroup)
-    # src need to be global rank
-    src_for_dim = 0
-    if dim_group is not GroupMember.WORLD:
-        src_for_dim = get_global_rank(dim_group, 0)
+    if not isinstance(dim_group, ProcessGroup):
+        raise AssertionError
 
-    return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
+    return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
 
-def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
-    if pad_size == 0:
+@maybe_run_for_local_tensor
+def pad_tensor(
+    tensor: torch.Tensor, pad_dim: int, pad_size: IntLikeType
+) -> torch.Tensor:
+    # During tracing, always emit the pad op even when pad_size=0 so all
+    # ranks produce identical FX graph structure (SPMD).
+    # In eager with concrete pad_size=0, guard_or_false returns True and we
+    # skip the no-op pad. Check _are_we_tracing() first to avoid
+    # guard_or_false creating a guard that concretizes symbolic pad sizes
+    # during make_fx tracing.
+    if isinstance(pad_size, int):
+        # Fast path: avoids _are_we_tracing() which is costly at compile
+        # time due to multiple C++ dispatch mode checks.
+        if pad_size == 0:
+            return tensor
+    elif not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
+    if _are_we_tracing():
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+        if has_free_unbacked_symbols(tensor):
+            pad_shape: list[IntLikeType] = list(tensor.shape)
+            pad_shape[pad_dim] = pad_size
+            return torch.cat([tensor, tensor.new_zeros(pad_shape)], dim=pad_dim)
+
     pad = [0, 0] * (tensor.ndim - pad_dim)
-    pad[-1] = pad_size
+    pad[-1] = pad_size  # pyrefly: ignore[unsupported-operation]
     return torch.nn.functional.pad(tensor, pad)
 
 
-def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
-    if pad_size == 0:
+@maybe_run_for_local_tensor
+def unpad_tensor(
+    tensor: torch.Tensor, pad_dim: int, pad_size: IntLikeType
+) -> torch.Tensor:
+    # During tracing, always emit the narrow op even when pad_size=0 so all
+    # ranks produce identical FX graph structure (SPMD).
+    # In eager with concrete pad_size=0, guard_or_false returns True and we
+    # skip the no-op narrow. Check _are_we_tracing() first to avoid
+    # guard_or_false creating a guard that concretizes symbolic pad sizes
+    # during make_fx tracing.
+    if isinstance(pad_size, int):
+        # Fast path: avoids _are_we_tracing() which is costly at compile
+        # time due to multiple C++ dispatch mode checks.
+        if pad_size == 0:
+            return tensor
+    elif not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
     return tensor.narrow(
         pad_dim,
@@ -188,14 +266,12 @@ def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Ten
 
 
 def fill_empty_tensor_to_shards(
-    shards: List[torch.Tensor], shard_dim: int, num_empty_tensors: int
-) -> List[torch.Tensor]:
+    shards: list[torch.Tensor], shard_dim: int, num_empty_tensors: int
+) -> list[torch.Tensor]:
     if num_empty_tensors == 0:
         return shards
     tensor_size = list(shards[0].size())
-    tensor_size = [
-        size if idx != shard_dim else 0 for idx, size in enumerate(tensor_size)
-    ]
+    tensor_size[shard_dim] = 0
     tensor = shards[0].new_zeros(tensor_size)
     shards.extend(tensor for _ in range(num_empty_tensors))
     return shards
@@ -226,7 +302,8 @@ def check_tensor_meta(
 
 
 def spec_to_bytes(spec: "dtensor_spec.DTensorSpec") -> int:
-    assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
+    if spec.tensor_meta is None:
+        raise AssertionError("spec should have tensor meta defined!")
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)
 
 
@@ -237,9 +314,9 @@ class MeshTopoInfo:
     """
 
     mesh: DeviceMesh
-    mesh_dim_devices: List[int]
-    mesh_dim_bandwidth: List[float]
-    mesh_dim_latency: List[float]
+    mesh_dim_devices: list[int]
+    mesh_dim_bandwidth: list[float]
+    mesh_dim_latency: list[float]
 
     @staticmethod
     @lru_cache(None)
@@ -290,7 +367,7 @@ def allreduce_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> f
     num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
     mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
     # allreduce have almost 2x comm bytes compare to allgather/reduce_scatter
-    num_hops = 2 * num_devices_on_mesh_dim - 1
+    num_hops = 2 * (num_devices_on_mesh_dim - 1)
 
     latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]
     bw = (bytes_gb * num_hops / num_devices_on_mesh_dim) / mesh_dim_bandwidth
@@ -311,6 +388,123 @@ def reduce_scatter_cost(
     return latency + bw * 1e6
 
 
+def _compute_placement_transition_cost(
+    current_placement: "dtensor_spec.Placement",
+    target_placement: "dtensor_spec.Placement",
+    mesh_topo: MeshTopoInfo,
+    mesh_dim: int,
+    comm_bytes_gb: float,
+) -> tuple[float, float]:
+    """
+    Compute the cost of transitioning from one placement to another on a single mesh dimension.
+
+    Args:
+        current_placement: The current placement on the mesh dimension.
+        target_placement: The target placement on the mesh dimension.
+        mesh_topo: Mesh topology information for cost estimation.
+        mesh_dim: The mesh dimension where the transition happens.
+        comm_bytes_gb: The communication bytes in GB for this step.
+
+    Returns:
+        A tuple of (cost, updated_comm_bytes_gb):
+            - cost: The communication cost for this transition (float("inf") if invalid).
+            - updated_comm_bytes_gb: The updated communication bytes after this step.
+    """
+    if current_placement == target_placement:
+        return 0.0, comm_bytes_gb
+
+    num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
+
+    # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
+    # Safe today: redistribute_cost bails with inf when shard_order is None.
+    if current_placement.is_shard() and target_placement.is_replicate():
+        # allgather gives larger comm bytes
+        comm_bytes_gb *= num_devices_on_mesh_dim
+        return allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim), comm_bytes_gb
+    elif current_placement.is_shard() and target_placement.is_shard():
+        # should be alltoall comm, since we haven't implement it yet, add 1.0 as penalty
+        # to favor allgather instead
+        # TODO: add alltoall_cost
+        return allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim) + 1.0, comm_bytes_gb
+    elif current_placement.is_partial() and target_placement.is_replicate():
+        return allreduce_cost(comm_bytes_gb, mesh_topo, mesh_dim), comm_bytes_gb
+    elif current_placement.is_partial() and target_placement.is_shard():
+        cost = reduce_scatter_cost(comm_bytes_gb, mesh_topo, mesh_dim)
+        # after reduce_scatter the comm bytes for further collectives halved.
+        comm_bytes_gb /= num_devices_on_mesh_dim
+        return cost, comm_bytes_gb
+    elif current_placement.is_shard() and target_placement.is_partial():
+        # ban shard -> partial as it does not make sense to perform
+        # this redistribute
+        return float("inf"), comm_bytes_gb
+    elif current_placement.is_partial() and target_placement.is_partial():
+        # we already handled the == case at the top, and we ban converting between partial types.
+        return float("inf"), comm_bytes_gb
+    elif current_placement.is_replicate() and target_placement.is_shard():
+        comm_bytes_gb /= num_devices_on_mesh_dim
+        return 0.0, comm_bytes_gb
+
+    return 0.0, comm_bytes_gb
+
+
+def one_step_redistribute_cost(
+    current_spec: "dtensor_spec.DTensorSpec",
+    target_spec: "dtensor_spec.DTensorSpec",
+) -> float:
+    """
+    Calculate the cost of a single redistribution step between two DTensorSpecs.
+
+    This function computes the communication cost for a one-step redistribution
+    where the current and target specs differ by exactly one placement on one
+    mesh dimension.
+
+    Args:
+        current_spec: The current DTensorSpec.
+        target_spec: The target DTensorSpec.
+
+    Returns:
+        The communication cost for this step (float("inf") if invalid).
+    """
+    if current_spec.mesh != target_spec.mesh:
+        return float("inf")
+
+    if current_spec.placements == target_spec.placements:
+        return 0.0
+
+    # Find the mesh dimension that differs
+    mesh_dim = -1
+    current_placement = None
+    target_placement = None
+    for i, (cur, tgt) in enumerate(
+        zip(current_spec.placements, target_spec.placements)
+    ):
+        if cur != tgt:
+            if mesh_dim != -1:
+                # More than one dimension differs - not a single step
+                raise ValueError(
+                    "one_step_redistribute_cost expects specs that differ by exactly one placement"
+                )
+            mesh_dim = i
+            current_placement = cur
+            target_placement = tgt
+
+    if mesh_dim == -1:
+        return 0.0
+
+    if current_placement is None or target_placement is None:
+        raise AssertionError
+
+    mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
+    comm_bytes_gb = (
+        spec_to_bytes(current_spec) / current_spec.num_shards / 1024 / 1024 / 1024
+    )
+
+    cost, _ = _compute_placement_transition_cost(
+        current_placement, target_placement, mesh_topo, mesh_dim, comm_bytes_gb
+    )
+    return cost
+
+
 def redistribute_cost(
     current_spec: "dtensor_spec.DTensorSpec",
     target_spec: "dtensor_spec.DTensorSpec",
@@ -320,7 +514,7 @@ def redistribute_cost(
 
     NOTE:
     1. Only consider communication cost here, since computation costs for redistribute
-       are quite trival (i.e. we only need to narrow or simple division)
+       are quite trivial (i.e. we only need to narrow or simple division)
     2. Only consider redistribute cost on same mesh, cross mesh communication cost is
        not quite needed for operator strategy estimation/selection.
     """
@@ -328,10 +522,21 @@ def redistribute_cost(
         # make infinite cost if meshes are not same
         # TODO: see if we want to support this once there's cross mesh communication
         return float("inf")
-
     if current_spec.is_replicated():
-        # short-cut:
-        # comm cost is 0 if current spec is already full replication
+        # short-cut: comm cost is 0 if current spec is already full replication
+        return 0.0
+
+    # TODO(zpcore): test placements with _StridedShard if we replace shard_order
+    # with _StridedShard.
+    if (
+        current_spec.placements == target_spec.placements
+        and current_spec.shard_order == target_spec.shard_order
+    ):
+        return 0.0
+
+    # For sub-meshes, ranks not participating in the mesh should not compute
+    # redistribution costs. Return 0 since they won't actually participate.
+    if not current_spec.mesh._is_current_rank_part_of_mesh():
         return 0.0
 
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
@@ -342,33 +547,43 @@ def redistribute_cost(
     # Transformation that considered for redistribute cost:
     # 1. allgather 2. alltoall
     # 3. allreduce 4. reduce_scatter
-    for i, (current, target) in enumerate(
-        zip(current_spec.placements, target_spec.placements)
-    ):
-        if current == target:
-            continue
+    from torch.distributed._functional_collectives import _are_we_tracing
+    from torch.distributed.tensor._redistribute import (
+        _gen_transform_infos,
+        _gen_transform_infos_non_cached,
+    )
 
-        num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[i]
-        if current.is_shard() and target.is_replicate():
-            # allgather gives larger comm bytes
-            comm_bytes_gb *= num_devices_on_mesh_dim
-            # add up allgather comm cost
-            cost += allgather_cost(comm_bytes_gb, mesh_topo, i)
-        elif current.is_shard() and target.is_shard():
-            # should be alltoall comm, since we haven't implement it yet, add penalty
-            # to favor allgather instead
-            cost += allgather_cost(comm_bytes_gb, mesh_topo, i) + 1.0
-        elif current.is_partial() and target.is_replicate():
-            # add up allreduce comm cost
-            cost += allreduce_cost(comm_bytes_gb, mesh_topo, i)
-        elif current.is_partial() and target.is_shard():
-            # add up reduce_scatter comm cost
-            cost += reduce_scatter_cost(comm_bytes_gb, mesh_topo, i)
-            # after reduce_scatter the comm bytes for further collectives halved.
-            comm_bytes_gb /= num_devices_on_mesh_dim
-        elif current.is_shard() and target.is_partial():
-            # ban shard -> partial as it does not make sense to perform
-            # this redistribute
+    # TODO(zpcore): Support _StridedShard redistribution. Remove the temporary
+    # fix, which is to prevent StridedShard erroring out.
+    if current_spec.shard_order is None or target_spec.shard_order is None:
+        return float("inf")
+
+    # No redistribution needed when placements are already identical.
+    # This also prevents potential failures in _gen_transform_infos for certain configurations
+    # (e.g., sub-meshes) where finding a transform path between identical states may error out.
+    # TODO(zpcore): test placements with _StridedShard if we replace shard_order
+    # with _StridedShard.
+    if (
+        current_spec.placements == target_spec.placements
+        and current_spec.shard_order == target_spec.shard_order
+    ):
+        return cost
+
+    if _are_we_tracing():
+        transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
+    else:
+        transform_infos = _gen_transform_infos(current_spec, target_spec)
+    for transform_info in transform_infos:
+        if current_spec.tensor_meta is None:
+            raise AssertionError("spec should have tensor meta defined!")
+        current = transform_info.src_dst_placements[0]
+        target = transform_info.src_dst_placements[1]
+        mesh_dim = transform_info.mesh_dim
+        step_cost, comm_bytes_gb = _compute_placement_transition_cost(
+            current, target, mesh_topo, mesh_dim, comm_bytes_gb
+        )
+        if step_cost == float("inf"):
             return float("inf")
+        cost += step_cost
 
     return cost

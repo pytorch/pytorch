@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import torch
 import functools
@@ -30,7 +29,7 @@ def to_numpy(tensor):
     return tensor.cpu().numpy()
 
 @torch.library.custom_op("_torch_testing::numpy_cube", mutates_args=())
-def numpy_cube(x: Tensor) -> Tuple[Tensor, Tensor]:
+def numpy_cube(x: Tensor) -> tuple[Tensor, Tensor]:
     x_np = to_numpy(x)
     dx = torch.tensor(3 * x_np ** 2, device=x.device)
     return torch.tensor(x_np ** 3, device=x.device), dx
@@ -63,7 +62,8 @@ def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
 
 @numpy_mul.register_fake
 def _(x, y):
-    assert x.device == y.device
+    if x.device != y.device:
+        raise AssertionError(f"x.device={x.device} != y.device={y.device}")
     return (x * y).contiguous()
 
 def numpy_mul_setup_context(ctx, inputs, output):
@@ -114,7 +114,7 @@ def numpy_mul_scalar_vmap(info, in_dims, x, *, scalar):
 numpy_mul_scalar.register_vmap(numpy_mul_scalar_vmap)
 
 @torch.library.custom_op("_torch_testing::numpy_sort", mutates_args=())
-def numpy_sort(x: Tensor, dim: int) -> Tuple[Tensor, Tensor, Tensor]:
+def numpy_sort(x: Tensor, dim: int) -> tuple[Tensor, Tensor, Tensor]:
     device = x.device
     x = to_numpy(x)
     ind = np.argsort(x, axis=dim)
@@ -160,10 +160,14 @@ def numpy_take(x: Tensor, ind: Tensor, ind_inv: Tensor, dim: int) -> Tensor:
 
 @numpy_take.register_fake
 def _(x, ind, ind_inv, dim):
-    assert x.device == ind.device
-    assert x.device == ind_inv.device
-    assert ind.dtype == torch.long
-    assert ind_inv.dtype == torch.long
+    if x.device != ind.device:
+        raise AssertionError(f"x.device={x.device} != ind.device={ind.device}")
+    if x.device != ind_inv.device:
+        raise AssertionError(f"x.device={x.device} != ind_inv.device={ind_inv.device}")
+    if ind.dtype != torch.long:
+        raise AssertionError(f"ind.dtype must be torch.long, got {ind.dtype}")
+    if ind_inv.dtype != torch.long:
+        raise AssertionError(f"ind_inv.dtype must be torch.long, got {ind_inv.dtype}")
     return torch.empty_like(x)
 
 def numpy_take_setup_context(ctx, inputs, output):
@@ -262,18 +266,24 @@ def sample_inputs_numpy_view_copy(opinfo, device, dtype, requires_grad, **kwargs
 
 @torch.library.custom_op('_torch_testing::numpy_cat', mutates_args=())
 def numpy_cat(xs: Sequence[Tensor], dim: int) -> Tensor:
-    assert len(xs) > 0
-    assert all(x.device == xs[0].device for x in xs)
-    assert all(x.dtype == xs[0].dtype for x in xs)
+    if len(xs) == 0:
+        raise AssertionError("xs must not be empty")
+    if not all(x.device == xs[0].device for x in xs):
+        raise AssertionError("All tensors must be on the same device")
+    if not all(x.dtype == xs[0].dtype for x in xs):
+        raise AssertionError("All tensors must have the same dtype")
     np_xs = [to_numpy(x) for x in xs]
     np_out = np.concatenate(np_xs, axis=dim)
     return torch.tensor(np_out, device=xs[0].device)
 
 @numpy_cat.register_fake
 def _(xs, dim):
-    assert len(xs) > 0
-    assert all(x.device == xs[0].device for x in xs)
-    assert all(x.dtype == xs[0].dtype for x in xs)
+    if len(xs) == 0:
+        raise AssertionError("xs must not be empty")
+    if not all(x.device == xs[0].device for x in xs):
+        raise AssertionError("All tensors must be on the same device")
+    if not all(x.dtype == xs[0].dtype for x in xs):
+        raise AssertionError("All tensors must have the same dtype")
     return torch.cat(xs, dim=dim)
 
 def numpy_cat_setup_context(ctx, inputs, output):
@@ -339,7 +349,7 @@ def sample_inputs_numpy_split_copy(opinfo, device, dtype, requires_grad, **kwarg
     yield SampleInput(x, args=([1, 3, 6], 1))
 
 @torch.library.custom_op('_torch_testing::numpy_split_copy_with_int', mutates_args=())
-def numpy_split_copy_with_int(x: Tensor, splits: Sequence[int], dim: int) -> Tuple[List[Tensor], int]:
+def numpy_split_copy_with_int(x: Tensor, splits: Sequence[int], dim: int) -> tuple[List[Tensor], int]:
     x_np = to_numpy(x)
     arrs = np.split(x_np, splits, axis=dim)
     return [torch.tensor(arr, device=x.device, dtype=x.dtype) for arr in arrs], len(splits)
@@ -371,15 +381,18 @@ numpy_split_copy_with_int.register_vmap(numpy_split_copy_with_int_vmap)
 def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
     # Adapted from Ross Girshick's fast-rcnn implementation at
     # https://github.com/rbgirshick/fast-rcnn/blob/master/lib/utils/nms.py
-    assert boxes.device == scores.device
+    if boxes.device != scores.device:
+        raise AssertionError(f"boxes.device={boxes.device} != scores.device={scores.device}")
     device = boxes.device
 
     boxes = to_numpy(boxes)
     scores = to_numpy(scores)
 
     N = boxes.shape[0]
-    assert boxes.shape == (N, 4)
-    assert scores.shape == (N,)
+    if boxes.shape != (N, 4):
+        raise AssertionError(f"boxes.shape must be (N, 4), got {boxes.shape}")
+    if scores.shape != (N,):
+        raise AssertionError(f"scores.shape must be (N,), got {scores.shape}")
 
     x1 = boxes[:, 0]
     y1 = boxes[:, 1]
@@ -408,15 +421,19 @@ def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
 
     result = torch.tensor(np.stack(keep), device=device)
     # Needed for data-dependent condition :(
-    assert result.size(0) >= 2
+    if result.size(0) < 2:
+        raise AssertionError(f"result.size(0) must be >= 2, got {result.size(0)}")
     return result
 
 @numpy_nms.register_fake
 def _(boxes, scores, iou_threshold):
-    assert boxes.device == scores.device
+    if boxes.device != scores.device:
+        raise AssertionError(f"boxes.device={boxes.device} != scores.device={scores.device}")
     N = boxes.shape[0]
-    assert boxes.shape == (N, 4)
-    assert scores.shape == (N,)
+    if boxes.shape != (N, 4):
+        raise AssertionError(f"boxes.shape must be (N, 4), got {boxes.shape}")
+    if scores.shape != (N,):
+        raise AssertionError(f"scores.shape must be (N,), got {scores.shape}")
 
     ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.create_unbacked_symint()
@@ -539,7 +556,7 @@ custom_op_db = [
 # some mechanical test cases
 # ==============================================================
 
-lib = torch.library.Library("_torch_testing", "FRAGMENT")  # noqa: TOR901
+lib = torch.library.Library("_torch_testing", "FRAGMENT")
 
 lib.define("source0(Tensor x) -> Tensor")
 
