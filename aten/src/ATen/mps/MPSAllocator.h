@@ -345,6 +345,11 @@ class MPSHeapAllocatorImpl {
   void setLowWatermarkRatio(double ratio);
   // (see m_high_watermark_ratio for description)
   void setHighWatermarkRatio(double ratio);
+  // sets high watermark (hard limit) to budget_bytes and scales low watermark proportionally;
+  // budget_bytes == 0 means unlimited (mirrors ratio=0.0 convention)
+  void setMemoryBudget(size_t budget_bytes);
+  // returns the high watermark limit in bytes, or 0 if unlimited
+  size_t getMemoryBudget() const;
   // (see m_low_watermark_limit for description)
   size_t getLowWatermarkLimit() const {
     return m_low_watermark_limit;
