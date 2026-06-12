@@ -614,6 +614,22 @@ class FakeTensorTest(TestCase):
 
         self.assertEqual(torch.ones([10]), out[0])
 
+    def test_convert_fake_to_real_unhinted(self):
+        # A FakeTensor with an unhinted (unbacked) symint dimension whose
+        # storage maps to a real storage must be returned unchanged rather than
+        # reconstructed: there is no concrete hint to build a real size from, so
+        # try_convert_fake_to_real should leave it alone instead of raising.
+        x = torch.ones([20])
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        with fake_mode:
+            fx = fake_mode.from_tensor(x)
+            u = shape_env.create_unbacked_symint()  # no hint set
+            v = torch.as_strided(fx, (u,), (1,))
+
+        out = torch._subclasses.fake_utils.try_convert_fake_to_real([v])
+        self.assertIs(out[0], v)
+
     def test_conv_nhwc(self):
         x = torch.randn([1, 1024, 16, 16]).to(memory_format=torch.channels_last)
         w = torch.randn([256, 1024, 4, 4]).to(memory_format=torch.channels_last)
