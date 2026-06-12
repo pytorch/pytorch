@@ -100,7 +100,7 @@ BLOCKED_OPS = frozenset(
         "_grid_sampler_2d_cpu_fallback",
         "grid_sampler_3d",
         "isnan",
-        "mkldnn_linear",
+        "onednn_linear",
         "median",
         "nanmedian",
         "_sparse_sparse_matmul",
