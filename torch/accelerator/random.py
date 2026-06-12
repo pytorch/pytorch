@@ -1,7 +1,9 @@
+from collections.abc import Iterable
+
 import torch
 from torch import Tensor
 
-from ._utils import _device_t, _get_device_index
+from ._utils import _device_t, _get_device_index, _lazy_call
 
 
 def initial_seed(device: _device_t = None, /) -> int:
@@ -55,4 +57,54 @@ def get_rng_state_all() -> list[Tensor]:
     return [get_rng_state(i) for i in range(torch.accelerator.device_count())]
 
 
-__all__ = ["initial_seed", "get_rng_state", "get_rng_state_all"]
+def set_rng_state(new_state: Tensor, device: _device_t = None) -> None:
+    r"""Set the RNG state of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>` on the given device.
+
+    Args:
+        new_state (:class:`torch.Tensor`): The desired RNG state, a tensor of dtype `torch.uint8`.
+        device (:class:`torch.device`, str, int, optional): The device to set the RNG state for.
+            If not given, uses :func:`torch.accelerator.current_device_index` by default.
+
+    .. note::
+        If the accelerator runtime is not yet initialized, the state is deferred
+        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+    """
+    if not torch._C._accelerator_isLazyInitialized():
+        with torch._C._DisableFuncTorch():
+            new_state = new_state.clone(memory_format=torch.contiguous_format)
+
+    device_index = _get_device_index(device) if device is not None else None
+
+    def cb() -> None:
+        idx = (
+            device_index
+            if device_index is not None
+            else torch.accelerator.current_device_index()
+        )
+        default_generator = torch._C._accelerator_getDefaultGenerator(idx)
+        default_generator.set_state(new_state)
+
+    _lazy_call(cb)
+
+
+def set_rng_state_all(new_states: Iterable[Tensor]) -> None:
+    r"""Set the RNG state of the default :class:`torch.Generator` of all devices for the current :ref:`accelerator<accelerators>`.
+
+    Args:
+        new_states (Iterable of :class:`torch.Tensor`): The desired RNG states for each device, each tensor of dtype `torch.uint8`.
+
+    .. note::
+        If the accelerator runtime is not yet initialized, the state is deferred
+        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+    """
+    for i, state in enumerate(new_states):
+        set_rng_state(state, i)
+
+
+__all__ = [
+    "initial_seed",
+    "get_rng_state",
+    "get_rng_state_all",
+    "set_rng_state",
+    "set_rng_state_all",
+]

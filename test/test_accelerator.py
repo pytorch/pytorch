@@ -304,6 +304,18 @@ class TestAccelerator(TestCase):
                     t = t.to(reference_dtype)
                     t = t.to(dtype)
 
+    def test_random_generator_state(self):
+        for device_idx in range(torch.accelerator.device_count()):
+            generator = torch._C._accelerator_getDefaultGenerator(device_idx)
+            old_state = torch.accelerator.get_rng_state(device_idx)
+            self.assertIsInstance(old_state, torch.Tensor)
+            generator.manual_seed(12345)
+            new_state = torch.accelerator.get_rng_state(device_idx)
+            self.assertNotEqual(old_state, new_state)
+            self.assertEqual(12345, torch.accelerator.initial_seed(device_idx))
+            torch.accelerator.set_rng_state(old_state, device_idx)
+            self.assertEqual(old_state, torch.accelerator.get_rng_state(device_idx))
+
 
 instantiate_device_type_tests(
     TestAccelerator,
