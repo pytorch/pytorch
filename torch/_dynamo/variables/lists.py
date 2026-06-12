@@ -57,9 +57,10 @@ from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
 from .object_protocol import (
+    generic_richcompare_bool,
+    maybe_get_python_type,
     pyindex_check,
     type_implements_nb_index,
-    validate_sequence_index,
     vt_is_iterable,
 )
 
@@ -151,16 +152,18 @@ class BaseListVariable(VariableTracker):
     def getitem_const(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
-        from .tensor import SymNodeVariable
-
-        arg = validate_sequence_index(tx, arg, self.python_type_name())
-
-        if isinstance(arg, SymNodeVariable):
-            index = arg.sym_num
-        else:
-            index = arg.as_python_constant()
-
-        if isinstance(index, slice):
+        if pyindex_check(maybe_get_python_type(arg)):
+            index = arg.nb_index_impl(tx).as_python_constant()
+            try:
+                return self.items[index]
+            except IndexError:
+                raise_observed_exception(
+                    IndexError, tx, args=["list index out of range"]
+                )
+        elif pyslice_check(arg):
+            if not isinstance(arg, SliceVariable):
+                raise AssertionError("Expected arg to be a SliceVariable")
+            index = arg.as_index_slice(tx)
             if index.step == 0:
                 raise_observed_exception(
                     ValueError, tx, args=["slice step cannot be zero"]
@@ -172,16 +175,10 @@ class BaseListVariable(VariableTracker):
                 mutation_type=ValueMutationNew() if self.mutation_type else None,
             )
         else:
-            if not isinstance(index, (int, torch.SymInt)):
-                raise AssertionError(
-                    f"index must be int or SymInt, got {type(index).__name__}"
-                )
-            try:
-                return self.items[index]
-            except IndexError:
-                raise_observed_exception(
-                    IndexError, tx, args=["list index out of range"]
-                )
+            raise_type_error(
+                tx,
+                f"list indices must be integers or slices, not {arg.python_type_name()}",
+            )
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
@@ -215,9 +212,10 @@ class BaseListVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L635-L652
+
         # TODO(dynamo-team): Replace iter_contains by a proper impl. once we
         # implement PyObject_RichCompare
-        return iter_contains(unpack_iterable(tx, self), item, tx)
+        return iter_contains(self.items, item, tx)
 
     def call_tree_map_branch(
         self,
@@ -369,7 +367,7 @@ class BaseListVariable(VariableTracker):
         CPython operates on the internal C array directly, so we compare
         VT items without going through a polyfill.
         """
-        from .object_protocol import generic_richcompare, generic_richcompare_bool
+        from .object_protocol import generic_richcompare
         from .tensor import SymNodeVariable
 
         try:
@@ -700,19 +698,18 @@ class RangeVariable(BaseListVariable):
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         # range_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L729-L748
-        from .object_protocol import validate_sequence_index
-
-        arg = validate_sequence_index(tx, arg, "range")
-        index = arg.as_python_constant()
-
-        if isinstance(index, slice):
-            return self.apply_slice(index)
-        elif isinstance(index, int):
-            return self.apply_index(tx, index)
-        else:
-            raise_observed_exception(
-                TypeError, tx, args=["range indices must be integers or slices"]
-            )
+        arg_type = maybe_get_python_type(arg)
+        if pyindex_check(arg_type):
+            i = arg.nb_index_impl(tx)
+            return self.apply_index(tx, i.as_python_constant())
+        elif pyslice_check(arg):
+            if not isinstance(arg, SliceVariable):
+                raise AssertionError("Expected arg to be a SliceVariable")
+            return self.apply_slice(arg.as_index_slice(tx))
+        raise_type_error(
+            tx,
+            f"range indices must be integers or slices, not {arg.python_type_name()}",
+        )
 
     def as_proxy(self) -> range:
         return self.python_type()(*self._as_proxy())
@@ -1544,6 +1541,32 @@ class DequeVariable(CommonListMethodsVariable):
         else:
             slice_within_maxlen = None
 
+        if name == "__init__" and self.is_mutable():
+            # deque_init: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1810
+            # Re-init resets maxlen (to None unless given), clears the deque,
+            # then extends with the iterable.
+            iterable = args[0] if len(args) >= 1 else kwargs.pop("iterable", None)
+            new_maxlen = (
+                args[1]
+                if len(args) >= 2
+                else kwargs.pop("maxlen", ConstantVariable.create(None))
+            )
+            if len(args) > 2 or kwargs:
+                raise_args_mismatch(tx, name)
+            if not new_maxlen.is_python_constant():
+                raise_type_error(tx, "an integer is required")
+            new_maxlen_val = new_maxlen.as_python_constant()
+            if new_maxlen_val is not None and new_maxlen_val < 0:
+                raise_observed_exception(
+                    ValueError, tx, args=["maxlen must be non-negative"]
+                )
+            tx.output.side_effects.mutation(self)
+            self.maxlen = new_maxlen
+            self.items[:] = []
+            if iterable is not None:
+                self.call_method(tx, "extend", [iterable], {})
+            return ConstantVariable.create(None)
+
         if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -2037,6 +2060,24 @@ class SliceVariable(VariableTracker):
 
     def as_python_constant(self) -> slice:
         return slice(*[guard_if_dyn(x) for x in self.items])
+
+    def as_index_slice(self, tx: "InstructionTranslatorBase") -> slice:
+        # PySlice_Unpack -> evaluate_slice_index: each non-None member is
+        # coerced through __index__ (nb_index), so user objects with an
+        # __index__ method are valid slice bounds.
+        # https://github.com/python/cpython/blob/62a6e898e01/Objects/sliceobject.c#L196-L242
+        members = []
+        for member in self.items:
+            if isinstance(member, ConstantVariable) and member.value is None:
+                members.append(None)
+                continue
+            if not pyindex_check(maybe_get_python_type(member)):
+                raise_type_error(
+                    tx,
+                    "slice indices must be integers or None or have an __index__ method",
+                )
+            members.append(member.nb_index_impl(tx).as_python_constant())
+        return slice(*members)
 
     def is_hashable(self) -> bool:
         # Slices became hashable in Python 3.12 (CPython slicehash).
