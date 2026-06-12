@@ -2115,10 +2115,6 @@ op_db: list[OpInfo] = [
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
             ),
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
             # Exception: linalg.lu_factor(): MPS doesn't support complex types.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
