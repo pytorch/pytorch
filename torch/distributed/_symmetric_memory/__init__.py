@@ -1971,7 +1971,7 @@ def empty(  # type: ignore[misc]
         mempool = get_mem_pool(device)
         # TODO: this path can be made device-agnostic if `use_mem_pool` is
         # elevated from torch.cuda to torch accelerator.
-        with torch.cuda.use_mem_pool(mempool, device=device):
+        with torch.cuda.use_mem_pool(mempool):
             return torch.empty_strided(size, stride, dtype=dtype, device=device)
     else:
         return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)

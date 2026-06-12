@@ -456,9 +456,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
                 out = torch.empty(numel, dtype=dtype, device=self.device)
                 inp.fill_(capture_offset)
                 out.fill_(0.0)
-                torch.ops.symm_mem.one_shot_all_reduce_out(
-                    inp, "sum", group_name, out
-                )
+                torch.ops.symm_mem.one_shot_all_reduce_out(inp, "sum", group_name, out)
                 expected_sum = float(
                     self.world_size * offset
                     + self.world_size * (self.world_size - 1) / 2
@@ -475,9 +473,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             out = torch.empty(numel, dtype=dtype, device=self.device)
             inp.fill_(capture_offset)
             out.fill_(0.0)
-            torch.ops.symm_mem.one_shot_all_reduce_out(
-                inp, "sum", group_name, out
-            )
+            torch.ops.symm_mem.one_shot_all_reduce_out(inp, "sum", group_name, out)
 
         graph.replay()
         expected_sum = float(
@@ -490,8 +486,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             capture_offset.fill_(self.rank + offset)
             graph.replay()
             expected_sum = float(
-                self.world_size * offset
-                + self.world_size * (self.world_size - 1) / 2
+                self.world_size * offset + self.world_size * (self.world_size - 1) / 2
             )
             self.assertEqual(out, torch.full_like(out, expected_sum))
 
