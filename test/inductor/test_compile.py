@@ -12,6 +12,7 @@ from torch._inductor import config
 from torch._inductor.codecache import write
 from torch._inductor.cpp_builder import CppBuilder, CppOptions, CppTorchOptions
 from torch._inductor.cpu_vec_isa import invalid_vec_isa
+from torch._inductor.ops_handler import MockHandler, OpCounterCSE, OpCountLimitExceeded
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs
 from torch.fx import symbolic_trace
@@ -99,6 +100,91 @@ class TestStandaloneInductor(TestCase):
         mod_opt = inductor.compile(make_fx(mod)(inp), [inp])
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
+
+    @torch._inductor.config.patch(realize_opcount_threshold=30)
+    def test_high_order_diff_does_not_expand_opcount(self):
+        def fn():
+            return torch.diff(torch.ones((64,)), n=30, dim=0)
+
+        mod_opt = inductor.compile(make_fx(fn)(), [])
+        self.assertEqual(mod_opt(), torch.zeros((34,)))
+
+    def test_unbounded_opcount_preserves_linear_counts(self):
+        opcounter = OpCounterCSE(MockHandler())
+        for i in range(5):
+            opcounter.add(str(i), "1")
+
+        opcount = opcounter.getvalue()
+        self.assertEqual(opcount.num_ops, 5)
+        self.assertFalse(opcount.limit_exceeded)
+
+    def test_bounded_opcount_preserves_linear_counts_past_threshold(self):
+        opcounter = OpCounterCSE(MockHandler(), max_ops=3)
+        for i in range(5):
+            opcounter.add(str(i), "1")
+
+        self.assertEqual(opcounter.getvalue().num_ops, 5)
+
+    def test_bounded_opcount_stops_at_work_limit(self):
+        opcounter = OpCounterCSE(MockHandler(), max_ops=1)
+        with self.assertRaises(OpCountLimitExceeded):
+            for i in range(101):
+                opcounter.add(str(i), "1")
+
+        opcount = opcounter.getvalue()
+        self.assertGreater(opcount.num_ops, 1)
+        self.assertTrue(opcount.limit_exceeded)
+
+    def test_completed_bounded_opcount_populates_exact_cache(self):
+        from torch._inductor.ir import Pointwise
+        from torch._inductor.virtualized import ops
+
+        calls = 0
+
+        def inner_fn(index):
+            nonlocal calls
+            calls += 1
+            value = ops.load("in0", index[0])
+            for _ in range(45):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        pointwise = Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=inner_fn,
+            ranges=[10],
+        )
+        with config.patch(realize_opcount_threshold=30):
+            self.assertTrue(pointwise.has_large_inner_fn())
+            self.assertEqual(pointwise.inner_fn_opcount().num_ops, 47)
+        self.assertEqual(calls, 1)
+
+    def test_incomplete_bounded_opcount_does_not_populate_exact_cache(self):
+        from torch._inductor.ir import Pointwise
+        from torch._inductor.virtualized import ops
+
+        calls = 0
+
+        def inner_fn(index):
+            nonlocal calls
+            calls += 1
+            value = ops.load("in0", index[0])
+            for _ in range(101):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        pointwise = Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=inner_fn,
+            ranges=[10],
+        )
+        opcount = pointwise.bounded_inner_fn_opcount(max_ops=0)
+        self.assertTrue(opcount.limit_exceeded)
+        self.assertEqual(calls, 1)
+        self.assertEqual(pointwise.inner_fn_opcount().num_ops, 103)
+        self.assertEqual(calls, 2)
 
     def test_inductor_via_bare_module(self):
         mod = MyModule3().eval()
