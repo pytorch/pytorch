@@ -153,6 +153,10 @@ class FakeTensorTest(TestCase):
         # The out_dtype dtype restriction in mm/bmm/baddbmm is a property of the
         # in-tree CUDA/XPU backends. Out-of-tree backends may support arbitrary
         # out_dtype combinations
+
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+
         with FakeTensorMode():
             a = torch.empty((8, 2048), dtype=torch.float8_e4m3fn, device="cpu")
             b = torch.empty((2048, 768), dtype=torch.float8_e4m3fn, device="cpu")
