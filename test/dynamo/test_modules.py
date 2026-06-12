@@ -1310,6 +1310,33 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
 
+    def test_rnn_graph_break_resumes_after_call(self):
+        class RecurrentModel(torch.nn.Module):
+            def __init__(self, recurrent_cls) -> None:
+                super().__init__()
+                self.pre = torch.nn.Linear(8, 8)
+                self.rnn = recurrent_cls(8, 8, batch_first=True)
+                self.post = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                x = self.pre(x)
+                x, _ = self.rnn(x)
+                return self.post(x[:, -1, :])
+
+        inp = torch.randn(2, 3, 8)
+
+        for recurrent_cls in (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM):
+            with self.subTest(recurrent_cls=recurrent_cls):
+                m = RecurrentModel(recurrent_cls).eval()
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_m = torch.compile(m, backend=cnt)
+
+                r = opt_m(inp)
+
+                self.assertTrue(torch._dynamo.testing.same(r, m(inp)))
+                self.assertEqual(cnt.frame_count, 2)
+                self.assertEqual(cnt.op_count, 3)
+
     @patch.object(torch._dynamo.config, "allow_unspec_int_on_nn_module", True)
     def test_self_mutating1(self):
         m1 = torch.nn.Linear(10, 10)
