@@ -54,7 +54,9 @@ class TestFlexGemmRuntimeImport(TestCase):
 
 class TestFlexGemmRuntimeHelpers(TestCase):
     def test_dense_config_selection_is_explicit_and_sm110_reuses_sm100(self):
-        from torch._inductor.kernel.flex_gemm import runtime
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
         from torch._vendor.quack.gemm_config import GemmConfig
 
         def config(tile_m, tile_n, cluster_m, cluster_n, dynamic, **kwargs):
@@ -96,30 +98,44 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             V.set_graph_handler(fake_graph),
         ):
             self.assertEqual(
-                runtime.candidate_gemm_configs_for_device(torch.device("cuda")),
+                flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                    torch.device("cuda")
+                ),
                 [default, skinny, large_rect, large],
             )
             self.assertEqual(
-                runtime.default_gemm_config_key(torch.device("cuda"), 256, 4096),
-                runtime.gemm_config_key(skinny),
+                flex_gemm_heuristics.default_gemm_config_key(
+                    torch.device("cuda"), 256, 4096
+                ),
+                flex_gemm_heuristics.gemm_config_key(skinny),
             )
             self.assertEqual(
-                runtime.default_gemm_config_key(torch.device("cuda"), 768, 4096),
-                runtime.gemm_config_key(large),
+                flex_gemm_heuristics.default_gemm_config_key(
+                    torch.device("cuda"), 768, 4096
+                ),
+                flex_gemm_heuristics.gemm_config_key(large),
             )
             self.assertEqual(
-                runtime.default_gemm_config_key(torch.device("cuda"), 1024, 4096),
-                runtime.gemm_config_key(large_rect),
+                flex_gemm_heuristics.default_gemm_config_key(
+                    torch.device("cuda"), 1024, 4096
+                ),
+                flex_gemm_heuristics.gemm_config_key(large_rect),
             )
             self.assertEqual(
-                runtime.default_gemm_config_key(torch.device("cuda"), 1024, 1024),
-                runtime.gemm_config_key(skinny),
+                flex_gemm_heuristics.default_gemm_config_key(
+                    torch.device("cuda"), 1024, 1024
+                ),
+                flex_gemm_heuristics.gemm_config_key(skinny),
             )
             self.assertEqual(
-                runtime.candidate_gemm_configs_for_device(torch.device("cuda")),
+                flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                    torch.device("cuda")
+                ),
                 [default, skinny, large_rect, large],
             )
-            self.assertEqual(GemmConfig(**dict(runtime.gemm_config_key(large))), large)
+            self.assertEqual(
+                GemmConfig(**dict(flex_gemm_heuristics.gemm_config_key(large))), large
+            )
 
         sm120_pingpong = config(
             128,
@@ -131,7 +147,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             pingpong=True,
         )
         self.assertNotEqual(
-            runtime.gemm_config_key(default), runtime.gemm_config_key(sm120_pingpong)
+            flex_gemm_heuristics.gemm_config_key(default),
+            flex_gemm_heuristics.gemm_config_key(sm120_pingpong),
         )
         with (
             mock.patch("torch.cuda.get_device_capability", return_value=(12, 0)),
@@ -141,7 +158,9 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             ),
         ):
             self.assertEqual(
-                runtime.candidate_gemm_configs_for_device(torch.device("cuda")),
+                flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                    torch.device("cuda")
+                ),
                 [sm120_pingpong],
             )
         with (
@@ -152,7 +171,39 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             ),
         ):
             with self.assertRaisesRegex(RuntimeError, "no QuACK configs"):
-                runtime.candidate_gemm_configs_for_device(torch.device("cuda"))
+                flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                    torch.device("cuda")
+                )
+
+    def test_precompile_metadata_counts_symbolic_skip(self):
+        import sympy
+
+        from torch._dynamo.utils import counters
+        from torch._inductor.kernel.flex_gemm.template import FlexGemmEpilogueCaller
+
+        counters.clear()
+        caller = FlexGemmEpilogueCaller.__new__(FlexGemmEpilogueCaller)
+        caller.bmreq = SimpleNamespace(
+            input_tensor_meta=[
+                SimpleNamespace(
+                    sizes=(sympy.Symbol("s0"), 64),
+                    strides=(64, 1),
+                    dtype=torch.float32,
+                    device=torch.device("cuda", 0),
+                )
+            ],
+            output_tensor_meta=SimpleNamespace(
+                sizes=(128, 128),
+                strides=(128, 1),
+                dtype=torch.float32,
+                device=torch.device("cuda", 0),
+            ),
+        )
+
+        self.assertIsNone(caller.precompile_metadata())
+        self.assertEqual(
+            counters["inductor"]["flex_gemm_precompile_skipped_dynamic"], 1
+        )
 
 
 class FlexGemmTestCase(TestCase):
@@ -370,10 +421,10 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_explicit_config_key_matches_reference(self):
-        from torch._inductor.kernel.flex_gemm.runtime import (
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+        from torch._inductor.template_heuristics.flex_gemm import (
             candidate_gemm_configs_for_device,
             gemm_config_key,
-            gemm_epilogue,
         )
 
         a = self.makeTensor(128, 64)
@@ -653,11 +704,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
 
-        from torch._inductor.kernel.flex_gemm import runtime
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
 
-        configs = runtime.candidate_gemm_configs_for_device(a.device)[:2]
+        configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(a.device)[:2]
         with mock.patch(
-            "torch._inductor.kernel.flex_gemm.runtime.candidate_gemm_configs_for_device",
+            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
             return_value=configs,
         ):
             actual, (code,) = run_and_get_code(
@@ -726,11 +779,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
 
-        from torch._inductor.kernel.flex_gemm import runtime
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
 
-        configs = runtime.candidate_gemm_configs_for_device(a.device)[:2]
+        configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(a.device)[:2]
         with mock.patch(
-            "torch._inductor.kernel.flex_gemm.runtime.candidate_gemm_configs_for_device",
+            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
             return_value=configs,
         ):
             actual, (code,) = run_and_get_code(

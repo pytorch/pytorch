@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import logging
 from typing import Any
 from typing_extensions import override
 
 import torch
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.flex_gemm import FlexGemmOpSpec
 from torch._inductor.codegen.common import IndentedBuffer
 from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLTemplateKernel
@@ -14,6 +16,9 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
 from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
 from torch._inductor.select_algorithm import PartialRender
 from torch.utils._ordered_set import OrderedSet
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -189,7 +194,8 @@ class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
                 ]
                 precompile_dtypes[name] = str(tensor_meta.dtype).removeprefix("torch.")
         except (TypeError, RuntimeError, ValueError):
-            # TODO: Pick representative symbolic sizes so dynamic-shape kernels can still precompile.
+            counters["inductor"]["flex_gemm_precompile_skipped_dynamic"] += 1
+            log.debug("Skipping FlexGEMM precompile for symbolic tensor metadata")
             return None
         device_index = self.bmreq.output_tensor_meta.device.index or 0
         device_capability = None
