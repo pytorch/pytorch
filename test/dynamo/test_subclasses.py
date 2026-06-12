@@ -2563,9 +2563,9 @@ class GraphModule(torch.nn.Module):
             extern_node_serializer: Callable[[list[Any]], Any] | None = None,
             **kwargs: Any,
         ):
-            # Important bit: there are 3 params: linear.weight.a, linear.weight.b, linear.bias.
-            # They should all be marked as static inputs.
-            self.assertEqual(len(static_input_idxs), 3)
+            # Important bit: there are 3 params: linear.weight.a, linear.weight.b, linear.bias,
+            # which are the first 3 args of the graph.
+            self.assertEqual(static_input_idxs, [0, 1, 2])
             return gm
 
         compiler = functools.partial(compile_fx, inner_compile=inner_compile)
