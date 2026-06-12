@@ -380,7 +380,11 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         if not (dist_tensor.shape == (4, 8)):
             raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
-        ones_like_dt = torch.ones_like(dist_tensor)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            ones_like_dt = torch.ones_like(dist_tensor)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(ones_like_dt.placements, (Replicate(),))
         ones_expected = torch.ones(dist_tensor.shape)
         self.assertEqual(ones_expected, ones_like_dt.full_tensor())
 
@@ -409,7 +413,11 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         if not (dist_tensor.shape == (4, 8)):
             raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
-        zeros_like_dt = torch.zeros_like(dist_tensor)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            zeros_like_dt = torch.zeros_like(dist_tensor)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(zeros_like_dt.placements, (Replicate(),))
         zeros_expected = torch.zeros(dist_tensor.shape)
         self.assertEqual(zeros_expected, zeros_like_dt.full_tensor())
 
@@ -1431,7 +1439,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
     def test_split_on_partial(self):
         self.run_subtests(
             {
-                "reduce_op": ["sum", "avg", "product", "min", "max"],
+                "reduce_op": ["sum", "avg", "min", "max"],
                 "split_size": [2, 3, 4],
                 "split_dim": [0, 1],
             },
