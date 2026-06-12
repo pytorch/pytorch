@@ -303,17 +303,20 @@ class TritonSymbols:
             else:
                 node = V.kernel.range_tree_nodes.get(var)
                 if node is None:
-                    raise AssertionError(f"Unregistered range symbol: {var.name}")
-                tree = node.root
-                ndim = V.kernel.triton_tensor_ndim()
-                shape = ["1"] * ndim
-                if tree.tensor_dim is None:
-                    # tree has no tensor dimension (e.g. no_x_dim mode),
-                    # treat as scalar
+                    # Symbol not registered in range tree - can happen in TMA template
+                    # epilogue fusion when loading bias tensors. Treat as scalar.
                     var_shape = ()
                 else:
-                    shape[tree.tensor_dim] = str(cls.get_block_size(tree))
-                    var_shape = tuple(shape)
+                    tree = node.root
+                    ndim = V.kernel.triton_tensor_ndim()
+                    shape = ["1"] * ndim
+                    if tree.tensor_dim is None:
+                        # tree has no tensor dimension (e.g. no_x_dim mode),
+                        # treat as scalar
+                        var_shape = ()
+                    else:
+                        shape[tree.tensor_dim] = str(cls.get_block_size(tree))
+                        var_shape = tuple(shape)
 
             # Union current variable shape
             expr_shape = get_broadcasted_shape(expr_shape, var_shape)
