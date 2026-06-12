@@ -31,7 +31,6 @@ from .bytecode_transformation import (
     create_call_function,
     create_call_function_ex,
     create_call_method,
-    create_copy,
     create_dup_top,
     create_instruction,
     create_load_const,
