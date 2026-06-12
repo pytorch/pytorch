@@ -12,7 +12,6 @@ import torch
 import torch.fx.node
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.source import NumpyTensorSource, Source
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode, StorageMetadata, TracingContext
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -20,6 +19,11 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
 )
 from torch._inductor import config, inductor_prims
+from torch._inductor.codecache import (
+    _is_valid_storage_metadata_guard_source,
+    _source_from_aot_input_desc,
+    _storage_metadata_for_cache_key,
+)
 from torch._inductor.fx_utils import get_node_storage, is_node_realized
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
@@ -139,7 +143,8 @@ def _normalize_view_op(
         raise AssertionError(f"unsupported view op {target}")
 
     unexpected_kwargs = [name for name in kwargs if name not in names]
-    assert not unexpected_kwargs, f"unexpected kwargs for {target}: {unexpected_kwargs}"
+    if unexpected_kwargs:
+        raise AssertionError(f"unexpected kwargs for {target}: {unexpected_kwargs}")
     normalized_args = tuple(
         _get_view_arg(target, args, kwargs, name, idx, default)
         for idx, (name, default) in enumerate(zip(names, defaults))
@@ -203,8 +208,16 @@ def _decode_view_op(target_code: int, flattened_args: Sequence[Any]) -> ViewOp:
 
 def _decode_view_ops(view_ops: EncodedViewOps) -> tuple[ViewOp, ...]:
     view_codes, view_args, view_arg_counts, view_arg_none = view_ops
-    assert len(view_codes) == len(view_arg_counts)
-    assert len(view_args) == len(view_arg_none)
+    if len(view_codes) != len(view_arg_counts):
+        raise AssertionError(
+            f"view_codes length {len(view_codes)} != "
+            f"view_arg_counts length {len(view_arg_counts)}"
+        )
+    if len(view_args) != len(view_arg_none):
+        raise AssertionError(
+            f"view_args length {len(view_args)} != "
+            f"view_arg_none length {len(view_arg_none)}"
+        )
 
     arg_offset = 0
     decoded_view_ops = []
@@ -216,7 +229,10 @@ def _decode_view_ops(view_ops: EncodedViewOps) -> tuple[ViewOp, ...]:
         decoded_view_ops.append(_decode_view_op(target_code, flattened_args))
         arg_offset += arg_count
 
-    assert arg_offset == len(view_args)
+    if arg_offset != len(view_args):
+        raise AssertionError(
+            f"consumed arg_offset {arg_offset} != view_args length {len(view_args)}"
+        )
     return tuple(decoded_view_ops)
 
 
@@ -486,7 +502,10 @@ def _decompose_scatter_functional(
     view_updated = aten.slice_scatter(view, src, 1, 10, -10)
     inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
     """
-    assert node.target is _generalized_scatter
+    if node.target is not _generalized_scatter:
+        raise AssertionError(
+            f"expected node.target to be _generalized_scatter, got {node.target}"
+        )
     inp, src, *view_ops = node.args
     return _decompose_scatter_functional_helper(
         graph, inp, src, _decode_view_ops(cast(EncodedViewOps, tuple(view_ops)))
@@ -508,9 +527,13 @@ def _decompose_scatter_mutating(
     slice2.copy_(src)
 
     """
-    assert node.target in (_generalized_scatter, _inplace_generalized_scatter)
+    if node.target not in (_generalized_scatter, _inplace_generalized_scatter):
+        raise AssertionError(
+            f"expected node.target to be a generalized scatter, got {node.target}"
+        )
     inp, src, *view_ops = node.args
-    assert not node.kwargs
+    if node.kwargs:
+        raise AssertionError(f"expected no kwargs, got {node.kwargs}")
 
     if node.target is _generalized_scatter:
         inp = _clone_for_scatter_decomposition(graph, inp)
@@ -566,29 +589,6 @@ def _clone_for_scatter_decomposition(graph: torch.fx.Graph, inp: Any) -> torch.f
     )
 
 
-def _source_from_aot_input_desc(desc: Any):
-    from torch._functorch._aot_autograd.descriptors import PlainAOTInput
-
-    if isinstance(desc, PlainAOTInput):
-        tracing_context = TracingContext.try_get()
-        sources = (
-            None
-            if tracing_context is None
-            else tracing_context.aotautograd_arg_pos_to_source
-        )
-        if sources is not None and desc.idx < len(sources):
-            return sources[desc.idx]
-    return None
-
-
-def _is_valid_storage_metadata_guard_source(source: Source | None) -> bool:
-    return (
-        source is not None
-        and not isinstance(source, NumpyTensorSource)
-        and "___from_numpy(" not in source.name
-    )
-
-
 def _add_storage_metadata_guard_for_scatter_input(
     inp: torch.fx.Node, storage_size: int, storage_offset: int
 ) -> None:
@@ -634,10 +634,7 @@ def scatter_input_has_observable_storage(node: torch.fx.Node) -> bool:
         return False
     if torch._debug_has_internal_overlap(inp_val) == 1:
         return False
-    storage_size = guarding_hint_or_throw(
-        clone_preserve_strides_storage_length(inp_val)
-    )
-    return not statically_known_true(sym_eq(storage_size, inp_val.numel()))
+    return _storage_metadata_for_cache_key(inp_val) is not None
 
 
 def scatter_output_storage_is_observed(node: torch.fx.Node) -> bool:
@@ -750,10 +747,14 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
         ]
 
     def handle_view_scatter(node: torch.fx.Node):
-        assert len(node.args) >= 2
+        if len(node.args) < 2:
+            raise AssertionError(f"expected at least 2 args, got {len(node.args)}")
         inp, src = node.args[:2]
 
-        assert isinstance(node.target, torch._ops.OpOverload)
+        if not isinstance(node.target, torch._ops.OpOverload):
+            raise AssertionError(
+                f"expected node.target to be an OpOverload, got {type(node.target)}"
+            )
         scatter_view_op = ViewOp(
             _SCATTER_OP_TO_VIEW[node.target],
             args=node.args[2:],
@@ -1188,7 +1189,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return get_node_storage(mutated_arg) in storage_of_reinplaced_args
 
         for arg in old_tensors_to_clone:
-            assert arg in kwargs
+            if arg not in kwargs:
+                raise AssertionError(f"expected {arg} to be in kwargs")
 
             mutated_arg = kwargs[arg]
 
@@ -1317,9 +1319,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
                 for position, idx in enumerate(mutated_arg_indices):
                     actual_idx = idx + 2  # offset for token and op
-                    assert actual_idx < len(node.args), (
-                        f"mutated arg idx {actual_idx} out of range {len(node.args)}"
-                    )
+                    if actual_idx >= len(node.args):
+                        raise AssertionError(
+                            f"mutated arg idx {actual_idx} out of range {len(node.args)}"
+                        )
                     arg = node.args[actual_idx]
 
                     # Output index is position + 1 (index 0 is the token)

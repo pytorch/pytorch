@@ -24,7 +24,6 @@ from typing_extensions import override
 
 import torch
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.source import NumpyTensorSource
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
     chromium_event_log_active,
@@ -38,6 +37,7 @@ from torch._functorch import config
 from torch._guards import StorageMetadata, TracingContext
 from torch._inductor.codecache import (
     _ident,
+    _is_valid_storage_metadata_guard_source,
     _needs_storage_metadata_for_cache_key,
     _storage_metadata_for_cache_key,
     add_ephemeral_timeout_increase_for_distributed,
@@ -925,12 +925,9 @@ def _add_storage_metadata_guards_for_cache_sensitive_ops(
         return
 
     for arg, source in zip(args, aot_config.aot_autograd_arg_pos_to_source):
-        if (
-            source is None
-            or isinstance(source, NumpyTensorSource)
-            or "___from_numpy(" in source.name
-            or not isinstance(arg, torch.Tensor)
-        ):
+        if not isinstance(arg, torch.Tensor):
+            continue
+        if not _is_valid_storage_metadata_guard_source(source):
             continue
         storage_metadata = _storage_metadata_for_cache_key(arg)
         if storage_metadata is None:
