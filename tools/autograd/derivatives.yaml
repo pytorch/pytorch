@@ -1942,11 +1942,11 @@
   output_differentiability: [False]
 
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
+  self: at::view_as_complex(grad.clone(c10::MemoryFormat::Contiguous)) # gx0 + 1j * gx1
   result: at::view_as_real(self_t)
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_real(grad.contiguous().resolve_conj()) # [gx, gy]
+  self: at::view_as_real(grad.clone(c10::MemoryFormat::Contiguous).resolve_conj()) # [gx, gy]
   result: at::view_as_complex(self_t)
 
 - name: where.self(Tensor condition, Tensor self, Tensor other) -> Tensor

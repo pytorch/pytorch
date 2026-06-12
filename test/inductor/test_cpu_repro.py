@@ -2723,6 +2723,38 @@ class CPUReproTests(TestCase):
         actual = torch.compile(reduce_example, fullgraph=True)(*args)
         self.assertEqual(expected, actual)
 
+    @torch._inductor.config.patch({"layout_optimization": True})
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_view_as_real_backward_with_conv(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(8, 8, 1, bias=False)
+
+            def forward(self, x):
+                x = torch.view_as_real(x)
+                x = x.permute(0, 4, 1, 2, 3).reshape(
+                    x.size(0), -1, x.size(2), x.size(3)
+                )
+                x = self.conv(x)
+                return x.sum()
+
+        torch.manual_seed(0)
+        eager_model = Model()
+        compiled_model = copy.deepcopy(eager_model)
+
+        eager_inp = torch.randn(1, 4, 8, 8, dtype=torch.complex64, requires_grad=True)
+        compiled_inp = eager_inp.detach().clone().requires_grad_(True)
+
+        eager_out = eager_model(eager_inp)
+        eager_out.backward()
+
+        compiled_out = torch.compile(compiled_model, fullgraph=True)(compiled_inp)
+        compiled_out.backward()
+
+        torch.testing.assert_close(compiled_out, eager_out)
+        torch.testing.assert_close(compiled_inp.grad, eager_inp.grad)
+
     def test_load_same_bool_tensor_twice(self):
         @torch.compile(backend="inductor")
         def fn(a, b):
