@@ -489,7 +489,7 @@ class TestShapeVarCompile(TestCase):
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
-            r"shapes_spec declares L\['n'\] as static with value 10, but got 42",
+            r"shapes_spec declared L\['n'\] as static with value 10, but while tracing we found that it was actually 42",
         ):
             compiled(torch.randn(4), 42)
 
@@ -658,7 +658,9 @@ class TestShapeVarCompile(TestCase):
     def test_normalize_rejects_bad_type(self):
         """Passing something that's not dict/ParamsSpec/ShapesSpec/None
         should raise TypeError at compile entry."""
-        with self.assertRaisesRegex(TypeError, "shapes_spec must be"):
+        with self.assertRaisesRegex(
+            TypeError, "dynamic spec expects a dict, ShapesSpec, or ParamsSpec"
+        ):
             torch.compile(lambda x: x, shapes_spec="not a spec")
 
     @_fx_experimental_config.patch(no_data_dependent_graph_break=True)

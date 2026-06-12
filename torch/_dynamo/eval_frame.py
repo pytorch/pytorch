@@ -89,7 +89,11 @@ from torch.fx.experimental._dynamism import (
     clone_and_convert_to_meta,
     track_dynamism_across_examples,
 )
-from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+from torch.fx.experimental.dynamic_spec import (
+    _coerce_to_shapes_spec,
+    ParamsSpec,
+    ShapesSpec,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -824,8 +828,7 @@ class _TorchDynamoContext:
             )
         # Normalize the shorthand forms: dict / ParamsSpec / ShapesSpec all
         # land here as a ShapesSpec (or None).
-        if shapes_spec is not None and not isinstance(shapes_spec, ShapesSpec):
-            shapes_spec = ShapesSpec(shapes_spec)
+        shapes_spec = _coerce_to_shapes_spec(shapes_spec)
         self.callback: DynamoCallback = callback
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Unset | DynamoCallback = unset
@@ -2276,9 +2279,9 @@ def export(
     if config.debug_force_graph_break_on_leaf_return:
         raise unittest.SkipTest("Cannot force graph break on export")
 
-    # `dynamic_shapes` is overloaded: it accepts the legacy dict/tuple/list/Dim
+    # `dynamic_shapes` is overloaded: it accepts the Dim-based dict/tuple/list
     # spec, OR the new ShapesSpec/ParamsSpec API. If the latter is passed, we
-    # route it through dynamo's `shapes_spec` mechanism and skip the legacy
+    # route it through dynamo's `shapes_spec` mechanism and skip the Dim-based
     # constraint processing.
     from torch.fx.experimental.dynamic_spec import (
         _SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG,
