@@ -10362,30 +10362,29 @@ def forward(self, b_a_buffer, x):
                 1,
             )
 
+    # associative_scan is not supported by the cpp (NativeRT) runtime yet
+    @testing.expectedFailureCppRuntime
     def test_export_associative_scan_pointwise_cpu(self):
         # combine_mode="pointwise" only has Inductor codegen on CUDA/XPU, but the
-        # device requirement must not block tracing/export of the HOP on other
-        # devices. See https://github.com/pytorch/pytorch/issues/186594.
-        def combine_fn(x_ab, y_ab):
-            x, a, b = x_ab
-            y, _, _ = y_ab
-            return x * a + y * b, a.clone(), b.clone()
+        # eager device check is skipped while compiling/exporting so the HOP can
+        # be captured on other devices. See
+        # https://github.com/pytorch/pytorch/issues/186594.
+        def combine_fn(x, y):
+            return x + y
 
         class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.a = torch.nn.Parameter(torch.rand(6))
-                self.b = torch.nn.Parameter(torch.rand(6))
-
             def forward(self, xs):
-                a_tiled = self.a.unsqueeze(0).expand(xs.shape[0], -1)
-                b_tiled = self.b.unsqueeze(0).expand(xs.shape[0], -1)
-                out, _, _ = associative_scan(
-                    combine_fn, (xs, a_tiled, b_tiled), dim=0, combine_mode="pointwise"
-                )
-                return out
+                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
 
-        ep = export(M(), (torch.randn(16, 6),))
+        xs = torch.randn(8, 4)
+
+        # A pure-eager (non-exported) CPU call still raises, since pointwise has
+        # no CPU codegen.
+        with self.assertRaisesRegex(ValueError, "need to be on CUDA or XPU"):
+            M()(xs)
+
+        # Export succeeds and retains the associative_scan HOP.
+        ep = export(M(), (xs,))
         self.assertTrue(
             any(
                 node.op == "call_function"
@@ -10394,6 +10393,10 @@ def forward(self, b_a_buffer, x):
             ),
             "exported graph should retain the associative_scan HOP",
         )
+
+        # The exported program runs on CPU via the HOP's eager fallback and
+        # matches the reference scan.
+        self.assertTrue(torch.allclose(ep.module()(xs), torch.cumsum(xs, dim=0)))
 
     # scan is not supported in sigmoid yet
     @testing.expectedFailureCppRuntime
