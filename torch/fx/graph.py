@@ -910,9 +910,69 @@ class CodeGen:
                         f"{repr(node)}{maybe_type_annotation} = {_format_target(_get_repr(node.args[0]), node.args[1])}"
                     )
                     return
+                boxed_arg_names = {
+                    i: namespace.create_name(f"{node.name}_boxed_arg_{i}", None)
+                    for i in node.meta.get(
+                        "boxed_call_arg_indices",
+                        getattr(node.target, "_boxed_call_arg_indices", ()),
+                    )
+                }
+                if boxed_arg_names:
+                    boxed_nodes: set[Node] = set()
+                    unboxed_nodes: set[Node] = set()
+                    map_arg(
+                        tuple(node.args[i] for i in boxed_arg_names),
+                        boxed_nodes.add,
+                    )
+                    map_arg(
+                        (
+                            tuple(
+                                arg
+                                for i, arg in enumerate(node.args)
+                                if i not in boxed_arg_names
+                            ),
+                            node.kwargs,
+                        ),
+                        unboxed_nodes.add,
+                    )
+                    body.append(
+                        "\n".join(
+                            f"{name} = {_get_repr(node.args[i])}"
+                            for i, name in boxed_arg_names.items()
+                        )
+                    )
+                    last_uses = user_to_last_uses.get(node, [])
+                    nodes_to_delete = [
+                        n
+                        for n in last_uses
+                        if n in boxed_nodes and n not in unboxed_nodes
+                    ]
+                    if nodes_to_delete:
+                        user_to_last_uses[node] = [
+                            n for n in last_uses if n not in nodes_to_delete
+                        ]
+                        to_delete_str = " = ".join(
+                            [repr(n) for n in nodes_to_delete] + ["None"]
+                        )
+                        body.append(f";  {dim(to_delete_str)}")
+                    body.append("\n")
+                if boxed_arg_names:
+                    call_args = [_get_repr(arg) for arg in node.args]
+                    for i, name in boxed_arg_names.items():
+                        call_args[i] = name
+                    call_args.extend(
+                        f"{k} = {_get_repr(v)}" for k, v in node.kwargs.items()
+                    )
+                    formatted_args_str = ", ".join(call_args)
+                else:
+                    formatted_args_str = _format_args(node.args, node.kwargs)
                 body.append(
-                    f"{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})"
+                    f"{repr(node)}{maybe_type_annotation} = "
+                    f"{global_name}({formatted_args_str})"
                 )
+                if boxed_arg_names:
+                    boxed_names_str = " = ".join([*boxed_arg_names.values(), "None"])
+                    body.append(f";  {dim(boxed_names_str)}")
                 if node.meta.get("is_wrapped", False):
                     wrapped_fns.setdefault(global_name)
                 return

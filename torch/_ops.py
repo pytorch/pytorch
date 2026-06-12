@@ -538,6 +538,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             return torch.overrides.handle_torch_function(
                 self, flat_args, *args, **kwargs
             )
+        del flat_args
 
         dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
