@@ -2965,6 +2965,13 @@ end
                     return 0
                 if t.is_mkldnn:
                     return torch.ops.mkldnn._nbytes(t)
+                if t.is_contiguous():
+                    # Serialize only up to the tensor's last element to avoid
+                    # N-way bloat for shared-storage constants (e.g. RNN
+                    # flatten_parameters). The reader recovers the tensor via
+                    # storage_offset within the slice. Must stay in sync with
+                    # data_size in cpp_wrapper_cpu.py.
+                    return int((t.storage_offset() + t.numel()) * t.element_size())
                 return t.untyped_storage().nbytes()
 
             if (
