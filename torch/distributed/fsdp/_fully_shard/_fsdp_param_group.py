@@ -1151,3 +1151,9 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
         # Drop the non-tensor param_group tangent. The output pre-backward hook
         # queues final post-backward after all primal/tangent paths finish.
         return grad_inputs
+
+
+if dist._is_spmd_types_available():
+    import spmd_types
+
+    spmd_types.register_local_autograd_function(RegisterPostBackwardFunction)
