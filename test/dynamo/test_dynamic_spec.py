@@ -658,7 +658,9 @@ class TestShapeVarCompile(TestCase):
     def test_normalize_rejects_bad_type(self):
         """Passing something that's not dict/ParamsSpec/ShapesSpec/None
         should raise TypeError at compile entry."""
-        with self.assertRaisesRegex(TypeError, "shapes_spec must be"):
+        with self.assertRaisesRegex(
+            TypeError, "dynamic spec expects a dict, ShapesSpec, or ParamsSpec"
+        ):
             torch.compile(lambda x: x, shapes_spec="not a spec")
 
     @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
