@@ -8765,8 +8765,8 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         quack_config_keys = (
             default_gemm_config_key(
                 layout.device,
-                gemm_args[mat1_index].get_size()[0],
-                gemm_args[mat2_index].get_size()[1],
+                gemm_args[mat1_index].get_size()[-2],
+                gemm_args[mat2_index].get_size()[-1],
             ),
         )
     choices: list[Any] = []

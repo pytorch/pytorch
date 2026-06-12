@@ -286,6 +286,34 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         )
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_batched_epilogue_beta_zero_ignores_nan_c(self):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+
+        torch.manual_seed(7)
+        batch, m, n, k = 2, 128, 128, 64
+        a = self.makeTensor(batch, m, k)
+        b = self.makeTensor(batch, k, n)
+        c = torch.full((m, n), float("nan"), device="cuda", dtype=a.dtype)
+
+        out = gemm_epilogue(
+            a,
+            b,
+            self.relu_epilogue,
+            "test_flex_gemm_batched_beta_zero",
+            C=c,
+            alpha=1.5,
+            beta=0,
+        )
+
+        self.assertFalse(torch.isnan(out).any())
+        self.assertMatchesLowPrecisionEager(
+            out,
+            torch.baddbmm(c, a, b, beta=0, alpha=1.5).relu(),
+            torch.baddbmm(c.double(), a.double(), b.double(), beta=0, alpha=1.5).relu(),
+            k,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_explicit_arg_kind_disambiguates_row_arg(self):
         from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
 
@@ -502,19 +530,31 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         file_check = file_check.check_not("epilogue_source=")
         file_check.check_not("from quack").check_not("import quack").run(code)
 
-    def test_supported_op_names_match_pr2b_scope(self):
-        self.assertEqual(_SUPPORTED_FLEX_GEMM_OP_NAMES, "mm/addmm")
+    def test_supported_op_names_match_dense_scope(self):
+        self.assertEqual(_SUPPORTED_FLEX_GEMM_OP_NAMES, "mm/addmm/bmm/baddbmm")
 
-    def test_default_backend_eager_matches_reference(self):
-        a = torch.randn(8, 16)
-        b = torch.randn(16, 12)
+    @parametrize(
+        "case",
+        (
+            ("mm", torch.mm, lambda a, b: (a, b), lambda a, b: a @ b),
+            ("bmm", torch.bmm, lambda a, b: (a, b), lambda a, b: torch.bmm(a, b)),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_default_backend_eager_matches_reference(self, case):
+        _, op, args_fn, ref_fn = case
+        a = torch.randn(2, 8, 16)
+        b = torch.randn(2, 16, 12)
+        if op is torch.mm:
+            a = a[0]
+            b = b[0]
 
         def epilogue_fn(acc):
             return acc.relu()
 
-        actual = flex_gemm(torch.mm, (a, b), epilogue_fn)
+        actual = flex_gemm(op, args_fn(a, b), epilogue_fn)
 
-        torch.testing.assert_close(actual, epilogue_fn(a @ b))
+        torch.testing.assert_close(actual, epilogue_fn(ref_fn(a, b)))
 
     def test_autograd_is_not_implemented(self):
         a = torch.randn(8, 16, requires_grad=True)
@@ -728,6 +768,195 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_bmm_compiled_matches_reference(self):
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        actual = torch.compile(flex_gemm, backend="inductor", fullgraph=True)(
+            torch.bmm,
+            (a, b),
+            epilogue_fn,
+            kernel_options={"backend": "QUACK"},
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.bmm(a, b)),
+            epilogue_fn(torch.bmm(a.double(), b.double())),
+            a.shape[-1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_baddbmm_compiled_matches_reference(self):
+        bias = torch.randn(2, 128, 128, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        actual = torch.compile(flex_gemm, backend="inductor", fullgraph=True)(
+            torch.baddbmm,
+            (bias, a, b),
+            epilogue_fn,
+            gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+            kernel_options={"backend": "QUACK"},
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.baddbmm(bias, a, b, beta=0.5, alpha=1.5)),
+            epilogue_fn(
+                torch.baddbmm(
+                    bias.double(), a.double(), b.double(), beta=0.5, alpha=1.5
+                )
+            ),
+            a.shape[-1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_baddbmm_broadcast_bias_compiled_matches_reference(self):
+        bias = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        actual = torch.compile(flex_gemm, backend="inductor", fullgraph=True)(
+            torch.baddbmm,
+            (bias, a, b),
+            epilogue_fn,
+            gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+            kernel_options={"backend": "QUACK"},
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.baddbmm(bias, a, b, beta=0.5, alpha=1.5)),
+            epilogue_fn(
+                torch.baddbmm(
+                    bias.double(), a.double(), b.double(), beta=0.5, alpha=1.5
+                )
+            ),
+            a.shape[-1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_bmm_generated_code_calls_flex_gemm_adapter(self):
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.bmm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.bmm(a, b)),
+            epilogue_fn(torch.bmm(a.double(), b.double())),
+            a.shape[-1],
+        )
+        self.assertFlexGemmGeneratedCode(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_bmm_generated_code_tuned_matches_reference(self):
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.bmm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
+
+        configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(a.device)[:2]
+        with mock.patch(
+            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            return_value=configs,
+        ):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.bmm(a, b)),
+            epilogue_fn(torch.bmm(a.double(), b.double())),
+            a.shape[-1],
+        )
+        self.assertFlexGemmGeneratedCode(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_baddbmm_generated_code_calls_flex_gemm_adapter(self):
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        def fn(bias, a, b):
+            return flex_gemm(
+                torch.baddbmm,
+                (bias, a, b),
+                epilogue_fn,
+                gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        bias = torch.randn(2, 128, 128, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), bias, a, b
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.baddbmm(bias, a, b, beta=0.5, alpha=1.5)),
+            epilogue_fn(
+                torch.baddbmm(
+                    bias.double(), a.double(), b.double(), beta=0.5, alpha=1.5
+                )
+            ),
+            a.shape[-1],
+        )
+        self.assertFlexGemmGeneratedCode(code, "C=")
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_addmm_generated_code_calls_flex_gemm_adapter(self):
         def epilogue_fn(acc):
             return acc.relu()
@@ -841,12 +1070,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     def test_rejects_unsupported_quack_op(self):
-        a = torch.randn(2, 3, 4)
-        b = torch.randn(2, 4, 5)
+        a = torch.randn(8, 16)
+        b = torch.randn(16, 12)
 
         with self.assertRaisesRegex(RuntimeError, "unsupported GEMM op"):
             flex_gemm(
-                torch.ops.aten.bmm.default,
+                torch.ops.aten.matmul.default,
                 (a, b),
                 lambda acc: acc.relu(),
                 kernel_options={"backend": "QUACK"},

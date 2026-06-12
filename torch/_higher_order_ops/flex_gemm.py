@@ -30,10 +30,14 @@ class FlexGemmOpSpec:
 FLEX_GEMM_OP_SPECS = {
     torch.ops.aten.mm.default: FlexGemmOpSpec("mm", 0, 1),
     torch.ops.aten.addmm.default: FlexGemmOpSpec("addmm", 1, 2, bias_index=0),
+    torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1),
+    torch.ops.aten.baddbmm.default: FlexGemmOpSpec("baddbmm", 1, 2, bias_index=0),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
     torch.addmm: torch.ops.aten.addmm.default,
+    torch.bmm: torch.ops.aten.bmm.default,
+    torch.baddbmm: torch.ops.aten.baddbmm.default,
 }
 _SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
 
