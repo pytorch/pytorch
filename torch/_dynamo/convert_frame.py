@@ -261,9 +261,11 @@ def clear_compile_context_weakrefs(
         and not config.run_gc_after_compile
     ):
         # Free-threaded Python can defer destruction of cleared WeakIdRef
-        # objects. Force collection before eager graph-break code resumes and
-        # potentially calls swap_tensors, which rejects any live weakrefs.
-        gc.collect()
+        # objects. A gen0 collection is enough to process deferred refs before
+        # eager graph-break code resumes and potentially calls swap_tensors,
+        # which rejects any live weakrefs. Avoid full-heap collections here
+        # because this runs on every graph-break compile.
+        gc.collect(0)
 
 
 class Tracker:
