@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.autograd.graph import _MultiHandle
-from torch.distributed import _is_spmd_types_available, _spmd_no_typecheck
+from torch.distributed import _spmd_no_typecheck
 from torch.distributed._composable_state import (
     _get_module_state,
     _insert_module_state,
@@ -19,7 +19,6 @@ from torch.distributed._composable_state import (
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import collect_grad_tensors
 from torch.distributed.utils import _apply_to_tensors, _to_kwargs
-from torch.utils._pytree import tree_map
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import _cast_fp_tensor, _dynamo_disable, TrainingState
@@ -28,10 +27,6 @@ from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
-
-if _is_spmd_types_available():
-    import spmd_types as spmd
-    from spmd_types.runtime import get_partition_spec
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
@@ -126,14 +121,13 @@ class FSDPState(_State):
                 self._pre_forward, prepend=True, with_kwargs=True
             )
             self._post_forward_hook_handle = modules[0].register_forward_hook(
-                self._post_forward,  # pyrefly: ignore[bad-argument-type]
-                prepend=False,
+                self._post_forward, prepend=False
             )
         else:
             hook_handle = _register_group_forward_hooks(
                 modules,
                 self._pre_forward,
-                self._post_forward,  # pyrefly: ignore[bad-argument-type]
+                self._post_forward,
                 self._modules_to_run_forward,
                 self._cast_output_dtype,
             )
@@ -292,49 +286,14 @@ class FSDPState(_State):
                         module_fqn += f", {module_name}"
                         fsdp_param_group._module_fqn = module_fqn
 
-    def _save_spmd_pre_forward(
-        self, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> tuple[Any, Any]:
-        if not _is_spmd_types_available():
-            return tree_map(lambda x: (None, None), (args, kwargs))
-
-        return tree_map(
-            lambda x: (
-                (spmd.get_local_type(x), get_partition_spec(x))
-                if isinstance(x, torch.Tensor)
-                else (None, None)
-            ),
-            (args, kwargs),
-        )
-
-    def _restore_spmd_pre_forward(
-        self,
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-        annotations: tuple[Any, Any],
-    ) -> None:
-        if not _is_spmd_types_available():
-            return
-
-        tree_map(
-            lambda x, a: (
-                spmd.assert_type(x, a[0], partition_spec=a[1])
-                if isinstance(x, torch.Tensor)
-                else x
-            ),
-            (args, kwargs),
-            annotations,
-        )
-
     @_dynamo_disable
     def _pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        spmd_annotations = self._save_spmd_pre_forward(args, kwargs)
-        with _spmd_no_typecheck():
-            # When composing with module-hook-based activation checkpointing, the
-            # pre-backward hook is responsible for the unshard
-            if self._training_state == TrainingState.PRE_BACKWARD:
+        # When composing with module-hook-based activation checkpointing, the
+        # pre-backward hook is responsible for the unshard
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            with _spmd_no_typecheck():
                 # With nested FSDP and multiple forward passes before backward,
                 # the params might have been resharded by a previous post_backward.
                 # We need to ensure params are unsharded for AC recomputation.
@@ -342,18 +301,19 @@ class FSDPState(_State):
                     if not fsdp_param_group.is_unsharded:
                         fsdp_param_group.unshard()
                         fsdp_param_group.wait_for_unshard()
-                args, kwargs = self._cast_forward_inputs(args, kwargs)
-                self._restore_spmd_pre_forward(args, kwargs, spmd_annotations)
-                return args, kwargs
-            # With grouped ``fully_shard([a, b, ...])`` the pre-hook fires per
-            # module (so ``cast_forward_inputs`` and ``fsdp_param_group.pre_forward``
-            # run for each). Root setup and forward prefetch are one-shot, gated
-            # on the first module's entry.
+            return self._cast_forward_inputs(args, kwargs)
+
+        # With grouped ``fully_shard([a, b, ...])`` the pre-hook fires per
+        # module (so ``cast_forward_inputs`` and ``fsdp_param_group.pre_forward``
+        # run for each). Root setup and forward prefetch are one-shot, gated
+        # on the first module's entry.
+        with _spmd_no_typecheck():
             state_first_in_pass = self._training_state != TrainingState.FORWARD
             self._training_state = TrainingState.FORWARD
             if state_first_in_pass:
                 args, kwargs = self._root_pre_forward(module, args, kwargs)
-            args, kwargs = self._cast_forward_inputs(args, kwargs)
+        args, kwargs = self._cast_forward_inputs(args, kwargs)
+        with _spmd_no_typecheck():
             for fsdp_param_group in self._fsdp_param_groups:
                 args, kwargs = fsdp_param_group.pre_forward(module, args, kwargs)
             if state_first_in_pass:
@@ -362,7 +322,6 @@ class FSDPState(_State):
                     # order; contrast with reversed() in _pre_backward.
                     for target_param_group in fsdp_state._fsdp_param_groups:
                         FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
-            self._restore_spmd_pre_forward(args, kwargs, spmd_annotations)
             return args, kwargs
 
     @_dynamo_disable
