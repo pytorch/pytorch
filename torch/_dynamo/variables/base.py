@@ -957,6 +957,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_divmod_impl(tx, args[0])
         elif name == "__rdivmod__":
             return self.nb_divmod_impl(tx, args[0], reverse=True)
+        elif name == "__pow__":
+            z = args[1] if len(args) == 2 else None
+            return self.nb_power_impl(tx, args[0], z, reverse=False)
+        elif name == "__rpow__":
+            z = args[1] if len(args) == 2 else None
+            return self.nb_power_impl(tx, args[0], z, reverse=True)
+        elif name == "__ipow__":
+            return self.nb_inplace_power_impl(tx, args[0], None)
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
@@ -1599,6 +1607,35 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         look up ``__rdivmod__`` instead of ``__divmod__``). divmod has no
         in-place form.
         """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_power_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_power_z_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        v: VariableTracker,
+        w: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_power slot when self is the modulus (z) operand.
+
+        ``v`` is the base, ``w`` is the exponent, ``self`` is the modulus.
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_power_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        other: VariableTracker,
+        z: VariableTracker | None,
+    ) -> VariableTracker:
         return variables.ConstantVariable(NotImplemented)
 
     def nb_multiply_impl(
