@@ -18,10 +18,17 @@ fmha_bwd_traits get_ck_fmha_varlen_bwd_traits(const mask_info &mask,
                                               bool deterministic,
                                               bool bias_requires_grad)
 {
-    return fmha_bwd_traits{head_size,
+    return fmha_bwd_traits{0,     // seqlen_q
+                           0,     // seqlen_k
+                           0,     // batch
+                           0,     // max_seqlen_q
+                           0,     // max_seqlen_k
                            head_size,
+                           head_size,
+                           0,     // nhead_q
+                           0,     // nhead_k
                            dtype,
-                           true, // is_group_mode
+                           true,  // is_group_mode
                            mask.type,
                            enable_bias ? bias_enum::elementwise_bias : bias_enum::no_bias,
                            bias_requires_grad,    // has_dbias
@@ -162,20 +169,22 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
                          dv.data_ptr(),
                          dbias_ptr, // dbias
                          dq_acc.data_ptr(), // dq_acc
+                         nullptr, // sink_ptr
+                         nullptr, // d_sink_ptr
                          seqlens_q.data_ptr(), // seqstart_q
                          seqlens_k.data_ptr(), // seqstart_k
                          nullptr, // seqlen_q_ptr
                          nullptr, // seqlen_k_ptr
                          nullptr, // cu_seqlen_q_ptr
                          nullptr, // cu_seqlen_k_ptr
-                         total_q,
-                         total_k,
+                         total_q, // seqlen_q
+                         total_k, // seqlen_k
                          b,
                          max_seqlen_q, // max_seqlen_q
                          max_seqlen_k, // max_seqlen_k
                          hdim, // hdim_q
                          hdim, // hdim_v
-                         h, // nhead
+                         h, // nhead_q
                          h_k, // nhead_k
                          softmax_scale,
                          stride_q,
