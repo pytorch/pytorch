@@ -588,15 +588,44 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
-    def var_getattr(self, tx: InstructionTranslatorBase, name: str) -> VariableTracker:
-        """getattr(self, name) returning a new variable"""
+    def lookup_instance_dict(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker | None:
+        """Look up *name* in the instance __dict__ (tp_dictoffset equivalent).
+
+        Returns a VT if the attribute exists in the instance dict, None
+        otherwise.  The base returns None (most VTs have no instance dict).
+        UDOV overrides to check self.value.__dict__ + side effects.
+        """
+        return None
+
+    def call_getattr_fallback(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker | None:
+        """Call __getattr__ fallback (step 6 of GenericGetAttr).
+
+        Returns a VT if the type defines __getattr__ and it succeeds,
+        None otherwise.  The base returns None (most types have no
+        __getattr__).  UDOV overrides to walk the MRO for __getattr__.
+        """
+        return None
+
+    def getattro_impl(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker:
+        """Default attribute access via const_getattr.
+
+        VTs with custom tp_getattro override this method.  The shared
+        GenericGetAttr algorithm is available as object_generic_getattr()
+        in object_protocol.py for VTs that want to opt into MRO-based
+        descriptor dispatch.
+        """
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError
         source = self.source and AttrSource(self.source, name)
         if source and not self.is_python_constant():
-            # The second condition is to avoid guards on const getattr objects
-            # like __code__.co_argcount
+            # Skip guards on const getattr objects like __code__.co_argcount
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return variables.ConstantVariable.create(value, source=source)
 
@@ -860,7 +889,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and args[0].is_python_constant()
             and not kwargs
         ):
-            return self.var_getattr(tx, args[0].as_python_constant())
+            # TODO(tp_getattro): In CPython, obj.__getattr__("foo") calls only
+            # the type's __getattr__ method, not the full attribute resolution.
+            # Currently we dispatch through getattro_impl which does the full
+            # GenericGetAttr + __getattr__ fallback. Fix in a follow-up to
+            # call __getattr__ directly for UDOV types.
+            return self.getattro_impl(tx, args[0].as_python_constant())
+        elif (
+            name == "__getattribute__"
+            and len(args) == 1
+            and args[0].is_python_constant()
+            and not kwargs
+        ):
+            # TODO(tp_getattro): In CPython, obj.__getattribute__("foo")
+            # calls GenericGetAttr WITHOUT the __getattr__ fallback.
+            # Currently we route through getattro_impl which, for UDOV,
+            # includes __getattr__. Fix in a follow-up to have UDOV
+            # override this to call generic_getattr (the inner helper)
+            # directly, skipping __getattr__.
+            return self.getattro_impl(tx, args[0].as_python_constant())
         elif name == "__index__" and not args and not kwargs:
             return self.nb_index_impl(tx)
         elif name == "__int__" and not args and not kwargs:
@@ -873,7 +920,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9771-L9790
             if hasattr(self, "tp_descr_get_impl"):
                 obj = args[0]
-                owner = args[1] if len(args) > 1 else obj.var_getattr(tx, "__class__")
+                owner = args[1] if len(args) > 1 else obj.getattro_impl(tx, "__class__")
                 return self.tp_descr_get_impl(tx, obj, owner)
         elif name == "__or__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
