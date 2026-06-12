@@ -2964,7 +2964,7 @@ end
                 if t.numel() == 0:
                     return 0
                 if t.is_mkldnn:
-                    return torch.ops.mkldnn._nbytes(t)
+                    return torch.ops.onednn._nbytes(t)
                 return t.untyped_storage().nbytes()
 
             if (

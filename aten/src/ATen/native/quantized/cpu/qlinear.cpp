@@ -1468,7 +1468,7 @@ namespace at::native {
       Tensor act, // int8 CPU tensor, not QTensor
       Tensor act_scale,
       Tensor act_zero_point,
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
       std::optional<Tensor> bias,
@@ -1497,7 +1497,7 @@ namespace at::native {
       Tensor act, // int8 CPU tensor, not QTensor
       Tensor act_scale,
       Tensor act_zero_point,
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
       std::optional<Tensor> other, // extra input for binary post-op
@@ -1629,7 +1629,7 @@ class QLinearOnednn final {
       Tensor act, // int8 CPU tensor, not QTensor
       double act_scale,
       int64_t act_zero_point,
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
       std::optional<Tensor> bias,
@@ -1658,7 +1658,7 @@ class QLinearOnednn final {
       Tensor act, // int8 CPU tensor, not QTensor
       double act_scale,
       int64_t act_zero_point,
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
       std::optional<at::Tensor> other, // extra input for binary post-op
@@ -1706,7 +1706,7 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::int4mm_packed_weight_cpu"), TORCH_FN(at::native::_weight_int4pack_mm_cpu_tensor));
 }
 
-TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise"),
       TORCH_FN(QLinearOnednn::run_pointwise));
   m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.tensor"),
