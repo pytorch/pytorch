@@ -311,17 +311,9 @@ run_and_save_rng_state = register_run_and_save_rng_state_op()
 run_with_rng_state = register_run_with_rng_state_op()
 
 
-def _impl_graphsafe_rng(op, *args, rng_state=None, **kwargs):
-    # pyrefly: ignore [missing-attribute]
+def _impl_graphsafe_rng(op, *args, rng_state, **kwargs):
     device_idx = rng_state.device.index
-    device_type = rng_state.device.type  # pyrefly: ignore [missing-attribute]
-    device_mod = getattr(torch, device_type, None)
-    if device_mod is None or not hasattr(device_mod, "default_generators"):
-        raise AssertionError(
-            f"GraphSafe RNG operations not supported for device '{device_type}' "
-            f"(no torch.{device_type}.default_generators)"
-        )
-    generator = device_mod.default_generators[device_idx]
+    generator = torch._C._accelerator_getDefaultGenerator(device_idx)
     current_state = generator.graphsafe_get_state()
 
     generator.graphsafe_set_state(rng_state)
