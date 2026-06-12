@@ -1,49 +1,28 @@
 #define PYBIND11_DETAILED_ERROR_MESSAGES
 
 #include <ATen/ATen.h>
-#include <c10/util/CallOnce.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/mps/Module.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <memory>
 
-// pthread.h is included for tracking bad forks
-#ifndef WIN32
-#include <pthread.h>
-#endif
-
 #ifdef USE_MPS
+#include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #endif
 
 namespace torch::mps {
 
-namespace {
-// True for children forked after mps init
-static bool in_bad_fork = false;
-
-// Called in the forked child if mps has already been initialized
-static void forked_mps_child() {
-  in_bad_fork = true;
-}
-
-// Should be called before the first mps call.
-static void track_bad_mps_fork() {
-#ifndef WIN32
-  static c10::once_flag flag;
-  c10::call_once(
-      flag, [] { pthread_atfork(nullptr, nullptr, forked_mps_child); });
-#endif
-}
-} // namespace
-
 static PyObject* MPSModule_isInBadFork(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyBool_FromLong(in_bad_fork);
+  return PyBool_FromLong(torch::utils::is_device_in_bad_fork(at::kMPS));
   END_HANDLE_TH_ERRORS
 }
 
@@ -51,7 +30,7 @@ static PyObject* MPSModule_getDefaultMPSGenerator(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  track_bad_mps_fork();
+  torch::utils::register_fork_handler_for_device_init(at::kMPS);
   return THPGenerator_initDefaultGenerator(
       at::detail::getMPSHooks().getDefaultGenerator());
   END_HANDLE_TH_ERRORS
@@ -59,8 +38,8 @@ static PyObject* MPSModule_getDefaultMPSGenerator(
 
 static PyObject* MPSModule_isAvailable(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  track_bad_mps_fork();
   if (at::detail::getMPSHooks().hasMPS()) {
+    torch::utils::register_fork_handler_for_device_init(at::kMPS);
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -86,8 +65,12 @@ static PyObject* MPSModule_isMacOSorNewer(PyObject* _unused, PyObject* args) {
 static PyObject* MPSModule_deviceSynchronize(
     PyObject* _unused,
     PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  at::detail::getMPSHooks().deviceSynchronize();
+  HANDLE_TH_ERRORS {
+    // Release GIL so Metal's completion thread can destroy Python-wrapped
+    // objects (e.g. storages captured in MTLBuffer deallocator blocks).
+    pybind11::gil_scoped_release no_gil;
+    at::detail::getMPSHooks().deviceSynchronize();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -135,6 +118,14 @@ static PyObject* MPSModule_recommendedMaxMemory(
   HANDLE_TH_ERRORS
   return THPUtils_packUInt64(
       at::detail::getMPSHooks().getRecommendedMaxMemory());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_maxBufferLength(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(at::detail::getMPSHooks().getMaxBufferLength());
   END_HANDLE_TH_ERRORS
 }
 
@@ -200,7 +191,11 @@ static PyObject* MPSModule_waitForEvent(PyObject* _unused, PyObject* args) {
 static PyObject* MPSModule_synchronizeEvent(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   const uint32_t event_id = THPUtils_unpackUInt32(args);
-  at::detail::getMPSHooks().synchronizeEvent(event_id);
+  {
+    // See MPSModule_deviceSynchronize.
+    pybind11::gil_scoped_release no_gil;
+    at::detail::getMPSHooks().synchronizeEvent(event_id);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -263,6 +258,7 @@ static struct PyMethodDef _MPSModule_methods[] = {
      MPSModule_recommendedMaxMemory,
      METH_NOARGS,
      nullptr},
+    {"_mps_maxBufferLength", MPSModule_maxBufferLength, METH_NOARGS, nullptr},
     {"_mps_profilerStartTrace",
      MPSModule_profilerStartTrace,
      METH_VARARGS,
@@ -394,6 +390,15 @@ struct OptionalArgCaster {
       } else if (py::isinstance<py::float_>(element)) {
         auto values = arg.cast<std::vector<float>>();
         setValue(f, idx, values);
+      } else if (THPVariable_Check(element.ptr())) {
+        /* List of tensors, most often to overcome the limits of 32-args per
+         * kernel */
+        auto tensorlist = py::cast<std::vector<at::Tensor>>(arg);
+        std::vector<void*> tl_ptrs;
+        for (auto& t : tensorlist) {
+          tl_ptrs.push_back(at::native::mps::get_tensor_gpu_address(t));
+        }
+        f.setArg(idx, tl_ptrs);
       } else {
         TORCH_CHECK(false, "Unexpected argument types");
       }
@@ -437,7 +442,8 @@ void initModule(PyObject* module) {
              const py::args& args,
              const py::object& py_threads,
              const py::object& py_group_size,
-             const py::object& arg_casts) {
+             const py::object& arg_casts,
+             const py::object& error_buf_idx) {
             auto threads = optional_vec_from_pyobject(py_threads);
             auto group_size = optional_vec_from_pyobject(py_group_size);
             OptionalArgCaster caster(arg_casts);
@@ -454,9 +460,14 @@ void initModule(PyObject* module) {
                 }
                 caster.setValue(self, idx, args[idx]);
               }
+              // Set error buffer if error_buf_idx is provided
+              if (!error_buf_idx.is_none()) {
+                auto error_idx = error_buf_idx.cast<unsigned>();
+                self.setErrorBufferIndex(error_idx);
+              }
               TORCH_CHECK(
                   threads.has_value() && threads->size() < 4,
-                  "Number of threads is undefined or has wrong dimention");
+                  "Number of threads is undefined or has wrong dimension");
               TORCH_CHECK(
                   !group_size.has_value() ||
                   threads->size() == group_size->size());
@@ -491,7 +502,8 @@ void initModule(PyObject* module) {
           py::kw_only(),
           py::arg("threads") = py::none(),
           py::arg("group_size") = py::none(),
-          py::arg("arg_casts") = py::none())
+          py::arg("arg_casts") = py::none(),
+          py::arg("error_buf_idx") = py::none())
       .def_property_readonly(
           "max_threads_per_threadgroup",
           &MetalKernelFunction::getMaxThreadsPerThreadgroup)
@@ -501,8 +513,56 @@ void initModule(PyObject* module) {
       .def_property_readonly(
           "static_thread_group_memory_length",
           &MetalKernelFunction::getStaticThreadGroupMemoryLength);
+  py::class_<
+      PrecompiledMetalShaderLibrary,
+      std::shared_ptr<PrecompiledMetalShaderLibrary>>(
+      m, "_mps_PrecompiledShaderLibrary")
+      .def(
+          "__getattr__",
+          [](PrecompiledMetalShaderLibrary& self, const std::string& name) {
+            return self.getKernelFunction(name);
+          })
+      .def("__dir__", [](PrecompiledMetalShaderLibrary& self) {
+        return self.getFunctionNames();
+      });
+  m.def("_mps_loadMetalllib", [](const py::bytes& data) {
+    auto sv = static_cast<std::string_view>(data);
+    std::vector<uint8_t> bytes(sv.begin(), sv.end());
+    return std::make_shared<PrecompiledMetalShaderLibrary>(std::move(bytes));
+  });
+  m.def("_mps_loadMetallibFromPath", [](const std::string& path) {
+    return std::make_shared<PrecompiledMetalShaderLibrary>(path);
+  });
   m.def("_mps_compileShader", [](const std::string& source) {
     return std::make_shared<DynamicMetalShaderLibrary>(source);
+  });
+  m.def("_mps_isCaptureEnabled", []() {
+    return at::mps::getMPSProfiler().isCaptureEnabled();
+  });
+  m.def("_mps_isCapturing", []() {
+    return at::mps::getMPSProfiler().isCapturing();
+  });
+  m.def("_mps_startCapture", [](const std::string& fileName) {
+    at::mps::getMPSProfiler().startCapture(fileName);
+  });
+  m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
+  m.def("_mps_get_name", []() {
+    return at::mps::MPSDevice::getInstance()->getName();
+  });
+  m.def("_mps_get_core_count", []() {
+    return at::mps::MPSDevice::getInstance()->getCoreCount();
+  });
+  m.def("_mps_host_alias_storage", [](py::object py_storage) -> py::object {
+    PyObject* obj = py_storage.ptr();
+    TORCH_CHECK_TYPE(
+        THPStorage_Check(obj),
+        "_mps_host_alias_storage: expected a torch.UntypedStorage");
+    const c10::Storage& mps_storage = THPStorage_Unpack(obj);
+    auto* allocator = at::mps::getIMPSAllocator();
+    TORCH_CHECK(allocator, "MPS allocator is not available");
+    c10::Storage host_alias = allocator->getHostAliasStorage(mps_storage);
+    return py::reinterpret_steal<py::object>(
+        THPStorage_Wrap(std::move(host_alias)));
   });
 }
 #endif /* USE_MPS */

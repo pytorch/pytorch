@@ -10,8 +10,8 @@
 
 #if !AT_ONEDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor onednn_softmax(
     const Tensor& self,
@@ -20,8 +20,8 @@ Tensor onednn_softmax(
   TORCH_CHECK(false, "onednn_softmax: ATen not compiled with ONEDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_ONEDNN_ENABLED
 

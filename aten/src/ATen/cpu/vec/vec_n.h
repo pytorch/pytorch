@@ -187,12 +187,13 @@ class VectorizedN {
   static VectorizedN<T, N> loadu(const void* ptr, int64_t count) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result.values[i] = Vectorized<T>::loadu(
-          ptr, std::min(count, (int64_t)Vectorized<T>::size()));
-      ptr = static_cast<const T*>(ptr) + Vectorized<T>::size();
-      count -= Vectorized<T>::size();
-      if (count <= 0) {
-        break;
+      if (count > 0) {
+        result.values[i] = Vectorized<T>::loadu(
+            ptr, std::min(count, (int64_t)Vectorized<T>::size()));
+        ptr = static_cast<const T*>(ptr) + Vectorized<T>::size();
+        count -= Vectorized<T>::size();
+      } else {
+        result.values[i] = Vectorized<T>((T)1);
       }
     }
     return result;
@@ -251,6 +252,7 @@ class VectorizedN {
   VECTORIZEDN_DEFINE_UNARY_OP(acos)
   VECTORIZEDN_DEFINE_UNARY_OP(acosh)
   VECTORIZEDN_DEFINE_UNARY_OP(asin)
+  VECTORIZEDN_DEFINE_UNARY_OP(asinh)
   VECTORIZEDN_DEFINE_UNARY_OP(atan)
   VECTORIZEDN_DEFINE_UNARY_OP(atanh)
   VECTORIZEDN_DEFINE_BINARY_OP(atan2)
@@ -262,6 +264,7 @@ class VectorizedN {
   VECTORIZEDN_DEFINE_UNARY_OP(exp2)
   VECTORIZEDN_DEFINE_UNARY_OP(expm1)
   VECTORIZEDN_DEFINE_UNARY_OP(exp_u20)
+  VECTORIZEDN_DEFINE_UNARY_OP(fexp_u20)
   VECTORIZEDN_DEFINE_UNARY_OP(frac)
   VECTORIZEDN_DEFINE_BINARY_OP(fmod)
   VECTORIZEDN_DEFINE_UNARY_OP(log)

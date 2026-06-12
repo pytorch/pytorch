@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional
+
+from typing import Optional
 
 import torch
 from torch.backends._nnapi.serializer import _NnapiSerializer
@@ -20,17 +21,17 @@ class NnapiModule(torch.nn.Module):
     """
 
     # _nnapi.Compilation is defined
-    comp: Optional[torch.classes._nnapi.Compilation]  # type: ignore[name-defined]
-    weights: List[torch.Tensor]
-    out_templates: List[torch.Tensor]
+    comp: Optional[torch.classes._nnapi.Compilation]  # type: ignore[name-defined]  # noqa: UP045
+    weights: list[torch.Tensor]
+    out_templates: list[torch.Tensor]
 
     def __init__(
         self,
         shape_compute_module: torch.nn.Module,
         ser_model: torch.Tensor,
-        weights: List[torch.Tensor],
-        inp_mem_fmts: List[int],
-        out_mem_fmts: List[int],
+        weights: list[torch.Tensor],
+        inp_mem_fmts: list[int],
+        out_mem_fmts: list[int],
         compilation_preference: int,
         relax_f32_to_f16: bool,
     ):
@@ -46,8 +47,9 @@ class NnapiModule(torch.nn.Module):
         self.relax_f32_to_f16 = relax_f32_to_f16
 
     @torch.jit.export
-    def init(self, args: List[torch.Tensor]):
-        assert self.comp is None
+    def init(self, args: list[torch.Tensor]):
+        if self.comp is not None:
+            raise AssertionError("comp must be None before initialization")
         self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)  # type: ignore[operator]
         self.weights = [w.contiguous() for w in self.weights]
         comp = torch.classes._nnapi.Compilation()
@@ -60,14 +62,18 @@ class NnapiModule(torch.nn.Module):
 
         self.comp = comp
 
-    def forward(self, args: List[torch.Tensor]) -> List[torch.Tensor]:
+    def forward(self, args: list[torch.Tensor]) -> list[torch.Tensor]:
         if self.comp is None:
             self.init(args)
         comp = self.comp
-        assert comp is not None
+        if comp is None:
+            raise AssertionError("comp must not be None")
         outs = [torch.empty_like(out) for out in self.out_templates]
 
-        assert len(args) == len(self.inp_mem_fmts)
+        if len(args) != len(self.inp_mem_fmts):
+            raise AssertionError(
+                f"args length {len(args)} != inp_mem_fmts length {len(self.inp_mem_fmts)}"
+            )
         fixed_args = []
         for idx in range(len(args)):
             fmt = self.inp_mem_fmts[idx]
@@ -80,7 +86,10 @@ class NnapiModule(torch.nn.Module):
             else:
                 raise ValueError("Invalid mem_fmt")
         comp.run(fixed_args, outs)
-        assert len(outs) == len(self.out_mem_fmts)
+        if len(outs) != len(self.out_mem_fmts):
+            raise AssertionError(
+                f"outs length {len(outs)} != out_mem_fmts length {len(self.out_mem_fmts)}"
+            )
         for idx in range(len(self.out_templates)):
             fmt = self.out_mem_fmts[idx]
             # These constants match the values in DimOrder in serializer.py

@@ -37,7 +37,7 @@
 // *the same `ShapeSymbol` is always associated with the same `Dimension`*.
 // * To maintain this invariant we merge the profiling information from all
 // profiling runs,
-//   * For every two runs, we iterate over all `symbic_shapes_`  and compare
+//   * For every two runs, we iterate over all `symbolic_shapes_`  and compare
 //   their `ShapeSymbol`s in the same position.
 //     * if we observe that for every dimension location that has
 //     the`ShapeSymbol S1`  in run #1 there is **only one** `ShapeSymbol S2` in
@@ -81,7 +81,8 @@ namespace torch::jit {
 using ::c10::TensorTypePtr;
 using Dimension = int64_t;
 
-TORCH_API void RegisterProfilingNode(const std::function<bool(const Node*)>&);
+TORCH_API void RegisterProfilingNode(
+    const std::function<bool(const Node*)>& /*func*/);
 
 struct ProfilingRecord;
 

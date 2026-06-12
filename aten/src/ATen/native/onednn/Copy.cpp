@@ -10,15 +10,15 @@
 
 #if !AT_ONEDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor& copy_onednn_(Tensor& self, const Tensor& src, bool non_blocking) {
   TORCH_CHECK(false, "copy_onednn_: ATen not compiled with ONEDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_ONEDNN_ENABLED
 

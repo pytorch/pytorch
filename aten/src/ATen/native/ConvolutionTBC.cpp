@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 #include <tuple>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -52,8 +53,7 @@ Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, in
   for (const auto k : c10::irange(kw)) {
     int iShift = std::max(0, static_cast<int>(k - real_pad));
     int oShift = std::max(0, static_cast<int>(real_pad - k));
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    int t = std::min(ilen + real_pad - k, olen) - oShift;
+    long t = std::min(ilen + real_pad - k, olen) - oShift;
     // Note: gemm assumes column-major matrices
     // input    is l*m (row-major)
     // weight   is m*r (row-major)
@@ -114,7 +114,8 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
   auto tmp = dOutput.sum(0, false);
   dBias.copy_(tmp.sum(0));
 
-  return std::make_tuple(dInput, dWeight, dBias);
+  return std::make_tuple(
+      std::move(dInput), std::move(dWeight), std::move(dBias));
 }
 
 } // namespace at::native

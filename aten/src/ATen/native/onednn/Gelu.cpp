@@ -12,7 +12,7 @@
 
 #if !AT_ONEDNN_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor onednn_gelu(const Tensor& input, std::string_view approximate) {
   TORCH_CHECK(false, "onednn_gelu: ATen not compiled with ONEDNN support");
@@ -22,7 +22,7 @@ Tensor onednn_gelu_backward(const Tensor& grad_output, const Tensor& input, std:
   TORCH_CHECK(false, "ONEdnn_gelu_backward: ATen not compiled with ONEDNN support");
 }
 
-}}
+}
 
 #else // AT_ONEDNN_ENABLED
 
