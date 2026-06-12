@@ -1278,6 +1278,7 @@ class TensorMetadata:
     is_quantized: bool
     is_conj: bool
     is_neg: bool
+    is_zerotensor: bool
     is_inference: bool
     is_sparse: bool  # read: is sparse COO
     is_coalesced: bool | None
@@ -1336,6 +1337,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_quantized,
         t.is_conj(),
         t.is_neg(),
+        t._is_zerotensor(),
         t.is_inference(),
         t.is_sparse,
         t.is_coalesced() if t.is_sparse else None,
@@ -2074,6 +2076,12 @@ class FakeTensorMode(TorchDispatchMode):
             if metadata.storage_bytes is None
             else state.convert_output(metadata.storage_bytes)
         )
+        if view_idx is not None and metadata.is_zerotensor:
+            view_arg = args[view_idx]
+            if not isinstance(view_arg, Tensor):
+                raise AssertionError("view_arg must be a Tensor")
+            if metadata.dtype != view_arg.dtype:
+                raise _BypassDispatchCache("zerotensor dtype-changing view")
 
         entry = _DispatchCacheEntryOutputInfo(
             inplace_idx=None,
@@ -2276,28 +2284,46 @@ class FakeTensorMode(TorchDispatchMode):
             maybe_suppress = self.shape_env.suppress_guards
 
         with in_kernel_invocation_manager(self), maybe_suppress():
-            empty = torch.empty_strided(
-                shape,
-                stride,
-                dtype=metadata.dtype,
-                layout=metadata.layout,
-                device="meta",
-                requires_grad=metadata.requires_grad,
-            )
-
-        if metadata.is_conj:
-            torch._C._set_conj(empty, True)
-        if metadata.is_neg:
-            torch._C._set_neg(empty, True)
+            if metadata.is_zerotensor:
+                empty = torch._efficientzerotensor(
+                    shape,
+                    dtype=metadata.dtype,
+                    layout=metadata.layout,
+                    device="meta",
+                    requires_grad=metadata.requires_grad,
+                )
+                if empty.stride() != stride or empty.storage_offset() != storage_offset:
+                    empty = empty.as_strided(shape, stride, storage_offset)
+            else:
+                empty = torch.empty_strided(
+                    shape,
+                    stride,
+                    dtype=metadata.dtype,
+                    layout=metadata.layout,
+                    device="meta",
+                    requires_grad=metadata.requires_grad,
+                )
 
         if isinstance(func, torch._ops.OpOverload) and func.is_view:
             # For view ops, the storage should be the same as the tensor input.
             view_arg = args[cast(int, entry.view_idx)]
             if not isinstance(view_arg, FakeTensor):
                 raise AssertionError("view_arg must be a FakeTensor")
-            storage = view_arg.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
-                empty.set_(storage, storage_offset, shape, stride)
+                if metadata.is_zerotensor:
+                    if metadata.dtype != view_arg.dtype:
+                        raise AssertionError(
+                            "ZeroTensor dtype-changing views should not be cached"
+                        )
+                    empty = view_arg.as_strided(shape, stride, storage_offset)
+                else:
+                    storage = view_arg.untyped_storage()
+                    empty.set_(storage, storage_offset, shape, stride)
+
+        if metadata.is_conj:
+            torch._C._set_conj(empty, True)
+        if metadata.is_neg:
+            torch._C._set_neg(empty, True)
 
         return FakeTensor(self, empty, metadata.device)
 
