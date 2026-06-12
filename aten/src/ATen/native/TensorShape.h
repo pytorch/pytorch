@@ -1,11 +1,19 @@
 #pragma once
 #include <ATen/core/IListRef.h>
 #include <ATen/core/Tensor.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/util/irange.h>
 
 namespace at::native {
 
 TORCH_API at::Tensor clone_preserve_strides(const at::Tensor& self);
+TORCH_API at::Tensor view_symint(
+    const at::Tensor& self,
+    c10::SymIntArrayRef size);
+TORCH_API at::Tensor _reshape_alias_symint(
+    const at::Tensor& self,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides);
 
 inline bool cat_should_skip_tensor(const Tensor& t) {
   return t.sym_numel() == 0 && t.dim() == 1;
