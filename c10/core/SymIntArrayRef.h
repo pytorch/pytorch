@@ -124,9 +124,16 @@ inline c10::SymBool sym_equals(SymIntArrayRef LHS, SymIntArrayRef RHS) {
   if (LHS.size() != RHS.size()) {
     return c10::SymBool(false);
   }
+  if (LHS.empty()) {
+    return c10::SymBool(true);
+  }
 
-  c10::SymBool result(true);
-  for (size_t i = 0; i < RHS.size(); ++i) {
+  c10::SymBool result = sym_eq(LHS[0], RHS[0]);
+  std::optional<bool> result_bool = result.maybe_as_bool();
+  if (result_bool.has_value() && !*result_bool) {
+    return result;
+  }
+  for (size_t i = 1; i < RHS.size(); ++i) {
     c10::SymBool equals = sym_eq(LHS[i], RHS[i]);
     std::optional<bool> equals_bool = equals.maybe_as_bool();
 

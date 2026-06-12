@@ -628,6 +628,10 @@ def _clear_torch_ops_cache(op_defs):
         if (ns, name) in cleared_packets:
             continue
         cleared_packets.add((ns, name))
+        # Use __dict__ to check the instance dict directly, avoiding
+        # __getattr__ which calls into C++ via _jit_get_operation.
+        # During interpreter shutdown the C++ runtime may already be
+        # torn down, causing UnicodeDecodeError or segfaults.
         namespace = torch.ops.__dict__.get(ns)
         if namespace is None:
             continue
