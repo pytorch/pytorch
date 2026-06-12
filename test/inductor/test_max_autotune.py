@@ -2799,7 +2799,10 @@ class TestMaxAutotune(TestCase):
 
                 if max_autotune:
                     self.assertIn(ExternKernelCaller, choice_types_seen)
-                    self.assertIn(TritonTemplateCaller, choice_types_seen)
+                    # XPU skips the Triton mm_plus_mm template due to
+                    # accuracy issues (#184490, #173473).
+                    if not (op == "mm_plus_mm" and GPU_TYPE == "xpu"):
+                        self.assertIn(TritonTemplateCaller, choice_types_seen)
                 else:
                     self.assertIn(ExternKernelCaller, choice_types_seen)
                     self.assertNotIn(TritonTemplateCaller, choice_types_seen)
