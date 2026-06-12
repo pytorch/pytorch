@@ -27,7 +27,12 @@ from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
-from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier, mps_ops_error_inputs_modifier
+from torch.testing._internal.common_mps import (
+    assert_mps_match_or_drift,
+    mps_ops_modifier,
+    mps_ops_grad_modifier,
+    mps_ops_error_inputs_modifier,
+)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -14654,6 +14659,204 @@ def transform_opinfo_sample_to_cpu(sample, dtype=None):
 
     return cpu_sample
 
+
+def _call_op_ignoring_user_warnings(op, sample):
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning)
+        return op(sample.input, *sample.args, **sample.kwargs)
+
+
+def _autograd_grad_inputs(op, sample, grad_outputs):
+    """Forward op(sample) and autograd.grad wrt sample's requires_grad tensors."""
+    out = _call_op_ignoring_user_warnings(op, sample)
+    out = (out,) if isinstance(out, torch.Tensor) else tuple(out)
+    leaves = pytree.tree_leaves(([sample.input, *sample.args], sample.kwargs))
+    diff_out = tuple(t for t in out if isinstance(t, torch.Tensor) and t.requires_grad)
+    diff_arg = tuple(t for t in leaves if isinstance(t, torch.Tensor) and t.requires_grad)
+    if len(diff_out) != len(grad_outputs):
+        raise RuntimeError(
+            f"diff_out has {len(diff_out)} tensors but grad_outputs has {len(grad_outputs)}"
+        )
+    return torch.autograd.grad(diff_out, diff_arg, grad_outputs=grad_outputs, allow_unused=True)
+
+
+class TestDriftFallbackHelper(TestCaseMPS):
+    """Unit tests for assert_mps_match_or_drift covering each branch."""
+
+    FP16_ATOL = 5e-2
+    FP16_RTOL = 5e-2
+
+    def _call(self, cpu, mps, fp32, **kwargs):
+        kwargs.setdefault("atol", self.FP16_ATOL)
+        kwargs.setdefault("rtol", self.FP16_RTOL)
+        kwargs.setdefault("dtype", torch.float16)
+        return assert_mps_match_or_drift(self, cpu, mps, lambda: fp32, **kwargs)
+
+    def test_happy_path_does_not_invoke_callback(self):
+        x = torch.tensor([1.0, 2.0], dtype=torch.float16)
+        invoked = [False]
+
+        def callback():
+            invoked[0] = True
+            return x
+
+        assert_mps_match_or_drift(
+            self, x, x.clone(), callback,
+            atol=self.FP16_ATOL, rtol=self.FP16_RTOL, dtype=torch.float16,
+        )
+        self.assertFalse(invoked[0])
+
+    def test_non_drift_dtype_reraises_immediately(self):
+        cpu = torch.tensor([1.0, 2.0], dtype=torch.float32)
+        mps = torch.tensor([1.0, 3.0], dtype=torch.float32, device="mps")
+        with self.assertRaises(AssertionError):
+            self._call(cpu, mps, cpu.float(), dtype=torch.float32)
+
+    def test_python_scalar_outputs_reraise_immediately(self):
+        # Ops returning Python scalars (item, allclose, equal) shouldn't enter
+        # the drift path -- the assertEqual failure must propagate as-is.
+        with self.assertRaises(AssertionError):
+            self._call(1.0, 2.0, 1.0)
+        with self.assertRaises(AssertionError):
+            self._call(True, False, True)
+
+    def test_cpu_meets_budget_is_real_regression(self):
+        # CPU exactly matches fp32 reference; MPS is off. Real regression.
+        fp32 = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
+        cpu = fp32.to(torch.float16)
+        mps = torch.tensor([1.0, 2.0, 10.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(AssertionError, "real regression"):
+            self._call(cpu, mps, fp32)
+
+    def test_drift_within_bound_passes(self):
+        # Both CPU and MPS drift from fp32; MPS drift <= 2 * CPU drift + atol.
+        fp32 = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
+        cpu = torch.tensor([1.5, 2.5, 3.5], dtype=torch.float16)
+        mps = torch.tensor([0.5, 1.0, 2.0], dtype=torch.float16, device="mps")
+        self._call(cpu, mps, fp32)
+
+    def test_drift_exceeds_bound_raises(self):
+        # CPU drifts by 0.5 from fp32; MPS drifts by 100 -- well beyond 2*cpu + atol.
+        fp32 = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
+        cpu = torch.tensor([1.5, 2.5, 3.5], dtype=torch.float16)
+        mps = torch.tensor([100.0, 100.0, 100.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(AssertionError, "MPS drift"):
+            self._call(cpu, mps, fp32)
+
+    def test_nan_position_mismatch_is_regression(self):
+        # MPS returns 0 where CPU and fp32 return NaN -- drift math would
+        # silently accept this; the finite-alignment check must catch it.
+        fp32 = torch.tensor([1.0, float("nan"), 3.0], dtype=torch.float32)
+        cpu = fp32.to(torch.float16)
+        mps = torch.tensor([1.0, 0.0, 3.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(AssertionError, "finite/non-finite"):
+            self._call(cpu, mps, fp32)
+
+    def test_aligned_nan_then_drift_passes(self):
+        # NaN positions match; finite elements drift within bound.
+        fp32 = torch.tensor([1.0, float("nan"), 3.0], dtype=torch.float32)
+        cpu = torch.tensor([1.5, float("nan"), 3.5], dtype=torch.float16)
+        mps = torch.tensor([0.5, float("nan"), 2.0], dtype=torch.float16, device="mps")
+        self._call(cpu, mps, fp32)
+
+    def test_aligned_nan_with_over_bound_drift_raises(self):
+        # Aligned NaNs must not contaminate .max() and silently accept wild drift.
+        fp32 = torch.tensor([1.0, float("nan"), 3.0], dtype=torch.float32)
+        cpu = torch.tensor([1.5, float("nan"), 3.5], dtype=torch.float16)
+        mps = torch.tensor([100.0, float("nan"), 100.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(AssertionError, "MPS drift"):
+            self._call(cpu, mps, fp32)
+
+    def test_tuple_skips_passing_tensors(self):
+        # One tensor passes fixed tolerance; the other needs drift fallback.
+        fp32_0 = torch.tensor([1.0, 2.0], dtype=torch.float32)
+        cpu_0 = torch.tensor([1.001, 2.001], dtype=torch.float16)
+        mps_0 = torch.tensor([1.001, 2.001], dtype=torch.float16, device="mps")
+        fp32_1 = torch.tensor([1.0, 2.0], dtype=torch.float32)
+        cpu_1 = torch.tensor([1.5, 2.5], dtype=torch.float16)
+        mps_1 = torch.tensor([0.5, 1.0], dtype=torch.float16, device="mps")
+        self._call((cpu_0, cpu_1), (mps_0, mps_1), (fp32_0, fp32_1))
+
+    def test_tuple_with_none_entries_skipped(self):
+        # autograd.grad(allow_unused=True) yields None -- must not raise.
+        fp32 = torch.tensor([1.0], dtype=torch.float32)
+        cpu = torch.tensor([1.5], dtype=torch.float16)
+        mps = torch.tensor([0.5], dtype=torch.float16, device="mps")
+        self._call((cpu, None), (mps, None), (fp32, None))
+
+    def test_bfloat16_uses_drift_fallback(self):
+        # Same semantics as fp16; ensure bf16 is also in _DRIFT_FALLBACK_DTYPES.
+        fp32 = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
+        cpu = torch.tensor([1.5, 2.5, 3.5], dtype=torch.bfloat16)
+        mps = torch.tensor([0.5, 1.0, 2.0], dtype=torch.bfloat16, device="mps")
+        self._call(cpu, mps, fp32, dtype=torch.bfloat16)
+
+    def test_default_atol_rtol_from_dtype(self):
+        # atol=None, rtol=None must resolve to dtype defaults in the drift path.
+        # fp16 defaults are roughly atol=1e-5, rtol=1e-3; construct values that
+        # fail assertEqual under those defaults but pass the drift check.
+        fp32 = torch.tensor([1.0], dtype=torch.float32)
+        cpu = torch.tensor([1.01], dtype=torch.float16)
+        mps = torch.tensor([1.02], dtype=torch.float16, device="mps")
+        self._call(cpu, mps, fp32, atol=None, rtol=None)
+
+    def test_sequence_length_mismatch_raises(self):
+        # Silent zip truncation would miss tensors; strict=True must catch it.
+        cpu = (torch.tensor([1.5], dtype=torch.float16),
+               torch.tensor([2.5], dtype=torch.float16))
+        mps = (torch.tensor([0.5], dtype=torch.float16, device="mps"),)
+        fp32 = (torch.tensor([1.0], dtype=torch.float32),
+                torch.tensor([2.0], dtype=torch.float32))
+        with self.assertRaises((ValueError, AssertionError)):
+            self._call(cpu, mps, fp32)
+
+    def test_reverse_nan_mismatch_is_regression(self):
+        # MPS produces NaN where CPU is finite -- symmetric to the forward case.
+        fp32 = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
+        cpu = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16)
+        mps = torch.tensor([1.0, float("nan"), 3.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(AssertionError, "finite/non-finite"):
+            self._call(cpu, mps, fp32)
+
+    def test_aligned_inf_with_drifting_finites_passes(self):
+        # +inf aligned across CPU/MPS/fp32; finite values drift within bound.
+        fp32 = torch.tensor([1.0, float("inf"), 3.0], dtype=torch.float32)
+        cpu = torch.tensor([1.5, float("inf"), 3.5], dtype=torch.float16)
+        mps = torch.tensor([0.5, float("inf"), 2.0], dtype=torch.float16, device="mps")
+        self._call(cpu, mps, fp32)
+
+    def test_aligned_inf_with_over_bound_drift_raises(self):
+        # Aligned +inf must not contaminate .max() and accept wild finite drift.
+        fp32 = torch.tensor([1.0, float("inf"), 3.0], dtype=torch.float32)
+        cpu = torch.tensor([1.5, float("inf"), 3.5], dtype=torch.float16)
+        mps = torch.tensor([100.0, float("inf"), 100.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(AssertionError, "MPS drift"):
+            self._call(cpu, mps, fp32)
+
+    def test_inf_position_mismatch_is_regression(self):
+        # CPU has +inf where MPS is finite.
+        fp32 = torch.tensor([1.0, float("inf"), 3.0], dtype=torch.float32)
+        cpu = torch.tensor([1.0, float("inf"), 3.0], dtype=torch.float16)
+        mps = torch.tensor([1.0, 10.0, 3.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(AssertionError, "finite/non-finite"):
+            self._call(cpu, mps, fp32)
+
+    def test_plus_inf_vs_minus_inf_is_regression(self):
+        # Both non-finite at the same position but different signs -- must be caught.
+        fp32 = torch.tensor([float("inf")], dtype=torch.float32)
+        cpu = torch.tensor([float("inf")], dtype=torch.float16)
+        mps = torch.tensor([float("-inf")], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(AssertionError, "non-finite values differ"):
+            self._call(cpu, mps, fp32)
+
+    def test_label_appears_in_error_message(self):
+        fp32 = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
+        cpu = fp32.to(torch.float16)
+        mps = torch.tensor([1.0, 2.0, 10.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(AssertionError, "myop float16"):
+            self._call(cpu, mps, fp32, label="myop float16")
+
+
 class TestConsistency(TestCaseMPS):
     # TODO: This is only used while some ops are being added.
     # This list should contain all ops and dtypes eventually
@@ -14920,7 +15123,13 @@ class TestConsistency(TestCaseMPS):
                 self._assert_random_op_match(mps_out, cpu_out)
                 continue
 
-            self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
+            assert_mps_match_or_drift(
+                self, cpu_out, mps_out,
+                lambda: _call_op_ignoring_user_warnings(
+                    op, transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
+                ),
+                atol=atol, rtol=rtol, dtype=dtype, label=f"{op.name} {dtype}",
+            )
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
@@ -14950,7 +15159,13 @@ class TestConsistency(TestCaseMPS):
             if op.name in self.RANDOM_OP_NAMES:
                 self._assert_random_op_match(mps_out, cpu_out)
             else:
-                self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
+                assert_mps_match_or_drift(
+                    self, cpu_out, mps_out,
+                    lambda: _call_op_ignoring_user_warnings(
+                        op, transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
+                    ),
+                    atol=atol, rtol=rtol, dtype=dtype, label=f"{op.name} {dtype}",
+                )
 
             #
             # Backward check
@@ -15035,7 +15250,18 @@ class TestConsistency(TestCaseMPS):
             else:
                 # TODO: Handle list inputs later
                 equal_input_types = True
-            self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol, exact_dtype=equal_input_types)
+
+            assert_mps_match_or_drift(
+                self, cpu_grad_inputs, mps_grad_inputs,
+                lambda: _autograd_grad_inputs(
+                    op,
+                    transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32),
+                    tuple(g.float() for g in cpu_grad_outputs),
+                ),
+                atol=atol, rtol=rtol, dtype=dtype,
+                label=f"{op.name} {dtype} backward",
+                exact_dtype=equal_input_types,
+            )
 
     # The CPU impl of grid_sampler_3d gives a large amount of error for half
     # precision types. So instead of testing MPS-vs-CPU outputs, test
