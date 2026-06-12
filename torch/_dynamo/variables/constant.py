@@ -170,11 +170,24 @@ class ConstantVariable(VariableTracker):
     def getitem_const(
         self, tx: InstructionTranslatorBase, arg: VariableTracker
     ) -> VariableTracker:
+        # unicode_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/unicodeobject.c#L13822-L13845
+        # bytes_subscript:   https://github.com/python/cpython/blob/62a6e898e01/Objects/bytesobject.c#L1709-L1759
         if isinstance(self.value, (str, bytes)):
-            from .object_protocol import validate_sequence_index
+            from .lists import SliceVariable
+            from .object_protocol import maybe_get_python_type, pyindex_check
 
-            container_name = "string" if isinstance(self.value, str) else "bytes"
-            arg = validate_sequence_index(tx, arg, container_name)
+            if isinstance(arg, SliceVariable):
+                return ConstantVariable.create(self.value[arg.as_index_slice(tx)])
+            if not pyindex_check(maybe_get_python_type(arg)):
+                from ..exc import raise_type_error
+
+                container_name = "string" if isinstance(self.value, str) else "byte"
+                raise_type_error(
+                    tx,
+                    f"{container_name} indices must be integers, "
+                    f"not {arg.python_type_name()}",
+                )
+            arg = arg.nb_index_impl(tx)
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )
