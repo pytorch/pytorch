@@ -6035,6 +6035,7 @@ class QuackGemmEpilogueConfig:
     main_output_transform_group: int | None = None
     concat_layout: tuple[str, ...] = ()
     tuned: bool = True
+    quack_config_key: tuple[Any, ...] | None = None
 
 
 class CuteDSLTemplateBuffer(TemplateBuffer):

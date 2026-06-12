@@ -863,7 +863,9 @@ class FlexGemmTests(TestCase):
 
                 torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
                 FileCheck().check("@cute.jit").check("gemm_epilogue(").check(
-                    f"tuned={tuned}"
+                    "tuned=False"
+                ).check("config_key=").check_not(
+                    "from quack.gemm_epilogue_interface"
                 ).run("\n".join(codes))
 
     @requires_cuda_and_triton

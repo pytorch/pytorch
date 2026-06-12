@@ -8857,6 +8857,7 @@ def _build_quack_epilogue_config(
     scaled_mm_scale_a_len=1,
     scaled_mm_scale_b_len=1,
     scaled_grouped_mm_kind=None,
+    quack_config_key=None,
 ):
     return ir.QuackGemmEpilogueConfig(
         epilogue_name=epilogue_key,
@@ -8898,6 +8899,27 @@ def _build_quack_epilogue_config(
         ),
         concat_layout=concat_layout,
         tuned=tuned,
+        quack_config_key=quack_config_key,
+    )
+
+
+def _use_inductor_quack_config_choices(
+    gemm_op,
+    epilogue_arg_indices,
+    local_reduce,
+    aux_output,
+    main_output_transform,
+    concat_layout,
+) -> bool:
+    """Restrict native QUACK config choices to the dense direct-runtime subset."""
+    if gemm_op == torch.ops.aten.addmm.default and epilogue_arg_indices:
+        return False
+    return (
+        gemm_op in (torch.ops.aten.mm.default, torch.ops.aten.addmm.default)
+        and local_reduce is None
+        and aux_output is None
+        and main_output_transform is None
+        and not concat_layout
     )
 
 
@@ -9055,37 +9077,73 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             local_reduce_out_index,
             aux_out_index,
         ) = _realize_quack_inputs(quack_args, local_reduce_out, aux_out)
-        choices: list[Any] = []
-        quack_gemm_epilogue_template.maybe_append_choice(
-            choices,
-            input_nodes=input_nodes,
-            layout=layout,
-            config=_build_quack_epilogue_config(
-                epilogue_key=epilogue_key,
-                epilogue_source=epilogue_source,
-                gemm_op_info=gemm_op_info,
-                alpha=alpha,
-                beta=beta,
-                main_output_dtype=main_output_dtype,
-                epilogue_arg_indices=epilogue_arg_indices,
-                epilogue_arg_kinds=epilogue_arg_kinds,
-                local_reduce_out_index=local_reduce_out_index,
-                aux_out_index=aux_out_index,
-                local_reduce=local_reduce,
-                aux_output=aux_output,
-                main_output_transform=main_output_transform,
-                concat_layout=concat_layout,
-                tuned=tuned,
-                scaled_mm_scale_a_len=kernel_options.get("_scaled_mm_v2", {}).get(
-                    "scale_a_len", 1
-                ),
-                scaled_mm_scale_b_len=kernel_options.get("_scaled_mm_v2", {}).get(
-                    "scale_b_len", 1
-                ),
-                scaled_grouped_mm_kind=scaled_grouped_mm_kind,
-            ),
-            mutated_inputs=mutated_inputs or None,
+        use_config_choices = _use_inductor_quack_config_choices(
+            gemm_op,
+            epilogue_arg_indices,
+            local_reduce,
+            aux_output,
+            main_output_transform,
+            concat_layout,
         )
+        if use_config_choices:
+            if tuned:
+                from torch._inductor.template_heuristics.quack_gemm import (
+                    candidate_gemm_configs_for_device,
+                    gemm_config_key,
+                )
+
+                quack_config_keys = tuple(
+                    gemm_config_key(config)
+                    for config in candidate_gemm_configs_for_device(layout.device)
+                )
+            else:
+                from torch._inductor.template_heuristics.quack_gemm import (
+                    default_gemm_config_key,
+                )
+
+                quack_config_keys = (
+                    default_gemm_config_key(
+                        layout.device,
+                        mat1.get_size()[0],
+                        mat2.get_size()[1],
+                    ),
+                )
+        else:
+            quack_config_keys = (None,)
+
+        choices: list[Any] = []
+        for quack_config_key in quack_config_keys:
+            quack_gemm_epilogue_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=layout,
+                config=_build_quack_epilogue_config(
+                    epilogue_key=epilogue_key,
+                    epilogue_source=epilogue_source,
+                    gemm_op_info=gemm_op_info,
+                    alpha=alpha,
+                    beta=beta,
+                    main_output_dtype=main_output_dtype,
+                    epilogue_arg_indices=epilogue_arg_indices,
+                    epilogue_arg_kinds=epilogue_arg_kinds,
+                    local_reduce_out_index=local_reduce_out_index,
+                    aux_out_index=aux_out_index,
+                    local_reduce=local_reduce,
+                    aux_output=aux_output,
+                    main_output_transform=main_output_transform,
+                    concat_layout=concat_layout,
+                    tuned=tuned and quack_config_key is None,
+                    scaled_mm_scale_a_len=kernel_options.get("_scaled_mm_v2", {}).get(
+                        "scale_a_len", 1
+                    ),
+                    scaled_mm_scale_b_len=kernel_options.get("_scaled_mm_v2", {}).get(
+                        "scale_b_len", 1
+                    ),
+                    scaled_grouped_mm_kind=scaled_grouped_mm_kind,
+                    quack_config_key=quack_config_key,
+                ),
+                mutated_inputs=mutated_inputs or None,
+            )
         node, _ = autotune_select_algorithm(
             "quack_flex_gemm", choices, input_nodes, layout
         )

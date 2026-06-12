@@ -1,20 +1,30 @@
 # mypy: allow-untyped-defs
+import logging
+
+import torch
+from torch._dynamo.utils import counters
 from torch._inductor import ir
 from torch._inductor.codegen.common import IndentedBuffer
 from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLTemplateKernel
-from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
+from torch._inductor.codegen.cutedsl.cutedsl_template import (
+    CuteDSLTemplate,
+    CuteDSLTemplateCaller,
+)
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
 
+log = logging.getLogger(__name__)
+
+
 class QuackGemmEpilogueKernel(CuteDSLTemplateKernel):
-    """Renders the QuACK GEMM epilogue runtime wrapper."""
+    """Render generated QUACK FlexGEMM epilogue modules."""
 
     def render(self, template, **kwargs):
         config = kwargs.pop("config")
         if kwargs:
-            raise RuntimeError(f"unexpected QuACK GEMM epilogue options: {kwargs}")
+            raise RuntimeError(f"unexpected QUACK GEMM epilogue options: {kwargs}")
 
         self._template_input_args = []
         self._seen_input_args = OrderedSet()
@@ -38,37 +48,58 @@ class QuackGemmEpilogueKernel(CuteDSLTemplateKernel):
                 params.append(arg_def.full_name())
         params.append("stream")
 
-        input_args = [arg_name for arg_name, _ in self._template_input_args]
-        call_fn, matmul_args, call_kwargs = self._gemm_call(input_args, config)
-        call_kwargs += self._epilogue_kwargs(input_args, config)
-        call_kwargs += self._local_reduce_kwargs(input_args, config)
+        input_arg_names = [arg_name for arg_name, _ in self._template_input_args]
+        call_fn, matmul_args, call_kwargs = self._gemm_call(input_arg_names, config)
+        call_kwargs += self._epilogue_kwargs(input_arg_names, config)
+        call_kwargs += self._local_reduce_kwargs(input_arg_names, config)
         if output_arg is not None:
             call_kwargs += f", out={output_arg}"
         call_kwargs += (
             f", tuned={config.tuned!r}, epilogue_source={config.epilogue_source!r}"
         )
+        if config.quack_config_key is not None:
+            call_kwargs += f", config_key={tuple(config.quack_config_key)!r}"
 
         code = IndentedBuffer()
-        code.writeline("import torch")
+        code.splice(
+            """
+            import torch
+            from torch._inductor.kernel.quack_gemm_epilogue_runtime import (
+                gemm_epilogue,
+                mxfp8_varlen_k_scaled_mm_epilogue,
+                mxfp8_varlen_m_scaled_mm_epilogue,
+            )
+            """
+        )
         code.splice(config.epilogue_source)
         code.writeline(f"def {self.kernel_name}_main({', '.join(params)}):")
         with code.indent():
-            self._write_imports(code, config)
             code.writeline(
                 f"{call_fn}({matmul_args}, {config.epilogue_name}, "
                 f"{config.epilogue_name!r}{call_kwargs})"
             )
+        self._write_precompile(code, input_arg_names, output_arg)
         return PartialRender(code.getvalue(), self.render_hooks)
 
-    def _write_imports(self, code: IndentedBuffer, config: ir.QuackGemmEpilogueConfig):
-        if config.gemm_op == "scaled_grouped_mm":
-            code.writeline(
-                "from quack.gemm_blockscaled_interface import "
-                "mxfp8_varlen_k_scaled_mm_epilogue, "
-                "mxfp8_varlen_m_scaled_mm_epilogue"
-            )
-        else:
-            code.writeline("from quack.gemm_epilogue_interface import gemm_epilogue")
+    def _write_precompile(
+        self,
+        code: IndentedBuffer,
+        input_arg_names: list[str],
+        output_arg: str | None,
+    ) -> None:
+        code.splice(
+            f"""
+            def {self.kernel_name}_precompile(
+                precompile_shapes,
+                precompile_strides,
+                precompile_dtypes,
+                device_index=0,
+                device_capability=None,
+                hw_info=None,
+            ):
+                return None
+            """
+        )
 
     def _epilogue_kwargs(
         self, input_args: list[str], config: ir.QuackGemmEpilogueConfig
@@ -179,8 +210,50 @@ class QuackGemmEpilogueKernel(CuteDSLTemplateKernel):
         )
 
 
+class QuackGemmEpilogueCaller(CuteDSLTemplateCaller):
+    def precompile(self) -> None:
+        """Keep template-specific precompile opt-in without forked QuACK imports."""
+        return None
+
+    def precompile_metadata(self) -> dict[str, object] | None:
+        """Build fake tensor metadata for the generated precompile entrypoint."""
+        precompile_shapes = {}
+        precompile_strides = {}
+        precompile_dtypes = {}
+        tensor_metas = [
+            *(
+                (f"arg{index}", tensor_meta)
+                for index, tensor_meta in enumerate(self.bmreq.input_tensor_meta)
+            ),
+            ("output", self.bmreq.output_tensor_meta),
+        ]
+        try:
+            for name, tensor_meta in tensor_metas:
+                precompile_shapes[name] = [int(size) for size in tensor_meta.sizes]
+                precompile_strides[name] = [
+                    int(stride) for stride in tensor_meta.strides
+                ]
+                precompile_dtypes[name] = str(tensor_meta.dtype).removeprefix("torch.")
+        except (TypeError, RuntimeError, ValueError):
+            counters["inductor"]["quack_gemm_precompile_skipped_dynamic"] += 1
+            log.debug("Skipping QUACK FlexGEMM precompile for symbolic metadata")
+            return None
+        device_index = self.bmreq.output_tensor_meta.device.index or 0
+        device_capability = None
+        if torch.cuda.is_available():
+            device_capability = torch.cuda.get_device_capability(device_index)
+        return {
+            "precompile_shapes": precompile_shapes,
+            "precompile_strides": precompile_strides,
+            "precompile_dtypes": precompile_dtypes,
+            "device_index": device_index,
+            "device_capability": device_capability,
+        }
+
+
 class QuackGemmEpilogueTemplate(CuteDSLTemplate):
     kernel_type = QuackGemmEpilogueKernel
+    caller_type = QuackGemmEpilogueCaller
 
     def __init__(self) -> None:
         super().__init__("quack_gemm_epilogue", source="")
