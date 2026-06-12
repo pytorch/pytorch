@@ -58,7 +58,7 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
-    reset_code,
+    reset_code as _reset_code,
     set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_isolate_recompiles_id,
@@ -115,8 +115,10 @@ from .mutation_guard import install_generation_tagging_init
 from .utils import (
     _get_error_on_graph_break,
     _set_error_on_graph_break,
+    CleanupManager,
     common_constant_types,
     compile_times,
+    guarded_eager_fallback_codes,
 )
 
 
@@ -373,6 +375,17 @@ def _reset_guarded_backend_cache() -> None:
         if hasattr(backend, "reset"):
             backend.reset()
     cached_backends.clear()
+
+
+def reset_code(code: types.CodeType) -> None:
+    for entry in _debug_get_cache_entry_list(code):
+        if entry.code in guarded_eager_fallback_codes:
+            CleanupManager.instance.cleanup(entry.code)
+            guarded_eager_fallback_codes._remove_id(id(entry.code))
+    if code in guarded_eager_fallback_codes:
+        CleanupManager.instance.cleanup(code)
+        guarded_eager_fallback_codes._remove_id(id(code))
+    _reset_code(code)
 
 
 DONT_WRAP_FILES = {

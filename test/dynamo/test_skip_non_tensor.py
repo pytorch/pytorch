@@ -1,14 +1,30 @@
 # Owner(s): ["module: dynamo"]
+import warnings
+from types import ModuleType, SimpleNamespace
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list, reset_code
 from torch._dynamo.testing import CompileCounter
+from torch._dynamo.utils import CleanupHook, CleanupManager, counters
+from torch.testing._internal.common_utils import AlwaysWarnTypedStorageRemoval
 
 
 _variable = 0
 _variable_2 = 0
+_condition_dependent_skip_flag = False
+_condition_dependent_skip_module = ModuleType("_condition_dependent_skip_module")
+_condition_dependent_skip_module.flag = False  # type: ignore[attr-defined]
+_P = ParamSpec("_P")
+_paramspec_module = ModuleType("_paramspec_module")
+_paramspec_module._P = ParamSpec("_paramspec_module._P")  # type: ignore[attr-defined]
+
+
+class _ConditionDependentSkipGate:
+    flag = False
 
 
 def user_function():
@@ -128,6 +144,642 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
         if counter.op_count != 0:
             raise AssertionError(f"Expected op_count 0, got {counter.op_count}")
+
+    def test_condition_dependent_graph_break_skip_does_not_poison_code(self):
+        def fn(x, n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+        preexisting_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        }
+
+        self.assertEqual(opt_fn(x, 0), x - 1)
+        self.assertEqual(counter.frame_count, 0)
+        entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(entries), 1)
+        self.assertIsNot(entries[0].code, fn.__code__)
+        self.assertTrue(
+            entries[0].trace_annotation.startswith("Torch-Compiled Eager Fallback")
+        )
+
+        self.assertEqual(opt_fn(x, 0), x - 1)
+        self.assertEqual(counter.frame_count, 0)
+        self.assertEqual(len(_debug_get_cache_entry_list(fn.__code__)), 1)
+
+        self.assertEqual(opt_fn(x, 1), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+        entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(entries), 2)
+        self.assertTrue(any(entry.code is not fn.__code__ for entry in entries))
+        self.assertTrue(
+            any(
+                entry.trace_annotation.startswith("Torch-Compiled Eager Fallback")
+                for entry in entries
+            )
+        )
+
+        self.assertEqual(opt_fn(x, 0), x - 1)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(len(_debug_get_cache_entry_list(fn.__code__)), 2)
+
+        new_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        } - preexisting_builtins_keys
+        self.assertTrue(new_builtins_keys)
+        del entries
+        torch._dynamo.reset()
+        self.assertEqual(
+            {name for name in fn.__globals__ if name.startswith("__builtins_dict___")},
+            preexisting_builtins_keys,
+        )
+
+    def test_condition_dependent_empty_graph_skip_does_not_poison_code(self):
+        def fn(x, flag):
+            if flag:
+                if torch.compiler.is_compiling():
+                    return x + 1
+                return x - 1
+            return x
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+
+        self.assertEqual(opt_fn(x, False), x)
+        self.assertEqual(counter.frame_count, 0)
+        entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(entries), 1)
+        self.assertIsNot(entries[0].code, fn.__code__)
+        self.assertTrue(
+            entries[0].trace_annotation.startswith("Torch-Compiled Eager Fallback")
+        )
+
+        self.assertEqual(opt_fn(x, True), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+        entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(entries), 2)
+        self.assertTrue(any(entry.code is not fn.__code__ for entry in entries))
+        self.assertTrue(
+            any(
+                entry.trace_annotation.startswith("Torch-Compiled Eager Fallback")
+                for entry in entries
+            )
+        )
+
+        self.assertEqual(opt_fn(x, False), x)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(len(_debug_get_cache_entry_list(fn.__code__)), 2)
+
+    def test_condition_dependent_skip_reset_code_cleans_globals(self):
+        def fn(x, n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+        x = torch.ones(3)
+        preexisting_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        }
+
+        self.assertEqual(opt_fn(x, 0), x + 1)
+        new_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        } - preexisting_builtins_keys
+        self.assertTrue(new_builtins_keys)
+
+        reset_code(fn.__code__)
+        self.assertEqual(
+            {name for name in fn.__globals__ if name.startswith("__builtins_dict___")},
+            preexisting_builtins_keys,
+        )
+
+    def test_condition_dependent_skip_cleanup_hooks_are_idempotent(self):
+        def fn():
+            pass
+
+        scope = {}
+        cleanup_count = CleanupManager.count
+        hook = CleanupHook.create(scope, "__tmp_cleanup", object())
+        self.assertEqual(CleanupManager.count, cleanup_count + 1)
+
+        key = fn.__code__.replace(co_varnames=fn.__code__.co_varnames)
+        CleanupManager.instance[key] = [hook, hook]
+        CleanupManager.instance.cleanup(key)
+        CleanupManager.instance.cleanup(key)
+
+        self.assertNotIn("__tmp_cleanup", scope)
+        self.assertEqual(CleanupManager.count, cleanup_count)
+
+    def test_reset_inside_compiled_frame_preserves_resume_globals(self):
+        def fn(x):
+            torch._dynamo.reset()
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(3)
+
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(opt_fn(x), x + 1)
+
+    def test_explicit_skip_frame_cleans_failed_trace_globals(self):
+        def fn(x):
+            try:
+                torch._dynamo.skip_frame()
+            finally:
+                pass
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+        x = torch.ones(3)
+        preexisting_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        }
+
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(
+            {name for name in fn.__globals__ if name.startswith("__builtins_dict___")},
+            preexisting_builtins_keys,
+        )
+
+    def test_condition_dependent_skip_paramspec_guard_detection(self):
+        from torch._dynamo.convert_frame import _guard_targets_paramspec_attr
+
+        def fail_getattr(name):
+            raise AssertionError("module __getattr__ should not run")
+
+        lazy_module = ModuleType("lazy_module")
+        lazy_module.__getattr__ = fail_getattr  # type: ignore[attr-defined]
+
+        output = SimpleNamespace(
+            global_scope={
+                "_P": _P,
+                "_paramspec_module": _paramspec_module,
+                "lazy_module": lazy_module,
+            },
+            local_scope={},
+        )
+
+        self.assertTrue(_guard_targets_paramspec_attr("G['_P'].args", output))
+        self.assertTrue(
+            _guard_targets_paramspec_attr("G['_paramspec_module']._P.args", output)
+        )
+        self.assertFalse(
+            _guard_targets_paramspec_attr("G['lazy_module'].missing.args", output)
+        )
+
+    def test_condition_dependent_skip_with_global_tensor_factory(self):
+        def fn(n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return torch.ones(3) - 1
+            if torch.compiler.is_compiling():
+                return torch.ones(3) + 1
+            return torch.ones(3) - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        self.assertEqual(opt_fn(0), torch.zeros(3))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(1), torch.ones(3) + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_other_torch_factory(self):
+        def fn(n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return torch.empty_strided((3,), (1,)) - 1
+            if torch.compiler.is_compiling():
+                return torch.empty_strided((3,), (1,)) + 1
+            return torch.empty_strided((3,), (1,)) - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        self.assertEqual(opt_fn(0).shape, (3,))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(1).shape, (3,))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_tensor_constructor(self):
+        def fn(n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return torch.Tensor([1.0]) - 1
+            if torch.compiler.is_compiling():
+                return torch.Tensor([1.0]) + 1
+            return torch.Tensor([1.0]) - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        self.assertEqual(opt_fn(0), torch.zeros(1))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(1), torch.full((1,), 2.0))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_legacy_tensor_constructor(self):
+        def fn(n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return torch.FloatTensor([1.0]) - 1
+            if torch.compiler.is_compiling():
+                return torch.FloatTensor([1.0]) + 1
+            return torch.FloatTensor([1.0]) - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        self.assertEqual(opt_fn(0), torch.zeros(1))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(1), torch.full((1,), 2.0))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_direct_torch_import(self):
+        from torch import ones
+        from torch._dynamo import graph_break
+        from torch.compiler import is_compiling
+
+        def fn(n):
+            if n == 0:
+                try:
+                    graph_break()
+                finally:
+                    pass
+                return ones(3) - 1
+            if is_compiling():
+                return ones(3) + 1
+            return ones(3) - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        self.assertEqual(opt_fn(0), torch.zeros(3))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(1), torch.ones(3) + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_ignores_storage_factory(self):
+        def fn(n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            return torch.FloatStorage(1)
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+
+        with AlwaysWarnTypedStorageRemoval(True):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.resetwarnings()
+                opt_fn(0)
+                self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
+                self.assertIn("TypedStorage is deprecated", str(w[0].message))
+
+    def test_condition_dependent_skip_with_sequence_length_guard(self):
+        def fn(xs):
+            if len(xs) == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return torch.zeros(3)
+            if torch.compiler.is_compiling():
+                return xs[0] + 1
+            return xs[0] - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+
+        self.assertEqual(opt_fn([]), torch.zeros(3))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn([x]), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_global_guard(self):
+        global _condition_dependent_skip_flag
+
+        def fn(x):
+            if _condition_dependent_skip_flag:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+
+        try:
+            _condition_dependent_skip_flag = True
+            self.assertEqual(opt_fn(x), x - 1)
+            self.assertEqual(counter.frame_count, 0)
+
+            _condition_dependent_skip_flag = False
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(counter.frame_count, 1)
+        finally:
+            _condition_dependent_skip_flag = False
+
+    def test_condition_dependent_skip_with_module_attr_global_guard(self):
+        def fn(x):
+            if _condition_dependent_skip_module.flag:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+
+        try:
+            _condition_dependent_skip_module.flag = True
+            self.assertEqual(opt_fn(x), x - 1)
+            self.assertEqual(counter.frame_count, 0)
+
+            _condition_dependent_skip_module.flag = False
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(counter.frame_count, 1)
+        finally:
+            _condition_dependent_skip_module.flag = False
+
+    def test_condition_dependent_skip_with_class_attr_global_guard(self):
+        def fn(x):
+            if _ConditionDependentSkipGate.flag:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+
+        try:
+            _ConditionDependentSkipGate.flag = True
+            self.assertEqual(opt_fn(x), x - 1)
+            self.assertEqual(counter.frame_count, 0)
+
+            _ConditionDependentSkipGate.flag = False
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(counter.frame_count, 1)
+        finally:
+            _ConditionDependentSkipGate.flag = False
+
+    def test_condition_dependent_skip_with_tensor_shape_guard(self):
+        def fn(x):
+            if x.shape[0] == 3:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        x3 = torch.ones(3)
+        x4 = torch.ones(4)
+        self.assertEqual(opt_fn(x3), x3 - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x4), x4 + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_tensor_len_guard(self):
+        def fn(x):
+            if len(x) == 3:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        x3 = torch.ones(3)
+        x4 = torch.ones(4)
+        self.assertEqual(opt_fn(x3), x3 - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x4), x4 + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_tensor_state_guard(self):
+        def fn(x):
+            if x.requires_grad:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        x_grad = torch.ones(3, requires_grad=True)
+        x_no_grad = torch.ones(3)
+        self.assertEqual(opt_fn(x_grad), x_grad - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x_no_grad), x_no_grad + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_tensor_numel_guard(self):
+        def fn(x):
+            if x.numel() == 3:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        x3 = torch.ones(3)
+        x4 = torch.ones(4)
+        self.assertEqual(opt_fn(x3), x3 - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x4), x4 + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_tensor_storage_offset_guard(self):
+        def fn(x):
+            if x.storage_offset() == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        base = torch.ones(4)
+        x_offset_0 = base[:3]
+        x_offset_1 = base[1:]
+        self.assertEqual(opt_fn(x_offset_0), x_offset_0 - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x_offset_1), x_offset_1 + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_tensor_predicate_guard(self):
+        def fn(x):
+            if x.is_complex():
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return x.real - 1
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        x_complex = torch.ones(3, dtype=torch.complex64)
+        x_float = torch.ones(3)
+        self.assertEqual(opt_fn(x_complex), x_complex.real - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x_float), x_float + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_graph_break_after_call_does_not_poison_code(self):
+        def fn(x, n):
+            y = x + 10
+            if n == 0:
+                torch._dynamo.graph_break()
+            return y + 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+        counters.clear()
+
+        self.assertEqual(opt_fn(x, 0), x + 11)
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(sum(counters["graph_break"].values()), 1)
+
+        self.assertEqual(opt_fn(x, 1), x + 11)
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_nested_explicit_graph_break_counted_once(self):
+        def inner(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        def outer(x):
+            return inner(x + 1) + 1
+
+        opt_fn = torch.compile(outer, backend="eager")
+        counters.clear()
+
+        self.assertEqual(opt_fn(torch.ones(2)), torch.ones(2) + 3)
+        self.assertEqual(sum(counters["graph_break"].values()), 1)
+
+    def test_backend_skip_frame_preserves_fullgraph_failure(self):
+        def backend(gm, args):
+            raise torch._dynamo.exc.SkipFrame("backend skip")
+
+        def fn(x):
+            return x + 1
+
+        preexisting_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        }
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "torch.compile with fullgraph=True found no compiled frames"
+        ):
+            opt_fn(torch.ones(2))
+        self.assertEqual(len(_debug_get_cache_entry_list(fn.__code__)), 0)
+        self.assertEqual(
+            {name for name in fn.__globals__ if name.startswith("__builtins_dict___")},
+            preexisting_builtins_keys,
+        )
+
+    def test_backend_skip_frame_still_skips_code_object(self):
+        backend_calls = 0
+
+        def backend(gm, args):
+            nonlocal backend_calls
+            backend_calls += 1
+            raise torch._dynamo.exc.SkipFrame("backend skip")
+
+        def fn(x, n):
+            if n == 0:
+                return x + 1
+            return x + 2
+
+        opt_fn = torch.compile(fn, backend=backend, dynamic=False)
+        x = torch.ones(2)
+
+        self.assertEqual(opt_fn(x, 0), x + 1)
+        self.assertEqual(backend_calls, 1)
+        self.assertEqual(opt_fn(x, 1), x + 2)
+        self.assertEqual(backend_calls, 1)
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_recursive_list(self):

@@ -162,6 +162,7 @@ from .utils import (
     gen_record_file_name,
     get_hook_for_recompile_user_context,
     get_metrics_context,
+    guarded_eager_fallback_codes,
     increment_frame,
     is_namedtuple,
     istype,
@@ -314,6 +315,293 @@ def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
         f"Line: {code.co_firstlineno}, Name: {code.co_name}, Filename: {code.co_filename}"
     ]
     return stack_strings
+
+
+def _guarded_eager_fallback(
+    code: CodeType,
+    tracer_output: DynamoTracerOutput | None,
+    hooks: Hooks,
+    cache_entries: list[CacheEntry],
+    compile_id: CompileId,
+    skip_reason: str,
+    package: CompilePackage | None,
+) -> ConvertFrameReturn:
+    """
+    Cache a guarded eager fallback for frame skips discovered after tracing starts.
+
+    Some skips depend on frame locals (for example, a graph break under one branch
+    or a no-op return under one boolean value). In those cases, caching SKIP as a
+    code-object strategy makes later calls with different locals skip Dynamo before
+    guard evaluation. Instead, cache the original code object behind the guards
+    Dynamo already produced for this trace; guard misses can still compile.
+    """
+    if tracer_output is None:
+        return ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason)
+    if package is not None:
+        _cleanup_skipped_tracer_output(tracer_output)
+        return ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason)
+
+    output = tracer_output.output_graph
+    if output is None or output.guards is None:
+        _cleanup_skipped_tracer_output(tracer_output)
+        return ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason)
+    if not _has_condition_dependent_skip_guards(code, output):
+        _cleanup_skipped_tracer_output(tracer_output)
+        return ConvertFrameReturn(skip_reason=skip_reason)
+    if _has_unstable_typing_guards(output):
+        _cleanup_skipped_tracer_output(tracer_output)
+        return ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason)
+
+    guarded_fallback_created = False
+    try:
+        build_guards_ctx = contextlib.ExitStack()
+        if torch_function_mode_stack_state_mgr.stack:
+            build_guards_ctx.enter_context(
+                torch_function_mode_stack_state_mgr.temp_restore_stack()
+            )
+        with (
+            dynamo_timed("build_guards", log_pt2_compile_event=True),
+            build_guards_ctx,
+        ):
+            try:
+                check_fn = CheckFunctionManager(
+                    code,
+                    output,
+                    cache_entries,
+                    hooks.guard_fail_fn,
+                    hooks.guard_filter_fn,
+                )
+            except AssertionError as e:
+                if "Guard failed on the same frame it was created" not in str(e):
+                    raise
+                return ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason)
+
+        # Use a code object owned by the cache entry so CleanupManager hooks
+        # have the same lifetime as normal Dynamo cache-entry code objects.
+        fallback_code = code.replace(co_varnames=code.co_varnames)
+
+        if output.cleanups:
+            CleanupManager.instance[fallback_code] = output.cleanups
+            guarded_eager_fallback_codes[fallback_code] = True
+
+        orig_code_map[fallback_code] = code
+        output_codes.add(fallback_code)
+        guarded_fallback_created = True
+        return ConvertFrameReturn(
+            frame_exec_strategy=FrameExecStrategy(
+                FrameAction.DEFAULT, FrameAction.DEFAULT
+            ),
+            guarded_code=GuardedCode(
+                fallback_code,
+                check_fn.guard_manager,  # type: ignore[arg-type]
+                compile_id,
+                "Torch-Compiled Eager Fallback: " + str(compile_id),
+            ),
+            skip_reason=skip_reason,
+        )
+    finally:
+        if not guarded_fallback_created:
+            for cleanup in output.cleanups:
+                cleanup()
+            output.cleanups.clear()
+        tracer_output._cleanup_output_graph()
+
+
+def _has_condition_dependent_skip_guards(
+    code: CodeType, output: OutputGraphCommon
+) -> bool:
+    if not _has_tensor_related_state(code, output):
+        return False
+
+    tensor_state_names = {
+        "shape",
+        "size",
+        "stride",
+        "dim",
+        "ndim",
+        "dtype",
+        "device",
+        "len",
+        "requires_grad",
+        "is_complex",
+        "is_floating_point",
+        "is_inference",
+        "is_nested",
+        "is_sparse",
+        "is_mkldnn",
+        "layout",
+        "numel",
+        "nelement",
+        "is_contiguous",
+        "is_cuda",
+        "is_meta",
+        "is_quantized",
+        "storage_offset",
+    }
+    has_tensor_state_name = bool(set(code.co_names) & tensor_state_names)
+
+    for guard in output.guards:
+        guard_create_fn_name = guard.create_fn_name()
+        if guard_create_fn_name == "SHAPE_ENV" and has_tensor_state_name:
+            return True
+        if guard_create_fn_name == "TENSOR_MATCH" and has_tensor_state_name:
+            name = guard.name
+            if name.startswith(("L[", "G[")):
+                return True
+        if guard_create_fn_name not in {
+            "CONSTANT_MATCH",
+            "EQUALS_MATCH",
+            "SEQUENCE_LENGTH",
+        }:
+            continue
+        name = guard.name
+        if not name.startswith(("L[", "G[")):
+            continue
+        if name.startswith(("L['___", "L['__nested_", "G['___", "G['__nested_")):
+            continue
+        if name.startswith("G[") and not _is_condition_dependent_global_guard(
+            name, output
+        ):
+            continue
+        return True
+    return False
+
+
+def _is_condition_dependent_global_guard(name: str, output: OutputGraphCommon) -> bool:
+    key_start = len("G[") + 1
+    key_end = name.find("']", key_start)
+    if key_end == -1:
+        return False
+
+    obj = output.global_scope.get(name[key_start:key_end])
+    rest = name[key_end + 2 :]
+    if rest.startswith("."):
+        for attr in rest[1:].split("."):
+            try:
+                attrs = vars(obj)
+            except TypeError:
+                return False
+            if attr not in attrs:
+                return False
+            obj = attrs[attr]
+
+    return not (
+        isinstance(obj, ModuleType)
+        or callable(obj)
+        or inspect.isclass(obj)
+        or _is_torch_tensor_related_callable(obj)
+    )
+
+
+def _has_unstable_typing_guards(output: OutputGraphCommon) -> bool:
+    return any(
+        _guard_targets_paramspec_attr(guard.name, output) for guard in output.guards
+    )
+
+
+def _guard_targets_paramspec_attr(name: str, output: OutputGraphCommon) -> bool:
+    for prefix, scope in (("G[", output.global_scope), ("L[", output.local_scope)):
+        if not name.startswith(prefix):
+            continue
+        key_start = len(prefix) + 1
+        key_end = name.find("']", key_start)
+        if key_end == -1:
+            return False
+        obj = scope.get(name[key_start:key_end])
+        rest = name[key_end + 2 :]
+        if not rest.startswith("."):
+            return False
+        for attr in rest[1:].split("."):
+            if attr in {"args", "kwargs"}:
+                return isinstance(obj, typing.ParamSpec)
+            if not isinstance(obj, ModuleType):
+                return False
+            obj = vars(obj).get(attr)
+        return False
+    return False
+
+
+def _has_tensor_related_state(code: CodeType, output: OutputGraphCommon) -> bool:
+    co_names = set(code.co_names)
+    torch_skip_only_names = {
+        "torch",
+        "_dynamo",
+        "decorators",
+        "graph_break",
+        "skip_frame",
+        "step_unsupported",
+    }
+    for co_name in code.co_names:
+        if co_name in output.global_scope:
+            obj = output.global_scope[co_name]
+            if _contains_tensor_related_value(obj):
+                return True
+            if isinstance(obj, ModuleType) and (
+                obj.__name__.startswith("torch.") or obj is torch
+            ):
+                if any(
+                    _is_torch_tensor_related_callable(vars(obj).get(name))
+                    for name in co_names - torch_skip_only_names
+                ):
+                    return True
+                continue
+            if _is_torch_tensor_related_callable(obj):
+                return True
+            if np and config.trace_numpy and (obj is np or is_numpy(obj)):
+                return True
+
+    return any(
+        _contains_tensor_related_value(value)
+        or _is_torch_tensor_related_callable(value)
+        for value in output.local_scope.values()
+    )
+
+
+def _is_torch_tensor_related_callable(value: object) -> bool:
+    if not callable(value) or getattr(value, "__module__", None) != "torch":
+        return False
+    if not inspect.isclass(value):
+        return True
+    return issubclass(value, torch.Tensor) or value.__name__.endswith("Tensor")
+
+
+def _contains_tensor_related_value(value: object, seen: set[int] | None = None) -> bool:
+    if seen is None:
+        seen = set()
+    value_id = id(value)
+    if value_id in seen:
+        return False
+    seen.add(value_id)
+    if isinstance(value, (torch.Tensor, torch.nn.Module)) or (
+        istype(value, type) and issubclass(value, torch.nn.Module)
+    ):
+        return True
+    if (
+        config.trace_numpy
+        and np
+        and (istype(value, np.ndarray) or isinstance(value, np.generic))
+    ):
+        return True
+    if istype(value, (list, tuple)):
+        return any(_contains_tensor_related_value(item, seen) for item in value)
+    if istype(value, dict):
+        values = list(value.values())
+        return any(_contains_tensor_related_value(item, seen) for item in values)
+    if is_namedtuple(value) and hasattr(value, "_fields"):
+        return any(
+            _contains_tensor_related_value(getattr(value, name), seen)
+            for name in value._fields
+        )
+    return False
+
+
+def _cleanup_skipped_tracer_output(tracer_output: DynamoTracerOutput) -> None:
+    output = tracer_output.output_graph or tracer_output.output_graph_for_cleanup
+    if output is not None:
+        for cleanup in output.cleanups:
+            cleanup()
+        output.cleanups.clear()
+    tracer_output._cleanup_output_graph()
 
 
 def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -963,8 +1251,18 @@ def trace_frame(
         propagate_inst_exn_table_entries(instructions)
         check_inst_exn_tab_entries_valid(instructions)
         instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+    except exc.SkipFrame as e:
+        e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer)  # type: ignore[attr-defined]
+        raise
     except Exception as e:
-        e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
+        preserve_output_graph = (
+            isinstance(e, (Unsupported, UserError))
+            and getattr(e, "skip_frame", False)
+            and getattr(e, "gb_type", None) == "Call to `torch._dynamo.graph_break()`"
+        )
+        e._torch_dynamo_tracer_output = DynamoTracerOutput(  # type: ignore[attr-defined]
+            tracer, error=not preserve_output_graph
+        )
         raise
     return tracer_output
 
@@ -1623,10 +1921,6 @@ def compile_frame(  # type: ignore[return]
         except exc.SkipFrame as e:
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
-            # Clean up the failed tracer output's graph to break reference cycles
-            failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
-            if failed_tracer_output:
-                failed_tracer_output._cleanup_output_graph()
             raise
 
 
@@ -1766,9 +2060,29 @@ def _compile(
                 raise AssertionError(
                     "SkipFrame exception must have _torch_dynamo_tracer_output set"
                 ) from None
+            skip_reason = f"Dynamo decided to skip the frame while tracing: {e}"
+            if one_graph:
+                _cleanup_skipped_tracer_output(e._torch_dynamo_tracer_output)
+                return (
+                    ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason),
+                    e._torch_dynamo_tracer_output,
+                )
+            output = e._torch_dynamo_tracer_output.output_graph
+            if output is not None and output.count_calls() > 0:
+                _cleanup_skipped_tracer_output(e._torch_dynamo_tracer_output)
+                return (
+                    ConvertFrameReturn(skip_reason=skip_reason),
+                    e._torch_dynamo_tracer_output,
+                )
             return (
-                ConvertFrameReturn(
-                    skip_reason=f"Dynamo decided to skip the frame while tracing: {e}"
+                _guarded_eager_fallback(
+                    code,
+                    e._torch_dynamo_tracer_output,
+                    hooks,
+                    cache_entries,
+                    compile_id,
+                    skip_reason,
+                    package,
                 ),
                 e._torch_dynamo_tracer_output,
             )
@@ -2143,6 +2457,42 @@ def _compile(
                 e, compile_id
             )
             tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            error_on_graph_break = (
+                tracer_output.error_on_graph_break
+                if tracer_output
+                else _get_error_on_graph_break()
+            )
+            if (
+                isinstance(e, (Unsupported, UserError))
+                and getattr(e, "skip_frame", False)
+                and getattr(e, "gb_type", None)
+                == "Call to `torch._dynamo.graph_break()`"
+                and not one_graph
+                and not error_on_graph_break
+                and tracer_output is not None
+                and tracer_output.output_graph is not None
+            ):
+                guarded_code = _guarded_eager_fallback(
+                    code,
+                    tracer_output,
+                    hooks,
+                    cache_entries,
+                    compile_id,
+                    f"Dynamo decided to skip the frame while tracing: {e}",
+                    package,
+                )
+                if isinstance(e, Unsupported) and e.category == "graph_break":
+                    if guarded_code.guarded_code is not None:
+                        e.remove_from_stats()
+                    elif counters[e.category][e.msg] > 1:
+                        e.remove_from_stats()
+                return guarded_code
+            if (
+                isinstance(e, (Unsupported, UserError))
+                and getattr(e, "skip_frame", False)
+                and tracer_output
+            ):
+                _cleanup_skipped_tracer_output(tracer_output)
             if isinstance(
                 e,
                 (
