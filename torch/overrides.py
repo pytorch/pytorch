@@ -1339,7 +1339,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.__mod__: lambda self, other: -1,
         Tensor.__rmod__: lambda self, other: -1,
         Tensor.__imod__: lambda self, other: -1,
-        Tensor.__array_wrap__: lambda self, array: -1,
+        Tensor.__array_wrap__: lambda self, array, context=None, return_scalar=False: -1,
         Tensor.__getitem__: lambda self, idx: -1,
         Tensor.__deepcopy__: lambda self, memo: -1,
         Tensor.__int__: lambda self: -1,
