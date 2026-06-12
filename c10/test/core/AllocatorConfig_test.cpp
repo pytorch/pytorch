@@ -135,3 +135,40 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   env = "foo:123,bar:456";
   ASSERT_THROW(c10::CachingAllocator::setAllocatorSettings(env), c10::Error);
 }
+
+TEST(AllocatorConfigTest, malformed_config_raises_value_error) {
+  // gh-186453: a malformed allocator config (supplied via PYTORCH_ALLOC_CONF /
+  // PYTORCH_CUDA_ALLOC_CONF / PYTORCH_HIP_ALLOC_CONF) must raise a clean
+  // c10::ValueError, not a TORCH_INTERNAL_ASSERT that asks the user to report a
+  // bug to PyTorch.
+  const std::vector<std::string> malformed = {
+      "max_split_size_mb", // key with no value (checkIndex)
+      "max_split_size_mb:", // trailing colon, no value (checkIndex)
+      "roundup_power2_divisions:[64:8", // unterminated list (operator[])
+  };
+  for (const auto& env : malformed) {
+    EXPECT_THROW(
+        c10::CachingAllocator::setAllocatorSettings(env), c10::ValueError)
+        << "config: " << env;
+  }
+
+  // skipKey's closing-bracket guard: an unterminated list value for a key that
+  // is skipped (rather than parsed) reaches the end of the config.
+  EXPECT_THROW(
+      ConfigTokenizer("large_segment_size_mb:[1").skipKey(0), c10::ValueError);
+
+  // The message must be user-facing: no internal-assert text, and it should
+  // point the user at the allocator config env var.
+  try {
+    c10::CachingAllocator::setAllocatorSettings(
+        "garbage_collection_threshold:");
+    ADD_FAILURE() << "expected a c10::ValueError";
+  } catch (const c10::ValueError& e) {
+    const std::string msg = e.what_without_backtrace();
+    EXPECT_EQ(msg.find("INTERNAL ASSERT"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("PYTORCH_ALLOC_CONF"), std::string::npos) << msg;
+    // gh-186453: the error must echo the offending config string.
+    EXPECT_NE(msg.find("garbage_collection_threshold"), std::string::npos)
+        << msg;
+  }
+}

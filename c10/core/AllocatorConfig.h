@@ -33,7 +33,7 @@ constexpr size_t kRoundLarge = 2097152;
 // Whitespace is ignored.
 class ConfigTokenizer {
  public:
-  explicit ConfigTokenizer(const std::string& env) {
+  explicit ConfigTokenizer(const std::string& env) : debug_config_str_(env) {
     std::string buffer;
     for (char ch : env) {
       if (ch == ',' || ch == ':' || ch == '[' || ch == ']') {
@@ -52,8 +52,7 @@ class ConfigTokenizer {
   }
 
   const std::string& operator[](size_t i) const {
-    TORCH_INTERNAL_ASSERT(
-        i < config_.size(), "Index out of bounds in ConfigTokenizer");
+    checkIndex(i);
     return config_[i];
   }
 
@@ -112,20 +111,34 @@ class ConfigTokenizer {
     while (++i < config_.size() && config_[i] != "]") {
     }
 
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK_VALUE(
         i < config_.size(),
-        "Expected closing bracket ']' in ConfigTokenizer but reached end of config");
+        "Error parsing the allocator config: expected a closing ']' for a "
+        "list value but reached the end of the configuration string. "
+        "It is set via PYTORCH_ALLOC_CONF (or PYTORCH_CUDA_ALLOC_CONF / "
+        "PYTORCH_HIP_ALLOC_CONF). The configuration string was '",
+        debug_config_str_,
+        "'.");
 
     return i; // Return the index of the closing ']'
   }
 
  private:
   void checkIndex(size_t i) const {
-    TORCH_INTERNAL_ASSERT(
-        i < config_.size(), "Index out of bounds in ConfigTokenizer");
+    TORCH_CHECK_VALUE(
+        i < config_.size(),
+        "Error parsing the allocator config: reached the end of the "
+        "configuration string while more tokens were expected. The "
+        "config is malformed, for example a key with no value or a "
+        "trailing ':' or ','. It is set via PYTORCH_ALLOC_CONF (or "
+        "PYTORCH_CUDA_ALLOC_CONF / PYTORCH_HIP_ALLOC_CONF). The "
+        "configuration string was '",
+        debug_config_str_,
+        "'.");
   }
 
   std::vector<std::string> config_;
+  std::string debug_config_str_;
 };
 
 /**
