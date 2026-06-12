@@ -760,7 +760,7 @@ class OutputGraph(OutputGraphCommon):
         # Wire ShapesSpec.assumptions BEFORE any input is processed. Each
         # assumption is appended to `_shape_spec_pending_assumptions`;
         if config._shapes_spec is not None:
-            from torch._dynamo.variables.builder import _wire_spec_assumptions
+            from torch.fx.experimental.symbolic_shapes import _wire_spec_assumptions
 
             _wire_spec_assumptions(self.shape_env, config._shapes_spec)
 
@@ -1950,7 +1950,7 @@ class OutputGraph(OutputGraphCommon):
         # check still has unbound IntVar dependencies (i.e. an IntVar
         # appears in an expression but never as a bare-IntVar input slot).
         if config._shapes_spec is not None:
-            from torch._dynamo.variables.builder import _finalize_spec_wiring
+            from torch.fx.experimental.symbolic_shapes import _finalize_spec_wiring
 
             _finalize_spec_wiring(self.shape_env)
 
