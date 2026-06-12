@@ -2044,7 +2044,7 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
             "`torch.utils._pytree.register_pytree_node(..., "
             "serialized_type_name=...)` or "
             "`torch.export.register_dataclass(..., serialized_type_name=...)` "
-            f"before deserializing. The `serialized_type_name` must match "
+            "before deserializing. The `serialized_type_name` must match "
             f"{serialized_type_name!r}.",
         )
 

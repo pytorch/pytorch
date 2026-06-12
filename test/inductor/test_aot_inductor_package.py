@@ -271,11 +271,17 @@ model(torch.ones(2))
         self.assertIn(
             "import that package before loading this artifact",
             proc.stderr,
+            msg=proc.stderr,
         )
-        self.assertIn("torch.export.register_dataclass", proc.stderr)
+        self.assertIn(
+            "torch.export.register_dataclass",
+            proc.stderr,
+            msg=proc.stderr,
+        )
         self.assertIn(
             "test_aot_inductor_package.CustomOutput",
             proc.stderr,
+            msg=proc.stderr,
         )
 
     def test_remove_intermediate_files(self):
