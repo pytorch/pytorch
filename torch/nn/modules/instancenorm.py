@@ -1,7 +1,5 @@
 # mypy: allow-untyped-defs
 
-import warnings
-
 import torch.nn.functional as F
 from torch import Tensor
 
@@ -114,18 +112,10 @@ class _InstanceNorm(_NormBase):
 
         feature_dim = input.dim() - self._get_no_batch_dim()
         if input.size(feature_dim) != self.num_features:
-            if self.affine:
-                raise ValueError(
-                    f"expected input's size at dim={feature_dim} to match num_features"
-                    f" ({self.num_features}), but got: {input.size(feature_dim)}."
-                )
-            else:
-                warnings.warn(
-                    f"input's size at dim={feature_dim} does not match num_features. "
-                    "You can silence this warning by not passing in num_features, "
-                    "which is not used because affine=False",
-                    stacklevel=2,
-                )
+            raise ValueError(
+                f"expected input's size at dim={feature_dim} to match num_features"
+                f" ({self.num_features}), but got: {input.size(feature_dim)}."
+            )
 
         if input.dim() == self._get_no_batch_dim():
             return self._handle_no_batch_input(input)
