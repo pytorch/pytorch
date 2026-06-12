@@ -22,7 +22,6 @@
 #include <ATen/ops/mish_backward_native.h>
 #include <ATen/ops/mish_native.h>
 #include <ATen/ops/relu_native.h>
-#include <ATen/ops/sigmoid_backward_native.h>
 #include <ATen/ops/softplus_backward_native.h>
 #include <ATen/ops/softplus_native.h>
 #include <ATen/ops/tanh_backward_native.h>
@@ -259,48 +258,6 @@ Tensor log_sigmoid_backward_mps(const Tensor& grad_output, const Tensor& self, c
   auto grad_input = at::empty_like(grad_output);
   log_sigmoid_backward_mps_out(grad_output, self, buffer, grad_input);
   return grad_input;
-}
-
-TORCH_IMPL_FUNC(sigmoid_backward_out_mps)(const Tensor& grad_output, const Tensor& output, const Tensor& grad_input) {
-  using namespace mps;
-  using CachedGraph = MPSUnaryGradCachedGraph;
-  TORCH_CHECK(grad_input.is_mps());
-
-  if (grad_output.numel() == 0) {
-    return;
-  }
-
-  MPSStream* stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string key = "sigmoid_backward_out_mps:" + getMPSTypeString(grad_output);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* gradOutputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_output));
-      MPSGraphTensor* outputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(output));
-
-      MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:getMPSDataType(grad_output)];
-      MPSGraphTensor* oneMinusSigmoidTensor = [mpsGraph subtractionWithPrimaryTensor:unitTensor
-                                                                     secondaryTensor:outputTensor
-                                                                                name:nil];
-      MPSGraphTensor* timesTensor = [mpsGraph multiplicationWithPrimaryTensor:oneMinusSigmoidTensor
-                                                              secondaryTensor:outputTensor
-                                                                         name:nil];
-      MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:gradOutputTensor
-                                                                  secondaryTensor:timesTensor
-                                                                             name:nil];
-
-      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-      newCachedGraph->gradInputTensor_ = gradInputTensor;
-    });
-
-    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
-
-    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, outputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
-  }
 }
 
 TORCH_IMPL_FUNC(tanh_backward_out_mps)(const Tensor& grad_output, const Tensor& output, const Tensor& grad_input) {
