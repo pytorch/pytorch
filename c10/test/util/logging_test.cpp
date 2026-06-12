@@ -149,6 +149,75 @@ TEST(LoggingTest, TestDanglingElse) {
     GTEST_FAIL();
 }
 
+namespace {
+// Streams-to-logger probe: operator<< is only invoked if the LOG_IF
+// condition is true, so counting invocations tells us exactly how many
+// times the throttled macro fires.
+struct LogHitCounter {
+  size_t* count;
+};
+
+std::ostream& operator<<(std::ostream& os, const LogHitCounter& c) {
+  ++(*c.count);
+  return os;
+}
+} // namespace
+
+TEST(LoggingTest, LogEveryNth) {
+  size_t hits = 0;
+  LogHitCounter c{&hits};
+
+  for (int i = 0; i < 12; ++i) {
+    C10_LOG_EVERY_NTH(WARNING, 3) << c;
+  }
+
+  // Logs on calls 3, 6, 9, 12.
+  EXPECT_EQ(hits, 4u);
+}
+
+TEST(LoggingTest, LogEveryNthWithN1) {
+  size_t hits = 0;
+  LogHitCounter c{&hits};
+
+  for (int i = 0; i < 5; ++i) {
+    C10_LOG_EVERY_NTH(WARNING, 1) << c;
+  }
+
+  // c % 1 == 0 always, so every call logs.
+  EXPECT_EQ(hits, 5u);
+}
+
+TEST(LoggingTest, LogEveryNthFewerThanN) {
+  size_t hits = 0;
+  LogHitCounter c{&hits};
+
+  for (int i = 0; i < 4; ++i) {
+    C10_LOG_EVERY_NTH(WARNING, 10) << c;
+  }
+
+  // Need at least N calls before the first log.
+  EXPECT_EQ(hits, 0u);
+}
+
+TEST(LoggingTest, LogEveryNthPerCallSiteCounter) {
+  size_t hits_a = 0;
+  size_t hits_b = 0;
+  LogHitCounter ca{&hits_a};
+  LogHitCounter cb{&hits_b};
+
+  // Two distinct call sites, each with its own static counter.
+  for (int i = 0; i < 5; ++i) {
+    C10_LOG_EVERY_NTH(WARNING, 2) << ca;
+  }
+
+  for (int i = 0; i < 3; ++i) {
+    C10_LOG_EVERY_NTH(WARNING, 2) << cb;
+  }
+
+  EXPECT_EQ(hits_a, 2u); // calls 2, 4
+  EXPECT_EQ(hits_b, 1u); // call 2
+}
+
 #if GTEST_HAS_DEATH_TEST
 TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   bool kTrue = true;
