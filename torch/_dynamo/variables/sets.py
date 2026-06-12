@@ -433,14 +433,11 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            if not self.sq_contains(tx, args[0]).as_python_constant():
-                raise_observed_exception(KeyError, tx, args=[args[0]])
+            if args[0] not in self:
+                raise_observed_exception(KeyError, tx, args=args)
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
-            # sq_contains validated/normalized args[0]; a set key was coerced to
-            # a frozenset, so pop that same normalized key.
-            key = args[0] if is_hashable(args[0]) else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
-            self.items.pop(HashableTracker(key))
+            self.items.pop(HashableTracker(args[0]))
             return ConstantVariable.create(None)
         elif name == "discard":
             if kwargs or len(args) != 1:
@@ -450,17 +447,10 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            if self.sq_contains(tx, args[0]).as_python_constant():
+            if args[0] in self:
                 self.should_reconstruct_all = True
                 tx.output.side_effects.mutation(self)
-                # sq_contains validated/normalized args[0]; a set key was coerced
-                # to a frozenset, so pop that same normalized key.
-                key = (
-                    args[0]
-                    if is_hashable(args[0])
-                    else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
-                )
-                self.items.pop(HashableTracker(key))
+                self.items.pop(HashableTracker(args[0]))
             return ConstantVariable.create(None)
         elif name in ("issubset", "issuperset"):
             if len(args) != 1:

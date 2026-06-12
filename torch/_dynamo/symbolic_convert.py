@@ -3816,8 +3816,6 @@ class InstructionTranslatorBase(
         from .variables.dicts import ConstDictVariable
         from .variables.lists import BaseListVariable
 
-        # TODO(dynamo-team): Refactor this to use sq_item / mp_ass_subscript
-
         item_var = None
         try:
             if isinstance(obj, BaseListVariable):

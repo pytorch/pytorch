@@ -1317,7 +1317,6 @@ def unpack_and_apply_fn(
         (
             variables.ConstDictVariable,
             variables.DictViewVariable,
-            variables.MappingProxyVariable,
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
@@ -3262,41 +3261,52 @@ def raise_args_mismatch(
 
 
 def iter_contains(
-    items: Iterable[VariableTracker],
-    search: VariableTracker,
+    items: Iterable[Any],
+    search: Any,
     tx: InstructionTranslatorBase,
-) -> VariableTracker:
+    check_tensor_identity: bool = False,
+) -> Any:
     from .variables import ConstantVariable
-    from .variables.object_protocol import generic_richcompare_bool
 
-    items = list(items)
-    # CPython's list_contains/set_contains use PyObject_RichCompareBool(item,
-    # search, Py_EQ) with an identity shortcut. The constant fast path is only
-    # valid when every element is a constant too; a non-constant element earlier
-    # in the sequence has an __eq__ that must be honored in order (it may match,
-    # or raise), so fall through to the per-element richcompare loop otherwise.
-    if search.is_python_constant() and all(x.is_python_constant() for x in items):
+    if search.is_python_constant():
         search_val = search.as_python_constant()
+        # CPython's list_contains/set_contains use PyObject_RichCompareBool
+        # which has an identity shortcut: if v is w, return True for eq.
+        # Check identity first (matters for NaN).
         found_const = any(
-            x.as_python_constant() is search_val or x.as_python_constant() == search_val
+            x.is_python_constant()
+            and (
+                x.as_python_constant() is search_val
+                or x.as_python_constant() == search_val
+            )
             for x in items
         )
         return ConstantVariable.create(found_const)
+
+    must_check_tensor_id = False
+    if check_tensor_identity and search.is_tensor():
+        must_check_tensor_id = True
+        # Match of Tensor means match of FakeTensor
+        search = _get_fake_tensor(search)
+
     found: VariableTracker | None = None
     for x in items:
-        check = generic_richcompare_bool(tx, x, search, "__eq__")
-        if check.is_constant_match(True):
-            return check
-        if check.is_constant_match(False):
-            continue
-        if found is None:
-            found = check
+        if must_check_tensor_id:
+            if x.is_tensor():
+                if search is _get_fake_tensor(x):  # Object equivalence
+                    return ConstantVariable.create(True)
         else:
             from torch._dynamo.variables.builder import SourcelessBuilder
 
-            found = SourcelessBuilder.create(tx, operator.or_).call_function(
-                tx, [check, found], {}
+            check = SourcelessBuilder.create(tx, operator.eq).call_function(
+                tx, [x, search], {}
             )
+            if found is None:
+                found = check
+            else:
+                found = SourcelessBuilder.create(tx, operator.or_).call_function(
+                    tx, [check, found], {}
+                )
     if found is None:
         found = ConstantVariable.create(False)
     return found

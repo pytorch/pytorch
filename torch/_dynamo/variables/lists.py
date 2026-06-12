@@ -31,13 +31,7 @@ from ..bytecode_transformation import (
     create_dup_top,
     create_instruction,
 )
-from ..exc import (
-    ObservedException,
-    raise_observed_exception,
-    raise_type_error,
-    unimplemented,
-    Unsupported,
-)
+from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
@@ -57,10 +51,9 @@ from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
 from .object_protocol import (
-    generic_richcompare_bool,
-    maybe_get_python_type,
     pyindex_check,
     type_implements_nb_index,
+    validate_sequence_index,
     vt_is_iterable,
 )
 
@@ -152,18 +145,16 @@ class BaseListVariable(VariableTracker):
     def getitem_const(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
-        if pyindex_check(maybe_get_python_type(arg)):
-            index = arg.nb_index_impl(tx).as_python_constant()
-            try:
-                return self.items[index]
-            except IndexError:
-                raise_observed_exception(
-                    IndexError, tx, args=["list index out of range"]
-                )
-        elif pyslice_check(arg):
-            if not isinstance(arg, SliceVariable):
-                raise AssertionError("Expected arg to be a SliceVariable")
-            index = arg.as_index_slice(tx)
+        from .tensor import SymNodeVariable
+
+        arg = validate_sequence_index(tx, arg, self.python_type_name())
+
+        if isinstance(arg, SymNodeVariable):
+            index = arg.sym_num
+        else:
+            index = arg.as_python_constant()
+
+        if isinstance(index, slice):
             if index.step == 0:
                 raise_observed_exception(
                     ValueError, tx, args=["slice step cannot be zero"]
@@ -175,10 +166,16 @@ class BaseListVariable(VariableTracker):
                 mutation_type=ValueMutationNew() if self.mutation_type else None,
             )
         else:
-            raise_type_error(
-                tx,
-                f"list indices must be integers or slices, not {arg.python_type_name()}",
-            )
+            if not isinstance(index, (int, torch.SymInt)):
+                raise AssertionError(
+                    f"index must be int or SymInt, got {type(index).__name__}"
+                )
+            try:
+                return self.items[index]
+            except IndexError:
+                raise_observed_exception(
+                    IndexError, tx, args=["list index out of range"]
+                )
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
@@ -212,10 +209,9 @@ class BaseListVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L635-L652
-
         # TODO(dynamo-team): Replace iter_contains by a proper impl. once we
         # implement PyObject_RichCompare
-        return iter_contains(self.items, item, tx)
+        return iter_contains(unpack_iterable(tx, self), item, tx)
 
     def call_tree_map_branch(
         self,
@@ -367,7 +363,7 @@ class BaseListVariable(VariableTracker):
         CPython operates on the internal C array directly, so we compare
         VT items without going through a polyfill.
         """
-        from .object_protocol import generic_richcompare
+        from .object_protocol import generic_richcompare, generic_richcompare_bool
         from .tensor import SymNodeVariable
 
         try:
@@ -698,18 +694,19 @@ class RangeVariable(BaseListVariable):
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         # range_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L729-L748
-        arg_type = maybe_get_python_type(arg)
-        if pyindex_check(arg_type):
-            i = arg.nb_index_impl(tx)
-            return self.apply_index(tx, i.as_python_constant())
-        elif pyslice_check(arg):
-            if not isinstance(arg, SliceVariable):
-                raise AssertionError("Expected arg to be a SliceVariable")
-            return self.apply_slice(arg.as_index_slice(tx))
-        raise_type_error(
-            tx,
-            f"range indices must be integers or slices, not {arg.python_type_name()}",
-        )
+        from .object_protocol import validate_sequence_index
+
+        arg = validate_sequence_index(tx, arg, "range")
+        index = arg.as_python_constant()
+
+        if isinstance(index, slice):
+            return self.apply_slice(index)
+        elif isinstance(index, int):
+            return self.apply_index(tx, index)
+        else:
+            raise_observed_exception(
+                TypeError, tx, args=["range indices must be integers or slices"]
+            )
 
     def as_proxy(self) -> range:
         return self.python_type()(*self._as_proxy())
@@ -1141,73 +1138,55 @@ class ListVariable(CommonListMethodsVariable):
             if len(kwargs) != 0:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
 
-            tx.output.side_effects.mutation(self)
-            # CPython's list.sort detaches the list while sorting: reads
-            # during the sort observe an empty list, items added during the
-            # sort are discarded, and the mutation raises ValueError after
-            # the sorted result is installed.
-            saved = list(self.items)
-            self.items.clear()
+            if key_fn_var.is_constant_none():
+                keys = self.items.copy()
+            else:
+                keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
 
-            class _TracedKey:
-                # Compares through Dynamo so user-defined __lt__ (e.g. from
-                # functools.cmp_to_key) is traced like CPython's timsort,
-                # which only ever uses "<".
-                def __init__(self, key: VariableTracker) -> None:
-                    self.key = key
-
-                def __lt__(self, other: "_TracedKey") -> bool:
-                    result = variables.BuiltinVariable(operator.lt).call_function(
-                        tx, [self.key, other.key], {}
+            if not all(k.is_python_constant() for k in keys):
+                first_non_constant_key = None
+                for k in keys:
+                    if not k.is_python_constant():
+                        first_non_constant_key = k
+                if first_non_constant_key is None:
+                    raise AssertionError(
+                        "expected at least one non-constant key when not all keys are constant"
                     )
-                    if not result.is_python_constant():
-                        unimplemented(
-                            gb_type="sort with non-constant keys",
-                            context=str(self.key),
-                            explanation=(
-                                f"Cannot perform sort whose key comparison is not "
-                                f"a compile-time constant. "
-                                f"Key type: {self.key.python_type()}. "
-                                f"Most notably, we cannot sort with Tensor or SymInt "
-                                f"keys, but we can sort ints."
-                            ),
-                            hints=[
-                                "Use something else as the key.",
-                                *graph_break_hints.SUPPORTABLE,
-                            ],
-                        )
-                    return bool(result.as_python_constant())
+
+                try:
+                    python_type = str(first_non_constant_key.python_type())
+                except NotImplementedError:
+                    python_type = "unknown"
+
+                unimplemented(
+                    gb_type="sort with non-constant keys",
+                    context=str(first_non_constant_key),
+                    explanation=(
+                        f"Cannot perform sort with non-constant key. "
+                        f"First non-constant key type: {python_type}. "
+                        f"Most notably, we cannot sort with Tensor or SymInt keys, but we can "
+                        f"sort ints."
+                    ),
+                    hints=["Use something else as the key."],
+                )
 
             try:
-                if key_fn_var.is_constant_none():
-                    keys = saved
-                else:
-                    keys = [key_fn_var.call_function(tx, [x], {}) for x in saved]
-
-                if all(k.is_python_constant() for k in keys):
-                    order = sorted(
-                        range(len(saved)),
-                        key=lambda i: keys[i].as_python_constant(),
-                        reverse=reverse,
-                    )
-                else:
-                    order = sorted(
-                        range(len(saved)),
-                        key=lambda i: _TracedKey(keys[i]),
-                        reverse=reverse,
-                    )
-                new_items = [saved[i] for i in order]
-            except Exception as e:
-                self.items[:] = saved
-                if isinstance(e, (ObservedException, Unsupported)):
-                    raise
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            modified_during_sort = bool(self.items)
-            self.items[:] = new_items
-            if modified_during_sort:
-                raise_observed_exception(
-                    ValueError, tx, args=["list modified during sort"]
+                tx.output.side_effects.mutation(self)
+                sorted_items_with_keys = sorted(
+                    (
+                        (
+                            x,
+                            k.as_python_constant(),
+                            -i if reverse else i,  # extra key to ensure stable sort
+                        )
+                        for i, (k, x) in enumerate(zip(keys, self.items))
+                    ),
+                    key=operator.itemgetter(1, 2),
+                    reverse=reverse,
                 )
+                self.items[:] = [x for x, *_ in sorted_items_with_keys]
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
@@ -1540,32 +1519,6 @@ class DequeVariable(CommonListMethodsVariable):
             slice_within_maxlen = slice(-maxlen, None)
         else:
             slice_within_maxlen = None
-
-        if name == "__init__" and self.is_mutable():
-            # deque_init: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1810
-            # Re-init resets maxlen (to None unless given), clears the deque,
-            # then extends with the iterable.
-            iterable = args[0] if len(args) >= 1 else kwargs.pop("iterable", None)
-            new_maxlen = (
-                args[1]
-                if len(args) >= 2
-                else kwargs.pop("maxlen", ConstantVariable.create(None))
-            )
-            if len(args) > 2 or kwargs:
-                raise_args_mismatch(tx, name)
-            if not new_maxlen.is_python_constant():
-                raise_type_error(tx, "an integer is required")
-            new_maxlen_val = new_maxlen.as_python_constant()
-            if new_maxlen_val is not None and new_maxlen_val < 0:
-                raise_observed_exception(
-                    ValueError, tx, args=["maxlen must be non-negative"]
-                )
-            tx.output.side_effects.mutation(self)
-            self.maxlen = new_maxlen
-            self.items[:] = []
-            if iterable is not None:
-                self.call_method(tx, "extend", [iterable], {})
-            return ConstantVariable.create(None)
 
         if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:
@@ -2060,24 +2013,6 @@ class SliceVariable(VariableTracker):
 
     def as_python_constant(self) -> slice:
         return slice(*[guard_if_dyn(x) for x in self.items])
-
-    def as_index_slice(self, tx: "InstructionTranslatorBase") -> slice:
-        # PySlice_Unpack -> evaluate_slice_index: each non-None member is
-        # coerced through __index__ (nb_index), so user objects with an
-        # __index__ method are valid slice bounds.
-        # https://github.com/python/cpython/blob/62a6e898e01/Objects/sliceobject.c#L196-L242
-        members = []
-        for member in self.items:
-            if isinstance(member, ConstantVariable) and member.value is None:
-                members.append(None)
-                continue
-            if not pyindex_check(maybe_get_python_type(member)):
-                raise_type_error(
-                    tx,
-                    "slice indices must be integers or None or have an __index__ method",
-                )
-            members.append(member.nb_index_impl(tx).as_python_constant())
-        return slice(*members)
 
     def is_hashable(self) -> bool:
         # Slices became hashable in Python 3.12 (CPython slicehash).
