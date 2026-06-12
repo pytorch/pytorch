@@ -100,7 +100,7 @@ def copy_libraries(torch_dir: Path, libtorch_lib: Path, platform: str) -> None:
                     shutil.copy2(item, libtorch_lib / item.name)
 
 
-def fix_rpath(libtorch_lib: Path, platform: str) -> None:
+def fix_rpath(libtorch_lib: Path) -> None:
     """Rewrite RPATH on all shared libraries to $ORIGIN using patchelf.
 
     The wheel sets RPATH relative to the pip site-packages layout
@@ -111,7 +111,7 @@ def fix_rpath(libtorch_lib: Path, platform: str) -> None:
     Requires patchelf to be available (present in manylinux2_28-builder
     Docker images at /usr/local/bin/patchelf).
     """
-    if platform != "linux":
+    if sys.platform != "linux":
         return
 
     patchelf = shutil.which("patchelf")
@@ -342,7 +342,7 @@ def main() -> None:
 
         # Copy components
         copy_libraries(torch_dir, libtorch_dir / "lib", args.platform)
-        fix_rpath(libtorch_dir / "lib", args.platform)
+        fix_rpath(libtorch_dir / "lib")
         copy_includes(torch_dir, libtorch_dir / "include")
         copy_cmake(torch_dir, libtorch_dir / "share")
         copy_bin(torch_dir, libtorch_dir / "bin", args.platform)
