@@ -84,7 +84,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['iadd', 'iadd_2', 'cos_1', 'sum_7', 'mul'], ['iadd_1', 'iadd_3', 'cos_2', 'sum_8', 'mul_1']], [['add', 'add_3', 'sum_1', 'sum_4', 'add_6'], ['add_1', 'add_5', 'sum_2', 'sum_6', 'add_8'], ['add_2', 'add_4', 'sum_3', 'sum_5', 'add_7']]]""",
+            """[[['iadd', 'iadd_1', 'cos_1', 'sum_5', 'mul'], ['iadd_2', 'iadd_3', 'cos_2', 'sum_8', 'mul_1']], [['add', 'add_2', 'sum_1', 'sum_3', 'add_4'], ['add_1', 'add_3', 'sum_2', 'sum_4', 'add_5'], ['add_6', 'add_7', 'sum_6', 'sum_7', 'add_8']]]""",
         )
 
     def test_no_single_node_regions(self):
@@ -129,7 +129,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['iadd_1', 'cos_1', 'sum_6'], ['iadd_2', 'cos_2', 'sum_7']], [['add', 'sum_1', 'add_8'], ['add_1', 'sum_2', 'add_6'], ['add_2', 'sum_3', 'add_5']], [['add_4', 'sum_5'], ['add_3', 'sum_4']]]""",
+            """[[['iadd_1', 'cos_1', 'sum_4'], ['iadd_3', 'cos_2', 'sum_8']], [['add', 'sum_1', 'add_5'], ['add_1', 'sum_2', 'add_3'], ['add_6', 'sum_6', 'add_8']], [['add_2', 'sum_3'], ['add_7', 'sum_7']]]""",
         )
 
     def test_mismatched_dtypes(self):
@@ -155,7 +155,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['mul', 'add', 'sum_1', 'add_4'], ['mul_1', 'add_1', 'sum_2', 'add_5'], ['mul_2', 'add_2', 'sum_3', 'add_6'], ['mul_3', 'add_3', 'sum_4', 'add_7']]]""",
+            """[[['add', 'mul', 'sum_1', 'add_4'], ['add_1', 'mul_1', 'sum_2', 'add_5'], ['add_2', 'mul_2', 'sum_3', 'add_6'], ['add_3', 'mul_3', 'sum_4', 'add_7']]]""",
         )
 
     def test_nested_args(self):
@@ -249,7 +249,7 @@ class GraphRegionTrackerTests(TestCase):
         ]:
             self.assertExpectedInline(
                 self.get_result(fn, torch.rand(10, 10), torch.ones(10, 20), ctx),
-                """[[['mul_2', 'add_4', 'sum_3', 'add_6'], ['mul_3', 'add_5', 'sum_4', 'add_7']], [['mul', 'add', 'sum_1', 'add_2'], ['mul_1', 'add_1', 'sum_2', 'add_3']]]""",
+                """[[['add_4', 'mul_2', 'sum_3', 'add_6'], ['add_5', 'mul_3', 'sum_4', 'add_7']], [['add', 'mul', 'sum_1', 'add_2'], ['add_1', 'mul_1', 'sum_2', 'add_3']]]""",
             )
 
     def test_mutation_tracking_simple(self):
