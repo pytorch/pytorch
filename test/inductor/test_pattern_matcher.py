@@ -2851,6 +2851,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(counter, 1)
 
 
+@inductor_config.patch(fx_graph_cache=False)
 class TestPatternMatcherLogging(LoggingTestCase):
     device_type = GPU_TYPE
 
@@ -3061,65 +3062,63 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
     def test_per_pattern_counter(self):
         """Test that per-pattern counters track individual pattern matches"""
-        with inductor_config.patch(fx_graph_cache=False):
-            with unittest.mock.patch.dict(
-                os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
-            ):
-                counters.clear()
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
+        ):
+            counters.clear()
 
-                def fn(x, y):
-                    return torch.bmm(x, y)
+            def fn(x, y):
+                return torch.bmm(x, y)
 
-                x = torch.randn(4, 10, 10, device=GPU_TYPE)
-                y = torch.randn(4, 10, 10, device=GPU_TYPE)
+            x = torch.randn(4, 10, 10, device=GPU_TYPE)
+            y = torch.randn(4, 10, 10, device=GPU_TYPE)
 
-                compiled = torch.compile(fn)
-                compiled(x, y)
+            compiled = torch.compile(fn)
+            compiled(x, y)
 
-                counter_key = "inductor_pattern_matcher_per_pattern"
-                per_pattern = counters.get(counter_key, None)
+            counter_key = "inductor_pattern_matcher_per_pattern"
+            per_pattern = counters.get(counter_key, None)
 
-                self.assertIsInstance(per_pattern, dict)
-                self.assertGreater(len(per_pattern), 0)
-                self.assertIn("CallFunction_aten.bmm.default", per_pattern)
-                self.assertEqual(per_pattern["CallFunction_aten.bmm.default"], 1)
+            self.assertIsInstance(per_pattern, dict)
+            self.assertGreater(len(per_pattern), 0)
+            self.assertIn("CallFunction_aten.bmm.default", per_pattern)
+            self.assertEqual(per_pattern["CallFunction_aten.bmm.default"], 1)
 
     def test_per_pattern_counter_accumulation(self):
         """Test that per-pattern counters accumulate across compilations"""
-        with inductor_config.patch(fx_graph_cache=False):
-            with unittest.mock.patch.dict(
-                os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
-            ):
-                counter_key = "inductor_pattern_matcher_per_pattern"
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
+        ):
+            counter_key = "inductor_pattern_matcher_per_pattern"
 
-                counters.clear()
+            counters.clear()
 
-                x = torch.randn(2, 10, 10, device=GPU_TYPE)
-                y = torch.randn(2, 10, 10, device=GPU_TYPE)
+            x = torch.randn(2, 10, 10, device=GPU_TYPE)
+            y = torch.randn(2, 10, 10, device=GPU_TYPE)
 
-                def fn1(a, b):
-                    return torch.bmm(a, b)
+            def fn1(a, b):
+                return torch.bmm(a, b)
 
-                compiled1 = torch.compile(fn1)
-                compiled1(x, y)
-                count1 = sum(counters.get(counter_key, {}).values())
+            compiled1 = torch.compile(fn1)
+            compiled1(x, y)
+            count1 = sum(counters.get(counter_key, {}).values())
 
-                # Compile second function without clearing counters
-                def fn2(a, b):
-                    return torch.bmm(a, b) * 2
+            # Compile second function without clearing counters
+            def fn2(a, b):
+                return torch.bmm(a, b) * 2
 
-                compiled2 = torch.compile(fn2)
-                compiled2(x, y)
-                accumulated_count = sum(counters.get(counter_key, {}).values())
+            compiled2 = torch.compile(fn2)
+            compiled2(x, y)
+            accumulated_count = sum(counters.get(counter_key, {}).values())
 
-                # Verify accumulation
-                counters.clear()
-                torch._dynamo.reset()
-                compiled2 = torch.compile(fn2)
-                compiled2(x, y)
-                count2 = sum(counters.get(counter_key, {}).values())
+            # Verify accumulation
+            counters.clear()
+            torch._dynamo.reset()
+            compiled2 = torch.compile(fn2)
+            compiled2(x, y)
+            count2 = sum(counters.get(counter_key, {}).values())
 
-                self.assertEqual(accumulated_count, count1 + count2)
+            self.assertEqual(accumulated_count, count1 + count2)
 
     def test_list_tensor_pattern_replacement(self):
         with torch.library._scoped_library("_test_pm_list", "FRAGMENT") as lib:
