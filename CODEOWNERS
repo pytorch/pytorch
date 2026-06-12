@@ -97,11 +97,11 @@ nn/qat/ @jerryzh168
 
 # torch.linalg
 # docs
-/torch/linalg/ @lezcano @IvanYashchuk @nikitaved
+/torch/linalg/ @lezcano @nikitaved
 # code
-/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
+/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved
 # tests
-/test/test_linalg.py @lezcano @nikitaved @IvanYashchuk
+/test/test_linalg.py @lezcano @nikitaved
 
 # OpInfo-related files
 /torch/testing/_internal/common_methods_invocations.py @mruberry

@@ -1441,9 +1441,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     TORCH_CHECK(seqstart_q->size(0) == seqstart_k->size(0));
     TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
     TORCH_CHECK(max_seqlen_q_.has_value());
+    TORCH_CHECK(max_seqlen_k_.has_value());
     max_seqlen_q = *max_seqlen_q_;
-    max_seqlen_k = 0; // TODO: is this actually being set inside the kernel anywhere?
-                      // see https://github.com/pytorch/pytorch/issues/115590s
+    max_seqlen_k = *max_seqlen_k_;
   } else {
     max_seqlen_q = query.size(1);
     max_seqlen_k = key.size(1);

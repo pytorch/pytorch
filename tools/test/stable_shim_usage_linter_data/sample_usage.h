@@ -126,3 +126,33 @@ void insufficient_new_struct_usage() {
   NewOpaqueClass* cls = nullptr; // ERROR: requires 2.11, have 2.10
 }
 #endif
+
+// Case 16: Correct; dynamic version call without any outer scope, fallback function unversioned, target shim equal to
+// dynamic version call macro.
+const auto& error_msg_without1 = TORCH_DYNAMIC_VERSION_CALL_2_11_0(
+    function_2_11_0, unversioned_function);
+
+// Case 17: Incorrect, fallback function version requires version newer than the current block.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+const auto& error_msg_without2 = TORCH_DYNAMIC_VERSION_CALL_2_11_0(
+    function_2_11_0, function_2_12_1);
+#endif
+
+// Case 18: Correct, fallback function version is lower than current block, target still equal.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_2
+const auto& error_msg_without3 = TORCH_DYNAMIC_VERSION_CALL_2_11_0(
+    function_2_11_0, function_2_12_1);
+#endif
+
+// Case 19: Incorrect, target version function exceeds dynamic version call.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_2
+const auto& error_msg_without4 = TORCH_DYNAMIC_VERSION_CALL_2_11_0(
+    function_2_13_2, unversioned_function);
+#endif
+
+// Case 20: Incorrect even with trailing args; the target shim exceeds the dynamic
+// version call. Confirms trailing __VA_ARGS__ do not confuse identifier extraction.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_2
+const auto& with_trailing_args = TORCH_DYNAMIC_VERSION_CALL_2_11_0(
+    function_2_13_2, unversioned_function, some_arg, other_arg);
+#endif
