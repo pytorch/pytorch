@@ -595,6 +595,27 @@ class TestExport(TestCase):
         #     exported_program.module()(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
         # )
 
+    def test_guards_fn_recovers_from_unparse_recursion_error(self):
+        # Regression test: guards-fn codegen pretty-prints each guard for the
+        # assert error message via ast.unparse(ast.parse(...)), which recurses
+        # once per AST node. A deeply-nested guard (e.g. a sum over thousands of
+        # symbolic sizes) overflowed the recursion limit there, crashing export
+        # even though the pretty-printing is cosmetic and the executed guard
+        # does not depend on it. Codegen must fall back to the raw guard string
+        # instead of propagating the error.
+        #
+        # We inject the overflow via a mocked ast.unparse rather than building a
+        # genuinely deep expression: the test target is ASAN-instrumented, where
+        # deep ast.parse/compile recursion can abort the process before the
+        # pure-Python RecursionError is reached.
+        from torch.export._unlift import _convert_guards_code_to_fn
+
+        guard = "args[0] == 0"
+        with patch("ast.unparse", side_effect=RecursionError):
+            guards_fn = _convert_guards_code_to_fn([guard], [])
+
+        self.assertIsNotNone(guards_fn)
+
     def _check_dynamic_shapes_specs_and_shapes(
         self,
         model,
@@ -1472,6 +1493,23 @@ graph():
 
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
+
+    def test_export_allows_aten_hardtanh_with_inverted_bounds(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.hardtanh(x, min_val=2, max_val=0)
+
+        model = M()
+        x = torch.randn(3)
+        ep = export(model, (x,), strict=True)
+        self.assertEqual(ep.module()(x), model(x))
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target == torch.ops.aten.hardtanh.default
+                for node in ep.graph_module.graph.nodes
+            )
+        )
 
     def test_symint_output(self):
         class Foo(torch.nn.Module):
@@ -19131,6 +19169,22 @@ def forward(self, x, y):
             ignore_empty_lines=True,
         )
 
+    def test_scalar_tensor_index(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x[y]
+
+        x = torch.randn((3, 4))
+        for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            with self.subTest(dtype=dtype):
+                y = torch.tensor(1, dtype=dtype)
+                traced = export(MyModel(), (x, y))
+                y2 = torch.tensor(2, dtype=dtype)
+                self.assertEqual(
+                    traced.module()(x, y2),
+                    MyModel()(x, y2),
+                )
+
     def test_is_fx_tracing(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -19206,6 +19260,20 @@ def forward(self, x, y):
             export_result = exported.module()(boundaries)
             self.assertEqual(eager_result, export_result)
             self.assertEqual(export_result.dtype, expected_dtype)
+
+    def test_constant_pad_nd_run_decompositions(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167068
+        # constant_pad_nd's ref decomposition must be fully functional so that
+        # run_decompositions (used by ONNX dynamo export) doesn't trip
+        # assert_functional_graph.
+        class Pad(torch.nn.Module):
+            def forward(self, x):
+                return F.pad(x, (0, 0, 0, 240, 0, 0))
+
+        ep = export(Pad(), (torch.randn(1, 16, 64),), strict=False)
+        decomposed = ep.run_decompositions(decomposition_table)
+        result = decomposed.module()(torch.randn(1, 16, 64))
+        self.assertEqual(result.shape, (1, 256, 64))
 
 
 if __name__ == "__main__":

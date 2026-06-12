@@ -578,6 +578,7 @@ class ScanAutogradImpl:
         self.saved_intermediates: list[Any] = []
         self.fw_spec = pytree.tree_flatten((init, xs, additional_inputs))[1]
         self._optimize_forward_intermediates()
+        self._break_bw_input_output_aliasing()
 
     def _insert_clone(
         self, need_copy_node: torch.fx.Node, output_node: torch.fx.Node
@@ -592,6 +593,57 @@ class ScanAutogradImpl:
                 need_copy_node.meta.copy() if hasattr(need_copy_node, "meta") else {}
             )
         return clone_node
+
+    def _break_bw_input_output_aliasing(self) -> None:
+        """
+        The min-cut partitioner can produce a ``bw_gm`` whose output aliases
+        an input placeholder. The most common case is a direct placeholder
+        return (e.g. when an input doesn't require grad and its gradient is
+        ``zeros_like(input)`` saved as a forward intermediate), but transitive
+        aliases (views, ``_unsafe_view``, slices, ...) can hit the same path.
+
+        When ``bw_gm`` is wrapped as the per-step backward inside ``scan_op``,
+        any input returned as an output violates ``scan_op``'s aliasing-free
+        invariant and surfaces as ``UncapturedHigherOrderOpError`` under
+        dynamo. Clone bw_gm outputs that are direct placeholders or whose
+        ``meta['val']`` shares storage with any placeholder.
+        """
+        from torch.multiprocessing.reductions import StorageWeakRef
+
+        bw_gm = self.hop_partitioned_graph.bw_gm
+        bw_output_node = next(iter(bw_gm.graph.find_nodes(op="output")))
+        if len(bw_output_node.args) != 1:
+            raise AssertionError(
+                f"expected bw_gm output to have 1 arg, got {len(bw_output_node.args)}"
+            )
+        bw_outputs = bw_output_node.args[0]
+
+        ph_storages: set = set()
+        for ph in bw_gm.graph.find_nodes(op="placeholder"):
+            val = ph.meta.get("val", None) if hasattr(ph, "meta") else None
+            if isinstance(val, torch.Tensor):
+                ph_storages.add(StorageWeakRef(val._typed_storage()))
+
+        def _aliases_placeholder(node: torch.fx.Node) -> bool:
+            if node.op == "placeholder":
+                return True
+            val = node.meta.get("val", None) if hasattr(node, "meta") else None
+            if isinstance(val, torch.Tensor):
+                return StorageWeakRef(val._typed_storage()) in ph_storages
+            return False
+
+        new_bw_outputs = []
+        rewrote = False
+        for out in bw_outputs:
+            if isinstance(out, torch.fx.Node) and _aliases_placeholder(out):
+                new_bw_outputs.append(self._insert_clone(out, bw_output_node))
+                rewrote = True
+            else:
+                new_bw_outputs.append(out)
+        if rewrote:
+            bw_output_node.args = (tuple(new_bw_outputs),)
+            bw_gm.graph.lint()
+            bw_gm.recompile()
 
     def _optimize_forward_intermediates(self):
         """
@@ -855,13 +907,30 @@ class ScanAutogradImpl:
 @scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs):
     with disable_proxy_modes_tracing():
-        hop_partitioned_graph: HopPartitionedGraph = (
-            HopGraphMinCutPartitioner.create_partitioned_graph(
-                combine_fn,
-                (*init, *[x[0] for x in xs], *additional_inputs),
-                always_recompute_complex_exprs=True,
+        # If init was passed in with requires_grad=False, AOT joint creation drops it from
+        # grad_primals and zero-fills, severing the carry chain and silently
+        # zeroing gradients that should reach closed-over additional_inputs from
+        # earlier steps. Thus, we temporarily flip requires_grad on the init tensors
+        # during tracing and restore it afterwards; this only affects the traced
+        # graphs, not the operands passed to apply. init elements are leaves.
+        flipped = [
+            t
+            for t in init
+            if (t.dtype.is_floating_point or t.dtype.is_complex) and not t.requires_grad
+        ]
+        try:
+            for t in flipped:
+                t.requires_grad_(True)
+            hop_partitioned_graph: HopPartitionedGraph = (
+                HopGraphMinCutPartitioner.create_partitioned_graph(
+                    combine_fn,
+                    (*init, *[x[0] for x in xs], *additional_inputs),
+                    always_recompute_complex_exprs=True,
+                )
             )
-        )
+        finally:
+            for t in flipped:
+                t.requires_grad_(False)
 
     return ScanAutogradOp.apply(
         hop_partitioned_graph,

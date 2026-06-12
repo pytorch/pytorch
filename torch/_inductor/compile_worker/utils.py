@@ -12,6 +12,22 @@ def in_toplevel_process() -> bool:
     return _IN_TOPLEVEL_PROCESS
 
 
+def _pin_triton_worker_driver() -> None:
+    # Pin the nvidia driver so a worker forked after CUDA init doesn't raise
+    # "0 active drivers" resolving driver.active (triton#9578, pytorch#184643).
+    import torch
+
+    if not torch.cuda.is_available() or torch.version.hip is not None:
+        return
+    try:
+        import triton
+    except ImportError:
+        return
+    driver = triton.runtime.driver
+    if driver._active is None:
+        driver.set_active(triton.backends.backends["nvidia"].driver())
+
+
 # If this process dies abnormally (e.g. segfault)
 # it will not shut down the workers. Instead,
 # the workers will have their parent reassigned to the
