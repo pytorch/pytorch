@@ -2463,6 +2463,8 @@ class CleanupHook:
     name: str
 
     def __call__(self, *args: Any) -> None:
+        if self.name not in self.scope:
+            return
         # Make sure we're not shutting down
         if CleanupManager is not None:
             CleanupManager.count -= 1
@@ -2481,13 +2483,18 @@ class CleanupManager(ExactWeakKeyDictionary):
     count = 0
     instance: ClassVar[CleanupManager]
 
+    def cleanup(self, key: Any) -> None:
+        self._remove_id(id(key))
+
     def _remove_id(self, idx: int) -> None:
-        for hook in self.values[idx]:
+        hooks = self.values.pop(idx, ())
+        self.refs.pop(idx, None)
+        for hook in hooks:
             hook()
-        super()._remove_id(idx)
 
 
 CleanupManager.instance = CleanupManager()
+guarded_eager_fallback_codes = ExactWeakKeyDictionary()
 
 
 def clone_tensor(x: torch.Tensor) -> torch.Tensor:
