@@ -1115,11 +1115,12 @@ def decide_worker_start_method() -> str:
         start_method = os.environ["TORCHINDUCTOR_WORKER_START"]
     else:
         start_method = "subprocess"
-    assert start_method in (
+    if start_method not in (
         "subprocess",
         "fork",
         "spawn",
-    ), f"Invalid start method: {start_method}"
+    ):
+        raise AssertionError(f"Invalid start method: {start_method}")
     return start_method
 
 
@@ -1362,7 +1363,8 @@ def decide_compile_threads() -> int:
         log.info("compile_threads set to 1 in fbcode")
     else:
         cpu_count = torch._utils.cpu_count()
-        assert cpu_count
+        if not cpu_count:
+            raise AssertionError(f"expected nonzero cpu_count, got {cpu_count}")
         compile_threads = min(32, cpu_count)
         log.info("compile_threads set to %d", compile_threads)
 
@@ -1699,6 +1701,12 @@ class cpp:
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
+    )
+
+    # Allow emitting KernelContextGuard metadata alongside kernel profiling.
+    # This switch only works when enable_kernel_profile is set to 1.
+    enable_kernel_context_guard = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_CONTEXT_GUARD", "0") == "1"
     )
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint
