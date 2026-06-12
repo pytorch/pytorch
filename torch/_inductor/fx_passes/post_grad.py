@@ -290,6 +290,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         spmd_check(gm)
 
+    if config.aten_distributed_optimizations.allow_comms_decompositions:
+        from torch._inductor.fx_passes.decomp_comms import decomp_comms
+
+        GraphTransformObserver(gm, "decomp_comms").apply_gm_pass(decomp_comms)
+
     collectives_bucketing: bool = False
 
     if config.dedup_reduce_scatters:
@@ -418,6 +423,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
     )
+
+    # Fix aliasing detection for dtype views AFTER reinplace determines cloning needs
+    GraphTransformObserver(gm, "fix_auto_functionalized_dtype_views").apply_graph_pass(
+        fix_auto_functionalized_dtype_views
+    )
+
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
@@ -478,20 +489,24 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
-        assert len(kwargs) == 0, (
-            "kwargs of map are not merged into args before entering decompose_map_to_while_loop_pass"
-        )
+        if len(kwargs) != 0:
+            raise AssertionError(
+                "kwargs of map are not merged into args before entering decompose_map_to_while_loop_pass"
+            )
         subgraph, fx_xs, fx_additional_inputs = args
         sub_gm: torch.fx.GraphModule = getattr(gm, subgraph.target)
         cur_node = match.nodes[0]
         mapped_outputs = cur_node.meta["val"]
 
         def lower_to_while_loop(*args, **kwargs):
-            assert len(kwargs) == 0
+            if len(kwargs) != 0:
+                raise AssertionError(f"expected no kwargs, got {kwargs}")
             xs, additional_inputs = pytree.tree_unflatten(args, tree_spec)
-            assert isinstance(xs, (tuple, list)) and isinstance(
-                additional_inputs, (tuple, list)
-            ), (xs, additional_inputs)
+            if not (
+                isinstance(xs, (tuple, list))
+                and isinstance(additional_inputs, (tuple, list))
+            ):
+                raise AssertionError((xs, additional_inputs))
             map_length = xs[0].size(0)
             loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
 
@@ -597,7 +612,8 @@ def resolve_shape_to_proxy(
                 ),
             )
         else:
-            assert isinstance(s, int)
+            if not isinstance(s, int):
+                raise AssertionError(f"expected int, got {type(s).__name__}")
             ret.append(s)
     return ret
 
@@ -668,12 +684,14 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
     def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.scan import _extract_carry_and_out
 
-        assert len(kwargs) == 0, (
-            "kwargs of scan are not merged into args before entering decompose_scan_to_while_loop_pass"
-        )
+        if len(kwargs) != 0:
+            raise AssertionError(
+                "kwargs of scan are not merged into args before entering decompose_scan_to_while_loop_pass"
+            )
 
         combine_subgraph, fx_init, fx_xs, fx_additional_inputs = args
-        assert combine_subgraph.op == "get_attr", "first arg is not combine_subgraph"
+        if combine_subgraph.op != "get_attr":
+            raise AssertionError("first arg is not combine_subgraph")
         sub_gm: torch.fx.GraphModule = getattr(gm, combine_subgraph.target)
         cur_node = match.nodes[0]
         num_init_leaves = len(fx_init)
@@ -683,7 +701,8 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
             """
             The traced graph of this function will be used to replace the original scan fx_node.
             """
-            assert len(kwargs) == 0
+            if len(kwargs) != 0:
+                raise AssertionError(f"expected no kwargs, got {kwargs}")
 
             # Step 1: construct necessary inputs to while_loop based on scan's input.
             (
@@ -875,12 +894,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
 
 
 def register_lowering_pattern(
-    pattern,
-    extra_check=_return_true,
-    pass_number=1,
-    *,
-    output_metadata_ignores_input_storage: bool = False,
-    output_metadata_is_input: int | str | None = None,
+    pattern, extra_check=_return_true, pass_number=1
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Register an aten to inductor IR replacement pattern
@@ -890,8 +904,6 @@ def register_lowering_pattern(
         extra_check,
         # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[pass_number],
-        output_metadata_ignores_input_storage=output_metadata_ignores_input_storage,
-        output_metadata_is_input=output_metadata_is_input,
     )
 
 
@@ -1058,7 +1070,8 @@ def is_valid_splitwithsizes_cat(match):
     get_item_args = OrderedSet(
         get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
     )
-    assert None not in get_item_args
+    if None in get_item_args:
+        raise AssertionError(f"expected no None in get_item_args, got {get_item_args}")
     split_sizes = get_arg_value(split_node, 1, "split_sizes")
     # All parts of split should be included in the cat
     if get_item_args != OrderedSet(range(len(split_sizes))):
@@ -1231,7 +1244,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
         input_storages.add(get_node_storage(node))
 
     output_node = next(iter(reversed(graph.nodes)))
-    assert output_node.op == "output"
+    if output_node.op != "output":
+        raise AssertionError(f"expected output node, got {output_node.op}")
     outputs = output_node.args[0]
     if not isinstance(outputs, (list, tuple)):
         # nested subgraphs can have singleton outputs
@@ -1249,6 +1263,16 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 src = src_index(node.args)
             if not isinstance(src, torch.fx.Node):
                 continue
+
+            if node.target is torch.ops.aten.copy.default:
+                dst = node.args[0]
+                if (
+                    isinstance(dst, torch.fx.Node)
+                    and dst.op == "call_function"
+                    and dst.kwargs.get("pin_memory") is True
+                ):
+                    continue
+
             # Don't introduce new aliasing between inputs and outputs.
             # See fx_passes/README.md for a discussion of why this is
             # necessary.
@@ -1424,6 +1448,53 @@ def decompose_triton_kernel_wrapper_functional(graph):
         raise AssertionError("triton_kernel_wrapper_functional was not removed")
 
 
+def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:
+    """
+    Fix aliasing detection for dtype views in auto_functionalized_v2.
+
+    When a dtype view shares storage with a graph input, we can skip cloning
+    it during decomposition because the view can be safely regenerated.
+
+    This pass identifies such cases and updates the reinplace metadata to
+    indicate no clone is needed.
+    """
+    storage_to_input: dict[int, torch.fx.Node] = {}
+    for node in graph.find_nodes(op="placeholder"):
+        storage = get_node_storage(node)
+        if storage is not None:
+            storage_to_input[storage] = node
+
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
+    ):
+        all_bases = node.kwargs.get("_all_bases")
+        only_clone_these = node.meta.get("only_clone_these_tensors")
+        if all_bases is None or only_clone_these is None:
+            continue
+
+        keep = []
+        for idx in only_clone_these:
+            if idx >= len(all_bases):
+                keep.append(idx)
+                continue
+            base = all_bases[idx]
+            if not isinstance(base, torch.fx.Node):
+                keep.append(idx)
+                continue
+            base_storage = get_node_storage(base)
+            if base_storage is None or base_storage not in storage_to_input:
+                keep.append(idx)
+                continue
+            input_val = storage_to_input[base_storage].meta["val"]
+            if input_val.dtype == base.meta["val"].dtype:
+                keep.append(idx)
+                continue
+            counters["inductor"]["fix_auto_functionalized_dtype_views"] += 1
+
+        if len(keep) != len(only_clone_these):
+            node.meta["only_clone_these_tensors"] = keep
+
+
 def decompose_auto_functionalized(graph):
     """Decomposes auto_functionalized nodes into clones and the underlying
     mutation node.
@@ -1455,7 +1526,8 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            assert len(args) == 1
+            if len(args) != 1:
+                raise AssertionError(f"expected 1 arg, got {len(args)}")
             mode = args[0]
             return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
 
@@ -1486,9 +1558,8 @@ def decompose_auto_functionalized(graph):
                 and "val" not in node.meta
             ):
                 const_attr = getattr(graph.owning_module, node.target)  # type: ignore[arg-type]
-                assert isinstance(
-                    const_attr, (torch.fx.GraphModule, pytree.TreeSpec)
-                ), (type(const_attr), const_attr)
+                if not isinstance(const_attr, (torch.fx.GraphModule, pytree.TreeSpec)):
+                    raise AssertionError((type(const_attr), const_attr))
                 return const_attr
             return node
 
@@ -1499,7 +1570,8 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            assert len(args) == 1
+            if len(args) != 1:
+                raise AssertionError(f"expected 1 arg, got {len(args)}")
             mutable_op = args[0]
             return auto_functionalized_v2_dense(
                 mutable_op, only_clone_these_bases, **kwargs
@@ -1546,7 +1618,8 @@ def decompose_auto_functionalized(graph):
         graph.erase_node(node)
 
     for attr_name in removable_attrs:
-        assert isinstance(attr_name, str)
+        if not isinstance(attr_name, str):
+            raise AssertionError(f"expected str, got {type(attr_name).__name__}")
         delattr(graph.owning_module, attr_name)
 
     graph.lint()
@@ -1582,7 +1655,6 @@ def decompose_auto_functionalized(graph):
     ),
     pass_number=2,
     extra_check=is_valid_splitwithsizes_cat,
-    output_metadata_is_input="input_",
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
@@ -1637,7 +1709,6 @@ def is_valid_cat_splitwithsizes(match):
     ),
     pass_number=2,
     extra_check=is_valid_cat_splitwithsizes,
-    output_metadata_is_input="input_",
 )
 def cat_splitwithsizes_replace(match, input_):
     return input_
@@ -1661,37 +1732,12 @@ def view_to_reshape(gm):
     _recursive_view_to_reshape(gm.graph)
 
 
-def _is_bias_like_addmm_input(inp: torch.fx.Node, output: torch.fx.Node) -> bool:
-    inp_val = inp.meta.get("val")
-    output_val = output.meta.get("val")
-    if not (isinstance(inp_val, torch.Tensor) and isinstance(output_val, torch.Tensor)):
-        return False
-
-    if len(inp_val.shape) != len(output_val.shape):
-        return True
-
-    same_shape = statically_known_true(sym_eq(inp_val.shape, output_val.shape))
-    if not same_shape:
-        for inp_dim, output_dim in zip(inp_val.shape, output_val.shape):
-            if statically_known_true(sym_eq(inp_dim, 1)) and not statically_known_true(
-                sym_eq(output_dim, 1)
-            ):
-                return True
-        return False
-
-    return inp_val.layout == torch.strided and any(
-        statically_known_true(sym_eq(stride, 0)) for stride in inp_val.stride()
-    )
-
-
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
     output = match.output_node()
-    if not _is_bias_like_addmm_input(inp, output):
-        return False
     return all(is_pointwise_use(use) for use in output.users)
 
 
@@ -1892,10 +1938,11 @@ class ConstructorMoverPass:
         self.allow_inputs = allow_inputs
         self.allow_outputs = allow_outputs
 
-        assert isinstance(target, str), (
-            "target should be a string representing the device type. "
-            f"Got: {type(target).__name__}"
-        )
+        if not isinstance(target, str):
+            raise AssertionError(
+                "target should be a string representing the device type. "
+                f"Got: {type(target).__name__}"
+            )
 
     def allow_cpu_device(self, node: fx.Node) -> bool:
         """

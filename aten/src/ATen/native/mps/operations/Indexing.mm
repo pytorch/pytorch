@@ -117,8 +117,6 @@ static void validateInputData(const TensorIteratorBase& iter,
 }
 
 static Tensor& masked_select_out_mps_impl(Tensor& result, const Tensor& self, const Tensor& mask) {
-  NoNamesGuard guard;
-
   TORCH_CHECK(mask.scalar_type() == ScalarType::Bool, "masked_select: expected BoolTensor for mask");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
@@ -478,13 +476,11 @@ Tensor nonzero_static_mps(const Tensor& self, int64_t size, int64_t fill_value) 
 }
 
 Tensor masked_select_mps(const Tensor& self, const Tensor& mask) {
-  namedinference::compute_broadcast_outnames(self, mask);
   Tensor result = at::empty({0}, self.options());
   return mps::masked_select_out_mps_impl(result, self, mask);
 }
 
 Tensor& masked_select_out_mps(const Tensor& self, const Tensor& mask, Tensor& result) {
-  namedinference::compute_broadcast_outnames(self, mask);
   return mps::masked_select_out_mps_impl(result, self, mask);
 }
 
@@ -552,6 +548,15 @@ TORCH_IMPL_FUNC(index_add_mps_out)
   MPSStream* stream = getCurrentMPSStream();
   dim = maybe_wrap_dim(dim, self.dim());
   if (index.numel() == 0) {
+    return;
+  }
+
+  // Empty source has nothing to scatter; the MPSGraph path would build an empty
+  // placeholder buffer and assert. Just propagate self into result and bail out.
+  if (source.numel() == 0) {
+    if (!result.is_same(self)) {
+      result.copy_(self);
+    }
     return;
   }
 
@@ -895,7 +900,6 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
   TORCH_CHECK(mask.scalar_type() == kBool, "expected mask dtype to be Bool but got ", mask.scalar_type());
   TORCH_CHECK(self.numel() <= std::numeric_limits<uint32_t>::max(),
               "masked_fill not supported for tensors of more than 2**32 elements");
-  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
   auto stream = getCurrentMPSStream();
   const bool is_dense = self.is_contiguous() && b_mask->is_contiguous();
@@ -926,7 +930,6 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
     }
   });
 
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
