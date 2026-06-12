@@ -832,6 +832,82 @@ class FakeTensorTest(TestCase):
                     torch._C._dispatch_key_set(y)
                 )
 
+    def test_backend_specific_autograd_kernel_ignored_for_fake(self):
+        def custom_tanh(x):
+            self.fail("FakeTensor dispatch should not run AutogradCPU kernels")
+
+        with torch.library._scoped_library("aten", "IMPL") as aten_lib:
+            aten_lib.impl("tanh", custom_tanh, "AutogradCPU")
+
+            with FakeTensorMode() as mode:
+                x = mode.from_tensor(torch.randn(4, requires_grad=True))
+                y = torch.tanh(x)
+
+        self.assertIsInstance(y, FakeTensor)
+        self.assertTrue(y.requires_grad)
+        self.assertIsNotNone(y.grad_fn)
+
+    def test_backend_autograd_python_kernel_cache_ignored_for_fake(self):
+        calls = []
+
+        def custom_tanh(x):
+            calls.append(type(x).__name__)
+            if isinstance(x, FakeTensor):
+                self.fail("FakeTensor dispatch should not run AutogradCPU kernels")
+            return x + 2
+
+        with torch.library._scoped_library("aten", "IMPL") as aten_lib:
+            aten_lib.impl("tanh", custom_tanh, "AutogradCPU")
+
+            with enable_python_dispatcher():
+                x = torch.randn(4)
+                self.assertEqual(torch.tanh(x), x + 2)
+
+                with FakeTensorMode() as mode:
+                    y = torch.tanh(mode.from_tensor(x.requires_grad_()))
+
+        self.assertEqual(calls, ["Tensor"])
+        self.assertIsInstance(y, FakeTensor)
+        self.assertTrue(y.requires_grad)
+        self.assertIsNotNone(y.grad_fn)
+
+    @skipIfTorchDynamo("dynamo-wrapped tests compile explicit FakeTensor inputs")
+    def test_custom_op_backend_autograd_kernel_not_redirected_for_fake(self):
+        calls = []
+
+        def custom_foo(x):
+            calls.append(type(x).__name__)
+            return x + 1
+
+        with torch.library._scoped_library(
+            "test_backend_autograd_kernel", "DEF"
+        ) as custom_lib:
+            custom_lib.define("foo(Tensor x) -> Tensor")
+            custom_lib.impl("foo", custom_foo, "AutogradCPU")
+            op = torch.ops.test_backend_autograd_kernel.foo.default
+
+            with enable_python_dispatcher(), FakeTensorMode() as mode:
+                y = op(mode.from_tensor(torch.randn(4, requires_grad=True)))
+
+        self.assertEqual(calls, ["FakeTensor"])
+        self.assertIsInstance(y, FakeTensor)
+        self.assertTrue(y.requires_grad)
+
+    def test_compile_backend_specific_autograd_kernel_ignored_for_fake(self):
+        def custom_tanh(x):
+            x.data_ptr()
+            return x + 2
+
+        with torch.library._scoped_library("aten", "IMPL") as aten_lib:
+            aten_lib.impl("tanh", custom_tanh, "AutogradCPU")
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.tanh(x)
+
+            x = torch.randn(4)
+            self.assertEqual(f(x), custom_tanh(x))
+
     def test_compare_tensor_meta_unbacked_numel(self):
         from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
