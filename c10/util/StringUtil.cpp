@@ -13,7 +13,7 @@ namespace c10 {
 
 namespace detail {
 
-std::string StripBasename(const std::string& full_path) {
+std::string StripBasename(std::string_view full_path) {
 #ifdef _WIN32
   const std::string separators("/\\");
 #else
@@ -21,18 +21,18 @@ std::string StripBasename(const std::string& full_path) {
 #endif
   size_t pos = full_path.find_last_of(separators);
   if (pos != std::string::npos) {
-    return full_path.substr(pos + 1, std::string::npos);
+    return std::string(full_path.substr(pos + 1));
   } else {
-    return full_path;
+    return std::string(full_path);
   }
 }
 
-std::string ExcludeFileExtension(const std::string& file_name) {
+std::string ExcludeFileExtension(std::string_view file_name) {
   const char sep = '.';
-  auto end_index = file_name.find_last_of(sep) == std::string::npos
+  auto end_index = file_name.find_last_of(sep) == std::string_view::npos
       ? -1
       : file_name.find_last_of(sep);
-  return file_name.substr(0, end_index);
+  return std::string(file_name.substr(0, end_index));
 }
 
 // Narrows the wstr argument and then passes it to _str.

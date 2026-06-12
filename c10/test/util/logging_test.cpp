@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <optional>
+#include <string_view>
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Logging.h>
@@ -9,6 +10,7 @@ namespace c10_test {
 
 using std::set;
 using std::string;
+using std::string_view;
 using std::vector;
 
 TEST(LoggingTest, TestEnforceTrue) {
@@ -136,10 +138,12 @@ TEST(LoggingTest, EnforceShowcase) {
 TEST(LoggingTest, Join) {
   auto s = c10::Join(", ", vector<int>({1, 2, 3}));
   EXPECT_EQ(s, "1, 2, 3");
-  s = c10::Join(":", vector<string>());
+  s = c10::Join(string_view(":"), vector<string>());
   EXPECT_EQ(s, "");
   s = c10::Join(", ", set<int>({3, 1, 2}));
   EXPECT_EQ(s, "1, 2, 3");
+  s = c10::Join(string_view(", "), vector<string_view>({"a", "b", "c"}));
+  EXPECT_EQ(s, "a, b, c");
 }
 
 TEST(LoggingTest, TestDanglingElse) {

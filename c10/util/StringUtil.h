@@ -23,9 +23,9 @@ namespace c10 {
 namespace detail {
 
 // Obtains the base name from a full path.
-C10_API std::string StripBasename(const std::string& full_path);
+C10_API std::string StripBasename(std::string_view full_path);
 
-C10_API std::string ExcludeFileExtension(const std::string& full_path);
+C10_API std::string ExcludeFileExtension(std::string_view full_path);
 
 struct CompileTimeEmptyString {
   operator const std::string&() const {
@@ -141,7 +141,7 @@ inline auto str(const Args&... args) {
 }
 
 template <class Container>
-inline std::string Join(const std::string& delimiter, const Container& v) {
+inline std::string Join(std::string_view delimiter, const Container& v) {
   std::stringstream s;
   int cnt = static_cast<int64_t>(v.size()) - 1;
   for (auto i = v.begin(); i != v.end(); ++i, --cnt) {
