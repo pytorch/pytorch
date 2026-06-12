@@ -109,6 +109,23 @@ class PythonKernelHolder : public c10::OperatorKernel {
     if (mode_stack_len > 0) {
       const auto& cur_torch_dispatch_mode_state =
           c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+      const auto fake_mode = c10::impl::TorchDispatchModeTLS::get_mode(
+          c10::impl::TorchDispatchModeKey::FAKE);
+      const auto functional_mode = c10::impl::TorchDispatchModeTLS::get_mode(
+          c10::impl::TorchDispatchModeKey::FUNCTIONAL);
+      if (c10::toFunctionalityKey(dispatch_key_) ==
+              c10::DispatchKey::AutogradFunctionality &&
+          dispatch_key_ != c10::DispatchKey::Autograd &&
+          dispatch_key_ != c10::DispatchKey::AutogradMeta &&
+          op.operator_name().getNamespace() == "aten" &&
+          ((fake_mode.has_value() &&
+            cur_torch_dispatch_mode_state == *fake_mode) ||
+           (functional_mode.has_value() &&
+            cur_torch_dispatch_mode_state == *functional_mode)) &&
+          !c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::Python)) {
+        op.callBoxedForDispatchKey(c10::DispatchKey::Autograd, *stack);
+        return;
+      }
       cur_torch_dispatch_mode_state->pyinterpreter()
           ->python_op_registration_trampoline(
               op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
@@ -230,12 +247,12 @@ void initDispatchBindings(PyObject* module) {
           "redispatch_boxed",
           [](const py::object& self,
              c10::DispatchKeySet keyset,
-             py::args args,
+             const py::args& args,
              const py::kwargs& kwargs) {
             auto& handle = self.cast<c10::OperatorHandle&>();
             auto stack = torch::jit::createStackForSchema(
                 handle.schema(),
-                std::move(args),
+                args,
                 kwargs,
                 /*self=*/std::nullopt);
             {
@@ -474,7 +491,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_library",
       [](const char* kind,
-         std::string name,
+         const std::string& name,
          const char* dispatch,
          const char* file,
          uint32_t linenum) {
@@ -489,7 +506,7 @@ void initDispatchBindings(PyObject* module) {
 
         return std::make_unique<torch::Library>(
             parseKind(kind),
-            std::move(name),
+            name,
             std::string(dispatch).empty()
                 ? std::nullopt
                 : std::make_optional(c10::parseDispatchKey(dispatch)),
@@ -537,9 +554,8 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_dispatch_check_invariants", [](const char* name) {
     auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
-    if (!op) {
-    } else {
-      return op->checkInvariants();
+    if (op) {
+      op->checkInvariants();
     }
   });
 
@@ -604,12 +620,12 @@ void initDispatchBindings(PyObject* module) {
           "call_boxed",
           [](const c10::SafeKernelFunction& self,
              c10::DispatchKeySet keyset,
-             py::args args,
+             const py::args& args,
              const py::kwargs& kwargs) {
             const auto& op = self.opHandle();
             auto stack = torch::jit::createStackForSchema(
                 op.schema(),
-                std::move(args),
+                args,
                 kwargs,
                 /*self=*/std::nullopt);
             self.callBoxed(op, keyset, &stack);
@@ -904,7 +920,8 @@ void initDispatchBindings(PyObject* module) {
       [](const char* dispatch_key) -> std::optional<c10::DispatchKey> {
         try {
           return c10::parseDispatchKey(dispatch_key);
-        } catch (const c10::Error&) {
+        } catch (const c10::Error& e) {
+          (void)e;
           return std::nullopt;
         }
       });
@@ -1039,6 +1056,7 @@ void initDispatchBindings(PyObject* module) {
 }
 
 // TODO: dedupe with the kernel
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void python_op_registration_trampoline_impl(
     const c10::OperatorHandle& op,
     c10::DispatchKey key,
