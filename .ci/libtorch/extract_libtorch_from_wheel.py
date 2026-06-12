@@ -112,7 +112,7 @@ def fix_rpath(libtorch_lib: Path) -> None:
     Docker images at /usr/local/bin/patchelf).
     """
     if sys.platform != "linux":
-        return
+        raise RuntimeError(f"fix_rpath is only supported on Linux, got {sys.platform}")
 
     patchelf = shutil.which("patchelf")
     if not patchelf:
@@ -342,7 +342,8 @@ def main() -> None:
 
         # Copy components
         copy_libraries(torch_dir, libtorch_dir / "lib", args.platform)
-        fix_rpath(libtorch_dir / "lib")
+        if args.platform == "linux":
+            fix_rpath(libtorch_dir / "lib")
         copy_includes(torch_dir, libtorch_dir / "include")
         copy_cmake(torch_dir, libtorch_dir / "share")
         copy_bin(torch_dir, libtorch_dir / "bin", args.platform)
