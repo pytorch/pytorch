@@ -308,6 +308,58 @@ class TestCostModel(DTensorOpTestBase):
             )
             self.assertFalse(output_sharding.needs_redistribute)
 
+    def test_t_prunes_unproven_unbacked_strided_shard_candidates(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.distributed.tensor._ops.utils import is_tensor_shardable
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        mesh = DeviceMesh("cpu", torch.arange(2), _init_backend=False, _rank=0)
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
+        strategy_info = (
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs[
+                torch.ops.aten.t.default
+            ]
+        )
+        self.assertFalse(strategy_info.allow_unbacked_sharding)
+
+        with fake_mode:
+            split_factor = fake_mode.shape_env.create_unbacked_symint()
+            torch._dynamo.override_optimization_hint(split_factor, 8)
+            input_meta = TensorMeta(
+                torch.Size([2048 * split_factor, 8]),
+                (8, 1),
+                torch.float32,
+            )
+
+            unproven_input_spec = DTensorSpec(
+                mesh,
+                (_StridedShard(1, split_factor=split_factor),),
+                input_meta,
+            )
+            self.assertFalse(
+                is_tensor_shardable(
+                    input_meta.shape,
+                    unproven_input_spec,
+                    allow_unbacked_sharding=strategy_info.allow_unbacked_sharding,
+                )
+            )
+
+            input_spec = DTensorSpec(
+                mesh,
+                (_StridedShard(0, split_factor=split_factor),),
+                input_meta,
+            )
+            op_schema = OpSchema(torch.ops.aten.t.default, (input_spec,), {})
+            output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding_non_cached(
+                op_schema
+            )
+
+        self.assertFalse(output_sharding.needs_redistribute)
+        self.assertEqual(
+            output_sharding.output_spec.placements,
+            (_StridedShard(1, split_factor=split_factor),),
+        )
+
     def test_bmm_strategies(self):
         mesh = self.build_device_mesh()
         lhs_tensor = torch.randn(8, 6, 8)
