@@ -1,7 +1,12 @@
+from typing import Any
+from typing_extensions import override
+
 import torch
 from torch._inductor.codegen.rocm.rocm_template import ROCmTemplate
 from torch._inductor.ir import IRNode
 from torch._inductor.utils import IndentedBuffer
+
+from .rocm_template import ArgInfo
 
 
 class CKTemplate(ROCmTemplate):
@@ -16,9 +21,25 @@ class CKTemplate(ROCmTemplate):
         torch.bfloat16: "BF16",
         torch.int32: "I32",
         torch.int8: "I8",
-        torch.float8_e4m3fnuz: "F8",
-        torch.float8_e5m2fnuz: "BF8",
+        torch.float8_e4m3fnuz: "F8",  # gfx94
+        torch.float8_e4m3fn: "F8",  # gfx95
+        torch.float8_e5m2fnuz: "BF8",  # gfx94
+        torch.float8_e5m2: "BF8",  # gfx95
     }
+
+    @staticmethod
+    def is_blocked_by_tf32_setting(op) -> bool:
+        """True if op internally computes in TF32 but the user has disabled TF32.
+
+        CK exposes this via {a,b}_compute_dtype on op (None == strict compute
+        matching the element type). Some F32 instances ship with `TF32` here.
+        """
+        if torch.backends.cuda.matmul.allow_tf32:
+            return False
+        return (
+            getattr(op, "a_compute_dtype", None) == "TF32"
+            or getattr(op, "b_compute_dtype", None) == "TF32"
+        )
 
     def header(self) -> IndentedBuffer:
         res = super().header()
@@ -72,6 +93,7 @@ class CKTemplate(ROCmTemplate):
                 using F32 = float;
                 // using F64 = double;
                 using BF16 = ck::bhalf_t;
+                using TF32 = ck::tf32_t;
                 // using I32 = int32_t;
                 // using I8 = int8_t;
                 // using I4 = ck::int4_t;
@@ -90,3 +112,14 @@ class CKTemplate(ROCmTemplate):
             return ptr
         else:
             return f"({self._TORCH_DTYPE_TO_CK.get(node.get_dtype())}*)({ptr})"
+
+    @override
+    def get_runtime_arg_info(self) -> list[ArgInfo]:
+        return [ArgInfo("kBatch", "int32_t")]
+
+    @override
+    def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
+        """
+        Helper method to retrieve runtime args from generate kwargs
+        """
+        return [kwargs[arg.name] for arg in self.get_runtime_arg_info()]

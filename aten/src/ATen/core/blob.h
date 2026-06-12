@@ -22,7 +22,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
   /**
    * Initializes an empty Blob.
    */
-  Blob() noexcept : meta_() {}
+  Blob() noexcept = default;
   ~Blob() override {
     Reset();
   }
@@ -198,7 +198,7 @@ inline void swap(Blob& lhs, Blob& rhs)  noexcept {
 }
 
 inline std::ostream& operator<<(std::ostream& out, const Blob& v) {
-  return out << "Blob[" << v.TypeName() << "]";
+  return out << "Blob[" << v.TypeName() << ']';
 }
 
 } // namespace caffe2

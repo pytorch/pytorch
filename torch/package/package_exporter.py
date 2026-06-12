@@ -3,31 +3,21 @@ import collections
 import importlib.machinery
 import io
 import linecache
+import os
 import pickletools
 import platform
 import types
 from collections import defaultdict, OrderedDict
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import (
-    Any,
-    BinaryIO,
-    Callable,
-    cast,
-    DefaultDict,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Union,
-)
+from typing import Any, cast, IO
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
-from torch.types import Storage
+from torch.types import FileLike, Storage
 from torch.utils.hooks import RemovableHandle
 
 from ._digraph import DiGraph
@@ -133,13 +123,16 @@ class PackagingError(Exception):
 
     def __init__(self, dependency_graph: DiGraph, debug=False):
         # Group errors by reason.
-        broken: Dict[PackagingErrorReason, List[str]] = defaultdict(list)
+        broken: dict[PackagingErrorReason, list[str]] = defaultdict(list)
         for module_name, attrs in dependency_graph.nodes.items():
             error = attrs.get("error")
             if error is None:
                 continue
             if error == PackagingErrorReason.NO_ACTION:
-                assert "action" not in attrs
+                if "action" in attrs:
+                    raise AssertionError(
+                        f"module {module_name} has NO_ACTION error but action is set"
+                    )
             broken[error].append(module_name)
 
         message = io.StringIO()
@@ -212,10 +205,10 @@ class PackageExporter:
 
     def __init__(
         self,
-        f: Union[str, Path, BinaryIO],
-        importer: Union[Importer, Sequence[Importer]] = sys_importer,
+        f: FileLike,
+        importer: Importer | Sequence[Importer] = sys_importer,
         debug: bool = False,
-    ):
+    ) -> None:
         """
         Create an exporter.
 
@@ -228,17 +221,17 @@ class PackageExporter:
         """
         torch._C._log_api_usage_once("torch.package.PackageExporter")
         self.debug = debug
-        if isinstance(f, (Path, str)):
-            f = str(f)
-            self.buffer: Optional[BinaryIO] = None
+        if isinstance(f, (str, os.PathLike)):
+            f = os.fspath(f)
+            self.buffer: IO[bytes] | None = None
         else:  # is a byte buffer
             self.buffer = f
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
-        self._written_files: Set[str] = set()
+        self._written_files: set[str] = set()
 
-        self.serialized_reduces: Dict[int, Any] = {}
+        self.serialized_reduces: dict[int, Any] = {}
 
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
@@ -266,7 +259,7 @@ class PackageExporter:
                 )
             self.importer = OrderedImporter(*importer)
 
-        self.patterns: Dict[GlobGroup, _PatternInfo] = {}
+        self.patterns: dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
 
     def save_source_file(
@@ -331,7 +324,7 @@ class PackageExporter:
 
     def _get_dependencies(
         self, src: str, module_name: str, is_package: bool
-    ) -> List[str]:
+    ) -> list[str]:
         """Return all modules that this source code depends on.
 
         Dependencies are found by scanning the source code for import-like statements.
@@ -443,7 +436,7 @@ class PackageExporter:
         except Exception:
             return False
 
-    def _get_source_of_module(self, module: types.ModuleType) -> Optional[str]:
+    def _get_source_of_module(self, module: types.ModuleType) -> str | None:
         filename = None
         spec = getattr(module, "__spec__", None)
         if spec is not None:
@@ -615,9 +608,10 @@ class PackageExporter:
             dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
 
-        assert (pickle_protocol == 4) or (
-            pickle_protocol == 3
-        ), "torch.package only supports pickle protocols 3 and 4"
+        if pickle_protocol not in (3, 4):
+            raise AssertionError(
+                f"torch.package only supports pickle protocols 3 and 4, got {pickle_protocol}"
+            )
 
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
@@ -635,7 +629,7 @@ class PackageExporter:
             is_pickle=True,
         )
 
-        def _check_mocked_error(module: Optional[str], field: Optional[str]):
+        def _check_mocked_error(module: str | None, field: str | None):
             """
             checks if an object (field) comes from a mocked module and then adds
             the pair to mocked_modules which contains mocked modules paired with their
@@ -645,8 +639,10 @@ class PackageExporter:
             to the module is the one we use.
             """
 
-            assert isinstance(module, str)
-            assert isinstance(field, str)
+            if not isinstance(module, str):
+                raise AssertionError(f"module must be str, got {type(module).__name__}")
+            if not isinstance(field, str):
+                raise AssertionError(f"field must be str, got {type(field).__name__}")
             if self._can_implicitly_extern(module):
                 return
             for pattern, pattern_info in self.patterns.items():
@@ -659,9 +655,10 @@ class PackageExporter:
             all_dependencies = []
             module = None
             field = None
-            memo: DefaultDict[int, str] = defaultdict(None)
+            memo: defaultdict[int, str] = defaultdict(None)
             memo_count = 0
             # pickletools.dis(data_value)
+            # pyrefly: ignore [bad-assignment]
             for opcode, arg, _pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
                     if (
@@ -669,7 +666,10 @@ class PackageExporter:
                         or opcode.name == "BINUNICODE"
                         or opcode.name == "BINUNICODE8"
                     ):
-                        assert isinstance(arg, str)
+                        if not isinstance(arg, str):
+                            raise AssertionError(
+                                f"expected str arg for {opcode.name}, got {type(arg).__name__}"
+                            )
                         module = field
                         field = arg
                         memo[memo_count] = arg
@@ -678,23 +678,32 @@ class PackageExporter:
                         or opcode.name == "BINGET"
                         or opcode.name == "GET"
                     ):
-                        assert isinstance(arg, int)
+                        if not isinstance(arg, int):
+                            raise AssertionError(
+                                f"expected int arg for {opcode.name}, got {type(arg).__name__}"
+                            )
                         module = field
                         field = memo.get(arg, None)
                     elif opcode.name == "MEMOIZE":
                         memo_count += 1
                     elif opcode.name == "STACK_GLOBAL":
                         if module is None:
-                            # If not module was passed on in the entries preceeding this one, continue.
+                            # If no module was passed on in the entries preceding this one, continue.
                             continue
-                        assert isinstance(module, str)
+                        if not isinstance(module, str):
+                            raise AssertionError(
+                                f"module must be str, got {type(module).__name__}"
+                            )
                         if module not in all_dependencies:
                             all_dependencies.append(module)
                         _check_mocked_error(module, field)
                 elif (
                     pickle_protocol == 3 and opcode.name == "GLOBAL"
                 ):  # a global reference
-                    assert isinstance(arg, str)
+                    if not isinstance(arg, str):
+                        raise AssertionError(
+                            f"expected str arg for GLOBAL, got {type(arg).__name__}"
+                        )
                     module, field = arg.split(" ")
                     if module not in all_dependencies:
                         all_dependencies.append(module)
@@ -706,7 +715,10 @@ class PackageExporter:
                     out with the other errors found by package exporter.
                 """
                 if module_name in mocked_modules:
-                    assert isinstance(module_name, str)
+                    if not isinstance(module_name, str):
+                        raise AssertionError(
+                            f"module_name must be str, got {type(module_name).__name__}"
+                        )
                     fields = mocked_modules[module_name]
                     self.dependency_graph.add_node(
                         module_name,
@@ -810,10 +822,10 @@ class PackageExporter:
         included in the package and have its dependencies processed recursively.
 
         Args:
-            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
+            include (list[str] | str): A string e.g. "my_package.my_subpackage", or list of strings
                 for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`.
 
-            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+            exclude (list[str] | str): An optional pattern that excludes some patterns that match the include string.
 
             allow_empty (bool): An optional flag that specifies whether the intern modules specified by this call
                 to the ``intern`` method must be matched to some module during packaging. If an ``intern`` module glob
@@ -839,7 +851,7 @@ class PackageExporter:
         Use this function to mock this functionality out without having to modify the original code.
 
         Args:
-            include (Union[List[str], str]): A string e.g. ``"my_package.my_subpackage"``, or list of strings
+            include (list[str] | str): A string e.g. ``"my_package.my_subpackage"``, or list of strings
                 for the names of the modules to be mocked out. Strings can also be a glob-style pattern
                 string that may match multiple modules. Any required dependencies that match this pattern
                 string will be mocked out automatically.
@@ -851,7 +863,7 @@ class PackageExporter:
                     ``'torch.*'`` -- matches ``'torch.nn'`` or ``'torch.functional'``, but not
                     ``'torch.nn.functional'``
 
-            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+            exclude (list[str] | str): An optional pattern that excludes some patterns that match the include string.
                 e.g. ``include='torch.**', exclude='torch.foo'`` will mock all torch packages except ``'torch.foo'``,
                 Default: is ``[]``.
 
@@ -879,11 +891,11 @@ class PackageExporter:
         Code for extern modules must also exist in the process loading the package.
 
         Args:
-            include (Union[List[str], str]): A string e.g. ``"my_package.my_subpackage"``, or list of strings
+            include (list[str] | str): A string e.g. ``"my_package.my_subpackage"``, or list of strings
                 for the names of the modules to be externed. This can also be a glob-style pattern, as
                 described in :meth:`mock`.
 
-            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the
+            exclude (list[str] | str): An optional pattern that excludes some patterns that match the
                 include string.
 
             allow_empty (bool): An optional flag that specifies whether the extern modules specified by this call
@@ -902,10 +914,10 @@ class PackageExporter:
         If a dependency on any matching packages is found, a :class:`PackagingError` is raised.
 
         Args:
-            include (Union[List[str], str]): A string e.g. ``"my_package.my_subpackage"``, or list of strings
+            include (list[str] | str): A string e.g. ``"my_package.my_subpackage"``, or list of strings
                 for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`.
 
-            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+            exclude (list[str] | str): An optional pattern that excludes some patterns that match the include string.
         """
         self.patterns[GlobGroup(include, exclude=exclude)] = _PatternInfo(
             _ModuleProviderAction.DENY, allow_empty=True
@@ -1114,8 +1126,8 @@ class PackageExporter:
         return self.dependency_graph.to_dot()
 
     def _nodes_with_action_type(
-        self, action: Optional[_ModuleProviderAction]
-    ) -> List[str]:
+        self, action: _ModuleProviderAction | None
+    ) -> list[str]:
         result = []
         for name, node_dict in self.dependency_graph.nodes.items():
             node_action = node_dict.get("action", None)
@@ -1124,7 +1136,7 @@ class PackageExporter:
         result.sort()
         return result
 
-    def externed_modules(self) -> List[str]:
+    def externed_modules(self) -> list[str]:
         """Return all modules that are currently externed.
 
         Returns:
@@ -1133,7 +1145,7 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.EXTERN)
 
-    def interned_modules(self) -> List[str]:
+    def interned_modules(self) -> list[str]:
         """Return all modules that are currently interned.
 
         Returns:
@@ -1142,7 +1154,7 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.INTERN)
 
-    def mocked_modules(self) -> List[str]:
+    def mocked_modules(self) -> list[str]:
         """Return all modules that are currently mocked.
 
         Returns:
@@ -1151,7 +1163,7 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.MOCK)
 
-    def denied_modules(self) -> List[str]:
+    def denied_modules(self) -> list[str]:
         """Return all modules that are currently denied.
 
         Returns:
@@ -1160,13 +1172,13 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.DENY)
 
-    def get_rdeps(self, module_name: str) -> List[str]:
+    def get_rdeps(self, module_name: str) -> list[str]:
         """Return a list of all modules which depend on the module ``module_name``.
 
         Returns:
             A list containing the names of modules which depend on ``module_name``.
         """
-        if module_name in self.dependency_graph._pred.keys():
+        if module_name in self.dependency_graph._pred:
             return list(self.dependency_graph._pred[module_name].keys())
         else:
             return []

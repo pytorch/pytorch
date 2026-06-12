@@ -1,7 +1,5 @@
-# mypy: allow-untyped-defs
 import itertools
 import operator
-from typing import Dict, List, Tuple
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
@@ -10,8 +8,8 @@ from torch.fx.passes.tools_common import legalize_graph
 
 
 def split_result_tensors(
-    result: torch.Tensor, inputs: List[torch.Tensor]
-) -> Tuple[torch.Tensor, ...]:
+    result: torch.Tensor, inputs: list[torch.Tensor]
+) -> tuple[torch.Tensor, ...]:
     """
     A free function for use in the merge_matmul graph transformation below that
     splits the output from a merged matmul into the individual results for each
@@ -34,7 +32,7 @@ def split_result_tensors(
     return torch.split(result, splits)
 
 
-def may_depend_on(a: Node, b: Node, search_depth: int = 6):
+def may_depend_on(a: Node, b: Node, search_depth: int = 6) -> bool:
     """
     Determine if one node depends on another in a torch.fx.Graph.
 
@@ -42,7 +40,7 @@ def may_depend_on(a: Node, b: Node, search_depth: int = 6):
         a: The node that may have a dependency on b.
         b: The node that a may have a dependency on.
         search_depth: In the case of an indirect dependency, this function
-                        searches upto this many nodes away in search of a
+                        searches up to this many nodes away in search of a
                         data dependency. If none is found, the function
                         makes the conservative assumption that there is a
                         dependency.
@@ -71,7 +69,7 @@ def may_depend_on(a: Node, b: Node, search_depth: int = 6):
     return False
 
 
-def are_nodes_independent(nodes: List[Node]):
+def are_nodes_independent(nodes: list[Node]) -> bool:
     """
     Check if all of the given nodes are pairwise-data independent.
 
@@ -89,21 +87,24 @@ def are_nodes_independent(nodes: List[Node]):
     return True
 
 
-def merge_matmul(in_mod: torch.nn.Module):
+def merge_matmul(in_mod: torch.nn.Module) -> torch.fx.GraphModule:
     """
     A graph transformation that merges matrix multiplication operations that share the same right-hand
     side operand into one large matrix multiplication.
-               ____      _________        _________
-      ----    |    |    |         |     M|  A * C  |
-    M| A  |  T| B  | * K|    C    | =    |---------|
-      ---- ,  |    |    |         |     T|  B * C  |
-       K       ----      ---------        ---------
-                K            R                R
+
+    ::
+
+                   ____      _________        _________
+          ----    |    |    |         |     M|  A * C  |
+        M| A  |  T| B  | * K|    C    | =    |---------|
+          ---- ,  |    |    |         |     T|  B * C  |
+           K       ----      ---------        ---------
+                    K            R                R
     """
     gm = symbolic_trace(in_mod)
 
-    rhs_users: Dict[Node, List[Node]] = {}
-    lhs_users: Dict[Node, List[Node]] = {}
+    rhs_users: dict[Node, list[Node]] = {}
+    lhs_users: dict[Node, list[Node]] = {}
 
     # Populate rhs_users and lhs_users - maps from LHS/RHS matrix multiply operands to
     # the matmul of which they are the LHS/RHS.

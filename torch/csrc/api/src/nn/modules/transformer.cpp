@@ -14,13 +14,12 @@ namespace torch::nn {
 TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
     TransformerEncoderLayerOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  TransformerEncoderLayerImpl::reset();
 }
 
 void TransformerEncoderLayerImpl::reset() {
   // NOTE: reset() is for initializing the model only, calling reset() after the
-  // model is created will throw exceptionss. Call reset_parameter() if the
+  // model is created will throw exceptions. Call reset_parameter() if the
   // created model needs a reset
 
   self_attn = this->register_module(
@@ -91,8 +90,7 @@ Tensor TransformerEncoderLayerImpl::forward(
 TransformerDecoderLayerImpl::TransformerDecoderLayerImpl(
     TransformerDecoderLayerOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  TransformerDecoderLayerImpl::reset();
 }
 
 void TransformerDecoderLayerImpl::reset() {
@@ -107,7 +105,7 @@ void TransformerDecoderLayerImpl::reset() {
           MultiheadAttentionOptions(options.d_model(), options.nhead())
               .dropout(options.dropout())));
 
-  // initialize multihed attention
+  // initialize multihead attention
   multihead_attn = this->register_module(
       "multihead_attn",
       MultiheadAttention(
@@ -147,7 +145,7 @@ void TransformerDecoderLayerImpl::reset_parameters() {
   multihead_attn->_reset_parameters();
 
   linear1->reset_parameters();
-  // dropout->reset_paramteres();
+  // dropout->reset_parameters();
   linear2->reset_parameters();
 
   norm1->reset_parameters();
@@ -155,7 +153,7 @@ void TransformerDecoderLayerImpl::reset_parameters() {
   norm3->reset_parameters();
   // dropout1->reset_parameters();
   // dropout2->reset_parameters();
-  // dropout3->reset_paramteres();
+  // dropout3->reset_parameters();
 }
 
 /// Pass the inputs (and mask) through the decoder layer.
@@ -214,8 +212,7 @@ Tensor TransformerDecoderLayerImpl::activation(const Tensor& input) {
 TransformerEncoderImpl::TransformerEncoderImpl(
     TransformerEncoderOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  TransformerEncoderImpl::reset();
 }
 
 void TransformerEncoderImpl::reset() {
@@ -280,8 +277,7 @@ Tensor TransformerEncoderImpl::forward(
 TransformerDecoderImpl::TransformerDecoderImpl(
     TransformerDecoderOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  TransformerDecoderImpl::reset();
 }
 
 void TransformerDecoderImpl::reset() {
@@ -359,8 +355,7 @@ Tensor TransformerDecoderImpl::forward(
 // =======================================TransformerImpl================================
 TransformerImpl::TransformerImpl(TransformerOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  TransformerImpl::reset();
 }
 
 void TransformerImpl::reset() {

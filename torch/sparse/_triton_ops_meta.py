@@ -9,7 +9,7 @@ performance of operations several times. For example, for large tensor
 shapes, the usage of a bsr tensor as mat1 argument in addmm-based
 operations typically outperforms the corresponding operation with
 strided-only inputs when the blocked representation of a tensor
-provides a better alignement with memory access than what the strided
+provides a better alignment with memory access than what the strided
 representation would provide.
 
 Pre-computed kernel parameters
@@ -57,10 +57,10 @@ Computing optimal kernel parameters
 If the approximations listed above are unacceptable, e.g. when one
 seeks a maximal performance possible, the optimal kernel parameters
 for a particular GPU can be computed by simply running this script in
-the pytorch developement tree::
+the pytorch development tree::
 
   cd /path/to/pytorch
-  python setup.py develop
+  python -m pip install --no-build-isolation -v -e .
   python torch/sparse/_triton_ops_meta.py
 
 This will compute the optimal kernel parameters for the GPU device
@@ -91,23 +91,33 @@ torch.nn.functional.linear will benefit from using the computed
 optimal set of kernel parameters.
 
 Note that running tune_bsr_dense_addmm can take several minutes. So,
-use it wisely, e.g. by implementing persisten storage of optimized
+use it wisely, e.g. by implementing persistent storage of optimized
 kernel parameters. See the source code of get_meta and
 tune_bsr_dense_addmm to learn how to register a custom set of optimal
 kernel parameters for addmm-based operations.
 
 """
+
 __all__ = ["get_meta", "tune_bsr_dense_addmm", "tune__int_bsr_dense_addmm"]
 
 import inspect
 import itertools
 import re
 import warnings
-from typing import Any, Dict
+from typing import Any
 
 import torch
 from torch.hub import tqdm
 from torch.testing import make_tensor
+
+
+def _get_device_name() -> str:
+    """Return the current accelerator device name for use as a Triton tuning cache key."""
+    if torch.cuda.is_available():
+        return torch.cuda.get_device_name()
+    if torch.xpu.is_available():
+        return torch.xpu.get_device_name()
+    return ""
 
 
 def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=False):
@@ -134,7 +144,7 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
       mappings that match with the given `key`.
     """
     if device_name is None:
-        device_name = torch.cuda.get_device_name()
+        device_name = _get_device_name()
 
     op_data = _operation_device_version_data.get((op, device_name, version))
     if op_data is None and not exact:
@@ -143,7 +153,10 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
         # meta parameters have been computed. In the following we'll
         # assume that there is a set of GPU models that all have
         # a similar set of optimal meta parameters.
-        if re.match(r"NVIDIA A100[^\d]", device_name) is not None:
+        if (
+            device_name is not None
+            and re.match(r"NVIDIA A100[^\d]", device_name) is not None
+        ):
             device_name = "NVIDIA A100-SXM4-80GB"
         else:
             return
@@ -154,7 +167,11 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
     matching_data = {}
     if "*" in key:
         for op_key in op_data:
-            if [None for k1, k2 in zip(op_key, key) if k2 != "*" and k1 != k2]:
+            if [
+                None
+                for k1, k2 in zip(op_key, key, strict=True)
+                if k2 != "*" and k1 != k2
+            ]:
                 continue
             matching_data[op_key] = op_data[op_key]
     else:
@@ -172,10 +189,14 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
                 "num_stages",
                 "num_warps",
             )
-            meta = dict(zip(names, values))
+            meta = dict(zip(names, values, strict=True))
         elif op in {"bsr_dense_addmm", "_int_bsr_dense_addmm"}:
             meta = dict(
-                zip(("GROUP_SIZE_ROW", "SPLIT_N", "num_stages", "num_warps"), values)
+                zip(
+                    ("GROUP_SIZE_ROW", "SPLIT_N", "num_stages", "num_warps"),
+                    values,
+                    strict=True,
+                )
             )
         else:
             raise NotImplementedError(f"names for {op=}")
@@ -193,7 +214,8 @@ def update(op, device_name, version, key, value):
     # skip storing possible optimization failures:
     if not value:
         warnings.warn(
-            f"skipping empty value for {op}: {device_name=} {version=} {key=}"
+            f"skipping empty value for {op}: {device_name=} {version=} {key=}",
+            stacklevel=2,
         )
         return
     if (op, device_name, version) in _operation_device_version_data:
@@ -207,16 +229,16 @@ def update(op, device_name, version, key, value):
 def dump():
     """Store the current runtime db state to the module file."""
     current_file = inspect.getfile(dump)
-    f = open(current_file)
-    current_content = f.read()
-    f.close()
+    with open(current_file) as f:
+        current_content = f.read()
     begin_data_str = "# BEGIN GENERATED DATA\n"
     begin_data_index = current_content.find(begin_data_str)
     end_data_index = current_content.find("    # END GENERATED DATA\n")
     if begin_data_index == -1 or end_data_index == -1:
         warnings.warn(
             f"{current_file} cannot be updated:"
-            " BEGIN/END GENERATED DATA comment blocks appear to be corrupted"
+            " BEGIN/END GENERATED DATA comment blocks appear to be corrupted",
+            stacklevel=2,
         )
         return
 
@@ -237,9 +259,8 @@ def dump():
         data_part.append("    },")
     new_content = part1 + "\n".join(data_part) + "\n" + part2
     if current_content != new_content:
-        f = open(current_file, "w")
-        f.write(new_content)
-        f.close()
+        with open(current_file, "w") as f:
+            f.write(new_content)
 
 
 def minimize(
@@ -284,7 +305,7 @@ def minimize(
         return tuple(parameters[k] for k in sorted(parameters))
 
     def from_key(key, parameters):
-        return dict(zip(sorted(parameters), key))
+        return dict(zip(sorted(parameters), key, strict=True))
 
     if all_values is None:
         all_values = {}
@@ -342,7 +363,7 @@ def minimize(
         for i, (_, d_tuple) in enumerate(all_directions):
             pbar.update(1)
             next_parameters = parameters.copy()
-            for name, direction in zip(names, d_tuple):
+            for name, direction in zip(names, d_tuple, strict=True):
                 value = next_parameters[name]
                 if direction == 0:
                     continue
@@ -366,6 +387,7 @@ def minimize(
                 if next_target < minimal_target:
                     minimal_target = next_target
                     parameters = next_parameters
+                    # pyrefly: ignore [unsupported-operation]
                     pbar.total += i + 1
                     break
         else:
@@ -432,11 +454,16 @@ def minimize(
 
 
 def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
-    assert (
-        sparsity <= 1.0 and sparsity >= 0.0
-    ), "sparsity should be a value between 0 and 1"
-    assert M % blocksize[0] == 0
-    assert N % blocksize[1] == 0
+    if sparsity < 0.0 or sparsity > 1.0:
+        raise AssertionError(f"sparsity should be between 0 and 1, got {sparsity}")
+    if M % blocksize[0] != 0:
+        raise AssertionError(
+            f"M ({M}) must be divisible by blocksize[0] ({blocksize[0]})"
+        )
+    if N % blocksize[1] != 0:
+        raise AssertionError(
+            f"N ({N}) must be divisible by blocksize[1] ({blocksize[1]})"
+        )
     shape = (B, M // blocksize[0], N // blocksize[1])[int(B == 0) :]
     A = torch.bernoulli(
         torch.full(shape, 1 - sparsity, dtype=torch.float32, device=device)
@@ -468,7 +495,7 @@ def optimize_scatter_mm(
     key = (m, k, n, bm, bk)
 
     version = (0, dtype, sparsity)
-    device_name = torch.cuda.get_device_name()
+    device_name = _get_device_name()
 
     reference_meta = dict(
         GROUP_SIZE=1,
@@ -561,7 +588,7 @@ def optimize_scatter_mm(
     print(f"{meta=} {speedup=:.1f} % {timing=:.3f} ms")
     if speedup < 0:
         return
-    device_name = torch.cuda.get_device_name()
+    device_name = _get_device_name()
 
     update(
         "scatter_mm", device_name, version, key, tuple(meta[k] for k in sorted(meta))
@@ -723,7 +750,7 @@ def tune_bsr_dense_addmm(
     if store and not (
         may_skip_update and meta == initial_meta and initial_meta is not reference_meta
     ):
-        device_name = torch.cuda.get_device_name()
+        device_name = _get_device_name()
         update(
             opname,
             device_name,
@@ -852,7 +879,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
 
     if 0:
         # Check performance dependence on sparsity and apply
-        # adjustments when differences are noticable (more than 10%).
+        # adjustments when differences are noticeable (more than 10%).
         #
         # When using NVIDIA A100 GPU, the performance dependence on
         # sparsity is insignificant (0 % ... 10 %) for majority of
@@ -922,7 +949,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                 print(sparsity1, index, key, meta_lst, speeddiff)
 
                 if index > 0:
-                    device_name = torch.cuda.get_device_name()
+                    device_name = _get_device_name()
                     meta = get_meta(
                         op, key, version=(0, dtype, meta_lst[0][1]), exact=True
                     )
@@ -937,7 +964,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                     dump()
 
 
-_operation_device_version_data: Dict[Any, Dict] = {
+_operation_device_version_data: dict[Any, dict] = {
     # Warning: the data in between the BEGIN/END DATA comment lines
     # below is generated. It can be updated either manually or via
     # calling dump function defined above.

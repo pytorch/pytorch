@@ -3,7 +3,6 @@
 import inspect
 import io
 from tempfile import TemporaryFileName
-from typing import Dict, List
 
 import torch
 import torch.utils.bundled_inputs
@@ -94,7 +93,10 @@ class TestLiteScriptModule(TestCase):
             buffer = io.BytesIO(exported_module)
             buffer.seek(0)
 
-            assert b"callstack_debug_map.pkl" in exported_module
+            if b"callstack_debug_map.pkl" not in exported_module:
+                raise AssertionError(
+                    "Expected callstack_debug_map.pkl in exported module"
+                )
 
             mobile_module = _load_for_lite_interpreter(buffer)
             with self.assertRaisesRegex(
@@ -248,7 +250,7 @@ class TestLiteScriptModule(TestCase):
                 self.foo = Foo()
 
             def forward(self):
-                my_list: List[Foo] = [self.foo]
+                my_list: list[Foo] = [self.foo]
                 return my_list
 
         script_module = torch.jit.script(MyTestModuleForListWithModuleClass())
@@ -272,7 +274,7 @@ class TestLiteScriptModule(TestCase):
                 self.foo = Foo()
 
             def forward(self):
-                my_dict: Dict[int, Foo] = {1: self.foo}
+                my_dict: dict[int, Foo] = {1: self.foo}
                 return my_dict
 
         script_module = torch.jit.script(MyTestModuleForDictWithModuleClass())
@@ -349,14 +351,14 @@ class TestLiteScriptModule(TestCase):
             def forward(self):
                 raise RuntimeError("foo")
 
-        _, lineno = inspect.getsourcelines(FooTest2)
+        _, _ = inspect.getsourcelines(FooTest2)
 
         # In C++ code, the type of exception thrown is torch::jit::JITException
         # which does not extend c10::Error, and hence it isn't possible to add
         # additional context to the exception message and preserve the correct
         #  C++ stack trace for symbolication. i.e. it isn't possible to add
         # the debug handle string to show where in the Python code the exception
-        # occured w/o first changing
+        # occurred w/o first changing
         # torch::jit::JITException to extend c10::Error.
         with self.assertRaisesRegex(torch.jit.Error, "foo"):
             ft = FooTest2()
@@ -426,7 +428,7 @@ class TestLiteScriptModule(TestCase):
 
         ft = FooTest5(42)
         loaded = self.getScriptExportImportCopy(ft)
-        _, lineno = inspect.getsourcelines(FooTest5)
+        _, _ = inspect.getsourcelines(FooTest5)
 
         try:
             loaded(42, torch.rand(3, 4), torch.rand(3, 4), torch.rand(30, 40))
@@ -438,7 +440,7 @@ class TestLiteScriptModule(TestCase):
         # additional context to the exception message and preserve the correct
         #  C++ stack trace for symbolication. i.e. it isn't possible to add
         # the debug handle string to show where in the Python code the exception
-        # occured w/o first changing
+        # occurred w/o first changing
         # torch::jit::JITException to extend c10::Error.
         self.assertTrue("self.val and val are same" in error_message)
 
@@ -487,17 +489,9 @@ class TestLiteScriptModule(TestCase):
                 "Traceback of TorchScript"
             ).check("self.b.forwardError").check_next(
                 "~~~~~~~~~~~~~~~~~~~ <--- HERE"
-            ).check(
-                "return self.call"
-            ).check_next(
-                "~~~~~~~~~ <--- HERE"
-            ).check(
+            ).check("return self.call").check_next("~~~~~~~~~ <--- HERE").check(
                 "return torch.ones"
-            ).check_next(
-                "~~~~~~~~~~ <--- HERE"
-            ).run(
-                str(exp)
-            )
+            ).check_next("~~~~~~~~~~ <--- HERE").run(str(exp))
 
 
 class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
@@ -556,9 +550,9 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
         class Model(torch.nn.Module):
             def forward(
                 self,
-                x: Dict[int, torch.Tensor],
-                y: Dict[int, torch.Tensor],
-                z: Dict[int, torch.Tensor],
+                x: dict[int, torch.Tensor],
+                y: dict[int, torch.Tensor],
+                z: dict[int, torch.Tensor],
             ):
                 return x
 

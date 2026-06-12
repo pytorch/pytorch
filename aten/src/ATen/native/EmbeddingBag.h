@@ -1,3 +1,4 @@
+#pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <cstdint>

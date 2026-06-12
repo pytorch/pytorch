@@ -8,31 +8,32 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from functools import lru_cache
+from typing import Any, cast, Literal, NamedTuple, Protocol
 
 import torch
 import torch.distributed as dist
+from torch._dynamo import OptimizedModule
 from torch.distributed.fsdp import FSDPModule, UnshardHandle
+from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
-from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
-from .stage import _PipelineStageBase
+from ._utils import (
+    generate_rank_to_stage_mapping,
+    generate_stage_to_rank_mapping,
+    InferenceMode,
+)
+from .microbatch import (
+    _split_tensor,
+    merge_chunks,
+    split_args_kwargs_into_chunks,
+    TensorChunkSpec,
+)
+from .stage import _PipelineStageBase, _RecvInfo, PipelineStage
 
-
-if TYPE_CHECKING:
-    from torch.distributed import Work
 
 __all__ = [
     "get_schedule_class",
@@ -44,63 +45,33 @@ __all__ = [
     "ScheduleLoopedBFS",
     "ScheduleInterleavedZeroBubble",
     "ScheduleZBVZeroBubble",
+    "ScheduleDualPipeV",
 ]
 
 logger = logging.getLogger(__name__)
 
 
-class _ComputationType(Enum):
+class _ComputationType(str, Enum):
     # TODO(whc) rename to _ActType?
-    FORWARD = 1
-    BACKWARD_INPUT = 2
-    BACKWARD_WEIGHT = 3
-    UNSHARD = 4
-    RESHARD = 5
-    SEND_F = 6
-    RECV_F = 7
-    SEND_B = 8
-    RECV_B = 9
-    FULL_BACKWARD = 10
-
-    def __str__(self):
-        str_map = {
-            _ComputationType.FORWARD: "F",
-            _ComputationType.BACKWARD_INPUT: "I",
-            _ComputationType.BACKWARD_WEIGHT: "W",
-            _ComputationType.UNSHARD: "UNSHARD",
-            _ComputationType.RESHARD: "RESHARD",
-            _ComputationType.SEND_F: "SEND_F",
-            _ComputationType.RECV_F: "RECV_F",
-            _ComputationType.SEND_B: "SEND_B",
-            _ComputationType.RECV_B: "RECV_B",
-            _ComputationType.FULL_BACKWARD: "B",
-        }
-        return str_map[self]
+    FORWARD = "F"
+    BACKWARD_INPUT = "I"
+    BACKWARD_WEIGHT = "W"
+    UNSHARD = "UNSHARD"
+    RESHARD = "RESHARD"
+    SEND_F = "SEND_F"
+    RECV_F = "RECV_F"
+    SEND_B = "SEND_B"
+    RECV_B = "RECV_B"
+    FULL_BACKWARD = "B"
+    OVERLAP_F_B = "OVERLAP_F_B"
+    REDUCE_GRAD = "REDUCE_GRAD"
 
     @staticmethod
-    def from_str(action):
-        if action == "F":
-            return _ComputationType.FORWARD
-        elif action == "I":
-            return _ComputationType.BACKWARD_INPUT
-        elif action == "W":
-            return _ComputationType.BACKWARD_WEIGHT
-        elif action == "UNSHARD":
-            return _ComputationType.UNSHARD
-        elif action == "RESHARD":
-            return _ComputationType.RESHARD
-        elif action == "SEND_F":
-            return _ComputationType.SEND_F
-        elif action == "RECV_F":
-            return _ComputationType.RECV_F
-        elif action == "SEND_B":
-            return _ComputationType.SEND_B
-        elif action == "RECV_B":
-            return _ComputationType.RECV_B
-        elif action == "B":
-            return _ComputationType.FULL_BACKWARD
-        else:
-            raise RuntimeError(f"Invalid computation type {action}")
+    def from_str(action: str) -> "_ComputationType":
+        try:
+            return _ComputationType(action)
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid computation type {action}") from exc
 
 
 FORWARD = _ComputationType.FORWARD
@@ -113,6 +84,15 @@ RECV_F = _ComputationType.RECV_F
 SEND_B = _ComputationType.SEND_B
 RECV_B = _ComputationType.RECV_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
+OVERLAP_F_B = _ComputationType.OVERLAP_F_B
+REDUCE_GRAD = _ComputationType.REDUCE_GRAD
+
+
+# Targets (e.g. labels) are always split along the batch dim (0). Use
+# _split_tensor so DTensor targets preserve their Shard placements instead of
+# being silently all-gathered to Replicate by the default dispatch path.
+_TARGET_CHUNK_SPEC = TensorChunkSpec(0)
+
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
@@ -122,21 +102,41 @@ B = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)(F|I|B|W|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B)(\d*)"
+    r"(\d+)(F|I|B|W|UNSHARD|RESHARD|REDUCE_GRAD|SEND_F|RECV_F|SEND_B|RECV_B)(\d*)"
 )
 
 
 class _Action(NamedTuple):
     stage_index: int
     computation_type: _ComputationType
-    microbatch_index: Optional[int] = None
+    microbatch_index: int | None = None
+    sub_actions: tuple["_Action", ...] | None = None
+
+    def __str__(self):
+        return self.__repr__()
 
     def __repr__(self):
-        repr = str(self.stage_index)
-        repr += str(self.computation_type)
-        if self.microbatch_index is not None:
-            repr += str(self.microbatch_index)
-        return repr
+        if self.sub_actions is not None:
+            # Use recursive repr for sub_actions
+            sub_action_reprs = [repr(sub_action) for sub_action in self.sub_actions]
+            return f"({';'.join(sub_action_reprs)}){self.computation_type.value}"
+        else:
+            repr_str = str(self.stage_index)
+            # Use .value to get the short string (e.g., "F", "B") instead of the full enum name
+            repr_str += self.computation_type.value
+            if self.microbatch_index is not None:
+                repr_str += str(self.microbatch_index)
+            return repr_str
+
+    @property
+    def is_compute_op(self) -> bool:
+        return self.computation_type in (
+            FORWARD,
+            FULL_BACKWARD,
+            BACKWARD_INPUT,
+            BACKWARD_WEIGHT,
+            OVERLAP_F_B,
+        )
 
     @staticmethod
     def from_str(action_string: str):
@@ -147,6 +147,38 @@ class _Action(NamedTuple):
             e.g. `2F0`, `1UNSHARD`, `3SEND_F1`
         """
         action_string = action_string.strip()
+        if action_string == "":
+            return None
+
+        # Check for sub_actions format: [sub_action1;sub_action2;...]ComputationType
+        if action_string.startswith("(") and ")" in action_string:
+            # Find the closing bracket to separate sub_actions from computation type
+            bracket_end = action_string.find(")")
+            sub_part = action_string[
+                1:bracket_end
+            ]  # Remove '[' and get content before ']'
+            computation_type_part = action_string[
+                bracket_end + 1 :
+            ]  # Get part after ']'
+
+            # Parse sub_actions
+            sub_actions = []
+            if sub_part.strip():
+                for sub_str in sub_part.split(";"):
+                    sub_action = _Action.from_str(sub_str.strip())
+                    if sub_action is not None:
+                        sub_actions.append(sub_action)
+
+            # For sub_actions format, we create an action with just the computation type
+            # The stage_index and microbatch_index are not meaningful for the container action
+            return _Action(
+                stage_index=-1,  # Placeholder, not meaningful for sub_actions container
+                computation_type=_ComputationType.from_str(computation_type_part),
+                microbatch_index=None,
+                sub_actions=tuple(sub_actions) if sub_actions else None,
+            )
+
+        # Handle regular single action format
         if match := _action_regex.match(action_string):
             stage_index, computation_type, microbatch_index = match.groups()
             return _Action(
@@ -161,9 +193,14 @@ class _Action(NamedTuple):
         )
 
 
+@lru_cache
+def _get_profiler_function_name(action: _Action) -> str:
+    return f"PP:{str(action)}"
+
+
 def _format_pipeline_order(
-    pipeline_order: Dict[int, List[Optional[_Action]]],
-    error_step_number: Optional[int] = None,
+    pipeline_order: dict[int, list[_Action | None]],
+    error_step_number: int | None = None,
 ) -> str:
     """
     Formats the pipeline order in a timestep (row) x rank (column) grid of actions
@@ -193,6 +230,7 @@ def _format_pipeline_order(
         pipeline_order.get(key, [""] * num_steps) for key in sorted(pipeline_order)
     ]
     # Transpose the list of lists (rows to columns)
+    # pyrefly: ignore [no-matching-overload]
     transposed_actions = list(itertools.zip_longest(*rank_actions, fillvalue=""))
     # Generate column labels for ranks
     num_ranks = len(pipeline_order)
@@ -227,14 +265,19 @@ class _PipelineSchedule(ABC):
     def __init__(
         self,
         n_microbatches: int,
-        loss_fn: Optional[Callable[..., torch.Tensor]] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
-        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        loss_fn: Callable[..., torch.Tensor] | None = None,
+        args_chunk_spec: tuple[TensorChunkSpec, ...] | None = None,
+        kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
+        output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
+        scale_grads: bool = True,
     ):
         # From arguments
         self._n_microbatches = n_microbatches
         self._loss_fn = loss_fn
+
+        # See documentation in `PipelineScheduleSingle` / `PipelineScheduleMulti`
+        self.scale_grads = scale_grads
+
         # Chunking specification for positional inputs. (default: `None`)
         self._args_chunk_spec = args_chunk_spec
         # Chunking specification for keyword inputs. (default: `None`)
@@ -250,17 +293,19 @@ class _PipelineSchedule(ABC):
         self._has_backward = self._loss_fn is not None
 
         # Holds the losses for each microbatch.
-        self._internal_losses: List[torch.Tensor] = []
+        self._internal_losses: list[torch.Tensor] = []
         logger.info("Using %s", self.__class__.__name__)
 
-    def _maybe_compute_loss(self, stage, output, target_mbs, mb_index):
-        if stage.is_last and self._has_backward:
-            loss = self._compute_loss(output, target_mbs[mb_index])  # type: ignore[index]
+    def _maybe_compute_loss(
+        self, stage, output, target_mbs, mb_index, loss_kwargs=None
+    ):
+        if stage.is_last and self._loss_fn is not None:
+            loss = self._compute_loss(output, target_mbs[mb_index], loss_kwargs)  # type: ignore[index]
             self._internal_losses.append(loss)
 
     def _maybe_get_loss(self, stage, mb_index):
         valid_index = 0 <= mb_index < len(self._internal_losses)
-        if stage.is_last and self._has_backward and valid_index:
+        if stage.is_last and self._loss_fn is not None and valid_index:
             return self._internal_losses[mb_index]
         elif len(self._internal_losses) != 0 and not valid_index:
             raise RuntimeError(
@@ -293,13 +338,156 @@ class _PipelineSchedule(ABC):
 
         self._internal_losses.clear()
 
+    def _warmup_p2p(
+        self,
+        stages: list[_PipelineStageBase],
+        has_backward: bool,
+        p2p_done: bool,
+    ) -> None:
+        """Run the P2P warm-up protocol for the given stages.
+
+        For ``PipelineStage`` instances this executes the forward/backward vote
+        protocol (which warms up 2-rank sub-communicators) and sets each
+        stage's ``_inference_mode``.  For other stage types it falls back to
+        the legacy ``_get_init_p2p_neighbors_ops`` + ``_batch_p2p`` path.
+
+        Args:
+            stages: The pipeline stages owned by this rank.
+            has_backward: Whether the schedule includes a backward pass.
+            p2p_done: ``True`` if P2P neighbours have already been initialised
+                (avoids redundant init on eval↔train mode switches).
+        """
+        if all(isinstance(stage, PipelineStage) for stage in stages):
+            acc: torch.Tensor | None = None
+            for stage in cast(list[PipelineStage], stages):
+                acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
+            result: torch.Tensor | None = acc
+            determined_mode: InferenceMode | None = None
+            for stage in reversed(cast(list[PipelineStage], stages)):
+                result = stage._warmup_backward_result(received_result=result)
+                if result is None:
+                    raise RuntimeError("P2P warm-up voting failed")
+                determined_mode = (
+                    InferenceMode.STATIC
+                    if result.item() == 1
+                    else InferenceMode.DYNAMIC
+                )
+                stage._inference_mode = determined_mode
+            logger.debug(
+                "Rank determined inference_mode=%s for %d stage(s)",
+                determined_mode.value if determined_mode else "None",
+                len(stages),
+            )
+        elif not p2p_done:
+            all_ops: list[dist.P2POp] = []
+            for stage in stages:
+                all_ops.extend(stage._get_init_p2p_neighbors_ops())
+            _wait_batch_p2p(_batch_p2p(all_ops))
+
+        # TODO: STATIC mode group communicator warm-up gap
+        # The vote protocol above warms up 2-rank sub-communicators
+        # (used by `_batch_p2p` homogeneous fast-path).  In DYNAMIC mode,
+        # `_send_meta`/`_recv_meta` (called during `_prepare_forward_infra` →
+        # `_forward_metadata_inference`) also warm up the *group* communicator
+        # (used by `_batch_p2p` mixed-op path).  In STATIC mode, metadata
+        # inference is skipped, so the group communicator is NOT warmed up —
+        # it will be lazily created on the first mixed `_batch_p2p` call
+        # (e.g., 1F1B steady-state with both sends and recvs).
+        # Fix: run `_get_init_p2p_neighbors_ops` + `_batch_p2p` after the
+        # vote, gated by `not p2p_done`.
+
+    def _initialize_pp_stages(
+        self,
+        stages: list[_PipelineStageBase],
+        args: tuple[Any, ...] | Any,
+        kwargs: dict[str, Any] | None,
+        target: Any,
+        fwd_initialized: bool,
+        bwd_initialized: bool,
+        loss_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[bool, bool]:
+        """Common stage initialization shared by Single and Multi schedules.
+
+        Handles mode-change detection (eval↔train), P2P warm-up, RNG forking,
+        forward / backward metadata inference, and FSDP cleanup.
+
+        Returns the updated ``(fwd_initialized, bwd_initialized)`` flags.
+        """
+        # Detect eval↔train mode switch: if has_backward changed since last
+        # init, re-initialize both fwd (recv buffers need different
+        # requires_grad) and bwd.  p2p_done avoids redundant P2P warm-up.
+        p2p_done = fwd_initialized
+        if fwd_initialized and (self._has_backward != bwd_initialized):
+            fwd_initialized = False
+            bwd_initialized = False
+
+        needs_fwd = not fwd_initialized
+        needs_bwd = self._has_backward and not bwd_initialized
+
+        if not needs_fwd and not needs_bwd:
+            return fwd_initialized, bwd_initialized
+
+        if needs_fwd:
+            self._warmup_p2p(stages, self._has_backward, p2p_done)
+
+        # Fork RNG so metadata inference doesn't perturb training RNG.
+        devices = list(
+            {
+                torch.device(stage.device)
+                for stage in stages
+                if torch.device(stage.device).type != "cpu"
+            }
+        )
+        device_type = devices[0].type if devices else None
+        # Assert all device types are the same
+        if device_type is not None and not all(
+            device.type == device_type for device in devices
+        ):
+            device_types = {device.type for device in devices}
+            raise AssertionError(
+                "All stages must have the same device type for RNG forking. "
+                f"Found device types: {device_types}"
+            )
+        with torch.random.fork_rng(devices=devices, device_type=device_type):
+            if needs_fwd:
+                next_stage_args: Any = None
+                for stage in stages:
+                    stage_args = args if stage.is_first else next_stage_args
+                    next_stage_args = stage._prepare_forward_infra(
+                        self._n_microbatches,
+                        stage_args,
+                        kwargs,
+                        has_backward=self._has_backward,
+                    )
+                fwd_initialized = True
+
+            if needs_bwd:
+                prev_stage_grad_meta: Any = None
+                for stage in reversed(stages):
+                    prev_stage_grad_meta = stage._prepare_backward_infra(
+                        self._n_microbatches,
+                        loss_fn=self._loss_fn,
+                        target=target,
+                        received_grad_meta=prev_stage_grad_meta,
+                        loss_kwargs=loss_kwargs,
+                    )
+                bwd_initialized = True
+
+        for stage in stages:
+            if isinstance(stage, PipelineStage):
+                stage._post_metadata_inference_cleanup()
+
+        return fwd_initialized, bwd_initialized
+
     @abstractmethod
     def _step_microbatches(
         self,
-        arg_mbs: Optional[List] = None,
-        kwarg_mbs: Optional[List] = None,
-        target_mbs: Optional[List] = None,
-        losses: Optional[List] = None,
+        arg_mbs: list | None = None,
+        kwarg_mbs: list | None = None,
+        target_mbs: list | None = None,
+        losses: list | None = None,
+        return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Run one iteration of the pipeline schedule with list of microbatches.
@@ -308,11 +496,21 @@ class _PipelineSchedule(ABC):
 
         Args:
             microbatches: list of microbatch args.
+            return_outputs: whether to return the outputs from the last stage.
+            loss_kwargs: extra keyword arguments forwarded to the loss function.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
+    def step(
+        self,
+        *args,
+        target=None,
+        losses: list | None = None,
+        return_outputs=True,
+        loss_kwargs: dict[str, Any] | None = None,
+        **kwargs,
+    ):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
         Will chunk the input into microbatches automatically, and go through the
@@ -322,16 +520,38 @@ class _PipelineSchedule(ABC):
         kwargs: keyword arguments to the model (as in non-pipeline case).
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
+        return_outputs: whether to return the outputs from the last stage.
+        loss_kwargs: extra keyword arguments forwarded to the loss function.
         """
         raise NotImplementedError
 
+    def eval(self, *args, target=None, losses: list | None = None, **kwargs):
+        """
+        Run one iteration of the pipeline schedule with *whole-batch* input.
+        Will chunk the input into microbatches automatically, and go through the
+        microbatches, calling forward only.
+
+        args: positional arguments to the model (as in non-pipeline case).
+        kwargs: keyword arguments to the model (as in non-pipeline case).
+        target: target values for the loss function.
+        losses: a list to store the losses for each microbatch.
+        """
+        # Save the original has_backward state
+        original_has_backward = self._has_backward
+        try:
+            self._has_backward = False
+            return self.step(*args, target=target, losses=losses, **kwargs)
+        finally:
+            # Restore the original state
+            self._has_backward = original_has_backward
+
     def _check_inputs(
         self,
-        arg_mbs: Optional[List] = None,
-        kwarg_mbs: Optional[List] = None,
-        target_mbs: Optional[List] = None,
-        losses: Optional[List] = None,
-    ):
+        arg_mbs: list | None = None,
+        kwarg_mbs: list | None = None,
+        target_mbs: list | None = None,
+        losses: list | None = None,
+    ) -> tuple[list, list]:
         """
         Pre-process/check inputs
         """
@@ -363,13 +583,13 @@ class _PipelineSchedule(ABC):
 
         return arg_mbs, kwarg_mbs
 
-    def _compute_loss(self, output, target):
-        return self._loss_fn(output, target)  # type: ignore[misc]
+    def _compute_loss(self, output, target, loss_kwargs=None):
+        return self._loss_fn(output, target, **(loss_kwargs or {}))  # type: ignore[misc]
 
     def _split_inputs(
         self,
-        args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any] | None = None,
     ):
         """
         Splits a full-batch input into chunks (i.e. microbatches) and returns
@@ -389,7 +609,7 @@ class _PipelineSchedule(ABC):
             # Return a list of empty tuples/dicts with matching length as chunks
             return [()] * self._n_microbatches, [{}] * self._n_microbatches
 
-    def _merge_outputs(self, output_chunks: List[Any]) -> Any:
+    def _merge_outputs(self, output_chunks: list[Any]) -> Any:
         """
         Merge output chunks back to a batch state.
         If output_merge_spec is None, the utility will merge output chunks by dimension 0 (batch dim).
@@ -400,20 +620,37 @@ class _PipelineSchedule(ABC):
         )
 
 
-def _batch_p2p(p2p_ops: List[dist.P2POp], desc: Optional[str] = None):
+def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.Work]:
     """
-    Simple wrapper over batch_isend_irecv from torch.distributed, which just adds a descriptive logger on top.
+    Wrapper over batch_isend_irecv that avoids coalescing for homogeneous
+    batches (all-send or all-recv).  Coalescing serializes ops on a single
+    CUDA stream, which causes head-of-line blocking when independent P2P ops
+    could otherwise overlap.  Mixed batches still use batch_isend_irecv for
+    deadlock avoidance.
     """
     if len(p2p_ops) == 0:
-        return None
+        return []
     desc_str = f"{desc}, " if desc else ""
     logger.debug("batch_p2p %s%s", desc_str, p2p_ops)
-    return dist.batch_isend_irecv(p2p_ops).pop()
+
+    op_types = {p.op for p in p2p_ops}
+    if op_types == {dist.isend}:
+        return [
+            p.op(p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer)
+            for p in p2p_ops
+        ]
+    if op_types == {dist.irecv}:
+        return [
+            p.op(p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer)
+            for p in p2p_ops
+        ]
+
+    return dist.batch_isend_irecv(p2p_ops)
 
 
 def _sorted_batch_p2p(
-    p2p_ops: List[dist.P2POp], desc: Optional[str] = None
-) -> Dict[int, dist.Work]:
+    p2p_ops: list[dist.P2POp], desc: str | None = None
+) -> dict[int, list[dist.Work]]:
     """
     Sorts the list of P2P ops by the peer rank, and then calls
     batch_isend_irecv. Return a dictionary of works by peer rank. This function
@@ -422,8 +659,8 @@ def _sorted_batch_p2p(
     # Arrange p2p_ops by peer rank:
     #   int is the peer rank;
     #   List is the list of ops towards the peer
-    ops_by_peer: Dict[int, List[dist.P2POp]] = defaultdict(list)
-    work_by_peer: Dict[int, dist.Work] = {}
+    ops_by_peer: dict[int, list[dist.P2POp]] = defaultdict(list)
+    work_by_peer: dict[int, list[dist.Work]] = {}
     if len(p2p_ops) == 0:
         return work_by_peer
 
@@ -438,21 +675,34 @@ def _sorted_batch_p2p(
     return work_by_peer
 
 
+def _wait_batch_p2p(work: list[dist.Work]):
+    """
+    Waits for a list of dist.Work (typically from _batch_p2p / _sorted_batch_p2p).
+    """
+    for w in work:
+        w.wait()
+
+
 class PipelineScheduleSingle(_PipelineSchedule):
     """
     Base class for single-stage schedules.
     Implements the `step` method.
     Derived classes should implement `_step_microbatches`.
+
+    Gradients are scaled by num_microbatches depending on the `scale_grads` argument, defaulting to True.  This setting
+    should match the configuration of your loss_fn, which may either average losses (scale_grads=True)
+    or sum losses (scale_grads=False).
     """
 
     def __init__(
         self,
         stage: _PipelineStageBase,
         n_microbatches: int,
-        loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
-        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        loss_fn: Callable | None = None,
+        args_chunk_spec: tuple[TensorChunkSpec, ...] | None = None,
+        kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
+        output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
+        scale_grads: bool = True,
     ):
         # Init parent
         super().__init__(
@@ -461,21 +711,41 @@ class PipelineScheduleSingle(_PipelineSchedule):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
         )
         # Self attributes
         self._stage = stage
         self._num_stages = stage.num_stages
-        # Set the same has_backward flag for stage object
-        self._stage.has_backward = self._has_backward
-        self._stage_initialized = False
+        self._stage_forward_initialized = False
+        self._stage_backward_initialized = False
 
-    def _initialize_stage(self, args, kwargs):
-        self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
-        if self._has_backward:
-            self._stage._prepare_backward_infra(self._n_microbatches)
-        self._stage_initialized = True
+        self.pipeline_order: dict[int, list[_Action | None]] | None = (
+            self._get_pipeline_order()
+        )
 
-    def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
+    def _initialize_stage(self, args, kwargs, target=None, loss_kwargs=None):
+        (
+            self._stage_forward_initialized,
+            self._stage_backward_initialized,
+        ) = self._initialize_pp_stages(
+            [self._stage],
+            args,
+            kwargs,
+            target,
+            self._stage_forward_initialized,
+            self._stage_backward_initialized,
+            loss_kwargs=loss_kwargs,
+        )
+
+    def step(
+        self,
+        *args,
+        target=None,
+        losses: list | None = None,
+        return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
+        **kwargs,
+    ):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
         Will chunk the input into microbatches automatically, and go through the
@@ -485,7 +755,18 @@ class PipelineScheduleSingle(_PipelineSchedule):
         kwargs: keyword arguments to the model (as in non-pipeline case).
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
+        return_outputs: whether to return the outputs from the last stage.
+        loss_kwargs: extra keyword arguments forwarded to the loss function.
         """
+        if self._has_backward and not torch.is_grad_enabled():
+            raise RuntimeError(
+                "step() requires gradients to be enabled for backward computation; "
+                "it should not be used under torch.no_grad() context. "
+                "Please call eval() instead."
+            )
+
+        # Set the same has_backward flag for stage object
+        self._stage.has_backward = self._has_backward
 
         # Clean per iteration
         self._stage.clear_runtime_states()
@@ -494,19 +775,45 @@ class PipelineScheduleSingle(_PipelineSchedule):
         args_split, kwargs_split = self._split_inputs(args, kwargs)
 
         # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
+        targets_split = (
+            list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
+            if target is not None
+            else None
+        )
 
         # Run microbatches
-        self._step_microbatches(args_split, kwargs_split, targets_split, losses)
+        self._step_microbatches(
+            args_split,
+            kwargs_split,
+            targets_split,
+            losses,
+            return_outputs,
+            loss_kwargs=loss_kwargs,
+        )
 
         # Return merged results per original format
-        if self._stage.is_last:
+        if self._stage.is_last and return_outputs:
             return self._merge_outputs(self._stage.output_chunks)
         else:
             return None
+
+    def _get_pipeline_order(self) -> dict[int, list[_Action | None]] | None:
+        """
+        Returns the pipeline execution order as a schedule IR.
+
+        The returned IR is a dictionary mapping rank IDs to lists of actions.
+        Each action is either an _Action object representing computation to perform,
+        or None representing a deliberate idle step.
+
+        The None values are used to represent pipeline bubbles where a rank
+        must wait for dependencies from other ranks before proceeding. However
+        during execution, with  the _PipelineScheduleRuntime, these Nones are
+        skipped since the relevant communication (send/recv) will be scheduled and waited on.
+
+        Returns:
+            A dictionary mapping rank -> list of actions
+        """
+        return None
 
 
 class _ScheduleForwardOnly(PipelineScheduleSingle):
@@ -517,10 +824,12 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
 
     def _step_microbatches(
         self,
-        arg_mbs: Optional[List] = None,
-        kwarg_mbs: Optional[List] = None,
-        target_mbs: Optional[List] = None,
-        losses: Optional[List] = None,
+        arg_mbs: list | None = None,
+        kwarg_mbs: list | None = None,
+        target_mbs: list | None = None,
+        losses: list | None = None,
+        return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Run one iteration of the pipeline schedule
@@ -531,11 +840,11 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
             )
 
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        if not self._stage_initialized:
-            self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stage(arg_mbs[0], kwarg_mbs[0], maybe_first_target)
 
         # Delay send waits
-        fwd_sends_to_wait: List[dist.Work] = []
+        fwd_sends_to_wait: list[list[dist.Work]] = []
 
         # Run microbatches
         for i in range(self._n_microbatches):
@@ -543,7 +852,7 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
                 ops = self._stage.get_fwd_recv_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_recv")
                 for work in works.values():
-                    work.wait()
+                    _wait_batch_p2p(work)
 
                 self._stage.forward_one_chunk(i, arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
 
@@ -557,7 +866,7 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
         # This should not have performance impact because by the time the first
         # backward arrives all the forward sends should have been finished.
         for work in fwd_sends_to_wait:
-            work.wait()
+            _wait_batch_p2p(work)
 
 
 class ScheduleGPipe(PipelineScheduleSingle):
@@ -568,10 +877,12 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
     def _step_microbatches(
         self,
-        arg_mbs: Optional[List] = None,
-        kwarg_mbs: Optional[List] = None,
-        target_mbs: Optional[List] = None,
-        losses: Optional[List] = None,
+        arg_mbs: list | None = None,
+        kwarg_mbs: list | None = None,
+        target_mbs: list | None = None,
+        losses: list | None = None,
+        return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Run one iteration of the pipeline schedule with list of microbatches.
@@ -579,14 +890,16 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
         Args:
             microbatches: list of microbatch args.
+            return_outputs: whether to return the outputs from the last stage.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-
-        if not self._stage_initialized:
-            self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stage(
+            arg_mbs[0], kwarg_mbs[0], maybe_first_target, loss_kwargs
+        )
 
         # Delay send waits
-        fwd_sends_to_wait: List[dist.Work] = []
+        fwd_sends_to_wait: list[list[dist.Work]] = []
 
         # Run microbatches
         for i in range(self._n_microbatches):
@@ -594,9 +907,11 @@ class ScheduleGPipe(PipelineScheduleSingle):
                 ops = self._stage.get_fwd_recv_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_recv")
                 for work in works.values():
-                    work.wait()
+                    _wait_batch_p2p(work)
 
-                output = self._stage.forward_one_chunk(i, arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
+                output = self._stage.forward_one_chunk(
+                    i, arg_mbs[i], kwarg_mbs[i], save_forward_output=return_outputs
+                )  # type: ignore[index]
 
                 ops = self._stage.get_fwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
@@ -604,31 +919,29 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
             logger.debug("[%s] Forwarded microbatch %s", self._stage.stage_index, i)
 
-            self._maybe_compute_loss(self._stage, output, target_mbs, i)
+            self._maybe_compute_loss(self._stage, output, target_mbs, i, loss_kwargs)
 
         # Wait for all forward sends to finish
         # This should not have performance impact because by the time the first
         # backward arrives all the forward sends should have been finished.
         for work in fwd_sends_to_wait:
-            work.wait()
-
-        # No loss function, no need to run backward
-        if not self._has_backward:
-            return
+            _wait_batch_p2p(work)
 
         # Run backward
         # Delay send waits
-        bwd_sends_to_wait: List[dist.Work] = []
+        bwd_sends_to_wait: list[list[dist.Work]] = []
         for i in range(self._n_microbatches):
             with record_function(f"Backward {i}"):
                 ops = self._stage.get_bwd_recv_ops(i)
                 works = _sorted_batch_p2p(ops, desc="bwd_recv")
                 for work in works.values():
-                    work.wait()
+                    _wait_batch_p2p(work)
 
                 loss = self._maybe_get_loss(self._stage, i)
                 self._stage.backward_one_chunk(
-                    i, loss=loss, last_backward=i == self._n_microbatches - 1
+                    i,
+                    loss=loss,
+                    last_backward=i == self._n_microbatches - 1,
                 )
 
                 ops = self._stage.get_bwd_send_ops(i)
@@ -637,12 +950,46 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
             logger.debug("[%s] Backwarded microbatch %s", self._stage.stage_index, i)
 
-        # Return losses if there is a container passed in
-        self._update_losses(self._stage, losses)
-
         # Wait for all backward sends to finish
         for work in bwd_sends_to_wait:
-            work.wait()
+            _wait_batch_p2p(work)
+
+        # Update losses if there is a container passed in
+        self._update_losses(self._stage, losses)
+
+        self._stage.perform_reduce_grad(self._n_microbatches if self.scale_grads else 1)
+
+    def _get_pipeline_order(self) -> dict[int, list[_Action | None]] | None:
+        """
+        Returns the pipeline order for GPipe schedule.
+
+        See base method in PipelineScheduleSingle for details on the schedule IR format.
+        """
+        pipeline_order = {}
+        pp_group_size = self._num_stages
+
+        for rank in range(pp_group_size):
+            actions: list[_Action | None] = []
+
+            # 1. Initial delay based on rank position
+            warmup_delay = rank
+            actions.extend([None] * warmup_delay)
+
+            # 2. Forward passes for all microbatches
+            for mb_idx in range(self._n_microbatches):
+                actions.append(_Action(rank, _ComputationType.FORWARD, mb_idx))
+
+            # 3. Wait period before backward passes can begin
+            backward_delay = 3 * (pp_group_size - 1 - rank)
+            actions.extend([None] * backward_delay)
+
+            # 4. Backward passes for all microbatches
+            for mb_idx in range(self._n_microbatches):
+                actions.append(_Action(rank, _ComputationType.FULL_BACKWARD, mb_idx))
+
+            pipeline_order[rank] = _add_reduce_grad(actions, self._n_microbatches)
+
+        return pipeline_order  # type: ignore[return-value]
 
 
 class Schedule1F1B(PipelineScheduleSingle):
@@ -651,12 +998,39 @@ class Schedule1F1B(PipelineScheduleSingle):
     Will perform one forward and one backward on the microbatches in steady state.
     """
 
+    def __init__(
+        self,
+        stage: _PipelineStageBase,
+        n_microbatches: int,
+        loss_fn: Callable | None = None,
+        args_chunk_spec: tuple[TensorChunkSpec, ...] | None = None,
+        kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
+        output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
+        scale_grads: bool = True,
+    ):
+        super().__init__(
+            stage=stage,
+            n_microbatches=n_microbatches,
+            loss_fn=loss_fn,
+            args_chunk_spec=args_chunk_spec,
+            kwargs_chunk_spec=kwargs_chunk_spec,
+            output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
+        )
+        if n_microbatches < self._num_stages:
+            raise ValueError(
+                f"Number of microbatches ({n_microbatches}) must be greater than \
+or equal to the number of stages ({self._num_stages})."
+            )
+
     def _step_microbatches(
         self,
-        arg_mbs: Optional[List] = None,
-        kwarg_mbs: Optional[List] = None,
-        target_mbs: Optional[List] = None,
-        losses: Optional[List] = None,
+        arg_mbs: list | None = None,
+        kwarg_mbs: list | None = None,
+        target_mbs: list | None = None,
+        losses: list | None = None,
+        return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Run one iteration of the pipeline schedule with list of microbatches.
@@ -664,11 +1038,14 @@ class Schedule1F1B(PipelineScheduleSingle):
 
         Args:
             microbatches: list of microbatch args.
+            return_outputs: whether to return the outputs from the last stage.
+            loss_kwargs: extra keyword arguments forwarded to the loss function.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-
-        if not self._stage_initialized:
-            self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stage(
+            arg_mbs[0], kwarg_mbs[0], maybe_first_target, loss_kwargs
+        )
 
         # Last stage has 1 warmup, second-to-last 2 warmups, ...
         # first stage `num_stages` warmups
@@ -682,23 +1059,26 @@ class Schedule1F1B(PipelineScheduleSingle):
         bwd_mb_index = 0
 
         # Warmup phase
-        send_work = None
+        send_work: list[dist.Work] = []
         fwd_sends = []
         for _ in range(warmup_chunks):
             # Receive activations
             fwd_recvs = self._stage.get_fwd_recv_ops(fwd_mb_index)
-            if recv_work := _batch_p2p(fwd_recvs, desc="fwd_recv"):
-                recv_work.wait()
+            _wait_batch_p2p(_batch_p2p(fwd_recvs, desc="fwd_recv"))
 
             # Compute
-            output = self._stage.forward_one_chunk(fwd_mb_index, arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
+            output = self._stage.forward_one_chunk(
+                fwd_mb_index,
+                arg_mbs[fwd_mb_index],
+                kwarg_mbs[fwd_mb_index],
+                save_forward_output=return_outputs,
+            )  # type: ignore[index]
 
             # Clear previous chunk's forward sends (hopefully they have well
             # finished, otherwise, we are heavily communication bound, in which
             # case it doesn't create a lot of benefit to compute next chunk
             # eagerly either)
-            if send_work:
-                send_work.wait()
+            _wait_batch_p2p(send_work)
 
             # Send activations
             fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
@@ -706,10 +1086,12 @@ class Schedule1F1B(PipelineScheduleSingle):
                 # Safe to fire
                 send_work = _batch_p2p(fwd_sends, desc="fwd_send")
             # otherwise:
-            #   The last foward send is left for fuse with first 1B in 1B1F below
+            #   The last forward send is left for fuse with first 1B in 1B1F below
 
             # Compute loss
-            self._maybe_compute_loss(self._stage, output, target_mbs, fwd_mb_index)
+            self._maybe_compute_loss(
+                self._stage, output, target_mbs, fwd_mb_index, loss_kwargs
+            )
             fwd_mb_index += 1
 
         # Now we should have send ops left over, to be fused with first 1B of 1B1F phase below.
@@ -720,8 +1102,7 @@ class Schedule1F1B(PipelineScheduleSingle):
             bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
 
             # Now, we need to fire the fwd_sends and bwd_recvs together
-            if fuse_work := _batch_p2p(fwd_sends + bwd_recvs, desc="fwd_send_bwd_recv"):
-                fuse_work.wait()
+            _wait_batch_p2p(_batch_p2p(fwd_sends + bwd_recvs, desc="fwd_send_bwd_recv"))
 
             # Backward one chunk
             loss = self._maybe_get_loss(self._stage, bwd_mb_index)
@@ -743,14 +1124,20 @@ class Schedule1F1B(PipelineScheduleSingle):
             fwd_recvs = self._stage.get_fwd_recv_ops(fwd_mb_index)
 
             # Fuse it with bwd_sends above
-            if fuse_work := _batch_p2p(bwd_sends + fwd_recvs, desc="bwd_send_fwd_recv"):
-                fuse_work.wait()
+            _wait_batch_p2p(_batch_p2p(bwd_sends + fwd_recvs, desc="bwd_send_fwd_recv"))
 
             # Now do the fwd
-            output = self._stage.forward_one_chunk(fwd_mb_index, arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
+            output = self._stage.forward_one_chunk(
+                fwd_mb_index,
+                arg_mbs[fwd_mb_index],
+                kwarg_mbs[fwd_mb_index],
+                save_forward_output=return_outputs,
+            )  # type: ignore[index]
 
             # Compute loss
-            self._maybe_compute_loss(self._stage, output, target_mbs, fwd_mb_index)
+            self._maybe_compute_loss(
+                self._stage, output, target_mbs, fwd_mb_index, loss_kwargs
+            )
 
             # Get the fwd send ops, but don't fire, leave it for the next iter (wrap-around)
             fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
@@ -763,8 +1150,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         while bwd_mb_index < self._n_microbatches:
             # prepare bwd recv ops
             bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
-            if recv_work := _batch_p2p(bwd_recvs, desc="bwd_recv"):
-                recv_work.wait()
+            _wait_batch_p2p(_batch_p2p(bwd_recvs, desc="bwd_recv"))
 
             # Backward one chunk
             loss = self._maybe_get_loss(self._stage, bwd_mb_index)
@@ -775,8 +1161,7 @@ class Schedule1F1B(PipelineScheduleSingle):
             )
 
             # Clear previous chunk's backward sends (hopefully they have well finished)
-            if send_work:
-                send_work.wait()
+            _wait_batch_p2p(send_work)
 
             # Get the bwd send ops, fire it
             bwd_sends = self._stage.get_bwd_send_ops(bwd_mb_index)
@@ -784,21 +1169,127 @@ class Schedule1F1B(PipelineScheduleSingle):
             bwd_mb_index += 1
 
         # Wait for the last backward send to finish
-        if send_work:
-            send_work.wait()
+        _wait_batch_p2p(send_work)
 
         # Return losses if there is a container passed in
         self._update_losses(self._stage, losses)
 
+        self._stage.perform_reduce_grad(self._n_microbatches if self.scale_grads else 1)
+
+    def _get_pipeline_order(self) -> dict[int, list[_Action | None]] | None:
+        """
+        Returns the pipeline order for 1F1B schedule.
+
+        See base method in PipelineScheduleSingle for details on the schedule IR format.
+        """
+        pipeline_order = {}
+        pp_group_size = self._num_stages
+
+        for rank in range(pp_group_size):
+            actions: list[_Action | None] = []
+
+            # 1. Warmup phase: initial delay based on rank
+            actions.extend([None] * rank)
+
+            # 2. Initial forward passes before 1F1B phase
+            num_forward = (pp_group_size - 1) - rank
+            forward_mb = 0
+            for i in range(num_forward):
+                actions.append(_Action(rank, _ComputationType.FORWARD, i))
+                forward_mb = i
+
+            # 3. Wait for backward to be ready
+            wait_for_1f1b = max(0, 2 * (pp_group_size - 1 - rank))
+            actions.extend([None] * wait_for_1f1b)
+
+            # 4. 1F1B steady state phase
+            backward_mb = 0
+            remaining_forward = self._n_microbatches - num_forward
+
+            while remaining_forward > 0:
+                # One forward
+                forward_mb += 1
+                actions.append(_Action(rank, _ComputationType.FORWARD, forward_mb))
+                remaining_forward -= 1
+
+                # One backward
+                actions.append(
+                    _Action(rank, _ComputationType.FULL_BACKWARD, backward_mb)
+                )
+                backward_mb += 1
+
+            # 5. Cooldown phase: remaining backward passes
+            remaining_backward = self._n_microbatches - backward_mb
+
+            while remaining_backward > 0:
+                # Add None and backward actions in alternating pattern
+                # based on distance from the last stage
+                if (pp_group_size - rank) > 0:
+                    actions.append(None)
+                    # Decrement the wait counter only if we still have backward passes to do
+                    if remaining_backward > 0:
+                        actions.append(
+                            _Action(rank, _ComputationType.FULL_BACKWARD, backward_mb)
+                        )
+                        backward_mb += 1
+                        remaining_backward -= 1
+                else:
+                    # If we're at the last stage, just add backward actions without None
+                    actions.append(
+                        _Action(rank, _ComputationType.FULL_BACKWARD, backward_mb)
+                    )
+                    backward_mb += 1
+                    remaining_backward -= 1
+
+            pipeline_order[rank] = _add_reduce_grad(actions, self._n_microbatches)
+        return pipeline_order
+
+
+def _requires_reduce_grad(action_type: _ComputationType) -> bool:
+    return action_type in (W, B)
+
+
+def _add_reduce_grad(
+    actions: list[_Action | None], n_microbatches: int
+) -> list[_Action | None]:
+    """
+    REDUCE_GRAD refers to joint across minibatches grad reduction.
+    reduce_grad frees memory and we want to schedule it just after the last "backward"-like stage.
+    """
+    actions_with_reduce_grad: list[_Action | None] = []
+    cnt: dict[int, int] = defaultdict(int)
+
+    def _leaf_action(a, to_schedule):
+        if _requires_reduce_grad(a.computation_type):
+            stage_index = a.stage_index
+            cnt[stage_index] += 1
+            if cnt[stage_index] == n_microbatches:
+                to_schedule.append(stage_index)
+
+    for a in actions:
+        if a is None:
+            continue
+        actions_with_reduce_grad.append(a)
+        schedule_reduce_grad_stage_idxs: list[int] = []
+        if a.computation_type == OVERLAP_F_B and a.sub_actions is not None:
+            for sub_action in a.sub_actions:
+                _leaf_action(sub_action, schedule_reduce_grad_stage_idxs)
+        else:
+            _leaf_action(a, schedule_reduce_grad_stage_idxs)
+
+        for stage_idx in schedule_reduce_grad_stage_idxs:
+            actions_with_reduce_grad.append(_Action(stage_idx, REDUCE_GRAD, None))
+    return actions_with_reduce_grad
+
 
 def _add_unshard_reshard(
-    compute_actions: List[Optional[_Action]],
+    compute_actions: list[_Action | None],
     max_active_stages: int = 3,
-) -> List[_Action]:
-    """Given a basic schedule involving only compute actions (F,B,W), add UNSHARD/RESHARD actions for FSDP.
+) -> list[_Action]:
+    """Given a basic schedule involving only compute actions (F,B,W,OVERLAP_F_B), add UNSHARD/RESHARD actions for FSDP.
 
     UNSHARD refers to fetching the full contents of an FSDP-sharded layer, requiring an all-gather operation.
-    RESHARD does the opposite, releasing memory (but doing no commmunication)
+    RESHARD does the opposite, releasing memory (but doing no communication)
 
     We abandon the "timestep lock"  during lowering
 
@@ -807,23 +1298,32 @@ def _add_unshard_reshard(
     (to account for having one f and one b active, and something else prefetching?)
     """
 
-    def next_stage_indices(
-        count: int, next_actions: List[Optional[_Action]]
-    ) -> List[int]:
+    def next_stage_indices(count: int, next_actions: list[_Action | None]) -> list[int]:
         """Remove duplicates (same stage, different microbatch), find next 'count' stages that will do compute."""
-        seen: Set[int] = set()
-        ret: List[int] = []
+        seen: set[int] = set()
+        ret: list[int] = []
 
         for a in next_actions:
-            if a is not None and a.stage_index not in seen:
-                seen.add(a.stage_index)
-                ret.append(a.stage_index)
-                if len(ret) == count:
-                    break
+            if a is not None:
+                # Handle OVERLAP_F_B actions by checking their sub_actions
+                if a.computation_type == OVERLAP_F_B and a.sub_actions is not None:
+                    for sub_action in a.sub_actions:
+                        if sub_action.stage_index not in seen:
+                            seen.add(sub_action.stage_index)
+                            ret.append(sub_action.stage_index)
+                    if len(ret) >= count:
+                        break
+                else:
+                    # Regular action
+                    if a.stage_index not in seen:
+                        seen.add(a.stage_index)
+                        ret.append(a.stage_index)
+                        if len(ret) == count:
+                            break
         return ret
 
-    active_stages: Set[int] = set()
-    fsdp_aware_actions: List[_Action] = []
+    active_stages: set[int] = set()
+    fsdp_aware_actions: list[_Action] = []
 
     def _unshard(stage_index: int):
         active_stages.add(stage_index)
@@ -858,12 +1358,16 @@ def _add_unshard_reshard(
             _unshard(stage)
         fsdp_aware_actions.append(action)
 
+    # Reshard all remaining active stages after processing all operations
+    for stage in list(active_stages):
+        _reshard(stage)
+
     return fsdp_aware_actions
 
 
 def _merge_bw(
-    compute_actions: List[Optional[_Action]],
-) -> List[_Action]:
+    compute_actions: list[_Action | None],
+) -> list[_Action]:
     """Given a basic schedule involving only compute actions (F,I,W), merge adjacent I and W ops into B ops.
     (note: I = BACKWARD_INPUT, W = BACKWARD_WEIGHT, B = FULL_BACKWARD)
 
@@ -876,9 +1380,12 @@ def _merge_bw(
         if action is None:
             continue
 
-        while len(compute_actions) and (next_action := compute_actions[0]) is None:
-            # remove any None actions between 'action' and 'next_action'
+        # Remove any None actions and find the next non-None action
+        while len(compute_actions) and compute_actions[0] is None:
             compute_actions.pop(0)
+
+        # Get the next action if it exists
+        next_action = compute_actions[0] if len(compute_actions) > 0 else None
 
         if (
             action.computation_type == BACKWARD_INPUT
@@ -897,12 +1404,18 @@ def _merge_bw(
 
 
 def _add_send_recv(
-    compute_actions: Dict[int, List[_Action]],
+    compute_actions: dict[int, list[_Action]],
     stage_to_rank: Callable[[int], int],
     num_stages: int,
-) -> Dict[int, List[_Action]]:
-    comm_actions: Dict[int, List[_Action]] = {rank: [] for rank in compute_actions}
-    prev_actions: Dict[int, Set[_Action]] = {rank: set() for rank in compute_actions}
+) -> dict[int, list[_Action]]:
+    """
+    Transforms a compute-only schedule into a complete schedule with communication actions.
+
+    For actions with sub-actions (OVERLAP_F_B) we ensure that all the subactions have been
+    computed and the communication is ready
+    """
+    comm_actions: dict[int, list[_Action]] = {rank: [] for rank in compute_actions}
+    prev_actions: dict[int, set[_Action]] = {rank: set() for rank in compute_actions}
 
     def _has_comms(action: _Action) -> bool:
         if action.computation_type == F:
@@ -915,8 +1428,9 @@ def _add_send_recv(
             ) != stage_to_rank(action.stage_index)
         return False
 
-    def _get_comms(action: _Action) -> Tuple[_Action, _Action]:
-        assert _has_comms(action), f"{action} is not a valid comm action"
+    def _get_comms(action: _Action) -> tuple[_Action, _Action]:
+        if not _has_comms(action):
+            raise AssertionError(f"{action} is not a valid comm action")
         stage_idx = action.stage_index
         ctype = action.computation_type
         mb_idx = action.microbatch_index
@@ -925,16 +1439,14 @@ def _add_send_recv(
         recv = _Action(recv_stage_idx, RECV_F if ctype == F else RECV_B, mb_idx)
         return send, recv
 
-    def _ready_to_schedule(
-        action: Optional[_Action], prev_actions: Set[_Action]
-    ) -> bool:
+    def _ready_to_schedule(action: _Action | None, prev_actions: set[_Action]) -> bool:
         """We don't put our own recv ops in the schedule, we let a sender on another rank put our recv ops in place.
         This helps ensure a sane (non-hanging) ordering of sends and recvs.
         But it also means we might not be able to schedule our next compute action yet.
         """
         if action is None:
             return True
-        elif action.computation_type == F and not action.stage_index == 0:
+        elif action.computation_type == F and action.stage_index != 0:
             if (
                 _Action(action.stage_index, RECV_F, action.microbatch_index)
                 in prev_actions
@@ -948,7 +1460,7 @@ def _add_send_recv(
             return False
         elif (
             action.computation_type in (BACKWARD_INPUT, FULL_BACKWARD)
-            and not action.stage_index == num_stages - 1
+            and action.stage_index != num_stages - 1
         ):
             if (
                 _Action(action.stage_index, RECV_B, action.microbatch_index)
@@ -973,49 +1485,154 @@ def _add_send_recv(
         progress = False
         # go in order of ranks even if dict keys aren't ordered
         for rank in sorted(compute_actions):
-            assert (
-                len(compute_actions[rank]) > 0
-            ), f"{rank=}, {len(compute_actions[rank])=}"
+            if not (len(compute_actions[rank]) > 0):
+                raise AssertionError(f"{rank=}, {len(compute_actions[rank])=}")
             action = compute_actions[rank][0]
+            # handle case where parent action (e.g. OVERLAP_F_B) can be comprised of subactions
+            if action is not None and action.sub_actions is not None:
+                all_actions = action.sub_actions
+            else:
+                all_actions = (action,)
 
-            if not _ready_to_schedule(action, prev_actions[rank]):
+            if not all(_ready_to_schedule(a, prev_actions[rank]) for a in all_actions):
                 continue
 
+            # The action's dependencies are satisfied, so add to schedule
             if action is not None:
                 comm_actions[rank].append(action)
-                prev_actions[rank].add(action)
-                if _has_comms(action):
-                    send, recv = _get_comms(action)
-                    # TODO we can avoid send/recv if the 2 stages are on the same rank.
-                    # should we avoid that in the runtime or here?
-                    comm_actions[rank].append(send)
-                    prev_actions[rank].add(send)
-                    comm_actions[stage_to_rank(recv.stage_index)].append(recv)
-                    prev_actions[stage_to_rank(recv.stage_index)].add(recv)
+                for a in all_actions:
+                    prev_actions[rank].add(a)
+                    if _has_comms(a):
+                        send, recv = _get_comms(a)
+                        # TODO we can avoid send/recv if the 2 stages are on the same rank.
+                        # should we avoid that in the runtime or here?
+                        comm_actions[rank].append(send)
+                        prev_actions[rank].add(send)
+                        comm_actions[stage_to_rank(recv.stage_index)].append(recv)
+                        prev_actions[stage_to_rank(recv.stage_index)].add(recv)
 
             compute_actions[rank].pop(0)
             if len(compute_actions[rank]) == 0:
                 del compute_actions[rank]
             progress = True
-        assert progress, "Malformed compute schedule, can't schedule sends/recvs"
+        if not progress:
+            raise AssertionError(
+                "Malformed compute schedule, can't schedule sends/recvs"
+            )
     return comm_actions
 
 
+def _defer_recv_ops(
+    actions: dict[int, list[_Action]],
+    stage_to_rank: Callable[[int], int],
+) -> dict[int, list[_Action]]:
+    """
+    Defers RECV operations to reduce interference with unrelated compute ops,
+    while maintaining deadlock-safe ordering via rank-parity P2P ordering.
+
+    By default, the schedule places RECV ops as early as possible (ASAP) to overlap
+    P2P communication with computation. However, on some platforms (e.g., AMD ROCm),
+    a pending RECV can block unrelated compute ops that also use the communication
+    fabric (e.g., FSDP allgather inside a forward pass), creating pipeline bubbles.
+
+    This function defers each RECV to as late as possible, subject to:
+      1. A RECV must appear before the compute op that consumes its data.
+      2. Deadlock avoidance via rank-parity ordering (see pytorch/pytorch#172668):
+         - When current rank > peer rank: SEND before RECV is safe, so deferred
+           RECVs from that peer are NOT flushed before SENDs to that peer.
+         - When current rank < peer rank: RECV before SEND is required, so
+           deferred RECVs from that peer ARE flushed before SENDs to that peer.
+
+    This breaks circular waits: the lower-ranked side always posts RECV first,
+    providing the matching target for the higher-ranked side's SEND.
+    """
+    RECV_F = _ComputationType.RECV_F
+    RECV_B = _ComputationType.RECV_B
+    SEND_F = _ComputationType.SEND_F
+    SEND_B = _ComputationType.SEND_B
+
+    def _recv_peer_rank(action: _Action) -> int:
+        if action.computation_type == RECV_F:
+            return stage_to_rank(action.stage_index - 1)
+        else:
+            return stage_to_rank(action.stage_index + 1)
+
+    def _send_peer_rank(action: _Action) -> int:
+        if action.computation_type == SEND_F:
+            return stage_to_rank(action.stage_index + 1)
+        else:
+            return stage_to_rank(action.stage_index - 1)
+
+    result: dict[int, list[_Action]] = {}
+    for rank, action_list in actions.items():
+        new_actions: list[_Action] = []
+        deferred: dict[tuple[int, _ComputationType, int | None], _Action] = {}
+
+        for action in action_list:
+            if action.computation_type in (RECV_F, RECV_B):
+                key = (
+                    action.stage_index,
+                    action.computation_type,
+                    action.microbatch_index,
+                )
+                deferred[key] = action
+                continue
+
+            if action.computation_type in (SEND_F, SEND_B):
+                peer = _send_peer_rank(action)
+                # Rank-parity rule: only flush RECVs when rank < peer
+                # (lower rank does RECV before SEND)
+                if rank < peer:
+                    to_flush = [
+                        k for k, v in deferred.items() if _recv_peer_rank(v) == peer
+                    ]
+                    for key in to_flush:
+                        new_actions.append(deferred.pop(key))
+
+            # Constraint 1: before a compute op, flush the RECV it consumes
+            consumers = (
+                action.sub_actions if action.sub_actions is not None else (action,)
+            )
+            for sub in consumers:
+                if sub.computation_type == FORWARD:
+                    key = (sub.stage_index, RECV_F, sub.microbatch_index)
+                    if key in deferred:
+                        new_actions.append(deferred.pop(key))
+                elif sub.computation_type in (FULL_BACKWARD, BACKWARD_INPUT):
+                    key = (sub.stage_index, RECV_B, sub.microbatch_index)
+                    if key in deferred:
+                        new_actions.append(deferred.pop(key))
+
+            new_actions.append(action)
+
+        if deferred:
+            raise AssertionError(
+                f"Malformed input schedule on rank {rank}: leftover RECV ops "
+                f"with no consumer found: {list(deferred.values())}. "
+                "Every RECV must be consumed by a downstream compute op."
+            )
+
+        result[rank] = new_actions
+    return result
+
+
 def _validate_schedule(
-    actions: Dict[int, List[Optional[_Action]]],
+    actions: dict[int, list[_Action | None]],
     pp_group_size: int,
     num_stages: int,
     num_microbatches: int,
-):
-    assert (
-        len(actions) == pp_group_size
-    ), f"Schedule has incorrect number of ranks - expected {pp_group_size}, actual {len(actions)}"
+) -> dict[int, int]:
+    if not (len(actions) == pp_group_size):
+        raise AssertionError(
+            f"Schedule has incorrect number of ranks - expected {pp_group_size}, actual {len(actions)}"
+        )
     for rank in range(pp_group_size):
-        assert rank in actions, f"Schedule is missing actions for rank {rank}"
+        if rank not in actions:
+            raise AssertionError(f"Schedule is missing actions for rank {rank}")
 
     # We will count all the actions per stage and ensure they happen in a valid order
     # (e.g. F before (B, I) before W for a given microbatch)
-    stage_actions: Dict[int, Dict[_ComputationType, Set]] = {
+    stage_actions: dict[int, dict[_ComputationType, set]] = {
         stage_id: {
             F: set(),
             B: set(),
@@ -1024,33 +1641,85 @@ def _validate_schedule(
         }
         for stage_id in range(num_stages)
     }
+    stage_index_to_rank_mapping = {}
+
+    def _process_action(action: _Action, rank: int, step: int):
+        """Process a single action and update stage_actions and stage_index_to_rank_mapping"""
+        s_id = action.stage_index
+        ctype = action.computation_type
+        mb_id = action.microbatch_index
+
+        if ctype == F:
+            stage_actions[s_id][F].add(mb_id)
+        elif ctype == B:
+            if mb_id not in stage_actions[s_id][F]:
+                error_msg = (
+                    f"Rank {rank}, step {step}: Running Full Backward for stage {s_id}, "
+                    f"microbatch {mb_id} without first running Forward"
+                )
+                formatted_schedule = _format_pipeline_order(
+                    actions, error_step_number=step
+                )
+                full_error_msg = (
+                    f"{error_msg}\n\nFull pipeline schedule:\n{formatted_schedule}"
+                )
+                raise AssertionError(full_error_msg)
+            stage_actions[s_id][B].add(mb_id)
+        elif ctype == I:
+            if mb_id not in stage_actions[s_id][F]:
+                error_msg = (
+                    f"Rank {rank}, step {step}: Running Backward Input for stage {s_id}, "
+                    f"microbatch {mb_id} without first running Forward"
+                )
+                formatted_schedule = _format_pipeline_order(
+                    actions, error_step_number=step
+                )
+                full_error_msg = (
+                    f"{error_msg}\n\nFull pipeline schedule:\n{formatted_schedule}"
+                )
+                raise AssertionError(full_error_msg)
+            stage_actions[s_id][I].add(mb_id)
+        elif ctype == W:
+            if mb_id not in stage_actions[s_id][I]:
+                error_msg = (
+                    f"Rank {rank}, step {step}: Running Backward Weight for stage {s_id}, "
+                    f"microbatch {mb_id} without first running Backward Input"
+                )
+                formatted_schedule = _format_pipeline_order(
+                    actions, error_step_number=step
+                )
+                full_error_msg = (
+                    f"{error_msg}\n\nFull pipeline schedule:\n{formatted_schedule}"
+                )
+                raise AssertionError(full_error_msg)
+            stage_actions[s_id][W].add(mb_id)
+
+        if s_id not in stage_index_to_rank_mapping:
+            stage_index_to_rank_mapping[s_id] = rank
+        else:
+            existing_rank = stage_index_to_rank_mapping[s_id]
+            if not (rank == existing_rank):
+                raise AssertionError(
+                    f"Rank {rank}, step {step}: Stage {s_id} is assigned to both rank {rank} and rank {existing_rank}"
+                )
+
     for rank in actions:
-        for action in actions[rank]:
+        for step, action in enumerate(actions[rank]):
             if action is None:
                 continue
-            assert isinstance(
-                action, _Action
-            ), f"Got an invalid action: {action}, expected instance of _Action"
-            s_id = action.stage_index
-            ctype = action.computation_type
-            mb_id = action.microbatch_index
-            if ctype == F:
-                stage_actions[s_id][F].add(mb_id)
-            elif ctype == B:
-                assert (
-                    mb_id in stage_actions[s_id][F]
-                ), f"Running Full Backward for stage {s_id}, microbatch {mb_id} without first running Forward"
-                stage_actions[s_id][B].add(mb_id)
-            elif ctype == I:
-                assert (
-                    mb_id in stage_actions[s_id][F]
-                ), f"Running Backward Input for stage {s_id}, microbatch {mb_id} without first running Forward"
-                stage_actions[s_id][I].add(mb_id)
-            elif ctype == W:
-                assert (
-                    mb_id in stage_actions[s_id][I]
-                ), f"Running Backward Weight for stage {s_id}, microbatch {mb_id} without first running Backward Input"
-                stage_actions[s_id][W].add(mb_id)
+            if not isinstance(action, _Action):
+                raise AssertionError(
+                    f"Rank {rank}, step {step}: Got an invalid action: {action}, expected instance of _Action"
+                )
+
+            # Check if action has sub_actions
+            if action.sub_actions is not None:
+                # Process each sub_action instead of the main action
+                for sub_action in action.sub_actions:
+                    _process_action(sub_action, rank, step)
+            else:
+                # Process the main action normally
+                _process_action(action, rank, step)
 
     for s_id in stage_actions:
         f_mb = len(stage_actions[s_id][F])
@@ -1058,32 +1727,46 @@ def _validate_schedule(
         i_mb = len(stage_actions[s_id][I])
         w_mb = len(stage_actions[s_id][W])
 
-        assert (
-            f_mb == num_microbatches
-        ), f"Got {f_mb} {F} microbatches for stage {s_id}, expected {num_microbatches}"
+        if not (f_mb == num_microbatches):
+            raise AssertionError(
+                f"Got {f_mb} {F} microbatches for stage {s_id}, expected {num_microbatches}"
+            )
 
-        assert (
-            b_mb + (i_mb + w_mb) // 2 == num_microbatches
-        ), f"Invalid backward microbatches for stage {s_id}: expected {num_microbatches} total backwards, \
+        if not (i_mb == w_mb):
+            raise AssertionError(
+                f"Invalid backward microbatches for stage {s_id}: I and W must have equal counts, \
+            but got I={i_mb}, W={w_mb}"
+            )
+
+        if not (b_mb + (i_mb + w_mb) // 2 == num_microbatches):
+            raise AssertionError(
+                f"Invalid backward microbatches for stage {s_id}: expected {num_microbatches} total backwards, \
             but got B={b_mb}, I={i_mb}, W={w_mb}"
+            )
+    return stage_index_to_rank_mapping
 
 
 class PipelineScheduleMulti(_PipelineSchedule):
     """
     Base class for multi-stage schedules.
     Implements the `step` method.
+
+    Gradients are scaled by num_microbatches depending on the `scale_grads` argument, defaulting to True.  This setting
+    should match the configuration of your loss_fn, which may either average losses (scale_grads=True)
+    or sum losses (scale_grads=False).
     """
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
-        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-        stage_index_to_group_rank: Optional[Dict[int, int]] = None,
-        use_full_backward: Optional[bool] = None,
+        loss_fn: Callable | None = None,
+        args_chunk_spec: tuple[TensorChunkSpec, ...] | None = None,
+        kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
+        output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
+        use_full_backward: bool | None = None,
+        scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
     ):
         # Init parent
         super().__init__(
@@ -1092,6 +1775,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
         )
         # Self attributes
         self._stages = stages
@@ -1099,22 +1783,26 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self.pp_group_size = stages[0].group_size
         self.rank = stages[0].group_rank
         # Set the pipeline stage states
-        if stage_index_to_group_rank is not None:
-            for stage in self._stages:
-                stage.stage_index_to_group_rank = stage_index_to_group_rank
-        self.stage_index_to_group_rank = stages[0].stage_index_to_group_rank
-
-        # Set the same has_backward flag for stage object
+        self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
+            self.pp_group_size, self._num_stages
+        )
         for stage in self._stages:
-            stage.has_backward = self._has_backward
-        self._stages_initialized = False
+            stage.stage_index_to_group_rank = self.stage_index_to_group_rank
+
+        self._stages_forward_initialized = False
+        self._stages_backward_initialized = False
 
         # avoid putting a reference to 'self' inside the lambda, it creates a ref cycle
         has_loss: bool = self._loss_fn is not None
         self._should_compute_loss = lambda stage: stage.is_last and has_loss
 
         # This will be set during init of derived schedules
-        self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
+        self.pipeline_order: dict[int, list[_Action | None]] = {}
+
+        # When using a custom backward function, we may or may not need autograd to be used
+        # for the backward pass. This flag is used to determine whether or torch.is_grad_enabled()
+        # check should be performed before the step function.
+        self._backward_requires_autograd = backward_requires_autograd
 
         if use_full_backward is not None:
             logger.warning(
@@ -1122,23 +1810,98 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 "Simply stop passing it, and everything should still work fine."
             )
 
-    def _initialize_stages(self, args: Tuple[Any, ...], kwargs):
-        # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
-        # or real value (if this stage and next stage are on the same device)
-        next_stage_args: Tuple[Any, ...] = tuple()
-        for stage in self._stages:
-            if stage.is_first:
-                next_stage_args = stage._prepare_forward_infra(
-                    self._n_microbatches, args, kwargs
-                )
-            else:
-                next_stage_args = stage._prepare_forward_infra(
-                    self._n_microbatches, next_stage_args, kwargs
+    def _initialize_stages(
+        self, args: tuple[Any, ...], kwargs, target=None, loss_kwargs=None
+    ):
+        reinit_for_mode_switch = self._stages_forward_initialized and (
+            self._has_backward != self._stages_backward_initialized
+        )
+        forward_initialized_before = self._stages_forward_initialized
+        (
+            self._stages_forward_initialized,
+            self._stages_backward_initialized,
+        ) = self._initialize_pp_stages(
+            self._stages,
+            args,
+            kwargs,
+            target,
+            self._stages_forward_initialized,
+            self._stages_backward_initialized,
+            loss_kwargs=loss_kwargs,
+        )
+
+        if self._stages_forward_initialized and (
+            not forward_initialized_before or reinit_for_mode_switch
+        ):
+            self._validate_adjacent_stage_communication()
+
+    def _validate_adjacent_stage_communication(self) -> None:
+        """Validate that stage communication follows adjacent-stage topology only."""
+
+        def _check_stage_indices(
+            stage_idx: int,
+            direction: str,
+            actual_stage_indices: set[int],
+            expected_stage_indices: set[int],
+        ) -> None:
+            non_adjacent_stage_indices = actual_stage_indices - expected_stage_indices
+            if non_adjacent_stage_indices:
+                raise RuntimeError(
+                    "PipelineScheduleMulti only supports adjacent-stage "
+                    f"communication, but stage {stage_idx} has {direction} "
+                    f"stages {sorted(actual_stage_indices)} with "
+                    f"non-adjacent stages {sorted(non_adjacent_stage_indices)} "
+                    f"(allowed adjacent stages: "
+                    f"{sorted(expected_stage_indices)}). This commonly "
+                    "indicates skip connections, which are unsupported in "
+                    "this schedule runtime."
                 )
 
-            if self._has_backward:
-                stage._prepare_backward_infra(self._n_microbatches)
-        self._stages_initialized = True
+        for stage in self._stages:
+            stage_idx = stage.stage_index
+            actual_fwd_recv_sources: set[int] = {
+                info.source
+                for info in stage.args_recv_info[0]
+                if isinstance(info, _RecvInfo) and info.source is not None
+            }
+            expected_fwd_recv_sources = set() if stage.is_first else {stage_idx - 1}
+            _check_stage_indices(
+                stage_idx,
+                "forward recv",
+                actual_fwd_recv_sources,
+                expected_fwd_recv_sources,
+            )
+
+            # act_send_info is keyed by output index (not microbatch index),
+            # so .values() yields per-output destination lists.
+            actual_fwd_send_dests: set[int] = {
+                dst
+                for dsts in stage.act_send_info.values()
+                for dst in dsts
+                if dst is not None
+            }
+            expected_fwd_send_dests = set() if stage.is_last else {stage_idx + 1}
+            _check_stage_indices(
+                stage_idx,
+                "forward send",
+                actual_fwd_send_dests,
+                expected_fwd_send_dests,
+            )
+
+    def _validate_and_set_stage_mapping(
+        self, actions: dict[int, list[_Action | None]]
+    ) -> None:
+        """
+        Allocates the stage index to rank mapping which is needed for communication
+        """
+        self.stage_index_to_group_rank = _validate_schedule(
+            actions,
+            self.pp_group_size,
+            self._num_stages,
+            self._n_microbatches,
+        )
+        for stage in self._stages:
+            stage.stage_index_to_group_rank = self.stage_index_to_group_rank
 
     def _dump_csv(self, filename):
         """Dump a CSV representation of the schedule into a file with the provided filename."""
@@ -1147,25 +1910,36 @@ class PipelineScheduleMulti(_PipelineSchedule):
             for rank in self.pipeline_order:
                 writer.writerow(self.pipeline_order[rank])
 
-    def _load_csv(self, filename, format="compute_only"):
+    def _load_csv(
+        self,
+        filename: str,
+        format: Literal["compute_only", "compute_comms"] = "compute_only",
+    ):
         """Load a CSV representation of the schedule from a file with the provided filename.
         This API will most likely get renamed/refactored so is marked as internal for now.
 
-        format must be "compute_only" for PipelineScheduleMulti
+        format must be "compute_only" for PipelineScheduleMulti.
         """
-        assert format == "compute_only"
+        if format != "compute_only":
+            raise AssertionError(f'format must be "compute_only", got {format}')
         with open(filename, newline="") as csvfile:
             reader = csv.reader(csvfile)
             for rank, row in enumerate(reader):
                 self.pipeline_order[rank] = [_Action.from_str(s) for s in row]
-        _validate_schedule(
-            self.pipeline_order,
-            self.pp_group_size,
-            self._num_stages,
-            self._n_microbatches,
-        )
 
-    def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
+        # Validates the order of the pipeline actions and infers the stage_to_rank_mapping.
+        # This will overwrite the default stage_to_rank_mapping created in the constructor
+        self._validate_and_set_stage_mapping(self.pipeline_order)
+
+    def step(
+        self,
+        *args,
+        target=None,
+        losses: list | None = None,
+        return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
+        **kwargs,
+    ):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
         Will chunk the input into microbatches automatically, and go through the
@@ -1175,7 +1949,24 @@ class PipelineScheduleMulti(_PipelineSchedule):
         kwargs: keyword arguments to the model (as in non-pipeline case).
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
+        return_outputs: whether to return the outputs from the last stage.
+        loss_kwargs: extra keyword arguments forwarded to the loss function.
         """
+        if (
+            self._has_backward
+            and self._backward_requires_autograd
+            and not torch.is_grad_enabled()
+        ):
+            raise RuntimeError(
+                "step() requires gradients to be enabled for backward computation; "
+                "it should not be used under torch.no_grad() context. "
+                "Please call eval() instead."
+            )
+
+        # Set the same has_backward flag for stage object
+        for stage in self._stages:
+            stage.has_backward = self._has_backward
+
         # Clean per iteration
         for stage in self._stages:
             stage.clear_runtime_states()
@@ -1184,27 +1975,37 @@ class PipelineScheduleMulti(_PipelineSchedule):
         args_split, kwargs_split = self._split_inputs(args, kwargs)
 
         # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
+        targets_split = (
+            list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
+            if target is not None
+            else None
+        )
 
         # Run microbatches
-        self._step_microbatches(args_split, kwargs_split, targets_split, losses)
+        self._step_microbatches(
+            args_split,
+            kwargs_split,
+            targets_split,
+            losses,
+            return_outputs,
+            loss_kwargs=loss_kwargs,
+        )
 
         # Return merged results per original format
         for stage in self._stages:
-            if stage.is_last:
+            if stage.is_last and return_outputs:
                 return self._merge_outputs(stage.output_chunks)
-        # Does not contain the last stage
+        # Does not contain the last stage or we do not return output chunks
         return None
 
     def _step_microbatches(
         self,
-        arg_mbs: Optional[List] = None,
-        kwarg_mbs: Optional[List] = None,
-        target_mbs: Optional[List] = None,
-        losses: Optional[List] = None,
+        arg_mbs: list | None = None,
+        kwarg_mbs: list | None = None,
+        target_mbs: list | None = None,
+        losses: list | None = None,
+        return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Operate on the microbatches for looped schedules (multiple stages on each rank).
@@ -1213,21 +2014,22 @@ class PipelineScheduleMulti(_PipelineSchedule):
         not support models with skip connections.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-
-        if not self._stages_initialized:
-            self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stages(
+            arg_mbs[0], kwarg_mbs[0], maybe_first_target, loss_kwargs
+        )
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
-        stage_index_to_stage: Dict[int, _PipelineStageBase] = {
+        stage_index_to_stage: dict[int, _PipelineStageBase] = {
             stage.stage_index: stage for stage in self._stages
         }
 
         # determine prev_rank and next_rank based on which ranks are next to
         # the stages in the pipeline_order
-        all_prev_ranks: Set[int] = set()
-        all_next_ranks: Set[int] = set()
-        for stage_index in stage_index_to_stage.keys():
+        all_prev_ranks: set[int] = set()
+        all_next_ranks: set[int] = set()
+        for stage_index in stage_index_to_stage:
             # TODO: assumption that stages only communicate from distances of +1/-1 (no skip connections)
             if stage_index > 0:
                 all_prev_ranks.add(self.stage_index_to_group_rank[stage_index - 1])
@@ -1237,34 +2039,48 @@ class PipelineScheduleMulti(_PipelineSchedule):
         backward_counter: Counter[int] = Counter()
         for time_step, action in enumerate(self.pipeline_order[self.rank]):
             try:
-                ops: List[dist.P2POp] = []
+                ops: list[dist.P2POp] = []
                 if action is not None:
                     computation_type = action.computation_type
                     mb_index = action.microbatch_index
                     stage_index = action.stage_index
-                    assert (
-                        mb_index is not None
-                    ), "All currently supported action types require valid microbatch_index"
+                    if mb_index is None:
+                        raise AssertionError(
+                            "All currently supported action types require valid microbatch_index"
+                        )
                     if computation_type == _ComputationType.FORWARD:
                         # perform forward computation
                         stage = stage_index_to_stage[stage_index]
                         output = stage.forward_one_chunk(
-                            mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
+                            mb_index,
+                            arg_mbs[mb_index],
+                            kwarg_mbs[mb_index],
+                            save_forward_output=return_outputs,
                         )
-                        self._maybe_compute_loss(stage, output, target_mbs, mb_index)
+                        self._maybe_compute_loss(
+                            stage, output, target_mbs, mb_index, loss_kwargs
+                        )
                         ops.extend(stage.get_fwd_send_ops(mb_index))
                     elif computation_type == _ComputationType.FULL_BACKWARD:
                         # perform backward computation
                         stage = stage_index_to_stage[stage_index]
                         loss = self._maybe_get_loss(stage, mb_index)
                         backward_counter[stage_index] += 1
+                        last_backward = (
+                            backward_counter[stage_index] == self._n_microbatches
+                        )
+                        grad_scale_factor = (
+                            self._n_microbatches if self.scale_grads else 1
+                        )
                         stage.backward_one_chunk(
                             mb_index,
                             loss=loss,
                             full_backward=True,
-                            last_backward=backward_counter[stage_index]
-                            == self._n_microbatches,
+                            last_backward=last_backward,
                         )
+                        if last_backward:
+                            stage.scale_grads(grad_scale_factor)
+
                         ops.extend(stage.get_bwd_send_ops(mb_index))
                     elif computation_type == _ComputationType.BACKWARD_INPUT:
                         # perform backward computation
@@ -1281,11 +2097,18 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         # perform weight update
                         stage = stage_index_to_stage[stage_index]
                         backward_counter[stage_index] += 1
+                        last_backward = (
+                            backward_counter[stage_index] == self._n_microbatches
+                        )
+                        grad_scale_factor = (
+                            self._n_microbatches if self.scale_grads else 1
+                        )
                         stage.backward_weight_one_chunk(
                             mb_index,
-                            last_backward=backward_counter[stage_index]
-                            == self._n_microbatches,
+                            last_backward=last_backward,
                         )
+                        if last_backward:
+                            stage.scale_grads(grad_scale_factor)
                     else:
                         raise ValueError(f"Unknown computation type {computation_type}")
 
@@ -1300,9 +2123,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         computation_type = prev_rank_action.computation_type
                         mb_index = prev_rank_action.microbatch_index
                         stage_index = prev_rank_action.stage_index
-                        assert (
-                            mb_index is not None
-                        ), "All currently supported action types require valid microbatch_index"
+                        if mb_index is None:
+                            raise AssertionError(
+                                "All currently supported action types require valid microbatch_index"
+                            )
                         # Only handle sends for the forward from a previous rank
                         if computation_type == _ComputationType.FORWARD:
                             # If not the last stage, then receive fwd activations
@@ -1331,9 +2155,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         computation_type = next_rank_action.computation_type
                         mb_index = next_rank_action.microbatch_index
                         stage_index = next_rank_action.stage_index
-                        assert (
-                            mb_index is not None
-                        ), "All currently supported action types require valid microbatch_index"
+                        if not (mb_index is not None):
+                            raise AssertionError(
+                                "All currently supported action types require valid microbatch_index"
+                            )
                         # Only handle receives for the backwards from a next rank
                         if computation_type in (FORWARD, BACKWARD_WEIGHT):
                             # Next rank doing forward or weight update has no influence for the current rank backward recv
@@ -1351,14 +2176,14 @@ class PipelineScheduleMulti(_PipelineSchedule):
                             )
 
                 # do the communication
-                if ops:
-                    _batch_p2p(ops).wait()
+                _wait_batch_p2p(_batch_p2p(ops))
             except Exception as e:
                 logger.error(
-                    "[Rank %s] pipeline schedule %s caught the following exception \
-                     at time_step %s when running action %s",
+                    "[Rank %s] pipeline schedule %s caught the following exception '%s' \
+at time_step %s when running action %s",
                     self.rank,
                     self.__class__.__name__,
+                    e,
                     time_step,
                     action,
                 )
@@ -1373,6 +2198,21 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self._update_losses(self._stages, losses)
 
 
+@dataclass
+class _PipelineContext:
+    """Context passed to custom functions during pipeline execution."""
+
+    schedule_ref: _PipelineSchedule
+    arg_mbs: list[tuple] | None = None
+    kwarg_mbs: list[dict] | None = None
+    target_mbs: list | None = None
+    losses: list | None = None
+
+
+class _CustomFunctionProtocol(Protocol):
+    def __call__(self, action: _Action, ctx: _PipelineContext) -> None: ...
+
+
 class _PipelineScheduleRuntime(PipelineScheduleMulti):
     """
     Provides a simple runtime that requires a 'schedule IR' including specified communication operations.
@@ -1381,31 +2221,105 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     subclassed and the subclass can be responsible for creating a schedule IR.
     """
 
-    def _load_actions(
+    def __init__(self, *args, **kwargs):
+        self._defer_pp_recv: bool = kwargs.pop("defer_pp_recv", False)
+        super().__init__(*args, **kwargs)
+        # Action to custom function mapping
+        self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
+        # count either full_backward or backward_weight together, to determine when to sync DP grads
+        self.backward_counter: Counter[int] = Counter()
+
+        # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
+        self.bwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
+        self.fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
+
+        # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
+        self.unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
+        self.unsharded_stages = set()
+
+    def register_custom_function(
         self,
-        actions: Dict[int, List[Optional[_Action]]],
-        format: str = "compute_only",
+        computation_type: _ComputationType,
+        custom_function: _CustomFunctionProtocol,
+    ) -> None:
+        """
+        Register a custom function to be executed for a specific computation type.
+
+        Args:
+            computation_type: The computation type for which to register the custom function
+            custom_function: The function to execute when this computation type is encountered.
+                Must have signature: (action: _Action, ctx: _PipelineContext) -> None
+        """
+        # Ensure that the computation type is valid
+        if computation_type not in (
+            FORWARD,
+            FULL_BACKWARD,
+            BACKWARD_INPUT,
+            BACKWARD_WEIGHT,
+            OVERLAP_F_B,
+            UNSHARD,
+            RESHARD,
+            REDUCE_GRAD,
+        ):
+            raise ValueError(
+                f"Invalid computation type {computation_type}. Only FORWARD, FULL_BACKWARD, \
+                BACKWARD_INPUT, BACKWARD_WEIGHT, OVERLAP_F_B, UNSHARD, RESHARD and REDUCE_GRAD are supported."
+            )
+
+        # Check if computation_type is already registered
+        if computation_type in self._comp_type_to_function_map:
+            logger.warning(
+                "Computation type %s is already registered. "
+                "Overwriting the existing custom function.",
+                computation_type,
+            )
+
+        self._comp_type_to_function_map[computation_type] = custom_function
+
+    def _prepare_schedule_with_comms(
+        self,
+        actions: dict[int, list[_Action | None]],
+        format: Literal["compute_only", "compute_comms"] = "compute_only",
     ):
         """
         Given an in-memory representation for a simple compute-only schedule, lower it to a complex schedule including
         communication actions.  Stores the schedule in self, and must be called before running step_mo()
         """
-        assert (
-            self.stage_index_to_group_rank is not None
-        ), "stage_index_to_group_rank is required for PipelineScheduleRuntime"
-        self.pipeline_order_with_comms: Dict[int, List[_Action]] = {}
+        # validate the provided actions are valid and overrides the default stage_index_to_group_rank
+        super()._validate_and_set_stage_mapping(actions)
+
+        self.pipeline_order_with_comms: dict[int, list[_Action]] = {}
         if format == "compute_comms":
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = []
                 for action in actions[rank]:
-                    assert action is not None
+                    if action is None:
+                        raise AssertionError(
+                            f"Expected action to be not None, got {type(action)}"
+                        )
                     self.pipeline_order_with_comms[rank].append(action)
             # TODO what level of validation should we offer for compute+comms schedule?
         elif format == "compute_only":
+            # Validate that the schedule does not have comms already added to it
+            for rank, action_list in actions.items():
+                for i, action in enumerate(action_list):
+                    if action is not None:
+                        if not action.is_compute_op:
+                            raise ValueError(
+                                f"Expected compute-only schedule but found communication action "
+                                f"'{action}' at rank {rank}, position {i}. "
+                                f"Communication actions (e.g. SEND_F, RECV_F, etc.) "
+                                f"should not be present when format='compute_only'."
+                            )
+
             # Perform schedule lowering
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
                     actions[rank]
+                )
+                self.pipeline_order_with_comms[rank] = _add_reduce_grad(  # type: ignore[assignment]
+                    self.pipeline_order_with_comms[rank],  # type: ignore[arg-type]
+                    self._n_microbatches,
                 )
 
             self.pipeline_order_with_comms = _add_send_recv(
@@ -1413,11 +2327,21 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
                 num_stages=self._num_stages,
             )
+
+            if self._defer_pp_recv:
+                self.pipeline_order_with_comms = _defer_recv_ops(
+                    self.pipeline_order_with_comms,
+                    stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
+                )
         else:
             raise NotImplementedError(f"{format=} is not implemented")
 
-    def _load_csv(self, filename: str, format: str = "compute_only"):
-        """Loads a csv in simple format and then lowers it to include comunication actions
+    def _load_csv(
+        self,
+        filename: str,
+        format: Literal["compute_only", "compute_comms"] = "compute_only",
+    ):
+        """Loads a csv in simple format and then lowers it to include communication actions
 
         format must be either "compute_only" or "compute_comms".  If compute_only, the lowering passes
         will automatically be run to generate a compute_comms schedule.
@@ -1426,28 +2350,39 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             # this will populate self.pipeline_order
             super()._load_csv(filename)
             # this will populate self.pipeline_order_with_comms
-            self._load_actions(self.pipeline_order)
+            self._prepare_schedule_with_comms(self.pipeline_order)
         elif format == "compute_comms":
             actions = {}
             with open(filename, newline="") as csvfile:
                 reader = csv.reader(csvfile)
                 for rank, row in enumerate(reader):
                     actions[rank] = [_Action.from_str(s) for s in row]
-                self._load_actions(actions, format=format)
+                self._prepare_schedule_with_comms(actions, format=format)
         else:
             raise NotImplementedError(f"{format=} is not implemented")
 
-    def _dump_csv(self, filename: str):
-        """Dump a CSV representation of the compute + comms schedule into a file with the provided filename."""
-        # TODO should there be an option to dump the compute_only schedule from PipelineScheduleRuntime? It's possible
-        # that it does not exist if it was created from a compute_comms schedule.
-        assert (
-            self.pipeline_order_with_comms is not None
-        ), "Must initialize compute_comms schedule before dump_csv"
-        with open(filename, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            for rank in self.pipeline_order_with_comms:
-                writer.writerow(self.pipeline_order_with_comms[rank])
+    def _dump_csv(
+        self,
+        filename: str,
+        format: Literal["compute_only", "compute_comms"] = "compute_comms",
+    ):
+        """Dump a CSV representation of the schedule into a file with the provided filename."""
+        if format == "compute_only":
+            if self.pipeline_order is None:
+                raise AssertionError("Compute only schedule must be available")
+            with open(filename, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                for rank in self.pipeline_order:
+                    writer.writerow(self.pipeline_order[rank])
+        elif format == "compute_comms":
+            if self.pipeline_order_with_comms is None:
+                raise AssertionError(
+                    "Must initialize compute_comms schedule before dump_csv"
+                )
+            with open(filename, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                for rank in self.pipeline_order_with_comms:
+                    writer.writerow(self.pipeline_order_with_comms[rank])
 
     def _simulate(self):
         return _simulate_comms_compute(
@@ -1456,12 +2391,27 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             self._num_stages,
         )
 
+    def _assert_unsharded(self, stage: _PipelineStageBase):
+        """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
+        stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
+        if stage_uses_fsdp:
+            stage_idx = stage.stage_index
+            if stage_idx in self.unshard_ops:
+                for op in self.unshard_ops[stage_idx]:
+                    op.wait()
+                del self.unshard_ops[stage_idx]
+                self.unsharded_stages.add(stage_idx)
+            if stage_idx not in self.unsharded_stages:
+                raise AssertionError(f"Attempted to compute on sharded {stage_idx=}")
+
     def _step_microbatches(
         self,
-        arg_mbs: Optional[List] = None,
-        kwarg_mbs: Optional[List] = None,
-        target_mbs: Optional[List] = None,
-        losses: Optional[List] = None,
+        arg_mbs: list | None = None,
+        kwarg_mbs: list | None = None,
+        target_mbs: list | None = None,
+        losses: list | None = None,
+        return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Operate on the microbatches for looped schedules (multiple stages on each rank).
@@ -1470,228 +2420,252 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         not support models with skip connections.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        if not self._stages_initialized:
-            self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stages(
+            arg_mbs[0], kwarg_mbs[0], maybe_first_target, loss_kwargs
+        )
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
-        stage_index_to_stage: Dict[int, _PipelineStageBase] = {
+        stage_index_to_stage: dict[int, _PipelineStageBase] = {
             stage.stage_index: stage for stage in self._stages
         }
 
-        assert (
-            self.pipeline_order_with_comms is not None
-        ), "Must call _load_actions() before calling _step_microbatches()"
+        if self.pipeline_order_with_comms is None:
+            raise AssertionError(
+                "Must call _prepare_schedule_with_comms() before calling _step_microbatches()"
+            )
 
-        # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
-        bwd_recv_ops: Dict[Tuple[int, int], Work] = {}
-        fwd_recv_ops: Dict[Tuple[int, int], Work] = {}
+        # send ops should be waited on before step() exists, mainly for hygiene
+        send_ops: list[list[dist.Work]] = []
 
-        # send ops should be waited on before step() exists, mainly for hygeine
-        send_ops: List[Work] = []
-
-        # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
-        unshard_ops: Dict[int, UnshardHandle] = {}
-        unsharded_stages = set()
-
-        def _assert_unsharded(stage_idx: int):
-            """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
-            if stage_idx in unshard_ops:
-                unshard_ops[stage_idx].wait()
-                del unshard_ops[stage_idx]
-                unsharded_stages.add(stage_idx)
-            assert (
-                stage_idx in unsharded_stages
-            ), f"Attempted to compute on sharded {stage_idx=}"
-
-        # count either full_backward or backward_weight together, to determine when to sync DP grads
-        backward_counter: Counter[int] = Counter()
-        for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
-            try:
-                comp_type = action.computation_type
-                mb_index: int = (
-                    action.microbatch_index
-                    if action.microbatch_index is not None
-                    else -1
-                )
-                assert mb_index >= 0 or comp_type in (
+        def _perform_action(action: _Action) -> None:
+            comp_type = action.computation_type
+            mb_index: int = (
+                action.microbatch_index if action.microbatch_index is not None else -1
+            )
+            if not (
+                mb_index >= 0
+                or comp_type
+                in (
                     UNSHARD,
                     RESHARD,
-                ), f"{action=} missing mb_index"
-                stage_idx = action.stage_index
-                stage = stage_index_to_stage[stage_idx]
-                stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
-                # see [Note: V-schedule special case]
-                is_next_stage_on_this_rank = stage_idx + 1 in stage_index_to_stage
-                is_prev_stage_on_this_rank = stage_idx - 1 in stage_index_to_stage
+                    REDUCE_GRAD,
+                )
+            ):
+                raise AssertionError(f"{action=} missing mb_index")
+            stage_idx = action.stage_index
+            stage = stage_index_to_stage[stage_idx]
+            stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
+            # see [Note: V-schedule special case]
+            is_next_stage_on_this_rank = stage_idx + 1 in stage_index_to_stage
+            is_prev_stage_on_this_rank = stage_idx - 1 in stage_index_to_stage
 
-                logger.debug(
-                    "_PipelineScheduleRuntime running time_step %d, action %s",
-                    time_step,
-                    action,
+            # TODO(whc) it's not actually safe to use _batch_p2p here in the uncommon case the model has skip-connections,
+            # since we do not want to batch up ops between more than a pair of ranks.  _sorted_batch_p2p would be
+            # safe to use instead.
+            # However, I was wondering if I should avoid calling batched operators at all in the case that there is
+            # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
+            if comp_type == SEND_F:
+                send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
+            elif comp_type == SEND_B:
+                send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
+            elif comp_type == RECV_F:
+                if (stage_idx, mb_index) in self.fwd_recv_ops:
+                    raise AssertionError(
+                        f"Recv twice for {stage_idx=} {mb_index=} without executing forward"
+                    )
+                self.fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                    stage.get_fwd_recv_ops(mb_index)
+                )
+            elif comp_type == RECV_B:
+                if (stage_idx, mb_index) in self.bwd_recv_ops:
+                    raise AssertionError(
+                        f"Recv twice for {stage_idx=} {mb_index=} without executing backward"
+                    )
+                self.bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                    stage.get_bwd_recv_ops(mb_index)
+                )
+            elif comp_type == UNSHARD:
+                if stage_uses_fsdp:
+                    if not (
+                        stage_idx not in self.unsharded_stages
+                        and stage_idx not in self.unshard_ops
+                    ):
+                        raise AssertionError(f"Unsharding the same {stage_idx=} twice")
+                    for submodule in stage.submod.modules():
+                        if not isinstance(submodule, FSDPModule):
+                            continue
+                        handle = cast(UnshardHandle, submodule.unshard(async_op=True))
+                        self.unshard_ops[stage_idx].append(handle)
+            elif comp_type == RESHARD:
+                if stage_uses_fsdp:
+                    if stage_idx not in self.unsharded_stages:
+                        raise AssertionError(
+                            f"Resharding {stage_idx=} without unsharding"
+                        )
+                    if stage_idx in self.unshard_ops:
+                        raise AssertionError(
+                            f"Resharding {stage_idx=} before finishing unshard"
+                        )
+                    for submodule in stage.submod.modules():
+                        if not isinstance(submodule, FSDPModule):
+                            continue
+                        submodule.reshard()
+                    self.unsharded_stages.remove(stage_idx)
+            elif comp_type == FORWARD:
+                self._assert_unsharded(stage)
+
+                if (
+                    not stage.is_first
+                    # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                    and not is_prev_stage_on_this_rank
+                ):
+                    if (stage_idx, mb_index) not in self.fwd_recv_ops:
+                        raise AssertionError(
+                            f"Computing {action=} before receiving input"
+                        )
+                    _wait_batch_p2p(self.fwd_recv_ops.pop((stage_idx, mb_index)))
+
+                output = stage.forward_one_chunk(
+                    mb_index,
+                    arg_mbs[mb_index],  # type: ignore[index]
+                    kwarg_mbs[mb_index],  # type: ignore[index]
+                    save_forward_output=return_outputs,
+                )
+                self._maybe_compute_loss(
+                    stage, output, target_mbs, mb_index, loss_kwargs
                 )
 
-                # TODO(whc) it's not actually safe to use _batch_p2p here in the uncommon case the model has skip-connections,
-                # since we do not want to batch up ops between more than a pair of ranks.  _sorted_batch_p2p would be
-                # safe to use instead.
-                # However, I was wondering if I should avoid calling batched operators at all in the case that there is
-                # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
-                if comp_type == SEND_F:
-                    send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
-                elif comp_type == SEND_B:
-                    send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
-                elif comp_type == RECV_F:
-                    assert (
-                        stage_idx,
-                        mb_index,
-                    ) not in fwd_recv_ops, "Recv twice for {stage_idx=} {mb_index=} without executing forward"
-                    fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
-                        stage.get_fwd_recv_ops(mb_index)
+                # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                # see [Note: V-schedule special case]
+                if is_next_stage_on_this_rank:
+                    stage_index_to_stage[stage_idx + 1].set_local_fwd_input(
+                        output, mb_index
                     )
-                elif comp_type == RECV_B:
-                    assert (
-                        stage_idx,
-                        mb_index,
-                    ) not in bwd_recv_ops, "Recv twice for {stage_idx=} {mb_index=} without executing backward"
-                    bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
-                        stage.get_bwd_recv_ops(mb_index)
-                    )
-                elif comp_type == UNSHARD:
-                    if stage_uses_fsdp:
-                        assert (
-                            stage_idx not in unsharded_stages
-                            and stage_idx not in unshard_ops
-                        ), f"Unsharding the same {stage_idx=} twice"
-                        unshard_ops[stage_idx] = stage.submod.unshard(async_op=True)  # type: ignore[operator]
-                elif comp_type == RESHARD:
-                    if stage_uses_fsdp:
-                        assert (
-                            stage_idx in unsharded_stages
-                        ), f"Resharding {stage_idx=} without unsharding"
-                        assert (
-                            stage_idx not in unshard_ops
-                        ), f"Resharding {stage_idx=} before finishing unshard"
-                        stage.submod.reshard()  # type: ignore[operator]
-                elif comp_type == FORWARD:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
 
-                    if (
-                        not stage.is_first
-                        # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
-                        and not is_prev_stage_on_this_rank
-                    ):
-                        assert (
-                            stage_idx,
-                            mb_index,
-                        ) in fwd_recv_ops, f"Computing {action=} before receiving input"
-                        fwd_recv_ops.pop((stage_idx, mb_index)).wait()
+            elif comp_type == FULL_BACKWARD:
+                self._assert_unsharded(stage)
 
-                    output = stage.forward_one_chunk(
-                        mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
-                    )
-                    self._maybe_compute_loss(stage, output, target_mbs, mb_index)
-
-                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
-                    # see [Note: V-schedule special case]
-                    if is_next_stage_on_this_rank:
-                        stage_index_to_stage[stage_idx + 1].set_local_fwd_input(
-                            output, mb_index
-                        )
-
-                elif comp_type == FULL_BACKWARD:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
-
-                    if (
-                        not stage.is_last
-                        # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
-                        and not is_next_stage_on_this_rank
-                    ):
-                        assert (
-                            stage_idx,
-                            mb_index,
-                        ) in bwd_recv_ops, (
+                if (
+                    not stage.is_last
+                    # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                    and not is_next_stage_on_this_rank
+                ):
+                    if (stage_idx, mb_index) not in self.bwd_recv_ops:
+                        raise AssertionError(
                             f"Attempted to run compute {action=} before receiving input"
                         )
-                        bwd_recv_ops.pop((stage_idx, mb_index)).wait()
-                    loss = self._maybe_get_loss(stage, mb_index)
-                    backward_counter[stage_idx] += 1
-                    stage.backward_one_chunk(
-                        mb_index,
-                        loss=loss,
-                        full_backward=True,
-                        last_backward=backward_counter[stage_idx]
-                        == self._n_microbatches,
+                    _wait_batch_p2p(self.bwd_recv_ops.pop((stage_idx, mb_index)))
+                loss = self._maybe_get_loss(stage, mb_index)
+                self.backward_counter[stage_idx] += 1
+                last_backward = self.backward_counter[stage_idx] == self._n_microbatches
+                stage.backward_one_chunk(
+                    mb_index,
+                    loss=loss,
+                    full_backward=True,
+                    last_backward=last_backward,
+                )
+                # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                # see [Note: V-schedule special case]
+                if is_prev_stage_on_this_rank:
+                    stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
+                        stage.get_local_bwd_output(mb_index), mb_index
                     )
-                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
-                    # see [Note: V-schedule special case]
-                    if is_prev_stage_on_this_rank:
-                        stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
-                            stage.get_local_bwd_output(mb_index), mb_index
-                        )
-                elif comp_type == BACKWARD_INPUT:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
+            elif comp_type == BACKWARD_INPUT:
+                self._assert_unsharded(stage)
 
-                    if not stage.is_last and not is_next_stage_on_this_rank:
-                        assert (
-                            stage_idx,
-                            mb_index,
-                        ) in bwd_recv_ops, (
+                if not stage.is_last and not is_next_stage_on_this_rank:
+                    if (stage_idx, mb_index) not in self.bwd_recv_ops:
+                        raise AssertionError(
                             f"Attempted to run compute {action=} before receiving input"
                         )
-                        bwd_recv_ops.pop((stage_idx, mb_index)).wait()
-                    loss = self._maybe_get_loss(stage, mb_index)
-                    stage.backward_one_chunk(
-                        mb_index,
-                        loss=loss,
-                        full_backward=False,
-                        last_backward=False,
+                    _wait_batch_p2p(self.bwd_recv_ops.pop((stage_idx, mb_index)))
+                loss = self._maybe_get_loss(stage, mb_index)
+                stage.backward_one_chunk(
+                    mb_index,
+                    loss=loss,
+                    full_backward=False,
+                    last_backward=False,
+                )
+                # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                # see [Note: V-schedule special case]
+                if is_prev_stage_on_this_rank:
+                    stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
+                        stage.get_local_bwd_output(mb_index), mb_index
                     )
-                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
-                    # see [Note: V-schedule special case]
-                    if is_prev_stage_on_this_rank:
-                        stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
-                            stage.get_local_bwd_output(mb_index), mb_index
+            elif comp_type == BACKWARD_WEIGHT:
+                self._assert_unsharded(stage)
+                self.backward_counter[stage_idx] += 1
+                last_backward = self.backward_counter[stage_idx] == self._n_microbatches
+                stage.backward_weight_one_chunk(
+                    mb_index,
+                    last_backward=last_backward,
+                )
+            elif comp_type == REDUCE_GRAD:
+                grad_scale_factor = self._n_microbatches if self.scale_grads else 1
+                stage.perform_reduce_grad(grad_scale_factor)
+            else:
+                raise ValueError(f"{action=} is unknown or unsupported")
+
+        # count either full_backward or backward_weight together, to determine when to sync DP grads
+        self.backward_counter.clear()
+        for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
+            logger.debug(
+                "_PipelineScheduleRuntime running time_step %d, action %s",
+                time_step,
+                action,
+            )
+            try:
+                with record_function(_get_profiler_function_name(action)):
+                    if action.computation_type in self._comp_type_to_function_map:
+                        ctx = _PipelineContext(
+                            self,
+                            arg_mbs,
+                            kwarg_mbs,
+                            target_mbs,
+                            losses,
                         )
-                elif comp_type == BACKWARD_WEIGHT:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
-                    backward_counter[stage_idx] += 1
-                    stage.backward_weight_one_chunk(
-                        mb_index,
-                        last_backward=backward_counter[stage_idx]
-                        == self._n_microbatches,
-                    )
-                else:
-                    raise ValueError(f"{action=} is unknown or unsupported")
+                        self._comp_type_to_function_map[action.computation_type](
+                            action, ctx
+                        )
+                    elif action.computation_type == OVERLAP_F_B:
+                        if action.sub_actions is None:
+                            raise AssertionError("sub_actions must be set")
+                        for sub_a in action.sub_actions:
+                            _perform_action(sub_a)
+                    else:
+                        _perform_action(action)
             except Exception as e:
                 logger.error(
                     "_PipelineScheduleRuntime caught exception at step %s when running action %s.  Full Schedule:",
                     time_step,
                     action,
                 )
-                # TODO(whc) what is the best practice for printing a multiline log?
-                # logger will split it into multiple log lines, but this makes it hard to read (too wide)
-                print(_format_pipeline_order(self.pipeline_order_with_comms, error_step_number=time_step))  # type: ignore[arg-type]
+                logger.error(
+                    _format_pipeline_order(
+                        self.pipeline_order_with_comms,  # type: ignore[arg-type]
+                        error_step_number=time_step,
+                    )
+                )
                 raise e
 
         # Mostly these operations should have finished long ago, but there isn't an obvious time when to wait for them
-        while len(send_ops):
-            send_ops.pop().wait()
+        while send_ops:
+            _wait_batch_p2p(send_ops.pop())
 
-        assert len(unshard_ops) == 0, "Unused unshard operations"
+        if len(self.unshard_ops) != 0:
+            raise AssertionError("Unused unshard operations")
 
         # Return losses if there is a container passed in
         self._update_losses(self._stages, losses)
 
 
-class ScheduleLoopedBFS(PipelineScheduleMulti):
+class ScheduleLoopedBFS(_PipelineScheduleRuntime):
     """
     Breadth-First Pipeline Parallelism.
     See https://arxiv.org/abs/2211.05953 for details.
-    Simliar to Interleaved 1F1B, Looped BFS supports multiple stages per rank.
+    Similar to Interleaved 1F1B, Looped BFS supports multiple stages per rank.
     What is different is that when microbatches are ready for multiple local
     stages, Loops BFS will prioritizes the earlier stage, running all available
     microbatches at once.
@@ -1699,26 +2673,35 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Optional[Callable] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        loss_fn: Callable | _Loss | None = None,
+        output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
+        scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
+        defer_pp_recv: bool = False,
     ):
         super().__init__(
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
             output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
+            backward_requires_autograd=backward_requires_autograd,
+            defer_pp_recv=defer_pp_recv,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
         # This will be used to keep track of the current state of the entire pipeline
         # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
-        self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
+        self.pipeline_order: dict[int, list[_Action | None]] = {}
         # ========================================================================
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
+
+        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
+        self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank):
         n_local_stages = len(self._stages)
@@ -1728,7 +2711,7 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
 
         # Store the list of operations used for that rank
         # Pre-padding, rank starts with no-ops based on the warmup.
-        rank_ops: List[Optional[_Action]] = [None for _ in range(rank)]
+        rank_ops: list[_Action | None] = [None for _ in range(rank)]
 
         for stage_index in stage_indices:
             rank_ops.extend(
@@ -1762,13 +2745,13 @@ def _get_1f1b_rank_ops(
     enable_zero_bubble=False,
 ):
     # All stages start with handling microbatch 0
-    fwd_stage_mb_index: Dict[int, int] = defaultdict(int)
-    bwd_stage_mb_index: Dict[int, int] = defaultdict(int)
-    weight_stage_mb_index: Dict[int, int] = defaultdict(int)
+    fwd_stage_mb_index: dict[int, int] = defaultdict(int)
+    bwd_stage_mb_index: dict[int, int] = defaultdict(int)
+    weight_stage_mb_index: dict[int, int] = defaultdict(int)
 
     # Store the list of operations used for that rank
     # Pre-padding, rank starts with no-ops based on the warmup.
-    rank_ops: List[Optional[_Action]] = [None for _ in range(rank)]
+    rank_ops: list[_Action | None] = [None for _ in range(rank)]
     # These are used to calculate the number of slots to fill with no-ops, to account for the delay in warmup
     # when we want to wait for the backward to trickle back up and start 1f1b to align all ranks.
     # Formula:
@@ -1886,7 +2869,26 @@ def _get_1f1b_rank_ops(
     return rank_ops
 
 
-class ScheduleInterleaved1F1B(PipelineScheduleMulti):
+def _get_warmup_ops(
+    rank: int,
+    n_local_stages: int,
+    microbatches_per_round: int,
+    pp_group_size: int,
+    n_microbatches: int,
+    multiply_factor: int = 2,
+) -> int:
+    """
+    Calculate the number of warmup operations for interleaved schedules.
+    """
+    # Warmup operations for last stage
+    warmups_ops_last_stage = (n_local_stages - 1) * microbatches_per_round
+    # Increment warmup operations by multiply_factor for each hop away from the last stage
+    warmup_ops = warmups_ops_last_stage + multiply_factor * ((pp_group_size - 1) - rank)
+    # We cannot have more warmup operations than there are number of microbatches, so cap it there
+    return min(warmup_ops, n_microbatches * n_local_stages)
+
+
+class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
     """
     The Interleaved 1F1B schedule.
     See https://arxiv.org/pdf/2104.04473 for details.
@@ -1906,12 +2908,15 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
-        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        loss_fn: Callable | None = None,
+        args_chunk_spec: tuple[TensorChunkSpec, ...] | None = None,
+        kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
+        output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
+        scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
+        defer_pp_recv: bool = False,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -1921,6 +2926,9 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
+            backward_requires_autograd=backward_requires_autograd,
+            defer_pp_recv=defer_pp_recv,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -1935,27 +2943,23 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         # 1. Create the pipeline_order (all ranks do this calculation)
         # This will be used to keep track of the current state of the entire pipeline
         # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
-        self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
+        self.pipeline_order: dict[int, list[_Action | None]] = {}
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
 
-    def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
-        def get_rank_warmup_ops(rank):
-            # Warms up operations for last stage
-            warmups_ops_last_stage = (
-                self.n_local_stages - 1
-            ) * self.microbatches_per_round
-            # Increment warmup operations by 2 for each hop away from the last stage
-            multiply_factor = 2
-            warmup_ops = warmups_ops_last_stage + multiply_factor * (
-                (self.pp_group_size - 1) - rank
-            )
+        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
+        self._prepare_schedule_with_comms(self.pipeline_order)
 
-            # We cannot have more warmup operations than there are number of microbatches, so cap it there
-            return min(warmup_ops, self._n_microbatches * self.n_local_stages)
-
-        warmup_ops = get_rank_warmup_ops(rank)
+    def _calculate_single_rank_operations(self, rank) -> list[_Action | None]:
+        warmup_ops = _get_warmup_ops(
+            rank,
+            self.n_local_stages,
+            self.microbatches_per_round,
+            self.pp_group_size,
+            self._n_microbatches,
+            multiply_factor=2,
+        )
         microbatch_ops = self.n_local_stages * self._n_microbatches
         # fwd_bwd_ops should encompass the remaining forwards
         fwd_bwd_ops = microbatch_ops - warmup_ops
@@ -2000,7 +3004,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         )
 
 
-class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
+class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
     """
     The Interleaved Zero Bubble schedule.
     See https://arxiv.org/pdf/2401.10241 for details.
@@ -2013,13 +3017,18 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
-        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        loss_fn: Callable | None = None,
+        args_chunk_spec: tuple[TensorChunkSpec, ...] | None = None,
+        kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
+        output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
+        scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
+        defer_pp_recv: bool = False,
     ):
+        # TODO: we dont support input/weight backward split with torch.compile
+        _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
             stages=stages,
@@ -2028,6 +3037,9 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
+            backward_requires_autograd=backward_requires_autograd,
+            defer_pp_recv=defer_pp_recv,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -2042,7 +3054,7 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         # 1. Create the pipeline_order (all ranks do this calculation)
         # This will be used to keep track of the current state of the entire pipeline
         # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
-        self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
+        self.pipeline_order: dict[int, list[_Action | None]] = {}
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
@@ -2054,22 +3066,18 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
             self.n_local_stages * self.pp_group_size,
         )
 
-    def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
-        def get_rank_warmup_ops(rank):
-            # Warms up operations for last stage
-            warmups_ops_last_stage = (
-                self.n_local_stages - 1
-            ) * self.microbatches_per_round
-            # Increment warmup operations by 2 for each hop away from the last stage
-            multiply_factor = 1
-            warmup_ops = warmups_ops_last_stage + multiply_factor * (
-                (self.pp_group_size - 1) - rank
-            )
+        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
+        self._prepare_schedule_with_comms(self.pipeline_order)
 
-            # We cannot have more warmup operations than there are number of microbatches, so cap it there
-            return min(warmup_ops, self._n_microbatches * self.n_local_stages)
-
-        warmup_ops = get_rank_warmup_ops(rank)
+    def _calculate_single_rank_operations(self, rank) -> list[_Action | None]:
+        warmup_ops = _get_warmup_ops(
+            rank,
+            self.n_local_stages,
+            self.microbatches_per_round,
+            self.pp_group_size,
+            self._n_microbatches,
+            multiply_factor=1,
+        )
         microbatch_ops = self.n_local_stages * self._n_microbatches
         # fwd_bwd_ops should encompass the remaining forwards
         fwd_bwd_ops = microbatch_ops - warmup_ops
@@ -2131,10 +3139,10 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
                 return (stage + 1, op, microbatch) not in seen_ops
             return False
 
-        seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
-        result: Dict[int, List[Optional[_Action]]] = {}
-        next_pointer: Dict[int, int] = {}
-        bubbles_added: Dict[int, int] = {}
+        seen_ops: set[tuple[int, _ComputationType, int]] = set()
+        result: dict[int, list[_Action | None]] = {}
+        next_pointer: dict[int, int] = {}
+        bubbles_added: dict[int, int] = {}
         total_bubbles_added = 0
 
         for rank in range(self.pp_group_size):
@@ -2145,7 +3153,7 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         while True:
             should_stop = True
 
-            temp_seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
+            temp_seen_ops: set[tuple[int, _ComputationType, int]] = set()
 
             for rank in range(self.pp_group_size):
                 timestamp = next_pointer[rank]
@@ -2156,8 +3164,11 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
 
                 if actions[rank][timestamp] is not None:
                     temp_action = actions[rank][timestamp]
-                    assert temp_action is not None
-                    stage_index, op, microbatch = temp_action
+                    if temp_action is None:
+                        raise AssertionError(
+                            f"Expected temp_action to be not None, got {type(temp_action)}"
+                        )
+                    stage_index, op, microbatch, _ = temp_action
                     if not need_bubble(
                         stage_index, op, microbatch, num_stages_global, seen_ops
                     ):
@@ -2185,7 +3196,7 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         return result
 
 
-class ScheduleZBVZeroBubble(PipelineScheduleMulti):
+class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
     """
     The Zero Bubble schedule (ZBV variant).
     See https://arxiv.org/pdf/2401.10241 Section 6 for details.
@@ -2203,14 +3214,18 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
-        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-        stage_index_to_group_rank: Optional[Dict[int, int]] = None,
+        loss_fn: Callable | None = None,
+        args_chunk_spec: tuple[TensorChunkSpec, ...] | None = None,
+        kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
+        output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
+        scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
+        defer_pp_recv: bool = False,
     ):
+        # TODO: we dont support input/weight backward split with torch.compile
+        _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
             stages=stages,
@@ -2219,8 +3234,16 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
-            stage_index_to_group_rank=stage_index_to_group_rank,
+            scale_grads=scale_grads,
+            backward_requires_autograd=backward_requires_autograd,
+            defer_pp_recv=defer_pp_recv,
         )
+        self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
+            self.pp_group_size, self._num_stages, style="v"
+        )
+        for stage in self._stages:
+            stage.stage_index_to_group_rank = self.stage_index_to_group_rank
+
         self.n_local_stages = len(stages)
         if self.n_local_stages != 2:
             raise ValueError(
@@ -2234,16 +3257,19 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
         # 1. Create the pipeline_order (all ranks do this calculation)
         # This will be used to keep track of the current state of the entire pipeline
         # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
-        self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
+        self.pipeline_order: dict[int, list[_Action | None]] = {}
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
 
-    def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
+        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
+        self._prepare_schedule_with_comms(self.pipeline_order)
+
+    def _calculate_single_rank_operations(self, rank) -> list[_Action | None]:
         # max(2 * self.pp_group_size - 1, ...) ensure the number of microbatches is at least
         # as large of the number of microbatches needed to fully utilize the pipeline
         n_micro = max(2 * self.pp_group_size - 1, self._n_microbatches)
-        rank_ops: List[Optional[_Action]] = [None for _ in range(rank)]
+        rank_ops: list[_Action | None] = [None for _ in range(rank)]
 
         # Forward and backward action counts for stage chunk 0 and chunk 1
         f0_cnt, f1_cnt, b0_cnt, b1_cnt = 0, 0, 0, 0
@@ -2341,8 +3367,14 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
             )
             w0_cnt += 1
 
-        assert w0_cnt == b0_cnt and b0_cnt == f0_cnt
-        assert w1_cnt == b1_cnt and b1_cnt == f1_cnt
+        if not (w0_cnt == b0_cnt and b0_cnt == f0_cnt):
+            raise AssertionError(
+                f"Expected w0_cnt == b0_cnt == f0_cnt, got w0_cnt={w0_cnt}, b0_cnt={b0_cnt}, f0_cnt={f0_cnt}"
+            )
+        if not (w1_cnt == b1_cnt and b1_cnt == f1_cnt):
+            raise AssertionError(
+                f"Expected w1_cnt == b1_cnt == f1_cnt, got w1_cnt={w1_cnt}, b1_cnt={b1_cnt}, f1_cnt={f1_cnt}"
+            )
         # We use max() in the n_micro computation above, so we may need to
         # remove redundant microbatches
         rank_ops = [
@@ -2356,6 +3388,233 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
             for action in rank_ops
         ]
         return rank_ops
+
+
+class ScheduleDualPipeV(_PipelineScheduleRuntime):
+    """
+    The DualPipeV schedule. A more efficient schedule variant based on the
+    DualPipe schedule introduced by DeepSeek in https://arxiv.org/pdf/2412.19437
+
+    Based on the open sourced code from https://github.com/deepseek-ai/DualPipe
+    """
+
+    def __init__(
+        self,
+        stages: list[_PipelineStageBase],
+        n_microbatches: int,
+        loss_fn: Callable | None = None,
+        args_chunk_spec: tuple[TensorChunkSpec, ...] | None = None,
+        kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
+        output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
+        scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
+        defer_pp_recv: bool = False,
+    ):
+        # TODO: we dont support input/weight backward split with torch.compile
+        _check_torch_compile_compatibility(stages, self.__class__.__name__)
+        self.pp_group_size = stages[0].group_size
+        super().__init__(
+            stages=stages,
+            n_microbatches=n_microbatches,
+            loss_fn=loss_fn,
+            args_chunk_spec=args_chunk_spec,
+            kwargs_chunk_spec=kwargs_chunk_spec,
+            output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
+            backward_requires_autograd=backward_requires_autograd,
+            defer_pp_recv=defer_pp_recv,
+        )
+        self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
+            self.pp_group_size, self._num_stages, style="v"
+        )
+        for stage in self._stages:
+            stage.stage_index_to_group_rank = self.stage_index_to_group_rank
+
+        self.n_local_stages = len(stages)
+        if self.n_local_stages != 2:
+            raise ValueError(
+                "ZBV requires exactly 2 stages per rank, but got "
+                f"{self.n_local_stages}."
+            )
+        if n_microbatches < self._num_stages:
+            raise ValueError(
+                "DualPipeV requires at least as many microbatches as stages, but got "
+                f"{n_microbatches} microbatches and {self._num_stages} stages."
+            )
+
+        self.rank = stages[0].group_rank
+        self.num_stages = stages[0].num_stages
+
+        # 1. Create the pipeline_order (all ranks do this calculation)
+        # This will be used to keep track of the current state of the entire pipeline
+        # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
+        self.pipeline_order: dict[int, list[_Action | None]] = {}
+        for rank in range(self.pp_group_size):
+            rank_ops = self._calculate_single_rank_operations(rank)
+            self.pipeline_order[rank] = rank_ops
+
+        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
+        self._prepare_schedule_with_comms(self.pipeline_order)
+
+    def _calculate_single_rank_operations(self, rank) -> list[_Action | None]:
+        actions: list[_Action | None] = []
+        counters: dict[
+            tuple[int, _ComputationType], int
+        ] = {}  # (stage_index, computation_type) -> mb_index
+        weight_queue = []  # Queue of (stage_index, mb_index) for pending weight actions
+
+        num_ranks = self.pp_group_size
+        num_chunks = self._n_microbatches
+
+        rank_to_stages = generate_rank_to_stage_mapping(
+            num_ranks, num_ranks * 2, style="v"
+        )
+        stage0_index, stage1_index = rank_to_stages[rank]
+
+        def increment_backward_counts(stage_index: int):
+            """Helper method to increment BACKWARD_INPUT and BACKWARD_WEIGHT counters when FULL_BACKWARD is used."""
+            input_key = (stage_index, BACKWARD_INPUT)
+            weight_key = (stage_index, BACKWARD_WEIGHT)
+            counters[input_key] = counters.get(input_key, 0) + 1
+            counters[weight_key] = counters.get(weight_key, 0) + 1
+
+        def add_overlap_f_b(
+            actions: list,
+            forward_stage: int,
+            backward_stage: int,
+        ):
+            """Helper method to add an overlapped forward+backward action which tracks microbatch index."""
+            # Create new overlapped forward+backward action with sub_actions
+            forward_key = (forward_stage, FORWARD)
+            backward_key = (backward_stage, BACKWARD_INPUT)
+
+            forward_mb = counters.get(forward_key, 0)
+            backward_mb = counters.get(backward_key, 0)
+
+            sub_actions = (
+                _Action(forward_stage, FORWARD, forward_mb),
+                _Action(backward_stage, FULL_BACKWARD, backward_mb),
+            )
+            actions.append(_Action(-1, OVERLAP_F_B, None, sub_actions))
+
+            # Update counters for sub_actions
+            counters[forward_key] = forward_mb + 1
+            increment_backward_counts(backward_stage)
+
+        def add_action(
+            actions: list,
+            stage_index: int,
+            computation_type: _ComputationType,
+        ):
+            # Regular single action, for FULL_BACKWARD we only use the BACKWARD_INPUT counter
+            key = (
+                (stage_index, computation_type)
+                if computation_type != FULL_BACKWARD
+                else (stage_index, BACKWARD_INPUT)
+            )
+            mb_index = counters.get(key, 0)
+            actions.append(_Action(stage_index, computation_type, mb_index))
+
+            # If FULL_BACKWARD is used, just increment the separate BACKWARD_INPUT and BACKWARD_WEIGHT counters
+            if computation_type == FULL_BACKWARD:
+                increment_backward_counts(stage_index)
+            else:
+                # If BACKWARD_INPUT is updated, add corresponding weight action to queue
+                if computation_type == BACKWARD_INPUT:
+                    # Add weight action to queue for later processing
+                    weight_queue.append((stage_index, mb_index))
+                counters[key] = mb_index + 1
+
+        def add_weight_action_if_pending(actions: list):
+            """Helper method to add a weight action from the queue."""
+            if not weight_queue:
+                return  # No pending weight actions, skip
+            # Pop the oldest weight action from the queue
+            actual_stage_index, weight_mb_index = weight_queue.pop(0)
+            actions.append(
+                _Action(
+                    actual_stage_index,
+                    BACKWARD_WEIGHT,
+                    weight_mb_index,
+                )
+            )
+            # Update the counter for the actual stage that was processed
+            weight_key = (actual_stage_index, BACKWARD_WEIGHT)
+            counters[weight_key] = counters.get(weight_key, 0) + 1
+
+        # Step 1: F0
+        step_1 = (num_ranks - rank - 1) * 2
+        for _ in range(step_1):
+            add_action(actions, stage0_index, FORWARD)
+
+        # Step 2: F0F1
+        step_2 = rank + 1
+        for _ in range(step_2):
+            add_action(actions, stage0_index, FORWARD)
+            add_action(actions, stage1_index, FORWARD)
+
+        # Step 3: I1W1F1 (Use zero bubble)
+        step_3 = num_ranks - rank - 1
+        for _ in range(step_3):
+            add_action(actions, stage1_index, BACKWARD_INPUT)
+            add_weight_action_if_pending(actions)
+            add_action(actions, stage1_index, FORWARD)
+
+        # Step 4 (Main step): F0B1-F1B0 (combined, overlapped forward+backward)
+        step_4 = num_chunks - num_ranks * 2 + rank + 1
+        for i in range(step_4):
+            if i == 0 and rank == num_ranks - 1:
+                # NOTE: We don't overlap these two chunks to further reduce bubble size.
+                add_action(actions, stage0_index, FORWARD)
+                add_action(actions, stage1_index, FULL_BACKWARD)
+            else:
+                add_overlap_f_b(
+                    actions,
+                    forward_stage=stage0_index,
+                    backward_stage=stage1_index,
+                )
+            add_overlap_f_b(
+                actions,
+                forward_stage=stage1_index,
+                backward_stage=stage0_index,
+            )
+
+        # Step 5: B1-F1B0
+        step_5 = num_ranks - rank - 1
+        for _ in range(step_5):
+            add_action(actions, stage1_index, FULL_BACKWARD)
+            add_overlap_f_b(
+                actions,
+                forward_stage=stage1_index,
+                backward_stage=stage0_index,
+            )
+
+        # Step 6: B1B0 (The second half of the chunks use zero bubble)
+        step_6 = rank + 1
+        enable_zb = False
+        for i in range(step_6):
+            if i == step_6 // 2 and rank % 2 == 1:
+                enable_zb = True
+            comp_type = BACKWARD_INPUT if enable_zb else FULL_BACKWARD
+            add_action(actions, stage1_index, comp_type)
+            if i == step_6 // 2 and rank % 2 == 0:
+                enable_zb = True
+            comp_type = BACKWARD_INPUT if enable_zb else FULL_BACKWARD
+            add_action(actions, stage0_index, comp_type)
+
+        # Step 7: W0B0
+        step_7 = num_ranks - rank - 1
+        for _ in range(step_7):
+            add_weight_action_if_pending(actions)
+            comp_type = BACKWARD_INPUT if enable_zb else FULL_BACKWARD
+            add_action(actions, stage0_index, comp_type)
+
+        # Step 8: W0
+        step_8 = rank + 1
+        for _ in range(step_8):
+            add_weight_action_if_pending(actions)
+
+        return actions
 
 
 def get_schedule_class(schedule_name: str):
@@ -2374,8 +3633,9 @@ def get_schedule_class(schedule_name: str):
         "PipelineScheduleSingle": PipelineScheduleSingle,
         "PipelineScheduleMulti": PipelineScheduleMulti,
         "ZBVZeroBubble": ScheduleZBVZeroBubble,
+        "DualPipeV": ScheduleDualPipeV,
     }
-    lowercase_keys = {k.lower(): k for k in schedule_map.keys()}
+    lowercase_keys = {k.lower(): k for k in schedule_map}
     lowercase_schedule_name = schedule_name.lower()
     if lowercase_schedule_name not in lowercase_keys:
         raise ValueError(
@@ -2400,18 +3660,18 @@ def _simulate_comms_compute(
         rank: [a for a in pipeline_order[rank] if a is not None]
         for rank in sorted(pipeline_order)
     }
-    _schedule: Dict[int, List[_Action | None]] = {
+    _schedule: dict[int, list[_Action | None]] = {
         rank: [] for rank in sorted(pipeline_order)
     }
 
-    _prev_ops_rank: Dict[int, Set[_Action]] = {rank: set() for rank in _schedule}
+    _prev_ops_rank: dict[int, set[_Action]] = {rank: set() for rank in _schedule}
 
-    def add_to_schedule(rank: int, action: Optional[_Action]):
+    def add_to_schedule(rank: int, action: _Action | None):
         _schedule[rank].append(action)
         if action is not None:
             _prev_ops_rank[rank].add(action)
 
-    def _ready_to_schedule(action: Optional[_Action]) -> bool:
+    def _ready_to_schedule(action: _Action | None) -> bool:
         if action is None:
             return True
 
@@ -2551,3 +3811,29 @@ def _dump_chrometrace(schedule, filename):
 
     with open(filename, "w") as f:
         json.dump({"traceEvents": events}, f)
+
+
+def _check_torch_compile_compatibility(
+    stages: list[_PipelineStageBase], schedule_name: str
+):
+    """
+    Check if the schedule is compatible with torch.compile.
+
+    Args:
+        stages: List of pipeline stages to check
+        schedule_name: Name of the schedule for error message
+
+    Raises:
+        RuntimeError: If any stage uses torch.compile
+    """
+    for stage in stages:
+        if not isinstance(stage.submod, torch.nn.Module):
+            continue
+
+        for module in stage.submod.modules():
+            if isinstance(module, OptimizedModule):
+                raise RuntimeError(
+                    f"The {schedule_name} schedule is not supported with "
+                    "stage modules that have used torch.compile. "
+                    f"Found OptimizedModule in {type(module).__name__}"
+                )

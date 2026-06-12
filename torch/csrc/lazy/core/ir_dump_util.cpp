@@ -43,13 +43,13 @@ std::optional<AttrTag> ParseAttrTag(
   }
 
   std::string::size_type vpos = match[1].second - node_string.begin() + 1;
-  char nested_open = -1;
-  char nested_close = -1;
+  std::optional<char> nested_open;
+  std::optional<char> nested_close;
   size_t nest_count = 1;
   AttrTag tag;
   tag.name = match[1].str();
   for (pos = vpos; pos < node_string.size(); ++pos) {
-    if (nested_open < 0) {
+    if (!nested_open.has_value()) {
       if (SkipTagSeparator(node_string, pos) != pos) {
         break;
       }
@@ -72,7 +72,8 @@ std::optional<AttrTag> ParseAttrTag(
       --nest_count;
       if (nest_count == 0) {
         nest_count = 1;
-        nested_open = nested_close = -1;
+        nested_open.reset();
+        nested_close.reset();
       }
     } else if (node_string[pos] == nested_open) {
       ++nest_count;
@@ -136,7 +137,7 @@ std::string GenerateDotNodeLabel(
   std::stringstream ss;
   ss << node->op() << "\\n" << node->shape();
   for (auto& tag : GetNodeTags(node)) {
-    ss << "\\n" << tag.name << "=";
+    ss << "\\n" << tag.name << '=';
     if (tag.value.size() < kMaxValueSize) {
       ss << tag.value;
     } else {
@@ -147,36 +148,36 @@ std::string GenerateDotNodeLabel(
   if (opt_root_id) {
     ss << "\\nROOT=" << *opt_root_id;
   }
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string GenerateDotNodeSpec(
     const Node* node,
     const std::unordered_map<const Node*, size_t>& roots_ids) {
   std::stringstream ss;
-  ss << "label=\"" << GenerateDotNodeLabel(node, roots_ids) << "\"";
-  return ss.str();
+  ss << "label=\"" << GenerateDotNodeLabel(node, roots_ids) << '"';
+  return std::move(ss).str();
 }
 
 std::string GenerateTextNodeSpec(const Node* node, const NodeIdMap& id_map) {
   std::stringstream ss;
-  ss << node->shapes() << " " << node->op() << "(";
+  ss << node->shapes() << ' ' << node->op() << '(';
   size_t count = 0;
   for (auto& output : node->operands()) {
     if (count > 0) {
       ss << ", ";
     }
-    ss << "%" << id_map.at(output.node);
+    ss << '%' << id_map.at(output.node);
     if (output.node->num_outputs() > 1) {
-      ss << "." << output.index;
+      ss << '.' << output.index;
     }
     ++count;
   }
-  ss << ")";
+  ss << ')';
   for (auto& tag : GetNodeTags(node)) {
-    ss << ", " << tag.name << "=" << tag.value;
+    ss << ", " << tag.name << '=' << tag.value;
   }
-  return ss.str();
+  return std::move(ss).str();
 }
 
 } // namespace
@@ -213,12 +214,12 @@ std::string DumpUtil::PostOrderToDot(
         if (output.node->num_outputs() > 1) {
           ss << " [label=\"o=" << output.index << "\"]";
         }
-        ss << "\n";
+        ss << '\n';
       }
     }
   }
   ss << "}\n";
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string DumpUtil::ToText(c10::ArrayRef<const Node*> nodes) {
@@ -241,10 +242,10 @@ std::string DumpUtil::PostOrderToText(
       ss << ", ROOT=" << *opt_root_id;
     }
     ss << ", NodeType=" << typeid(*node).name();
-    ss << "\n";
+    ss << '\n';
   }
   ss << "}\n";
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string DumpUtil::ToBackend(

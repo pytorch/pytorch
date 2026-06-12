@@ -1,14 +1,14 @@
-# mypy: allow-untyped-defs
 """Various linear algebra utility methods for internal use."""
-
-from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
 
 
-def is_sparse(A):
-    """Check if tensor A is a sparse tensor"""
+def is_sparse(A: Tensor) -> bool:
+    """Check if tensor A is a sparse COO tensor.
+
+    All other sparse storage formats (CSR, CSC, etc...) will return False.
+    """
     if isinstance(A, torch.Tensor):
         return A.layout == torch.sparse_coo
 
@@ -18,7 +18,7 @@ def is_sparse(A):
     raise TypeError(error_str)
 
 
-def get_floating_dtype(A):
+def get_floating_dtype(A: Tensor) -> torch.dtype:
     """Return the floating point dtype of tensor A.
 
     Integer types map to float32.
@@ -29,7 +29,7 @@ def get_floating_dtype(A):
     return torch.float32
 
 
-def matmul(A: Optional[Tensor], B: Tensor) -> Tensor:
+def matmul(A: Tensor | None, B: Tensor) -> Tensor:
     """Multiply two matrices.
 
     If A is None, return B. A can be sparse or dense. B is always
@@ -42,22 +42,22 @@ def matmul(A: Optional[Tensor], B: Tensor) -> Tensor:
     return torch.matmul(A, B)
 
 
-def bform(X: Tensor, A: Optional[Tensor], Y: Tensor) -> Tensor:
+def bform(X: Tensor, A: Tensor | None, Y: Tensor) -> Tensor:
     """Return bilinear form of matrices: :math:`X^T A Y`."""
     return matmul(X.mT, matmul(A, Y))
 
 
-def qform(A: Optional[Tensor], S: Tensor):
+def qform(A: Tensor | None, S: Tensor) -> Tensor:
     """Return quadratic form :math:`S^T A S`."""
     return bform(S, A, S)
 
 
-def basis(A):
+def basis(A: Tensor) -> Tensor:
     """Return orthogonal basis of A columns."""
     return torch.linalg.qr(A).Q
 
 
-def symeig(A: Tensor, largest: Optional[bool] = False) -> Tuple[Tensor, Tensor]:
+def symeig(A: Tensor, largest: bool | None = False) -> tuple[Tensor, Tensor]:
     """Return eigenpairs of A with specified ordering."""
     if largest is None:
         largest = False
@@ -71,6 +71,17 @@ def symeig(A: Tensor, largest: Optional[bool] = False) -> Tuple[Tensor, Tensor]:
 
 # These functions were deprecated and removed
 # This nice error message can be removed in version 1.13+
+def cholesky(input: Tensor, upper: bool = False, *, out=None) -> Tensor:
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed. "
+        "`torch.cholesky` is deprecated in favor of `torch.linalg.cholesky`.\n"
+        "L = torch.cholesky(A) should be replaced with:\n"
+        "L = torch.linalg.cholesky(A)\n"
+        "U = torch.cholesky(A, upper=True) should be replaced with:\n"
+        "U = torch.linalg.cholesky(A).mH"
+    )
+
+
 def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed.\n"
@@ -79,7 +90,7 @@ def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
     )
 
 
-def solve(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
+def solve(input: Tensor, A: Tensor, *, out=None) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "`torch.solve` is deprecated in favor of `torch.linalg.solve`. "
@@ -91,7 +102,7 @@ def solve(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
     )
 
 
-def lstsq(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
+def lstsq(input: Tensor, A: Tensor, *, out=None) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "`torch.lstsq` is deprecated in favor of `torch.linalg.lstsq`.\n"
@@ -114,7 +125,7 @@ def _symeig(
     upper=True,
     *,
     out=None,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "The default behavior has changed from using the upper triangular portion of the matrix by default "
@@ -135,7 +146,7 @@ def eig(
     *,
     e=None,
     v=None,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "`torch.linalg.eig` returns complex tensors of dtype `cfloat` or `cdouble` rather than real tensors "

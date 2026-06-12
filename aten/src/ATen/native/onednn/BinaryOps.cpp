@@ -13,8 +13,8 @@
 
 #if !AT_ONEDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor& onednn_add_out(
     const Tensor& self,
@@ -45,8 +45,8 @@ Tensor& onednn_mul_(Tensor& self, const Tensor& other) {
   TORCH_CHECK(false, "onednn_mul_: ATen not compiled with ONEDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_ONEDNN_ENABLED
 

@@ -5,14 +5,18 @@ Python polyfills for operator
 from __future__ import annotations
 
 import operator
-from typing import Any, Callable, overload, TypeVar
+from typing import Any, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
 
 from ..decorators import substitute_in_graph
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
+
+
 # Most unary and binary operators are handled by BuiltinVariable (e.g., `pos`, `add`)
-__all__ = ["attrgetter", "itemgetter", "methodcaller"]
+__all__ = ["attrgetter", "concat", "countOf", "iconcat", "itemgetter", "methodcaller"]
 
 
 _T = TypeVar("_T")
@@ -26,15 +30,15 @@ _Us = TypeVarTuple("_Us")
 
 
 @overload
-def attrgetter(attr: str, /) -> Callable[[Any], _U]:
-    ...
+# pyrefly: ignore [inconsistent-overload]
+def attrgetter(attr: str, /) -> Callable[[Any], _U]: ...
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def attrgetter(
     attr1: str, attr2: str, /, *attrs: str
-) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]:
-    ...
+) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]: ...
 
 
 # Reference: https://docs.python.org/3/library/operator.html#operator.attrgetter
@@ -65,16 +69,35 @@ def attrgetter(*attrs: str) -> Callable[[Any], Any | tuple[Any, ...]]:
     return getter
 
 
-@overload
-def itemgetter(item: _T, /) -> Callable[[Any], _U]:
-    ...
+# Reference: https://docs.python.org/3/library/operator.html#operator.concat
+@substitute_in_graph(operator.concat, can_constant_fold_through=True)  # type: ignore[arg-type]
+def concat(a: Sequence[_T], b: Sequence[_T2], /) -> Sequence[_T | _T2]:
+    return a + b  # type: ignore[operator]
+
+
+# Reference: https://docs.python.org/3/library/operator.html#operator.countOf
+@substitute_in_graph(operator.countOf, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def countOf(a: Iterable[_T], b: _T, /) -> int:
+    return sum(it is b or it == b for it in a)
+
+
+# Reference: https://docs.python.org/3/library/operator.html#operator.iconcat
+@substitute_in_graph(operator.iconcat)  # type: ignore[arg-type]
+def iconcat(a: Sequence[_T], b: Sequence[_T2], /) -> Sequence[_T | _T2]:
+    a += b  # type: ignore[operator]
+    return a  # type: ignore[return-value]
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
+def itemgetter(item: _T, /) -> Callable[[Any], _U]: ...
+
+
+@overload
+# pyrefly: ignore [inconsistent-overload]
 def itemgetter(
     item1: _T1, item2: _T2, /, *items: Unpack[_Ts]
-) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]:
-    ...
+) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]: ...
 
 
 # Reference: https://docs.python.org/3/library/operator.html#operator.itemgetter
