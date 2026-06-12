@@ -8,7 +8,7 @@ bool is_flash_attention_available() {
   return sycltla::is_flash_attention_available();
 }
 
-inline bool is_flash_attention_available(sdp_params const& params, bool debug) {
+inline bool check_flash_attention_available(sdp_params const& params, bool debug) {
   if (!is_flash_attention_available()) {
     if (debug) {
       TORCH_WARN("Torch XPU was not compiled with flash attention.");
@@ -21,8 +21,19 @@ inline bool is_flash_attention_available(sdp_params const& params, bool debug) {
 bool check_flash_attention_hardware_support(
     sdp_params const& params,
     bool debug) {
+  // Check if tensors are actually on XPU device
+  if (params.query.device().type() != c10::DeviceType::XPU) {
+    if (debug) {
+      TORCH_WARN("Flash attention XPU: tensors are not on XPU device.");
+    }
+    return false;
+  }
+
   if (!at::xpu::is_available()) {
-    TORCH_CHECK(false, "FlashAttentionXPU: XPU device is not available.");
+    if (debug) {
+      TORCH_WARN("Flash attention XPU: XPU device is not available.");
+    }
+    return false;
   }
 
   constexpr auto supported_architectures =
@@ -163,27 +174,46 @@ inline bool check_flash_attention_deterministic(
 }
 
 bool can_use_flash_attention(sdp_params const& params, bool debug) {
-  constexpr auto constraints =
-      std::array<bool (*)(sdp_params const&, bool), 14>{
-          is_flash_attention_available,
-          check_flash_attention_hardware_support,
-          check_for_attn_mask,
-          check_for_dropout,
-          check_nested_tensor,
-          check_tensor_shapes,
-          check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
-          check_nonzero_sequence_lengths_dense,
-          check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim*/>,
-          check_flash_causal_non_square_seqlens,
-          check_flash_attention_datatype,
-          check_flash_attention_head_dim_size,
-          check_flash_attention_layout,
-          check_flash_attention_deterministic};
-  for (auto& constraint : constraints) {
+  constexpr auto general_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+      check_flash_attention_available,
+      check_flash_attention_hardware_support,
+      check_for_attn_mask,
+      check_for_dropout,
+      check_tensor_shapes,
+      check_flash_causal_non_square_seqlens,
+      check_flash_attention_datatype,
+      check_flash_attention_head_dim_size,
+      check_flash_attention_layout,
+      check_flash_attention_deterministic);
+  for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
   }
+
+  if (has_for_nested_inputs(params)) {
+    constexpr auto nested_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+        check_batch_size_nested,
+        check_for_seq_len_0_nested_tensor);
+    for (auto& constraint : nested_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+  }
+
+  if (has_only_dense_inputs(params)) {
+    constexpr auto dense_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+        check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
+        check_nonzero_sequence_lengths_dense,
+        check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>);
+    for (auto& constraint : dense_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+  }
+
   return true;
 }
 
