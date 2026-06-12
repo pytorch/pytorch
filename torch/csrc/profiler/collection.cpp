@@ -479,14 +479,12 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto input_shape_getter = inputs_outputs_.getInputShapeGenerator();
   auto concrete_input_getter = inputs_outputs_.getConcreteInputGenerator();
 
-  // TODO: CTAD will take care of template args when we move to C++17
-  auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
-  auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
-  auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
-  auto extra_meta = StealOrDefault<decltype(extra_meta_)>(extra_meta_);
-  auto kwinputs = StealOrDefault<decltype(kwinputs_)>(kwinputs_);
-  auto gpu_fallback =
-      StealOrDefault<decltype(device_fallback_)>(device_fallback_);
+  auto jit_stack = StealOrDefault(jit_stack_);
+  auto jit_module = StealOrDefault(jit_modules_);
+  auto extra_args = StealOrDefault(extra_args_);
+  auto extra_meta = StealOrDefault(extra_meta_);
+  auto kwinputs = StealOrDefault(kwinputs_);
+  auto gpu_fallback = StealOrDefault(device_fallback_);
 
   for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
     ExtraFields<EventType::TorchOp> e{
@@ -879,6 +877,12 @@ void generateForwardBackwardLinks(
 
 static constexpr const char* indexKey = "Ev Idx";
 
+static std::string sanitizeNameForKinetoJSON(std::string name) {
+  // Kineto's Chrome trace writer quotes names itself but does not escape '"'.
+  std::replace(name.begin(), name.end(), '"', '\'');
+  return name;
+}
+
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
     uint64_t start_time_ns,
@@ -900,6 +904,7 @@ void passEventsToKineto(
     if (!e->overload_name().empty()) {
       name = fmt::format("{}.{}", e->name(), e->overload_name());
     }
+    name = sanitizeNameForKinetoJSON(std::move(name));
     auto* activity = cpu_trace.addCPUActivity(
         name,
         e->kinetoType(),
@@ -1668,7 +1673,7 @@ RecordQueue::getRecords(
   }
 
   build_tree(out);
-  return {out, std::move(trace)};
+  return {std::move(out), std::move(trace)};
 }
 
 namespace {

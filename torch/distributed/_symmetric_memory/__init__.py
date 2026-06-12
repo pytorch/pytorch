@@ -155,7 +155,7 @@ def _pipelined_multi_all_gather_and_consume(
     communication:
 
         gathered = [
-            all_gather_tensor(x, gather_dim=0, group=group)
+            all_gather_single(x, gather_dim=0, group=group)
             for x in shard
         ]
 
@@ -304,7 +304,7 @@ def _pipelined_all_gather_and_consume(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        ag_out = all_gather_tensor(shard, gather_dim=0, group=group)
+        ag_out = all_gather_single(shard, gather_dim=0, group=group)
         shards = ag_out.chunk(group.size())
         for src_rank, shard in enumerate(shards):
             shard_consumer(shard, src_rank)
@@ -862,7 +862,7 @@ def _fused_all_gather_matmul(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        all_gather_tensor(A_shard, gather_dim, group_name) @ B
+        all_gather_single(A_shard, gather_dim, group_name) @ B
 
     Optimal stride order for A_shard - if A_shard.movedim(gather_dim, 0) is
     contiguous, no extra copy is required for input layout transformation.
@@ -1111,7 +1111,7 @@ def _fused_all_gather_scaled_matmul(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        A = all_gather_tensor(A_shard, gather_dim, group_name)
+        A = all_gather_single(A_shard, gather_dim, group_name)
         leading_dims = A.shape[:-1]
         res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
         res = res.unflatten(0, leading_dims)
@@ -1214,7 +1214,7 @@ def _fused_matmul_reduce_scatter(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
+        reduce_scatter_single(A @ B, reduce_op, scatter_dim, group_name)
 
     Optimal stride order for A - if A.movedim(scatter_dim, 0) is contiguous, no
     extra copy is required for input layout transformation. Otherwise A needs
@@ -1246,7 +1246,7 @@ def _fused_matmul_reduce_scatter_fallback(
     scatter_dim: int,
     group_name: c10d.GroupName,
 ) -> torch.Tensor:
-    res = funcol.reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
+    res = funcol.reduce_scatter_single(A @ B, reduce_op, scatter_dim, group_name)
     res = funcol.wait_tensor(res)
     return res
 
@@ -1431,7 +1431,7 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
         use_fast_accum,
     )
     C = C.view(*output_shape[:-1], B.shape[1])
-    res = funcol.reduce_scatter_tensor(
+    res = funcol.reduce_scatter_single(
         C,
         reduce_op,
         orig_scatter_dim,  # need original scatter dim for 3D+ output tensor here
@@ -2272,89 +2272,6 @@ def reduce_scatter_offset(
         )
 
 
-def all_to_all_vdev(
-    input: torch.Tensor,
-    out: torch.Tensor,
-    in_splits: torch.Tensor,
-    out_splits_offsets: torch.Tensor,
-    group: str,
-) -> None:
-    r"""
-    all_to_all_vdev(input, out, in_splits, out_splits_offsets, group) -> None
-
-    Variable-length AllToAll where the per-peer split sizes live on device.
-    Functionally equivalent to :func:`torch.distributed.all_to_all_single` with
-    explicit ``input_split_sizes`` / ``output_split_sizes``, but the splits
-    never have to leave the device, which avoids the host/device sync that the
-    standard collective imposes when the splits are device tensors.
-
-    All four tensor arguments must be allocated via
-    :func:`torch.distributed._symmetric_memory.empty` and rendezvous'd on
-    ``group`` (i.e. they must be symmetric-memory tensors on the *same*
-    backend).
-
-    Args:
-        input (Tensor): Send buffer (contiguous).  Sized to fit
-            ``sum(in_splits)`` rows along dim 0.  All ranks must agree on the
-            tensor shape and dtype.
-        out (Tensor): Recv buffer (contiguous).  Must be large enough to hold
-            the rows pulled from every peer (i.e. the sum of the output splits
-            this rank receives).  Same dtype as ``input``.
-        in_splits (Tensor): 1-D ``int64`` tensor of length
-            ``group.size()``.  ``in_splits[p]`` = number of rows this rank
-            sends to peer ``p``.
-        out_splits_offsets (Tensor): 2-D ``int64`` tensor of shape
-            ``(2, group.size())``.  On return:
-
-            - ``out_splits_offsets[0, p]`` = number of rows received from peer ``p``.
-            - ``out_splits_offsets[1, p]`` = exclusive prefix-sum of row 0
-              (the position of peer ``p``'s chunk inside ``out``).
-
-            The contents on entry are ignored / used as scratch.
-        group (str): Name of the :class:`~torch.distributed.ProcessGroup` to
-            perform the operation on.
-
-    Backend dispatch:
-
-    - ``"NCCL"``    -> :func:`torch.ops.symm_mem.nccl_all_to_all_vdev`
-      (NCCL device-API based, requires NCCL >= 2.28).
-    - ``"NVSHMEM"`` -> :func:`torch.ops.symm_mem.all_to_all_vdev`
-      (NVSHMEM-based, requires PyTorch built with NVSHMEM support).
-
-    Other backends raise :class:`NotImplementedError`.
-
-    Example::
-
-        >>> # doctest: +SKIP
-        >>> # MoE token shuffle: every rank decides per-peer how many tokens to send
-        >>> max_in = group.size() * max_tokens_per_peer
-        >>> max_out = group.size() * max_tokens_per_peer  # upper bound on rows received
-        >>> input  = symm_mem.empty(max_in, hidden, dtype=torch.bfloat16, device="cuda")
-        >>> out    = symm_mem.empty(max_out, hidden, dtype=torch.bfloat16, device="cuda")
-        >>> in_sp  = symm_mem.empty(group.size(), dtype=torch.int64, device="cuda")
-        >>> out_sp = symm_mem.empty(2, group.size(), dtype=torch.int64, device="cuda")
-        >>> for t in (input, out, in_sp, out_sp):
-        ...     symm_mem.rendezvous(t, group=group_name)
-        >>> # ... fill `input` and `in_sp` from your router on device ...
-        >>> symm_mem.all_to_all_vdev(input, out, in_sp, out_sp, group_name)
-        >>> # `out_sp[0]` = received splits, `out_sp[1]` = exclusive offsets in `out`
-    """
-    backend = get_backend(input.device)
-    match backend:
-        case "NCCL":
-            torch.ops.symm_mem.nccl_all_to_all_vdev(
-                input, out, in_splits, out_splits_offsets, group
-            )
-        case "NVSHMEM":
-            torch.ops.symm_mem.all_to_all_vdev(
-                input, out, in_splits, out_splits_offsets, group
-            )
-        case _:
-            raise NotImplementedError(
-                f"all_to_all_vdev: unsupported backend: {backend}"
-            )
-
-
 def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
     r"""
     is_symm_mem_tensor(tensor) -> bool
@@ -2382,5 +2299,4 @@ __all__ = [
     "get_signal_pad_size",
     "get_mem_pool",
     "reduce_scatter_offset",
-    "all_to_all_vdev",
 ]
