@@ -1105,6 +1105,7 @@ def index_reduce_single_dim_strategy(
         aten.split_with_sizes_copy.default,
     ],
     RuntimeSchemaInfo(1),
+    allow_unbacked_sharding=False,
 )
 def split_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
