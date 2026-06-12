@@ -31,7 +31,13 @@ from ..bytecode_transformation import (
     create_dup_top,
     create_instruction,
 )
-from ..exc import raise_observed_exception, raise_type_error, unimplemented
+from ..exc import (
+    ObservedException,
+    raise_observed_exception,
+    raise_type_error,
+    unimplemented,
+    Unsupported,
+)
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
@@ -51,6 +57,7 @@ from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
 from .object_protocol import (
+    generic_richcompare_bool,
     pyindex_check,
     type_implements_nb_index,
     validate_sequence_index,
@@ -209,9 +216,10 @@ class BaseListVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L635-L652
+
         # TODO(dynamo-team): Replace iter_contains by a proper impl. once we
         # implement PyObject_RichCompare
-        return iter_contains(unpack_iterable(tx, self), item, tx)
+        return iter_contains(self.items, item, tx)
 
     def call_tree_map_branch(
         self,
@@ -363,7 +371,7 @@ class BaseListVariable(VariableTracker):
         CPython operates on the internal C array directly, so we compare
         VT items without going through a polyfill.
         """
-        from .object_protocol import generic_richcompare, generic_richcompare_bool
+        from .object_protocol import generic_richcompare
         from .tensor import SymNodeVariable
 
         try:
@@ -1138,55 +1146,73 @@ class ListVariable(CommonListMethodsVariable):
             if len(kwargs) != 0:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
 
-            if key_fn_var.is_constant_none():
-                keys = self.items.copy()
-            else:
-                keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
+            tx.output.side_effects.mutation(self)
+            # CPython's list.sort detaches the list while sorting: reads
+            # during the sort observe an empty list, items added during the
+            # sort are discarded, and the mutation raises ValueError after
+            # the sorted result is installed.
+            saved = list(self.items)
+            self.items.clear()
 
-            if not all(k.is_python_constant() for k in keys):
-                first_non_constant_key = None
-                for k in keys:
-                    if not k.is_python_constant():
-                        first_non_constant_key = k
-                if first_non_constant_key is None:
-                    raise AssertionError(
-                        "expected at least one non-constant key when not all keys are constant"
+            class _TracedKey:
+                # Compares through Dynamo so user-defined __lt__ (e.g. from
+                # functools.cmp_to_key) is traced like CPython's timsort,
+                # which only ever uses "<".
+                def __init__(self, key: VariableTracker) -> None:
+                    self.key = key
+
+                def __lt__(self, other: "_TracedKey") -> bool:
+                    result = variables.BuiltinVariable(operator.lt).call_function(
+                        tx, [self.key, other.key], {}
                     )
-
-                try:
-                    python_type = str(first_non_constant_key.python_type())
-                except NotImplementedError:
-                    python_type = "unknown"
-
-                unimplemented(
-                    gb_type="sort with non-constant keys",
-                    context=str(first_non_constant_key),
-                    explanation=(
-                        f"Cannot perform sort with non-constant key. "
-                        f"First non-constant key type: {python_type}. "
-                        f"Most notably, we cannot sort with Tensor or SymInt keys, but we can "
-                        f"sort ints."
-                    ),
-                    hints=["Use something else as the key."],
-                )
+                    if not result.is_python_constant():
+                        unimplemented(
+                            gb_type="sort with non-constant keys",
+                            context=str(self.key),
+                            explanation=(
+                                f"Cannot perform sort whose key comparison is not "
+                                f"a compile-time constant. "
+                                f"Key type: {self.key.python_type()}. "
+                                f"Most notably, we cannot sort with Tensor or SymInt "
+                                f"keys, but we can sort ints."
+                            ),
+                            hints=[
+                                "Use something else as the key.",
+                                *graph_break_hints.SUPPORTABLE,
+                            ],
+                        )
+                    return bool(result.as_python_constant())
 
             try:
-                tx.output.side_effects.mutation(self)
-                sorted_items_with_keys = sorted(
-                    (
-                        (
-                            x,
-                            k.as_python_constant(),
-                            -i if reverse else i,  # extra key to ensure stable sort
-                        )
-                        for i, (k, x) in enumerate(zip(keys, self.items))
-                    ),
-                    key=operator.itemgetter(1, 2),
-                    reverse=reverse,
-                )
-                self.items[:] = [x for x, *_ in sorted_items_with_keys]
+                if key_fn_var.is_constant_none():
+                    keys = saved
+                else:
+                    keys = [key_fn_var.call_function(tx, [x], {}) for x in saved]
+
+                if all(k.is_python_constant() for k in keys):
+                    order = sorted(
+                        range(len(saved)),
+                        key=lambda i: keys[i].as_python_constant(),
+                        reverse=reverse,
+                    )
+                else:
+                    order = sorted(
+                        range(len(saved)),
+                        key=lambda i: _TracedKey(keys[i]),
+                        reverse=reverse,
+                    )
+                new_items = [saved[i] for i in order]
             except Exception as e:
+                self.items[:] = saved
+                if isinstance(e, (ObservedException, Unsupported)):
+                    raise
                 raise_observed_exception(type(e), tx, args=list(e.args))
+            modified_during_sort = bool(self.items)
+            self.items[:] = new_items
+            if modified_during_sort:
+                raise_observed_exception(
+                    ValueError, tx, args=["list modified during sort"]
+                )
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
@@ -1519,6 +1545,32 @@ class DequeVariable(CommonListMethodsVariable):
             slice_within_maxlen = slice(-maxlen, None)
         else:
             slice_within_maxlen = None
+
+        if name == "__init__" and self.is_mutable():
+            # deque_init: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1810
+            # Re-init resets maxlen (to None unless given), clears the deque,
+            # then extends with the iterable.
+            iterable = args[0] if len(args) >= 1 else kwargs.pop("iterable", None)
+            new_maxlen = (
+                args[1]
+                if len(args) >= 2
+                else kwargs.pop("maxlen", ConstantVariable.create(None))
+            )
+            if len(args) > 2 or kwargs:
+                raise_args_mismatch(tx, name)
+            if not new_maxlen.is_python_constant():
+                raise_type_error(tx, "an integer is required")
+            new_maxlen_val = new_maxlen.as_python_constant()
+            if new_maxlen_val is not None and new_maxlen_val < 0:
+                raise_observed_exception(
+                    ValueError, tx, args=["maxlen must be non-negative"]
+                )
+            tx.output.side_effects.mutation(self)
+            self.maxlen = new_maxlen
+            self.items[:] = []
+            if iterable is not None:
+                self.call_method(tx, "extend", [iterable], {})
+            return ConstantVariable.create(None)
 
         if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:

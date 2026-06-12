@@ -256,6 +256,41 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         # Result respects maxlen of 3
         self.assertEqual(list(d), [2, 3, 4])
 
+    # --- deque re-init (deque.__init__) ---
+
+    @make_dynamo_test
+    def test_deque_reinit_clears_and_extends(self):
+        d = collections.deque(range(-5, 0))
+        d.__init__(range(3))
+        self.assertEqual(list(d), [0, 1, 2])
+
+    @make_dynamo_test
+    def test_deque_reinit_resets_maxlen(self):
+        d = collections.deque([1, 2], maxlen=2)
+        d.__init__(range(4))
+        # No maxlen passed -> maxlen reset to None, all items kept
+        self.assertEqual(d.maxlen, None)
+        self.assertEqual(list(d), [0, 1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_reinit_with_maxlen(self):
+        d = collections.deque([1, 2])
+        d.__init__(range(5), 3)
+        self.assertEqual(d.maxlen, 3)
+        self.assertEqual(list(d), [2, 3, 4])
+
+    @make_dynamo_test
+    def test_deque_reinit_empty(self):
+        d = collections.deque([1, 2, 3])
+        d.__init__()
+        self.assertEqual(list(d), [])
+
+    @make_dynamo_test
+    def test_deque_reinit_negative_maxlen(self):
+        d = collections.deque([1, 2])
+        with self.assertRaises(ValueError):
+            d.__init__(range(3), -1)
+
     # --- torch.Size concatenation ---
 
     @make_dynamo_test
