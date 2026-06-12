@@ -1158,6 +1158,18 @@ if(USE_NCCL)
   endif()
 endif()
 
+# ---[ NCCL EP
+# Static-link libnccl_ep.a into libtorch_cuda.so. This is interim: once nccl-ep
+# ships in a release wheel we'll switch to dynamic linking. Static linking is
+# fine in the meantime because libnccl_ep.a is small -- the actual EP CUDA
+# kernels are JIT-compiled at runtime, so the archive is mostly host-side and
+# launcher logic.
+if(USE_NCCL_EP)
+  message(STATUS "USE_NCCL_EP is ON")
+  include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)
+  list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS __caffe2_nccl_ep)
+endif()
+
 # ---[ XCCL
 if(USE_XCCL)
   if(NOT USE_XPU)
