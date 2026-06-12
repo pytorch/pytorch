@@ -78,6 +78,12 @@ inductor_compiled_code.fallthrough(DispatchKey.AutogradCPU)
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCUDA)
 
 
+# Materialize boxed call arguments through an FX node so codegen can drop the
+# original locals immediately after the list is built.
+def _box_call_inputs(*inputs):
+    return list(inputs)
+
+
 _inductor_compiled_callable_id = itertools.count()
 
 
@@ -205,14 +211,21 @@ def inductor_compiled_code_functionalize(ctx, func, inputs, *, name=None):
 def inductor_compiled_code_proxy(mode, func, inputs, *, name=None):
     resolved = _resolve_inductor_callable(func)
 
+    proxy_inputs = pytree.tree_map(mode.tracer.unwrap_proxy, inputs)
+    if isinstance(proxy_inputs, list):
+        proxy_inputs = mode.tracer.create_proxy(
+            "call_function",
+            _box_call_inputs,
+            tuple(proxy_inputs),
+            {},
+        )
+
     # Run the fake impl to get example outputs for tracing
     kwargs = {"name": name} if name is not None else {}
     example_out = inductor_compiled_code(func, inputs, **kwargs)
 
     # Register in side table so the FX node stores a serializable int
     callable_idx = inductor_code_side_table.add_callable(resolved)
-
-    proxy_inputs = pytree.tree_map(mode.tracer.unwrap_proxy, inputs)
 
     out_proxy = mode.tracer.create_proxy(
         "call_function",
