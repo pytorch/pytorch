@@ -529,12 +529,17 @@ def instantiate_user_defined_class_object(
     # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
     if issubclass(type(obj), cls):
         init = type(obj).__init__
-        if init is object.__init__ or (
+        if init is object.__init__:
+            return obj
+        if (
             not args
             and not kwargs
-            and issubclass(type(obj), BaseException)
             and init in (BaseException.__init__, Exception.__init__)
         ):
+            if cls.__new__ in (BaseException.__new__, Exception.__new__):
+                return obj
+            # pyrefly: ignore [bad-argument-type]
+            BaseException.__init__(obj)
             return obj
 
         init_kind = _get_class_init_kind(type(obj))

@@ -246,6 +246,26 @@ class TestUserDefinedObjectConstruction(TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn().args, fn().args)
 
+    def test_exception_new_returned_instance_no_arg_init_graph_breaks(self):
+        class MyError(Exception):
+            saved = None
+
+            def __new__(cls):
+                return cls.saved
+
+        MyError.saved = Exception.__new__(MyError)
+        BaseException.__init__(MyError.saved, "stale")
+
+        def fn():
+            e = MyError()
+            return len(e.args)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported method call"
+        ):
+            opt_fn()
+
     def test_explicit_exception_init_with_wrong_receiver_not_supported(self):
         class MyError(Exception):
             pass
@@ -254,6 +274,18 @@ class TestUserDefinedObjectConstruction(TestCase):
             values = []
             MyError.__init__(values, 1)
             return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_builtin_exception_init_requires_descriptor_owner(self):
+        def fn():
+            e = BaseException("x")
+            Exception.__init__(e)
+            return e
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(
