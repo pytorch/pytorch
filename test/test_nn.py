@@ -15498,6 +15498,35 @@ if __name__ == '__main__':
         self.assertEqual(inp.grad, g1_inp)
         self.assertEqual(weight.grad, g1_w)
 
+    @onlyCUDA
+    def test_linear_cross_entropy_chunked_backward_no_grad_materialization(
+        self, device
+    ):
+        """The chunked scalar op returns its precomputed gradients as op
+        outputs; backward must not let the engine materialize zero-filled
+        gradients for those unused outputs (set_materialize_grads(False)
+        in setup_context). The materialized zeros would be (N, F) + (C, F)
+        at input dtype -- asserted here as a peak-memory regression
+        trip-wire: backward's allocations must stay well below that.
+        """
+        torch.manual_seed(0)
+        N, F_, C = 1024, 1024, 4096
+        inp = torch.randn(N, F_, device=device, dtype=torch.float16,
+                          requires_grad=True)
+        lw = torch.randn(C, F_, device=device, dtype=torch.float16,
+                         requires_grad=True)
+        target = torch.randint(0, C, (N,), device=device)
+        options = nn.LinearCrossEntropyOptions(batch_chunk_size=256)
+        loss = nn.functional.linear_cross_entropy(inp, lw, target, options=options)
+        torch.cuda.synchronize(device)
+        torch.cuda.reset_peak_memory_stats(device)
+        pre = torch.cuda.memory_allocated(device)
+        loss.backward()
+        torch.cuda.synchronize(device)
+        backward_extra = torch.cuda.max_memory_allocated(device) - pre
+        materialized = (N * F_ + C * F_) * 2  # the zeros the engine would fill
+        self.assertLess(backward_extra, materialized // 2)
+
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
