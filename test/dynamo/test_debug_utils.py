@@ -256,7 +256,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(TestDebugUtils, globals())
 
 instantiate_device_type_tests(
-    TestDebugUtilsDevice, globals(), only_for=devices, except_for="mps", allow_xpu=True
+    TestDebugUtilsDevice, globals(), except_for="mps", allow_xpu=True
 )
 
 
