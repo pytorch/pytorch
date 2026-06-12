@@ -15,8 +15,8 @@
 
 #if !AT_ONEDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor onednn_view(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(false, "onednn_reshape: ATen not compiled with ONEDNN support");
@@ -38,8 +38,8 @@ Tensor& onednn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(false, "onednn_transpose_: ATen not compiled with ONEDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_ONEDNN_ENABLED
 

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from operator import itemgetter
-from typing import List
 
 import torch
 import torch.fx
@@ -13,7 +12,7 @@ from torch.distributed.tensor import DTensor
 
 inductor_decomps = select_decomp_table()
 
-graphs: List[torch.fx.GraphModule] = []
+graphs: list[torch.fx.GraphModule] = []
 
 
 def fwd_bwd_compiler(fx_g, _):
@@ -43,7 +42,8 @@ def get_inductor_decomp_graphs(model: nn.Module, args, kwargs):
     output.backward()
 
     # one fwd, one bwd graph
-    assert len(graphs) == 2
+    if len(graphs) != 2:
+        raise AssertionError
     return graphs
 
 

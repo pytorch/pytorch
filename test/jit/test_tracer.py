@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import copy
 import io
@@ -28,6 +29,7 @@ from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_utils import (
     enable_profiling_mode_for_profiling_tests,
     IS_SANDCASTLE,
+    raise_on_run_directly,
     skipIfCompiledWithoutNumpy,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -43,14 +45,6 @@ from torch.testing._internal.jit_utils import (
     RUN_CUDA,
     RUN_CUDA_MULTI_GPU,
 )
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
@@ -159,7 +153,8 @@ class TestTracer(JitTestCase):
             return (x,)
 
         jit_f2 = torch.jit.trace(f2, x)
-        assert f2(x) == jit_f2(x)  # fails
+        if f2(x) != jit_f2(x):
+            raise AssertionError(f"Traced output {jit_f2(x)} != eager output {f2(x)}")
 
     def test_trace_out_operator_with_two_output(self):
         example_input = torch.rand(2, 8)
@@ -966,8 +961,9 @@ class TestTracer(JitTestCase):
         V = Variable
         a, b = V(torch.rand(1)), V(torch.rand(1))
         ge = torch.jit.trace(foo, (a, b))
-        a, b = V(torch.rand(1), requires_grad=True), V(
-            torch.rand(1), requires_grad=True
+        a, b = (
+            V(torch.rand(1), requires_grad=True),
+            V(torch.rand(1), requires_grad=True),
         )
         (r,) = ge(a, b)
         da, db = torch.autograd.grad(r + 3, [a, b], create_graph=True)
@@ -1157,10 +1153,14 @@ class TestTracer(JitTestCase):
     def test_trace_detach_redispatch(self):
         def foo(x, w):
             y = torch.matmul(x, w)
-            assert y.requires_grad
+            if not y.requires_grad:
+                raise AssertionError("Expected y.requires_grad to be True")
             y = y.detach()
             # Make sure trace kernel redispatches to the right lower kernel.
-            assert not y.requires_grad
+            if y.requires_grad:
+                raise AssertionError(
+                    "Expected y.requires_grad to be False after detach"
+                )
             return y
 
         x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
@@ -1185,10 +1185,14 @@ class TestTracer(JitTestCase):
     def test_trace_detach_inplace_redispatch(self):
         def foo(x, w):
             y = torch.matmul(x, w)
-            assert y.requires_grad
+            if not y.requires_grad:
+                raise AssertionError("Expected y.requires_grad to be True")
             y.detach_()
             # Make sure trace kernel redispatches to the right lower kernel.
-            assert not y.requires_grad
+            if y.requires_grad:
+                raise AssertionError(
+                    "Expected y.requires_grad to be False after detach_"
+                )
             return y
 
         x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
@@ -1701,7 +1705,7 @@ class TestTracer(JitTestCase):
     def test_trace_checker_dot_data(self):
         with self.assertRaisesRegex(
             torch.jit.TracingCheckError,
-            r"Tensor-valued Constant nodes differed in value " r"across invocations",
+            r"Tensor-valued Constant nodes differed in value across invocations",
         ):
 
             @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
@@ -1931,9 +1935,12 @@ class TestTracer(JitTestCase):
 
         traced = torch.jit.trace(foo, (torch.rand(3, 3), torch.rand(3, 3)))
         graph_str = str(traced.graph)
-        assert "bar" in graph_str
-        assert "baz" in graph_str
-        assert "quick_brown_fox" in graph_str
+        if "bar" not in graph_str:
+            raise AssertionError(f"'bar' not found in graph: {graph_str}")
+        if "baz" not in graph_str:
+            raise AssertionError(f"'baz' not found in graph: {graph_str}")
+        if "quick_brown_fox" not in graph_str:
+            raise AssertionError(f"'quick_brown_fox' not found in graph: {graph_str}")
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tracing_hooks(self):
@@ -2030,7 +2037,7 @@ class TestTracer(JitTestCase):
         module = torch.jit.trace_module(n, inputs)
 
         check_inputs = []
-        for i in range(2):
+        for _ in range(2):
             check_weight = torch.rand(1, 1, 3, 3)
             check_forward_input = torch.rand(1, 1, 3, 3)
             check_inputs.append(
@@ -2825,3 +2832,7 @@ class TestMixTracingScripting(JitTestCase):
         for n in fn_t.graph.nodes():
             if n.kind() == "prim::CallFunction":
                 self.assertTrue(n.output().isCompleteTensor())
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

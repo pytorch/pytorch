@@ -1,13 +1,17 @@
 //  Copyright © 2022 Apple Inc.
 
 #pragma once
+#include <ATen/Device.h>
 #include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #ifdef __OBJC__
-#include <Foundation/Foundation.h>
+// Metal.h pulls in Foundation.h, which transitively includes CarbonCore
+// headers that emit a flood of -Wdeprecated-declarations on recent macOS SDKs.
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #include <Metal/Metal.h>
+C10_DIAGNOSTIC_POP()
 typedef id<MTLDevice> MTLDevice_t;
 #else
 typedef void* MTLDevice_t;
@@ -17,13 +21,20 @@ namespace at::mps {
 
 // Helper enum to check if a MPSGraph op is supported in a given macOS version
 enum class MacOSVersion : uint32_t {
-  MACOS_VER_13_1_PLUS = 0,
-  MACOS_VER_13_2_PLUS,
-  MACOS_VER_13_3_PLUS,
-  MACOS_VER_14_0_PLUS,
-  MACOS_VER_14_4_PLUS,
+  MACOS_VER_14_4_PLUS = 0,
   MACOS_VER_15_0_PLUS,
   MACOS_VER_15_1_PLUS,
+  MACOS_VER_15_2_PLUS,
+  MACOS_VER_26_0_PLUS,
+  MACOS_VER_26_4_PLUS,
+};
+
+// Helper enum for GPU-family-gated workarounds
+enum class AppleGPUFamily : uint32_t {
+  APPLE_7_PLUS = 1007, // M1
+  APPLE_8_PLUS = 1008, // M2
+  APPLE_9_PLUS = 1009, // M3 / M4
+  APPLE_10_PLUS = 1010, // M5
 };
 
 //-----------------------------------------------------------------
@@ -57,6 +68,17 @@ class TORCH_API MPSDevice {
    */
   bool isMacOS13Plus(MacOSVersion version) const;
 
+  /**
+   * Returns device name
+   */
+  std::string getName() const;
+
+  /**
+   * Returns number of GPU cores.
+   * 1 Core = 16 ExecutionUnit x 8 ALU x 24 threads
+   */
+  unsigned getCoreCount() const;
+
   ~MPSDevice();
 
  private:
@@ -67,6 +89,11 @@ class TORCH_API MPSDevice {
 
 TORCH_API bool is_available();
 TORCH_API bool is_macos_13_or_newer(MacOSVersion version);
-TORCH_API at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
+TORCH_API bool is_apple_family_or_newer(AppleGPUFamily family);
+TORCH_API at::Allocator* GetMPSAllocator();
+
+inline Device getDeviceFromPtr(void* ptr) {
+  return {c10::DeviceType::MPS, 0};
+}
 
 } // namespace at::mps

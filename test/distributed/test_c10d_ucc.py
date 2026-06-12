@@ -751,11 +751,11 @@ class DistributedDataParallelTest(
             torch.save(ddp_withload.state_dict(), checkpoint_path)
 
         dist.barrier()
-        map_location = {"cuda:%d" % 0: "cuda:%d" % self.rank}
+        map_location = {"cuda:0": f"cuda:{self.rank:d}"}
         ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
 
         for model in [ddp_withload, model_withload]:
-            for p in ddp_withload.parameters():
+            for p in model.parameters():
                 with torch.no_grad():
                     p.zero_()
         ddp_withload.load_state_dict(ddp_state_dict)
@@ -1085,13 +1085,14 @@ class UccProcessGroupWithDispatchedCollectivesTests(
         device = "cuda"
         tensor = torch.ones(10, 10, device=torch.device(device))
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
-        dist.all_gather_into_tensor(output_tensor, tensor)
+        dist.all_gather_single(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
+    if torch.cuda._initialized:
+        raise AssertionError(
+            "test_distributed must not have initialized CUDA context on main process"
+        )
 
     run_tests()

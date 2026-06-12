@@ -1,32 +1,46 @@
-# mypy: allow-untyped-defs
 """
 The various dataclasses, Enums, namedtuples etc used in AOTAutograd. This includes
 input/output types, metadata, config, function signatures etc.
 """
 
+from __future__ import annotations
+
 import collections
-import dataclasses
 import functools
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Set, Union
+from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
-from torch._guards import Source
-from torch._ops import OpOverload
-from torch._subclasses import FakeTensor
+from torch import SymInt, Tensor
+from torch._opaque_base import OpaqueBase
+from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
+from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-from .functional_utils import (
-    _check_if_mutation_can_be_in_graph,
-    FunctionalTensorMetadataEq,
-)
+from .functional_utils import _check_if_mutation_can_be_in_graph, ViewMetaSequence
 from .utils import strict_zip
 
 
+if TYPE_CHECKING:
+    import contextlib
+    from collections.abc import Callable, Iterable, Sequence
+
+    from torch._guards import Source
+    from torch._inductor.output_code import OutputCode
+    from torch._inductor.utils import InputType
+    from torch._ops import OpOverload
+    from torch.types import IntLikeType
+
+    from .descriptors import AOTInput, AOTOutput
+    from .graph_capture_wrappers import JointFnHandle
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 zip = strict_zip
 
 
@@ -87,20 +101,25 @@ class OutputAliasInfo:
     # If (6) above, then:
     # - Tells us that the base of this alias is output_user_fwds[base_idx]
     #   here, this refers to the index of the *direct* traced
-    base_idx: Optional[int]
+    base_idx: int | None
     # If it is a Tensor, what the dynamic dims are (otherwise is None)
-    dynamic_dims: Optional[Set[int]]
-    # requires_grad
+    dynamic_dims: set[int] | None
+    # Whether the output tensor has requires_grad=True. Use for
+    # preserving output properties (mark_non_differentiable, alias reconstruction).
     requires_grad: bool
-    # FunctionalTensorWrapper that represents this output.
+    # Whether this output participates in backward as
+    # a tangent. Normally the same as requires_grad, but False for views created
+    # under no_grad() that inherit requires_grad from their base without having a
+    # grad_fn. Use when constructing tangent lists for torch.autograd.grad().
+    requires_grad_for_backward: bool
+    # Sequence of ViewMeta objects.
     #
-    # Provides us the means to replay views from it.
+    # Provides us the means to re-run view functions on other tensors.
     #
-    # We need to wrap the actual FunctionalTensorWrapper with this class so that
-    # we only compare the tensor's metadata. That's because with the transformations
-    # of the model throughout AOTAutograd, the sequence of ViewMeta and the base
-    # tensor might change.
-    functional_tensor: Optional[FunctionalTensorMetadataEq] = None
+    # We need to wrap the actual list of ViewMeta with this class so that
+    # we compare the ViewMeta elements appropriately, i.e. their type and
+    # the elements returned by the `as_tuple()` call.
+    view_meta_sequence: ViewMetaSequence | None = None
 
 
 class MutationType(Enum):
@@ -122,13 +141,16 @@ class InputAliasInfo:
     requires_grad: bool
     keep_input_mutations: bool
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.mutates_storage_metadata:
             # For convenience, we guarantee that this is always true.
             # In practice, If we call .set_(), then at runtime there is no need
             # to additionally fix  up the tensor metadata, since our runtime
             # call to inp.set_(updated_inp) will already have the right metadata
-            assert self.mutates_metadata
+            if not self.mutates_metadata:
+                raise AssertionError(
+                    "mutates_storage_metadata requires mutates_metadata to be True"
+                )
 
     @functools.cached_property
     def mutation_type(self) -> MutationType:
@@ -155,9 +177,62 @@ class InputAliasInfo:
 
 
 @dataclass
+class MemoryFormatMeta:
+    # For static shapes we assume tangents have the same strideness as outputs
+    size: Sequence[int] | None = None
+    stride: Sequence[int] | None = None
+
+    # For dynamic shapes we assume the same memory format: contiguous, channels_last etc.
+    memory_format: torch.memory_format | None = None
+
+    @staticmethod
+    def from_tensor(
+        t: torch.Tensor, force_use_memory_format: bool = False
+    ) -> MemoryFormatMeta | None:
+        # We only memorize expected memory format for
+        # 1. Traceable wrapper subclasses
+        # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
+        # 2. Dynamic shape tensors
+        # Support for symbolic shapes is not implemented yet.
+        # 3. force_use_memory_format=True (e.g., local_map where shapes change)
+        use_memory_format: bool = (
+            force_use_memory_format
+            or not torch._functorch.config.guess_tangent_strides_as_outputs
+            or is_traceable_wrapper_subclass(t)
+        )
+        if not use_memory_format:
+            use_memory_format = t._has_symbolic_sizes_strides
+
+        if (
+            not use_memory_format
+            and t.layout == torch.strided
+            and torch._debug_has_internal_overlap(t) == 1
+        ):
+            # An internally overlapping output, e.g. from expand(), cannot
+            # represent arbitrary incoming gradients with its own strides.
+            use_memory_format = True
+
+        if use_memory_format:
+            return MemoryFormatMeta(
+                # pyrefly: ignore [unbound-name]
+                memory_format=torch._prims_common.suggest_memory_format(t),
+            )
+
+        return MemoryFormatMeta(
+            size=t.size(),
+            stride=t.stride(),
+        )
+
+
+@dataclass
 class PlainTensorMeta:
     unwrapped_idx: int
-    memory_format: Optional[torch.memory_format] = None
+    memory_format: MemoryFormatMeta | None = None
+
+
+@dataclass
+class OpaqueMeta:
+    pass
 
 
 @dataclass
@@ -182,7 +257,7 @@ class SubclassCreationMeta:
     # arg_count is inclusive of the arg_counts of any
     # inner tensor subclasses: If I have a TwoTensor and
     # both of its inner elements are TwoTensors, then the
-    # arg_count of the outer-most sublass will be 4
+    # arg_count of the outer-most subclass will be 4
     arg_count: int
     # Mark where or not symints were included. This flag is only used in one assertion
     # in "wrap_tensor_subclasses"
@@ -190,41 +265,45 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: Dict[str, Union["SubclassCreationMeta", PlainTensorMeta]]
-    outer_size: Iterable[Union[None, int, torch.SymInt]]
-    outer_stride: Iterable[Union[None, int, torch.SymInt]]
+    attrs: dict[str, SubclassCreationMeta | PlainTensorMeta | OpaqueMeta]
+    outer_size: Iterable[IntLikeType | None]
+    outer_stride: Iterable[IntLikeType | None]
     meta: Any
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
     # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
     #  so holding onto this at runtime shouldn't leak memory)
     # This field is nulled out after calling make_runtime_safe()
-    original_subclass: Optional[torch.Tensor]
+    original_subclass: torch.Tensor | None
 
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
-    original_subclass_type: Optional[type] = None
-    memory_format: Optional[torch.memory_format] = None
+    original_subclass_type: type | None = None
+    memory_format: MemoryFormatMeta | None = None
 
     def compute_outer_size_and_stride(
         self,
-        all_args,
+        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
         *,
         curr_start_idx: int,
-    ):
+    ) -> tuple[
+        Iterable[IntLikeType | None],
+        Iterable[IntLikeType | None],
+    ]:
         from .subclass_utils import compute_symint_placeholders
 
-        def compute(outer, start_idx):
+        def compute(
+            outer: Iterable[IntLikeType | None], start_idx: int
+        ) -> tuple[Any, int | Any]:
             placeholders = compute_symint_placeholders(outer)
             has_symbolic = any(placeholders)
 
             if has_symbolic:
-                start = curr_start_idx
                 end = start_idx + sum(placeholders)
-                it_args = iter(all_args[start:end])
+                it_args = iter(all_args[start_idx:end])
                 it_placeholders = iter(placeholders)
                 return pytree.tree_map_only(
                     lambda _: next(it_placeholders), lambda _: next(it_args), outer
-                ), start + len(placeholders)
+                ), end
             else:
                 return outer, start_idx
 
@@ -234,16 +313,25 @@ class SubclassCreationMeta:
 
     def creation_fn(
         self,
-        all_args,
+        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
         *,
         is_runtime: bool,
-    ):
-        inner_tensors = {}
+    ) -> torch.Tensor:
+        inner_tensors: dict[str, torch.Tensor | OpaqueBase] = {}
 
         curr_start_idx = self.flat_tensor_start_idx
         for attr, creation_meta in self.attrs.items():
+            if isinstance(creation_meta, OpaqueMeta):
+                opaque = all_args[curr_start_idx]
+                if not isinstance(opaque, OpaqueBase):
+                    raise AssertionError(f"OpaqueBase expected, got {type(opaque)}")
+                inner_tensors[attr] = opaque
+                curr_start_idx += 1
+                continue
             if isinstance(creation_meta, PlainTensorMeta):
                 subclass = all_args[curr_start_idx]
+                if not isinstance(subclass, Tensor):
+                    raise AssertionError("Tensor expected")
                 curr_start_idx += 1
             else:
                 subclass = creation_meta.creation_fn(
@@ -254,7 +342,10 @@ class SubclassCreationMeta:
             inner_tensors[attr] = subclass
 
         if is_runtime:
-            assert self.original_subclass_type is not None
+            if self.original_subclass_type is None:
+                raise AssertionError(
+                    "original_subclass_type must not be None at runtime"
+                )
             original_subclass_type = self.original_subclass_type
         else:
             original_subclass_type = type(self.original_subclass)
@@ -280,8 +371,8 @@ class SubclassCreationMeta:
 
         return rebuilt
 
-    def make_runtime_safe(self):
-        def _make_size_runtime_safe(x: Union[None, int, torch.SymInt]) -> Optional[int]:
+    def make_runtime_safe(self) -> None:
+        def _make_size_runtime_safe(x: None | int | torch.SymInt) -> int | None:
             dummy = -1
             if isinstance(x, torch.SymInt):
                 # Replace nested ints by a dummy value (-1) as NJT ignores
@@ -289,7 +380,10 @@ class SubclassCreationMeta:
                 return dummy if x.node.is_nested_int() else None
             return x
 
-        assert self.original_subclass is not None
+        if self.original_subclass is None:
+            raise AssertionError(
+                "original_subclass must not be None before calling make_runtime_safe"
+            )
         self.original_subclass_type = type(self.original_subclass)
         self.original_subclass = None
 
@@ -297,7 +391,7 @@ class SubclassCreationMeta:
         # `_make_size_runtime_safe` replaces any nested int with a dummy value (-1)
         # to prevent serializing a SymInt at runtime. Internally, nested tensor __tensor_unflatten__
         # is designed to safely ignore this dummy value.
-        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299  # noqa: B950
+        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299
         self.outer_size = tuple(map(_make_size_runtime_safe, self.outer_size))
         self.outer_stride = tuple(map(_make_size_runtime_safe, self.outer_stride))
 
@@ -306,30 +400,28 @@ class SubclassCreationMeta:
             if isinstance(creation_meta, SubclassCreationMeta):
                 creation_meta.make_runtime_safe()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # sanity assert to make sure we don't leak memory
-        assert is_fake(self.original_subclass)
-
-        # This saves the type of subclass nested structure to compare
-        # against runtime tangent inputs. We do wanna compute this at AOT
-        # time as it is invoked in hot-path
-        from .subclass_utils import get_types_for_subclass
-
-        self.subclass_type = get_types_for_subclass(self.original_subclass)
+        if not is_fake(self.original_subclass):
+            raise AssertionError(
+                f"original_subclass must be a fake tensor to avoid memory leaks, got {type(self.original_subclass)}"
+            )
 
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph
 # See a more detailed overview of the edge case handling at
 # https://docs.google.com/document/d/19UoIh_SVrMy_b2Sx5ZaeOJttm6P0Qmyss2rdBuyfoic/edit
+# NOTE: This class is saved in AOTAutogradCache, If you are adding elements, make sure
+# they are covered by warm cache tests.
 @dataclass(eq=False)
 class ViewAndMutationMeta:
     # length = # user inputs
     # This gives us info about every input, and what sort of mutation happened to it (if any)
-    input_info: List[InputAliasInfo]
+    input_info: list[InputAliasInfo]
 
     # length = # user outputs
     # This gives us info about every output (mostly around whether it aliases other tensors)
-    output_info: List[OutputAliasInfo]
+    output_info: list[OutputAliasInfo]
 
     # length = the number of intermediate bases appended as outputs to the end of the forward graph.
     # Note: this is not necessarily the same thing as:
@@ -347,8 +439,11 @@ class ViewAndMutationMeta:
     # metadata pass of the user's forward function.
     # Their only use today is to pass them as a best-guess for tangents when tracing the joint.
     # Stashing them as part of our "metadata" makes it simpler if we want to run our analysis
-    # pass once, and re-use the output throughout AOTAutograd
-    traced_tangents: List[Any]
+    # pass once, and reuse the output throughout AOTAutograd
+    traced_tangents: list[Any]
+
+    # TODO doc
+    traced_tangents_descs: list[AOTInput]
 
     # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
     # They are used throughout AOTDispatch to tell us how to generate a list of subclass tensors,
@@ -362,7 +457,7 @@ class ViewAndMutationMeta:
     #      inputs[3] and inputs[4] of the plain-tensor graph".
 
     # length = # user inputs
-    subclass_inp_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
+    subclass_inp_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # So, the full set of outputs to the forward graph looks something like:
     # (*mutated_inps, *user_outs, *intermediate_bases, *saved_for_bw_tensors)
     # where the first 3 of those 4 can be subclasses
@@ -370,42 +465,53 @@ class ViewAndMutationMeta:
     # and not user visible, so there's no point in wrapping/unwrapping them at runtime).
     # This list contains subclass information on all of the fw graph outputs
     # except for saved_for_bw_tensors.
-    subclass_fw_graph_out_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
+    subclass_fw_graph_out_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # length = # backward graph inputs
-    subclass_tangent_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
-    # TODO: we should kill this
-    # (need to default it to not break internal)
-    is_train: bool = False
+    subclass_tangent_meta: list[PlainTensorMeta | SubclassCreationMeta]
 
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
     # At runtime, we don't keep the traced_tangents around since they're not serializable.
     # Instead, we keep any necessary subclass metadata necessary about each traced_tangent.
     # This list is generated after calling make_runtime_safe().
-    traced_tangent_metas: Optional[List[Any]] = None
+    traced_tangent_metas: list[Any] | None = None
 
-    num_symints_saved_for_bw: Optional[int] = None
+    num_symints_saved_for_bw: int | None = None
 
+    # See Note [Activations with no version counter checks in eager]
+    # Number of tensors saved for backward that were stashed on ctx (e.g., ctx.x = x)
+    # rather than via save_for_backward in an autograd.Function.
+    # These tensors are placed at the end of the saved tensors and should skip
+    # version counter checks at runtime.
+    num_tensors_saved_with_no_vc_check: int | None = None
+
+    # Number of opaque objects saved for backward
+    num_opaque_objects_saved_for_bw: int | None = None
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
     # equivalence to eager mode. It is the responsibility of upstream graph acquisition
     # to reset the grad mode to its pre-graph value prior to calling aot_autograd.
-    grad_enabled_mutation: Optional[bool] = None
+    grad_enabled_mutation: bool | None = None
 
     # Keeps track of whether `torch.use_deterministic_algorithms` was turned on
     # when the forward was run. If deterministic mode was turned off during the
     # forward, but is turned on during the backward call, then an error is
     # raised
-    deterministic: Optional[bool] = None
+    deterministic: bool | None = None
 
     # Keeps track of which input indices store parameters (which we will treat as static)
-    static_input_indices: List[int] = field(default_factory=list)
+    static_input_indices: list[int] = field(default_factory=list)
+
+    # Input indices that held AsyncCollectiveTensors at compile time.
+    # Used to emit direct trigger_wait() calls at runtime instead of
+    # scanning every arg on every graph invocation.
+    act_input_indices: list[int] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
     # dictionary telling us how many tokens we will need during tracing.
-    tokens: Dict[Any, torch.Tensor] = field(default_factory=dict)
+    tokens: dict[Any, torch.Tensor] = field(default_factory=dict)
 
     # Only filled in if/when we trace the joint function
     # If an input requires grad and is mutated in the backward, it is only safe to keep the mutation
@@ -413,24 +519,45 @@ class ViewAndMutationMeta:
     # (grad mode is disabled by default when users run the backward, but can be turned on with create_graph=True)
     # At runtime during the backward, we use this list of indices to error properly if we find out
     # that it was not safe to include a backward mutation in the graph.
-    indices_of_inputs_that_requires_grad_with_mutations_in_bw: List[int] = field(
+    indices_of_inputs_that_requires_grad_with_mutations_in_bw: list[int] = field(
         default_factory=list
     )
 
     # Indexes of saved tensors which are donated buffer.
     # Donated buffer means the tensor is not alias of any forward user input, forward user output,
     # and backward output.
-    bw_donated_idxs: Optional[List[int]] = None
+    bw_donated_idxs: list[int] | None = None
 
     # Number of tokens used in backward, appended at the end of backward outputs.
     # Filled after tracing joint function.
     num_backward_tokens: int = 0
 
-    def __post_init__(self):
+    # Number of rng states that will get thread into the forward and backward for
+    # cudagraph compatible run_and_save_rng
+    num_graphsafe_rng_states: int = 0
+
+    graphsafe_rng_state_index: int | None = None
+
+    # Device for graphsafe RNG states (supports CUDA, TPU, etc.)
+    graphsafe_rng_device: torch.device | None = None
+
+    # Stream indices for mutated inputs in the epilogue
+    # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
+    # the storage of the tensor that will be copied back into the original input
+    # None means use the current/default stream
+    # This is populated during graph compilation when stream assignments are made
+    mutated_inp_stream_indices: list[int | None] | None = None
+
+    # compile ID string (e.g., "1/0") for error messages
+    compile_id_str: str | None = None
+
+    # help users identify where to add .detach() in their code
+    tangent_source_stack_traces: list[str | None] | None = None
+
+    def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
         # handling data-only mutations, because we keep them directly in the graph.
-
         mutated_inp_runtime_indices = [
             i
             for i, m in enumerate(self.input_info)
@@ -527,7 +654,15 @@ class ViewAndMutationMeta:
             + self.num_outputs_aliased_to_intermediates
         )
 
+        # Record dynamic outputs of the Dynamo traced forward graph
+        # Mark them as dynamic at the end of the runtime wrapper
         self.dynamic_outputs = any(o.dynamic_dims for o in self.output_info)
+
+        # Record the indices of dynamic outputs in the partitioned forward graph
+        # Mark them as dynamic in the runtime wrapper
+        # activation index -> dynamic dims indices
+        self.dynamic_saved_tensors_idxs: dict[int, set[int]] = {}
+
         # See Note: [AOTAutograd Backward Guards]
         # This is pre-computed for fast asserts on the types of our grad_outputs in the backward.
         # Eventually, we should kill this and replace with real backward guards.
@@ -562,7 +697,7 @@ class ViewAndMutationMeta:
         # this information.
         self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
 
-    def make_runtime_safe(self):
+    def make_runtime_safe(self) -> None:
         """
         There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
         is completed to simplify certain fields in the metadata so that they can be safely cached.
@@ -572,9 +707,12 @@ class ViewAndMutationMeta:
         # TODO: This function is only a best effort: there are other fields that may not be cache safe
         # (i.e., there's no guarantee that tensor_flatten() returns a serializable result), or that
         # SubclassCreationMeta is cache safe.
-        assert self.traced_tangent_metas is None
+        if self.traced_tangent_metas is not None:
+            raise AssertionError(
+                "traced_tangent_metas should be None before calling make_runtime_safe"
+            )
 
-        def extract_metadata(t):
+        def extract_metadata(t: object) -> tuple[Sequence[str], object] | None:
             if isinstance(t, torch.Tensor) and is_traceable_wrapper_subclass(t):
                 (inner_tensors, flatten_spec) = t.__tensor_flatten__()  # type: ignore[attr-defined]
                 # Technically, we only need the flatten_spec, not the inner tensors.
@@ -589,17 +727,6 @@ class ViewAndMutationMeta:
         self.traced_tangent_metas = [extract_metadata(t) for t in self.traced_tangents]
         # Clear traced tangents at runtime
         self.traced_tangents = []
-        new_output_info = []
-        for out in self.output_info:
-            if config.view_replay_for_aliased_outputs:
-                new_out = out
-            else:
-                # If we're not using view_replay, remove the functional tensor.
-                # Functional tensors are unfortunately not serializable,
-                # so doing this is required for AOTAutograd caching.
-                new_out = dataclasses.replace(out, functional_tensor=None)
-            new_output_info.append(new_out)
-        self.output_info = new_output_info
         for inp_meta in self.subclass_inp_meta:
             if isinstance(inp_meta, SubclassCreationMeta):
                 inp_meta.make_runtime_safe()
@@ -610,23 +737,100 @@ class ViewAndMutationMeta:
             if isinstance(inp_meta, SubclassCreationMeta):
                 inp_meta.make_runtime_safe()
 
+        # Clear view_meta_sequence when it has symbolic inputs, since it won't
+        # be used at runtime anyway (gen_alias_from_base skips view replay for
+        # symbolic inputs) and the SymInt references make it unpicklable.
+        for i, out_info in enumerate(self.output_info):
+            if out_info.view_meta_sequence is not None and any(
+                vm.has_symbolic_inputs for vm in out_info.view_meta_sequence.sequence
+            ):
+                self.output_info[i] = replace(out_info, view_meta_sequence=None)
+
     @property
-    def tensors_saved_for_backwards_slice(self):
-        assert self.num_symints_saved_for_bw is not None
-        if self.num_symints_saved_for_bw > 0:
-            return slice(self.num_forward, -self.num_symints_saved_for_bw)
+    def tensors_saved_for_backwards_slice(self) -> slice:
+        if self.num_symints_saved_for_bw is None:
+            raise AssertionError("num_symints_saved_for_bw must not be None")
+        if self.num_tensors_saved_with_no_vc_check is None:
+            raise AssertionError("num_tensors_saved_with_no_vc_check must not be None")
+        # Fast-path: if no tensors without VC check, just return the VC check slice
+        if self.num_tensors_saved_with_no_vc_check == 0:
+            return self.tensors_saved_for_backwards_with_vc_check_slice
+        # Invariant: total tensors activations = (acts_with_vc_check, acts_no_vc_check)
+        vc_slice = self.tensors_saved_for_backwards_with_vc_check_slice
+        no_vc_slice = self.tensors_saved_for_backwards_no_vc_check_slice
+        # Start should be the same (self.num_forward)
+        if vc_slice.start != self.num_forward:
+            raise AssertionError(
+                f"vc_slice.start ({vc_slice.start}) != self.num_forward ({self.num_forward})"
+            )
+        # End is the end of the no_vc_check slice
+        return slice(vc_slice.start, no_vc_slice.stop)
+
+    @property
+    def tensors_saved_for_backwards_with_vc_check_slice(self) -> slice:
+        """
+        Slice of forward outputs that are tensors saved for backward that
+        require version counter checks (i.e., were saved via save_for_backward).
+        """
+        # See Note [Activations with no version counter checks in eager]
+        if self.num_symints_saved_for_bw is None:
+            raise AssertionError("num_symints_saved_for_bw must not be None")
+        if self.num_tensors_saved_with_no_vc_check is None:
+            raise AssertionError("num_tensors_saved_with_no_vc_check must not be None")
+        # The tensors with VC check come first, followed by tensors without VC check
+        num_no_vc_check = self.num_tensors_saved_with_no_vc_check
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw
+        num_trailing = num_no_vc_check + num_opaque + num_symints
+        if num_trailing > 0:
+            return slice(self.num_forward, -num_trailing if num_trailing != 0 else None)
         else:
             return slice(self.num_forward, None)
 
     @property
-    def symints_saved_for_backwards_slice(self):
-        assert self.num_symints_saved_for_bw is not None
+    def tensors_saved_for_backwards_no_vc_check_slice(self) -> slice:
+        """
+        Slice of forward outputs that are tensors saved for backward that
+        do NOT require version counter checks (i.e., were stashed on ctx
+        rather than via save_for_backward in an autograd.Function).
+        """
+        if self.num_symints_saved_for_bw is None:
+            raise AssertionError("num_symints_saved_for_bw must not be None")
+        if self.num_tensors_saved_with_no_vc_check is None:
+            raise AssertionError("num_tensors_saved_with_no_vc_check must not be None")
+        num_no_vc_check = self.num_tensors_saved_with_no_vc_check
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw
+        if num_no_vc_check == 0:
+            return slice(0, 0)  # empty slice
+        num_trailing = num_opaque + num_symints
+        if num_trailing > 0:
+            return slice(-num_no_vc_check - num_trailing, -num_trailing)
+        else:
+            return slice(-num_no_vc_check, None)
+
+    @property
+    def opaque_objects_saved_for_backwards_slice(self) -> slice:
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw or 0
+        if num_opaque > 0:
+            if num_symints > 0:
+                return slice(-num_opaque - num_symints, -num_symints)
+            else:
+                return slice(-num_opaque, None)
+        else:
+            return slice(0, 0)  # empty slice
+
+    @property
+    def symints_saved_for_backwards_slice(self) -> slice:
+        if self.num_symints_saved_for_bw is None:
+            raise AssertionError("num_symints_saved_for_bw must not be None")
         if self.num_symints_saved_for_bw > 0:
             return slice(-self.num_symints_saved_for_bw, None)
         else:
             return slice(0, 0)  # empty slice
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, ViewAndMutationMeta):
             return NotImplemented
         return (
@@ -639,7 +843,7 @@ class ViewAndMutationMeta:
             and len(self.traced_tangents) == len(other.traced_tangents)
             and all(
                 x.shape == y.shape and x.dtype == y.dtype
-                for x, y, in zip(self.traced_tangents, other.traced_tangents)
+                for x, y in zip(self.traced_tangents, other.traced_tangents)
             )
             and self.num_backward_tokens == other.num_backward_tokens
         )
@@ -676,9 +880,7 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[
-        List[Union[PlainTensorMeta, SubclassCreationMeta]]
-    ] = None
+    grad_input_metas: list[PlainTensorMeta | SubclassCreationMeta] | None = None
 
     def __init__(self) -> None:
         # The fields in this class get set after its construction.
@@ -711,8 +913,8 @@ class BackwardSignature:
     Each string name is the `node.name` of the corresponding node in the fx graph.
     """
 
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_user_inputs: Dict[str, str]
+    gradients_to_parameters: dict[str, str]
+    gradients_to_user_inputs: dict[str, str]
     loss_output: str
 
 
@@ -739,29 +941,30 @@ class GraphSignature:
         a signature on the backward section of the joint graph.
     """
 
-    parameters: List[FQN]
-    buffers: List[FQN]
+    parameters: list[FQN]
+    buffers: list[FQN]
 
-    user_inputs: List[GraphInputName]
-    user_outputs: List[GraphOutputName]
-    inputs_to_parameters: Dict[GraphInputName, FQN]
-    inputs_to_buffers: Dict[GraphInputName, FQN]
+    user_inputs: list[GraphInputName]
+    user_outputs: list[GraphOutputName]
+    inputs_to_parameters: dict[GraphInputName, FQN]
+    inputs_to_buffers: dict[GraphInputName, FQN]
 
     # If the user's module mutates a buffer,
     # it's represented in the graph as an extra graph output.
     # This dict is a mapping from
     # "graph outputs that correspond to updated buffers"
     # to the FQN names of those mutated buffers.
-    buffers_to_mutate: Dict[GraphOutputName, FQN]
-    user_inputs_to_mutate: Dict[GraphOutputName, GraphInputName]
+    buffers_to_mutate: dict[GraphOutputName, FQN]
+    parameters_to_mutate: dict[GraphOutputName, FQN]
+    user_inputs_to_mutate: dict[GraphOutputName, GraphInputName]
 
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
 
-    backward_signature: Optional[BackwardSignature]
+    backward_signature: BackwardSignature | None
 
-    input_tokens: List[GraphInputName]
-    output_tokens: List[GraphOutputName]
+    input_tokens: list[GraphInputName]
+    output_tokens: list[GraphOutputName]
 
     @classmethod
     def from_tracing_metadata(
@@ -769,16 +972,17 @@ class GraphSignature:
         *,
         in_spec: pytree.TreeSpec,
         out_spec: pytree.TreeSpec,
-        graph_input_names: List[str],
-        graph_output_names: List[str],
+        graph_input_names: list[str],
+        graph_output_names: list[str],
         view_mutation_metadata: ViewAndMutationMeta,
-        named_parameters: List[str],
-        named_buffers: List[str],
+        named_parameters: list[str],
+        named_buffers: list[str],
         num_user_inputs: int,
         num_user_outputs: int,
-        loss_index: Optional[int],
-        backward_signature: Optional[BackwardSignature],
-    ) -> "GraphSignature":
+        trace_joint: bool,
+        loss_index: int | None,
+        backward_signature: BackwardSignature | None,
+    ) -> GraphSignature:
         graph_inputs = graph_input_names
         graph_outputs = graph_output_names
         parameters = list(named_parameters)
@@ -811,21 +1015,32 @@ class GraphSignature:
         user_inputs = graph_inputs[start:stop]
 
         # We should've gone through all the inputs now
-        assert len(graph_inputs) - stop == 0
+        if len(graph_inputs) - stop != 0:
+            raise AssertionError(
+                f"expected all graph_inputs consumed, but {len(graph_inputs) - stop} remain"
+            )
 
         # Address output calling conventions:
         start, stop = 0, num_tokens
         output_tokens = graph_outputs[start:stop]
 
         names = [*input_tokens, *parameters, *buffers, *user_inputs]
-        mutations = []
+        mutations: list[str] = []
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
             if input_info.mutates_data:
-                # Only buffers can be mutated, not parameters
-                assert idx >= len(parameters)
+                if trace_joint:
+                    # Only buffers can be mutated, not parameters
+                    if idx < len(parameters):
+                        raise AssertionError(
+                            f"expected idx ({idx}) >= len(parameters) ({len(parameters)}) when tracing joint"
+                        )
                 mutations.append(names[idx + num_tokens])
 
-        assert len(mutations) == view_mutation_metadata.num_mutated_inp_runtime_indices
+        if len(mutations) != view_mutation_metadata.num_mutated_inp_runtime_indices:
+            raise AssertionError(
+                f"len(mutations) ({len(mutations)}) != "
+                f"num_mutated_inp_runtime_indices ({view_mutation_metadata.num_mutated_inp_runtime_indices})"
+            )
 
         start, stop = (
             stop,
@@ -833,14 +1048,24 @@ class GraphSignature:
         )
         outputs_to_mutations = dict(zip(graph_outputs[start:stop], mutations))
 
-        user_inputs_to_mutate = {}
-        buffers_to_mutate = {}
+        user_inputs_to_mutate: dict[GraphOutputName, GraphInputName] = {}
+        buffers_to_mutate: dict[GraphOutputName, FQN] = {}
+        parameters_to_mutate: dict[GraphOutputName, FQN] = {}
         for output_name, mutation_name in outputs_to_mutations.items():
             if mutation_name in user_inputs:
+                # pyrefly: ignore [unsupported-operation]
                 user_inputs_to_mutate[output_name] = mutation_name
             else:
-                assert mutation_name in buffers
-                buffers_to_mutate[output_name] = mutation_name
+                if mutation_name not in buffers and mutation_name not in parameters:
+                    raise AssertionError(
+                        f"mutation_name '{mutation_name}' not found in buffers or parameters"
+                    )
+                if mutation_name in buffers:
+                    # pyrefly: ignore [unsupported-operation]
+                    buffers_to_mutate[output_name] = mutation_name
+                else:
+                    # pyrefly: ignore [unsupported-operation]
+                    parameters_to_mutate[output_name] = mutation_name
 
         start, stop = stop, stop + num_user_outputs
         user_outputs = graph_outputs[start:stop]
@@ -850,7 +1075,8 @@ class GraphSignature:
             unused_outputs -= len(backward_signature.gradients_to_parameters) + len(
                 backward_signature.gradients_to_user_inputs
             )
-        assert unused_outputs == 0
+        if unused_outputs != 0:
+            raise AssertionError(f"expected unused_outputs == 0, got {unused_outputs}")
 
         return GraphSignature(
             parameters=parameters,  # type: ignore[arg-type]
@@ -861,6 +1087,7 @@ class GraphSignature:
             inputs_to_parameters=inputs_to_parameters,  # type: ignore[arg-type]
             user_inputs_to_mutate=user_inputs_to_mutate,
             buffers_to_mutate=buffers_to_mutate,  # type: ignore[arg-type]
+            parameters_to_mutate=parameters_to_mutate,  # type: ignore[arg-type]
             in_spec=in_spec,
             out_spec=out_spec,
             backward_signature=backward_signature,
@@ -873,39 +1100,436 @@ class GraphSignature:
 class AOTAutogradCacheInfo:
     cache_key: str
     start_time_ns: int
+    forward_symints: list[torch.SymInt]
 
 
 @dataclass
-class AOTConfig:
+class CacheableAOTConfig:
     """
-    Configuration for AOTDispatcher
+    Serializable subset of AOTConfig used by cache keys and cached entries.
     """
 
-    fw_compiler: Callable
-    bw_compiler: Callable
-    partition_fn: Callable
-    decompositions: Dict[OpOverload, Callable]
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
     is_export: bool = False
     no_tangents: bool = False
     dynamic_shapes: bool = False
-    aot_autograd_arg_pos_to_source: Optional[List[Source]] = None
-    static_input_indices: Optional[List[int]] = None
-    inference_compiler: Optional[Callable] = None
+    aot_autograd_arg_pos_to_source: list[Source] | None = None
+    static_input_indices: list[int] | None = None
+    enable_log: bool = True
+    # this is always false outside of export.
+    pre_dispatch: bool = False
+    precompile_backend_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.pre_dispatch and not self.is_export:
+            raise AssertionError("Can only have pre_dispatch IR for export.")
+
+
+@dataclass(frozen=True)
+class AOTConfig:
+    """
+    Configuration for AOTDispatcher
+    """
+
+    fw_compiler: Callable[..., Any] | None
+    bw_compiler: Callable[..., Any] | None
+    partition_fn: Callable[..., Any] | None
+    decompositions: dict[OpOverload, Callable[..., Any]] | None
+    num_params_buffers: int
+    aot_id: int
+    keep_inference_input_mutations: bool
+    is_export: bool = False
+    no_tangents: bool = False
+    dynamic_shapes: bool = False
+    aot_autograd_arg_pos_to_source: list[Source] | None = None
+    static_input_indices: list[int] | None = None
+    inference_compiler: Callable[..., Any] | None = None
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
     # Key to use for AOTAutogradCache
-    cache_info: Optional[AOTAutogradCacheInfo] = None
+    cache_info: AOTAutogradCacheInfo | None = None
+    # If we should ignore the shape_env in the ambient tracing_context.
+    # The net effect is that if dynamic shapes are on, we end up
+    # specializing on example_inputs.
+    # Used only by standalone_compile.
+    ignore_shape_env: bool = False
+    precompile_backend_id: str | None = None
+    force_non_lazy_backward_lowering: bool = False
+    # This config makes sure to check certain things like
+    # mutating input with req_grad in export joint tracing.
+    export_trace_joint: bool = False
+    disable_functionalization: bool = False
+    # If True, disable TorchFunctionMetadataMode during make_fx tracing.
+    # This mode is used to track torch_fn metadata but can interfere with
+    # certain tracing scenarios.
+    _disable_torch_fn_metadata_mode: bool = False
 
-    def __post_init__(self):
+    def to_cacheable(self) -> CacheableAOTConfig:
+        return CacheableAOTConfig(
+            num_params_buffers=self.num_params_buffers,
+            aot_id=self.aot_id,
+            keep_inference_input_mutations=self.keep_inference_input_mutations,
+            is_export=self.is_export,
+            no_tangents=self.no_tangents,
+            dynamic_shapes=self.dynamic_shapes,
+            aot_autograd_arg_pos_to_source=self.aot_autograd_arg_pos_to_source,
+            static_input_indices=self.static_input_indices,
+            enable_log=self.enable_log,
+            pre_dispatch=self.pre_dispatch,
+            precompile_backend_id=self.precompile_backend_id,
+        )
+
+    def __post_init__(self) -> None:
         if self.pre_dispatch:
-            assert self.is_export, "Can only have pre_dispatch IR for export."
+            if not self.is_export:
+                raise AssertionError("Can only have pre_dispatch IR for export.")
 
 
+# TODO: types here
+# plain_tensor_trace_fn, when it is joint, has tuple structure on the trace
+# info too!
+# TODO: this needs to be generic, parameterized on AOTDescriptor
 SubclassTracingInfo = collections.namedtuple(
     "SubclassTracingInfo",
-    ["plain_tensor_trace_fn", "plain_tensor_args", "maybe_subclass_meta"],
+    [
+        "plain_tensor_trace_fn",
+        "plain_tensor_args",
+        "plain_tensor_args_descs",
+        "maybe_subclass_meta",
+    ],
 )
+
+
+@dataclass
+class AOTState:
+    """
+    When we run AOTAutograd, this class encapsulates the state in the compiler which
+    must be preserved across stages.  This is state in the traditional sense (not an
+    environment) because some values in this structure change as we progress through
+    pipelines in AOTAutograd.
+    """
+
+    # Whether or not we need to handle autograd when doing graph capture and
+    # compilation.  Although the calling convention for non-autograd graph
+    # capture in AOTAutograd is simple and can be relied upon, the autograph
+    # capture calling convention is quite complicated and in general you are
+    # only expected to pass to aot_stage2_compile to process.
+    needs_autograd: bool
+
+    # The FAKE flat arguments which we will do tracing with.  Although you
+    # might naively expect this to be immutable, it's not: when we perform
+    # tracing, we may execute code that modifies the metadata of inputs,
+    # causing the args to become "invalid".  It's also nontrivial to have a
+    # "golden" set of fake values and deepcopy them just in time when you
+    # might destructively mutate them (Voz and I tried very hard to do this).
+    # So we just periodically renew this field.  Don't worry too much about
+    # this unless you're specifically trying to track down an input metadata
+    # mutation bug.
+    #
+    # (By the way, this is NEVER the joint inputs!  Those only ever go in
+    # AOTGraphCapture)
+    flat_args: list[FxValue]
+
+    # The descriptor for each argument in flat_args.
+    flat_args_descs: list[AOTInput]
+
+    # This contains view and mutation information about the function, which we
+    # detected by doing an initial trace when we created this state.
+    fw_metadata: ViewAndMutationMeta
+
+    # Top-level configuration. Stage-local compiler choices are threaded
+    # explicitly rather than mutating this object in place.
+    aot_config: AOTConfig
+
+    # When performing AOTAutograd traces and other passes, we typically
+    # require a lot of active context managers; most typically these either
+    # (1) ensure we are faithfully replicating the original PyTorch context
+    # managers or (2) toggle some behaviors in PyTorch to make it more
+    # suitable for tracing.  When you use AOTState, you're expected to have
+    # created an ExitStack, entered it; then while we are running AOTAutograd
+    # we will add things onto the stack as necessary.  When you're all done
+    # with processing AOTAutograd, you can exit this stack.  All functions
+    # that take AOTState expect the ExitStack to not have been exited yet.
+    #
+    # TODO: We potentially could offer a resumable context manager, where you
+    # can cancel it and reenable it later when you need it.
+    stack: contextlib.ExitStack
+
+    # The fake tensor mode used during tracing.  This is useful for later
+    # operations that need to create new fake tensors consistent with the
+    # original trace.
+    fake_mode: FakeTensorMode
+
+
+FxValue = Tensor | int | SymInt | BackwardState | OpaqueBase
+
+
+class CompilerWrapper:
+    """
+    AOTAutograd needs to do many transformations to the calling convention of the user function
+    it is tracing, e.g., deduplicating inputs, unpacking subclasses, etc.  CompilerWrapper lets
+    us factor these into compositional stages so we can handle each transformation incrementally
+    instead of having to do it all at once.
+
+    Since there is a calling convention change, there are two parts to the wrapper:
+
+    1. The prologue, which is about compile-time behavior: given this original function, what
+       is the new function with modified calling convention that we should trace with AOTAutograd
+       to get the FX graph we will do joint passes, partitioning and ultimate Inductor compilation on?
+       We get (flat_fn, flat_args), the original function under trace and inputs we were
+       going to feed it, and produce a new function and new inputs to feed it.
+
+    2. The epilogue, which is about run-time behavior: we have now compiled the modified calling
+       convention function, we need to wrap it so that we have a new function that has the
+       original calling convention of the original function, so that our users can call it
+       at the old signature they expected.  We get (compiled_fn, real arguments), the newly
+       compiled function we need to wrap.
+
+    Note about caching: we do NOT directly serialize the runtime wrappers; instead, they
+    are reapplied to compiled_fn after we have finished deserializing the compiled_fn.
+
+    Extra metadata that is needed to compute pre or post compile can be passed in via attributes.
+    """
+
+    def pre_compile(
+        self,
+        flat_fn: TraceFn,
+        flat_args: list[FxValue],
+        flat_args_descs: list[AOTInput],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
+        """
+        Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
+        Args:
+        flat_fn: The function to compile
+        flat_args: Metadata from example inputs of the function to compile
+        aot_config: AOTConfig passed in at compile time
+        fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
+        """
+        return flat_fn, flat_args, flat_args_descs, fw_metadata
+
+    def post_compile(
+        self,
+        compiled_fn: Callable[_P, _R],
+        aot_config: AOTConfig,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+    ) -> Callable[_P, _R]:
+        """
+        Given an output of the compiler, wrap it with information received from prologue.
+        Args:
+        compiled_fn: Callable after calling compiler_fn
+        aot_config: AOTConfig after calling prologue
+        runtime_metadata: ViewAndMutationMeta after calling all wrappers's pre_compile steps.
+        Example:
+
+        def wrapped_compiled_fn(args):
+            # do something with args, aot_config, fw_metadata
+            return compiled_fn(args)
+
+        return wrapped_compiled_fn
+        """
+        return compiled_fn
+
+
+class InductorWrapper:
+    """
+    This is sort of like CompilerWrapper, but it happens at a different part of the lifecycle:
+    it talks about transformations we do to the traced and partitioned FX graph before we
+    send it to the Inductor compiler.
+
+    Once again, there are two parts:
+
+    1. The prologue, which "modifies" the FX graph before we send it to
+       Inductor.  I say "modifies" because... we don't really actually do
+       anything nontrivial in either of our two implementations.
+    2. The epilogue, which modifies the compiled function produced by Inductor
+
+    Although hypothetically these wrappers could be used compositionally in a centralized
+    wrappers list, in practice they seem to just be invoked manually when needed.
+
+    NB: The flat_args input is sometimes mutated.  This is probably naughty but whatever.
+    """
+
+    def pre_compile(
+        self,
+        fw_module: torch.fx.GraphModule,
+        flat_args: list[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ) -> None:
+        """
+        Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
+        Args:
+        flat_fn: The function to compile
+        flat_args: Metadata from example inputs of the function to compile
+        aot_config: AOTConfig passed in at compile time
+        fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
+        """
+        return
+
+    def post_compile(
+        self,
+        compiled_fn: Callable[_P, _R],
+        aot_config: AOTConfig,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+    ) -> Callable[_P, _R]:
+        """
+        Given an output of the compiler, wrap it with information received from prologue.
+        Args:
+        compiled_fn: Callable after calling compiler_fn
+        aot_config: AOTConfig after calling prologue
+        runtime_metadata: ViewAndMutationMeta after calling all wrappers's pre_compile steps.
+        Example:
+
+        def wrapped_compiled_fn(args):
+            # do something with args, aot_config, fw_metadata
+            return compiled_fn(args)
+
+        return wrapped_compiled_fn
+        """
+        return compiled_fn
+
+
+@dataclass
+class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
+    # AOTAutograd typically operates by taking complicated graphs and
+    # desugaring them into simpler graphs that use PyTorch features.  These
+    # wrappers establish invariants so that when we actually do tracing we can
+    # assume these invariants hold, leading to a simpler tracing
+    # implementation.  However, this means that we have to keep track of how
+    # to enter/exit these wrappers when passing inputs into the compiled
+    # graph, among other things!
+    wrappers: list[CompilerWrapper]
+
+    # The actual captured graph module.  In some circumstances (export) this
+    # graph has a specific calling convention that can be relied upon by
+    # external callers.  In other situations, the calling convention is
+    # unspecified and only aot_stage2_compile knows how to deal with them.
+    graph_module: torch.fx.GraphModule
+
+    # When compiling with autograd support, this is the joint_inputs, which is
+    # larger than the original flat_args as all tangents get inputs.  The
+    # tuple organizes into primals and tangents.  When not autograd it's just
+    # a plain list.
+    updated_flat_args: list[Any] | tuple[list[Any], list[Any]]
+
+    updated_flat_args_descs: list[AOTInput] | tuple[list[AOTInput], list[AOTInput]]
+
+    # Metadata about subclass inputs/outputs in the graph trace.
+    maybe_subclass_meta: Any
+
+
+FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
+
+
+TOutputCode = TypeVar("TOutputCode", bound="OutputCode")
+
+
+class AOTDispatchCompiler(Protocol):
+    """
+    Represents a fw or bw_compiler passed to AOTAutograd.
+    """
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+    ) -> Any: ...
+
+
+# TODO: bikeshed on this name
+class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
+    """
+    Represents an AOTDispatchCompiler that returns an OutputCode, and is
+    therefore cacheable. SerializableAOTDispatchCompiler always return an OutputCode.
+    A _CompileFxCallable usually gets converted into an AOTDispatchCompiler after binding all of
+    the kwargs in _CompileFxKwargs.
+    """
+
+    def __init__(
+        self,
+        output_code_ty: type[TOutputCode],
+        compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
+    ) -> None:
+        # pyrefly: ignore [invalid-type-var]
+        self.output_code_ty = output_code_ty
+        # pyrefly: ignore [invalid-type-var]
+        self.compiler_fn = compiler_fn
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+    ) -> OutputCode:
+        output_code = self.compiler_fn(gm, example_inputs)
+        return output_code
+
+
+class FlatFn(Protocol):
+    def __call__(self, *args: FxValue) -> list[FxValue]: ...
+
+
+class TraceFn(Protocol):
+    def __call__(self, *args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]: ...
+
+
+class PreppedForAutogradTraceFn(Protocol):
+    def __call__(
+        self,
+        *args: FxValue,
+    ) -> tuple[tuple[list[FxValue], list[bool]], list[AOTOutput]]: ...
+
+
+class JointTraceFn(Protocol):
+    handle: JointFnHandle
+
+    def __call__(
+        self, primals: list[FxValue], tangents: list[FxValue]
+    ) -> tuple[
+        tuple[list[FxValue], list[Tensor | None]],
+        tuple[list[AOTOutput], list[AOTOutput | None]],
+    ]: ...
+
+
+@dataclass
+class JointWithDescriptors:
+    _aot_state: AOTState
+    _aot_graph_capture: AOTGraphCapture
+
+    # The exact order parameters and buffers are expected to be passed into
+    # the final compiled function.  Parameters before buffers.
+    params_spec: list[str]
+    buffers_spec: list[str]
+
+    in_spec: pytree.TreeSpec
+    out_spec: pytree.TreeSpec
+
+    @property
+    def graph_module(self) -> torch.fx.GraphModule:
+        return self._aot_graph_capture.graph_module
+
+    @graph_module.setter
+    def graph_module(self, value: torch.fx.GraphModule) -> None:
+        self._aot_graph_capture.graph_module = value
+
+    @property
+    def fake_mode(self) -> FakeTensorMode:
+        return self._aot_state.fake_mode
+
+    def cache_hash(self) -> str:
+        """
+        Return a hash string suitable for use as a cache key. This method
+        exists to decouple cache key generation from __str__/__repr__, so
+        that display-oriented changes don't accidentally affect caching.
+        """
+        from hashlib import sha256
+
+        return sha256(str(self).encode("utf-8")).hexdigest()

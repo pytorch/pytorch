@@ -41,7 +41,8 @@ class QuantizePerTensorBenchmark(op_bench.TorchBenchmarkBase):
     r"""Benchmarks both quantization and dequantization."""
 
     def init(self, C, M, N, dtype, mode):
-        assert mode in ("Q", "D")
+        if mode not in ("Q", "D"):
+            raise AssertionError(f"mode must be 'Q' or 'D', but got '{mode}'")
         self.input = torch.rand(C, M, N)
         self.dtype = dtype
         self.op = nnq.Quantize(scale=1.0, zero_point=0, dtype=dtype)
@@ -78,7 +79,8 @@ class QuantizePerChannelBenchmark(op_bench.TorchBenchmarkBase):
     r"""Benchmarks both quantization and dequantization."""
 
     def init(self, C, M, N, dtype, axis, mode):
-        assert mode in ("Q", "D")
+        if mode not in ("Q", "D"):
+            raise AssertionError(f"mode must be 'Q' or 'D', but got '{mode}'")
         self.input = torch.rand(C, M, N)
         self.op = torch.quantize_per_channel
 
@@ -193,8 +195,8 @@ def fakeQuantizePerTensorOriginalKernel(
 
 fake_quantize_per_tensor_ops = op_bench.op_list(
     attrs=(
-        ("learnable_kernel", fakeQuantizePerTensorLearnableKernel),
-        ("original_kernel", fakeQuantizePerTensorOriginalKernel),
+        ("learnable_kernel_tensor", fakeQuantizePerTensorLearnableKernel),
+        ("original_kernel_tensor", fakeQuantizePerTensorOriginalKernel),
     ),
     attr_names=("op_name", "op_func"),
 )
@@ -297,8 +299,8 @@ def fakeQuantizePerChannelOriginalKernel(
 
 fake_quantize_per_channel_ops = op_bench.op_list(
     attrs=(
-        ("learnable_kernel", fakeQuantizePerChannelLearnableKernel),
-        ("original_kernel", fakeQuantizePerChannelOriginalKernel),
+        ("learnable_kernel_channel", fakeQuantizePerChannelLearnableKernel),
+        ("original_kernel_channel", fakeQuantizePerChannelOriginalKernel),
     ),
     attr_names=("op_name", "op_func"),
 )

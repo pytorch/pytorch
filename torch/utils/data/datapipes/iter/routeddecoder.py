@@ -1,5 +1,6 @@
+from collections.abc import Callable, Iterable, Iterator, Sized
 from io import BufferedIOBase
-from typing import Any, Callable, Iterable, Iterator, Sized, Tuple
+from typing import Any
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -16,7 +17,7 @@ __all__ = ["RoutedDecoderIterDataPipe"]
 
 
 @functional_datapipe("routed_decode")
-class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
+class RoutedDecoderIterDataPipe(IterDataPipe[tuple[str, Any]]):
     r"""
     Decodes binary streams from input DataPipe, yields pathname and decoded data in a tuple.
 
@@ -25,7 +26,7 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     Args:
         datapipe: Iterable datapipe that provides pathname and binary stream in tuples
         handlers: Optional user defined decoder handlers. If ``None``, basic and image decoder
-            handlers will be set as default. If multiple handles are provided, the priority
+            handlers will be set as default. If multiple handlers are provided, the priority
             order follows the order of handlers (the first handler has the top priority)
         key_fn: Function for decoder to extract key from pathname to dispatch handlers.
             Default is set to extract file extension from pathname
@@ -38,12 +39,12 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
 
     def __init__(
         self,
-        datapipe: Iterable[Tuple[str, BufferedIOBase]],
+        datapipe: Iterable[tuple[str, BufferedIOBase]],
         *handlers: Callable,
         key_fn: Callable = extension_extract_fn,
     ) -> None:
         super().__init__()
-        self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
+        self.datapipe: Iterable[tuple[str, BufferedIOBase]] = datapipe
         if not handlers:
             handlers = (decoder_basichandlers, decoder_imagehandler("torch"))
         self.decoder = Decoder(*handlers, key_fn=key_fn)
@@ -57,7 +58,7 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     def add_handler(self, *handler: Callable) -> None:
         self.decoder.add_handler(*handler)
 
-    def __iter__(self) -> Iterator[Tuple[str, Any]]:
+    def __iter__(self) -> Iterator[tuple[str, Any]]:
         for data in self.datapipe:
             pathname = data[0]
             result = self.decoder(data)
