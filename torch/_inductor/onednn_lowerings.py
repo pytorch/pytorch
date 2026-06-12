@@ -274,7 +274,7 @@ def register_onednn_fusion_ops():
             torch.ops.onednn._convolution_pointwise_,
             torch.ops.onednn._convolution_transpose_pointwise,
             torch.ops.onednn._linear_pointwise,
-            aten.mkldnn_rnn_layer.default,
+            aten.onednn_rnn_layer.default,
             torch.ops.onednn.qconv_pointwise,
         ]
 
@@ -538,8 +538,8 @@ def register_onednn_fusion_ops():
                 )
             )
 
-        @register_lowering(aten.mkldnn_rnn_layer.default)
-        def mkldnn_rnn_layer(
+        @register_lowering(aten.onednn_rnn_layer.default)
+        def onednn_rnn_layer(
             x: TensorBox,
             w0: TensorBox,
             w1: TensorBox,
