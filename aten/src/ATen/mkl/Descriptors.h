@@ -17,9 +17,8 @@ struct DftiDescriptorDeleter {
 class DftiDescriptor {
 public:
   void init(DFTI_CONFIG_VALUE precision, DFTI_CONFIG_VALUE signal_type, MKL_LONG signal_ndim, MKL_LONG* sizes) {
-    if (desc_ != nullptr) {
-      throw std::runtime_error("DFTI DESCRIPTOR can only be initialized once");
-    }
+    TORCH_CHECK(
+        desc_ == nullptr, "DFTI DESCRIPTOR can only be initialized once");
     DFTI_DESCRIPTOR *raw_desc;
     if (signal_ndim == 1) {
       MKL_DFTI_CHECK(DftiCreateDescriptor(&raw_desc, precision, signal_type, 1, sizes[0]));
@@ -30,9 +29,8 @@ public:
   }
 
   DFTI_DESCRIPTOR *get() const {
-    if (desc_ == nullptr) {
-      throw std::runtime_error("DFTI DESCRIPTOR has not been initialized");
-    }
+    TORCH_CHECK(
+        desc_ != nullptr, "DFTI DESCRIPTOR has not been initialized");
     return desc_.get();
   }
 

@@ -13,12 +13,12 @@ RegisterWorkerInfoOnce::RegisterWorkerInfoOnce() {
 }
 
 WorkerInfo::WorkerInfo(std::string name, int64_t id)
-    : WorkerInfo(std::move(name), (worker_id_t)id) {
+    : WorkerInfo(std::move(name), static_cast<worker_id_t>(id)) {
   TORCH_CHECK(
       id <= std::numeric_limits<worker_id_t>::max(),
       "RPC worker id ",
       id,
-      " out of bound of int16_t.");
+      " out of bounds for int16_t.");
 }
 
 WorkerInfo::WorkerInfo(std::string name, worker_id_t id)
@@ -326,7 +326,7 @@ std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {
 
 std::ostream& operator<<(std::ostream& os, const WorkerInfo& workerInfo) {
   return os << "WorkerInfo(id=" << workerInfo.id_
-            << ", name=" << workerInfo.name_ << ")";
+            << ", name=" << workerInfo.name_ << ')';
 }
 
 } // namespace torch::distributed::rpc

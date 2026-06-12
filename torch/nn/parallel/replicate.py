@@ -1,16 +1,7 @@
 from collections import OrderedDict
-from typing import (
-    cast,
-    Dict,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from collections.abc import Iterator, Sequence
+from typing import cast, TYPE_CHECKING, TypeVar
+from typing_extensions import TypeIs
 
 import torch
 from torch._utils import _get_device_index
@@ -19,6 +10,7 @@ from torch.nn.parallel import comm
 
 
 if TYPE_CHECKING:
+    from torch._C import ScriptMethod
     from torch.jit import ScriptModule
     from torch.jit._state import EnabledProxy
 
@@ -26,13 +18,13 @@ if TYPE_CHECKING:
 __all__ = ["replicate"]
 
 
-def _is_script_module(module: Module) -> bool:
+def _is_script_module(module: Module) -> TypeIs["ScriptModule"]:
     import torch.jit
 
     return isinstance(module, torch.jit.ScriptModule)
 
 
-def _is_script_method(module: Module) -> bool:
+def _is_script_method(module: object) -> TypeIs["ScriptMethod"]:
     import torch.jit
 
     return isinstance(module, torch._C.ScriptMethod)
@@ -57,7 +49,7 @@ def _is_jit_enabled() -> "EnabledProxy":
 #
 # currently a module cannot be replicated properly if the descendants of
 # any ScriptModule contains python module (type 1 above)
-def _replicatable_module(module: Module, memo: Optional[Set[Module]] = None) -> bool:
+def _replicatable_module(module: Module, memo: set[Module] | None = None) -> bool:
     # module.modules() contains module itself as the first element
     def descendant_modules(module: Module) -> Iterator[Module]:
         gen = module.modules()
@@ -90,23 +82,34 @@ def _replicatable_module(module: Module, memo: Optional[Set[Module]] = None) -> 
 
 def _broadcast_coalesced_reshape(
     tensors: Sequence[torch.Tensor],
-    devices: Sequence[Union[int, torch.device]],
+    devices: Sequence[int | torch.device],
     detach: bool = False,
-) -> List[List[torch.Tensor]]:
+) -> list[list[torch.Tensor]]:
     from torch.nn.parallel._functions import Broadcast
 
+    if len(tensors) == 0:
+        return []
+
     if detach:
-        return comm.broadcast_coalesced(tensors, devices)
+        complex_mask = [
+            not isinstance(t, torch.nn.UninitializedParameter) and t.is_complex()
+            for t in tensors
+        ]
+
+        outputs = comm.broadcast_coalesced(tensors, devices)
+
+        for device_outputs in outputs:
+            for i, is_complex in enumerate(complex_mask):
+                if is_complex:
+                    device_outputs[i] = torch.view_as_complex(device_outputs[i])
+
+        return outputs
     else:
-        # Use the autograd function to broadcast if not detach
-        if len(tensors) > 0:
-            tensor_copies = Broadcast.apply(devices, *tensors)
-            return [
-                tensor_copies[i : i + len(tensors)]
-                for i in range(0, len(tensor_copies), len(tensors))
-            ]
-        else:
-            return []
+        tensor_copies = Broadcast.apply(devices, *tensors)
+        return [
+            list(tensor_copies[i : i + len(tensors)])
+            for i in range(0, len(tensor_copies), len(tensors))
+        ]
 
 
 T = TypeVar("T", bound=Module)
@@ -114,13 +117,12 @@ T = TypeVar("T", bound=Module)
 
 def replicate(
     network: T,
-    devices: Sequence[Union[int, torch.device]],
+    devices: Sequence[int | torch.device],
     detach: bool = False,
-) -> List[T]:
+) -> list[T]:
     if not _replicatable_module(network):
         raise RuntimeError(
-            "Cannot replicate network where python modules are "
-            "childrens of ScriptModule"
+            "Cannot replicate network where python modules are children of ScriptModule"
         )
 
     if not devices:
@@ -134,8 +136,8 @@ def replicate(
     param_copies = _broadcast_coalesced_reshape(params, devices, detach)
 
     buffers = list(network.buffers())
-    buffers_rg: List[torch.Tensor] = []
-    buffers_not_rg: List[torch.Tensor] = []
+    buffers_rg: list[torch.Tensor] = []
+    buffers_not_rg: list[torch.Tensor] = []
     for buf in buffers:
         if buf.requires_grad and not detach:
             buffers_rg.append(buf)
@@ -151,8 +153,8 @@ def replicate(
     )
 
     modules = list(network.modules())
-    module_copies: List[List[Module]] = [[] for _ in devices]
-    module_indices: Dict[Module, int] = {}
+    module_copies: list[list[Module]] = [[] for _ in devices]
+    module_indices: dict[Module, int] = {}
 
     for i, module in enumerate(modules):
         module_indices[module] = i
@@ -160,7 +162,7 @@ def replicate(
             replica = module._replicate_for_data_parallel()
             # This is a temporary fix for DDP. DDP needs to access the
             # replicated model parameters. It used to do so through
-            # `mode.parameters()`. The fix added in #33907 for DP stops the
+            # `module.parameters()`. The fix added in #33907 for DP stops the
             # `parameters()` API from exposing the replicated parameters.
             # Hence, we add a `_former_parameters` dict here to support DDP.
             replica._former_parameters = OrderedDict()
@@ -192,7 +194,7 @@ def replicate(
                     # so setattr them as non-parameter attributes
                     setattr(replica, key, param_copy)
                     # expose the parameter for DDP
-                    replica._former_parameters[key] = param_copy
+                    replica._former_parameters[key] = param_copy  # type: ignore[operator, index]
         for key, buf in module._buffers.items():  # type: ignore[assignment]
             if buf is None:
                 for j in range(num_replicas):

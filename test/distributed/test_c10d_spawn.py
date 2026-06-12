@@ -8,7 +8,7 @@ import torch
 import torch.distributed as c10d
 import torch.multiprocessing as mp
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import load_tests, NO_MULTIPROCESSING_SPAWN
+from torch.testing._internal.common_utils import load_tests, run_tests
 
 
 # Torch distributed.nn is not available in windows
@@ -21,14 +21,10 @@ except ImportError:
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 if not c10d.is_available():
     print("c10d not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
-
-if NO_MULTIPROCESSING_SPAWN:
-    print("spawn not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 
@@ -38,7 +34,7 @@ class AbstractProcessGroupShareTensorTest:
     def _test_multiprocess(self, f, shared_tensors, init_pg, n_output):
         ws = self.world_size
         # file store will delete the test file on destruction
-        file = tempfile.NamedTemporaryFile(delete=False)
+        file = tempfile.NamedTemporaryFile(delete=False)  # noqa: SIM115
         ctx = mp.get_context("spawn")
         c2p = ctx.Queue(2)
         p2c = ctx.Queue(2)
@@ -250,3 +246,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         z.backward()
         x_s = ((self.rank + 1) * torch.ones(int(row), 5, device=device)).cos()
         self.assertEqual(x.grad, x_s)
+
+
+if __name__ == "__main__":
+    run_tests()

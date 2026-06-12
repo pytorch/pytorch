@@ -241,7 +241,7 @@ class TestPackageScript(PackageTestCase):
         """
         Test to verify saving multiple ScriptModules with same top module
         but different submodules works. Submodule is redefined to between
-        the defintion of the top module to check that the different concrete
+        the definition of the top module to check that the different concrete
         types of the modules are thoroughly recognized by serializaiton code.
         """
 
@@ -407,7 +407,7 @@ class TestPackageScript(PackageTestCase):
             e.save_pickle("res", "mod1.pkl", scripted_mod_0)
 
         buffer_0.seek(0)
-        importer_0 = importer = PackageImporter(buffer_0)
+        importer_0 = PackageImporter(buffer_0)
 
         buffer_1 = BytesIO()
         with PackageExporter(buffer_1) as e:

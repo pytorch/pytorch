@@ -83,9 +83,8 @@ sycl::event convolution(
     int64_t groups,
     Attr& attr,
     const std::vector<sycl::event>& deps) {
-  auto engine = GpuEngineManager::Instance().get_engine(
-      {c10::kXPU, c10::xpu::current_device()});
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last = use_channels_last_for_conv(src, weight);
 
@@ -119,6 +118,8 @@ sycl::event convolution(
     pattr.set_deterministic(true);
   }
 #endif
+
+  at::native::onednn::apply_tf32_if_allowed(pattr);
 
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
       engine,
@@ -182,9 +183,8 @@ sycl::event convolution_backward_weights(
     IntArrayRef dilation,
     int64_t groups,
     const std::vector<sycl::event>& deps) {
-  auto engine = GpuEngineManager::Instance().get_engine(
-      {c10::kXPU, c10::xpu::current_device()});
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last = use_channels_last_for_conv(src, diff_dst);
 
@@ -210,6 +210,8 @@ sycl::event convolution_backward_weights(
     pattr.set_deterministic(true);
   }
 #endif
+
+  at::native::onednn::apply_tf32_if_allowed(pattr);
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
@@ -288,9 +290,8 @@ sycl::event convolution_backward_data(
     int64_t groups,
     bool bias_defined,
     const std::vector<sycl::event>& deps) {
-  auto engine = GpuEngineManager::Instance().get_engine(
-      {c10::kXPU, c10::xpu::current_device()});
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last = use_channels_last_for_conv(diff_dst, weight);
 
@@ -319,6 +320,9 @@ sycl::event convolution_backward_data(
   dnnl::memory::dims _padding_back_bottom_right =
       padding_back_bottom_right.vec();
   dnnl::memory::dims _dilation = compatible_dilation(dilation);
+
+  at::native::onednn::apply_tf32_if_allowed(pattr);
+
   auto conv_forward_pd = dnnl::convolution_forward::primitive_desc(
       engine,
       dnnl::prop_kind::forward,

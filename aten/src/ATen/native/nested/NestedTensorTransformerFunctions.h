@@ -50,7 +50,7 @@ Tensor NestedTensor_from_padded_tensor_cpu(
     const Tensor& padded,
     const NestedTensorImpl& nt);
 
-Tensor NestedTensor_to_mask(const Tensor& nt, std::optional<int64_t> mask_dim, std::optional<int64_t> mask_dim_length);
+TORCH_API Tensor NestedTensor_to_mask(const Tensor& nt, std::optional<int64_t> mask_dim, std::optional<int64_t> mask_dim_length);
 
 template <typename T>
 void remove_padding_kernelLauncher(
@@ -74,7 +74,7 @@ void remove_padding_transform0213_kernelLauncher(
 
 template <typename T>
 void add_padding_kernelLauncher(
-    T* input,
+    const T* input,
     T* output,
     T padding_value,
     const int* offsets,

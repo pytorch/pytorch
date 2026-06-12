@@ -16,7 +16,6 @@ import warnings
 from collections import defaultdict, OrderedDict
 from pathlib import Path
 from pprint import pprint
-from typing import Optional
 
 import numpy as np
 from prettytable import PrettyTable
@@ -136,7 +135,7 @@ def run(
         torch.testing.assert_close(
             y_native_mha_fast, y_native_mha_slow, atol=1e-3, rtol=1e-3
         )
-    except AssertionError as e:
+    except AssertionError:
         error_dict[entry_name] += 1
         pprint(error_dict)
 
@@ -159,7 +158,7 @@ def run(
     return result_entry
 
 
-def main(save_path: Optional[Path], error_path: Optional[Path]):
+def main(save_path: Path | None, error_path: Path | None):
     table = PrettyTable()
     entries = defaultdict(list)
 

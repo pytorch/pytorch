@@ -153,7 +153,10 @@ class testVariousModelVersions(TestCase):
     def test_get_model_bytecode_version(self):
         def check_model_version(model_path, expect_version):
             actual_version = _get_model_bytecode_version(model_path)
-            assert actual_version == expect_version
+            if actual_version != expect_version:
+                raise AssertionError(
+                    f"Expected version {expect_version}, got {actual_version}"
+                )
 
         for version, model_info in SCRIPT_MODULE_BYTECODE_PKL.items():
             model_path = pytorch_test_dir / "cpp" / "jit" / model_info["model_name"]
@@ -187,7 +190,10 @@ class testVariousModelVersions(TestCase):
                 backport_success = _backport_for_mobile(
                     input_model_path, tmp_output_model_path_backport, current_to_version
                 )
-                assert backport_success
+                if not backport_success:
+                    raise AssertionError(
+                        f"Backport failed from v{current_from_version} to v{current_to_version}"
+                    )
 
                 expect_bytecode_pkl = SCRIPT_MODULE_BYTECODE_PKL[current_to_version][
                     "bytecode_pkl"
@@ -209,7 +215,10 @@ class testVariousModelVersions(TestCase):
                 acutal_result_clean = "".join(output.split())
                 expect_result_clean = "".join(expect_bytecode_pkl.split())
                 isMatch = fnmatch.fnmatch(acutal_result_clean, expect_result_clean)
-                assert isMatch
+                if not isMatch:
+                    raise AssertionError(
+                        f"Bytecode mismatch for version {current_to_version}"
+                    )
 
                 current_from_version -= 1
             shutil.rmtree(tmpdirname)
@@ -283,7 +292,8 @@ class testVariousModelVersions(TestCase):
                     tmp_backport_model_path,
                     maximum_checked_in_model_version - 1,
                 )
-                assert success
+                if not success:
+                    raise AssertionError("Backport to buffer failed")
 
                 buf = io.StringIO()
                 torch.utils.show_pickle.main(
@@ -302,7 +312,8 @@ class testVariousModelVersions(TestCase):
                 acutal_result_clean = "".join(output.split())
                 expect_result_clean = "".join(expected_result.split())
                 isMatch = fnmatch.fnmatch(acutal_result_clean, expect_result_clean)
-                assert isMatch
+                if not isMatch:
+                    raise AssertionError("Bytecode mismatch after backport")
 
                 # Load model v4 and run forward method
                 mobile_module = _load_for_lite_interpreter(str(tmp_backport_model_path))
@@ -331,12 +342,15 @@ class testVariousModelVersions(TestCase):
             script_module_v4_buffer = _backport_for_mobile_to_buffer(
                 script_module_v5_path, maximum_checked_in_model_version - 1
             )
-            buf = io.StringIO()
 
             # Check version of the model v4 from backport
             bytesio = io.BytesIO(script_module_v4_buffer)
             backport_version = _get_model_bytecode_version(bytesio)
-            assert backport_version == maximum_checked_in_model_version - 1
+            expected_version = maximum_checked_in_model_version - 1
+            if backport_version != expected_version:
+                raise AssertionError(
+                    f"Expected version {expected_version}, got {backport_version}"
+                )
 
             # Load model v4 from backport and run forward method
             bytesio = io.BytesIO(script_module_v4_buffer)
@@ -352,8 +366,14 @@ class testVariousModelVersions(TestCase):
         # TODO update this to be more in the style of the above tests after a backport from 6 -> 5 exists
         script_module_v6 = pytorch_test_dir / "cpp" / "jit" / "script_module_v6.ptl"
         ops_v6 = _get_model_ops_and_info(script_module_v6)
-        assert ops_v6["aten::add.int"].num_schema_args == 2
-        assert ops_v6["aten::add.Scalar"].num_schema_args == 2
+        if ops_v6["aten::add.int"].num_schema_args != 2:
+            raise AssertionError(
+                f"Expected 2 schema args, got {ops_v6['aten::add.int'].num_schema_args}"
+            )
+        if ops_v6["aten::add.Scalar"].num_schema_args != 2:
+            raise AssertionError(
+                f"Expected 2 schema args, got {ops_v6['aten::add.Scalar'].num_schema_args}"
+            )
 
     def test_get_mobile_model_contained_types(self):
         class MyTestModule(torch.nn.Module):
@@ -363,12 +383,11 @@ class testVariousModelVersions(TestCase):
         sample_input = torch.tensor([1])
 
         script_module = torch.jit.script(MyTestModule())
-        script_module_result = script_module(sample_input)
+        script_module(sample_input)
 
         buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)
-        type_list = _get_mobile_model_contained_types(buffer)
-        assert len(type_list) >= 0
+        _get_mobile_model_contained_types(buffer)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 #include <ATen/cpu/vec/functional.h>
 #include <algorithm>
+#include <array>
 
 namespace at::native {
 namespace {
@@ -285,12 +286,12 @@ struct CastStoreAccumulate {
 };
 
 template <typename StorePolicy, typename scalar_t>
-static void store(char * C10_RESTRICT data, int64_t stride, int64_t index, scalar_t value) {
+void store(char * C10_RESTRICT data, int64_t stride, int64_t index, scalar_t value) {
   StorePolicy::store(data, stride, index, value);
 }
 
 template <typename StorePolicy, typename scalar_t, size_t numel>
-static void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
+void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
                   const std::array<scalar_t, numel> &values) {
   auto *base_ptr = data + stride * index;
   for (const auto k : c10::irange(numel)) {
@@ -300,7 +301,7 @@ static void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
 }
 
 template <typename StorePolicy, typename scalar_t>
-static void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
+void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
                   const Vectorized<scalar_t> &values) {
   using vec_t = Vectorized<scalar_t>;
   alignas(64) std::array<scalar_t, vec_t::size()> array_values{};
@@ -354,9 +355,10 @@ std::array<scalar_t, nrows> multi_row_sum(
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
-  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  scalar_t acc[num_levels][nrows];
-  std::fill_n(&acc[0][0], num_levels * nrows, scalar_t(0));
+  std::array<std::array<scalar_t, nrows>, num_levels> acc{};
+  for (auto &row:acc) {
+    row.fill(scalar_t(0));
+  }
 
   int64_t i = 0;
   for (; i + level_step <= size;) {
@@ -404,13 +406,7 @@ std::array<scalar_t, nrows> multi_row_sum(
       acc[0][k] += acc[j][k];
     }
   }
-
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<scalar_t, nrows> ret;
-  for (const auto k : c10::irange(nrows)) {
-    ret[k] = acc[0][k];
-  }
-  return ret;
+  return acc[0];
 }
 
 template <typename scalar_t, typename LoadPolicy>
@@ -504,7 +500,6 @@ void vectorized_outer_sum(
     const vacc_t sums = row_sum<vacc_t, VecLoadPolicy>(
         row_in, inner_stride, size0);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     store<StorePolicy>(data[0], out_stride, j, sums);
   }
 
