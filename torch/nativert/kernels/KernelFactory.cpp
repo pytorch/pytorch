@@ -204,8 +204,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       nodeKernels.push_back(std::make_unique<C10Kernel>(&node));
 
       std::string opName = std::string(node.target());
-      if (opsWithoutStaticDispatchCount.find(opName) ==
-          opsWithoutStaticDispatchCount.end()) {
+      if (!opsWithoutStaticDispatchCount.contains(opName)) {
         opsWithoutStaticDispatchCount[opName] = 0;
       }
       opsWithoutStaticDispatchCount[opName] += 1;

@@ -316,7 +316,7 @@ class PytreeNodeRegistry {
             }});
   }
   bool hasNodeDef(std::string_view typeName) const {
-    return registry_.find(std::string{typeName}) != registry_.end();
+    return registry_.contains(std::string{typeName});
   }
   const NodeDef& getNodeDef(std::string_view typeName) const {
     return registry_.at(std::string{typeName});

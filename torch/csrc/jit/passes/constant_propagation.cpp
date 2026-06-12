@@ -353,7 +353,7 @@ struct ConstantPropagator {
           noMutableValues(n->inputs()) && noMutableValues(n->outputs());
     }
     return no_mutation && !n->kind().is_onnx() &&
-        skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
+        !skip_list.contains(n->kind()) && !n->isNondeterministic() &&
         !n->hasSideEffects() && n->blocks().empty();
   }
 

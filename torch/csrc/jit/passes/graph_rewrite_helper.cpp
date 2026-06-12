@@ -278,7 +278,7 @@ bool isClampFusable(
   // If hardtanh's min/max Value's are not actually constants, we will end up
   // rerouting those values to prepack op. And if they are not constants
   // we will not be able to remove prepacking ops.
-  if (vmap.find("output_min") != vmap.end()) {
+  if (vmap.contains("output_min")) {
     // aten::relu pattern does not have output_min/output_max.
     // aten::hardtanh/_ does.
     TORCH_CHECK(

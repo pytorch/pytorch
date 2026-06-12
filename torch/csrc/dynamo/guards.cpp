@@ -3621,7 +3621,7 @@ class GuardManager {
     if (!_disable_dict_tag_matching) {
       if (_is_tag_safe_root) {
         // Check if the `value` object was recorded earlier
-        if (_dict_pointers.find(value) != _dict_pointers.end()) {
+        if (_dict_pointers.contains(value)) {
           // Check for fast path
           // if (is_weakref_valid(value) && check_dict_pointer_tags(value)) {
           if (check_dict_pointer_tags(value) &&
@@ -4007,8 +4007,7 @@ class GuardManager {
   }
 
   bool is_leaf_guard_present(const std::string& guard_name) {
-    return _inserted_leaf_guards.find(guard_name) !=
-        _inserted_leaf_guards.end();
+    return _inserted_leaf_guards.contains(guard_name);
   }
 
   void insert_leaf_guard(const std::string& guard_name) {

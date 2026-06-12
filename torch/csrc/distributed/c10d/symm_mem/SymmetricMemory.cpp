@@ -162,7 +162,7 @@ static at::Tensor empty_strided_p2p_persistent(
 
   auto allocator = get_allocator(device.type());
   void* dev_ptr = nullptr;
-  if (alloc_id_to_dev_ptr.find(alloc_id) != alloc_id_to_dev_ptr.end()) {
+  if (alloc_id_to_dev_ptr.contains(alloc_id)) {
     dev_ptr = alloc_id_to_dev_ptr[alloc_id];
     TORCH_CHECK(
         alloc_size == allocator->get_alloc_size(dev_ptr),
