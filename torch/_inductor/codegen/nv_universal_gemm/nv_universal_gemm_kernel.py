@@ -500,12 +500,10 @@ class NVUniversalGemmKernel(Kernel):
         code.writeline("")
 
         # -- Epilogue function definition (must be module-level for cutlass_api) --
-        if has_epilogue:
-            assert self.epilogue_fn_code is not None
-            code.splice(self.epilogue_fn_code, strip=True)
-            epilogue_source_hash = hashlib.sha256(
-                self.epilogue_fn_code.encode()
-            ).hexdigest()
+        epilogue_fn_code = self.epilogue_fn_code
+        if has_epilogue and epilogue_fn_code is not None:
+            code.splice(epilogue_fn_code, strip=True)
+            epilogue_source_hash = hashlib.sha256(epilogue_fn_code.encode()).hexdigest()
             code.writeline(f'_EPILOGUE_FN_SOURCE = "{epilogue_source_hash}"')
             code.writeline("")
 
