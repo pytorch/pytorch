@@ -1247,7 +1247,7 @@ class ExceptionStack:
     # and "stack" sometimes refers to a C variable with the same name and the
     # exception stack, respectively.
     #
-    # The lifetime of an exception is (Python 3.11+):
+    # The lifetime of an exception in Python 3.11+ is:
     #  + tx._raise_exception_variable(...) := sets the current_exception variable
     #  + PUSH_EXC_INFO := pushes the current_exception to the *exception stack*
     #  + POP_EXCEPT := pops TOS from the *exception stack*
@@ -4268,7 +4268,9 @@ class InstructionTranslatorBase(
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
         val = self.stack[-1]
         if not self._isinstance_exception(val):
-            raise AssertionError("expected self._isinstance_exception(val) to be true")
+            raise AssertionError(
+                f"expected self._isinstance_exception(val) to be true, got {val}"
+            )
         if val.exc_type is StopIteration:  # type: ignore[union-attr]
             new_val = VariableTracker.build(self, RuntimeError).call_function(
                 self,  # type: ignore[arg-type]

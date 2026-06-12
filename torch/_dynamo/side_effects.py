@@ -66,6 +66,7 @@ from .variables.user_defined import FrozenDataClassVariable
 if TYPE_CHECKING:
     from torch._dynamo.output_graph import OutputGraph
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.variables.functions import LocalGeneratorObjectVariable
     from torch._dynamo.variables.lists import ListVariable
 
 
@@ -342,6 +343,29 @@ class SideEffects:
             output_graph
             and output_graph.current_tx.output.current_tracer.allow_side_effects_in_hop
         )
+
+    def track_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
+        output_graph = self.output_graph_weakref()
+        if output_graph:
+            output_graph.local_generators.append(gen)
+
+    def untrack_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
+        output_graph = self.output_graph_weakref()
+        if output_graph and gen in output_graph.local_generators:
+            output_graph.local_generators.remove(gen)
+
+    def close_local_generators(self) -> None:
+        from .symbolic_convert import temporarely_allow_writes_to_output_graph
+
+        output_graph = self.output_graph_weakref()
+        if output_graph:
+            tx = output_graph.root_tx
+            with temporarely_allow_writes_to_output_graph(tx):
+                # close() runs user code that may untrack, so iterate a snapshot
+                for gen in list(output_graph.local_generators):
+                    if not gen._is_generator_exhausted():
+                        # pyrefly: ignore[bad-argument-type]
+                        gen.call_method(tx, "close", [], {})
 
     def is_reconstructing_generator(self) -> bool:
         output_graph = self.output_graph_weakref()
