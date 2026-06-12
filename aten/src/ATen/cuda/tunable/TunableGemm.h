@@ -13,9 +13,12 @@
 #ifdef USE_ROCM
 #include <ATen/cuda/tunable/GemmHipblaslt.h>
 #include <ATen/cuda/tunable/GemmRocblas.h>
+#else
+#include <ATen/cuda/tunable/GemmCublaslt.h>
 #endif
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/Float4_e2m1fn_x2.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
@@ -23,6 +26,7 @@
 #include <c10/util/Float8_e8m0fnu.h>
 #include <c10/util/StringUtil.h>
 #include <fmt/printf.h>
+#include <optional>
 
 namespace at::cuda::tunable {
 
@@ -110,7 +114,11 @@ class DefaultScaledGemmOp : public Callable<ScaledGemmParams<T>> {
           params->ldc,
           params->c_dtype,
           params->use_fast_accum,
+#ifdef USE_ROCM
           std::nullopt /* alpha */);
+#else
+          params->alpha);
+#endif
       return OK;
     }
 };
@@ -170,6 +178,11 @@ inline const char* TypeName(Half v) {
 }
 
 template <>
+inline const char* TypeName(Float4_e2m1fn_x2 v) {
+  return "Float4_e2m1fn_x2";
+}
+
+template <>
 inline const char* TypeName(Float8_e4m3fn v) {
   return "Float8_e4m3fn";
 }
@@ -205,7 +218,14 @@ inline const char* TypeName(c10::complex<float> v) {
 }
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmTunableOp : public TunableOp<GemmParams<T>> {
+class GemmTunableOp
+    : public
+#ifdef USE_ROCM
+          TunableOp<GemmParams<T>>
+#else
+          CublasltGemmTunableOp<T, GemmParams<T>>
+#endif
+{
  public:
   GemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
@@ -240,7 +260,14 @@ class GemmTunableOp : public TunableOp<GemmParams<T>> {
 };
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>> {
+class GemmAndBiasTunableOp
+    : public
+#ifdef USE_ROCM
+          TunableOp<GemmAndBiasParams<T>>
+#else
+          CublasltGemmTunableOp<T, GemmAndBiasParams<T>>
+#endif
+{
  public:
   GemmAndBiasTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
@@ -268,7 +295,14 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>> {
 };
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>> {
+class GemmStridedBatchedTunableOp
+    : public
+#ifdef USE_ROCM
+          TunableOp<GemmStridedBatchedParams<T>>
+#else
+          CublasltGemmTunableOp<T, GemmStridedBatchedParams<T>>
+#endif
+{
  public:
   GemmStridedBatchedTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
@@ -303,7 +337,14 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
 };
 
 template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
-class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>> {
+class ScaledGemmTunableOp
+    : public
+#ifdef USE_ROCM
+          TunableOp<ScaledGemmParams<CT>>
+#else
+          CublasltScaledGemmTunableOp<AT, BT, CT, ScaledGemmParams<CT>>
+#endif
+{
  public:
   ScaledGemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
