@@ -119,7 +119,7 @@ Multi-instance inference
 Memory allocator
 ----------------
 
-"--enable-tcmalloc" and "--enable-jemalloc" can be used to enable different memory allcator.
+"--enable-tcmalloc" and "--enable-jemalloc" can be used to enable different memory allocator.
 
 """
 
@@ -132,7 +132,6 @@ import subprocess
 import sys
 from argparse import ArgumentParser, RawTextHelpFormatter, REMAINDER
 from os.path import expanduser
-from typing import Dict, List
 
 from torch.distributed.elastic.multiprocessing import (
     DefaultLogsSpecs as _DefaultLogsSpecs,
@@ -157,7 +156,7 @@ class _CPUinfo:
             # Sample output of: `lscpu --parse=CPU,Core,Socket,Node`
             #
             # # The following is the parsable format, which can be fed to other
-            # # programs. Each different item in every column has an unique ID
+            # # programs. Each different item in every column has a unique ID
             # # starting from zero.
             # # CPU,Core,Socket,Node
             # 0,0,0,0
@@ -181,8 +180,8 @@ class _CPUinfo:
             # physical cores := core column in lscpu output
             #  logical cores :=  cPU column in lscpu output
             self.node_nums = int(max(line[3] for line in self.cpuinfo)) + 1
-            self.node_physical_cores: List[List[int]] = []  # node_id is index
-            self.node_logical_cores: List[List[int]] = []  # node_id is index
+            self.node_physical_cores: list[list[int]] = []  # node_id is index
+            self.node_logical_cores: list[list[int]] = []  # node_id is index
             self.physical_core_node_map = {}  # physical core to numa node id
             self.logical_core_node_map = {}  # logical core to numa node id
 
@@ -250,8 +249,8 @@ class _CPUinfo:
                 "Numa Aware: cores:%s on different NUMA nodes:%s. To avoid \
 this behavior, please use --ncores-per-instance knob to make sure number of cores is divisible by --ncores-per-\
 instance. Alternatively, please use --skip-cross-node-cores knob.",
-                str(core_list),
-                str(numa_ids),
+                core_list,
+                numa_ids,
             )
         if len(numa_ids) == 0:
             raise RuntimeError(
@@ -263,9 +262,11 @@ instance. Alternatively, please use --skip-cross-node-cores knob.",
 class _Launcher:
     r"""Class for launcher."""
 
-    msg_lib_notfound = f"Unable to find the {{0}} library file lib{{1}}.so in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib \
+    msg_lib_notfound = (
+        f"Unable to find the {{0}} library file lib{{1}}.so in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib \
 or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib64 or \
 {expanduser('~')}/.local/lib/ so the LD_PRELOAD environment variable will not be set."
+    )
 
     def __init__(self) -> None:
         self.cpuinfo = _CPUinfo()
@@ -294,11 +295,15 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
                 break
         if not lib_set:
             for lib_path in library_paths:
+                # pyrefly: ignore [unbound-name]
                 library_file = os.path.join(lib_path, f"lib{lib_type}.so")
                 matches = glob.glob(library_file)
                 if len(matches) > 0:
+                    # pyrefly: ignore [unbound-name]
                     ld_preloads = [f"{matches[0]}", os.getenv("LD_PRELOAD", "")]
+                    # pyrefly: ignore [unbound-name]
                     os.environ["LD_PRELOAD"] = os.pathsep.join(
+                        # pyrefly: ignore [unbound-name]
                         [p.strip(os.pathsep) for p in ld_preloads if p]
                     )
                     lib_find = True
@@ -340,7 +345,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_tc = self.add_lib_preload(lib_type="tcmalloc")
             if not find_tc:
                 msg = f'{self.msg_lib_notfound} you can use "conda install -c conda-forge gperftools" to install {{0}}'
-                logger.warning(msg.format("TCmalloc", "tcmalloc"))  # noqa: G001
+                logger.warning(msg.format("TCmalloc", "tcmalloc"))
             else:
                 logger.info("Use TCMalloc memory allocator")
 
@@ -348,7 +353,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_je = self.add_lib_preload(lib_type="jemalloc")
             if not find_je:
                 msg = f'{self.msg_lib_notfound} you can use "conda install -c conda-forge jemalloc" to install {{0}}'
-                logger.warning(msg.format("Jemalloc", "jemalloc"))  # noqa: G001
+                logger.warning(msg.format("Jemalloc", "jemalloc"))
             else:
                 logger.info("Use JeMalloc memory allocator")
                 self.set_env(
@@ -421,7 +426,7 @@ Value applied: %s. Value ignored: %s",
             find_iomp = self.add_lib_preload(lib_type="iomp5")
             if not find_iomp:
                 msg = f'{self.msg_lib_notfound} you can use "conda install mkl" to install {{0}}'
-                logger.warning(msg.format("iomp", "iomp5"))  # noqa: G001
+                logger.warning(msg.format("iomp", "iomp5"))
             else:
                 logger.info("Using Intel OpenMP")
                 if set_kmp_affinity:
@@ -532,7 +537,11 @@ won't take effect even if it is set explicitly."
                             )
                             i += 1
                         cores = list(set(cores) - leftover_cores)
-                        assert len(cores) % args.ncores_per_instance == 0
+                        if len(cores) % args.ncores_per_instance != 0:
+                            raise AssertionError(
+                                f"Number of cores ({len(cores)}) must be divisible by "
+                                f"ncores_per_instance ({args.ncores_per_instance})"
+                            )
                         args.ninstances = len(cores) // args.ncores_per_instance
             else:
                 if args.ninstances * args.ncores_per_instance > len(cores):
@@ -594,7 +603,7 @@ won't take effect even if it is set explicitly."
         )
         entrypoint = ""
         launch_args = {}
-        launch_envs: Dict[int, Dict] = {}
+        launch_envs: dict[int, dict] = {}
         launch_tee = {}
         # check whether is launched from torchrun with --nproc-per-node <num workers>
         local_size = int(os.environ.get("LOCAL_WORLD_SIZE", 1))
@@ -612,24 +621,24 @@ won't take effect even if it is set explicitly."
                     args.rank == -1
                 ):  # sequentially assign ncores_per_instance to ninstances
                     core_list = cores[
-                        i
-                        * args.ncores_per_instance : (i + 1)
+                        i * args.ncores_per_instance : (i + 1)
                         * args.ncores_per_instance
                     ]
                 else:  # assign ncores_per_instance from rank
                     core_list = cores[
-                        args.rank
-                        * args.ncores_per_instance : (args.rank + 1)
+                        args.rank * args.ncores_per_instance : (args.rank + 1)
                         * args.ncores_per_instance
                     ]
 
-                core_ranges: List[Dict] = []
+                core_ranges: list[dict] = []
                 if local_size > 1:
                     total_num_cores = len(core_list)
                     cores_per_rank = total_num_cores // local_size
-                    assert (
-                        cores_per_rank >= 1
-                    ), "At least one core needs to be assigned to each rank"
+                    if cores_per_rank < 1:
+                        raise AssertionError(
+                            f"At least one core needs to be assigned to each rank, "
+                            f"got {total_num_cores} cores for {local_size} ranks"
+                        )
                     core_list = core_list[
                         cores_per_rank * local_rank : cores_per_rank * (local_rank + 1)
                     ]
@@ -836,6 +845,7 @@ def create_args(parser=None):
 
     @retval ArgumentParser
     """
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "--multi-instance",
         "--multi_instance",
@@ -844,6 +854,7 @@ def create_args(parser=None):
         help="Enable multi-instance, by default one instance per node",
     )
 
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "-m",
         "--module",
@@ -854,6 +865,7 @@ def create_args(parser=None):
         '"python -m".',
     )
 
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "--no-python",
         "--no_python",
@@ -868,6 +880,7 @@ def create_args(parser=None):
 
     _add_multi_instance_params(parser)
     # positional
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "program",
         type=str,
@@ -876,6 +889,7 @@ def create_args(parser=None):
     )
 
     # rest from the training program
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument("program_args", nargs=REMAINDER)
 
 

@@ -248,7 +248,7 @@ void tril_indices_kernel(scalar_t * tensor,
                          int64_t col,
                          int64_t trapezoid_size,
                          int64_t tril_size) {
-  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t linear_index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (linear_index < tril_size) {
     int64_t r, c;
@@ -324,7 +324,7 @@ void triu_indices_kernel(scalar_t * tensor,
                          int64_t col,
                          int64_t rectangle_size,
                          int64_t triu_size) {
-  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t linear_index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (linear_index < triu_size) {
     int64_t r, c;

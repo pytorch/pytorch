@@ -6,7 +6,6 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 
 namespace at::functorch {
 
@@ -330,7 +329,7 @@ convolution_backward_weight_batch_rule(
             dilation, transposed, output_padding, groups, mask);
         auto& grad_weight = std::get<1>(result);
         grad_weight = reshape_dim_outof_symint(1, batch_size, grad_weight);
-        return std::make_tuple(grad_weight, 1);
+        return std::make_tuple(std::move(grad_weight), 1);
       } else {
         // transposed: N(GO), BN(GI) -> N(GO), N(GBI) -> (GBI)O
         const auto dummy_weight = make_dummy(weight, weight_bdim, 0, batch_size);
@@ -362,6 +361,7 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
     c10::SymIntArrayRef output_padding, c10::SymInt groups, std::array<bool, 3> output_mask) {
   const auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "convolution_backward_plumbing");
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad_output_, input_, weight_}, cur_level)){

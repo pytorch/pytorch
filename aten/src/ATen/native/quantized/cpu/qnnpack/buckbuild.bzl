@@ -1,7 +1,7 @@
 load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
 load("//tools/build_defs:fb_xplat_cxx_test.bzl", "fb_xplat_cxx_test")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
-load("//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "APPLETVOS", "CXX", "IOS", "MACOSX")
+load("//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "CXX", "IOS", "MACOSX")
 
 # Shared by internal and OSS BUCK
 def define_qnnpack(third_party, labels = []):
@@ -21,7 +21,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
@@ -40,6 +40,16 @@ def define_qnnpack(third_party, labels = []):
             third_party("FXdiv"),
         ],
     )
+
+    # Workaround for MSVC: the auto-generated wrapper .c files use
+    # `#if defined(__x86_64__)` guards, but MSVC defines `_M_X64` instead.
+    # Clang-cl defines both, but some xplat configurations compile with
+    # MSVC directly. Adding -D__x86_64__ on MSVC makes the guards work
+    # without modifying the 70+ generated wrapper files.
+    _MSVC_X86_64_COMPAT_FLAGS = select({
+        "DEFAULT": [],
+        "ovr_config//compiler:msvc": ["-D__x86_64__"],
+    })
 
     fb_xplat_cxx_library(
         # @autodeps-skip
@@ -82,7 +92,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
             "-ffast-math",
@@ -90,22 +100,24 @@ def define_qnnpack(third_party, labels = []):
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
             "-Wno-empty-translation-unit",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-msse2",
+                "-mno-sse3",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-msse2",
+                "-mno-sse3",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
         force_static = True,
         labels = labels,
-        platform_compiler_flags = [
-            (
-                "86",
-                [
-                    "-msse2",
-                    "-mno-sse3",
-                ],
-            ),
-        ],
+        preprocessor_flags = _MSVC_X86_64_COMPAT_FLAGS,
         visibility = ["PUBLIC"],
         deps = [
             ":qnnp_interface",
@@ -129,7 +141,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
             "-ffast-math",
@@ -137,30 +149,24 @@ def define_qnnpack(third_party, labels = []):
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
             "-Wno-empty-translation-unit",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-mssse3",
+                "-mno-sse4",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-mssse3",
+                "-mno-sse4",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
         force_static = True,
         labels = labels,
-        platform_compiler_flags = [
-            (
-                "86",
-                [
-                    "-mssse3",
-                    "-mno-sse4",
-                ],
-            ),
-            (
-                # By default, osmeta compiler silently ignores -msseXX flags.
-                # This flag disables this behavior.
-                "osmeta",
-                [
-                    "-mosmeta-no-restrict-sse",
-                ],
-            ),
-        ],
+        preprocessor_flags = _MSVC_X86_64_COMPAT_FLAGS,
         visibility = ["PUBLIC"],
         deps = [
             ":qnnp_interface",
@@ -184,7 +190,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
             "-ffast-math",
@@ -192,30 +198,24 @@ def define_qnnpack(third_party, labels = []):
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
             "-Wno-empty-translation-unit",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-msse4.1",
+                "-mno-sse4.2",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-msse4.1",
+                "-mno-sse4.2",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
         force_static = True,
         labels = labels,
-        platform_compiler_flags = [
-            (
-                "86",
-                [
-                    "-msse4.1",
-                    "-mno-sse4.2",
-                ],
-            ),
-            (
-                # By default, osmeta compiler silently ignores -msseXX flags.
-                # This flag disables this behavior.
-                "osmeta",
-                [
-                    "-mosmeta-no-restrict-sse",
-                ],
-            ),
-        ],
+        preprocessor_flags = _MSVC_X86_64_COMPAT_FLAGS,
         visibility = ["PUBLIC"],
         deps = [
             ":qnnp_interface",
@@ -236,7 +236,7 @@ def define_qnnpack(third_party, labels = []):
             ],
         ),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
         ],
@@ -291,33 +291,34 @@ def define_qnnpack(third_party, labels = []):
             ("src", "qnnpack/*.h"),
             ("include", "*.h"),
         ]),
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
-        ],
+            "-fvisibility=default",
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm32": [
+                "-mfpu=neon",
+            ],
+        }) + select({
+            "DEFAULT": [],
+            "ovr_config//os:android-arm32": [
+                "-marm",
+                "-mfloat-abi=softfp",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
+        fbobjc_compiler_flags = [
+            "-Wno-switch-enum",
+            "-Wno-switch-default",
+        ],
         labels = [
             "supermodule:android/default/pytorch",
             "supermodule:ios/default/public.pytorch",
-        ],
-        platform_compiler_flags = [
-            (
-                "armv7",
-                [
-                    "-mfpu=neon",
-                ],
-            ),
-            (
-                "^android-armv7$",
-                [
-                    "-marm",
-                    "-mfloat-abi=softfp",
-                ],
-            ),
         ],
         # FIXME(T172572183): This should be removed when fbcode no longer uses
         # produce_interface_from_stub_shared_library; it's needed to work around a bug
@@ -329,9 +330,6 @@ def define_qnnpack(third_party, labels = []):
         visibility = ["PUBLIC"],
         deps = [
             ":qnnp_interface",
-            ":ukernels_asm",
-            ":ukernels_neon",
-            ":ukernels_psimd",
             ":ukernels_scalar",
             ":ukernels_sse2",
             ":ukernels_sse41",
@@ -341,7 +339,20 @@ def define_qnnpack(third_party, labels = []):
             third_party("FP16"),
             third_party("FXdiv"),
             third_party("pthreadpool"),
-        ],
+        ] + select({
+            "DEFAULT": [":ukernels_psimd"],
+            "ovr_config//os:windows": [],
+        }) + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm32": [
+                ":ukernels_asm",
+                ":ukernels_neon",
+            ],
+            "ovr_config//cpu:arm64": [
+                ":ukernels_asm",
+                ":ukernels_neon",
+            ],
+        }),
         exported_deps = [
             third_party("cpuinfo"),
         ],
@@ -393,35 +404,31 @@ def define_qnnpack(third_party, labels = []):
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
             "-ffast-math",
             "-Wno-error=unused-variable",
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm32": [
+                "-mfpu=neon",
+            ],
+        }) + select({
+            "DEFAULT": [],
+            "ovr_config//os:android-arm32": [
+                "-marm",
+                "-mfloat-abi=softfp",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
         force_static = True,
         labels = labels,
-        platform_compiler_flags = [
-            (
-                "armv7",
-                [
-                    "-mfpu=neon",
-                ],
-            ),
-            (
-                "^android-armv7$",
-                [
-                    "-marm",
-                    "-mfloat-abi=softfp",
-                ],
-            ),
-        ],
         visibility = ["PUBLIC"],
         deps = [
             ":qnnp_interface",
@@ -431,78 +438,74 @@ def define_qnnpack(third_party, labels = []):
         ],
     )
 
+    # ARM assembly sources, gated by CPU architecture.
+    # On non-ARM platforms (x86_64, etc.) no .S files are compiled,
+    # avoiding MSVC ml64.exe failures on Windows and unnecessary work elsewhere.
+    _AARCH32_ASM_SRCS = [
+        "wrappers/hgemm/8x8-aarch32-neonfp16arith.S",
+        "wrappers/q8conv/4x8-aarch32-neon.S",
+        "wrappers/q8dwconv/up8x9-aarch32-neon.S",
+        "wrappers/q8dwconv/up8x9-aarch32-neon-per-channel.S",
+        "wrappers/q8gemm/4x8-aarch32-neon.S",
+        "wrappers/q8gemm/4x8-dq-aarch32-neon.S",
+        "wrappers/q8gemm/4x8c2-xzp-aarch32-neon.S",
+        "wrappers/q8gemm_sparse/4x4-packA-aarch32-neon.S",
+        "wrappers/q8gemm_sparse/4x8c1x4-dq-packedA-aarch32-neon.S",
+        "wrappers/q8gemm_sparse/4x8c8x1-dq-packedA-aarch32-neon.S",
+    ]
+    _AARCH64_ASM_SRCS = [
+        "wrappers/q8conv/8x8-aarch64-neon.S",
+        "wrappers/q8gemm/8x8-aarch64-neon.S",
+        "wrappers/q8gemm/8x8-dq-aarch64-neon.S",
+        "wrappers/q8gemm_sparse/8x4-packA-aarch64-neon.S",
+        "wrappers/q8gemm_sparse/8x8c1x4-dq-packedA-aarch64-neon.S",
+        "wrappers/q8gemm_sparse/8x8c8x1-dq-packedA-aarch64-neon.S",
+    ]
+
     fb_xplat_cxx_library(
         # @autodeps-skip
         name = "ukernels_asm",
-        srcs = [
-            # AArch32 ukernels
-            "wrappers/hgemm/8x8-aarch32-neonfp16arith.S",
-            "wrappers/q8conv/4x8-aarch32-neon.S",
-            "wrappers/q8dwconv/up8x9-aarch32-neon.S",
-            "wrappers/q8dwconv/up8x9-aarch32-neon-per-channel.S",
-            "wrappers/q8gemm/4x8-aarch32-neon.S",
-            "wrappers/q8gemm/4x8-dq-aarch32-neon.S",
-            "wrappers/q8gemm/4x8c2-xzp-aarch32-neon.S",
-            "wrappers/q8gemm_sparse/4x4-packA-aarch32-neon.S",
-            "wrappers/q8gemm_sparse/4x8c1x4-dq-packedA-aarch32-neon.S",
-            "wrappers/q8gemm_sparse/4x8c8x1-dq-packedA-aarch32-neon.S",
-            "wrappers/q8gemm_sparse/8x4-packA-aarch64-neon.S",
-            "wrappers/q8gemm_sparse/8x8c1x4-dq-packedA-aarch64-neon.S",
-            "wrappers/q8gemm_sparse/8x8c8x1-dq-packedA-aarch64-neon.S",
-            # AArch64 ukernels
-            "wrappers/q8conv/8x8-aarch64-neon.S",
-            "wrappers/q8gemm/8x8-aarch64-neon.S",
-            "wrappers/q8gemm/8x8-dq-aarch64-neon.S",
-        ],
+        srcs = select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm32": _AARCH32_ASM_SRCS,
+            "ovr_config//cpu:arm64": _AARCH64_ASM_SRCS,
+        }),
         headers = subdir_glob([
             ("src", "qnnpack/assembly.h"),
             ("src", "**/*.S"),
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
-        ],
+            "-Wno-unused-command-line-argument",
+        ] + select({
+            "DEFAULT": [],
+            # iOS assembler doesn't let us specify ISA in the assembly file,
+            # so this must be set to the highest version of ISA of any of the
+            # assembly functions
+            "ovr_config//os:iphoneos-arm32": [
+                "-mfpu=neon-vfpv4",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
         force_static = True,
         labels = labels,
-        platform_compiler_flags = [
-            (
-                # iOS assembler doesn't let us specify ISA in the assembly file,
-                # so this must be set to the highest version of ISA of any of the
-                # assembly functions
-                "^iphoneos-armv7$",
-                [
-                    "-mfpu=neon-vfpv4",
-                ],
-            ),
-            (
-                "osmeta",
-                [
-                    "-mfpu=neon-vfpv4",
-                ],
-            ),
-        ],
-        platform_preprocessor_flags = [
-            (
-                "android",
-                [
-                    # Workaround for osmeta-android, which builds for ELF, but hides it
-                    "-D__ELF__=1",
-                ],
-            ),
-            (
-                "tizen",
-                [
-                    # Workaround for osmeta-tizen, which builds for ELF, but hides it
-                    "-D__ELF__=1",
-                ],
-            ),
-        ],
+        preprocessor_flags = select({
+            "DEFAULT": [],
+            "ovr_config//os:android": [
+                # Workaround for osmeta-android, which builds for ELF, but hides it
+                "-D__ELF__=1",
+            ],
+            "ovr_config//os:tizen": [
+                # Workaround for osmeta-tizen, which builds for ELF, but hides it
+                "-D__ELF__=1",
+            ],
+        }),
         visibility = ["PUBLIC"],
     )
 
@@ -519,33 +522,29 @@ def define_qnnpack(third_party, labels = []):
             ("src", "qnnpack/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
             "-ffast-math",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm32": [
+                "-mfpu=neon",
+            ],
+        }) + select({
+            "DEFAULT": [],
+            "ovr_config//os:android-arm32": [
+                "-marm",
+                "-mfloat-abi=softfp",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
         force_static = True,
         labels = labels,
-        platform_compiler_flags = [
-            (
-                "armv7",
-                [
-                    "-mfpu=neon",
-                ],
-            ),
-            (
-                "^android-armv7$",
-                [
-                    "-marm",
-                    "-mfloat-abi=softfp",
-                ],
-            ),
-        ],
         visibility = ["PUBLIC"],
         deps = [
             ":qnnp_interface",
@@ -632,16 +631,14 @@ def define_qnnpack(third_party, labels = []):
             "-fexceptions",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
         ],
-        platform_linker_flags = [
-            (
-                "^linux.*$",
-                [
-                    "-Wl,--no-as-needed",
-                    "-ldl",
-                    "-pthread",
-                ],
-            ),
-        ],
+        linker_flags = select({
+            "DEFAULT": [],
+            "ovr_config//os:linux": [
+                "-Wl,--no-as-needed",
+                "-ldl",
+                "-pthread",
+            ],
+        }),
         env = {
             # These tests fail in sandcastle since they leak memory. Disable LeakSanitizer.
             "ASAN_OPTIONS": "detect_leaks=0",

@@ -2,15 +2,17 @@
 import collections
 import functools
 import warnings
+from collections.abc import Callable, Iterable
 from itertools import product
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 from typing_extensions import deprecated
 
 import torch
 import torch.testing
+
+# pyrefly: ignore [deprecated]
 from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
-from torch.types import _TensorOrTensors
+from torch.types import _TensorOrOptionalTensors, _TensorOrTensors
 
 
 # Note: `get_*_jacobian` functions are added here even though we didn't intend to make them public
@@ -48,14 +50,14 @@ def _is_float_or_complex_tensor(obj):
 
 
 def _allocate_jacobians_with_inputs(
-    input_tensors: Tuple, numel_output
-) -> Tuple[torch.Tensor, ...]:
+    input_tensors: tuple, numel_output
+) -> tuple[torch.Tensor, ...]:
     # Makes zero-filled tensors from inputs. If `numel_output` is not None, for
     # each tensor in `input_tensors`, returns a new zero-filled tensor with height
     # of `t.numel` and width of `numel_output`. Otherwise, for each tensor, returns
     # a 1-d tensor with size `(t.numel,)`. Each new tensor will be strided and have
     # the same dtype and device as those of the corresponding input.
-    out: List[torch.Tensor] = [
+    out: list[torch.Tensor] = [
         t.new_zeros((t.numel(), numel_output), layout=torch.strided)
         for t in input_tensors
         if _is_float_or_complex_tensor(t) and t.requires_grad
@@ -64,14 +66,14 @@ def _allocate_jacobians_with_inputs(
 
 
 def _allocate_jacobians_with_outputs(
-    output_tensors: Tuple, numel_input, dtype=None, device=None
-) -> Tuple[torch.Tensor, ...]:
+    output_tensors: tuple, numel_input, dtype=None, device=None
+) -> tuple[torch.Tensor, ...]:
     # Makes zero-filled tensors from outputs. If `dim` is not None, for each tensor
     # in `output_tensors`, returns a new zero-filled tensor with height of `dim` and
     # width of `t.numel`. Otherwise, for each tensor, returns a 1-d tensor with size
     # (t.numel,).
     options = {"dtype": dtype, "device": device, "layout": torch.strided}
-    out: List[torch.Tensor] = [
+    out: list[torch.Tensor] = [
         t.new_zeros((numel_input, t.numel()), **options)
         for t in output_tensors
         if _is_float_or_complex_tensor(t)
@@ -80,7 +82,7 @@ def _allocate_jacobians_with_outputs(
 
 
 def _iter_tensors(
-    x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_grad: bool = False
+    x: torch.Tensor | Iterable[torch.Tensor], only_requiring_grad: bool = False
 ) -> Iterable[torch.Tensor]:
     if is_tensor_like(x):
         # mypy doesn't narrow type of `x` to torch.Tensor
@@ -258,7 +260,7 @@ def _iter_tensor(x_tensor):
 
 def _get_numerical_jacobian(
     fn, inputs, outputs=None, target=None, eps=1e-3, is_forward_ad=False
-) -> List[Tuple[torch.Tensor, ...]]:
+) -> list[tuple[torch.Tensor, ...]]:
     """Compute the numerical Jacobian of `fn(inputs)` with respect to `target`.
 
     If not specified, targets are the input. Returns M * N Jacobians where N is the
@@ -281,7 +283,7 @@ def _get_numerical_jacobian(
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
     """
-    jacobians: List[Tuple[torch.Tensor, ...]] = []
+    jacobians: list[tuple[torch.Tensor, ...]] = []
     if outputs is None:
         outputs = _as_tuple(fn(*_as_tuple(inputs)))
     if not is_forward_ad and any(o.is_complex() for o in outputs):
@@ -294,7 +296,7 @@ def _get_numerical_jacobian(
     inp_indices = [
         i for i, a in enumerate(target) if is_tensor_like(a) and a.requires_grad
     ]
-    for i, (inp, inp_idx) in enumerate(zip(_iter_tensors(target, True), inp_indices)):
+    for inp, inp_idx in zip(_iter_tensors(target, True), inp_indices):
         jacobians += [
             get_numerical_jacobian_wrt_specific_input(
                 fn,
@@ -360,8 +362,15 @@ def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
         # sparse compressed tensors don't implement sub/add/copy_
         # yet. However, in non-masked semantics context entry and v
         # have the same sparse indices ...
-        assert entry.layout == v.layout, (entry.layout, v.layout)
-        assert entry._nnz() == v._nnz(), (entry._nnz(), v._nnz(), entry.shape)
+        if entry.layout != v.layout:
+            raise AssertionError(
+                f"Expected entry and v to have the same layout, but got {entry.layout} and {v.layout}"
+            )
+        if entry._nnz() != v._nnz():
+            raise AssertionError(
+                f"Expected entry and v to have the same nnz, but got {entry._nnz()} and {v._nnz()} "
+                f"with entry shape {entry.shape}"
+            )
         # ... the finite differencing can be performed on values only:
         entry = entry.values()
         v = v.values()
@@ -386,13 +395,13 @@ def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
 
 def _compute_numerical_jvps_wrt_specific_input(
     jvp_fn, delta, input_is_complex, is_forward_ad=False
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     # Computing the jacobian only works for real delta
     # For details on the algorithm used here, refer:
     # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
     # s = fn(z) where z = x for real valued input
     # and z = x + yj for complex valued input
-    jvps: List[torch.Tensor] = []
+    jvps: list[torch.Tensor] = []
     ds_dx_tup = jvp_fn(delta[0] if isinstance(delta, tuple) else delta)
 
     if input_is_complex:  # C -> R
@@ -400,20 +409,22 @@ def _compute_numerical_jvps_wrt_specific_input(
             jvp_fn(delta[1] * 1j) if isinstance(delta, tuple) else jvp_fn(delta * 1j)
         )
         for ds_dx, ds_dy in zip(ds_dx_tup, ds_dy_tup):
-            assert not ds_dx.is_complex()
+            if ds_dx.is_complex():
+                raise AssertionError("Expected ds_dx to be real-valued, not complex")
             # conjugate wirtinger derivative
             conj_w_d = ds_dx + ds_dy * 1j
             jvps.append(conj_w_d)
     else:
         for ds_dx in ds_dx_tup:  # R -> R or (R -> C for the forward AD case)
-            assert is_forward_ad or not ds_dx.is_complex()
+            if not is_forward_ad and ds_dx.is_complex():
+                raise AssertionError("Expected ds_dx to be real-valued, not complex.")
             jvps.append(ds_dx)
     return jvps
 
 
 def _combine_jacobian_cols(
-    jacobians_cols: Dict[int, List[torch.Tensor]], outputs, input, numel
-) -> Tuple[torch.Tensor, ...]:
+    jacobians_cols: dict[int, list[torch.Tensor]], outputs, input, numel
+) -> tuple[torch.Tensor, ...]:
     # jacobian_cols maps column_idx -> output_idx -> single column of jacobian Tensor
     # we return a list that maps output_idx -> full jacobian Tensor
     jacobians = _allocate_jacobians_with_outputs(
@@ -426,7 +437,7 @@ def _combine_jacobian_cols(
 
 
 def _prepare_input(
-    input: torch.Tensor, maybe_perturbed_input: Optional[torch.Tensor], fast_mode=False
+    input: torch.Tensor, maybe_perturbed_input: torch.Tensor | None, fast_mode=False
 ) -> torch.Tensor:
     # Prepares the inputs to be passed into the function while including the new
     # modified input.
@@ -452,30 +463,33 @@ def _prepare_input(
 def _check_outputs_same_dtype_and_shape(output1, output2, eps, idx=None) -> None:
     # Check that the returned outputs don't have different dtype or shape when you
     # perturb the input
-    on_index = "on index {idx} " if idx is not None else ""
-    assert output1.shape == output2.shape, (
-        f"Expected `func` to return outputs with the same shape"
-        f" when inputs are perturbed {on_index}by {eps}, but got:"
-        f" shapes {output1.shape} and {output2.shape}."
-    )
-    assert output1.dtype == output2.dtype, (
-        f"Expected `func` to return outputs with the same dtype"
-        f" when inputs are perturbed {on_index}by {eps}, but got:"
-        f" dtypes {output1.dtype} and {output2.dtype}."
-    )
+    on_index = f"on index {idx} " if idx is not None else ""
+    if output1.shape != output2.shape:
+        raise AssertionError(
+            f"Expected `func` to return outputs with the same shape"
+            f" when inputs are perturbed {on_index}by {eps}, but got:"
+            f" shapes {output1.shape} and {output2.shape}."
+        )
+    if output1.dtype != output2.dtype:
+        raise AssertionError(
+            f"Expected `func` to return outputs with the same dtype"
+            f" when inputs are perturbed {on_index}by {eps}, but got:"
+            f" dtypes {output1.dtype} and {output2.dtype}."
+        )
 
 
 def get_numerical_jacobian_wrt_specific_input(
     fn, input_idx, inputs, outputs, eps, input=None, is_forward_ad=False
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     # Computes the numerical jacobians wrt to a single input. Returns N jacobian
     # tensors, where N is the number of outputs. We use a dictionary for
     # jacobian_cols because indices aren't necessarily consecutive for sparse inputs
     # When we perturb only a single element of the input tensor at a time, the jvp
     # is equivalent to a single col of the Jacobian matrix of fn.
-    jacobian_cols: Dict[int, List[torch.Tensor]] = {}
+    jacobian_cols: dict[int, list[torch.Tensor]] = {}
     input = inputs[input_idx] if input is None else input
-    assert input.requires_grad
+    if not input.requires_grad:
+        raise AssertionError("Expected input to have requires_grad=True")
     for x, idx, d_idx in _iter_tensor(input):
         wrapped_fn = _with_prepare_inputs(fn, inputs, input_idx, x)
         input_to_perturb = x[idx]
@@ -493,7 +507,7 @@ def get_numerical_jacobian_wrt_specific_input(
 
 def _get_analytical_jacobian_forward_ad(
     fn, inputs, outputs, *, check_grad_dtypes=False, all_u=None
-) -> Tuple[Tuple[torch.Tensor, ...], ...]:
+) -> tuple[tuple[torch.Tensor, ...], ...]:
     """Compute the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect to `target`.
 
     Return N * M Jacobians where N is the number of tensors in target that require grad and
@@ -534,7 +548,7 @@ def _get_analytical_jacobian_forward_ad(
     with fwAD.dual_level():
         fw_grads = []
         dual_inputs = []
-        for i, inp in enumerate(inputs):
+        for inp in inputs:
             if is_tensor_like(inp) and inp.requires_grad:
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError(
@@ -659,7 +673,7 @@ def _mul_tensor_or_tuple(u, k):
 
 def _get_numerical_jvp_wrt_specific_input(
     fn, input_idx, inputs, u, eps, is_forward_ad=False
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     input = inputs[input_idx]
     input_to_perturb = _get_input_to_perturb(input)
     wrapped_fn = _with_prepare_inputs(fn, inputs, input_idx, input_to_perturb, True)
@@ -676,7 +690,7 @@ def _get_numerical_vJu(
     fn, inputs, inp_indices, func_out, all_u, all_v, eps, is_forward_ad
 ):
     # Note that all_v can also be None, in that case, this function only computes Ju.
-    reduced_jacobians: List[List[torch.Tensor]] = []
+    reduced_jacobians: list[list[torch.Tensor]] = []
     for inp_idx, u in zip(inp_indices, all_u):
         all_Ju = _get_numerical_jvp_wrt_specific_input(
             fn, inp_idx, inputs, u, eps, is_forward_ad
@@ -684,7 +698,11 @@ def _get_numerical_vJu(
         # Filter out the Ju for non floating point outputs
         filtered_Ju = []
         func_out = _as_tuple(func_out)
-        assert len(all_Ju) == len(func_out)
+        if len(all_Ju) != len(func_out):
+            raise AssertionError(
+                f"Expected all_Ju and func_out to have the same length, "
+                f"but got {len(all_Ju)} and {len(func_out)}"
+            )
         for Ju, output in zip(all_Ju, func_out):
             if _is_float_or_complex_tensor(output):
                 filtered_Ju.append(Ju)
@@ -692,7 +710,7 @@ def _get_numerical_vJu(
                 # TODO: handle the other Ju
                 pass
         if all_v is not None:
-            jacobian_scalars: List[torch.Tensor] = []
+            jacobian_scalars: list[torch.Tensor] = []
             for v, Ju in zip(all_v, filtered_Ju):
                 jacobian_scalars.append(_dot_with_type_promotion(v, Ju))
             reduced_jacobians.append(jacobian_scalars)
@@ -712,7 +730,7 @@ def _check_jacobians_equal(j1, j2, atol):
 
 def _stack_and_check_tensors(
     list_of_list_of_tensors, inputs, numel_outputs
-) -> Tuple[Tuple[torch.Tensor, ...], bool, bool]:
+) -> tuple[tuple[torch.Tensor, ...], bool, bool]:
     # For the ith tensor in the inner list checks whether it has the same size and
     # dtype as the ith differentiable input.
     out_jacobians = _allocate_jacobians_with_inputs(inputs, numel_outputs)
@@ -730,10 +748,12 @@ def _stack_and_check_tensors(
             if tensor is None:
                 out_jacobian[:, j].zero_()
             else:
-                dense = (
-                    tensor.to_dense() if not tensor.layout == torch.strided else tensor
-                )
-                assert out_jacobian[:, j].numel() == dense.numel()
+                dense = tensor.to_dense() if tensor.layout != torch.strided else tensor
+                if out_jacobian[:, j].numel() != dense.numel():
+                    raise AssertionError(
+                        f"Expected out_jacobian column to have {dense.numel()} elements, "
+                        f"but got {out_jacobian[:, j].numel()}"
+                    )
                 out_jacobian[:, j] = dense.reshape(-1)
     return out_jacobians, correct_grad_sizes, correct_grad_types
 
@@ -757,7 +777,7 @@ If the test
 
 def _check_analytical_jacobian_attributes(
     inputs, output, nondet_tol, check_grad_dtypes, fast_mode=False, v=None
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     # This is used by both fast and slow mode:
     #  - For slow mode, vjps[i][j] is the jth row of the Jacobian wrt the ith
     #    input.
@@ -802,12 +822,12 @@ def _check_analytical_jacobian_attributes(
 def _get_analytical_vJu_backward_mode(
     inputs, outputs, nondet_tol, check_grad_dtypes, all_v, all_u
 ):
-    reduced_jacobians: List[List[torch.Tensor]] = []
+    reduced_jacobians: list[list[torch.Tensor]] = []
     for output, v in zip(outputs, all_v):
         all_vJ = _check_analytical_jacobian_attributes(
             inputs, output, nondet_tol, check_grad_dtypes, fast_mode=True, v=v
         )
-        jacobian_scalars: List[torch.Tensor] = []
+        jacobian_scalars: list[torch.Tensor] = []
         for vJ, u in zip(all_vJ, all_u):
             # Why do we need squeeze here? vJ is a 2-d tensor so that we can reuse
             # the error checking logic from slow mode
@@ -878,7 +898,7 @@ def _get_analytical_jacobian(inputs, outputs, input_idx, output_idx):
 
 def _compute_analytical_jacobian_rows(
     vjp_fn, sample_output
-) -> List[List[Optional[torch.Tensor]]]:
+) -> list[list[torch.Tensor | None]]:
     # Computes Jacobian row-by-row by projecting `vjp_fn` = v^T J on standard basis
     # vectors: vjp_fn(e) = e^T J is a corresponding row of the Jacobian.
     # NB: this function does not assume vjp_fn(v) to return tensors with the same
@@ -889,7 +909,7 @@ def _compute_analytical_jacobian_rows(
     )
     flat_grad_out = grad_out_base.view(-1)
     # jacobians_rows[i][j] is the Jacobian jth row for the ith input
-    jacobians_rows: List[List[Optional[torch.Tensor]]] = []
+    jacobians_rows: list[list[torch.Tensor | None]] = []
     for j in range(flat_grad_out.numel()):
         flat_grad_out.zero_()
         flat_grad_out[j] = 1.0  # projection for jth row of Jacobian
@@ -905,9 +925,9 @@ def _compute_analytical_jacobian_rows(
 
 def _get_analytical_vjps_wrt_specific_output(
     vjp_fn, sample_output, v
-) -> List[List[Optional[torch.Tensor]]]:
+) -> list[list[torch.Tensor | None]]:
     grad_inputs = vjp_fn(v.reshape(sample_output.shape))
-    vjps: List[List[Optional[torch.Tensor]]] = [
+    vjps: list[list[torch.Tensor | None]] = [
         [vjp.clone() if isinstance(vjp, torch.Tensor) else None] for vjp in grad_inputs
     ]
     return vjps
@@ -923,7 +943,8 @@ def _check_inputs(tupled_inputs) -> bool:
                     f"Input #{idx} requires gradient and "
                     "is not a double precision floating point or complex. "
                     "This check will likely fail if all the inputs are "
-                    "not of double precision floating point or complex. "
+                    "not of double precision floating point or complex. ",
+                    stacklevel=2,
                 )
             if inp.is_sparse:
                 content = inp._values()
@@ -949,7 +970,7 @@ def _check_inputs(tupled_inputs) -> bool:
     if not any_input_requiring_grad:
         raise ValueError(
             "gradcheck expects at least one input tensor to require gradient, "
-            "but none of the them have requires_grad=True."
+            "but none of them have requires_grad=True."
         )
     return True
 
@@ -1060,7 +1081,8 @@ Expected:
 
 def _test_batched_grad_forward_ad(func, inputs) -> bool:
     fwAD = torch.autograd.forward_ad  # To avoid early import issues (do we need this?)
-    assert isinstance(inputs, tuple)
+    if not isinstance(inputs, tuple):
+        raise AssertionError("Expected inputs to be a tuple")
 
     for input_idx, current_input in enumerate(inputs):
         if not (is_tensor_like(current_input) and current_input.requires_grad):
@@ -1151,7 +1173,7 @@ def _test_batched_grad(input, output, output_idx) -> bool:
     # NB: this doesn't work for CUDA tests: https://github.com/pytorch/pytorch/issues/50209
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="There is a performance drop")
-        warnings.filterwarnings("ignore", message="Please use torch.vmap")
+        warnings.filterwarnings("ignore", message="Please use `torch.vmap`")
         try:
             result = vmap(vjp)(torch.stack(grad_outputs))
         except RuntimeError as ex:
@@ -1174,7 +1196,7 @@ def _test_batched_grad(input, output, output_idx) -> bool:
 
 def _test_backward_mul_by_grad_output(outputs, inputs, masked) -> bool:
     # Tests that backward is multiplied by grad_output
-    diff_input_list: List[torch.Tensor] = list(_iter_tensors(inputs, True))
+    diff_input_list: list[torch.Tensor] = list(_iter_tensors(inputs, True))
     if not diff_input_list:
         raise GradcheckError("no Tensors requiring grad found in input")
     grads_input = torch.autograd.grad(
@@ -1252,7 +1274,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 tensor_indices.add(i)
             dual_inputs.append(inp)
 
-        for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
+        for fw_grad, u in zip(fw_grads, all_u):
             fw_grad.copy_(u.view_as(fw_grad))
 
         for idx, inp in enumerate(inputs):
@@ -1294,7 +1316,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
 
 
 def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
-    diff_input_list: List[torch.Tensor] = list(_iter_tensors(inputs, True))
+    diff_input_list: list[torch.Tensor] = list(_iter_tensors(inputs, True))
     if not diff_input_list:
         raise GradcheckError("no Tensors requiring grad found in input")
 
@@ -1303,7 +1325,8 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
             "Backwards compatibility: New undefined gradient support checking "
             "feature is enabled by default, but it may break existing callers "
             "of this function. If this is true for you, you can call this "
-            'function with "check_undefined_grad=False" to disable the feature'
+            'function with "check_undefined_grad=False" to disable the feature',
+            stacklevel=2,
         )
 
     def check_undefined_grad_support(output_to_check):
@@ -1394,9 +1417,9 @@ def _get_notallclose_msg(
     )
     mode = "computed with forward mode " if is_forward_ad else ""
     return (
-        prefix + "Jacobian %smismatch for output %d with respect to input %d,\n"
-        "numerical:%s\nanalytical:%s\n"
-        % (mode, output_idx, input_idx, numerical, analytical)
+        prefix
+        + f"Jacobian {mode}mismatch for output {output_idx:d} with respect to input {input_idx:d},\n"
+        f"numerical:{numerical}\nanalytical:{analytical}\n"
     )
 
 
@@ -1640,7 +1663,10 @@ def _slow_gradcheck(
 
 
 def _dot_with_type_promotion(u, v):
-    assert u.dim() == 1 and v.dim() == 1
+    if u.dim() != 1 or v.dim() != 1:
+        raise AssertionError(
+            f"Expected u and v to be 1D tensors, but got dims {u.dim()} and {v.dim()}"
+        )
     return (u * v).sum()
 
 
@@ -1722,12 +1748,31 @@ def _adjusted_atol(atol, u, v):
     # the correctly sized matrix in which each entry is atol.
     #
     # We see that atol needs to be scaled by v^T M u (where M is an all-ones M x N
-    # matrix): v^T M u = \sum_{i} \sum_{j} u_i * v_j = (\sum_{i} u_i)(\sum_{i} v_i)
-    # TODO: properly handle case when u is tuple instead of only taking first element
-    u = u[0] if isinstance(u, tuple) else u
-    sum_u = u.sum()
+    # matrix): v^T M u = \sum_{i} \sum_{j} u[i] * v[j] = sum(u) * sum(v).
+
+    # For the case of complex inputs, u has re and im. components: u = (ur, ui).
+    # Let q = a - b = (qr, qi) in the above notation, eg. q is the difference between analytic and numerical
+    # Jacobians. Then the transformed tolerance checks being done in the torch.allclose ops
+    # are of form abs(Re{q_r u_r - q_i u_i}) < atol * (abs(u_r) + abs(u_i)), and equivalently
+    # for imaginary components abs(Im{q_r u_r - q_i ui}) < atol * (abs(u_r) + abs(u_i)).
+    # Since u is drawn randomly non-negative, the end effect is a factor
+    # (sum(u_r) + sum(u_i)) * sum(v) increase in atol for complex inputs, eg.
+    # a statistical factor of 2 as compared to the real case.
+
     sum_v = 1.0 if v is None else v.sum()
-    return atol * float(sum_u) * float(sum_v)
+
+    if isinstance(u, tuple):
+        # case of complex input
+        ur, ui = u[0], u[1]
+        sum_ur = ur.sum()
+        sum_ui = ui.sum()
+        complex_modified_atol = atol * (float(sum_ur) + float(sum_ui)) * float(sum_v)
+        return complex_modified_atol
+
+    # case of real input
+    sum_u = u.sum()
+    modified_atol = atol * float(sum_u) * float(sum_v)
+    return modified_atol
 
 
 FAST_FAIL_SLOW_OK_MSG = """
@@ -1907,7 +1952,8 @@ def _fast_gradcheck(
     )
     # TODO: replicate https://github.com/pytorch/pytorch/pull/77743 for fast gradcheck as well
     if use_forward_ad:
-        assert all_v is None
+        if all_v is not None:
+            raise AssertionError("Expected all_v to be None.")
         analytical_vJu = _get_analytical_jacobian_forward_ad(
             func,
             inputs,
@@ -1946,12 +1992,12 @@ def _fast_gradcheck(
 
 # Note [VarArg of Tensors]
 # ~~~~~~~~~~~~~~~~~~~~~~~~
-# 'func' accepts a vararg of tensors, which isn't expressable in the type system at the moment.
+# 'func' accepts a vararg of tensors, which isn't expressible in the type system at the moment.
 # If https://mypy.readthedocs.io/en/latest/additional_features.html?highlight=callable#extended-callable-types is accepted,
 # the '...' first argument of Callable can be replaced with VarArg(Tensor).
 # For now, we permit any input.
 def gradcheck(
-    func: Callable[..., Union[_TensorOrTensors]],  # See Note [VarArg of Tensors]
+    func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,
     *,
     eps: float = 1e-6,
@@ -1966,8 +2012,8 @@ def gradcheck(
     check_forward_ad: bool = False,
     check_backward_ad: bool = True,
     fast_mode: bool = False,
-    masked: Optional[bool] = None,
-) -> bool:  # noqa: D400,D205
+    masked: bool | None = None,
+) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
     and with ``requires_grad=True``.
@@ -2035,15 +2081,18 @@ def gradcheck(
         ``True`` if all differences satisfy allclose condition
 
     """
-    assert (
-        check_forward_ad or check_backward_ad
-    ), "Expected at least one of check_forward_ad or check_backward_ad to be True"
-    assert not (
-        check_batched_grad and not check_backward_ad
-    ), "Setting check_batched_grad=True requires check_backward_ad to be True"
-    assert not (
-        check_batched_forward_grad and not check_forward_ad
-    ), "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
+    if not (check_forward_ad or check_backward_ad):
+        raise AssertionError(
+            "Expected at least one of check_forward_ad or check_backward_ad to be True"
+        )
+    if check_batched_grad and not check_backward_ad:
+        raise AssertionError(
+            "Setting check_batched_grad=True requires check_backward_ad to be True"
+        )
+    if check_batched_forward_grad and not check_forward_ad:
+        raise AssertionError(
+            "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
+        )
     args = locals().copy()
     args.pop("raise_exception")
     if not raise_exception:
@@ -2118,7 +2167,7 @@ def _gradcheck_helper(
 def gradgradcheck(
     func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,
-    grad_outputs: Optional[_TensorOrTensors] = None,
+    grad_outputs: _TensorOrOptionalTensors | None = None,
     *,
     eps: float = 1e-6,
     atol: float = 1e-5,
@@ -2133,7 +2182,7 @@ def gradgradcheck(
     check_rev_over_rev: bool = True,
     fast_mode: bool = False,
     masked: bool = False,
-) -> bool:  # noqa: D400,D205
+) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients wrt tensors in :attr:`inputs` and
     :attr:`grad_outputs` that are of floating point or complex type and with
@@ -2161,7 +2210,7 @@ def gradgradcheck(
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor or a tuple of Tensors
         inputs (tuple of Tensor or Tensor): inputs to the function
-        grad_outputs (tuple of Tensor or Tensor, optional): The gradients with
+        grad_outputs (tuple of [Tensor or None] or Tensor, optional): The gradients with
             respect to the function's outputs.
         eps (float, optional): perturbation for finite differences
         atol (float, optional): absolute tolerance
@@ -2188,15 +2237,18 @@ def gradgradcheck(
     Returns:
         True if all differences satisfy allclose condition
     """
-    assert (
-        check_fwd_over_rev or check_rev_over_rev
-    ), "Expected at least one of check_fwd_over_rev or check_rev_over_rev to be True"
-    assert not (
-        check_undefined_grad and not check_rev_over_rev
-    ), "Setting check_undefined_grad=True requires check_rev_over_rev to be True"
-    assert not (
-        check_batched_grad and not check_rev_over_rev
-    ), "Setting check_batched_grad=True requires check_rev_over_rev to be True"
+    if not (check_fwd_over_rev or check_rev_over_rev):
+        raise AssertionError(
+            "Expected at least one of check_fwd_over_rev or check_rev_over_rev to be True"
+        )
+    if check_undefined_grad and not check_rev_over_rev:
+        raise AssertionError(
+            "Setting check_undefined_grad=True requires check_rev_over_rev to be True"
+        )
+    if check_batched_grad and not check_rev_over_rev:
+        raise AssertionError(
+            "Setting check_batched_grad=True requires check_rev_over_rev to be True"
+        )
     # TODO: do we want to test this too?
     # assert not (check_batched_forward_grad and not check_fwd_over_rev), (
     #     "Setting check_batched_forward_grad=True requires check_fwd_over_rev to be True")
