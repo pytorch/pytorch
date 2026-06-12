@@ -7,7 +7,7 @@ namespace torch {
 void initVerboseBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
-  auto verbose = m.def_submodule("_verbose", "MKL, MKLDNN verbose");
+  auto verbose = m.def_submodule("_verbose", "MKL, ONEDNN verbose");
   verbose.def("mkl_set_verbose", torch::verbose::_mkl_set_verbose);
   verbose.def("onednn_set_verbose", torch::verbose::_onednn_set_verbose);
 }

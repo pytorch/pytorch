@@ -1357,11 +1357,11 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 static inline int64_t get_onednn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
-      // Minimum dimension requirement for MKLDNN; derived based on experiments.
+      // Minimum dimension requirement for ONEDNN; derived based on experiments.
       //it's enabled on all Neoverse cpus.
       return is_arm_neoverse() ? 8 : 0;
     }();
-    const auto value = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_DIM");
+    const auto value = c10::utils::get_env("TORCH_ONEDNN_MATMUL_MIN_DIM");
     return value.has_value() ? std::stoi(value.value()) : default_min_dim;
   }();
   return value;
@@ -1371,11 +1371,11 @@ static inline int64_t get_onednn_matmul_min_dim() {
 static inline int64_t get_onednn_matmul_min_size() {
   static auto value = [&] {
     const int64_t default_min_size = [&] {
-      // Minimum size requirement for MKLDNN; derived based on experiments.
+      // Minimum size requirement for ONEDNN; derived based on experiments.
       // it's enabled on all Neoverse cpus.
       return is_arm_neoverse() ? 8 * 1024 : 0;
     }();
-    const auto value = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_SIZE");
+    const auto value = c10::utils::get_env("TORCH_ONEDNN_MATMUL_MIN_SIZE");
     return value.has_value() ? std::stoi(value.value()) : default_min_size;
   }();
   return value;
