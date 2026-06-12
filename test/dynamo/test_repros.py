@@ -81,6 +81,7 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfRocm,
     skipIfWindows,
+    skipIfXpu,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
@@ -7681,6 +7682,66 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
             self.assertEqual(model(*inputs), compiled_result)
 
+    # https://github.com/pytorch/pytorch/issues/162374
+    def test_pad_packed_sequence_graph_break_after_packed_gru(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(16, 4)
+                self.rnn = torch.nn.GRU(4, 6)
+                self.attn = torch.nn.Linear(6, 6)
+                self.proj = torch.nn.Linear(6, 8)
+                self.v = torch.nn.Parameter(torch.rand(6))
+
+            def forward(self, input_seq, input_lengths):
+                embedded = self.embedding(input_seq)
+                packed = torch.nn.utils.rnn.pack_padded_sequence(
+                    embedded, input_lengths.cpu(), enforce_sorted=False
+                )
+                outputs_packed, _ = self.rnn(packed)
+                outputs_padded, _ = torch.nn.utils.rnn.pad_packed_sequence(
+                    outputs_packed
+                )
+                energy = torch.sum(
+                    torch.tanh(self.attn(outputs_padded)) * self.v.view(1, 1, -1),
+                    dim=2,
+                )
+                attn_weights = torch.nn.functional.softmax(
+                    energy.transpose(0, 1), dim=1
+                )
+                context = (
+                    attn_weights.unsqueeze(1)
+                    .bmm(outputs_padded.transpose(0, 1))
+                    .squeeze(1)
+                )
+                return self.proj(context)
+
+        model = Model().eval()
+        input_seq = torch.arange(10, dtype=torch.long).view(5, 2)
+        input_lengths = torch.tensor([3, 5], dtype=torch.int64)
+
+        expected = model(input_seq, input_lengths)
+        actual = torch.compile(model, backend="eager")(input_seq, input_lengths)
+
+        self.assertEqual(expected, actual)
+
+    # https://github.com/pytorch/pytorch/issues/162374
+    def test_pad_packed_sequence_fullgraph_unsupported(self):
+        def fn(sequence):
+            output, lengths = torch.nn.utils.rnn.pad_packed_sequence(sequence)
+            return output + lengths.to(output.dtype).view(1, -1, 1)
+
+        x = torch.randn(5, 2, 4)
+        lengths = torch.tensor([3, 5], dtype=torch.int64)
+        packed = torch.nn.utils.rnn.pack_padded_sequence(
+            x, lengths, enforce_sorted=False
+        )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "pad_packed_sequence"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(packed)
+
     def test_autograd_function_ctx_stash_no_vc_check(self):
         # Test that tensors stashed directly on ctx (e.g., ctx.x = x) in an
         # autograd.Function don't trigger version counter checks, while tensors
@@ -7908,6 +7969,45 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(actual, expected)
         self.assertEqual(actual.shape, (3, length))
 
+    def test_istft_compile_dynamic_length_clamp(self):
+        # Regression for the sym_min/sym_max clamp in the istft ref. Under
+        # dynamic shapes the (requested length vs signal size) clamp must stay
+        # symbolic: the builtin min would install a guard and recompile when the
+        # relationship flips (or raise GuardOnDataDependentSymNode for unbacked
+        # symints). sym_min/sym_max carry it symbolically, so a single graph
+        # serves both the "length exceeds signal" and "length within signal"
+        # cases.
+        n_fft = 1024
+        hop_length = 512
+        length = 60000
+
+        def fn(spec, window):
+            return torch.istft(
+                spec,
+                n_fft=n_fft,
+                hop_length=hop_length,
+                window=window,
+                length=length,
+            )
+
+        window = torch.hann_window(n_fft)
+        # 50 frames -> signal shorter than length (tail is padded);
+        # 200 frames -> signal longer than length (clamped/sliced).
+        spec_short = torch.view_as_complex(torch.randn(4, n_fft // 2 + 1, 50, 2))
+        spec_long = torch.view_as_complex(torch.randn(4, n_fft // 2 + 1, 200, 2))
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.assertEqual(compiled(spec_short, window), fn(spec_short, window))
+            self.assertEqual(compiled(spec_long, window), fn(spec_long, window))
+
+        # Both shapes share a single graph: the symbolic clamp installs no guard
+        # that would force a recompile when the length/signal relationship flips.
+        self.assertEqual(cnt.frame_count, 1)
+
     @unittest.expectedFailure
     def test_method_dunder_dict_setitem(self):
         # Reproducer for: getattr(obj, method_name).__dict__['key'] = value
@@ -8062,6 +8162,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         peak_mem2 = torch.get_device_module(device).max_memory_allocated()
         self.assertTrue(peak_mem1 == peak_mem2)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3860")
     # test involves custom ops that return unbacked symints
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     # test requires the activation memory budget code to think
@@ -8422,6 +8523,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mem_after = torch.accelerator.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3835")
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)
@@ -9455,8 +9557,10 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(ReproTests)
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(ReproTestsDevice, globals(), only_for=devices)
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(
+    ReproTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
