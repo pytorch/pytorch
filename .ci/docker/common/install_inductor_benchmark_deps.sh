@@ -35,7 +35,7 @@ conda_install pango
 
 # Detect CUDA version and use appropriate wheel index
 # DESIRED_CUDA is set as ENV in the Dockerfile, but reality is that it can only be 13.0.2 atm
-# TODO: One shoudl not install GPU builds on ROCM or CPU inductorbeanch installs
+# TODO: One should not install GPU builds on ROCM or CPU inductorbeanch installs
 CUDA_INDEX_URL="https://download.pytorch.org/whl/cu130"
 echo "DESIRED_CUDA=${DESIRED_CUDA}, using cu130 wheels"
 
