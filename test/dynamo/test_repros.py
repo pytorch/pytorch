@@ -8299,18 +8299,18 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         # Generate input once to ensure consistency across runs
         torch.manual_seed(54321)
-        torch.get_device_module(device).manual_seed_all(54321)
+        torch.accelerator.manual_seed_all(54321)
         image_latent = torch.randn((2, 12, 16, 32, 32))
 
         torch.manual_seed(54321)
-        torch.get_device_module(device).manual_seed_all(54321)
+        torch.accelerator.manual_seed_all(54321)
         expected = f(image_latent).sum()
 
         # https://github.com/pytorch/pytorch/issues/147171
         with torch._inductor.config.patch(fallback_random=True):
             for backend in ["eager", "aot_eager"]:
                 torch.manual_seed(54321)
-                torch.get_device_module(device).manual_seed_all(54321)
+                torch.accelerator.manual_seed_all(54321)
                 actual = torch.compile(backend=backend, fullgraph=True)(f)(
                     image_latent
                 ).sum()

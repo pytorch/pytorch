@@ -163,7 +163,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         # The DTensor random ops will use the same generator as the default one on the device.
 
         # Note: this behavior changed, and now the guideline is to set the same RNG seed on all SPMD ranks.
-        torch.get_device_module(self.device_type).manual_seed(0)
+        torch.accelerator.manual_seed(0)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
