@@ -10,15 +10,13 @@
 #include <mkl.h>
 #endif
 
+#if AT_ONEDNN_ENABLED()
+#include <ATen/native/onednn/IDeepRegistration.h>
+#endif
+
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace at {
-#if AT_ONEDNN_ENABLED()
-namespace native::onednn {
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-void clear_computation_cache();
-} // namespace native::onednn
-#endif
 
 namespace {
 // Number of threads set by the user

@@ -2,14 +2,25 @@
 
 import math
 import unittest
-from typing import List, Tuple, Union
 
 import torch
 from torch._inductor import config
+from torch._inductor.decomposition import bmm as decomp_bmm, mm
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    ShapeEnv,
+    StatelessSymbolicContext,
+)
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, run_tests
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    parametrize,
+    run_tests,
+    TEST_XPU,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -26,7 +37,7 @@ default_rtol = {
 
 
 def rand_math_tensor(
-    shape: Tuple[Union[int, List[int]]],
+    shape: tuple[int | list[int]],
     device: str,
     dtype: torch.dtype,
     requires_grad: bool = False,
@@ -78,6 +89,19 @@ def torch_baddbmm(add, b, c, alpha, beta):
     return torch.baddbmm(add, b, c, alpha=alpha, beta=beta)
 
 
+def create_fake_tensor_with_dynamic_size(x, fake_mode):
+    with fake_mode:
+        dynamic_sizes = [DimDynamic.DYNAMIC for _ in range(x.dim())]
+        dynamic_strides = [DimDynamic.INFER_STRIDE for _ in range(x.dim())]
+        return fake_mode.from_tensor(
+            x,
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=dynamic_sizes,
+                dynamic_strides=dynamic_strides,
+            ),
+        )
+
+
 # The shapes we test on
 ts_list = [
     (1, 32, 32, 1),
@@ -113,7 +137,8 @@ class TestDecomp(NNTestCase):
 
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     @parametrize(
-        "dtype", [torch.float, torch.bfloat16] if SM80OrLater else [torch.float]
+        "dtype",
+        [torch.float, torch.bfloat16] if SM80OrLater or TEST_XPU else [torch.float],
     )
     @parametrize("bs", [1, 2, 4, 10])
     def test_batched_mm(self, device, dtype, bs):
@@ -148,11 +173,89 @@ class TestDecomp(NNTestCase):
 
         run_comp_nocomp(torch_bmm, t1, t2, rtol=rtol, atol=atol)
 
+    @config.patch(coordinate_descent_tuning=False)
+    def test_bmm_outer_product_k_is_one(self, device):
+        t1 = torch.randn(32, 8, 1, device=device)
+        t2 = torch.randn(32, 1, 256, device=device)
+        expected = torch.bmm(t1, t2)
+
+        out = decomp_bmm(t1, t2)
+
+        self.assertIsNot(out, NotImplemented)
+        self.assertEqual(expected, out)
+
+    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    def test_bmm_outer_product_k_is_one_with_unbacked_k(self, device):
+        if device == "cpu":
+            self.skipTest("unbacked symints require GPU fake tensors")
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            b, m, n = [shape_env.create_unbacked_symint() for _ in range(3)]
+            lhs_k_unbacked, rhs_k_unbacked = [
+                shape_env.create_unbacked_symint() for _ in range(2)
+            ]
+
+            lhs_static_k = torch.empty((b, m, 1), device=device)
+            rhs_static_k = torch.empty((b, 1, n), device=device)
+            lhs_unbacked_k = torch.empty((b, m, lhs_k_unbacked), device=device)
+            rhs_unbacked_k = torch.empty((b, rhs_k_unbacked, n), device=device)
+
+            self.assertIsNot(
+                decomp_bmm(lhs_static_k, rhs_static_k),
+                NotImplemented,
+            )
+            self.assertIs(
+                decomp_bmm(lhs_static_k, rhs_unbacked_k),
+                NotImplemented,
+            )
+            self.assertIs(
+                decomp_bmm(lhs_unbacked_k, rhs_static_k),
+                NotImplemented,
+            )
+            self.assertIs(
+                decomp_bmm(lhs_unbacked_k, rhs_unbacked_k),
+                NotImplemented,
+            )
+
+    @config.patch(coordinate_descent_tuning=False)
+    def test_bmm_outer_product_permuted_inputs(self, device):
+        B, M, N = 4, 8, 16
+
+        cases = [
+            # LHS: batch dim permuted
+            (
+                torch.randn(M, B, 1, device=device).permute(1, 0, 2),
+                torch.randn(B, 1, N, device=device),
+            ),
+            # RHS: batch dim permuted
+            (
+                torch.randn(B, M, 1, device=device),
+                torch.randn(N, B, 1, device=device).permute(1, 2, 0),
+            ),
+            # Both permuted
+            (
+                torch.randn(M, B, 1, device=device).permute(1, 0, 2),
+                torch.randn(N, B, 1, device=device).permute(1, 2, 0),
+            ),
+            # LHS: fully transposed [1, M, B] -> [B, M, 1]
+            (
+                torch.randn(1, M, B, device=device).permute(2, 1, 0),
+                torch.randn(B, 1, N, device=device),
+            ),
+        ]
+
+        for t1, t2 in cases:
+            expected = torch.bmm(t1, t2)
+            out = decomp_bmm(t1, t2)
+            self.assertIsNot(out, NotImplemented)
+            self.assertEqual(expected, out, exact_stride=True)
+
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.int])
     def test_some(self, device, dtype):
         # this Pytorch data type is not fully supported on cuda today
-        # - unfortunately we can't skipIf because we don't see the actual parms in skipIf
+        # - unfortunately we can't skipIf because we don't see the actual params in skipIf
         if device.startswith(GPU_TYPE) and dtype == torch.int:
             return
 
@@ -172,7 +275,7 @@ class TestDecomp(NNTestCase):
     @parametrize("bs", [1, 2, 4, 10])
     def test_some_batched(self, device, dtype, bs):
         # this Pytorch data type is not fully supported on cuda today
-        # - unfortunately we can't skipIf because we don't see the actual parms in skipIf
+        # - unfortunately we can't skipIf because we don't see the actual params in skipIf
         if device.startswith(GPU_TYPE) and dtype == torch.int:
             return
 
@@ -187,9 +290,76 @@ class TestDecomp(NNTestCase):
             init_tensor([[[1], [2], [3], [4]]] * bs, dtype=dtype, device=device),
         )
 
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    def test_dynamic_shape_mm(self, device, dtype):
+        # Test that the mm decomp does not evaluate expressions for dynamic shapes
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        # Only test decomp for cpu to match fake tensors from dynamo
+        if device != "cpu":
+            return
+
+        for t_size in ts_list:
+            ((a1_0, a1_1, a2_0, a2_1)) = t_size
+
+            # Create the fake tensors
+            t1 = create_fake_tensor_with_dynamic_size(
+                rand_math_tensor((a1_0, a1_1), dtype=dtype, device=device),
+                fake_mode,
+            )
+            t2 = create_fake_tensor_with_dynamic_size(
+                rand_math_tensor((a2_0, a2_1), dtype=dtype, device=device),
+                fake_mode,
+            )
+
+            # Save the expression types to check if any symints are evaluated
+            og_t1_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t1.size()
+            ]
+            og_t2_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t2.size()
+            ]
+
+            r = mm(t1, t2)
+
+            # Make sure all symints are not evaluated
+            new_t1_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t1.size()
+            ]
+            new_t2_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t2.size()
+            ]
+            self.assertTrue(
+                all(
+                    og_t1_expr_types[i] == new_t1_expr_types[i]
+                    for i in range(len(og_t1_expr_types))
+                )
+            )
+            self.assertTrue(
+                all(
+                    og_t2_expr_types[i] == new_t2_expr_types[i]
+                    for i in range(len(og_t2_expr_types))
+                )
+            )
+
+            if r is not NotImplemented:
+                # Check that the output is well formed
+                self.assertEqual(t1.size(0), r.size(0))
+                self.assertEqual(t2.size(1), r.size(1))
+                r_expr_types = [
+                    type(d.node.expr) if type(d) is torch.SymInt else int
+                    for d in r.size()
+                ]
+                self.assertTrue(r_expr_types[0] == og_t1_expr_types[0])
+                self.assertTrue(r_expr_types[1] == og_t2_expr_types[1])
+
 
 device_types = ("cpu", GPU_TYPE)
-instantiate_device_type_tests(TestDecomp, globals(), only_for=device_types)
+instantiate_device_type_tests(
+    TestDecomp, globals(), only_for=device_types, allow_xpu=True
+)
 
 if __name__ == "__main__":
     # We don't support torch.compile() on Windows

@@ -8,7 +8,7 @@ import torch._inductor.decomposition
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
-    run_tests, TestCase, IS_WINDOWS, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, TEST_CUDA
+    run_tests, TestCase, IS_WINDOWS, IS_FBCODE, IS_REMOTE_GPU, TEST_CUDA
 )
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing import FileCheck
@@ -61,11 +61,10 @@ class TestOutDtypeOp(TestCase):
         weight = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
         m = M(weight)
         x = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
-        ep = torch.export.export(
-            m,
-            (x,),
-        )
-        FileCheck().check("torch.ops.higher_order.out_dtype").check("aten.mm.default").run(ep.graph_module.code)
+        ep = torch.export.export(m, (x,), strict=True)
+        FileCheck().check("torch.ops.higher_order.out_dtype").check(
+            "aten.mm.default"
+        ).run(ep.graph_module.code)
         self.assertTrue(torch.allclose(m(x), ep.module()(x)))
         for node in ep.graph.nodes:
             if node.op == "call_function" and node.target is out_dtype:
@@ -128,7 +127,12 @@ class TestOutDtypeOp(TestCase):
 
         with self.assertRaisesRegex(ValueError, "out_dtype's first argument needs to be a functional operator"):
             _ = torch.export.export(
-                M(), (torch.randint(-128, 127, (5, 5), dtype=torch.int8), torch.randint(-128, 127, (5, 5), dtype=torch.int8)),
+                M(),
+                (
+                    torch.randint(-128, 127, (5, 5), dtype=torch.int8),
+                    torch.randint(-128, 127, (5, 5), dtype=torch.int8),
+                ),
+                strict=True,
             )
 
     def test_out_dtype_non_op_overload(self):
@@ -159,7 +163,6 @@ class TestOutDtypeOp(TestCase):
             loss.backward()
 
     @unittest.skipIf(IS_WINDOWS, "_int_mm unavailable")
-    @unittest.skipIf(TEST_WITH_ROCM, "_int_mm unavailable")
     @unittest.skipIf(not SM80OrLater, "_int_mm unavailable")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(_get_torch_cuda_version() >= (11, 7), "_int_mm unavailable")

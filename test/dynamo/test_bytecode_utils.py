@@ -53,8 +53,8 @@ class BytecodeTests(torch._dynamo.test_case.TestCase):
         fn_str = f"""\
 def fn():
     foo.bar(1, 2, 3)
-{str(chr(10)).join(' ' * 4 + 'x' + str(i) + ' = 1' for i in range(1 << 9))}
-    l = [{' '.join('x' + str(i) + ',' for i in range(1 << 9))}]
+{str(chr(10)).join(" " * 4 + "x" + str(i) + " = 1" for i in range(1 << 9))}
+    l = [{" ".join("x" + str(i) + "," for i in range(1 << 9))}]
         """
         locals = {}
         exec(fn_str, {}, locals)
@@ -80,7 +80,7 @@ def fn():
         self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
 
     @unittest.skipIf(
-        sys.version_info < (3, 10) or sys.version_info >= (3, 11),
+        sys.version_info >= (3, 11),
         "linetable test for Python 3.10",
     )
     def test_linetable_310_writer(self):
@@ -94,19 +94,6 @@ def fn():
         inst = dis.get_instructions(fn)
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_linetable)
-
-    @unittest.skipIf(sys.version_info >= (3, 10), "use lnotab when python < 3.10")
-    def test_lnotab_writer(self):
-        def fn():
-            a = 10
-            b = 20
-            c = a + b
-            f = "lnotab_writer"
-            return f"Test if {f} generates correct co_lnotab: {c}"
-
-        inst = dis.get_instructions(fn)
-        result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
-        self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
     def test_if_tensor_is_none(self):
         """
@@ -284,7 +271,7 @@ def fn():
         def nothing(*args):
             pass
 
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        code, _ = bytecode_transformation.transform_code_object(fn.__code__, nothing)
         self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
 
     @skipIfNotPy311
@@ -300,7 +287,7 @@ def fn():
         def nothing(*args):
             pass
 
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        code, _ = bytecode_transformation.transform_code_object(fn.__code__, nothing)
         self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
 
     @skipIfNotPy311
@@ -500,6 +487,7 @@ def fn():
                 self.assertIn("JUMP", i1.opname)
                 self.assertIs(i1.target, insts[-1])
 
+    @unittest.skipIf(sys.version_info >= (3, 14), "3.14+ removed RETURN_CONST")
     @skipIfNotPy312
     def test_bytecode_from_template_noreturn_const(self):
         # Test 3.12+ RETURN_CONST
@@ -518,7 +506,7 @@ def fn():
         insts = bytecode_transformation.bytecode_from_template(fn, noprefix=False)
         self.assertEqual(insts[-1].opname, "NOP")
         insts_i = 0
-        for i, inst in enumerate(dis_insts):
+        for inst in dis_insts:
             if inst.opname == "RETURN_CONST":
                 self.assertEqual(insts[insts_i].opname, "LOAD_CONST")
                 insts_i += 1
@@ -538,11 +526,41 @@ def fn():
                     x = x + 1
                 except NotImplementedError:
                     x = x + 1
-                except Exception as e:
+                except Exception:
                     x = x + 1
             return x
 
         self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
+
+    # https://github.com/pytorch/pytorch/issues/160471
+    def test_extended_args_starts_line(self):
+        # NOTE: need to LOAD_CONST i before LOAD_FAST x
+        # in order to get an EXTENDED_ARG with starts_line set
+        # NOTE: 3.14+ introduced LOAD_SMALL_INT, so integers need to be >= 256
+        # in order for LOAD_CONST to be generated
+        lines = "\n".join(f"    x = {i + 1000} + x" for i in range(300))
+        fn_str = f"def fn(x):\n{lines}"
+        locals = {}
+        exec(fn_str, {}, locals)
+        fn = locals["fn"]
+
+        for inst in dis.get_instructions(fn):
+            if inst.opname == "EXTENDED_ARG" and inst.starts_line:
+                break
+        else:
+            self.assertTrue(
+                False, "bad test case: no EXTENDED_ARG with starts_line found"
+            )
+
+        def transformations(instructions, _):
+            for inst in instructions:
+                if inst.starts_line == 301:
+                    break
+            else:
+                self.assertTrue(False, "test failure: 301 starts_line not found")
+            return instructions
+
+        bytecode_transformation.transform_code_object(fn.__code__, transformations)
 
 
 class BytecodeHookTests(torch._dynamo.test_case.TestCase):
@@ -558,7 +576,7 @@ class BytecodeHookTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(hook)
         try:
-            opt_fn = torch.compile(fn)
+            opt_fn = torch.compile(fn, backend="eager")
             for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
         finally:

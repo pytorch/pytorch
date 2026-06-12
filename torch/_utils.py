@@ -1,13 +1,20 @@
 # mypy: allow-untyped-defs
 import copyreg
 import functools
+import importlib
 import logging
+import math
+import os
+import pickle
+import re
 import sys
 import traceback
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, DefaultDict, Generic, List, Optional, TYPE_CHECKING
-from typing_extensions import deprecated, ParamSpec
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any, cast, Generic, TYPE_CHECKING, TypedDict
+from typing_extensions import deprecated, NotRequired, ParamSpec
 
 import torch
 
@@ -34,7 +41,7 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
 
     if isinstance(dtype, str):
         dtype = _import_dotted_name(dtype)
-    if dtype == type(self):
+    if dtype is type(self):
         return self
     if self.is_sparse:
         if not dtype.is_sparse:
@@ -70,6 +77,8 @@ def _to(self, device, non_blocking=False):
     if device.type == "cpu":
         pin_memory = non_blocking and self.device.type in (
             "cuda",
+            "xpu",
+            "mtia",
             torch._C._get_privateuse1_backend_name(),
         )
         untyped_storage = torch.empty(
@@ -79,9 +88,8 @@ def _to(self, device, non_blocking=False):
         return untyped_storage
 
     device_module = getattr(torch, device.type, None)
-    assert (
-        device_module is not None
-    ), f"{device.type.upper()} device module is not loaded"
+    if device_module is None:
+        raise AssertionError(f"{device.type.upper()} device module is not loaded")
     with device_module.device(device):
         if self.is_sparse and hasattr(device_module, "sparse"):
             new_type = getattr(device_module.sparse, self.__class__.__name__)
@@ -93,9 +101,10 @@ def _to(self, device, non_blocking=False):
             )
             return new_type(indices, values, self.size())
         else:
-            assert (
-                not self.is_sparse
-            ), f"sparse storage is not supported for {device.type.upper()} tensors"
+            if self.is_sparse:
+                raise AssertionError(
+                    f"sparse storage is not supported for {device.type.upper()} tensors"
+                )
             untyped_storage = torch.UntypedStorage(self.size(), device=device)
             untyped_storage.copy_(self, non_blocking)
             return untyped_storage
@@ -115,7 +124,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
         message = "{}() got an unexpected keyword argument '{}'"
         argument = list(kwargs.keys()).pop()
         raise TypeError(message.format(function_name, argument))
-    warnings.warn("'async' is deprecated; use 'non_blocking'")
+    warnings.warn("'async' is deprecated; use 'non_blocking'", stacklevel=2)
     return kwargs["async"]
 
 
@@ -134,7 +143,10 @@ def _get_restore_location(device):
         elif isinstance(map_location, (str, torch.device)):
             return map_location
         else:
-            assert callable(map_location)
+            if not callable(map_location):
+                raise AssertionError(
+                    f"expected callable map_location, got {type(map_location).__name__}"
+                )
             raise RuntimeError(
                 "Callable map_location not supported with _rebuild_wrapper_subclass "
                 "or _rebuild_device_tensor_from_numpy"
@@ -157,7 +169,7 @@ def _get_restore_location(device):
 #     serialization), and the state dict saves "data" only, thus
 #     stripping the backward hooks.  In some cases, hooks are
 #     essential to the well-functioning of a model (e.g., DDP),
-#     but DDP already manages readding the hooks!
+#     but DDP already manages re-adding the hooks!
 #
 #   - We didn't serialize them in many cases.  Prior to #10220, we
 #     were dropping backward hooks in ForkingPickler.  We "fixed" this
@@ -188,17 +200,30 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
 
 def get_tensor_metadata(tensor):
     # Tensor's Metadata for serializing.
-    # Currently, this only returns a dict[string, bool] specifing whether
+    # Currently, this only returns a dict[string, bool] specifying whether
     # `conj` or `neg` bit is set.
-    assert isinstance(tensor, torch.Tensor)
+    if not isinstance(tensor, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(tensor).__name__}")
     return torch._C._get_tensor_metadata(tensor)  # type: ignore[attr-defined]
 
 
 def set_tensor_metadata(tensor, metadata):
     # See `get_tensor_metadata` above
-    assert isinstance(metadata, dict)
-    assert isinstance(tensor, torch.Tensor)
+    if not isinstance(metadata, dict):
+        raise AssertionError(f"expected dict, got {type(metadata).__name__}")
+    if not isinstance(tensor, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(tensor).__name__}")
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
+
+
+def _restore_device_fake_mode(tensor):
+    if torch._guards.detect_fake_mode(None) is not None:
+        if tensor.untyped_storage()._fake_device is not None:
+            device = _get_restore_location(tensor.untyped_storage()._fake_device)
+            if not isinstance(device, torch.device):
+                device = torch.device(device)
+            tensor.fake_device = torch.device(device)
+    return tensor
 
 
 def _rebuild_tensor_v2(
@@ -219,6 +244,8 @@ def _rebuild_tensor_v2(
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
+
+    tensor = _restore_device_fake_mode(tensor)
     return tensor
 
 
@@ -242,10 +269,11 @@ def _rebuild_tensor_v3(
     if metadata:
         set_tensor_metadata(t, metadata)
     t._backward_hooks = backward_hooks
+    t = _restore_device_fake_mode(t)
     return t
 
 
-_sparse_tensors_to_validate: List["torch.Tensor"] = []
+_sparse_tensors_to_validate: list["torch.Tensor"] = []
 
 
 # In _legacy_load() in serialization.py we unpickle storages after the sparse
@@ -259,11 +287,25 @@ _sparse_tensors_to_validate: List["torch.Tensor"] = []
 # to Pickler semantics, we have to use the same (non-validating) function for
 # unpickling sparse tensors, regardless of the caller.
 def _validate_loaded_sparse_tensors():
+    if not torch.sparse.check_sparse_tensor_invariants().is_enabled():
+        # Skip sparse tensor invariants validation for better
+        # performance. See check_sparse_tensor_invariants
+        # documentation for how to control sparse tensor invariants
+        # checking.
+        _sparse_tensors_to_validate.clear()
+        return
     try:
+        # We disable pinning check (see check_pinning=False below) to
+        # avoid gh-153143. In fact, pinning check is unnecessary
+        # anywhy when loading sparse data from external sources.
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
-                    t._indices(), t._values(), t.size(), t.is_coalesced()
+                    t._indices(),
+                    t._values(),
+                    t.size(),
+                    t.is_coalesced(),
+                    check_pinning=False,
                 )
             elif t.layout in {
                 torch.sparse_csr,
@@ -284,7 +326,12 @@ def _validate_loaded_sparse_tensors():
                         t.row_indices(),
                     )
                 torch._validate_sparse_compressed_tensor_args(
-                    compressed_indices, plain_indices, t.values(), t.size(), t.layout
+                    compressed_indices,
+                    plain_indices,
+                    t.values(),
+                    t.size(),
+                    t.layout,
+                    check_pinning=False,
                 )
             else:
                 raise NotImplementedError(
@@ -376,7 +423,7 @@ def _rebuild_wrapper_subclass(
     requires_grad,
 ):
     device = _get_restore_location(device)
-    return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+    return torch.Tensor._make_wrapper_subclass(
         cls,
         size,
         strides=stride,
@@ -411,6 +458,24 @@ def _rebuild_qtensor(
         )
     elif qscheme in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
         _, scales, zero_points, axis = quantizer_params
+        # The C++ constructor does not bound-check axis or the
+        # scales/zero_points length against size; values arriving from an
+        # untrusted weights_only checkpoint can otherwise be arbitrary.
+        if not 0 <= axis < len(size):
+            raise ValueError(
+                f"_rebuild_qtensor: per_channel axis {axis} out of range for size {tuple(size)}"
+            )
+        expected_len = int(size[axis])
+        scales_len = len(scales) if isinstance(scales, list) else scales.numel()
+        zero_points_len = (
+            len(zero_points) if isinstance(zero_points, list) else zero_points.numel()
+        )
+        if scales_len != expected_len or zero_points_len != expected_len:
+            raise ValueError(
+                "_rebuild_qtensor: per_channel scales/zero_points length must equal "
+                f"size[axis]={expected_len}, got scales={scales_len}, "
+                f"zero_points={zero_points_len}"
+            )
         if type(scales) is list and type(zero_points) is list:
             if qscheme == torch.per_channel_affine:
                 scales = torch.tensor(scales, dtype=torch.double, device=storage.device)
@@ -465,7 +530,7 @@ def _rebuild_parameter_with_state(data, requires_grad, backward_hooks, state):
 
 def _get_obj_state(obj):
     # Get the state of the python subclass
-    # This loosely mimicks the function on the object class but since Tensor do not inherit
+    # This loosely mimics the function on the object class but since Tensor do not inherit
     # from it, we cannot call that function directly
     # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
     # Note that starting with Python 3.11, this `__getstate__` is always defined and thus
@@ -635,7 +700,7 @@ def _take_tensors(tensors, size_limit):
         Blocks of tensors of same type and within size_limit. The yielded
         tensors are only ordered as the original sequence within its types.
     """
-    buf_dict: DefaultDict[str, List] = defaultdict(lambda: [[], 0])
+    buf_dict: defaultdict[str, list] = defaultdict(lambda: [[], 0])
     for tensor in tensors:
         t = tensor.type()
         if tensor.is_sparse:
@@ -651,22 +716,11 @@ def _take_tensors(tensors, size_limit):
         if buf_and_size[1] + size > size_limit and buf_and_size[1] > 0:
             yield buf_and_size[0]
             buf_and_size = buf_dict[t] = [[], 0]
-        buf_and_size[0].append(tensor)
-        buf_and_size[1] += size
+        buf_and_size[0].append(tensor)  # pyrefly: ignore [missing-attribute]
+        buf_and_size[1] += size  # pyrefly: ignore [unsupported-operation]
     for buf, _ in buf_dict.values():
         if len(buf) > 0:
             yield buf
-
-
-# annotation decorator to get annotations in a way that is compatible
-# with both Python 2 and 3
-def annotate(ret, **kwargs):
-    def dec(fun):
-        fun.__annotations__ = dict(kwargs)
-        fun.__annotations__["return"] = ret
-        return fun
-
-    return dec
 
 
 def render_call(fn, args, kwargs):
@@ -674,7 +728,7 @@ def render_call(fn, args, kwargs):
     if str_fn is None:
         str_fn = str(fn)
 
-    str_args: List[str] = []
+    str_args: list[str] = []
     with torch._tensor_str.printoptions(threshold=0, edgeitems=0):
         str_args.extend(repr(a) for a in args)
         str_args.extend(f"{k}={repr(v)}" for k, v in kwargs.items())
@@ -694,6 +748,8 @@ def render_call(fn, args, kwargs):
 class KeyErrorMessage(str):
     r"""str subclass that returns itself in repr"""
 
+    __slots__ = ()
+
     def __repr__(self):
         return self
 
@@ -707,6 +763,7 @@ class ExceptionWrapper:
         if exc_info is None:
             exc_info = sys.exc_info()
         self.exc_type = exc_info[0]
+
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
         self.where = where
 
@@ -714,8 +771,8 @@ class ExceptionWrapper:
         r"""Reraises the wrapped exception in the current thread"""
         # Format a message such as: "Caught ValueError in DataLoader worker
         # process 2. Original Traceback:", followed by the traceback.
-        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"
-        if self.exc_type == KeyError:
+        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"  # pyrefly: ignore [missing-attribute]
+        if self.exc_type is KeyError:
             # KeyError calls repr() on its argument (usually a dict key). This
             # makes stack traces unreadable. It will not be changed in Python
             # (https://bugs.python.org/issue2651), so we work around it.
@@ -723,14 +780,31 @@ class ExceptionWrapper:
         elif getattr(self.exc_type, "message", None):
             # Some exceptions have first argument as non-str but explicitly
             # have message field
-            raise self.exc_type(message=msg)
+            # pyrefly: ignore [not-callable]
+            raise self.exc_type(
+                # pyrefly: ignore [unexpected-keyword]
+                message=msg
+            )
         try:
-            exception = self.exc_type(msg)
-        except TypeError:
-            # If the exception takes multiple arguments, don't try to
-            # instantiate since we don't know how to
+            exception = self.exc_type(msg)  # pyrefly: ignore [not-callable]
+        except Exception:
+            # If the exception takes multiple arguments or otherwise can't
+            # be constructed, don't try to instantiate since we don't know how to
             raise RuntimeError(msg) from None
         raise exception
+
+
+def cpu_count() -> int | None:
+    """Return the number of CPUs available to the current process.
+
+    Prefers ``os.sched_getaffinity`` (respects cgroups / taskset) and
+    falls back to ``os.cpu_count``.
+    """
+    # os.process_cpu_count was added in CPython 3.13, see
+    # https://docs.python.org/3/library/os.html#os.process_cpu_count
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count()
 
 
 def _get_available_device_type():
@@ -814,7 +888,7 @@ def _get_device_index(
     """
     if isinstance(device, str):
         device = torch.device(device)
-    device_idx: Optional[int] = None
+    device_idx: int | None = None
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == "cpu":
             raise ValueError(f"Expected a non cpu device, but got: {device}")
@@ -977,16 +1051,16 @@ class _LazySeedTracker:
         self.call_order = []
 
     def queue_seed_all(self, cb, traceback):
-        self.manual_seed_all_cb = (cb, traceback)
+        self.manual_seed_all_cb = (cb, traceback)  # pyrefly: ignore [bad-assignment]
         # update seed_all to be latest
         self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
 
     def queue_seed(self, cb, traceback):
-        self.manual_seed_cb = (cb, traceback)
+        self.manual_seed_cb = (cb, traceback)  # pyrefly: ignore [bad-assignment]
         # update seed to be latest
         self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
 
-    def get_calls(self) -> List:
+    def get_calls(self) -> list:
         return self.call_order
 
 
@@ -997,7 +1071,7 @@ P = ParamSpec("P")
 class CallbackRegistry(Generic[P]):
     def __init__(self, name: str):
         self.name = name
-        self.callback_list: List[Callable[P, None]] = []
+        self.callback_list: list[Callable[P, None]] = []
 
     def add_callback(self, cb: Callable[P, None]) -> None:
         self.callback_list.append(cb)
@@ -1010,6 +1084,26 @@ class CallbackRegistry(Generic[P]):
                 logger.exception(
                     "Exception in callback for %s registered with gpu trace", self.name
                 )
+
+
+def try_import(module_name: str) -> ModuleType | None:
+    # Implementation based on
+    # https://docs.python.org/3/library/importlib.html#checking-if-a-module-can-be-imported
+    if (module := sys.modules.get(module_name, None)) is not None:
+        return module
+
+    if (spec := importlib.util.find_spec(module_name)) is not None:
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+
+        # https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader
+        # "The finder should always set this attribute"
+        if spec.loader is None:
+            raise AssertionError("The loader attribute should always be set")
+        spec.loader.exec_module(module)
+        return module
+
+    return None
 
 
 # IMPORT_MAPPING and NAME_MAPPING are adapted from https://github.com/python/cpython/blob/main/Lib/_compat_pickle.py
@@ -1054,3 +1148,270 @@ NAME_MAPPING = {
     ("exceptions", "StandardError"): ("builtins", "Exception"),
     ("UserDict", "UserDict"): ("collections", "UserDict"),
 }
+
+
+def _chunk_or_narrow_cat(
+    tensor: "torch.Tensor",
+    num_chunks: int,
+    narrow_dim: int,
+    cat_dim: int = 0,
+) -> "torch.Tensor":
+    """
+    Splits tensor along narrow_dim into num_chunks and concatenates along cat_dim.
+    Uses torch.chunk in eager mode, but torch.narrow under tracing to be unbacked-symint safe.
+    """
+    if torch.distributed.is_available():
+        from torch.distributed._functional_collectives import _are_we_tracing
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+        # TODO(pianpwk): remove the unbacked symbols check and fix AsyncTP pattern matching
+        # for test_micro_pipeline_tp.py.
+        if _are_we_tracing() and has_free_unbacked_symbols(tensor):
+            chunk_size = tensor.size(narrow_dim) // num_chunks
+            chunks = [
+                torch.narrow(tensor, narrow_dim, i * chunk_size, chunk_size)
+                for i in range(num_chunks)
+            ]
+            return torch.cat(chunks, dim=cat_dim)
+    return torch.cat(torch.chunk(tensor, num_chunks, dim=narrow_dim), dim=cat_dim)
+
+
+def _maybe_view_chunk_cat(
+    res: "torch.Tensor", group_size: int, gather_dim: int
+) -> "torch.Tensor":
+    """
+    This is intuitively the same as torch.cat(torch.chunk(res, group_size,
+    dim=0), dim=gather_dim), but returns a view if data movement is not
+    necessary.  This operation arises in NCCL all_gather, where you always get
+    a result which is concatenated on dim=0, even though actually you may need
+    to undo this concatenation and then re-cat on the gather dim.
+
+    When is data-movement not necessary?  Intuitively, we need to understand if
+    the unflatten in this reference implementation of this code triggers a
+    copy or not:
+
+        chunks = torch.unflatten(res, 0, [group_size, -1])
+        return torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
+
+    Assume res is contiguous (it will be coming out of the collective).  We
+    essentially need to know if the movedim maintains the contiguity of the
+    tensor.  Moving a dimension typically does NOT preserve contiguity, unless
+    EVERY dimension it is moved across is size 1.
+
+    Example: shape [4, d1, d2] with group_size=4, gather_dim=1 -> [1, 4*d1, d2]
+
+        [4, d1, d2] -> [4, 1, d1, d2] -> [1, 4, d1, d2] (contiguous!)
+
+    Example: shape [4, 2, d2] with group_size=4, gather_dim=2 -> [1, 2, 4*d2]
+
+        [4, 2, d2] -> [4, 1, 2, d2] -> [1, 2, 4, d2] (not contiguous!)
+
+    Args:
+        res: Tensor with gathered data in dim 0, shape [group_size, ...]
+        group_size: Number of ranks in the group
+        gather_dim: Dimension to gather along in the output
+
+    Returns:
+        Tensor with data rearranged to gather along gather_dim
+    """
+
+    if gather_dim == 0:
+        # When gather_dim is 0, chunk+cat is a no-op
+        return res
+
+    shape = list(res.shape)
+
+    # Optimization: Can use view instead of split+cat when:
+    # 1. res.shape[0] == group_size (invariant after all_gather)
+    # 2. All dims between 0 and gather_dim (exclusive) have size 1
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
+
+    if guard_or_false(shape[0] == group_size) and guard_or_false(numel_between == 1):
+        # View optimization: reshape to collapse dim 0 into gather_dim
+        final_shape = (
+            [1]  # Dim 0 becomes 1
+            + shape[1:gather_dim]  # Dims 1 to gather_dim-1 unchanged
+            + [shape[0] * shape[gather_dim]]  # gather_dim gets multiplied by group_size
+            + shape[gather_dim + 1 :]  # Rest unchanged
+        )
+        return res.view(final_shape)
+    else:
+        # General case: fall back to split + cat
+        # This is better than torch.flatten as cat can be vectorized, whereas
+        # the contiguous kernel is always bad.
+        return _chunk_or_narrow_cat(res, group_size, narrow_dim=0, cat_dim=gather_dim)
+
+
+class _Frame(TypedDict):
+    """Frame information from memory profiler snapshots."""
+
+    filename: str
+    line: int
+    name: str
+    # Fields added by FX augmentation (optional)
+    fx_node_op: NotRequired[str]
+    fx_node_name: NotRequired[str]
+    fx_node_target: NotRequired[str]
+    fx_original_trace: NotRequired[str]
+
+
+class _Block(TypedDict):
+    """Memory block information."""
+
+    size: int
+    requested_size: int
+    address: int
+    state: str
+    frames: list[_Frame]
+
+
+class _Segment(TypedDict):
+    """Memory segment information."""
+
+    address: int
+    total_size: int
+    stream: int
+    segment_type: str
+    allocated_size: int
+    active_size: int
+    blocks: list[_Block]
+
+
+class _TraceEntry(TypedDict):
+    """Memory trace entry information."""
+
+    action: str
+    addr: NotRequired[int]
+    frames: list[_Frame]
+    size: int
+    stream: int
+    device_free: NotRequired[int]
+
+
+class _Snapshot(TypedDict):
+    """Memory snapshot structure."""
+
+    segments: list[_Segment]
+    device_traces: NotRequired[list[list[_TraceEntry]]]
+
+
+def _augment_frames(frames: list[_Frame]) -> int:
+    """
+    Augment a list of frames with FX debug information. For each frame corresponding
+    to an FX-generated Python file, this function attaches additional FX node
+    metadata (op, name, target, and original trace).
+
+    Args:
+        frames (list[_Frame]): List of frame dictionaries to augment
+
+    Returns:
+        int: The count of frames that were augmented.
+    """
+    from torch.fx.graph_module import FX_GRAPH_MODULE_FILE_PREFIX
+    from torch.fx.traceback import _FX_METADATA_REGISTRY
+
+    # Regex pattern to match FX generated files
+    _FX_GENERATED_PATTERN = re.compile(
+        rf"{re.escape(FX_GRAPH_MODULE_FILE_PREFIX)}.*\.py$"
+    )
+
+    count = 0
+
+    for frame in frames:
+        filename = frame.get("filename")
+        lineno = frame.get("line")
+        if not filename or not lineno:
+            continue
+
+        # Check if this looks like an FX generated file
+        if not _FX_GENERATED_PATTERN.search(os.path.basename(filename)):
+            continue
+
+        metadata = _FX_METADATA_REGISTRY.get(filename)
+        if metadata is None:
+            continue
+
+        lineno_map = metadata.get("lineno_map", {})
+        node_metadata = metadata.get("node_metadata", {})
+        prologue_start = metadata.get("prologue_start", 0)
+
+        # Get the node index for this line
+        node_idx = lineno_map.get(lineno - prologue_start)
+        if node_idx is None:
+            continue
+
+        node_info = node_metadata.get(node_idx)
+        if node_info is None:
+            continue
+
+        # Populate FX metadata fields
+        frame["fx_node_op"] = node_info.get("op")
+        frame["fx_node_name"] = node_info.get("name")
+        frame["fx_node_target"] = str(node_info.get("target"))
+
+        # Attach original stack trace if available
+        original_trace = node_info.get("stack_trace")
+        if original_trace:
+            frame["fx_original_trace"] = original_trace
+
+        count += 1
+
+    return count
+
+
+def _augment_memory_snapshot_stack_traces(
+    snapshot: str | _Snapshot,
+) -> _Snapshot:
+    """
+    Augment a memory snapshot with original source stack traces from FX metadata.
+
+    IMPORTANT: This function reads from a global in-memory registry (_FX_METADATA_REGISTRY)
+    that is populated during graph module compilation. It must be called in the same
+    Python process where the FX graphs were compiled. It cannot be used to augment
+    snapshots loaded from disk in a different process.
+
+    Args:
+        snapshot (str or _Snapshot): Either a memory snapshot dict or path to a snapshot pickle file
+
+    Returns:
+        _Snapshot: The augmented snapshot dictionary with fx_node_op, fx_node_name,
+            fx_original_trace, and fx_node_info fields added to frames
+    """
+
+    snapshot_dict: _Snapshot
+    if isinstance(snapshot, str):
+        # Load the memory snapshot
+        with open(snapshot, "rb") as f:
+            snapshot_dict = cast(_Snapshot, pickle.load(f))
+    else:
+        snapshot_dict = snapshot
+
+    # Process blocks in segments (for regular allocations)
+    for segment in snapshot_dict.get("segments", []):
+        for block in segment.get("blocks", []):
+            if "frames" in block:
+                _augment_frames(block["frames"])
+
+    # Process device traces (for memory history)
+    for trace_list in snapshot_dict.get("device_traces", []):
+        for trace_entry in trace_list:
+            if isinstance(trace_entry, dict) and "frames" in trace_entry:
+                _augment_frames(trace_entry["frames"])
+
+    return snapshot_dict
+
+
+def _is_privateuse1_backend_available():
+    """
+    Determines whether the privateuse1 backend is registered and available.
+
+    Returns:
+        Return True if the privateuse1 backend is registered and available.
+    """
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    privateuse1_backend_module = getattr(torch, privateuse1_backend_name, None)
+    return (
+        is_available := getattr(privateuse1_backend_module, "is_available", None)
+    ) and is_available()

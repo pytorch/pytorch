@@ -2,6 +2,8 @@
 
 #include <mutex>
 #include <ATen/CachedTensorUtils.h>
+#include <c10/core/GradMode.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/util/flat_hash_map.h>
 
 namespace at::autocast {
@@ -36,7 +38,7 @@ namespace {
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
 
-static ska::flat_hash_map<TensorImpl*, val_type>& get_cached_casts() {
+ska::flat_hash_map<TensorImpl*, val_type>& get_cached_casts() {
   static ska::flat_hash_map<TensorImpl*, val_type> cached_casts;
   return cached_casts;
 }
@@ -64,7 +66,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
         at::ScalarType::Undefined, // IDEEP.
         at::kHalf, // AMD HIP
         at::ScalarType::Undefined, // FPGA
-        at::ScalarType::Undefined, // ONNX Runtime / Microsoft
+        at::kBFloat16, // ONNX Runtime / Microsoft
         at::kBFloat16, // XLA / TPU
         at::ScalarType::Undefined, // Vulkan
         at::ScalarType::Undefined, // Metal
@@ -75,7 +77,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
         at::ScalarType::Undefined, // SX-Aurora / NEC
         at::ScalarType::Undefined, // Lazy Tensors
         at::kHalf, // Graphcore IPU
-        at::ScalarType::Undefined, // Meta training and inference devices
+        at::kHalf, // Meta training and inference devices
         at::kHalf, // PrivateUse1 device
 };
 
@@ -121,10 +123,14 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
   if (is_eligible(arg, device_type) && (arg.scalar_type() != to_type)) {
     // Heuristic:  Do what Apex does, and cache lower_precision_fp casts of fp32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
+    //
+    // Fix #158232: Don't cache in inference_mode - those tensors can't be reused
+    // for training since enable_grad() cannot override inference_mode.
     bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
                          arg.is_leaf() && !arg.is_view() && cache_enabled &&
-                         !at::caching::is_cached_tensor(arg));
+                         !at::caching::is_cached_tensor(arg) &&
+                         !c10::InferenceMode::is_enabled());
 
     if (can_try_cache) {
       const std::lock_guard<std::mutex> lock(cached_casts_mutex);
@@ -132,6 +138,12 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
       if (it != get_cached_casts().end()) {
         return std::get<1>(it->second);
       } else {
+        // Fix #158232: When caching in no_grad() context, we still need grad_fn
+        // on the cached tensor so it can be reused in grad-enabled contexts.
+        // The AutoGradMode RAII guard temporarily enables grad for .to() only.
+        // Note: arg.requires_grad() is guaranteed true here (checked in can_try_cache)
+        // and inference_mode is excluded above since enable_grad can't override it.
+        c10::AutoGradMode enable_grad(true);
         auto casted_arg = arg.to(to_type);
         get_cached_casts().emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
         return casted_arg;
@@ -148,7 +160,7 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
 Banned functions
 *******************************/
 
-static Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const std::optional<Tensor>&, int64_t) {
+static Tensor binary_cross_entropy_banned(const Tensor & /*unused*/, const Tensor & /*unused*/, const std::optional<Tensor>& /*unused*/, int64_t /*unused*/) {
   TORCH_CHECK(false, "torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
            "Many models use a sigmoid layer right before the binary cross entropy layer.\n"
            "In this case, combine the two layers using torch.nn.functional.binary_cross_entropy_with_logits\n"
@@ -216,6 +228,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(_convolution, lower_precision_fp)
   KERNEL_MPS(conv1d, lower_precision_fp)
   KERNEL_MPS(conv2d, lower_precision_fp)
+  KERNEL_MPS(conv3d, lower_precision_fp)
   KERNEL_MPS(conv_tbc, lower_precision_fp)
   KERNEL_MPS(conv_transpose1d, lower_precision_fp)
   KERNEL_MPS(conv_transpose2d, input, lower_precision_fp)
@@ -239,6 +252,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(scaled_dot_product_attention, lower_precision_fp)
 
   // fp32
+  KERNEL_MPS(conv_transpose3d, input, fp32)
   KERNEL_MPS(acos, fp32)
   KERNEL_MPS(asin, fp32)
   KERNEL_MPS(cosh, fp32)
@@ -290,21 +304,15 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   // fp32_set_opt_dtype
   KERNEL_MPS(prod, fp32)
   KERNEL_MPS(prod, dim_int, fp32)
-  KERNEL_MPS(prod, dim_Dimname, fp32)
   KERNEL_MPS(softmax, int, fp32)
-  KERNEL_MPS(softmax, Dimname, fp32)
   KERNEL_MPS(log_softmax, int, fp32)
-  KERNEL_MPS(log_softmax, Dimname, fp32)
   KERNEL_MPS(cumprod, fp32)
-  KERNEL_MPS(cumprod, dimname, fp32)
   KERNEL_MPS(cumsum, fp32)
-  KERNEL_MPS(cumsum, dimname, fp32)
   KERNEL_MPS(linalg_vector_norm, fp32)
   KERNEL_MPS(linalg_matrix_norm, fp32)
   KERNEL_MPS(linalg_matrix_norm, str_ord, fp32)
   KERNEL_MPS(sum, fp32)
   KERNEL_MPS(sum, dim_IntList, fp32)
-  KERNEL_MPS(sum, dim_DimnameList, fp32)
   //
   // promote
   KERNEL_MPS(addcdiv, promote)
@@ -358,7 +366,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(polar, fp32)
   KERNEL_CPU(prod, fp32)
   KERNEL_CPU(prod, dim_int, fp32)
-  KERNEL_CPU(prod, dim_Dimname, fp32)
   KERNEL_CPU(quantile, fp32)
   KERNEL_CPU(quantile, scalar, fp32)
   KERNEL_CPU(nanquantile, fp32)
@@ -371,7 +378,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(grid_sampler_3d, fp32)
   KERNEL_CPU(trace, fp32)
   KERNEL_CPU(view_as_complex, fp32)
-  KERNEL_CPU(cholesky, fp32)
   KERNEL_CPU(cholesky_inverse, fp32)
   KERNEL_CPU(cholesky_solve, fp32)
   KERNEL_CPU(inverse, fp32)
@@ -458,10 +464,86 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(stack, promote)
   KERNEL_CPU(cat, promote)
   KERNEL_CPU(index_copy, promote)
-  KERNEL_CPU(index_copy, dimname, promote)
 
 }
 
+// MTIA
+TORCH_LIBRARY_IMPL(_, AutocastMTIA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, AutocastMTIA, m) {
+  // lower_precision_fp
+#define _KERNEL_MTIA_LOW_PRECISION_FP(...) \
+  KERNEL_MTIA(__VA_ARGS__, lower_precision_fp)
+
+  AT_FORALL_LOWER_PRECISION_FP(_KERNEL_MTIA_LOW_PRECISION_FP)
+
+  // fp32
+#define _KERNEL_MTIA_FP32(...) KERNEL_MTIA(__VA_ARGS__, fp32)
+
+  AT_FORALL_FP32(_KERNEL_MTIA_FP32)
+
+  // fp32_set_opt_dtype
+#define _KERNEL_MTIA_FP32_SET_OPT_DTYPE(...) \
+  KERNEL_MTIA(__VA_ARGS__, fp32_set_opt_dtype)
+
+  AT_FORALL_FP32_SET_OPT_DTYPE(_KERNEL_MTIA_FP32_SET_OPT_DTYPE)
+
+  // fp32_append_dtype
+  // The fp32_append_dtype wrapper overrides implicit promotion behavior.
+  // norm does not implicitly promote, but be aware when adding new ops to this policy.
+  AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
+      KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_MTIA)
+
+  // promote
+#define _KERNEL_MTIA_PROMOTE(...) KERNEL_MTIA(__VA_ARGS__, promote)
+
+  AT_FORALL_PROMOTE(_KERNEL_MTIA_PROMOTE)
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
+         TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
+}
+
+// MAIA
+TORCH_LIBRARY_IMPL(_, AutocastMAIA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, AutocastMAIA, m) {
+  // lower_precision_fp
+#define _KERNEL_MAIA_LOW_PRECISION_FP(...) \
+  KERNEL_MAIA(__VA_ARGS__, lower_precision_fp)
+
+  AT_FORALL_LOWER_PRECISION_FP(_KERNEL_MAIA_LOW_PRECISION_FP)
+
+  // fp32
+#define _KERNEL_MAIA_FP32(...) KERNEL_MAIA(__VA_ARGS__, fp32)
+
+  AT_FORALL_FP32(_KERNEL_MAIA_FP32)
+
+  // fp32_set_opt_dtype
+#define _KERNEL_MAIA_FP32_SET_OPT_DTYPE(...) \
+  KERNEL_MAIA(__VA_ARGS__, fp32_set_opt_dtype)
+
+  AT_FORALL_FP32_SET_OPT_DTYPE(_KERNEL_MAIA_FP32_SET_OPT_DTYPE)
+
+  // fp32_append_dtype
+  // The fp32_append_dtype wrapper overrides implicit promotion behavior.
+  // norm does not implicitly promote, but be aware when adding new ops to this policy.
+  AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
+      KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_MAIA)
+
+  // promote
+#define _KERNEL_MAIA_PROMOTE(...) KERNEL_MAIA(__VA_ARGS__, promote)
+
+  AT_FORALL_PROMOTE(_KERNEL_MAIA_PROMOTE)
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
+         TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
+}
+
+// XPU
 TORCH_LIBRARY_IMPL(_, AutocastXPU, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }

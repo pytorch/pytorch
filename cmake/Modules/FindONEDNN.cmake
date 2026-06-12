@@ -20,17 +20,29 @@ IF(NOT ONEDNN_FOUND)
   SET(ONEDNN_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
 
   if(USE_XPU) # Build oneDNN GPU library
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(WIN32)
+      # Windows
+      set(DNNL_HOST_COMPILER "DEFAULT")
+      set(DNNL_C_COMPILER "icx")
+      set(SYCL_CXX_DRIVER "icx")
+      set(DNNL_LIB_NAME "dnnl.lib")
+    elseif(LINUX)
       # Linux
       # g++ is soft linked to /usr/bin/cxx, oneDNN would not treat it as an absolute path
       set(DNNL_HOST_COMPILER "g++")
-      set(SYCL_CXX_DRIVER "icpx")
+      if("${XPU_SYCL_COMPILER}" MATCHES "icx")
+        set(DNNL_C_COMPILER "icx")
+        set(SYCL_CXX_DRIVER "icpx")
+      elseif("${XPU_SYCL_COMPILER}" MATCHES "dpclang")
+        set(DNNL_C_COMPILER "dpclang")
+        set(SYCL_CXX_DRIVER "dpclang++")
+      else()
+        message(FATAL_ERROR "Unsupported SYCL compiler: ${XPU_SYCL_COMPILER}")
+      endif()
       set(DNNL_LIB_NAME "libdnnl.a")
     else()
-      # Windows
-      set(DNNL_HOST_COMPILER "DEFAULT")
-      set(SYCL_CXX_DRIVER "icx")
-      set(DNNL_LIB_NAME "dnnl.lib")
+      MESSAGE(FATAL_ERROR "OneDNN for Intel GPU in PyTorch currently supports only Windows and Linux.
+                           Detected system '${CMAKE_SYSTEM_NAME}' is not supported.")
     endif()
 
     set(DNNL_MAKE_COMMAND "cmake" "--build" ".")
@@ -42,23 +54,18 @@ IF(NOT ONEDNN_FOUND)
         list(APPEND DNNL_MAKE_COMMAND "--" "-l" "$ENV{MAX_JOBS}")
       endif()
     endif()
-    if(XPU_DEVICE_CXX_FLAGS)
-      set(DNNL_CXX_FLAGS "-DCMAKE_CXX_FLAGS=${XPU_DEVICE_CXX_FLAGS}")
-    else()
-      set(DNNL_CXX_FLAGS "")
-    endif()
     ExternalProject_Add(xpu_onednn_proj
-      SOURCE_DIR ${ONEDNN_ROOT}
+      GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
+      GIT_TAG v3.12
       PREFIX ${XPU_ONEDNN_DIR_PREFIX}
       BUILD_IN_SOURCE 0
-      CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
+      CMAKE_ARGS  -DCMAKE_C_COMPILER=${DNNL_C_COMPILER}
       -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
-      ${DNNL_CXX_FLAGS}
       -DDNNL_GPU_RUNTIME=SYCL
-      -DDNNL_CPU_RUNTIME=THREADPOOL
+      -DDNNL_CPU_RUNTIME=NONE
       -DDNNL_BUILD_TESTS=OFF
       -DDNNL_BUILD_EXAMPLES=OFF
-      -DONEDNN_BUILD_GRAPH=OFF
+      -DONEDNN_BUILD_GRAPH=ON
       -DDNNL_LIBRARY_TYPE=STATIC
       -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER} # Use global cxx compiler as host compiler
       -G ${CMAKE_GENERATOR} # Align Generator to Torch
@@ -67,16 +74,15 @@ IF(NOT ONEDNN_FOUND)
       INSTALL_COMMAND ""
     )
 
-    ExternalProject_Get_Property(xpu_onednn_proj BINARY_DIR)
-    set(__XPU_ONEDNN_BUILD_DIR ${BINARY_DIR})
-    set(XPU_ONEDNN_LIBRARIES ${__XPU_ONEDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
-    set(XPU_ONEDNN_INCLUDE ${__XPU_ONEDNN_BUILD_DIR}/include)
+    ExternalProject_Get_Property(xpu_onednn_proj SOURCE_DIR BINARY_DIR)
+    set(XPU_ONEDNN_LIBRARIES ${BINARY_DIR}/src/${DNNL_LIB_NAME})
+    set(XPU_ONEDNN_INCLUDE ${SOURCE_DIR}/include ${BINARY_DIR}/include)
     # This target would be further linked to libtorch_xpu.so.
     # The libtorch_xpu.so would contain Conv&GEMM operators that depend on
     # oneDNN primitive implementations inside libdnnl.a.
     add_library(xpu_onednn INTERFACE)
     add_dependencies(xpu_onednn xpu_onednn_proj)
-    target_link_libraries(xpu_onednn INTERFACE ${__XPU_ONeDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
+    target_link_libraries(xpu_onednn INTERFACE ${XPU_ONEDNN_LIBRARIES})
     target_include_directories(xpu_onednn INTERFACE ${XPU_ONEDNN_INCLUDE})
   endif()
 
@@ -88,8 +94,12 @@ IF(NOT ONEDNN_FOUND)
   ENDIF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
 
   IF(EXISTS "${ONEDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
-    MESSAGE("-- Will build oneDNN UKERNEL")
-    SET(DNNL_EXPERIMENTAL_UKERNEL ON CACHE BOOL "" FORCE)
+    IF(CPU_POWER OR CPU_RISCV)
+      SET(DNNL_EXPERIMENTAL_UKERNEL OFF CACHE BOOL "" FORCE)
+    ELSE()
+      MESSAGE("-- Will build oneDNN UKERNEL")
+      SET(DNNL_EXPERIMENTAL_UKERNEL ON CACHE BOOL "" FORCE)
+    ENDIF()
   ENDIF(EXISTS "${ONEDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
 
   FIND_PACKAGE(BLAS)

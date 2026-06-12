@@ -1,10 +1,11 @@
 #pragma once
 
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/python_headers.h>
 #include <cstdint>
 
-extern PyTypeObject THPSizeType;
+TORCH_PYTHON_API extern PyTypeObject THPSizeType;
 
 #define THPSize_Check(obj) (Py_TYPE(obj) == &THPSizeType)
 

@@ -7,7 +7,6 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/Operators.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 
 #include <utility>
 
@@ -54,6 +53,8 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
   static Tensor apply(const Tensor& tensor, const Tensor& other, T... extra_args) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
     auto maybe_layer = maybeCurrentDynamicLayer();
+    TORCH_INTERNAL_ASSERT(maybe_layer.has_value())
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto cur_level = maybe_layer->layerId();
     RandomnessType randomness = maybe_layer->randomness();
 
@@ -179,7 +180,7 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_batch_rule(
       "vmap: Attempted to vmap over `mask` in torch.masked_select(self, mask) ",
       "We cannot support this because for each batch this would return a ",
       "differently shaped Tensor. "
-      "Please voice your support in https://github.com/pytorch/functorch/issues/256");
+      "Please file an issue at https://github.com/pytorch/pytorch/issues if you need this feature.");
   auto self_ = moveBatchDimToFront(self, self_bdim);
   const auto batch_size = self_.size(0);
   const auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -187,8 +188,8 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_batch_rule(
   self_ = maybePadToLogicalRank(self_, 0, max_logical_rank);
 
   // masked_select returns a 1D tensor, so we have to reshape it into 2D
-  const auto result = at::masked_select(self_, mask).view({ batch_size, -1 });
-  return std::make_tuple(result, 0);
+  auto result = at::masked_select(self_, mask).view({ batch_size, -1 });
+  return std::make_tuple(std::move(result), 0);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_rule(
@@ -199,7 +200,7 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_r
       "vmap: Attempted to vmap over `mask` in torch.masked_select_backward(grad, self, mask) ",
       "We cannot support this because for each batch this would return a ",
       "differently shaped Tensor. "
-      "Please voice your support in https://github.com/pytorch/functorch/issues/256");
+      "Please file an issue at https://github.com/pytorch/pytorch/issues if you need this feature.");
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto grad_ = moveBatchDimToFront(grad, grad_bdim);
 
@@ -212,8 +213,8 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_r
   self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
   grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), batch_size);
 
-  const auto result = at::masked_select_backward(grad_, self_.contiguous(), mask);
-  return std::make_tuple(result, 0);
+  auto result = at::masked_select_backward(grad_, self_.contiguous(), mask);
+  return std::make_tuple(std::move(result), 0);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> cdist_backward_batch_rule(
@@ -293,7 +294,7 @@ rrelu_with_noise_batch_rule(
 
   auto ret = at::rrelu_with_noise(self_, noise_, lower, upper, training, std::move(generator));
 
-  return std::make_tuple(ret, 0, noise_, 0);
+  return std::make_tuple(std::move(ret), 0, std::move(noise_), 0);
 }
 
 static Tensor rrelu_with_noise_batch(
@@ -306,12 +307,13 @@ static Tensor rrelu_with_noise_batch(
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "gen_vmap_plumbing");
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
   auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   auto [noise_value, noise_bdim] = unwrapTensorAtLevel(noise, cur_level);
   TORCH_CHECK(!noise_bdim.has_value(), "vmap: Attempted to vmap over 'noise' in torch.rrelu_with_noise. This is not supported.");
   auto res = rrelu_with_noise_batch_rule(self_value, self_bdim, noise_value, noise_bdim, lower, upper, training, std::move(generator));
-  return makeBatched(std::get<0>(res), std::get<1>(res), cur_level);
+  return makeBatched(std::move(std::get<0>(res)), std::get<1>(res), cur_level);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> log_sigmoid_backward_batch_rule(
@@ -319,11 +321,13 @@ static std::tuple<Tensor, std::optional<int64_t>> log_sigmoid_backward_batch_rul
   Tensor& self, std::optional<int64_t> self_bdim,
   Tensor& buffer, std::optional<int64_t> buffer_bdim) {
   // NB: This emulates handle_pointwise_ops except we ignore the last argument, buffer
-  // when any of the inputs are on cuda.
-  // We do this because on cuda, buffer is a dummy tensor always of logical rank 1 and
+  // when any of the inputs are on cuda/xpu.
+  // We do this because on cuda/xpu, buffer is a dummy tensor always of logical rank 1 and
   // it becomes an issue when the rest of the inputs are scalar
   int64_t out_logical_rank = std::max(rankWithoutBatchDim(grad, grad_bdim), rankWithoutBatchDim(self, self_bdim));
-  if (!grad.is_cuda() && !self.is_cuda() && !buffer.is_cuda()) {
+  bool inputs_on_cuda = grad.is_cuda() || self.is_cuda() || buffer.is_cuda();
+  bool inputs_on_xpu = grad.is_xpu() || self.is_xpu() || buffer.is_xpu();
+  if (!inputs_on_cuda && !inputs_on_xpu) {
     out_logical_rank = std::max(out_logical_rank, rankWithoutBatchDim(buffer, buffer_bdim));
   }
   Tensor out_grad = maybePadToLogicalRank(moveBatchDimToFront(grad, grad_bdim), grad_bdim, out_logical_rank);
@@ -438,6 +442,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(gcd);
   BINARY_POINTWISE(igamma);
   BINARY_POINTWISE(igammac);
+  BINARY_POINTWISE2(ldexp, Tensor);
   BINARY_POINTWISE(logaddexp);
   BINARY_POINTWISE(logaddexp2);
   POINTWISE_BOXED(lerp.Scalar);
