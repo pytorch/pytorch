@@ -1027,7 +1027,7 @@ class _PipelineStageBase(ABC):
                         "input", bwd_kwargs, last_backward=last_backward
                     )
 
-                # TODO: we dont need to save this, add to dw_runner?
+                # TODO: we don't need to save this, add to dw_runner?
                 self.backward_state[bwd_chunk_id] = (
                     bwd_kwargs["input_values"],
                     param_groups,

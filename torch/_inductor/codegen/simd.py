@@ -2121,7 +2121,7 @@ class SIMDScheduling(BaseScheduling):
                     # prologue fusion input sizes differ from output group
                     # fuse so long as this node matches the group of existing prologue nodes
                     for node in node2.get_nodes():
-                        # dont need to check epilogue nodes for prologue fusion, break after template
+                        # don't need to check epilogue nodes for prologue fusion, break after template
                         if node.is_template():
                             break
                         # we would have already restricted prologue from fusing if it had multiple
@@ -4340,7 +4340,7 @@ class SIMDScheduling(BaseScheduling):
 
         default_tiling = cls.create_tiling([pointwise_numel], [reduction_numel])
 
-        # add a slight penalty for longer tilings that dont increase score much,
+        # add a slight penalty for longer tilings that don't increase score much,
         # and are poor sizes
         bad_size_additional_tiling_penalty = 1.025
         good_size_tiling_penalty = 1.005
@@ -4361,7 +4361,7 @@ class SIMDScheduling(BaseScheduling):
 
             return -(t[0].score + uncoalesced_penalty) * score_factor
 
-        # apply penalty for longer tilings that dont increase score much
+        # apply penalty for longer tilings that don't increase score much
         for cand, tiling_score in sorted(tilings, key=score_mod):
             if (
                 cls.tiling_is_compatible(
@@ -4369,7 +4369,7 @@ class SIMDScheduling(BaseScheduling):
                 )
                 or cand.tiling == default_tiling
             ):
-                # we always include default reduction numel == 1, dont include
+                # we always include default reduction numel == 1, don't include
                 tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
                 if tiling_len > get_max_tiles(default=3):
                     perf_hint_log.info(

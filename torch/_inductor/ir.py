@@ -4477,7 +4477,7 @@ class Layout(OutputSpec):
         if len(self.stride) != len(order):
             raise AssertionError("Expected len(self.stride) == len(order)")
 
-        # ignore dimensions of size 1, they dont affect layout
+        # ignore dimensions of size 1, they don't affect layout
         non_1_indices = [
             i
             for i, dim in enumerate(self.size)
@@ -9914,7 +9914,7 @@ class MemoryCheckKernel(FallbackKernel):
         dead_repr = repr(dead_list)
         if is_final_step:
             wrapper.writeline(
-                "# note: dont currently distinguish between buffers returned and dealloc'd in last step"
+                "# note: don't currently distinguish between buffers returned and dealloc'd in last step"
             )
             call = f"check_memory_step(allocated={alive_repr}, freed={dead_repr}, is_final_step={is_final_step})"
         else:

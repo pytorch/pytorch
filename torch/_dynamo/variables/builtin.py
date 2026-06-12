@@ -3297,7 +3297,7 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             try:
                 return obj.var_getattr(tx, name)
             except AsPythonConstantNotImplementedError:
-                # dont fallback on as_python_constant error because this leads
+                # don't fallback on as_python_constant error because this leads
                 # to a failure later on, and leads to a wrong stacktrace
                 raise
             except NotImplementedError:

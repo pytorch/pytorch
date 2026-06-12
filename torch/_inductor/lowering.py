@@ -2286,7 +2286,7 @@ def cat(inputs, dim=0):
     fusable_reduction = any(can_fuse_reduction(t, exclude) for t in inputs)
 
     def should_lower_cat_input(x) -> bool:
-        # Unrealized inputs will not be storage and layouts, and we dont want to realize
+        # Unrealized inputs will not be storage and layouts, and we don't want to realize
         # them in case we want to fuse
         if ir.is_storage_and_layout(x):
             storage, _ = ir.as_storage_and_layout(x, freeze=False)

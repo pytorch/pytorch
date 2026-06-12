@@ -2752,7 +2752,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
         if not new_order:
             loop_ordering_log.debug(
-                "Dont reordering fused node %s because we can not decide the suitable loop order",
+                "Don't reordering fused node %s because we can not decide the suitable loop order",
                 self.get_name(),
             )
             return False
@@ -7339,7 +7339,7 @@ class Scheduler:
         """
         Heuristics to avoid benchmarking predictably slow prologue fusions
         """
-        # user opt into more aggressive prologue fusion, dont use heuristics
+        # user opt into more aggressive prologue fusion, don't use heuristics
         if prologue_node.get_operation_names() <= V.graph.invoke_quant_ops:
             return True
 
