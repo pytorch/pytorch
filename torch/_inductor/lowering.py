@@ -4765,12 +4765,12 @@ def index_add(x, dim, index, source, *, alpha=1):
     ):
         return fallback_index_add(x, dim, index, source, alpha=alpha)
 
-    dim = _validate_dim(x, dim)
     if alpha != 1:
         source = mul(source, alpha)
 
     zero_dim = len(x.get_size()) == 0
     x1 = view(x, [1]) if zero_dim else x
+    dim = _validate_dim(x1, dim)
     idx = [None] * dim + [index]
     out = index_put_impl_(
         clone(x1),
