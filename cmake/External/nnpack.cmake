@@ -56,6 +56,34 @@ if(ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAM
   set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
   set(GOOGLETEST_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/googletest" CACHE STRING "Google Test source directory")
 
+  # NNPACK's x86-64 PeachPy codegen runs with PYTHON_SIX_SOURCE_DIR on its
+  # PYTHONPATH; if the var is unset NNPACK fetches six from pypi at configure
+  # time, which fails on network-restricted runners (e.g. OSDC). Resolve it
+  # from the already-pip-installed `six` instead. PyTorch's top-level
+  # CMakeLists uses the modern FindPython, which sets `Python_EXECUTABLE`;
+  # the legacy `PYTHON_EXECUTABLE` is only populated later by NNPACK's own
+  # FIND_PACKAGE(PythonInterp) call, so we must not rely on it here.
+  if(NOT DEFINED PYTHON_SIX_SOURCE_DIR)
+    if(Python_EXECUTABLE)
+      set(_nnpack_python "${Python_EXECUTABLE}")
+    elseif(PYTHON_EXECUTABLE)
+      set(_nnpack_python "${PYTHON_EXECUTABLE}")
+    endif()
+    if(_nnpack_python)
+      execute_process(
+        COMMAND "${_nnpack_python}" -c
+          "import importlib.util, os, sys; s = importlib.util.find_spec('six'); print(os.path.dirname(s.origin)) if s and s.origin else sys.exit(1)"
+        OUTPUT_VARIABLE _six_dir
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _six_rc
+        ERROR_QUIET)
+      if(_six_rc EQUAL 0 AND _six_dir)
+        set(PYTHON_SIX_SOURCE_DIR "${_six_dir}" CACHE STRING "six (Python package) source directory")
+        message(STATUS "Resolved PYTHON_SIX_SOURCE_DIR from installed six: ${_six_dir}")
+      endif()
+    endif()
+  endif()
+
   if(NOT TARGET nnpack)
     set(NNPACK_BUILD_TESTS OFF CACHE BOOL "")
     set(NNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
