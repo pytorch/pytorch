@@ -358,6 +358,210 @@ REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(short);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(char);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(uchar);
 
+// index_add is index_reduce with a sum reduction plus an alpha scale on the
+// source. Accumulation happens directly in the output dtype via atomic add,
+// which (unlike MPSGraph scatter) natively covers long and complex types.
+template <typename T, typename IT>
+kernel void index_add(
+    device AtomicType_t<T>* self [[buffer(0)]],
+    device IT* index [[buffer(1)]],
+    device T* source [[buffer(2)]],
+    constant IndexReduceParams<>& params [[buffer(3)]],
+    constant T& alpha [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint32_t tid_ = tid;
+  long source_offset = 0;
+  long self_offset = 0;
+
+  for (int32_t dim = params.ndim - 1; dim >= 0; dim--) {
+    auto source_size = params.source_sizes[dim];
+    auto dim_idx = tid_ % source_size;
+
+    source_offset += dim_idx * params.source_strides[dim];
+
+    if (dim == params.reduce_dim) {
+      // Clamp keeps the access in bounds; out-of-range indices are reported
+      // separately by the index_check_bounds pass, which invalidates the
+      // result.
+      long idx = clamp(
+          long(index[dim_idx * params.index_stride]),
+          0L,
+          long(params.self_sizes[dim]) - 1);
+      self_offset += static_cast<uint32_t>(idx) * params.self_strides[dim];
+    } else {
+      self_offset += dim_idx * params.self_strides[dim];
+    }
+
+    tid_ /= source_size;
+  }
+
+  AtomicType<T>::atomic_add(
+      self, self_offset, mul(alpha, source[source_offset]));
+}
+
+#define REGISTER_INDEX_ADD_OP(T, IT)                          \
+  template [[host_name("index_add_" #T "_" #IT)]] kernel void \
+  index_add<T, IT>(                                           \
+      device AtomicType_t<T> * self [[buffer(0)]],            \
+      device IT * index [[buffer(1)]],                        \
+      device T * source [[buffer(2)]],                        \
+      constant IndexReduceParams<> & params [[buffer(3)]],    \
+      constant T & alpha [[buffer(4)]],                       \
+      uint tid [[thread_position_in_grid]]);
+
+#define REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(T) \
+  REGISTER_INDEX_ADD_OP(T, int);                 \
+  REGISTER_INDEX_ADD_OP(T, long);
+
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(float);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(half);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(bfloat);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(long);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(int);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(short);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(char);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(uchar);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(bool);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(float2);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(half2);
+
+// Dim-based index_select gather: output[..., j, ...] = input[..., index[j],
+// ...] along reduce_dim. One thread per output element; templated by element
+// bit-size (T) so a single set of kernels covers every dtype, complex included.
+// Validate index values once (one thread per index) before a gather/scatter
+// kernel runs, so the hot kernel can clamp instead of branch-and-report on
+// every element. Reports the first out-of-bounds index via the stream error
+// buffer.
+template <typename IT>
+kernel void index_check_bounds(
+    device IT* index [[buffer(0)]],
+    constant uint& index_stride [[buffer(1)]],
+    constant long& dim_size [[buffer(2)]],
+    device ErrorMessages* error_buf [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  long idx = index[tid * index_stride];
+  if (idx < 0 || idx >= dim_size) {
+    TORCH_REPORT_ERROR(
+        error_buf,
+        "index ",
+        idx,
+        " is out of bounds for dimension with size ",
+        dim_size);
+  }
+}
+
+template [[host_name("index_check_bounds_int")]] kernel void index_check_bounds<
+    int>(
+    device int*,
+    constant uint&,
+    constant long&,
+    device ErrorMessages*,
+    uint);
+template [[host_name("index_check_bounds_long")]] kernel void index_check_bounds<
+    long>(
+    device long*,
+    constant uint&,
+    constant long&,
+    device ErrorMessages*,
+    uint);
+
+template <typename T, typename IT>
+kernel void index_select_dim(
+    device T* output [[buffer(0)]],
+    device IT* index [[buffer(1)]],
+    device T* input [[buffer(2)]],
+    constant IndexReduceParams<>& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint32_t tid_ = tid;
+  long output_offset = 0;
+  long input_offset = 0;
+
+  // params.source_* describe the output (iterated), params.self_* the input.
+  for (int32_t dim = params.ndim - 1; dim >= 0; dim--) {
+    auto output_size = params.source_sizes[dim];
+    auto dim_idx = tid_ % output_size;
+
+    output_offset += dim_idx * params.source_strides[dim];
+
+    if (dim == params.reduce_dim) {
+      // Clamp keeps the access in bounds; index_check_bounds reports any
+      // out-of-range index and invalidates the result.
+      long idx = clamp(
+          long(index[dim_idx * params.index_stride]),
+          0L,
+          long(params.self_sizes[dim]) - 1);
+      input_offset += static_cast<uint32_t>(idx) * params.self_strides[dim];
+    } else {
+      input_offset += dim_idx * params.self_strides[dim];
+    }
+
+    tid_ /= output_size;
+  }
+
+  output[output_offset] = input[input_offset];
+}
+
+#define REGISTER_INDEX_SELECT_DIM_OP(SUFFIX, T, IT)                       \
+  template [[host_name("index_select_dim_" #SUFFIX "_" #IT)]] kernel void \
+  index_select_dim<T, IT>(                                                \
+      device T * output [[buffer(0)]],                                    \
+      device IT * index [[buffer(1)]],                                    \
+      device T * input [[buffer(2)]],                                     \
+      constant IndexReduceParams<> & params [[buffer(3)]],                \
+      uint tid [[thread_position_in_grid]]);
+
+#define REGISTER_INDEX_SELECT_DIM_OP_ALL_SIZES(IT) \
+  REGISTER_INDEX_SELECT_DIM_OP(8bit, char, IT);    \
+  REGISTER_INDEX_SELECT_DIM_OP(16bit, short, IT);  \
+  REGISTER_INDEX_SELECT_DIM_OP(32bit, int, IT);    \
+  REGISTER_INDEX_SELECT_DIM_OP(64bit, long, IT);
+
+REGISTER_INDEX_SELECT_DIM_OP_ALL_SIZES(int);
+REGISTER_INDEX_SELECT_DIM_OP_ALL_SIZES(long);
+
+// Fast path for contiguous index_select: tensors are [outer, dim, inner]; a 3D
+// grid (inner, out_dim, outer) drops the per-element coordinate decomposition.
+template <typename T, typename IT>
+kernel void index_select_dim_dense(
+    device T* output [[buffer(0)]],
+    device IT* index [[buffer(1)]],
+    device T* input [[buffer(2)]],
+    constant IndexSelectParams& params [[buffer(3)]],
+    uint3 tid [[thread_position_in_grid]]) {
+  // Clamp keeps the read in bounds; index_check_bounds reports any out-of-range
+  // index and invalidates the result.
+  long in_row = clamp(
+      long(index[tid.y * params.index_stride]),
+      0L,
+      long(params.in_dim_size) - 1);
+  long out_off =
+      (static_cast<long>(tid.z) * params.out_dim_size + tid.y) * params.inner +
+      tid.x;
+  long in_off =
+      (static_cast<long>(tid.z) * params.in_dim_size + in_row) * params.inner +
+      tid.x;
+  output[out_off] = input[in_off];
+}
+
+#define REGISTER_INDEX_SELECT_DIM_DENSE_OP(SUFFIX, T, IT)                  \
+  template                                                                 \
+      [[host_name("index_select_dim_dense_" #SUFFIX "_" #IT)]] kernel void \
+      index_select_dim_dense<T, IT>(                                       \
+          device T * output [[buffer(0)]],                                 \
+          device IT * index [[buffer(1)]],                                 \
+          device T * input [[buffer(2)]],                                  \
+          constant IndexSelectParams & params [[buffer(3)]],               \
+          uint3 tid [[thread_position_in_grid]]);
+
+#define REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(IT) \
+  REGISTER_INDEX_SELECT_DIM_DENSE_OP(8bit, char, IT);    \
+  REGISTER_INDEX_SELECT_DIM_DENSE_OP(16bit, short, IT);  \
+  REGISTER_INDEX_SELECT_DIM_DENSE_OP(32bit, int, IT);    \
+  REGISTER_INDEX_SELECT_DIM_DENSE_OP(64bit, long, IT);
+
+REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(int);
+REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(long);
+
 template <typename StridesT, typename DataT>
 kernel void kernel_index_offsets(
     constant StridesT* strides [[buffer(0)]],
