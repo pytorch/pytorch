@@ -205,6 +205,21 @@ class TestList(JitTestCase):
                 test_lists_with_different_internal_types_are_invariant_recursive
             )
 
+    def test_list_tensor_subtype(self):
+        ts_str = """
+            graph(%171 : Tensor,
+                  %174 : Tensor):
+              %50 : int = prim::Constant[value=-1]()
+              %175 : BFloat16(1)[] = prim::ListConstruct(%171, %174)
+              %176 : BFloat16(2) = aten::cat(%175, %50)
+              return (%176)
+        """
+        ts = torch.parse_ir(ts_str)
+        t1 = torch.ones((1)).to(torch.bfloat16)
+        t2 = torch.ones((1)).to(torch.bfloat16)
+        res = torch._C._jit_interpret_graph(ts, (t1, t2))
+        self.assertEqual(res, torch.tensor([1, 1], dtype=torch.bfloat16))
+
     def test_del(self):
         def inputs():
             return [1, 2, 3, 4]
