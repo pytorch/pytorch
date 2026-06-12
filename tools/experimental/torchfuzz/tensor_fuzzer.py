@@ -390,7 +390,12 @@ def fuzz_tensor(
             elif dtype == torch.bool:
                 base_tensor = torch.randint(0, 2, (required_storage,), dtype=torch.bool)
             else:  # integer types
-                base_tensor = torch.randint(-100, 100, (required_storage,), dtype=dtype)
+                # torch.randint requires `low` to be within the dtype's
+                # representable range. Unsigned dtypes (uint8/16/32/64)
+                # cannot represent negative values, so clamp `low` to 0;
+                # signed dtypes keep the default of -100.
+                low = -100 if torch.iinfo(dtype).min < 0 else 0
+                base_tensor = torch.randint(low, 100, (required_storage,), dtype=dtype)
         else:
             # Use zeros (default behavior)
             base_tensor = torch.ones(required_storage, dtype=dtype)
