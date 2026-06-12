@@ -33,7 +33,8 @@ using torch::profiler::impl::GlobalStateManager;
 
 TEST(GlobalStateManagerTest, GetReturnsOwningHandleThatOutlivesPop) {
   int destroyed = 0;
-  GlobalStateManager<Tracked<0>>::push(std::make_shared<Tracked<0>>(&destroyed));
+  GlobalStateManager<Tracked<0>>::push(
+      std::make_shared<Tracked<0>>(&destroyed));
 
   auto held = GlobalStateManager<Tracked<0>>::get();
   ASSERT_NE(held, nullptr);
