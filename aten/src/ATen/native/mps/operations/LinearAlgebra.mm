@@ -26,9 +26,6 @@
 #include <ATen/ops/all.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
-#include <ATen/ops/cat.h>
-#include <ATen/ops/cholesky_native.h>
-#include <ATen/ops/empty.h>
 #include <ATen/ops/eye.h>
 #include <ATen/ops/eye_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
@@ -1469,8 +1466,6 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
   return self;
 }
 
-// Orthonormal basis for the complement of Q's columns (Gram-Schmidt on proj =
-// I - Q Q^H; complex-capable, unlike float-only linalg_qr). Batched.
 static Tensor mps_orthonormal_complement(const Tensor& proj, int64_t want) {
   const int64_t dim = proj.size(-1);
   auto bsh = proj.sizes().slice(0, proj.dim() - 2).vec();
@@ -1645,8 +1640,6 @@ static void svd_kernel_mps(const Tensor& A,
   }
 }
 
-// Native MPS symmetric/Hermitian eigensolver (two-sided block-Jacobi). On entry
-// `eigenvectors` holds A column-major (the structured wrapper already copied it).
 static void eigh_kernel_mps(const Tensor& eigenvalues,
                             const Tensor& eigenvectors,
                             const Tensor& infos,
@@ -1858,6 +1851,54 @@ static void linalg_qr_out_impl_mps(const Tensor& A, const Tensor& Q, const Tenso
   bool reduced_mode = (mode != "complete");
 
   metal_qr_kernel_impl(A, Q, R, reduced_mode);
+}
+
+static void lstsq_kernel_mps(const Tensor& a,
+                             Tensor& b,
+                             Tensor& rank,
+                             Tensor& singular_values,
+                             Tensor& infos,
+                             double rcond,
+                             std::string driver_name) {
+  const auto scalar_type = a.scalar_type();
+  const auto real_dtype = c10::toRealValueType(scalar_type);
+  const auto m = a.size(-2);
+  const auto n = a.size(-1);
+
+  const bool sets_rank = (driver_name != "gels");
+  const bool sets_singular_values = (driver_name == "gelsd" || driver_name == "gelss");
+
+  const double rcond_value =
+      rcond > 0 ? rcond : _get_epsilon(real_dtype) * static_cast<double>(std::max<int64_t>(m, n));
+
+  // RHS occupies the first m rows of the (.., max(m, n), nrhs) buffer.
+  Tensor rhs = b.narrow(-2, 0, m);
+
+  Tensor U, S, Vh;
+  std::tie(U, S, Vh) = at::linalg_svd(a, /*full_matrices=*/false);
+
+  Tensor s_max = std::get<0>(S.max(/*dim=*/-1, /*keepdim=*/true));
+  Tensor above = S.gt(s_max.mul(rcond_value));
+  Tensor s_inv = at::where(above, S.reciprocal(), at::zeros({}, S.options()));
+
+  Tensor tmp = at::matmul(U.mH(), rhs).mul(s_inv.unsqueeze(-1));
+  Tensor solution = at::matmul(Vh.mH(), tmp); // (.., n, nrhs)
+
+  if (m > n) {
+    Tensor rss = at::matmul(a, solution).sub(rhs).abs().square().sum(/*dim=*/-2, /*keepdim=*/true);
+    Tensor tail = b.narrow(-2, n, m - n);
+    tail.zero_();
+    tail.narrow(-2, 0, 1).copy_(rss.sqrt());
+  }
+  b.narrow(-2, 0, n).copy_(solution);
+
+  if (sets_rank) {
+    rank.copy_(above.sum(/*dim=*/-1).to(at::kLong));
+  }
+  if (sets_singular_values) {
+    singular_values.copy_(S.to(real_dtype));
+  }
+  infos.zero_();
 }
 
 } // namespace mps
@@ -2110,140 +2151,12 @@ TORCH_IMPL_FUNC(linalg_qr_out_mps)(const Tensor& A, c10::string_view mode, const
   mps::linalg_qr_out_impl_mps(A, Q, R, mode);
 }
 
-// SVD-based least-squares (x = V Sigma^+ U^H b); reproduces the per-driver output
-// rules (gels: neither rank nor sv; gelsy: rank; gelsd/gelss: both) to match LAPACK.
-static std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq_mps(const Tensor& input,
-                                                                   const Tensor& other,
-                                                                   std::optional<double> rcond,
-                                                                   std::optional<std::string_view> driver) {
-  TORCH_CHECK(input.dim() >= 2, "torch.linalg.lstsq: input must have at least 2 dimensions.");
-  TORCH_CHECK(other.dim() >= 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
-  TORCH_CHECK(input.scalar_type() == other.scalar_type(),
-              "torch.linalg.lstsq: Expected input and other to have the same dtype, but got input's dtype ",
-              input.scalar_type(),
-              " and other's dtype ",
-              other.scalar_type());
-  auto dim_diff = input.dim() - other.dim();
-  TORCH_CHECK(
-      0 <= dim_diff && dim_diff <= 1,
-      "torch.linalg.lstsq: input.dim() must be greater or equal to other.dim() and (input.dim() - other.dim()) <= 1");
-
-  std::string driver_name;
-  if (driver.has_value()) {
-    driver_name = std::string(driver.value());
-    std::transform(
-        driver_name.begin(), driver_name.end(), driver_name.begin(), [](unsigned char c) { return std::tolower(c); });
-    static const std::unordered_set<std::string_view> allowed_drivers = {"gels", "gelsy", "gelsd", "gelss"};
-    TORCH_CHECK(allowed_drivers.find(driver_name) != allowed_drivers.end(),
-                "torch.linalg.lstsq: parameter `driver` should be one of (gels, gelsy, gelsd, gelss)");
-  } else {
-    driver_name = "gelsy";
-  }
-
-  const bool sets_rank = (driver_name != "gels");
-  const bool sets_singular_values = (driver_name == "gelsd" || driver_name == "gelss");
-
-  const auto scalar_type = input.scalar_type();
-  const auto real_dtype = c10::toRealValueType(scalar_type);
-
-  bool vector_case = linalg_solve_is_vector_rhs(input, other);
-  Tensor other_2d = vector_case ? other.unsqueeze(-1) : other;
-  TORCH_CHECK(input.size(-2) == other_2d.size(-2),
-              vector_case ? "torch.linalg.lstsq: input.size(-2) should match other.size(-1)"
-                          : "torch.linalg.lstsq: input.size(-2) should match other.size(-2)");
-
-  const auto m = input.size(-2);
-  const auto n = input.size(-1);
-  const auto k = std::min(m, n);
-
-  double rcond_value =
-      rcond.has_value() ? rcond.value() : _get_epsilon(real_dtype) * static_cast<double>(std::max<int64_t>(m, n));
-
-  Tensor U, S, Vh;
-  std::tie(U, S, Vh) = at::linalg_svd(input, /*full_matrices=*/false);
-
-  Tensor s_max = std::get<0>(S.max(/*dim=*/-1, /*keepdim=*/true));
-  Tensor threshold = s_max.mul(rcond_value);
-  Tensor above = S.gt(threshold);
-
-  Tensor s_inv = at::where(above, S.reciprocal(), at::zeros({}, S.options()));
-
-  Tensor tmp = at::matmul(U.mH(), other_2d);
-  tmp = tmp.mul(s_inv.unsqueeze(-1));
-  Tensor solution = at::matmul(Vh.mH(), tmp);
-
-  Tensor rank;
-  if (sets_rank) {
-    rank = above.sum(/*dim=*/-1).to(at::kLong);
-  } else {
-    rank = at::empty({0}, input.options().dtype(at::kLong));
-  }
-
-  Tensor singular_values;
-  if (sets_singular_values) {
-    singular_values = S.to(real_dtype).contiguous();
-  } else {
-    singular_values = at::empty({0}, input.options().dtype(real_dtype));
-  }
-
-  Tensor residuals = at::empty({0}, input.options().dtype(real_dtype));
-  if (m > n && driver_name != "gelsy") {
-    bool compute_residuals = true;
-    if (driver_name == "gelss" || driver_name == "gelsd") {
-      compute_residuals = at::all(rank.eq(n)).item().toBool();
-    }
-    if (compute_residuals) {
-      Tensor resid = at::matmul(input, solution).sub(other_2d);
-      if (resid.is_complex()) {
-        residuals = at::real(resid.mul(resid.conj())).sum(/*dim=*/-2, /*keepdim=*/false).to(real_dtype);
-      } else {
-        residuals = resid.pow(2).sum(/*dim=*/-2, /*keepdim=*/false).to(real_dtype);
-      }
-    }
-  }
-
-  if (m == 0) {
-    solution.zero_();
-  }
-
-  if (vector_case) {
-    solution = solution.squeeze(-1);
-  }
-  solution = solution.contiguous();
-
-  return std::make_tuple(std::move(solution), std::move(residuals), std::move(rank), std::move(singular_values));
-}
-
-std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out_mps(const Tensor& input,
-                                                                    const Tensor& other,
-                                                                    std::optional<double> rcond,
-                                                                    std::optional<std::string_view> driver,
-                                                                    Tensor& solution,
-                                                                    Tensor& residuals,
-                                                                    Tensor& rank,
-                                                                    Tensor& singular_values) {
-  auto [solution_tmp, residuals_tmp, rank_tmp, singular_values_tmp] = linalg_lstsq_mps(input, other, rcond, driver);
-
-  at::native::resize_output(solution, solution_tmp.sizes());
-  solution.copy_(solution_tmp);
-
-  at::native::resize_output(residuals, residuals_tmp.sizes());
-  residuals.copy_(residuals_tmp);
-
-  at::native::resize_output(rank, rank_tmp.sizes());
-  rank.copy_(rank_tmp);
-
-  at::native::resize_output(singular_values, singular_values_tmp.sizes());
-  singular_values.copy_(singular_values_tmp);
-
-  return std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>(solution, residuals, rank, singular_values);
-}
-
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
 REGISTER_DISPATCH(unpack_pivots_stub, mps::unpack_pivots_stub_impl)
 REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
 REGISTER_DISPATCH(cholesky_inverse_stub, mps::cholesky_inverse_kernel_impl_mps);
 REGISTER_DISPATCH(svd_stub, mps::svd_kernel_mps);
 REGISTER_DISPATCH(linalg_eigh_stub, mps::eigh_kernel_mps);
+REGISTER_DISPATCH(lstsq_stub, mps::lstsq_kernel_mps);
 
 } // namespace at::native

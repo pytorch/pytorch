@@ -1215,9 +1215,6 @@ REGISTER_UNPACK_PIVOTS(int, long);
 REGISTER_UNPACK_PIVOTS(long, int);
 REGISTER_UNPACK_PIVOTS(long, long);
 
-// One-sided Jacobi SVD: one threadgroup per matrix, one SIMD-group per column
-// pair.
-
 template <typename T>
 struct svd_real {
   using type = T;
@@ -1550,8 +1547,6 @@ kernel void svd_jacobi(
 REGISTER_SVD_JACOBI(float);
 REGISTER_SVD_JACOBI(float2);
 
-// Two-sided block-Jacobi Hermitian eigensolver (A = Q diag(w) Q^H, w
-// ascending).
 template <typename T>
 kernel void eigh_jacobi(
     device T* A [[buffer(0)]],
