@@ -120,13 +120,14 @@ from .graph_signature import _convert_to_export_graph_signature, ExportGraphSign
 
 log = logging.getLogger(__name__)
 
-# Legacy dynamic shapes specification (backed based spec).
-_LegacyDynamicShapesSpec: TypeAlias = dict[str, Any] | tuple[Any, ...] | list[Any]
+# Dim-based dynamic shapes spec: the raw container forms (dict / tuple / list of
+# ``Dim`` / ``None``) -- i.e. anything accepted as ``dynamic_shapes`` that is
+# not the structured ShapesSpec / ParamsSpec API. Dims marked dynamic this way
+# become backed symbols.
+_DimDynamicShapesSpec: TypeAlias = dict[str, Any] | tuple[Any, ...] | list[Any]
 
 # Full set of accepted ``dynamic_shapes`` inputs across export entry points.
-_DynamicShapesInput: TypeAlias = (
-    _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None
-)
+_DynamicShapesInput: TypeAlias = _DimDynamicShapesSpec | ShapesSpec | ParamsSpec | None
 
 
 @dataclasses.dataclass
@@ -608,8 +609,8 @@ def _add_input_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
     if (shape_env := _get_shape_env_from_gm(gm)) is None:
         return
 
-    for node in gm.graph.nodes:
-        if node.op != "placeholder" or node.meta.get("unbacked_bindings"):
+    for node in gm.graph.find_nodes(op="placeholder"):
+        if node.meta.get("unbacked_bindings"):
             continue
         if (val := node.meta.get("val")) is None:
             continue
@@ -916,7 +917,7 @@ def _export_to_torch_ir(
     is_shapes_spec = isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec))
 
     if not is_shapes_spec:
-        # legacy dynamic shapes.
+        # Dim-based dynamic shapes.
         combined_args = _combine_args(f, args, kwargs)
         _check_dynamic_shapes(combined_args, dynamic_shapes)
         constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
