@@ -2,9 +2,15 @@
 
 import logging
 from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Any
 
 import torch
 import torch._functorch.config
+from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+from torch._functorch._aot_autograd.subclass_codegen import (
+    _codegen_subclass_wrapper_source,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.two_tensor import TwoTensor
 
@@ -12,7 +18,36 @@ from torch.testing._internal.two_tensor import TwoTensor
 trace_log = logging.getLogger("torch.__trace")
 
 
+@dataclass
+class _TestSubclassMeta:
+    flat_tensor_start_idx: int
+    arg_count: int
+    included_subclass_symints: bool
+    attrs: dict
+    outer_size: tuple
+    outer_stride: tuple
+    meta: Any
+    original_subclass: Any
+    original_subclass_type: type
+
+
 class TestSubclassCodegen(TestCase):
+    def _two_tensor_meta(self) -> _TestSubclassMeta:
+        return _TestSubclassMeta(
+            flat_tensor_start_idx=0,
+            arg_count=2,
+            included_subclass_symints=True,
+            attrs={
+                "a": PlainTensorMeta(unwrapped_idx=0),
+                "b": PlainTensorMeta(unwrapped_idx=1),
+            },
+            outer_size=(4,),
+            outer_stride=(1,),
+            meta=None,
+            original_subclass=None,
+            original_subclass_type=TwoTensor,
+        )
+
     @contextmanager
     def _capture_wrapper_source(self):
         """Capture subclass_wrapper artifacts from the structured trace log."""
@@ -124,57 +159,57 @@ def inner_fn(args):
     return (_out_15,)""",
         )
 
+    def test_act_wait_top_level_codegen(self):
+        """ACT paths on plain inputs emit waits during input unwrapping."""
+        source, _ = _codegen_subclass_wrapper_source(
+            inp_metas=[PlainTensorMeta(unwrapped_idx=0)],
+            out_metas=[PlainTensorMeta(unwrapped_idx=0)],
+            num_fw_outs_saved_for_bw=None,
+            act_input_paths=[(0, ())],
+        )
+
+        self.assertExpectedInline(
+            source,
+            """\
+def inner_fn(args):
+    unwrapped_args = []
+    unwrapped_args.append(_maybe_wait_act_0(args[0]))
+    unwrapped_args.extend(args[1:])
+    args.clear()
+    unwrapped_outs = compiled_fn(unwrapped_args)
+    return (unwrapped_outs[0],)""",
+        )
+
+    def test_act_wait_nested_codegen(self):
+        """ACT paths inside subclasses emit waits at the matching leaf."""
+        source, _ = _codegen_subclass_wrapper_source(
+            inp_metas=[self._two_tensor_meta()],
+            out_metas=[PlainTensorMeta(unwrapped_idx=0)],
+            num_fw_outs_saved_for_bw=None,
+            act_input_paths=[(0, ("a",))],
+        )
+
+        self.assertExpectedInline(
+            source,
+            """\
+def inner_fn(args):
+    unwrapped_args = []
+    _inp_1 = args[0]
+    assert type(_inp_1) is _expected_type_2, f'expected {_expected_type_2}, got {type(_inp_1)}'
+    _resolved_3 = _maybe_wait_act_0(_inp_1.a)
+    unwrapped_args.append(_resolved_3)
+    unwrapped_args.append(_inp_1.b)
+    unwrapped_args.extend(args[1:])
+    args.clear()
+    unwrapped_outs = compiled_fn(unwrapped_args)
+    return (unwrapped_outs[0],)""",
+        )
+
     def test_trailing_args_forwarded(self):
         """Extra trailing args (e.g. rng seed/offset) are forwarded to compiled_fn."""
         # Build SubclassCreationMeta manually to avoid __post_init__ fake tensor check
-        from dataclasses import dataclass
-        from typing import Any
-
-        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
-        from torch._functorch._aot_autograd.subclass_codegen import (
-            _codegen_subclass_wrapper_source,
-        )
-
-        @dataclass
-        class _TestSubclassMeta:
-            flat_tensor_start_idx: int
-            arg_count: int
-            included_subclass_symints: bool
-            attrs: dict
-            outer_size: tuple
-            outer_stride: tuple
-            meta: Any
-            original_subclass: Any
-            original_subclass_type: type
-
-        inp_meta = _TestSubclassMeta(
-            flat_tensor_start_idx=0,
-            arg_count=2,
-            included_subclass_symints=True,
-            attrs={
-                "a": PlainTensorMeta(unwrapped_idx=0),
-                "b": PlainTensorMeta(unwrapped_idx=1),
-            },
-            outer_size=(4,),
-            outer_stride=(1,),
-            meta=None,
-            original_subclass=None,
-            original_subclass_type=TwoTensor,
-        )
-        out_meta = _TestSubclassMeta(
-            flat_tensor_start_idx=0,
-            arg_count=2,
-            included_subclass_symints=True,
-            attrs={
-                "a": PlainTensorMeta(unwrapped_idx=0),
-                "b": PlainTensorMeta(unwrapped_idx=1),
-            },
-            outer_size=(4,),
-            outer_stride=(1,),
-            meta=None,
-            original_subclass=None,
-            original_subclass_type=TwoTensor,
-        )
+        inp_meta = self._two_tensor_meta()
+        out_meta = self._two_tensor_meta()
 
         source, globals_dict = _codegen_subclass_wrapper_source(
             inp_metas=[inp_meta],

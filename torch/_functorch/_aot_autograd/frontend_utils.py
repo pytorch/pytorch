@@ -16,11 +16,14 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
 from .descriptors import BufferAOTInput, DifferentiableAOTInput, ParamAOTInput
-from .schemas import AOTConfig, FakifiedFlatArgs
+from .schemas import ActInputPath, AOTConfig, FakifiedFlatArgs
+from .utils import get_loaded_async_collective_tensor_type
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator, KeysView
+
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -34,7 +37,7 @@ def process_inputs(
     fake_mode: FakeTensorMode,
     shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
-) -> tuple[FakifiedFlatArgs, list[int]]:
+) -> tuple[FakifiedFlatArgs, list[ActInputPath]]:
     """Convert real tensor inputs into fake tensors for AOT autograd tracing.
 
     Called at compile time (not runtime) to produce the fake inputs that AOT
@@ -43,20 +46,19 @@ def process_inputs(
     symbolic shape information from the ShapeEnv. Non-tensor inputs (ints,
     SymInts, ScriptObjects) are converted or passed through as appropriate.
 
-    Tensor subclass inputs (DTensor, etc.) are fakified recursively by
-    walking their ``__tensor_flatten__`` attrs. AsyncCollectiveTensors are
-    resolved via ``trigger_wait()`` before fakification so they don't appear
-    in the traced metadata (see below).
+    Tensor subclass inputs (DTensor, etc.) are fakified recursively by walking
+    their ``__tensor_flatten__`` attrs. AsyncCollectiveTensors are resolved via
+    ``trigger_wait()`` before fakification so they don't appear in the traced
+    metadata (see below).
 
     Called from ``aot_function``, ``aot_module_simplified``, and
     ``aot_export_module`` — anywhere AOT autograd needs fake inputs before
     graph capture.
 
     Returns:
-        A tuple of (fakified_args, act_input_indices) where act_input_indices
-        records which positions held AsyncCollectiveTensors. These indices are
-        stored on ViewAndMutationMeta so that the runtime wrapper can emit
-        direct trigger_wait() calls on those positions.
+        A tuple of (fakified_args, act_input_paths) where act_input_paths records
+        which input paths held AsyncCollectiveTensors. The paths are stored on
+        ViewAndMutationMeta so the runtime wrapper can re-wait those positions.
     """
     # Resolve AsyncCollectiveTensors before tracing. ACTs are transient
     # eager-mode wrappers for async collective overlap; if they leak into the
@@ -64,17 +66,23 @@ def process_inputs(
     # SubclassCreationMeta for output tangent metadata. At runtime, autograd
     # produces plain tensor tangents, causing a type mismatch. Unwrapping
     # here prevents ACT from appearing in the traced metadata.
-    try:
-        from torch.distributed._functional_collectives import AsyncCollectiveTensor
-    except ImportError:
-        AsyncCollectiveTensor = None
-
-    act_input_indices: list[int] = []
+    AsyncCollectiveTensor = get_loaded_async_collective_tensor_type()
+    act_input_paths: list[ActInputPath] = []
     if AsyncCollectiveTensor is not None:
+        tracing_context = torch._guards.TracingContext.try_get()
         for i, a in enumerate(flat_args):
-            if isinstance(a, AsyncCollectiveTensor):
-                act_input_indices.append(i)
-                flat_args[i] = a.trigger_wait()
+            resolved_arg = _resolve_input_async_collectives(
+                a, i, (), act_input_paths, AsyncCollectiveTensor
+            )
+            # Rebuilt wrapper inputs must keep Dynamo's symbolic context so
+            # fakeification does not allocate source-less shape symbols.
+            if resolved_arg is not a and isinstance(resolved_arg, torch.Tensor):
+                if tracing_context is not None:
+                    if a in tracing_context.tensor_to_context:
+                        tracing_context.tensor_to_context[resolved_arg] = (
+                            tracing_context.tensor_to_context[a]
+                        )
+            flat_args[i] = resolved_arg
 
     with fake_mode:
 
@@ -163,7 +171,55 @@ def process_inputs(
 
         return FakifiedFlatArgs(
             [convert(idx, x) for idx, x in enumerate(flat_args)]
-        ), act_input_indices
+        ), act_input_paths
+
+
+def _resolve_input_async_collectives(
+    x: object,
+    idx: int,
+    attr_path: tuple[str, ...],
+    act_input_paths: list[ActInputPath],
+    AsyncCollectiveTensor: type[AsyncCollectiveTensor],
+) -> object:
+    """Wait on ACT inputs, recording each top-level or wrapper-subclass path."""
+    if isinstance(x, AsyncCollectiveTensor):
+        act_input_paths.append((idx, attr_path))
+        return x.trigger_wait()
+
+    if not is_traceable_wrapper_subclass(x):
+        return x
+
+    attrs, meta = x.__tensor_flatten__()
+    inner_tensors: dict[str, Any] | None = None
+    for attr in attrs:
+        inner = getattr(x, attr)
+        match inner:
+            case OpaqueBase():
+                continue
+            case torch.Tensor():
+                resolved_inner = _resolve_input_async_collectives(
+                    inner,
+                    idx,
+                    (*attr_path, attr),
+                    act_input_paths,
+                    AsyncCollectiveTensor,
+                )
+            case _:
+                raise AssertionError(
+                    f"expected Tensor or OpaqueBase, got {type(inner)}"
+                )
+
+        if resolved_inner is not inner:
+            if inner_tensors is None:
+                inner_tensors = {a: getattr(x, a) for a in attrs}
+            inner_tensors[attr] = resolved_inner
+
+    if inner_tensors is None:
+        return x
+
+    return type(x).__tensor_unflatten__(  # type: ignore[attr-defined]
+        inner_tensors, meta, x.size(), x.stride()
+    )
 
 
 def construct_fake_mode(
