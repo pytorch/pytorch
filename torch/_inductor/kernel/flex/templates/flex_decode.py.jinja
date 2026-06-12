@@ -215,32 +215,21 @@
     m_offset = off_t * stride_mt + off_z * stride_mz
     l_offset = off_t * stride_lt + off_z * stride_lz
 
-    M_block_ptr = tl.make_block_ptr(
-        base=M + m_offset,
-        shape=(G, Q_LEN),                   # (G, M)
-        strides=(stride_mh, stride_mm),
-        offsets=(off_hkv*G, off_block_m * BLOCK_M_PER_HQ),
-        block_shape=(G, BLOCK_M_PER_HQ),
-        order=(1, 0)
-    )
-    L_block_ptr = tl.make_block_ptr(
-        base=L + l_offset,
-        shape=(G, Q_LEN),                   # (G, M)
-        strides=(stride_lh, stride_lm),
-        offsets=(off_hkv*G, off_block_m * BLOCK_M_PER_HQ),
-        block_shape=(G, BLOCK_M_PER_HQ),
-        order=(1, 0)
-    )
+    ml_h_offsets = off_hkv * G + off_g[:, None]
+    ml_m_offsets = off_m[None, :]
+    m_ptrs = M + m_offset + ml_h_offsets * stride_mh + ml_m_offsets * stride_mm
+    l_ptrs = L + l_offset + ml_h_offsets * stride_lh + ml_m_offsets * stride_lm
 
     # Store output, logsumexp and rowmax for cross CTA reduction. (all in float32, even when input data are in fp16)
     m_i = m_i.reshape(G, BLOCK_M_PER_HQ)
     l_i = l_i.reshape(G, BLOCK_M_PER_HQ)
     if SAFE_M_BOUNDARY:
-        tl.store(M_block_ptr, m_i)
-        tl.store(L_block_ptr, l_i)
+        tl.store(m_ptrs, m_i)
+        tl.store(l_ptrs, l_i)
     else:
-        tl.store(M_block_ptr, m_i, boundary_check=(1,))
-        tl.store(L_block_ptr, l_i, boundary_check=(1,))
+        ml_mask = ml_m_offsets < Q_LEN
+        tl.store(m_ptrs, m_i, mask=ml_mask)
+        tl.store(l_ptrs, l_i, mask=ml_mask)
 
     # -- store output
     idx_z = off_z
