@@ -26,6 +26,7 @@ def path(script):
 
 class LaunchTest(unittest.TestCase):
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp()
         # set a sentinel env var on the parent proc
         # this should be present on the child and gets
@@ -41,7 +42,6 @@ class LaunchTest(unittest.TestCase):
     def test_launch_without_env(self):
         nnodes = 1
         nproc_per_node = 4
-        world_size = nnodes * nproc_per_node
         sock = get_socket_with_port()
         with closing(sock):
             master_port = sock.getsockname()[1]
@@ -85,3 +85,10 @@ class LaunchTest(unittest.TestCase):
         self.assertSetEqual(
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

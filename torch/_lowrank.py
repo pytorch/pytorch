@@ -2,7 +2,6 @@
 
 __all__ = ["svd_lowrank", "pca_lowrank"]
 
-from typing import Optional, Tuple
 
 import torch
 from torch import _linalg_utils as _utils, Tensor
@@ -12,8 +11,8 @@ from torch.overrides import handle_torch_function, has_torch_function
 def get_approximate_basis(
     A: Tensor,
     q: int,
-    niter: Optional[int] = 2,
-    M: Optional[Tensor] = None,
+    niter: int | None = 2,
+    M: Tensor | None = None,
 ) -> Tensor:
     """Return tensor :math:`Q` with :math:`q` orthonormal columns such
     that :math:`Q Q^H A` approximates :math:`A`. If :math:`M` is
@@ -27,7 +26,7 @@ def get_approximate_basis(
     .. note:: For an adequate approximation of a k-rank matrix
               :math:`A`, where k is not known in advance but could be
               estimated, the number of :math:`Q` columns, q, can be
-              choosen according to the following criteria: in general,
+              chosen according to the following criteria: in general,
               :math:`k <= q <= min(2*k, m, n)`. For large low-rank
               matrices, take :math:`q = k + 5..10`.  If k is
               relatively small compared to :math:`min(m, n)`, choosing
@@ -85,10 +84,10 @@ def get_approximate_basis(
 
 def svd_lowrank(
     A: Tensor,
-    q: Optional[int] = 6,
-    niter: Optional[int] = 2,
-    M: Optional[Tensor] = None,
-) -> Tuple[Tensor, Tensor, Tensor]:
+    q: int | None = 6,
+    niter: int | None = 2,
+    M: Tensor | None = None,
+) -> tuple[Tensor, Tensor, Tensor]:
     r"""Return the singular value decomposition ``(U, S, V)`` of a matrix,
     batches of matrices, or a sparse matrix :math:`A` such that
     :math:`A \approx U \operatorname{diag}(S) V^{\text{H}}`. In case :math:`M` is given, then
@@ -100,7 +99,7 @@ def svd_lowrank(
     .. note:: For an adequate approximation of a k-rank matrix
               :math:`A`, where k is not known in advance but could be
               estimated, the number of :math:`Q` columns, q, can be
-              choosen according to the following criteria: in general,
+              chosen according to the following criteria: in general,
               :math:`k <= q <= min(2*k, m, n)`. For large low-rank
               matrices, take :math:`q = k + 5..10`.  If k is
               relatively small compared to :math:`min(m, n)`, choosing
@@ -149,10 +148,10 @@ def svd_lowrank(
 
 def _svd_lowrank(
     A: Tensor,
-    q: Optional[int] = 6,
-    niter: Optional[int] = 2,
-    M: Optional[Tensor] = None,
-) -> Tuple[Tensor, Tensor, Tensor]:
+    q: int | None = 6,
+    niter: int | None = 2,
+    M: Tensor | None = None,
+) -> tuple[Tensor, Tensor, Tensor]:
     # Algorithm 5.1 in Halko et al., 2009
 
     q = 6 if q is None else q
@@ -183,10 +182,10 @@ def _svd_lowrank(
 
 def pca_lowrank(
     A: Tensor,
-    q: Optional[int] = None,
+    q: int | None = None,
     center: bool = True,
     niter: int = 2,
-) -> Tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor]:
     r"""Performs linear Principal Component Analysis (PCA) on a low-rank
     matrix, batches of such matrices, or sparse matrix.
 

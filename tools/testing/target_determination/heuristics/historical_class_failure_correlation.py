@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections import defaultdict
-from typing import Any, cast, Dict
-from warnings import warn
+from typing import Any, cast
 
 from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
@@ -45,7 +44,7 @@ def _get_historical_test_class_correlations() -> dict[str, dict[str, float]]:
         print(f"could not find path {path}")
         return {}
     with open(path) as f:
-        test_class_correlations = cast(Dict[str, Dict[str, float]], json.load(f))
+        test_class_correlations = cast(dict[str, dict[str, float]], json.load(f))
         return test_class_correlations
 
 
@@ -53,11 +52,7 @@ def _get_ratings_for_tests(
     tests_to_run: set[str],
 ) -> dict[str, float]:
     # Get the files edited
-    try:
-        changed_files = query_changed_files()
-    except Exception as e:
-        warn(f"Can't query changed test files due to {e}")
-        return {}
+    changed_files = query_changed_files()
 
     test_class_correlations = _get_historical_test_class_correlations()
     if not test_class_correlations:
@@ -83,7 +78,9 @@ def _rank_correlated_tests(
 ) -> list[str]:
     # Find the tests failures that are correlated with the edited files.
     # Filter the list to only include tests we want to run.
+    # pyrefly: ignore [bad-assignment]
     tests_to_run = set(tests_to_run)
+    # pyrefly: ignore [bad-argument-type]
     ratings = _get_ratings_for_tests(tests_to_run)
     prioritize = sorted(ratings, key=lambda x: -ratings[x])
     return prioritize

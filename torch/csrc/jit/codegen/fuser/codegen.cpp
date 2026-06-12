@@ -1,11 +1,8 @@
 #include <torch/csrc/jit/codegen/fuser/codegen.h>
 
-#include <ATen/ATen.h>
 #include <ATen/code_template.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
-#include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/codegen/fuser/tensor_info.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/jit/codegen/fuser/cpu/resource_strings.h>
@@ -15,7 +12,6 @@
 #include <cstdint>
 #include <iostream>
 #include <sstream>
-#include <tuple>
 #include <vector>
 
 namespace torch::jit::fuser {
@@ -74,7 +70,7 @@ static const char* scalarTypeName(const at::ScalarType type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
 #undef DEFINE_CASE
     default:
-      throw std::runtime_error("unknown scalar type");
+      TORCH_CHECK(false, "unknown scalar type");
   }
 }
 
@@ -99,8 +95,7 @@ static std::string variableType(const c10::Type& t) {
     return calcScalarTypeName(*scalar_type);
   }
   // something went wrong with the type analysis during shape propagation
-  throw std::runtime_error(
-      "unknown scalar type during JIT fusion code generation");
+  TORCH_CHECK(false, "unknown type during JIT fusion code generation");
 }
 
 static std::string typeCastedValueName(
@@ -129,8 +124,7 @@ static std::string typeCastedValueName(
     return vn;
   }
   // something went wrong with the type analysis during shape propagation
-  throw std::runtime_error(
-      "unknown scalar type during JIT fusion code generation");
+  TORCH_CHECK(false, "unknown type during JIT fusion code generation");
 }
 
 // Writes RHS of special handling "simple mappable" ops
@@ -155,11 +149,10 @@ static std::string encodeSpecialRHS(const Node* n, at::jit::TemplateEnv& env) {
       env.s("1", valueName(min));
       return format("(${0} < ${1} ? ${1} : ${0})", env);
     } else {
-      throw std::runtime_error(
-          "At least one of 'min' or 'max' must not be None");
+      TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
     }
   } else {
-    throw std::runtime_error("Cannot encode RHS of the node, op not supported");
+    TORCH_CHECK(false, "Cannot encode RHS of the node, op not supported");
   }
 }
 
@@ -635,7 +628,7 @@ std::string generateKernel(
   }
 
   // Includes headers
-  // Note: CUDA kernels support halfs and random generation, CPU kernels do not
+  // Note: CUDA kernels support Halfs and random generation, CPU kernels do not
   if (has_half_tensor) {
     env.s("HalfHeader", cuda::half_support_literal);
   } else {
@@ -660,12 +653,12 @@ std::string generateKernel(
   // clang-format on
 
   // Instantiates the CUDA or CPU-specific templates
-  env.s("tensorOffsets", tensorOffsets.str());
-  env.s("tensorChecks", tensorChecks.str());
-  env.s("kernelBody", body.str());
-  env.s("kernelBody_vec4", body_vec4.str());
-  env.s("kernelLoad", load.str());
-  env.s("kernelStore", store.str());
+  env.s("tensorOffsets", std::move(tensorOffsets).str());
+  env.s("tensorChecks", std::move(tensorChecks).str());
+  env.s("kernelBody", std::move(body).str());
+  env.s("kernelBody_vec4", std::move(body_vec4).str());
+  env.s("kernelLoad", std::move(load).str());
+  env.s("kernelStore", std::move(store).str());
   env.v("formals", formals);
   env.v("argument_loads", argument_loads);
   std::string code_string;

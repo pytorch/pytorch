@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "ruff==0.14.4",
+# ]
+# ///
 """Adapter for https://github.com/charliermarsh/ruff."""
 
 from __future__ import annotations
@@ -18,11 +24,6 @@ from typing import Any, BinaryIO
 LINTER_CODE = "RUFF"
 SYNTAX_ERROR = "E999"
 IS_WINDOWS: bool = os.name == "nt"
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    """Print to stderr."""
-    print(*args, file=sys.stderr, flush=True, **kwargs)
 
 
 class LintSeverity(str, enum.Enum):
@@ -420,7 +421,8 @@ def main() -> None:
     if args.severity:
         for severity in args.severity:
             parts = severity.split(":", 1)
-            assert len(parts) == 2, f"invalid severity `{severity}`"
+            if len(parts) != 2:
+                raise AssertionError(f"invalid severity `{severity}`")
             severities[parts[0]] = LintSeverity(parts[1])
 
     lint_messages = check_files(

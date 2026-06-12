@@ -36,7 +36,7 @@ from __future__ import annotations
 import itertools
 import re
 from collections import defaultdict
-from typing import Callable, Iterable, Sequence
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -76,6 +76,10 @@ from .gen_inplace_or_view_type import is_tensor_list_type
 from .gen_trace_type import should_trace
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
+
+
 #
 # declarations blocklist
 # We skip codegen for these functions, for various reasons.
@@ -88,11 +92,17 @@ from .gen_trace_type import should_trace
 _SKIP_PYTHON_BINDINGS = [
     "alias",
     "contiguous",
+    "dim",
+    "get_device",
+    "is_contiguous",
     "is_cuda",
     "is_sparse",
     "is_sparse_csr",
+    "numel",
     "size",
+    "storage_offset",
     "stride",
+    "sym_is_contiguous",
     "sym_size",
     "sym_stride",
     "sym_storage_offset",
@@ -144,7 +154,7 @@ _SKIP_PYTHON_BINDINGS = [
     "mH",  # these need to be an attributes in Python, not functions
     "nonzero(_(out|numpy))?",
     "set_data",
-    ".*_overrideable",  # overrideable functions for backend extension
+    ".*_overrideable",  # overridable functions for backend extension
     "data",
     "is_leaf",
     "output_nr",
@@ -612,9 +622,10 @@ def load_deprecated_signatures(
         }
         schema_args_by_name = {a.name: a for a in schema.arguments.flat_all}
         for name in call_args:
-            assert (
-                name in schema_args_by_name or name in known_constants
-            ), f"deprecation definiton: Unrecognized value {name}"
+            if name not in schema_args_by_name and name not in known_constants:
+                raise AssertionError(
+                    f"deprecation definition: Unrecognized value {name}"
+                )
 
         # Map deprecated signature arguments to their aten signature and test
         # if the types and alias annotation match.
@@ -679,7 +690,10 @@ def load_deprecated_signatures(
                     function=pair.function,
                 )
             )
-        assert any_schema_found, f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
+        if not any_schema_found:
+            raise AssertionError(
+                f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
+            )
 
     return results
 
@@ -719,7 +733,7 @@ def emit_structseq_call(
         tn_key = gen_structseq_typename_key(overload.function)
         typename = typenames.get(tn_key)
         if typename is None:
-            typename = f'NamedTuple{"" if not typedefs else len(typedefs)}'
+            typename = f"NamedTuple{'' if not typedefs else len(typedefs)}"
             typenames[tn_key] = typename
             typedefs.append(
                 f"""\
@@ -755,7 +769,7 @@ def generate_return_type_definition_and_registrations(
         typename = typenames.get(tn_key)
 
         if typename is None:
-            typename = f'{name}NamedTuple{"" if not definitions else len(definitions)}'
+            typename = f"{name}NamedTuple{'' if not definitions else len(definitions)}"
             typenames[tn_key] = typename
             definitions.append(
                 f"""\
@@ -803,7 +817,7 @@ def generate_return_type_declarations(
 
         if typename is None:
             typename = (
-                f'{name}NamedTuple{"" if not declarations else len(declarations)}'
+                f"{name}NamedTuple{'' if not declarations else len(declarations)}"
             )
             typenames[tn_key] = typename
             declarations.append(f"PyTypeObject* get_{name}_structseq();")
@@ -963,7 +977,7 @@ def gen_has_torch_function_check(
     if noarg:
         if method:
             return f"""\
-if(check_has_torch_function(self_)) {{
+if (has_torch_function(self_)) {{
   return handle_torch_function(self_, "{name}");
 }}
 """
@@ -1223,8 +1237,6 @@ def sort_overloads(
             and str(t2) == "Tensor"
             or str(t1) == "Scalar?"
             and str(t2) == "Tensor?"
-            or "Dimname" in str(t1)
-            and "Dimname" not in str(t2)
             or
             # In the discussion https://github.com/pytorch/pytorch/issues/54555 it has been
             # discussed why it is important to prioritize int/int? over int[]
@@ -1319,8 +1331,6 @@ def emit_single_dispatch(
         else:
             schema_comment = f"// aten::{f.func}"
 
-        deprecated = "[deprecated] " if ps.deprecated else ""
-
         # dispatch lambda signature
         name = cpp.name(f.func)
         lambda_formals = ", ".join(
@@ -1349,7 +1359,7 @@ def emit_single_dispatch(
             or (ps.method and ("requires_grad" in parser_outputs))
         )
         set_requires_grad = (
-            f'.set_requires_grad({parser_outputs["requires_grad"].expr})'
+            f".set_requires_grad({parser_outputs['requires_grad'].expr})"
             if need_set_requires_grad
             else ""
         )
@@ -1364,10 +1374,11 @@ def emit_single_dispatch(
                 and f.func.kind() == SchemaKind.inplace
             ):
                 # note(crcrpar): `_foreach_pow.ScalarAndTensor` does NOT have its in-place
-                # variant and it unlikely to have it in the future. Thus it's safe to have the following assert.
-                assert self_arg is not None and is_tensor_list_type(
-                    self_arg.argument.type
-                )
+                # variant and it unlikely to have it in the future. Thus it's safe to have the following check.
+                if self_arg is None or not is_tensor_list_type(self_arg.argument.type):
+                    raise AssertionError(
+                        "Expected self_arg to be a tensor list type for inplace foreach"
+                    )
                 return_stmt = """PyObject* self_tensorlist = _r.args[0];
 Py_INCREF(self_tensorlist);
 return self_tensorlist;

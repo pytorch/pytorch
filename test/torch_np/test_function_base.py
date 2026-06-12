@@ -34,5 +34,11 @@ class TestAppend(TestCase):
             np.append([[1, 2, 3], [4, 5, 6]], [7, 8, 9], axis=0)
 
 
+class TestMisc(TestCase):
+    def test_broadcast_shapes(self):
+        result = np.broadcast_shapes((1, 2), (2, 2))
+        assert_equal(result, (2, 2))
+
+
 if __name__ == "__main__":
     run_tests()
