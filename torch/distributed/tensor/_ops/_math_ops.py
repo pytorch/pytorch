@@ -806,13 +806,31 @@ def std_var_single_dim_strategy(
         dims = _infer_reduction_dims(args_schema[1], ndim)
 
     keep_dim = cast(bool, kwargs_schema.get("keepdim", False))
-    return _reduction_single_dim_strategy(
+    strategies = _reduction_single_dim_strategy(
         args_schema,
         reduction_dims=dims,
         keep_dim=keep_dim,
         reduction_linear=False,
         reduction_op="sum",
     )
+    num_outputs = len(op._schema.returns)
+    if num_outputs == 1 and not any(
+        isinstance(arg, TensorMeta) for arg in kwargs_schema.values()
+    ):
+        return strategies
+
+    expanded_strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for rule in strategies:
+        output_placements = [rule[0]] * num_outputs
+        input_placements = rule[1:]
+        kwarg_placements: list[Placement | _ShardingPlaceholder] = []
+        for arg in kwargs_schema.values():
+            if isinstance(arg, TensorMeta):
+                kwarg_placements.append(output_placements[len(kwarg_placements)])
+        expanded_strategies.append(
+            output_placements + input_placements + kwarg_placements
+        )
+    return expanded_strategies
 
 
 def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
@@ -1749,20 +1767,16 @@ def _norm_backward_single_dim_strategy(
     return cast(list[list[Placement | _ShardingPlaceholder]], strategies)
 
 
+@register_single_dim_strategy(
+    [aten.native_layer_norm_backward.default],
+    schema_info=RuntimeSchemaInfo(2),
+)
 def layer_norm_bwd_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     return _norm_backward_single_dim_strategy(op, args_schema, kwargs_schema)
-
-
-@register_op_strategy(
-    [aten.native_layer_norm_backward.default],
-    schema_info=RuntimeSchemaInfo(2),
-)
-def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
-    return _common_norm_backward_strategy(op_schema)
 
 
 def rms_norm_bwd_single_dim_strategy(
