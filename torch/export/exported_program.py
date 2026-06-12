@@ -1454,10 +1454,12 @@ class ExportedProgram:
             print_output=False, colored=False
         ).replace("\n", "\n    ")
         graph_signature = str(self.graph_signature).replace("\n", "\n    ")
+        # No space after "Graph signature:" — graph_signature starts with
+        # a newline; trailing whitespace breaks expecttest snapshots.
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph signature: {graph_signature}\n"
+            f"Graph signature:{graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
         )
         return string
