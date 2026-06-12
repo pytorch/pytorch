@@ -582,18 +582,19 @@ auto get_generator_sources(
     const bool allow_tf32,
     const cudnnBackendHeurMode_t heur_mode,
     const bool heuristic,
-    const bool fallback) {
+    const bool fallback,
+    const bool get_all_configs) {
   // Method for engine config generator based on heuristics
   const auto heurgen_method =
-      [/*&desc,*/ &x, deterministic, allow_tf32, heur_mode](
+      [/*&desc,*/ &x, deterministic, allow_tf32, heur_mode, get_all_configs](
           cudnn_frontend::OperationGraph& opGraph)
       -> cudnn_frontend::EngineConfigList {
     auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
                           .setOperationGraph(opGraph)
                           .setHeurMode(heur_mode)
                           .build();
-    auto& engine_configs =
-        heuristics.getEngineConfig(heuristics.getEngineConfigCount());
+    auto& engine_configs = heuristics.getEngineConfig(
+        get_all_configs ? heuristics.getEngineConfigCount() : 1);
     cudnn_frontend::EngineConfigList filtered_configs;
     filterEngineConfigs(
         engine_configs,
@@ -754,7 +755,14 @@ auto get_plans_from_find(
   // We don't care about getting the best ordering of algos if we're roing to
   // run all of them
   auto sources = get_generator_sources(
-      desc, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT, true, true);
+      desc,
+      x,
+      deterministic,
+      allow_tf32,
+      CUDNN_HEUR_MODE_INSTANT,
+      true,
+      true,
+      true);
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
   cudnn_frontend::executionPlans_t valid_plans;
@@ -809,6 +817,7 @@ auto get_plans_from_find_fused(
       allow_tf32,
       CUDNN_HEUR_MODE_INSTANT,
       true,
+      true,
       true);
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
@@ -852,7 +861,8 @@ auto get_configs_from_heuristics(
     const IntArrayRef dilation,
     const bool deterministic,
     const bool allow_tf32,
-    const bool fallback) {
+    const bool fallback,
+    const bool get_all_configs) {
   auto opGraph =
       build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   opgraph_tag = opGraph.getTag();
@@ -860,12 +870,18 @@ auto get_configs_from_heuristics(
       ? CUDNN_HEUR_MODE_B
       : CUDNN_HEUR_MODE_INSTANT;
   auto sources = get_generator_sources(
-      desc, x, deterministic, allow_tf32, heuristic_mode, !fallback, fallback);
+      desc,
+      x,
+      deterministic,
+      allow_tf32,
+      heuristic_mode,
+      !fallback,
+      fallback,
+      get_all_configs);
 
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
-  auto configs = generator.generate_engine_config(opGraph);
-  return configs;
+  return generator.generate_engine_config(opGraph);
 }
 
 auto get_configs_from_heuristics_fused(
@@ -883,7 +899,8 @@ auto get_configs_from_heuristics_fused(
     const IntArrayRef dilation,
     const bool deterministic,
     const bool allow_tf32,
-    const bool fallback) {
+    const bool fallback,
+    const bool get_all_configs) {
   auto opGraph = build_opgraph_fused(
       handle, x, y, w, z, b, alpha, key, padding, stride, dilation);
   opgraph_tag = opGraph.getTag();
@@ -897,12 +914,12 @@ auto get_configs_from_heuristics_fused(
       allow_tf32,
       heuristic_mode,
       !fallback,
-      fallback);
+      fallback,
+      get_all_configs);
 
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
-  auto configs = generator.generate_engine_config(opGraph);
-  return configs;
+  return generator.generate_engine_config(opGraph);
 }
 
 void try_plans(
@@ -1049,7 +1066,7 @@ void run_single_conv(
   }
   if (!benchmark) {
     std::string opgraph_tag; // extra data needed for errata filter
-    // heuristic configs
+    // top config from heuristic
     cudnn_frontend::EngineConfigList configs = get_configs_from_heuristics(
         handle,
         operation,
@@ -1063,7 +1080,27 @@ void run_single_conv(
         dilation,
         deterministic,
         allow_tf32,
+        false,
         false);
+    if (try_configs(configs, opgraph_tag, key, handle, x, y, w, operation)) {
+      return;
+    }
+    // all heuristic configs
+    configs = get_configs_from_heuristics(
+        handle,
+        operation,
+        opgraph_tag,
+        x,
+        y,
+        w,
+        key,
+        padding,
+        stride,
+        dilation,
+        deterministic,
+        allow_tf32,
+        false,
+        true);
     if (try_configs(configs, opgraph_tag, key, handle, x, y, w, operation)) {
       return;
     }
@@ -1081,7 +1118,8 @@ void run_single_conv(
         dilation,
         deterministic,
         allow_tf32,
-        true);
+        true,
+        false);
     if (try_configs(configs, opgraph_tag, key, handle, x, y, w, operation)) {
       return;
     }
@@ -1149,7 +1187,7 @@ void run_fused_conv(
   }
   if (!benchmark) {
     std::string opgraph_tag; // extra data needed for errata filter
-    // heuristic configs
+    // top heuristic config
     cudnn_frontend::EngineConfigList configs =
         get_configs_from_heuristics_fused(
             handle,
@@ -1166,7 +1204,29 @@ void run_fused_conv(
             dilation,
             deterministic,
             allow_tf32,
+            false,
             false);
+    if (try_configs_fused(configs, opgraph_tag, key, handle, x, y, w, z, b)) {
+      return;
+    }
+    // all heuristic configs
+    configs = get_configs_from_heuristics_fused(
+        handle,
+        opgraph_tag,
+        x,
+        y,
+        w,
+        z,
+        b,
+        alpha,
+        key,
+        padding,
+        stride,
+        dilation,
+        deterministic,
+        allow_tf32,
+        false,
+        true);
     if (try_configs_fused(configs, opgraph_tag, key, handle, x, y, w, z, b)) {
       return;
     }
@@ -1186,7 +1246,8 @@ void run_fused_conv(
         dilation,
         deterministic,
         allow_tf32,
-        true);
+        true,
+        false);
     if (try_configs_fused(configs, opgraph_tag, key, handle, x, y, w, z, b)) {
       return;
     }
