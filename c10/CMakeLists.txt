@@ -4,6 +4,11 @@ project(c10 CXX)
 set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include(GNUInstallDirs)
+if(NOT TORCH_INSTALL_LIB_DIR)
+  set(TORCH_INSTALL_LIB_DIR ${CMAKE_INSTALL_LIBDIR})
+endif()
+
 # Main build file for the C10 library.
 #
 # Note that the C10 library should maintain minimal dependencies - especially,
@@ -162,7 +167,7 @@ if(NOT BUILD_LIBTORCHLESS)
   # Note: for now, we will put all export path into one single Caffe2Targets group
   # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
   # individual libraries like libc10.so and libcaffe2.so are still self-contained.
-  install(TARGETS c10 EXPORT Caffe2Targets DESTINATION lib)
+  install(TARGETS c10 EXPORT Caffe2Targets DESTINATION ${TORCH_INSTALL_LIB_DIR})
 endif()
 
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
@@ -170,5 +175,5 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         FILES_MATCHING PATTERN "*.h")
 
 if(MSVC AND C10_BUILD_SHARED_LIBS)
-  install(FILES $<TARGET_PDB_FILE:c10> DESTINATION lib OPTIONAL)
+  install(FILES $<TARGET_PDB_FILE:c10> DESTINATION ${TORCH_INSTALL_LIB_DIR} OPTIONAL)
 endif()

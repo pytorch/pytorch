@@ -5,6 +5,11 @@
 include(../../cmake/public/utils.cmake)
 include(../../cmake/public/cuda.cmake)
 
+include(GNUInstallDirs)
+if(NOT TORCH_INSTALL_LIB_DIR)
+  set(TORCH_INSTALL_LIB_DIR ${CMAKE_INSTALL_LIBDIR})
+endif()
+
 # ---[ Configure macro file.
 set(C10_CUDA_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 # Probably have to do this :(
@@ -86,7 +91,7 @@ if(NOT BUILD_LIBTORCHLESS)
 # Note: for now, we will put all export path into one single Caffe2Targets group
 # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
 # individual libraries like libc10.so and libcaffe2.so are still self-contained.
-install(TARGETS c10_cuda EXPORT Caffe2Targets DESTINATION lib)
+install(TARGETS c10_cuda EXPORT Caffe2Targets DESTINATION ${TORCH_INSTALL_LIB_DIR})
 
 endif()
 
@@ -100,5 +105,5 @@ install(FILES ${CMAKE_BINARY_DIR}/c10/cuda/impl/cuda_cmake_macros.h
   DESTINATION include/c10/cuda/impl)
 
 if(MSVC AND C10_CUDA_BUILD_SHARED_LIBS)
-  install(FILES $<TARGET_PDB_FILE:c10_cuda> DESTINATION lib OPTIONAL)
+  install(FILES $<TARGET_PDB_FILE:c10_cuda> DESTINATION ${TORCH_INSTALL_LIB_DIR} OPTIONAL)
 endif()

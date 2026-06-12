@@ -4,6 +4,11 @@
 
 include(../../cmake/public/xpu.cmake)
 
+include(GNUInstallDirs)
+if(NOT TORCH_INSTALL_LIB_DIR)
+  set(TORCH_INSTALL_LIB_DIR ${CMAKE_INSTALL_LIBDIR})
+endif()
+
 if(NOT BUILD_LIBTORCHLESS)
   find_library(C10_XPU_LIB c10_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
 endif()
@@ -49,7 +54,7 @@ if(NOT BUILD_LIBTORCHLESS)
       $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
       $<INSTALL_INTERFACE:include>
       )
-  install(TARGETS c10_xpu EXPORT Caffe2Targets DESTINATION lib)
+  install(TARGETS c10_xpu EXPORT Caffe2Targets DESTINATION ${TORCH_INSTALL_LIB_DIR})
   set(C10_XPU_LIB c10_xpu)
   add_subdirectory(test)
 endif()
@@ -64,5 +69,5 @@ install(FILES ${CMAKE_BINARY_DIR}/c10/xpu/impl/xpu_cmake_macros.h
   DESTINATION include/c10/xpu/impl)
 
 if(MSVC AND C10_XPU_BUILD_SHARED_LIBS)
-  install(FILES $<TARGET_PDB_FILE:c10_xpu> DESTINATION lib OPTIONAL)
+  install(FILES $<TARGET_PDB_FILE:c10_xpu> DESTINATION ${TORCH_INSTALL_LIB_DIR} OPTIONAL)
 endif()

@@ -5,6 +5,11 @@
 
 include(../../cmake/public/utils.cmake)
 
+include(GNUInstallDirs)
+if(NOT TORCH_INSTALL_LIB_DIR)
+  set(TORCH_INSTALL_LIB_DIR ${CMAKE_INSTALL_LIBDIR})
+endif()
+
 if(BUILD_LIBTORCHLESS)
   find_library(C10_HIP_LIB c10_hip PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
 endif()
@@ -52,7 +57,7 @@ if(NOT BUILD_LIBTORCHLESS)
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
       $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
       $<INSTALL_INTERFACE:include>)
-  install(TARGETS c10_hip EXPORT Caffe2Targets DESTINATION lib)
+  install(TARGETS c10_hip EXPORT Caffe2Targets DESTINATION ${TORCH_INSTALL_LIB_DIR})
   set(C10_HIP_LIB c10_hip)
 endif()
 
