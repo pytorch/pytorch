@@ -634,5 +634,110 @@ class TestCustomAutogradFunctions(TestCase):
         self.assertFalse(y.requires_grad)
 
 
+class TestStructuredCodegen(TestCase):
+    """maximum.out and minimum.out are registered for openreg through torchgen
+    (gen_backend_stubs) with structured: true + use_out_as_primary: true; see
+    csrc/aten/openreg_native_functions.yaml and csrc/aten/OpenRegStructured.cpp.
+    Both reuse aten's native meta and only provide impl(). These exercise the
+    generated structured wrappers end to end. (openreg avoids define_meta so the
+    fixture never registers on the global aten Meta key -- see the scoped test below.)"""
+
+    def test_maximum_functional(self):
+        """Functional variant: out-as-primary allocates an out and reuses it."""
+        x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
+        y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
+        z = torch.maximum(x, y)
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.cpu(), torch.tensor([4.0, 5.0, 6.0]))
+
+    def test_maximum_out(self):
+        """Out variant: the wrapper redirects straight to the impl _out call."""
+        x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
+        y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
+        out = torch.empty(3, device="openreg")
+        ret = torch.maximum(x, y, out=out)
+        self.assertEqual(ret.cpu(), torch.tensor([4.0, 5.0, 6.0]))
+        self.assertEqual(out.cpu(), torch.tensor([4.0, 5.0, 6.0]))
+
+    def test_minimum_functional(self):
+        """Functional variant on a structured op: out-as-primary allocates an out
+        and reuses it. Broadcasting checks the native meta computed the shape."""
+        x = torch.tensor([[1.0, 5.0, 3.0]], device="openreg")  # (1, 3)
+        y = torch.tensor([[4.0], [2.0]], device="openreg")  # (2, 1)
+        z = torch.minimum(x, y)  # broadcasts to (2, 3)
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.shape, torch.Size([2, 3]))
+        self.assertEqual(z.cpu(), torch.tensor([[1.0, 4.0, 3.0], [1.0, 2.0, 2.0]]))
+
+    def test_minimum_out(self):
+        """Out variant: the wrapper drives op.meta() + op.impl()."""
+        x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
+        y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
+        out = torch.empty(3, device="openreg")
+        ret = torch.minimum(x, y, out=out)
+        self.assertEqual(ret.cpu(), torch.tensor([1.0, 2.0, 3.0]))
+        self.assertEqual(out.cpu(), torch.tensor([1.0, 2.0, 3.0]))
+
+    def test_define_meta_meta_override_is_scoped(self):
+        """A `define_meta` op registers its meta() on aten's device-agnostic global
+        Meta key, which torch.compile / FakeTensor shape propagation use (the generated
+        registration is covered by the gen_backend_stubs unit tests). openreg deliberately
+        does NOT register globally -- a static registration is permanent and would override
+        aten's meta for every device in the test process. Exercise the same mechanism with a
+        RAII-scoped registration: plugin -> verify FakeTensor routes through it -> plugout
+        (scope exit) -> verify it is gone, leaving aten's meta intact."""
+        import torch.library
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        hit = []
+
+        def override_meta(a, b):
+            hit.append(1)
+            return a.new_empty(torch.broadcast_shapes(a.shape, b.shape))
+
+        with torch.library._scoped_library("aten", "IMPL") as lib:  # plugin
+            lib.impl("minimum", override_meta, "Meta")
+            with FakeTensorMode() as fake_mode:
+                fx = fake_mode.from_tensor(torch.empty(1, 3))  # (1, 3)
+                fy = fake_mode.from_tensor(torch.empty(2, 1))  # (2, 1)
+                self.assertEqual(torch.minimum(fx, fy).shape, torch.Size([2, 3]))
+            self.assertTrue(hit, "FakeTensor did not route through the Meta override")
+
+        # plugout: scope exit unregisters; aten's meta is restored, no leak
+        hit.clear()
+        with FakeTensorMode() as fake_mode:
+            torch.minimum(
+                fake_mode.from_tensor(torch.empty(1, 3)),
+                fake_mode.from_tensor(torch.empty(2, 1)),
+            )
+        self.assertFalse(hit, "Meta override leaked after the scoped library closed")
+
+    # div.out is registered non-structured (out-as-primary only): the backend
+    # supplies div_out via TORCH_PRIVATEUSE1_FUNC and torchgen derives the functional
+    # and inplace variants from it.
+    def test_div_out_as_primary_functional(self):
+        """Functional variant: allocates an out and reuses it (no temp-copy)."""
+        x = torch.tensor([6.0, 8.0], device="openreg")
+        y = torch.tensor([2.0, 4.0], device="openreg")
+        z = torch.div(x, y)
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.cpu(), torch.tensor([3.0, 2.0]))
+
+    def test_div_out_as_primary_out(self):
+        """Out variant: wrapper redirects straight to the backend div_out."""
+        x = torch.tensor([6.0, 8.0], device="openreg")
+        y = torch.tensor([2.0, 4.0], device="openreg")
+        out = torch.empty(2, device="openreg")
+        torch.div(x, y, out=out)
+        self.assertEqual(out.cpu(), torch.tensor([3.0, 2.0]))
+
+    def test_div_out_as_primary_inplace(self):
+        """Inplace variant: derived from div_out, feeds self into the out slot."""
+        x = torch.tensor([6.0, 8.0], device="openreg")
+        y = torch.tensor([2.0, 4.0], device="openreg")
+        x.div_(y)
+        self.assertEqual(x.cpu(), torch.tensor([3.0, 2.0]))
+
+
 if __name__ == "__main__":
     run_tests()
