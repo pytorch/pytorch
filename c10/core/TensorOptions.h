@@ -151,9 +151,8 @@ struct C10_API TensorOptions {
 
   /// Constructs a `TensorOptions` object with the given device.
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
-  template <
-      typename T,
-      typename = std::enable_if_t<std::is_same_v<std::decay_t<T>, Device>>>
+  template <typename T>
+  requires std::is_same_v<std::decay_t<T>, Device>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -166,9 +165,8 @@ struct C10_API TensorOptions {
   /// NB: Ideally we only allow implicit constructors here. But there is no easy
   ///     way to detect them. So we have this one that allows explicit
   ///     constructors too.
-  template <
-      typename... Args,
-      typename = std::enable_if_t<std::is_constructible_v<Device, Args&&...>>>
+  template <typename... Args>
+  requires std::is_constructible_v<Device, Args&&...>
   /* implicit */ TensorOptions(Args&&... args)
       : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
@@ -657,6 +655,11 @@ inline DispatchKey computeDispatchKey(
         case c10::DeviceType::Metal:
           return DispatchKey::Metal;
         case c10::DeviceType::MKLDNN:
+          TORCH_CHECK_NOT_IMPLEMENTED(
+              false,
+              "The 'mkldnn' device type is deprecated and cannot be used "
+              "to allocate dense tensors. Please use a supported device type "
+              "instead.");
         case c10::DeviceType::OPENGL:
         case c10::DeviceType::OPENCL:
         case c10::DeviceType::IDEEP:
