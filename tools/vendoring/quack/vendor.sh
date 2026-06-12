@@ -208,9 +208,8 @@ apply_patch_dir() {
 }
 
 apply_patch_series() {
-    local dir=$1 line patch_name p
+    local dir=$1 line patch_name p seen_patches=""
     local series="$dir/series"
-    declare -A seen=()
     [[ -f "$series" ]] || die "missing patch series: $series"
     while IFS= read -r line || [[ -n "$line" ]]; do
         line=${line%%#*}
@@ -219,14 +218,17 @@ apply_patch_series() {
         [[ "$patch_name" == */* ]] && die "patch series entries must be filenames: $patch_name"
         [[ "$patch_name" == *.patch ]] || die "patch series entry must end in .patch: $patch_name"
         [[ -f "$dir/$patch_name" ]] || die "patch listed in $series not found: $patch_name"
-        [[ -z ${seen[$patch_name]+x} ]] || die "duplicate patch in $series: $patch_name"
-        seen[$patch_name]=1
+        if printf "%s" "$seen_patches" | grep -Fxq "$patch_name"; then
+            die "duplicate patch in $series: $patch_name"
+        fi
+        seen_patches="${seen_patches}${patch_name}"$'\n'
         apply_patch_file "$dir/$patch_name"
     done < "$series"
     for p in "$dir"/*.patch; do
         [[ -e "$p" ]] || continue
         patch_name=$(basename "$p")
-        [[ -n ${seen[$patch_name]+x} ]] || die "patch missing from $series: $patch_name"
+        printf "%s" "$seen_patches" | grep -Fxq "$patch_name" \
+            || die "patch missing from $series: $patch_name"
     done
 }
 

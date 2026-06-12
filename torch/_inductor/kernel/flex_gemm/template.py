@@ -166,7 +166,7 @@ class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
                     int(stride) for stride in tensor_meta.strides
                 ]
                 precompile_dtypes[name] = str(tensor_meta.dtype).removeprefix("torch.")
-        except (TypeError, ValueError):
+        except (TypeError, RuntimeError, ValueError):
             # TODO: Pick representative symbolic sizes so dynamic-shape kernels can still precompile.
             return None
         device_index = self.bmreq.output_tensor_meta.device.index or 0

@@ -656,7 +656,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         from torch._inductor.kernel.flex_gemm import runtime
 
-        configs = runtime.candidate_gemm_configs_for_device(a.device)[:1]
+        configs = runtime.candidate_gemm_configs_for_device(a.device)[:2]
         with mock.patch(
             "torch._inductor.kernel.flex_gemm.runtime.candidate_gemm_configs_for_device",
             return_value=configs,
@@ -729,7 +729,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         from torch._inductor.kernel.flex_gemm import runtime
 
-        configs = runtime.candidate_gemm_configs_for_device(a.device)[:1]
+        configs = runtime.candidate_gemm_configs_for_device(a.device)[:2]
         with mock.patch(
             "torch._inductor.kernel.flex_gemm.runtime.candidate_gemm_configs_for_device",
             return_value=configs,
