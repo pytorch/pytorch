@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
 project(headeronly CXX)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -35,5 +37,5 @@ install(FILES ${CMAKE_BINARY_DIR}/torch/headeronly/core/enum_tag.h
 
 if(NOT BUILD_LIBTORCHLESS)
   # ---[ Installation copied from c10/CMakeLists.txt
-  install(TARGETS headeronly EXPORT Caffe2Targets DESTINATION lib)
+  install(TARGETS headeronly EXPORT Caffe2Targets DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()

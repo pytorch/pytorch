@@ -1,3 +1,5 @@
+include(GNUInstallDirs)
+
 set(JIT_TEST_ROOT ${TORCH_ROOT}/test/cpp/jit)
 
 # Build separate libraries the define custom classes/operators used from our Python tests.
@@ -32,9 +34,9 @@ endif()
 target_link_libraries(backend_with_compiler torch)
 
 if(INSTALL_TEST)
-  install(TARGETS torchbind_test DESTINATION lib)
-  install(TARGETS jitbackend_test DESTINATION lib)
-  install(TARGETS backend_with_compiler DESTINATION lib)
+  install(TARGETS torchbind_test DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  install(TARGETS jitbackend_test DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  install(TARGETS backend_with_compiler DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
 # Build the cpp gtest binary containing the cpp-only tests.

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 project(c10 CXX)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -162,7 +164,7 @@ if(NOT BUILD_LIBTORCHLESS)
   # Note: for now, we will put all export path into one single Caffe2Targets group
   # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
   # individual libraries like libc10.so and libcaffe2.so are still self-contained.
-  install(TARGETS c10 EXPORT Caffe2Targets DESTINATION lib)
+  install(TARGETS c10 EXPORT Caffe2Targets DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
@@ -170,5 +172,5 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         FILES_MATCHING PATTERN "*.h")
 
 if(MSVC AND C10_BUILD_SHARED_LIBS)
-  install(FILES $<TARGET_PDB_FILE:c10> DESTINATION lib OPTIONAL)
+  install(FILES $<TARGET_PDB_FILE:c10> DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
 endif()
