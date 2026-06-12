@@ -62,9 +62,9 @@ def switch(
     Equivalent to: ``branches[index](*operands)`` with index in ``[0, len(branches))``.
 
     Args:
-        index (Union[int, torch.Tensor]): An int or single-element integer tensor in
-          ``[0, len(branches))``, indicating which branch to run. SymInt is also
-          accepted for use under tracing.
+        index (Union[int, torch.Tensor]): An int or single-element integer tensor
+          indicating which branch to run. Out-of-range values are clamped into
+          ``[0, len(branches))``.
 
         branches (Union[tuple[Callable, ...], list[Callable]]): Non-empty sequence of
           callables. Each must accept operands and return the same structure of outputs.
@@ -181,7 +181,7 @@ def trace_switch(proxy_mode, func_overload, index, branches, operands):
     flat_branch_outs = [pytree.arg_tree_leaves(*outs) for outs in branch_outs]
     for i, outs in enumerate(flat_branch_outs):
         if len(flat_branch_outs[0]) != len(outs):
-            raise torch._dynamo.exc.SwitchOpArgsMismatchError(
+            raise AssertionError(
                 f"Expected to return same number of outputs from all branches but got:"
                 f"\n  branch0 returns {len(flat_branch_outs[0])} item(s)"
                 f"\n  branch{i} returns {len(outs)} item(s)"
