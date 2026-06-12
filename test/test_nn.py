@@ -5959,6 +5959,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         self.assertEqual(theta_grad_cf, theta_grad_cl)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @set_default_dtype(torch.double)
     def test_grid_sample(self):
         # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,
