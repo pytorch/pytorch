@@ -3027,7 +3027,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
     ):
-        # TODO: we dont support input/weight backward split with torch.compile
+        # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3224,7 +3224,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
     ):
-        # TODO: we dont support input/weight backward split with torch.compile
+        # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3410,7 +3410,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
     ):
-        # TODO: we dont support input/weight backward split with torch.compile
+        # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(

@@ -1739,7 +1739,7 @@ def _advise_is_size(a: SymInt) -> None:
     max=Inf).  Instead of forcibly constraining a variable (and erroring if we
     failed to constrain it), it will simply advise us that a size is
     constrained in some way.  We will always defer a runtime assert for this
-    constraint if we cannot prove it at compile-time, but we we only
+    constraint if we cannot prove it at compile-time, but we only
     *sometimes* learn useful extra information at compile-time with this
     information.  This is in contrast to constrain_range_for_size, where if
     you don't call that on a fresh unbacked symint, chances are we will choke.

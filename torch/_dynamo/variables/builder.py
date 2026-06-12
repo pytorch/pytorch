@@ -1368,7 +1368,7 @@ class VariableBuilder:
             if not np:
                 raise AssertionError("numpy must be available for numpy tracing")
             if istype(value, types.MethodType):
-                # Dont guard on cython functions as they dont change ids
+                # Don't guard on cython functions as they don't change ids
                 if inspect.isfunction(value.__func__):
                     install_guard(
                         AttrSource(self.source, "__func__").make_guard(
@@ -2960,7 +2960,7 @@ class VariableBuilder:
             value, torch.distributed.tensor.DTensor
         )
         if not is_dtensor:
-            # We guard on the _local_tensor and the _spec, and therefore we dont
+            # We guard on the _local_tensor and the _spec, and therefore we don't
             # have to guard on the outer DTensor.
             self.install_guards(
                 functools.partial(

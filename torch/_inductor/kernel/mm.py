@@ -1011,7 +1011,7 @@ def tuned_scaled_mm_v2(
     _, is_nonzero = _is_static_problem(layout)
 
     if (
-        # We dont have triton lowerings for the MX variants yet
+        # We don't have triton lowerings for the MX variants yet
         is_single_level_scale
         and supported_recipe
         and scale_a[0].dtype == torch.float32

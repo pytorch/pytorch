@@ -2425,7 +2425,7 @@ class Module:
                     continue
 
                 # This is used to avoid copying uninitialized parameters into
-                # non-lazy modules, since they dont have the hook to do the checks
+                # non-lazy modules, since they don't have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.
                 is_param_lazy = torch.nn.parameter.is_lazy(param)
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
