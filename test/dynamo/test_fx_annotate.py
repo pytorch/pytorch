@@ -120,7 +120,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('get_attr', 'wrap_body_0', {'ac_sin': 0})
 [('placeholder', 'l_x_', {'ac_sin': 0}), ('call_function', 'sin', {'ac_sin': 0}), ('output', 'output', {'ac_sin': 0})]
 ('call_function', 'tag_activation_checkpoint', {'ac_sin': 0})
-('call_function', 'ac', {'ac_sin': 0})""",
+('call_function', 'getitem', {'ac_sin': 0})""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
