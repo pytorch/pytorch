@@ -2,8 +2,9 @@
 import functools
 import operator
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
@@ -95,7 +96,7 @@ class ShardingSpec(ABC):
 
 
 # Ops customized for a particular ShardingSpec.
-_CUSTOM_SHARDING_SPEC_OPS: Dict[str, Dict[Callable, Callable]] = {}
+_CUSTOM_SHARDING_SPEC_OPS: dict[str, dict[Callable, Callable]] = {}
 
 
 def _has_custom_op(sharding_spec, op):
@@ -148,7 +149,7 @@ class EnumerableShardingSpec(ShardingSpec):
             each shard. Note that none of the shards should overlap.
     """
 
-    shards: List[ShardMetadata]
+    shards: list[ShardMetadata]
 
     def __post_init__(self):
         if len(self.shards) == 0:
@@ -203,7 +204,7 @@ def _infer_sharding_spec_from_shards_metadata(shards_metadata):
     chunk_offset_list = []
     shard_size_list = []
     shard_offset_list = []
-    # collect local shard metadatas from the global sharded_tensor_metadata
+    # collect local shard metadata from the global sharded_tensor_metadata
     for shard_metadata in shards_metadata:  # type: ignore[attr-defined]
         placements.append(shard_metadata.placement)
         local_offsets = shard_metadata.shard_offsets

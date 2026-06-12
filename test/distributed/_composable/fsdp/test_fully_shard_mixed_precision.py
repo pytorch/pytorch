@@ -1,13 +1,15 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import dataclasses
 import functools
-from typing import Dict, List, Optional, Union
+from typing import Any, NamedTuple
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
@@ -22,38 +24,52 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     FSDPTest,
     FSDPTestMultiThread,
+    get_devtype,
     MLP,
     patch_reduce_scatter,
     reduce_scatter_with_assert,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    MI300_ARCH,
+    run_tests,
+    skipIfRocmArch,
+    skipIfRocmVersionLessThan,
+    TEST_HPU,
+)
+from torch.utils.checkpoint import checkpoint
+
+
+device_type = torch.device(get_devtype())
 
 
 class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.get_device_module(device_type).device_count())
 
     def _init_models_and_optims(
         self,
-        reshard_after_forward: Union[bool, int],
-        param_dtype: Optional[torch.dtype],
-        reduce_dtype: Optional[torch.dtype],
+        reshard_after_forward: bool | int,
+        param_dtype: torch.dtype | None,
+        reduce_dtype: torch.dtype | None,
         use_shard_placement_fn,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
-        ref_model = copy.deepcopy(model).cuda()
+        ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
-        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = -1
             largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
                 if dim_size > largest_dim_size:
                     largest_dim = dim
                     largest_dim_size = dim_size
-            assert largest_dim >= 0, f"{param.shape}"
+            if not (largest_dim >= 0):
+                raise AssertionError(
+                    f"Expected largest_dim >= 0, got {largest_dim} for {param.shape}"
+                )
             return Shard(largest_dim)
 
         mp_policy = MixedPrecisionPolicy(
@@ -81,6 +97,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             use_shard_placement_fn_vals.append(True)
         return use_shard_placement_fn_vals
 
+    @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_compute_dtype(self):
@@ -99,7 +116,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     def _test_compute_dtype(
         self,
         param_dtype: torch.dtype,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         use_shard_placement_fn: bool,
     ):
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
@@ -109,7 +126,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             use_shard_placement_fn=use_shard_placement_fn,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, param_dtype)
@@ -117,12 +134,12 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
-        predivide_factor, postdivide_factor = _get_gradient_divide_factors(
+        predivide_factor, postdivide_factor, _, _ = _get_gradient_divide_factors(
             self.process_group, all_reduce_group=None, reduce_dtype=param_dtype
         )
 
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device="cuda", dtype=param_dtype)
+        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
         for iter_idx in range(10):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             fsdp_loss = model(inp).sum()
@@ -142,8 +159,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 elif predivide_factor is None:
                     param.grad.div_(self.world_size)
                 output = torch.zeros_like(torch.chunk(param.grad, self.world_size)[0])
-                dist.reduce_scatter_tensor(output, param.grad)
-                dist.all_gather_into_tensor(param.grad, output)
+                dist.reduce_scatter_single(output, param.grad)
+                dist.all_gather_single(param.grad, output)
                 if postdivide_factor is not None and postdivide_factor > 1:
                     param.grad.div_(postdivide_factor)
             for param_fp32, param_bf16 in zip(
@@ -160,6 +177,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             self.assertEqual(fsdp_loss, ref_loss)
             check_sharded_parity(self, ref_model, model)
 
+    @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_reduce_dtype(self):
@@ -182,7 +200,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         )
 
     def _test_reduce_dtype_fp32_reduce(
-        self, reshard_after_forward: Union[bool, int], use_shard_placement_fn: bool
+        self, reshard_after_forward: bool | int, use_shard_placement_fn: bool
     ):
         if (
             self.world_size > 2
@@ -198,7 +216,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             use_shard_placement_fn=use_shard_placement_fn,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -207,7 +225,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device="cuda", dtype=param_dtype)
+        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
         for iter_idx in range(10):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             fsdp_loss = model(inp).sum()
@@ -237,7 +255,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     def _test_reduce_dtype_bf16_reduce(
-        self, reshard_after_forward: Union[bool, int], use_shard_placement_fn: bool
+        self, reshard_after_forward: bool | int, use_shard_placement_fn: bool
     ):
         param_dtype, reduce_dtype = torch.float32, torch.bfloat16
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
@@ -247,7 +265,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             use_shard_placement_fn=use_shard_placement_fn,
         )
         group = dist.distributed_c10d._get_default_group()
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -256,7 +274,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device="cuda", dtype=param_dtype)
+        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
         for iter_idx in range(10):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             fsdp_loss = model(inp).sum()
@@ -272,14 +290,12 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 # Use reduce-scatter -> all-gather to implement all-reduce
                 # since for world size >2, bf16 all-reduce and reduce-scatter
                 # have numeric differences
-                sharded_grad = funcol.reduce_scatter_tensor(
+                sharded_grad = funcol.reduce_scatter_single(
                     param_grad, scatter_dim=0, reduceOp="avg", group=group
                 )  # bf16 reduction
-                param.grad = funcol.all_gather_tensor(
+                param.grad = funcol.all_gather_single(
                     sharded_grad, gather_dim=0, group=group
-                ).to(
-                    param.dtype
-                )  # upcast to fp32
+                ).to(param.dtype)  # upcast to fp32
             ref_optim.step()  # fp32 optimizer step
 
             self.assertEqual(fsdp_loss, ref_loss)
@@ -307,7 +323,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         # To emulate the mixed precision implementation where forward/backward
         # compute use bf16 and optimizer uses fp32, we maintain both an fp32
         # and a bf16 copy of the reference model
-        ref_model = copy.deepcopy(model).cuda()
+        ref_model = copy.deepcopy(model).to(device_type)
         ref_model_compute = copy.deepcopy(ref_model).to(param_dtype)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for mlp in model:
@@ -318,7 +334,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             model, reshard_after_forward=reshard_after_forward, mp_policy=mp_policy
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -327,7 +343,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         torch.manual_seed(42 + self.rank + 1)
-        device = torch.device("cuda")
+        device = device_type
         # Train on the same input to avoid loss explosion
         num_microbatches = 4
         inp = torch.randn((2 * num_microbatches, 16), device=device, dtype=param_dtype)
@@ -339,7 +355,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 model.set_reshard_after_backward(
                     is_last_microbatch or reshard_after_forward
                 )
-                losses: List[torch.Tensor] = []
+                losses: list[torch.Tensor] = []
                 for _model in (ref_model_compute, model):
                     losses.append(
                         _model(microbatch_inps[microbatch_idx].detach()).sum()
@@ -379,6 +395,261 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             ):
                 ref_param_compute.detach().copy_(ref_param)
 
+    def _reduce_1d_partial_grads(
+        self, module: nn.Module, group: dist.ProcessGroup | None = None
+    ) -> None:
+        # The reference model is replicated and sees the full global batch, so
+        # its gradients are already the global sum. Dividing by world_size
+        # simulates the average that FSDP's all-reduce produces.
+        group = group or dist.distributed_c10d._get_default_group()
+        for param in module.parameters():
+            if param.grad is not None:
+                param.grad.div_(group.size())
+
+    @skip_if_lt_x_gpu(2)
+    def test_structured_input_output(self):
+        """
+        Tests numeric parity between FSDP and a reference model when using
+        structured (dataclass, nested dataclass, NamedTuple) activations
+        between FSDP-wrapped modules, with and without mixed precision.
+        """
+        self.run_subtests(
+            {
+                "container_type": ["dataclass", "nested_dataclass", "namedtuple"],
+                "mp_config": [
+                    (None, None),  # fp32
+                    (torch.bfloat16, torch.bfloat16),  # bf16 compute + reduce
+                    (torch.bfloat16, torch.float32),  # bf16 compute, fp32 reduce
+                ],
+            },
+            self._test_structured_input_output,
+        )
+
+    def _test_structured_input_output(
+        self,
+        container_type: str,
+        mp_config: tuple[torch.dtype | None, torch.dtype | None],
+    ):
+        param_dtype, reduce_dtype = mp_config
+
+        @dataclasses.dataclass
+        class DC:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        @dataclasses.dataclass
+        class Inner:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        @dataclasses.dataclass
+        class Outer:
+            inner: Inner
+            z: torch.Tensor
+
+        class TensorPair(NamedTuple):
+            x: torch.Tensor
+            y: torch.Tensor
+
+        class ContainerModule(nn.Module):
+            """Applies a linear layer to each tensor in the container."""
+
+            def __init__(self, ctype: str, dim: int):
+                super().__init__()
+                self.ctype = ctype
+                self._layer = nn.Linear(dim, dim)
+
+            def forward(self, inp: Any) -> Any:
+                if self.ctype == "dataclass":
+                    return DC(x=self._layer(inp.x), y=self._layer(inp.y))
+                elif self.ctype == "nested_dataclass":
+                    return Outer(
+                        inner=Inner(
+                            x=self._layer(inp.inner.x),
+                            y=self._layer(inp.inner.y),
+                        ),
+                        z=self._layer(inp.z),
+                    )
+                else:  # namedtuple
+                    return TensorPair(x=self._layer(inp.x), y=self._layer(inp.y))
+
+        class ToContainer(nn.Module):
+            """Converts a plain tensor into a structured container."""
+
+            def __init__(self, ctype: str):
+                super().__init__()
+                self.ctype = ctype
+
+            def forward(self, x: torch.Tensor) -> Any:
+                # clone() so each field has an independent autograd path
+                if self.ctype == "dataclass":
+                    return DC(x=x, y=x.clone())
+                elif self.ctype == "nested_dataclass":
+                    return Outer(inner=Inner(x=x, y=x.clone()), z=x.clone())
+                else:  # namedtuple
+                    return TensorPair(x=x, y=x.clone())
+
+        class FromContainer(nn.Module):
+            """Extracts and sums tensors from a structured container."""
+
+            def __init__(self, ctype: str):
+                super().__init__()
+                self.ctype = ctype
+
+            def forward(self, inp: Any) -> torch.Tensor:
+                if self.ctype == "nested_dataclass":
+                    return inp.inner.x + inp.inner.y + inp.z
+                else:
+                    return inp.x + inp.y
+
+        torch.manual_seed(42)
+        dim = 16
+        local_batch_size = 2
+        global_batch_size = self.world_size * local_batch_size
+
+        model = nn.Sequential(
+            ToContainer(container_type),
+            ContainerModule(container_type, dim),
+            ContainerModule(container_type, dim),
+            FromContainer(container_type),
+        )
+        ref_model = copy.deepcopy(model).to(device_type)
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=param_dtype, reduce_dtype=reduce_dtype
+        )
+        for module in model:
+            fully_shard(module, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        if param_dtype is not None:
+            # Maintain a bf16 copy for compute, fp32 copy for optimizer
+            ref_model_compute = copy.deepcopy(ref_model).to(param_dtype)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(1)  # same on all ranks
+        for iter_idx in range(10):
+            global_inp = torch.rand((global_batch_size, dim), device=device_type.type)
+            local_inp = global_inp[
+                self.rank * local_batch_size : (self.rank + 1) * local_batch_size
+            ].detach()
+
+            # FSDP forward/backward
+            optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            fsdp_loss = model(local_inp).sum()
+            fsdp_loss.backward()
+            optim.step()
+
+            # Ref forward/backward
+            ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            if param_dtype is not None:
+                ref_loss = ref_model_compute(global_inp.to(param_dtype)).sum()
+                ref_loss.backward()
+                # Simulate gradient reduction matching FSDP's behavior
+                if reduce_dtype is not None and reduce_dtype != param_dtype:
+                    # Cast grads to reduce_dtype, all-reduce, divide
+                    for p in ref_model_compute.parameters():
+                        p.grad.data = p.grad.to(reduce_dtype)
+                        dist.all_reduce(p.grad)
+                        p.grad.div_(self.world_size)
+                else:
+                    self._reduce_1d_partial_grads(ref_model_compute)
+                for p_fp32, p_compute in zip(
+                    ref_model.parameters(), ref_model_compute.parameters()
+                ):
+                    p_fp32.grad = p_compute.grad.to(p_fp32.dtype)
+                    p_compute.grad = None
+                ref_optim.step()
+                for p_fp32, p_compute in zip(
+                    ref_model.parameters(), ref_model_compute.parameters()
+                ):
+                    p_compute.detach().copy_(p_fp32)
+            else:
+                ref_loss = ref_model(global_inp).sum()
+                ref_loss.backward()
+                self._reduce_1d_partial_grads(ref_model)
+                ref_optim.step()
+
+            dist.all_reduce(fsdp_loss)  # partial -> replicated
+            self.assertEqual(fsdp_loss, ref_loss)
+            # bf16 gradient accumulation introduces drift beyond default
+            # fp32 tolerances, so only check full param/grad parity for fp32.
+            if param_dtype is None:
+                check_sharded_parity(self, ref_model, model)
+
+
+class TestFullyShardMixedPrecisionJVP(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_no_warmup_jvp_reshard_after_forward_false(self):
+        dtype = torch.bfloat16
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size,),
+            mesh_dim_names=("fsdp",),
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=dtype,
+            reduce_dtype=torch.float32,
+            cast_forward_inputs=True,
+        )
+
+        with torch.device("meta"):
+            enc = nn.Linear(128, 256, bias=False)
+            dec = nn.Linear(256, 320, bias=False)
+
+        for module in (enc, dec):
+            fully_shard(
+                module,
+                mesh=mesh,
+                mp_policy=mp_policy,
+                reshard_after_forward=False,
+            )
+
+        gen = torch.Generator(device_type.type)
+        for idx, module in enumerate((enc, dec)):
+            module.to_empty(device=device_type.type)
+            with torch.no_grad():
+                module.weight.normal_(
+                    std=module.in_features**-0.5,
+                    generator=gen.manual_seed(42 + idx),
+                )
+
+        x = torch.randn(
+            (128,),
+            device=device_type.type,
+            dtype=dtype,
+            generator=gen.manual_seed(0),
+        )
+        primal = torch.randn(
+            (320,),
+            device=device_type.type,
+            dtype=dtype,
+            generator=gen.manual_seed(1),
+            requires_grad=True,
+        )
+        tangent = torch.randn(
+            (320,),
+            device=device_type.type,
+            dtype=dtype,
+            generator=gen.manual_seed(2),
+        )
+        e = enc(x)
+
+        def fn(unused: torch.Tensor) -> torch.Tensor:
+            return dec(e)
+
+        output, tangent_output = torch.func.jvp(fn, (primal,), (tangent,))
+
+        self.assertEqual(output.shape, (320,))
+        self.assertEqual(output.dtype, dtype)
+        self.assertEqual(tangent_output, torch.zeros_like(output))
+
 
 class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
     @property
@@ -387,15 +658,15 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_float16_on_one_submodule(self):
-        x = torch.zeros(2, 100, device="cuda")
+        x = torch.zeros(2, 100, device=device_type)
 
         # Subtest 1: use fp16 on the second child submodule -- does not require
         # any additional casting logic
-        forward_inputs: Dict[str, nn.Module] = {}
+        forward_inputs: dict[str, nn.Module] = {}
         model = SaveForwardInputsModel(
             forward_inputs,
             cast_forward_inputs=False,
-        ).cuda()
+        ).to(device_type)
         fully_shard(model.c2, mp_policy=MixedPrecisionPolicy(param_dtype=torch.float16))
         fully_shard(model)
         model(x).sum().backward()
@@ -405,10 +676,10 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
         # Subtest 2: use fp16 on the second child module, where the user module
         # owns the cast
-        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        forward_inputs: dict[nn.Module, torch.Tensor] = {}
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=True
-        ).cuda()
+        ).to(device_type)
         fully_shard(
             model.c2,
             mp_policy=MixedPrecisionPolicy(
@@ -423,10 +694,10 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
         # Subtest 3: use fp16 on the first child module and specify its output
         # dtype so that the second child module does not need to cast
-        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        forward_inputs: dict[nn.Module, torch.Tensor] = {}
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=False
-        ).cuda()
+        ).to(device_type)
         fully_shard(
             model.c1,
             mp_policy=MixedPrecisionPolicy(
@@ -448,7 +719,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
     def _test_submodules_with_external_inputs(self, enable_submodule_cast: bool):
         class ToyModule(nn.Module):
-            def __init__(self, forward_inputs: Dict[str, torch.Tensor]) -> None:
+            def __init__(self, forward_inputs: dict[str, torch.Tensor]) -> None:
                 super().__init__()
                 self.l = nn.Linear(100, 100)
                 self.forward_inputs = forward_inputs
@@ -459,7 +730,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
                 return self.l(x)
 
         class ToyModel(nn.Module):
-            def __init__(self, forward_inputs: Dict[str, torch.Tensor]) -> None:
+            def __init__(self, forward_inputs: dict[str, torch.Tensor]) -> None:
                 super().__init__()
                 self.l1 = nn.Linear(100, 100)
                 self.l2 = ToyModule(forward_inputs)
@@ -468,13 +739,13 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 self.forward_inputs["model_input_x"] = x
                 y = torch.ones(
-                    2, 100, device="cuda", dtype=torch.float32
+                    2, 100, device=device_type.type, dtype=torch.float32
                 )  # external input
                 return self.l2(self.l1(x), y)
 
-        forward_inputs: Dict[str, torch.Tensor] = {}
-        model = ToyModel(forward_inputs).cuda()
-        x = torch.zeros(2, 100, device="cuda", dtype=torch.float32)
+        forward_inputs: dict[str, torch.Tensor] = {}
+        model = ToyModel(forward_inputs).to(device_type)
+        x = torch.zeros(2, 100, device=device_type.type, dtype=torch.float32)
         fully_shard(
             model.l2,
             mp_policy=MixedPrecisionPolicy(
@@ -494,12 +765,95 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         )
 
     @skip_if_lt_x_gpu(1)
+    @skipIfRocmArch(MI300_ARCH)  # https://github.com/pytorch/pytorch/issues/182988
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_checkpoint_recompute_casts_forward_inputs(self):
+        self._test_checkpoint_recompute_casts(
+            recompute_cast="input",
+        )
+
+    @skip_if_lt_x_gpu(1)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_checkpoint_recompute_casts_outputs(self):
+        self._test_checkpoint_recompute_casts(
+            recompute_cast="output",
+        )
+
+    def _test_checkpoint_recompute_casts(self, recompute_cast: str):
+        class RecordingLinear(nn.Linear):
+            def __init__(self) -> None:
+                super().__init__(1, 1)
+                self.input_dtypes: list[torch.dtype] = []
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.input_dtypes.append(x.dtype)
+                return super().forward(x)
+
+        class Model(nn.Module):
+            def __init__(self, checkpoint_input_dtype: torch.dtype) -> None:
+                super().__init__()
+                self.linear1 = RecordingLinear()
+                self.checkpoint_input_dtype = checkpoint_input_dtype
+                self.linear1_output_dtypes: list[torch.dtype] = []
+
+            def checkpointed_linear1(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.linear1(x)
+                self.linear1_output_dtypes.append(x.dtype)
+                return x
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = x.to(dtype=self.checkpoint_input_dtype)
+                x = checkpoint(
+                    self.checkpointed_linear1,
+                    x,
+                    use_reentrant=False,
+                    early_stop=False,
+                )
+                return x.float().sum()
+
+        if recompute_cast == "input":
+            checkpoint_input_dtype = torch.float32
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.bfloat16,
+            )
+        elif recompute_cast == "output":
+            checkpoint_input_dtype = torch.bfloat16
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.bfloat16,
+                output_dtype=torch.float32,
+                cast_forward_inputs=False,
+            )
+        else:
+            raise AssertionError(f"Unknown recompute_cast: {recompute_cast}")
+
+        torch.manual_seed(42)
+        model = Model(checkpoint_input_dtype).to(device_type)
+        fully_shard(model.linear1, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        inp = torch.randn(8, 1, device=device_type.type)
+        model(inp).backward()
+        if recompute_cast == "input":
+            self.assertEqual(
+                model.linear1.input_dtypes,
+                [torch.bfloat16, torch.bfloat16],
+            )
+        else:
+            self.assertEqual(
+                model.linear1_output_dtypes,
+                [torch.float32, torch.float32],
+            )
+
+    @skip_if_lt_x_gpu(1)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_norm_modules_bf16(self):
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
         self._test_norm_modules(mp_policy)
 
     @skip_if_lt_x_gpu(1)
+    @skipIfRocmArch(MI300_ARCH)  # https://github.com/pytorch/pytorch/issues/182988
     def test_norm_modules_fp16(self):
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.float16)
         self._test_norm_modules(mp_policy)
@@ -527,9 +881,15 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
         for module in (model[0], model[1], model[2], model):
             fully_shard(module, mp_policy=mp_policy)
-        with self.assertRaisesRegex(RuntimeError, "Expected running_mean to have type"):
-            # Errors in batch norm 2D backward
+        if TEST_HPU:
             inner(model, torch.randn((3, 1, 9, 9)))
+        else:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected running_mean to have type",  # Error not seen on HPUs and hence it can be skipped
+            ):
+                # Errors in batch norm 2D backward
+                inner(model, torch.randn((3, 1, 9, 9)))
 
         # Batch norm 2D: cast buffers down to lower precision
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
@@ -547,6 +907,39 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         for module in (model[0], model[2], model):
             fully_shard(module, mp_policy=mp_policy)
         inner(model, torch.randn((3, 1, 9, 9)))
+
+    @skip_if_lt_x_gpu(1)
+    def test_clamp_reduce_dtype(self):
+        # Initialize the model directly in bf16
+        init_dtype = torch.bfloat16
+        model = nn.Sequential(
+            nn.Linear(32, 32, dtype=init_dtype),
+            nn.Linear(32, 32, dtype=init_dtype),
+        ).to(device_type.type)
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        # Check that we did not clamp the reduce dtype
+        self.assertEqual(mp_policy.reduce_dtype, torch.bfloat16)
+        for module in model:
+            fully_shard((module), mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        # Check that the reduce-scatter runs in bf16 even after we change the
+        # model from bf16 to fp32
+        model.to(torch.float32)
+        orig_reduce_scatter = dist.reduce_scatter_single
+
+        def assert_fn(output: torch.Tensor):
+            self.assertEqual(output.dtype, torch.bfloat16)
+
+        reduce_scatter = functools.partial(
+            reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
+        )
+        with patch_reduce_scatter(reduce_scatter):
+            inp = torch.randn((4, 32), device=device_type.type)
+            loss = model(inp).sum()
+            loss.backward()
 
 
 if __name__ == "__main__":

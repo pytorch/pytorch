@@ -9,7 +9,7 @@
 
 namespace at::functorch {
 
-Tensor moveBatchDimToFront(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim) {
+Tensor moveBatchDimToFront(Tensor tensor, std::optional<int64_t> maybe_batch_dim) {
   if (!maybe_batch_dim.has_value()) {
     return tensor;
   }
@@ -199,7 +199,7 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
   tensor_ = maybePadToLogicalRank(tensor_, tensor_batch_dim, max_logical_rank);
   other_ = maybePadToLogicalRank(other_, other_batch_dim, max_logical_rank);
 
-  return std::make_tuple(tensor_, other_);
+  return std::make_tuple(std::move(tensor_), std::move(other_));
 }
 
 } // namespace at::functorch

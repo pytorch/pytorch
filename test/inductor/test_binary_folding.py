@@ -24,7 +24,6 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     copy_tests,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import skipCUDAIf
 
 
@@ -41,7 +40,16 @@ class BinaryFoldingTemplate(TestCase):
     @skipCUDAIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
     def test_conv_binary_folding(self):
         @torch.no_grad()
-        def test_conv_fusion(use_bias, module, op, scalar, add_tensor, expect_success):
+        def test_conv_fusion(
+            use_bias,
+            module,
+            op,
+            scalar,
+            add_tensor,
+            expect_success,
+            rtol=None,
+            atol=None,
+        ):
             class ConvOp(nn.Module):
                 __constants__ = ["use_scalar"]
 
@@ -73,9 +81,9 @@ class BinaryFoldingTemplate(TestCase):
             out_optimized = torch.compile(mod_eager)
 
             inps = [4, 3, 4]
-            if module == nn.Conv2d:
+            if module is nn.Conv2d:
                 inps.append(inps[-1])
-            if module == nn.Conv3d:
+            if module is nn.Conv3d:
                 inps.append(inps[-1])
                 inps.append(inps[-1])
 
@@ -83,7 +91,7 @@ class BinaryFoldingTemplate(TestCase):
             inp = torch.rand(inps).to(self.device)
             out_eager = mod_eager(inp)
             out_optimized = out_optimized(inp)
-            self.assertEqual(out_optimized, out_eager)
+            self.assertEqual(out_optimized, out_eager, rtol=rtol, atol=atol)
             if expect_success:
                 self.assertEqual(counters["inductor"]["binary_folding"], 1)
             else:
@@ -138,6 +146,12 @@ class BinaryFoldingTemplate(TestCase):
                 False,
                 add_tensor=torch.tensor([2]).to(torch.float64).to(self.device),
                 expect_success=False,
+                # This test is for float32 conv fusion with different dtype, like float64,
+                # which will not be fused. The tolerance of float64 is too tight
+                # for float32 conv post fusion with float64 tensor. Will relax the tolerance
+                # for this case.
+                rtol=1.3e-6,
+                atol=1e-5,
             )
 
     @inductor_config.patch({"freezing": True})
@@ -181,9 +195,9 @@ class BinaryFoldingTemplate(TestCase):
             )
 
             inps = [4, 3, 4]
-            if module[0] == nn.Conv2d:
+            if module[0] is nn.Conv2d:
                 inps.append(inps[-1])
-            if module[0] == nn.Conv3d:
+            if module[0] is nn.Conv3d:
                 inps.append(inps[-1])
                 inps.append(inps[-1])
 
@@ -331,7 +345,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(BinaryFoldingTemplate, FreezingCpuTests, "cpu")
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_GPU:
 
     class FreezingGpuTests(TestCase):
         common = check_model_gpu
