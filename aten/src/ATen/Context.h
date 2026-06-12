@@ -401,6 +401,9 @@ class TORCH_API Context {
   bool allowFP16AccumulationCuBLAS() const;
   void setAllowFP16AccumulationCuBLAS(bool /*b*/);
   bool rocmAllowGroupGemmCk() const;
+  bool preferCublasltGroupedGemm() const {
+    return c10::utils::check_env("TORCH_GROUPED_MM_PREFER_CUBLASLT") == true;
+  }
 
   // Matmuls can use a so-called "persistent" kernel which launches one CUDA
   // block for each SM on the GPU, and each block then iterates over multiple

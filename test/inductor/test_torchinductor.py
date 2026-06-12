@@ -73,6 +73,7 @@ from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -18789,7 +18790,23 @@ if RUN_GPU:
         @requires_cuda_and_triton
         @unittest.skipIf(TEST_WITH_ROCM, "no grouped_mm support")
         @config.patch(implicit_fallbacks=True)
-        def test_grouped_mm(self):
+        @parametrize("backend", ["cublaslt", "cutlass"])
+        def test_grouped_mm(self, backend):
+            if backend == "cublaslt":
+                if _get_torch_cuda_version() < (13, 2):
+                    self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+                sm_major = torch.cuda.get_device_capability()[0]
+                if sm_major < 9 or sm_major >= 12:
+                    self.skipTest("cublaslt grouped gemm requires SM 9.0-11.0")
+                if sm_major == 9 and _get_torch_cuda_version() < (13, 3):
+                    self.skipTest(
+                        "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3"
+                    )
+                os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "1"
+            else:
+                os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "0"
+            self.addCleanup(os.environ.pop, "TORCH_GROUPED_MM_PREFER_CUBLASLT", None)
+
             @torch.compile(fullgraph=True)
             def f(a, b, offs, out_dtype):
                 return F.grouped_mm(

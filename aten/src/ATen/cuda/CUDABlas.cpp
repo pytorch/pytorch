@@ -399,6 +399,37 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
     TORCH_CUDABLAS_CHECK(::cublasLtMatmulPreferenceSetAttribute(descriptor(), attr, &value, sizeof(T)));
   }
 };
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+class CuBlasLtGroupedMatrixLayout
+    : public at::cuda::blas::CuBlasLtDescriptor<
+          cublasLtMatrixLayoutOpaque_t, &cublasLtMatrixLayoutDestroy> {
+ public:
+  CuBlasLtGroupedMatrixLayout(
+      cudaDataType_t type,
+      int group_count,
+      const void* rows_array,
+      const void* cols_array,
+      const void* ld_array,
+      bool t,
+      bool use_int64) {
+    cublasLtMatrixLayout_t raw = nullptr;
+    TORCH_CUDABLAS_CHECK(cublasLtGroupedMatrixLayoutCreate(
+        &raw, type, group_count, t ? cols_array : rows_array, t ? rows_array : cols_array, ld_array));
+    descriptor_.reset(raw);
+    if (use_int64) {
+      setAttribute(CUBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH, CUBLASLT_INTEGER_WIDTH_64);
+      setAttribute(CUBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH, CUBLASLT_INTEGER_WIDTH_64);
+    }
+  }
+  template <typename V>
+  void setAttribute(cublasLtMatrixLayoutAttribute_t attr, const V value) {
+    TORCH_CUDABLAS_CHECK(
+        cublasLtMatrixLayoutSetAttribute(descriptor(), attr, &value, sizeof(V)));
+  }
+};
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+
 } // namespace
 
 
@@ -2445,6 +2476,122 @@ void int8_gemm(
     _syncCurrentWithCarveoutStream(stream, false);
   }
 #endif
+}
+
+void grouped_gemm(
+    char transa,
+    char transb,
+    const void *mArrayDev,
+    int64_t avgM,
+    const void *nArrayDev,
+    int64_t avgN,
+    const void *kArrayDev,
+    int64_t avgK,
+    const int64_t *alphaArrayDev,
+    const float *alphaScalar,
+    ScalarType input_dtype,
+    const int64_t *APtrArrayDev,
+    const void *ldaArrayDev,
+    const int64_t *BPtrArrayDev,
+    const void *ldbArrayDev,
+    const int64_t *betaArrayDev,
+    const float *betaScalar,
+    ScalarType result_dtype,
+    const int64_t *CPtrArrayDev,
+    const void *ldcArrayDev,
+    int64_t *DPtrArrayDev,
+    const void *lddArrayDev,
+    int batchCount,
+    bool use_int64_dims) {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  const bool sm90 = prop->major == 9;
+  if (sm90) {
+    TORCH_CHECK(CUBLAS_VERSION >= 130401 && cublasLtGetVersion() >= 130401,
+        "grouped cublasLtMatmul on SM 9.0 requires cuBLAS >= 13.4.1 (CUDA Toolkit 13.2 Update 1)");
+  }
+  TORCH_CHECK(prop->major >= 9 && prop->major < 12, "grouped cublasLtMatmul requires SM 9.0-11.0");
+
+  const auto computeType = CUBLAS_COMPUTE_32F;
+  const auto scaleType = CUDA_R_32F;
+  const auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
+  const int64_t alphaBatchStride = sm90 ? 0 : 1;
+  const int64_t betaBatchStride = sm90 ? 0 : 1;
+
+  cublasOperation_t opa = _cublasOpFromChar(transa);
+  cublasOperation_t opb = _cublasOpFromChar(transb);
+
+  CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, opa);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, opb);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE, alphaBatchStride);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE, betaBatchStride);
+
+  CuBlasLtGroupedMatrixLayout Adesc(ScalarTypeToCudaDataType(input_dtype), batchCount, mArrayDev, kArrayDev, ldaArrayDev, opa != CUBLAS_OP_N, use_int64_dims);
+  CuBlasLtGroupedMatrixLayout Bdesc(ScalarTypeToCudaDataType(input_dtype), batchCount, kArrayDev, nArrayDev, ldbArrayDev, opb != CUBLAS_OP_N, use_int64_dims);
+  CuBlasLtGroupedMatrixLayout Cdesc(ScalarTypeToCudaDataType(result_dtype), batchCount, mArrayDev, nArrayDev, ldcArrayDev, false, use_int64_dims);
+  CuBlasLtGroupedMatrixLayout Ddesc(ScalarTypeToCudaDataType(result_dtype), batchCount, mArrayDev, nArrayDev, lddArrayDev, false, use_int64_dims);
+
+  CuBlasLtMatmulPreference preference;
+  auto ltworkspace = CublasLtWorkspace();
+  auto stream = at::cuda::getCurrentCUDAStream();
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS, avgM);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS, avgN);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM, avgK);
+
+  cublasLtMatmulHeuristicResult_t heuristicResult = {};
+  int returnedResult = 0;
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
+
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+      ltHandle,
+      computeDesc.descriptor(),
+      Adesc.descriptor(),
+      Bdesc.descriptor(),
+      Cdesc.descriptor(),
+      Ddesc.descriptor(),
+      preference.descriptor(),
+      1,
+      &heuristicResult,
+      &returnedResult));
+  if (returnedResult == 0) {
+    TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
+  }
+
+  // When alphaBatchStride=0 (SM 9.0), alpha/beta are single device scalars.
+  // When alphaBatchStride=1 (SM 10.0+), alpha/beta are per-group pointer arrays.
+  const void* alpha = alphaBatchStride ? static_cast<const void*>(alphaArrayDev) : static_cast<const void*>(alphaScalar);
+  const void* beta = betaBatchStride ? static_cast<const void*>(betaArrayDev) : static_cast<const void*>(betaScalar);
+
+  cublasStatus_t cublasStatus = cublasLtMatmul(
+    ltHandle,
+    computeDesc.descriptor(),
+    alpha,
+    APtrArrayDev,
+    Adesc.descriptor(),
+    BPtrArrayDev,
+    Bdesc.descriptor(),
+    beta,
+    CPtrArrayDev,
+    Cdesc.descriptor(),
+    DPtrArrayDev,
+    Ddesc.descriptor(),
+    &heuristicResult.algo,
+    ltworkspace.ptr,
+    ltworkspace.size,
+    stream);
+
+  TORCH_CHECK(
+      cublasStatus == CUBLAS_STATUS_SUCCESS,
+      "CUDA error: ",
+      at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
+      " when calling grouped cublasLtMatmul");
+  return;
+#else
+  TORCH_CHECK(false, "grouped cublasLtMatmul requires CUDA >= 13.2 and is not supported on ROCm. Current build does not meet these requirements.");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
 }
 
 template <>
