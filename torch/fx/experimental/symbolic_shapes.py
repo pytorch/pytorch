@@ -94,7 +94,7 @@ from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import CppPrinter, PythonPrinter
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import try_solve
-from torch.utils._sympy.symbol import make_symbol, symbol_is_type, SymT
+from torch.utils._sympy.symbol import make_symbol, prefix_str, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import (
     bound_sympy,
     SymPyValueRangeAnalysis,
@@ -8744,13 +8744,27 @@ class ShapeEnv:
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
 
-            # TODO: Do this in a way that is less janky than int(s.name[1:])
+            # TODO: Do this in a way that avoids recovering the symbol's
+            # creation index from its name.
+            def unbacked_symbol_sort_key(s: sympy.Symbol) -> tuple[int, str]:
+                for symbol_type in (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT):
+                    if symbol_is_type(s, symbol_type):
+                        return (
+                            int(s.name[len(prefix_str[symbol_type]) :]),
+                            prefix_str[symbol_type],
+                        )
+                raise AssertionError(f"expected unbacked symbol, got {s}")
+
             cands = sorted(
-                (s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)),
-                key=lambda s: int(s.name[1:]),
+                (
+                    s
+                    for s in expr.free_symbols
+                    if symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+                ),
+                key=unbacked_symbol_sort_key,
             )
             # Is None when prefer_deferred_runtime_asserts_over_guards=True
-            # and the guard in question has no unbacked SymInts in front
+            # and the guard in question has no unbacked symbols in front
             ix = cands[-1] if cands else None
             self.deferred_runtime_asserts.setdefault(ix, []).append(ra)
             self.axioms.update(dict(self.get_implications(self.simplify(expr))))
