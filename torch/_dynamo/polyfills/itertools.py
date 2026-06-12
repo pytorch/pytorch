@@ -21,6 +21,7 @@ __all__ = [
     "accumulate",
     "chain",
     "chain_from_iterable",
+    "combinations",
     "combinations_with_replacement",
     "compress",
     "cycle",
@@ -92,6 +93,38 @@ def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
 
 
 chain.from_iterable = chain_from_iterable  # type: ignore[attr-defined]
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.combinations
+@substitute_in_graph(itertools.combinations, is_embedded_type=True)  # type: ignore[arg-type]
+def combinations(iterable: Iterable[_T], r: int, /) -> Iterator[tuple[_T, ...]]:
+    pool = tuple(iterable)
+    n = len(pool)
+
+    if r < 0:
+        raise ValueError("r must be non-negative")
+
+    def _combinations() -> Iterator[tuple[_T, ...]]:
+        if r > n:
+            return
+
+        indices = list(range(r))
+        yield tuple(pool[i] for i in indices)
+
+        while True:
+            for i in reversed(range(r)):
+                if indices[i] != i + n - r:
+                    break
+            else:
+                return
+
+            indices[i] += 1
+            for j in range(i + 1, r):
+                indices[j] = indices[j - 1] + 1
+
+            yield tuple(pool[i] for i in indices)
+
+    return _combinations()
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.compress
