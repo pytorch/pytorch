@@ -402,6 +402,7 @@ def _save_raw_tensors(
     directory: str,
     filename_prefix: str,
     idx: int,
+    use_safetensors: bool = False,
 ) -> int:
     """Save deduplicated raw tensor bytes and update config. Returns updated index."""
     if not raw_items:
@@ -415,8 +416,22 @@ def _save_raw_tensors(
         complete_tensor = get_complete_tensor(group, weights_dict)
 
         path_name = f"{filename_prefix}{idx}"
+        if use_safetensors:
+            path_name += ".safetensors"
         archive_path = os.path.join(directory, path_name)
-        tensor_bytes = _get_raw_tensor_bytes(complete_tensor)
+        
+        if use_safetensors:
+            try:
+                import safetensors.torch
+            except ImportError as e:
+                raise ImportError(
+                    "safetensors package is required to save in safetensors format."
+                ) from e
+            contiguous_tensor = complete_tensor.contiguous()
+            tensor_bytes = safetensors.torch.save({"storage": contiguous_tensor})
+        else:
+            tensor_bytes = _get_raw_tensor_bytes(complete_tensor)
+            
         archive_writer.write_bytes(archive_path, tensor_bytes)
         idx += 1
 
@@ -437,6 +452,7 @@ def _package_state_dict(
     exported_program: ExportedProgram,
     archive_writer: PT2ArchiveWriter,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    use_safetensors: bool = False,
 ) -> schema.PayloadConfig:
     weights_config: dict[str, schema.PayloadMeta] = {}
 
@@ -474,6 +490,7 @@ def _package_state_dict(
         WEIGHTS_DIR,
         WEIGHT_FILENAME_PREFIX,
         idx,
+        use_safetensors=use_safetensors,
     )
 
     return schema.PayloadConfig(config=weights_config)
@@ -484,6 +501,7 @@ def _package_constants(
     exported_program: ExportedProgram,
     archive_writer: PT2ArchiveWriter,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    use_safetensors: bool = False,
 ) -> schema.PayloadConfig:
     constants_config: dict[str, schema.PayloadMeta] = {}
 
@@ -535,6 +553,7 @@ def _package_constants(
         CONSTANTS_DIR,
         TENSOR_CONSTANT_FILENAME_PREFIX,
         tensor_idx,
+        use_safetensors=use_safetensors,
     )
 
     # ScriptObjects use the torchbind-aware pickler (zip-archive format,
@@ -581,6 +600,7 @@ def _package_exported_programs(
     exported_programs: ExportedProgram | dict[str, ExportedProgram] | None,
     opset_version: dict[str, int] | None = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    use_safetensors: bool = False,
 ) -> None:
     if exported_programs is None:
         return
@@ -595,13 +615,13 @@ def _package_exported_programs(
 
     for model_name, ep in exported_programs.items():
         weights_config = _package_state_dict(
-            model_name, ep, archive_writer, pickle_protocol
+            model_name, ep, archive_writer, pickle_protocol, use_safetensors=use_safetensors
         )
         weights_config_file = WEIGHTS_CONFIG_FILENAME_FORMAT.format(model_name)
         _package_payload_config(archive_writer, weights_config, weights_config_file)
 
         constants_config = _package_constants(
-            model_name, ep, archive_writer, pickle_protocol
+            model_name, ep, archive_writer, pickle_protocol, use_safetensors=use_safetensors
         )
         constants_config_file = CONSTANTS_CONFIG_FILENAME_FORMAT.format(model_name)
         _package_payload_config(archive_writer, constants_config, constants_config_file)
@@ -652,6 +672,7 @@ def package_pt2(
     opset_version: dict[str, int] | None = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
     executorch_files: dict[str, bytes] | None = None,
+    use_safetensors: bool = False,
 ) -> FileLike:
     r"""
     Saves the artifacts to a PT2Archive format. The artifact can then be loaded
@@ -710,7 +731,10 @@ def package_pt2(
     # pyrefly: ignore [bad-argument-type]
     with PT2ArchiveWriter(f) as archive_writer:
         _package_exported_programs(
-            archive_writer, exported_programs, pickle_protocol=pickle_protocol
+            archive_writer,
+            exported_programs,
+            pickle_protocol=pickle_protocol,
+            use_safetensors=use_safetensors,
         )
         _package_aoti_files(
             archive_writer,
@@ -814,32 +838,43 @@ def _build_file_map(
         dtype = deserialize_scalar_type(tensor_meta.dtype)
         device = deserialize_device(tensor_meta.device)
         record_name = os.path.join(base_dir, payload_meta.path_name)
-        nbytes = archive_reader.archive_file.get_record_size(record_name)
 
-        if nbytes == 0:
-            size = deserialize_size(tensor_meta.sizes)
-            tensor = torch.zeros(size, dtype=dtype, device=device)
-            if tensor_meta.requires_grad:
-                tensor.requires_grad_(True)
-        else:
-            element_size = torch._utils._element_size(dtype)
-            if nbytes % element_size != 0:
-                raise ValueError(
-                    f"Record {record_name}: size {nbytes} is not a multiple of "
-                    f"element size {element_size} for dtype {dtype}"
-                )
-            numel = nbytes // element_size
-            raw = archive_reader.archive_file.get_storage_from_record(
-                record_name, numel, dtype
-            )
-            # get_storage_from_record returns a tensor with empty DispatchKeySet,
-            # so we wrap the storage in a proper CPU tensor via set_().
-            tensor = torch.empty(0, dtype=dtype)
-            tensor.set_(raw.untyped_storage(), 0, (numel,), (1,))
+        if payload_meta.path_name.endswith(".safetensors"):
+            import safetensors.torch
+            tensor_bytes = archive_reader.read_bytes(record_name)
+            loaded_dict = safetensors.torch.load(tensor_bytes)
+            tensor = loaded_dict["storage"]
             if tensor_meta.requires_grad:
                 tensor.requires_grad_(True)
             if device != torch.device("cpu"):
                 tensor = tensor.to(device)
+        else:
+            nbytes = archive_reader.archive_file.get_record_size(record_name)
+
+            if nbytes == 0:
+                size = deserialize_size(tensor_meta.sizes)
+                tensor = torch.zeros(size, dtype=dtype, device=device)
+                if tensor_meta.requires_grad:
+                    tensor.requires_grad_(True)
+            else:
+                element_size = torch._utils._element_size(dtype)
+                if nbytes % element_size != 0:
+                    raise ValueError(
+                        f"Record {record_name}: size {nbytes} is not a multiple of "
+                        f"element size {element_size} for dtype {dtype}"
+                    )
+                numel = nbytes // element_size
+                raw = archive_reader.archive_file.get_storage_from_record(
+                    record_name, numel, dtype
+                )
+                # get_storage_from_record returns a tensor with empty DispatchKeySet,
+                # so we wrap the storage in a proper CPU tensor via set_().
+                tensor = torch.empty(0, dtype=dtype)
+                tensor.set_(raw.untyped_storage(), 0, (numel,), (1,))
+                if tensor_meta.requires_grad:
+                    tensor.requires_grad_(True)
+                if device != torch.device("cpu"):
+                    tensor = tensor.to(device)
 
         file_map[payload_meta.path_name] = tensor
 
@@ -862,6 +897,7 @@ def _load_payload_config(
 def _load_state_dict(
     archive_reader: PT2ArchiveReader,
     model_name: str,
+    weights_only: bool = True,
 ) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy weight files
     legacy_weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
@@ -889,7 +925,7 @@ def _load_state_dict(
                     os.path.join(WEIGHTS_DIR, payload_meta.path_name)
                 )
                 state_dict[weight_fqn] = torch.load(
-                    io.BytesIO(weight_bytes), weights_only=False
+                    io.BytesIO(weight_bytes), weights_only=weights_only
                 )
             else:
                 tensor_meta = payload_meta.tensor_meta
@@ -918,6 +954,7 @@ def _load_state_dict(
 def _load_constants(
     archive_reader: PT2ArchiveReader,
     model_name: str,
+    weights_only: bool = True,
 ) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy constant files
     legacy_constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
@@ -947,7 +984,7 @@ def _load_constants(
                         os.path.join(CONSTANTS_DIR, path_name)
                     )
                     constants[constant_fqn] = torch.load(
-                        io.BytesIO(constant_bytes), weights_only=False
+                        io.BytesIO(constant_bytes), weights_only=weights_only
                     )
                 else:
                     tensor_meta = payload_meta.tensor_meta
@@ -987,6 +1024,7 @@ def _load_exported_programs(
     archive_reader: PT2ArchiveReader,
     file_names: list[str],
     expected_opset_version: dict[str, int] | None,
+    weights_only: bool = True,
 ) -> dict[str, ExportedProgram]:
     exported_program_files = [
         file for file in file_names if file.startswith(MODELS_DIR)
@@ -1009,8 +1047,8 @@ def _load_exported_programs(
         serialized_exported_program = _bytes_to_dataclass(
             schema.ExportedProgram, exported_program_bytes
         )
-        state_dict = _load_state_dict(archive_reader, model_name)
-        constants = _load_constants(archive_reader, model_name)
+        state_dict = _load_state_dict(archive_reader, model_name, weights_only=weights_only)
+        constants = _load_constants(archive_reader, model_name, weights_only=weights_only)
 
         ep = ExportedProgramDeserializer(expected_opset_version).deserialize(
             serialized_exported_program,
@@ -1085,6 +1123,7 @@ def load_pt2(
     num_runners: int = 1,
     device_index: int = -1,
     load_weights_from_disk: bool = False,
+    weights_only: bool = True,
 ) -> PT2ArchiveContents:  # type: ignore[type-arg]
     """
     Loads all the artifacts previously saved with ``package_pt2``.
@@ -1141,7 +1180,7 @@ def load_pt2(
         file_names = archive_reader.get_file_names()
 
         exported_programs = _load_exported_programs(
-            archive_reader, file_names, expected_opset_version
+            archive_reader, file_names, expected_opset_version, weights_only=weights_only
         )
         extra_files = _load_extra_files(archive_reader, file_names)
 

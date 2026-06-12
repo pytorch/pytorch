@@ -215,6 +215,7 @@ def save(
     extra_files: dict[str, Any] | None = None,
     opset_version: dict[str, int] | None = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    use_safetensors: bool = False,
 ) -> None:
     """
 
@@ -238,6 +239,8 @@ def save(
          to the version of this opset
 
         pickle_protocol: can be specified to override the default protocol
+
+        use_safetensors: Whether to save tensors in safetensors format.
 
     Example::
 
@@ -277,6 +280,7 @@ def save(
         extra_files=extra_files,
         pickle_protocol=pickle_protocol,
         opset_version=opset_version,
+        use_safetensors=use_safetensors,
     )
 
 
@@ -285,6 +289,7 @@ def load(
     *,
     extra_files: dict[str, Any] | None = None,
     expected_opset_version: dict[str, int] | None = None,
+    weights_only: bool = True,
 ) -> ExportedProgram:
     """
 
@@ -308,6 +313,8 @@ def load(
 
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
+
+        weights_only: If True, only loads weight tensors and basic structure, disabling execution of arbitrary code during loading.
 
     Returns:
         An :class:`ExportedProgram` object
@@ -343,6 +350,7 @@ def load(
         pt2_contents = load_pt2(
             f,
             expected_opset_version=expected_opset_version,
+            weights_only=weights_only,
         )
     except RuntimeError:
         log.warning("Ran into the following error when deserializing", exc_info=True)
