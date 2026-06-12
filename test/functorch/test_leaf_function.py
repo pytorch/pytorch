@@ -1238,15 +1238,15 @@ class GraphModule(torch.nn.Module):
             dynamo_graph_str,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[3, 3]", L_self_parameters_offset_: "f32[3]", L_self_modules_linear_parameters_weight_: "f32[3, 3]", L_self_modules_linear_parameters_bias_: "f32[3]"):
-        l_x_ = L_x_
-        l_self_parameters_offset_ = L_self_parameters_offset_
-        l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
+    def forward(self, L_self_modules_linear_parameters_bias_: "f32[3]", L_self_modules_linear_parameters_weight_: "f32[3, 3]", L_self_parameters_offset_: "f32[3]", L_x_: "f32[3, 3]"):
         l_self_modules_linear_parameters_bias_ = L_self_modules_linear_parameters_bias_
+        l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
+        l_self_parameters_offset_ = L_self_parameters_offset_
+        l_x_ = L_x_
 
-        real_fn : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.real_fn
         fake_fn : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.fake_fn
         input_spec : torch.utils._pytree.TreeSpec = self.input_spec
+        real_fn : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.real_fn
         invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(real_fn, fake_fn, input_spec, '', 0, l_self_parameters_offset_, l_self_modules_linear_parameters_weight_, l_self_modules_linear_parameters_bias_, l_x_);  real_fn = fake_fn = input_spec = l_self_parameters_offset_ = l_self_modules_linear_parameters_weight_ = l_self_modules_linear_parameters_bias_ = l_x_ = None
         getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem,)
@@ -1256,11 +1256,11 @@ class GraphModule(torch.nn.Module):
             fw_graph_str,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[0]", primals_2: "f32[3, 3]", primals_3: "f32[3]", primals_4: "f32[3, 3]", primals_5: "f32[3]"):
+    def forward(self, primals_1: "f32[0]", primals_2: "f32[3]", primals_3: "f32[3, 3]", primals_4: "f32[3]", primals_5: "f32[3, 3]"):
         _opaque_obj0 = self._opaque_obj0
         _opaque_obj1 = self._opaque_obj1
         _tree_spec_constant0 = self._tree_spec_constant0
-        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _opaque_obj0, _opaque_obj1, _tree_spec_constant0, '', 0, primals_3, primals_4, primals_5, primals_2, requires_grad_indices = '1,2,3,4');  primals_1 = _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = primals_3 = primals_4 = primals_5 = primals_2 = None
+        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _opaque_obj0, _opaque_obj1, _tree_spec_constant0, '', 0, primals_4, primals_3, primals_2, primals_5, requires_grad_indices = '1,2,3,4');  primals_1 = _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = primals_4 = primals_3 = primals_2 = primals_5 = None
 
         getitem: "f32[0]" = with_effects[0]
         getitem_1: "f32[3, 3]" = with_effects[1];  with_effects = None
@@ -1281,7 +1281,7 @@ class GraphModule(torch.nn.Module):
         getitem_5: "f32[3, 3]" = with_effects_1[3]
         getitem_6: "f32[3]" = with_effects_1[4]
         getitem_7: "f32[3, 3]" = with_effects_1[5];  with_effects_1 = None
-        return (getitem_7, getitem_4, getitem_5, getitem_6, getitem_2)
+        return (getitem_6, getitem_5, getitem_4, getitem_7, getitem_2)
 """,
         )
 
