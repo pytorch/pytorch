@@ -889,7 +889,7 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         devices = ['cpu']
         if torch.accelerator.is_available():
-            devices.append(device)
+            devices.append(torch.device(device).type)
         dtypes = module_info.dtypes
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)
