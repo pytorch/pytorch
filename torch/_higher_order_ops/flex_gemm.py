@@ -21,7 +21,6 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 class FlexGemmOpSpec:
     """Canonical FlexGEMM view of a supported GEMM op's operand layout."""
 
-    op: torch._ops.OpOverload
     name: str
     mat1_index: int
     mat2_index: int
@@ -29,17 +28,8 @@ class FlexGemmOpSpec:
 
 
 FLEX_GEMM_OP_SPECS = {
-    torch.ops.aten.mm.default: FlexGemmOpSpec(torch.ops.aten.mm.default, "mm", 0, 1),
-    torch.ops.aten.addmm.default: FlexGemmOpSpec(
-        torch.ops.aten.addmm.default,
-        "addmm",
-        1,
-        2,
-        bias_index=0,
-    ),
-}
-FLEX_GEMM_OP_INPUT_INDICES = {
-    op: (spec.mat1_index, spec.mat2_index) for op, spec in FLEX_GEMM_OP_SPECS.items()
+    torch.ops.aten.mm.default: FlexGemmOpSpec("mm", 0, 1),
+    torch.ops.aten.addmm.default: FlexGemmOpSpec("addmm", 1, 2, bias_index=0),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
