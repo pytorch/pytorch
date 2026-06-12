@@ -662,10 +662,10 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 
 namespace {
 
-using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
 using namespace std::placeholders;
+using scaled_blas::ScaleKernelDispatchEntry;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 9> scale_kernel_dispatch = {{
+std::array<ScaleKernelDispatchEntry, 9> scale_kernel_dispatch = {{
   { "tensorwise_tensorwise", scaled_blas::check_tensorwise_recipe, ScaledGemmImplementation::TENSORWISE_TENSORWISE },
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "block_1x128_128x128", std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128, _1, _2, _3, _4, _5, _6),
@@ -1446,25 +1446,16 @@ _scaled_mm_cuda_v2_out(
   // Try to do as few steps as possible.
   // NOTE: support is deliberately sparse, can explicitly enumerate all combinations allowed.
   // Do this via a list of defined (name, acceptance, concrete_impl) tuples.
-  bool found_impl = false;
-  ScaledGemmImplementation gemm_impl = ScaledGemmImplementation::NONE;
-
-  for (const auto& fn_entry : scale_kernel_dispatch) {
-    const auto [name, accept_fn, scaled_gemm_impl] = fn_entry;
-    bool ok = accept_fn(mat_a.scalar_type(),
-                        scale_recipe_a_enum,
-                        scale_a,
-                        mat_b.scalar_type(),
-                        scale_recipe_b_enum,
-                        scale_b);
-    if (ok) {
-      gemm_impl = scaled_gemm_impl;
-      found_impl = true;
-      break;
-    }
-  }
+  ScaledGemmImplementation gemm_impl = scaled_blas::find_scaled_gemm_impl(
+      scale_kernel_dispatch,
+      mat_a.scalar_type(),
+      scale_recipe_a_enum,
+      scale_a,
+      mat_b.scalar_type(),
+      scale_recipe_b_enum,
+      scale_b);
   TORCH_CHECK_VALUE(
-    found_impl,
+    gemm_impl != ScaledGemmImplementation::NONE,
     "Invalid scaling configuration.\n"
     "- For TensorWise scaling, a and b should be float8, scales should be float and singletons.\n"
     "- For RowWise scaling, a and b should be float8, scales should be float, scale_a should be (", mat_a.size(0), ", 1) and scale_b should be (1, ", mat_b.size(1), "), and both should be contiguous.\n"
