@@ -958,6 +958,16 @@ def optim_error_inputs_func_muon(device, dtype):
             error_regex="Unknown keys in gram_newton_schulz_config",
             error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
         ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={"use_cuda_graph": True},
+                desc="use_cuda_graph requires foreach=True",
+            ),
+            error_type=ValueError,
+            error_regex="use_cuda_graph=True requires foreach=True",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
     ]
     return error_inputs
 

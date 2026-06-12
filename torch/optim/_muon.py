@@ -3,9 +3,9 @@
 """Implementation of the Muon optimizer with optional Gram Newton-Schulz support."""
 
 import math
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from enum import Enum
-from typing import TypedDict
+from typing import Any, NamedTuple, TypedDict
 
 import torch
 from torch import Tensor
@@ -318,6 +318,7 @@ class Muon(Optimizer):
         foreach: bool | None = None,
         ns_algorithm: NewtonSchulzAlgorithm = NewtonSchulzAlgorithm.STANDARD,
         gram_newton_schulz_config: GramNewtonSchulzConfig | None = None,
+        use_cuda_graph: bool = False,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -350,6 +351,15 @@ class Muon(Optimizer):
         gram_ns_coefficients, gram_ns_reset_iterations = (
             _parse_gram_newton_schulz_config(gram_newton_schulz_config)
         )
+        if use_cuda_graph and not foreach:
+            # CUDA graph capture is an amortization of per-shape NS launches
+            # across a shape group; it only makes sense in the multi-tensor
+            # (foreach) path, which is also where the per-instance cache is
+            # consulted.
+            raise ValueError(
+                "use_cuda_graph=True requires foreach=True; got "
+                f"foreach={foreach!r}."
+            )
 
         defaults = {
             "lr": lr,
@@ -364,8 +374,18 @@ class Muon(Optimizer):
             "ns_algorithm": ns_algorithm,
             "gram_ns_coefficients": gram_ns_coefficients,
             "gram_ns_reset_iterations": gram_ns_reset_iterations,
+            "use_cuda_graph": use_cuda_graph,
         }
         super().__init__(params, defaults)
+
+        # Per-instance cache for CUDA-graph-captured NS computations. Shared
+        # across param groups so two groups with identical (count, shape,
+        # dtype, device, algorithm, coefficients) reuse the same graph; see
+        # _NsCacheKey for the full discriminator set.
+        self._cuda_graph_cache: dict[
+            _NsCacheKey,
+            tuple[torch.cuda.CUDAGraph, list[Tensor], list[Tensor]],
+        ] = {}
 
         for group in self.param_groups:
             for p in group["params"]:
@@ -389,9 +409,16 @@ class Muon(Optimizer):
                 "gram_ns_reset_iterations",
                 list(DEFAULT_GRAM_NS_RESET_ITERATIONS),
             )
+            group.setdefault("use_cuda_graph", False)
             # ns_algorithm round-trips through JSON / pickle as a plain string;
             # normalize back to the enum so dispatch comparisons are stable.
             group["ns_algorithm"] = NewtonSchulzAlgorithm(group["ns_algorithm"])
+        # The CUDA graph cache itself is *not* part of the state dict -- the
+        # captured graphs reference live tensors that are not portable across
+        # processes. Loading state always starts with a fresh, empty cache;
+        # graphs will be re-captured on the first step() with each shape.
+        if not hasattr(self, "_cuda_graph_cache"):
+            self._cuda_graph_cache = {}
 
     def _init_group(
         self,
@@ -463,6 +490,8 @@ class Muon(Optimizer):
                 ns_algorithm=group["ns_algorithm"],
                 gram_ns_coefficients=group["gram_ns_coefficients"],
                 gram_ns_reset_iterations=group["gram_ns_reset_iterations"],
+                use_cuda_graph=group["use_cuda_graph"],
+                cuda_graph_cache=self._cuda_graph_cache,
             )
         return loss
 
@@ -579,6 +608,15 @@ Muon.__doc__ = (
               from the accumulated ``Q`` and reset ``Q`` to the identity.
 
             (default: None)
+        use_cuda_graph (bool, optional): if True, capture each per-shape NS computation into a CUDA graph and
+            replay on subsequent ``step()`` calls. The graph is keyed by (count, shape, dtype, device,
+            algorithm, coefficients), so distinct shape groups and distinct param groups with different
+            configs get independent graphs. The captured static-output buffers are returned by reference --
+            the immediate Phase-3 ``_foreach_add_`` consumes them in the same ``step()``, so they are safe
+            to overwrite on the next replay. Requires ``foreach=True`` (CUDA graph capture is an
+            amortization across the multi-tensor NS dispatch); passing ``use_cuda_graph=True`` with
+            ``foreach`` left at its ``None`` default or set to ``False`` raises ``ValueError``. The flag is
+            silently a no-op on CPU. (default: False)
 
     Example:
         >>> # xdoctest: +SKIP
@@ -661,6 +699,121 @@ def _ns_eager(
     )
 
 
+class _NsCacheKey(NamedTuple):
+    """Hashable cache key for CUDA-graph-captured NS computations.
+
+    Distinct entries are needed per `(count, shape, device, dtype)` of the
+    inputs and per `(algorithm, coefficients, ns_steps, eps)` of the
+    computation, so two param groups with different configs do not collide.
+    """
+
+    count: int
+    shape: tuple[int, int]
+    device: torch.device
+    dtype: torch.dtype
+    ns_algorithm: NewtonSchulzAlgorithm
+    gram_ns_coefficients: tuple[tuple[float, float, float], ...]
+    gram_ns_reset_iterations: tuple[int, ...]
+    ns_coefficients: tuple[float, float, float]
+    ns_steps: int
+    eps: float
+
+
+def _ns_cudagraph(
+    inputs: list[Tensor],
+    compute_fn: Callable[[list[Tensor]], list[Tensor]],
+    cache_key: _NsCacheKey,
+    cuda_graph_cache: dict[
+        _NsCacheKey,
+        tuple["torch.cuda.CUDAGraph", list[Tensor], list[Tensor]],
+    ],
+) -> list[Tensor]:
+    """Run an NS-style computation through CUDA graph capture/replay.
+
+    Wraps ``compute_fn`` (which must be safe to call inside a capture region
+    and must return a list of newly-allocated tensors) with cache lookup,
+    static-buffer allocation, warmup, capture, and replay.
+
+    Returns ``static_outputs`` directly (no clone). Callers must consume the
+    returned tensors before the next call with the same ``cache_key`` --
+    that next call will overwrite the static output buffers in place. This
+    contract is safe inside Muon's step() because the immediate Phase-3
+    `_foreach_add_` (or per-tensor `add_`) consumes the NS outputs before
+    `_run_ns` is invoked again, even across param groups.
+    """
+    if cache_key not in cuda_graph_cache:
+        # Static input buffers: the exact tensors the graph reads from.
+        static_inputs = [t.clone() for t in inputs]
+        # Warmup is required before capture.
+        compute_fn(static_inputs)
+        torch.cuda.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            static_outputs = compute_fn(static_inputs)
+        cuda_graph_cache[cache_key] = (graph, static_inputs, static_outputs)
+
+    graph, static_inputs, static_outputs = cuda_graph_cache[cache_key]
+    for si, t in zip(static_inputs, inputs, strict=True):
+        si.copy_(t)
+    graph.replay()
+    return list(static_outputs)
+
+
+def _dispatch_ns_group(
+    inputs: list[Tensor],
+    *,
+    ns_algorithm: NewtonSchulzAlgorithm,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+    gram_ns_coefficients: list[list[float]],
+    gram_ns_reset_iterations: list[int],
+    use_cuda_graph: bool,
+    cuda_graph_cache: dict[_NsCacheKey, Any] | None,
+) -> list[Tensor]:
+    """Dispatch one same-shape NS group through CUDA graph or eager.
+
+    CUDA graph capture only engages when ``use_cuda_graph`` is True, a
+    cache was supplied, and the inputs live on CUDA. Otherwise the call
+    falls through to the plain eager dispatch.
+    """
+    is_square = inputs[0].size(0) == inputs[0].size(1)
+
+    def _compute(buffers: list[Tensor]) -> list[Tensor]:
+        return _ns_eager(
+            buffers,
+            ns_algorithm=ns_algorithm,
+            is_square=is_square,
+            ns_coefficients=ns_coefficients,
+            ns_steps=ns_steps,
+            eps=eps,
+            gram_ns_coefficients=gram_ns_coefficients,
+            gram_ns_reset_iterations=gram_ns_reset_iterations,
+        )
+
+    graph_eligible = (
+        use_cuda_graph and cuda_graph_cache is not None and inputs[0].is_cuda
+    )
+    if not graph_eligible:
+        return _compute(inputs)
+
+    cache_key = _NsCacheKey(
+        count=len(inputs),
+        shape=(inputs[0].size(0), inputs[0].size(1)),
+        device=inputs[0].device,
+        dtype=inputs[0].dtype,
+        ns_algorithm=ns_algorithm,
+        gram_ns_coefficients=tuple(
+            tuple(c) for c in gram_ns_coefficients  # type: ignore[misc]
+        ),
+        gram_ns_reset_iterations=tuple(gram_ns_reset_iterations),
+        ns_coefficients=tuple(ns_coefficients),  # type: ignore[arg-type]
+        ns_steps=ns_steps,
+        eps=eps,
+    )
+    return _ns_cudagraph(inputs, _compute, cache_key, cuda_graph_cache)
+
+
 def _run_ns(
     updates: list[Tensor],
     *,
@@ -670,12 +823,16 @@ def _run_ns(
     eps: float,
     gram_ns_coefficients: list[list[float]],
     gram_ns_reset_iterations: list[int],
+    use_cuda_graph: bool = False,
+    cuda_graph_cache: dict[_NsCacheKey, Any] | None = None,
 ) -> list[Tensor]:
     """Top-level NS dispatcher.
 
     Groups updates by shape so same-shape tensors can be batched through the
     appropriate NS routine, then writes the orthogonalized outputs back into
-    a list aligned with the input order.
+    a list aligned with the input order. Each group is routed through
+    ``_dispatch_ns_group`` which optionally captures the per-group NS into a
+    CUDA graph keyed on shape, dtype, algorithm, and coefficients.
     """
     shape_groups: dict[tuple[int, int], list[int]] = {}
     for i, update in enumerate(updates):
@@ -684,16 +841,16 @@ def _run_ns(
     results: list[Tensor] = list(updates)
     for indices in shape_groups.values():
         group_inputs = [updates[idx] for idx in indices]
-        is_square = group_inputs[0].size(0) == group_inputs[0].size(1)
-        group_results = _ns_eager(
+        group_results = _dispatch_ns_group(
             group_inputs,
             ns_algorithm=ns_algorithm,
-            is_square=is_square,
             ns_coefficients=ns_coefficients,
             ns_steps=ns_steps,
             eps=eps,
             gram_ns_coefficients=gram_ns_coefficients,
             gram_ns_reset_iterations=gram_ns_reset_iterations,
+            use_cuda_graph=use_cuda_graph,
+            cuda_graph_cache=cuda_graph_cache,
         )
         for idx, r in zip(indices, group_results, strict=True):
             results[idx] = r
@@ -772,6 +929,8 @@ def _multi_tensor_muon(
     ns_algorithm: NewtonSchulzAlgorithm = NewtonSchulzAlgorithm.STANDARD,
     gram_ns_coefficients: list[list[float]] | None = None,
     gram_ns_reset_iterations: list[int] | None = None,
+    use_cuda_graph: bool = False,
+    cuda_graph_cache: dict[_NsCacheKey, Any] | None = None,
 ) -> None:
     lr = _to_scalar(lr)
     if has_complex:
@@ -797,7 +956,9 @@ def _multi_tensor_muon(
     # Phase 2: shape-grouped NS. For STANDARD this batches same-shape square
     # groups (len > 1) via bmm/baddbmm; rectangular shapes still run per-tensor.
     # For GRAM, rectangular shapes batch into the Gram NS routine; square groups
-    # fall back to standard (with the same batching when len > 1).
+    # fall back to standard (with the same batching when len > 1). When
+    # use_cuda_graph is enabled, each per-shape NS group is captured into a
+    # CUDA graph keyed on (count, shape, dtype, device, algorithm, coeffs).
     updates = _run_ns(
         updates,
         ns_algorithm=ns_algorithm,
@@ -806,6 +967,8 @@ def _multi_tensor_muon(
         eps=eps,
         gram_ns_coefficients=gram_ns_coefficients,
         gram_ns_reset_iterations=gram_ns_reset_iterations,
+        use_cuda_graph=use_cuda_graph,
+        cuda_graph_cache=cuda_graph_cache,
     )
 
     # Phase 3: weight-decay shrink (uniform scale across all params) followed
@@ -852,6 +1015,8 @@ def muon(
     ns_algorithm: NewtonSchulzAlgorithm = NewtonSchulzAlgorithm.STANDARD,
     gram_ns_coefficients: list[list[float]] | None = None,
     gram_ns_reset_iterations: list[int] | None = None,
+    use_cuda_graph: bool = False,
+    cuda_graph_cache: dict[_NsCacheKey, Any] | None = None,
 ) -> None:
     r"""Functional API that performs Muon algorithm computation.
 
@@ -859,9 +1024,33 @@ def muon(
     """
     # foreach=None preserves the historical single-tensor default; only an
     # explicit True opts into the multi-tensor (_foreach_*) path.
-    func = _multi_tensor_muon if foreach else _single_tensor_muon
+    if foreach:
+        _multi_tensor_muon(
+            params,
+            grads,
+            muon_momentum_bufs,
+            lr=lr,
+            weight_decay=weight_decay,
+            momentum=momentum,
+            nesterov=nesterov,
+            ns_coefficients=ns_coefficients,
+            ns_steps=ns_steps,
+            eps=eps,
+            adjust_lr_fn=adjust_lr_fn,
+            has_complex=has_complex,
+            ns_algorithm=ns_algorithm,
+            gram_ns_coefficients=gram_ns_coefficients,
+            gram_ns_reset_iterations=gram_ns_reset_iterations,
+            use_cuda_graph=use_cuda_graph,
+            cuda_graph_cache=cuda_graph_cache,
+        )
+        return
 
-    func(
+    # Single-tensor path does not support CUDA graph capture (graph capture
+    # is intrinsically a multi-tensor amortization); the constructor rejects
+    # `use_cuda_graph=True` unless `foreach=True`, so we never get here with
+    # the flag set.
+    _single_tensor_muon(
         params,
         grads,
         muon_momentum_bufs,

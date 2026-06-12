@@ -2737,6 +2737,7 @@ class TestMuon(TestCase):
         sd["param_groups"][0]["ns_algorithm"] = "gram"
         sd["param_groups"][0].pop("gram_ns_coefficients", None)
         sd["param_groups"][0].pop("gram_ns_reset_iterations", None)
+        sd["param_groups"][0].pop("use_cuda_graph", None)
 
         p2 = torch.nn.Parameter(torch.randn(8, 16))
         p2.grad = torch.randn_like(p2)
@@ -2749,8 +2750,99 @@ class TestMuon(TestCase):
         )
         self.assertIn("gram_ns_coefficients", opt2.param_groups[0])
         self.assertIn("gram_ns_reset_iterations", opt2.param_groups[0])
+        self.assertEqual(opt2.param_groups[0]["use_cuda_graph"], False)
         # And a subsequent step() must succeed.
         opt2.step()
+
+    def test_use_cuda_graph_cpu_is_noop(self):
+        # use_cuda_graph=True with foreach=True on CPU silently skips graph
+        # capture and runs eager -- two same-shape param matrices should still
+        # produce sensible non-finite-free updates.
+        from torch.optim import Muon
+
+        torch.manual_seed(0)
+        p1 = torch.nn.Parameter(torch.randn(8, 16))
+        p2 = torch.nn.Parameter(torch.randn(8, 16))
+        p1.grad = torch.randn_like(p1)
+        p2.grad = torch.randn_like(p2)
+
+        opt = Muon([p1, p2], foreach=True, use_cuda_graph=True)
+        opt.step()
+        self.assertTrue(p1.isfinite().all())
+        self.assertTrue(p2.isfinite().all())
+        # No graphs were captured since inputs are on CPU.
+        self.assertEqual(opt._cuda_graph_cache, {})
+
+    def test_use_cuda_graph_without_foreach_raises(self):
+        from torch.optim import Muon
+
+        param = torch.nn.Parameter(torch.randn(8, 16))
+        # foreach=None (default) -> reject use_cuda_graph=True.
+        with self.assertRaisesRegex(ValueError, "requires foreach=True"):
+            Muon([param], use_cuda_graph=True)
+        # foreach=False -> same.
+        with self.assertRaisesRegex(ValueError, "requires foreach=True"):
+            Muon([param], foreach=False, use_cuda_graph=True)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+    def test_cuda_graph_matches_eager(self):
+        from torch.optim import Muon
+
+        torch.manual_seed(0)
+        base = torch.randn(8, 16, device="cuda")
+        p_eager = torch.nn.Parameter(base.clone().detach())
+        p_graph = torch.nn.Parameter(base.clone().detach())
+
+        opt_eager = Muon([p_eager], foreach=True)
+        opt_graph = Muon([p_graph], foreach=True, use_cuda_graph=True)
+        for _ in range(5):
+            grad = torch.randn(8, 16, device="cuda")
+            p_eager.grad = grad.clone()
+            p_graph.grad = grad.clone()
+            opt_eager.step()
+            opt_graph.step()
+
+        self.assertEqual(p_eager, p_graph, atol=1e-5, rtol=0)
+        # And the graph cache was actually used.
+        self.assertTrue(len(opt_graph._cuda_graph_cache) > 0)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+    def test_cuda_graph_multiple_params_same_shape_share_cache(self):
+        from torch.optim import Muon
+
+        torch.manual_seed(0)
+        params = [
+            torch.nn.Parameter(torch.randn(8, 16, device="cuda")) for _ in range(3)
+        ]
+        for p in params:
+            p.grad = torch.randn_like(p)
+        opt = Muon(params, foreach=True, use_cuda_graph=True)
+        opt.step()
+        # All three params share the same (count, shape, ...) cache key.
+        self.assertEqual(len(opt._cuda_graph_cache), 1)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+    def test_cuda_graph_different_configs_get_distinct_cache_entries(self):
+        from torch.optim import Muon
+        from torch.optim._muon import NewtonSchulzAlgorithm
+
+        torch.manual_seed(0)
+        p_std = torch.nn.Parameter(torch.randn(8, 16, device="cuda"))
+        p_gram = torch.nn.Parameter(torch.randn(8, 16, device="cuda"))
+        p_std.grad = torch.randn_like(p_std)
+        p_gram.grad = torch.randn_like(p_gram)
+
+        opt = Muon(
+            [
+                {"params": [p_std], "ns_algorithm": NewtonSchulzAlgorithm.STANDARD},
+                {"params": [p_gram], "ns_algorithm": NewtonSchulzAlgorithm.GRAM},
+            ],
+            foreach=True,
+            use_cuda_graph=True,
+        )
+        opt.step()
+        # Same shape but different algorithm -> separate cache entries.
+        self.assertEqual(len(opt._cuda_graph_cache), 2)
 
 
 if __name__ == "__main__":
