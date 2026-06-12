@@ -90,7 +90,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return size_;
   }
 
-  // Returns an unique opaque ID of this backend that can be used to correlate
+  // Returns a unique opaque ID of this backend that can be used to correlate
   // with its collectives.
   int64_t getID() const {
     return reinterpret_cast<std::intptr_t>(this);
