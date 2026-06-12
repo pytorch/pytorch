@@ -2215,9 +2215,7 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
     # Derive the nightly wheel channel from BUILD_ENVIRONMENT so baseline matches the PR
     # build's CUDA/ROCm toolchain. Override by setting BASELINE_INDEX_URL in the workflow.
     if [[ -z "${BASELINE_INDEX_URL:-}" ]]; then
-      if [[ "${BUILD_ENVIRONMENT}" == *cuda12.8* ]]; then
-        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"
-      elif [[ "${BUILD_ENVIRONMENT}" == *cuda13* ]]; then
+      if [[ "${BUILD_ENVIRONMENT}" == *cuda13* ]]; then
         BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu130"
       elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
         # Keep in sync with the ROCm version in the benchmarks docker image
