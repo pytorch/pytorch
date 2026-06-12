@@ -104,7 +104,11 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .misc import NullVariable, StringFormatVariable
+from .misc import (
+    check_no_unsafe_exception_inspection,
+    NullVariable,
+    StringFormatVariable,
+)
 from .object_protocol import (
     binary_iop,
     binary_op,
@@ -1756,6 +1760,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             arg,
             (variables.ExceptionVariable, variables.UserDefinedExceptionObjectVariable),
         ):
+            arg.check_safe_to_inspect()
             if len(arg.args) == 0:
                 return VariableTracker.build(tx, "")
             elif len(arg.args) == 1:
@@ -2525,6 +2530,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        for arg in itertools.chain((_format_string,), args, kwargs.values()):
+            check_no_unsafe_exception_inspection(arg)
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
         return StringFormatVariable.create(format_string, list(args), kwargs)

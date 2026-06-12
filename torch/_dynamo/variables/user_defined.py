@@ -4201,6 +4201,18 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     def args(self) -> list[VariableTracker]:
         return self._base_vt.args  # type: ignore[missing-attribute]
 
+    def mark_unsafe_to_inspect(self) -> None:
+        self._base_vt.mark_unsafe_to_inspect()  # type: ignore[missing-attribute]
+
+    def check_safe_to_inspect(self) -> None:
+        self._base_vt.check_safe_to_inspect()  # type: ignore[missing-attribute]
+
+    def get_internal_traceback(self) -> VariableTracker:
+        return self.exc_vt.get_internal_traceback()
+
+    def set_internal_traceback(self, traceback_vt: VariableTracker) -> None:
+        self.exc_vt.set_internal_traceback(traceback_vt)
+
     def set_context(self, context: "variables.ExceptionVariable") -> None:
         return self._base_vt.set_context(context)  # type: ignore[missing-attribute]
 
@@ -4217,6 +4229,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
+        self.check_safe_to_inspect()
         if type(self.value).__repr__ is not BaseException.__repr__:
             return super().repr_impl(tx)
         return self.exc_vt.repr_impl(tx)

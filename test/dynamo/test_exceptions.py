@@ -11,8 +11,9 @@ import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import TorchRuntimeError, Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
+from torch._dynamo.testing import EagerAndRecordGraphs, skipIfNotPy311
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
@@ -41,6 +42,15 @@ class CustomExceptionWithArgs(Exception):
 
 class MyException(OSError):
     pass
+
+
+class CustomRuntimeError(RuntimeError):
+    pass
+
+
+class CustomRuntimeErrorWithRepr(RuntimeError):
+    def __repr__(self):
+        return "custom repr"
 
 
 class ExceptionTests(torch._dynamo.test_case.TestCase):
@@ -621,6 +631,410 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         res = opt_m(x)
         self.assertEqual(ref, res)
+
+    def test_fake_tensor_runtime_error_in_try_except(self):
+        backend = EagerAndRecordGraphs()
+
+        def fn(t):
+            t0 = torch.randn(2)
+            try:
+                t.expand_as(t0)
+            except RuntimeError:
+                return t.sin()
+            return t.cos()
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), opt_fn(t))
+
+        self.assertEqual(len(backend.graphs), 1)
+        node_targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertNotIn("expand_as", node_targets)
+        self.assertIn("sin", node_targets)
+
+    def test_fake_tensor_runtime_error_in_parent_try_except(self):
+        backend = EagerAndRecordGraphs()
+
+        def inner(t, t0):
+            t.expand_as(t0)
+            return t.cos()
+
+        def fn(t):
+            t0 = torch.randn(2)
+            try:
+                return inner(t, t0)
+            except RuntimeError:
+                return t.sin()
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), opt_fn(t))
+
+        self.assertEqual(len(backend.graphs), 1)
+        node_targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertNotIn("expand_as", node_targets)
+        self.assertIn("sin", node_targets)
+
+    def test_fake_tensor_runtime_error_subclass(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.library.custom_op("test_dynamo::runtime_error_subclass", mutates_args=())
+        def runtime_error_subclass(t: torch.Tensor) -> torch.Tensor:
+            raise CustomRuntimeError("custom runtime")
+
+        @runtime_error_subclass.register_fake
+        def _(t):
+            raise CustomRuntimeError("custom runtime")
+
+        def fn(t):
+            try:
+                runtime_error_subclass(t)
+            except CustomRuntimeError:
+                return t.sin()
+            except RuntimeError:
+                return t.cos()
+            return t
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), opt_fn(t))
+
+        self.assertEqual(len(backend.graphs), 1)
+        node_targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertNotIn(
+            torch.ops.test_dynamo.runtime_error_subclass.default, node_targets
+        )
+        self.assertIn("sin", node_targets)
+        self.assertNotIn("cos", node_targets)
+
+    def test_fake_tensor_runtime_error_internal_error_not_caught(self):
+        @torch.library.custom_op("test_dynamo::metadata_mismatch", mutates_args=())
+        def metadata_mismatch(t: torch.Tensor) -> torch.Tensor:
+            return t.cos()
+
+        @metadata_mismatch.register_fake
+        def _(t):
+            raise torch._subclasses.fake_tensor.MetadataMismatchError(
+                "fake-only metadata mismatch"
+            )
+
+        def fn(t):
+            try:
+                metadata_mismatch(t)
+            except RuntimeError:
+                return t.sin()
+            return t.cos()
+
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), t.cos())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            TorchRuntimeError, "RuntimeError when making fake tensor call"
+        ):
+            opt_fn(t)
+
+    def test_fake_tensor_runtime_error_propagate_real_internal_error_not_caught(self):
+        @torch.library.custom_op(
+            "test_dynamo::propagate_real_tensors_error", mutates_args=()
+        )
+        def propagate_real_tensors_error(t: torch.Tensor) -> int:
+            return t.dim()
+
+        def fn(t):
+            try:
+                propagate_real_tensors_error(t)
+            except RuntimeError:
+                return t.sin()
+            return t.cos()
+
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), t.cos())
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                TorchRuntimeError, "RuntimeError when making fake tensor call"
+            ):
+                opt_fn(t)
+
+    def test_fake_tensor_runtime_error_without_try_except(self):
+        def fn(t):
+            t.expand_as(torch.randn(2))
+            return t.cos()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            TorchRuntimeError, "RuntimeError when making fake tensor call"
+        ):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_bound_exception(self):
+        def fn(t):
+            try:
+                t.expand_as(torch.randn(2))
+            except RuntimeError as e:
+                if "too few dimensions" in str(e):
+                    return t.sin()
+            return t.cos()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    @skipIfNotPy311
+    def test_fake_tensor_runtime_error_sys_exception(self):
+        @torch.library.custom_op("test_dynamo::runtime_error_message", mutates_args=())
+        def runtime_error_message(t: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("real message")
+
+        @runtime_error_message.register_fake
+        def _(t):
+            raise RuntimeError("fake message")
+
+        def fn(t):
+            try:
+                runtime_error_message(t)
+            except RuntimeError:
+                e = sys.exception()
+                if "fake message" in str(e):
+                    return t.sin()
+                return t.cos()
+            return t
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_sys_exc_info_traceback(self):
+        def fn(t):
+            try:
+                t.expand_as(torch.randn(2))
+            except RuntimeError:
+                return sys.exc_info()[2] is not None
+            return False
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_f_string(self):
+        @torch.library.custom_op("test_dynamo::runtime_error_f_string", mutates_args=())
+        def runtime_error_f_string(t: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("real message")
+
+        @runtime_error_f_string.register_fake
+        def _(t):
+            raise RuntimeError("fake message")
+
+        def fn(t):
+            try:
+                runtime_error_f_string(t)
+            except RuntimeError as e:
+                return f"{(e,)}"
+            return "ok"
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_format(self):
+        @torch.library.custom_op("test_dynamo::runtime_error_format", mutates_args=())
+        def runtime_error_format(t: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("real message")
+
+        @runtime_error_format.register_fake
+        def _(t):
+            raise RuntimeError("fake message")
+
+        def fn(t):
+            try:
+                runtime_error_format(t)
+            except RuntimeError as e:
+                return "{}".format((e,))  # noqa: UP032
+            return "ok"
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_custom_repr(self):
+        @torch.library.custom_op(
+            "test_dynamo::runtime_error_custom_repr", mutates_args=()
+        )
+        def runtime_error_custom_repr(t: torch.Tensor) -> torch.Tensor:
+            raise CustomRuntimeErrorWithRepr("real message")
+
+        @runtime_error_custom_repr.register_fake
+        def _(t):
+            raise CustomRuntimeErrorWithRepr("fake message")
+
+        def fn(t):
+            try:
+                runtime_error_custom_repr(t)
+            except CustomRuntimeErrorWithRepr as e:
+                return repr(e)
+            return "ok"
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_builtin_format(self):
+        @torch.library.custom_op(
+            "test_dynamo::runtime_error_builtin_format", mutates_args=()
+        )
+        def runtime_error_builtin_format(t: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("real message")
+
+        @runtime_error_builtin_format.register_fake
+        def _(t):
+            raise RuntimeError("fake message")
+
+        def fn(t):
+            try:
+                runtime_error_builtin_format(t)
+            except RuntimeError as e:
+                return format([e])
+            return "ok"
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_return_exception(self):
+        def fn(t):
+            try:
+                t.expand_as(torch.randn(2))
+            except RuntimeError as e:
+                return e
+            return None
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    @parametrize(
+        "attr",
+        ("__cause__", "__context__", "__suppress_context__", "__traceback__"),
+    )
+    def test_fake_tensor_runtime_error_state_attr(self, attr):
+        def fn(t):
+            try:
+                t.expand_as(torch.randn(2))
+            except RuntimeError as e:
+                getattr(e, attr)
+                return t.sin()
+            return t.cos()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_non_string_arg(self):
+        str_calls = []
+
+        class Arg:
+            def __str__(self):
+                str_calls.append("called")
+                return "1"
+
+        @torch.library.custom_op(
+            "test_dynamo::runtime_error_non_string", mutates_args=()
+        )
+        def runtime_error_non_string(t: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError(Arg())
+
+        @runtime_error_non_string.register_fake
+        def _(t):
+            raise RuntimeError(Arg())
+
+        def fn(t):
+            try:
+                runtime_error_non_string(t)
+            except ValueError:
+                return t.sin()
+            return t.cos()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Observed exception"):
+            opt_fn(torch.randn(2, 3))
+        self.assertEqual(str_calls, [])
+
+    def test_fake_tensor_runtime_error_in_with_cleanup(self):
+        class SwallowRuntimeError:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, typ, exc, tb):
+                return typ is RuntimeError
+
+        def fn(t):
+            with SwallowRuntimeError():
+                t.expand_as(torch.randn(2))
+            return t.cos()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            TorchRuntimeError, "RuntimeError when making fake tensor call"
+        ):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_in_try_finally(self):
+        def fn(t):
+            try:
+                t.expand_as(torch.randn(2))
+            finally:
+                t.sin()
+            return t.cos()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            TorchRuntimeError, "RuntimeError when making fake tensor call"
+        ):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_in_try_finally_inside_try_except(self):
+        backend = EagerAndRecordGraphs()
+
+        def fn(t):
+            try:
+                try:
+                    t.expand_as(torch.randn(2))
+                finally:
+                    t.cos()
+            except RuntimeError:
+                return t.sin()
+            return t.cos()
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), opt_fn(t))
+
+        self.assertEqual(len(backend.graphs), 1)
+        node_targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertNotIn("expand_as", node_targets)
+        self.assertIn("sin", node_targets)
+
+    def test_fake_tensor_runtime_error_in_bare_except(self):
+        backend = EagerAndRecordGraphs()
+
+        def fn(t):
+            t0 = torch.randn(2)
+            try:
+                t.expand_as(t0)
+            except:  # noqa: E722
+                return t.sin()
+            return t.cos()
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), opt_fn(t))
+
+        self.assertEqual(len(backend.graphs), 1)
+        node_targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertNotIn("expand_as", node_targets)
+        self.assertIn("sin", node_targets)
 
     def test_raise_from_None(self):
         # Inspired from os.environ

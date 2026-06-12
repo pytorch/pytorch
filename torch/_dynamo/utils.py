@@ -3945,6 +3945,86 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
     raise AssertionError("should be unreachable")
 
 
+def _has_active_exception_handler(tx: InstructionTranslatorBase) -> bool:
+    def is_except_handler(
+        cur_tx: InstructionTranslatorBase,
+        target: Instruction,
+        seen: set[Instruction] | None = None,
+    ) -> bool:
+        if seen is None:
+            seen = set()
+        if target in seen:
+            return False
+        seen.add(target)
+
+        handler_idx = cur_tx.indexof[target]
+        idx = handler_idx
+        for idx, inst in enumerate(
+            cur_tx.instructions[handler_idx:], start=handler_idx
+        ):
+            # Exception-table entries also cover with/finally cleanup blocks.
+            # Only real except handlers run exception matching or bare-except
+            # stack cleanup at the handler target.
+            if inst.opname in ("NOP", "PUSH_EXC_INFO"):
+                continue
+            if inst.opname in ("CHECK_EXC_MATCH", "JUMP_IF_NOT_EXC_MATCH"):
+                return True
+            if inst.opname == "POP_TOP":
+                return True
+            if inst.opname == "WITH_EXCEPT_START":
+                return False
+            break
+
+        for inst in cur_tx.instructions[idx:]:
+            if inst.opname in ("CHECK_EXC_MATCH", "JUMP_IF_NOT_EXC_MATCH"):
+                return True
+            if inst.opname == "WITH_EXCEPT_START":
+                return False
+            if inst.opname == "RERAISE":
+                entry = inst.exn_tab_entry
+                return bool(entry and is_except_handler(cur_tx, entry.target, seen))
+            if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+                return False
+        return False
+
+    cur_tx: InstructionTranslatorBase | None = tx
+    while cur_tx is not None:
+        if sys.version_info >= (3, 11):
+            entry = cur_tx.current_instruction.exn_tab_entry
+            if entry and is_except_handler(cur_tx, entry.target):
+                return True
+        else:
+            if any(
+                block.target is not None and is_except_handler(cur_tx, block.target)
+                for block in cur_tx.block_stack
+            ):
+                return True
+        cur_tx = cur_tx.parent
+    return False
+
+
+_INTERNAL_FAKE_TENSOR_RUNTIME_ERRORS: tuple[type[BaseException], ...] = (
+    torch._subclasses.fake_tensor.DataDependentOutputException,
+    torch._subclasses.fake_tensor.DynamicOutputShapeException,
+    torch._subclasses.fake_tensor.FakeTensorDeviceMismatchError,
+    torch._subclasses.fake_tensor.FakeTensorInternalError,
+    torch._subclasses.fake_tensor.MetadataMismatchError,
+    torch._subclasses.fake_tensor.UnsupportedFakeTensorException,
+    torch._subclasses.fake_tensor.UnsupportedMutationAliasingException,
+    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+)
+
+
+def _can_raise_fake_runtime_error_to_user_handler(
+    cause: BaseException, tx: InstructionTranslatorBase
+) -> bool:
+    return (
+        isinstance(cause, RuntimeError)
+        and not isinstance(cause, _INTERNAL_FAKE_TENSOR_RUNTIME_ERRORS)
+        and _has_active_exception_handler(tx)
+    )
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4155,6 +4235,16 @@ def _get_fake_value_impl(
                 explanation="",
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
+            )
+        elif _can_raise_fake_runtime_error_to_user_handler(cause, tx):
+            from .exc import raise_observed_exception
+
+            runtime_error = cast(RuntimeError, cause)
+            tx.output.remove_node(node)
+            raise_observed_exception(
+                type(runtime_error),
+                tx,
+                unsafe_to_inspect=True,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         _wrap_graph_break_with_torch_runtime_err(
