@@ -7100,6 +7100,87 @@ class CPUReproTests(TestCase):
         )
         self.assertTrue(cuda_storage.has_exceeded_max_reads())
 
+        def inner_large_reads_fn(index):
+            value = ops.add(ops.load("in0", index[0]), ops.load("in1", index[0]))
+            for _ in range(45):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        large_reads_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_large_reads_fn,
+                ranges=[10],
+            )
+        )
+        with (
+            config.patch(realize_opcount_threshold=30),
+            patch.object(StorageBox, "realize", autospec=True) as realize_mock,
+        ):
+            self.assertTrue(large_reads_storage.has_exceeded_max_reads())
+            large_reads_storage.realize_hint()
+            realize_mock.assert_called_once_with(large_reads_storage)
+
+        large_reads_zero_threshold_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_large_reads_fn,
+                ranges=[10],
+            )
+        )
+        with (
+            config.patch(realize_opcount_threshold=0),
+            patch.object(StorageBox, "realize", autospec=True) as realize_mock,
+        ):
+            self.assertTrue(large_reads_zero_threshold_storage.has_exceeded_max_reads())
+            large_reads_zero_threshold_storage.realize_hint()
+            realize_mock.assert_called_once_with(large_reads_zero_threshold_storage)
+
+        complete_calls = 0
+
+        def inner_complete_fn(index):
+            nonlocal complete_calls
+            complete_calls += 1
+            value = ops.load("in0", index[0])
+            for _ in range(45):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        complete_pointwise = Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=inner_complete_fn,
+            ranges=[10],
+        )
+        with config.patch(realize_opcount_threshold=30):
+            self.assertTrue(complete_pointwise.has_large_inner_fn())
+            self.assertEqual(complete_pointwise.inner_fn_opcount().num_ops, 47)
+        self.assertEqual(complete_calls, 1)
+
+        exceeded_calls = 0
+
+        def inner_exceeded_fn(index):
+            nonlocal exceeded_calls
+            exceeded_calls += 1
+            value = ops.load("in0", index[0])
+            for _ in range(101):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        exceeded_pointwise = Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=inner_exceeded_fn,
+            ranges=[10],
+        )
+        exceeded_opcount = exceeded_pointwise.bounded_inner_fn_opcount(max_ops=0)
+        self.assertTrue(exceeded_opcount.limit_exceeded)
+        self.assertEqual(exceeded_calls, 1)
+        self.assertEqual(exceeded_pointwise.inner_fn_opcount().num_ops, 103)
+        self.assertEqual(exceeded_calls, 2)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
