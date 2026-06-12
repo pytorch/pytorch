@@ -1973,7 +1973,11 @@ def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 68  # 3080
+    min_sms = (
+        16
+        if device.type == "xpu" or "orin" in torch.cuda.get_device_name(device).lower()
+        else 68
+    )  # 3080 / Jetson Orin AGX
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
