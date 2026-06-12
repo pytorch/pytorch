@@ -508,6 +508,15 @@ class ViewAndMutationMeta:
     # scanning every arg on every graph invocation.
     act_input_indices: list[int] = field(default_factory=list)
 
+    # Nested ACT paths: list of (arg_index, (attr1, attr2, ...)) for ACTs
+    # found inside wrapper subclass inputs (e.g., DTensor._local_tensor).
+    # At runtime, the codegen emits trigger_wait() calls that walk the
+    # attribute path to resolve the nested ACT before the compiled graph
+    # uses the data.
+    nested_act_input_paths: list[tuple[int, tuple[str, ...]]] = field(
+        default_factory=list
+    )
+
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
     # dictionary telling us how many tokens we will need during tracing.
