@@ -5457,6 +5457,46 @@ class TestMPS(TestCaseMPS):
         helper_dtype_float32(3, 3, 3)
         helper_dtype_float32(1, 1, 1)
 
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int32, torch.int64])
+    @parametrize("op", ["median", "nanmedian"])
+    def test_median_comprehensive(self, dtype, op):
+        op = getattr(torch, op)
+
+        def check(cpu_x):
+            mps_x = cpu_x.to('mps')
+            self.assertEqual(op(cpu_x), op(mps_x))
+            dims = range(cpu_x.dim()) if cpu_x.dim() else [0]
+            for dim, keepdim in product(dims, [True, False]):
+                self.assertEqual(op(cpu_x, dim=dim, keepdim=keepdim), op(mps_x, dim=dim, keepdim=keepdim))
+
+        def make(shape):
+            if dtype.is_floating_point:
+                return torch.randn(shape, dtype=dtype)
+            return torch.randint(-50, 50, shape, dtype=dtype)
+
+        # contiguous shapes (rank-5 from issue #187017), then sizes crossing the
+        # single-block/multi-block/u16 sort path boundaries
+        shapes = [(), (5,), (10, 10, 10), (1, 2, 3), (2, 1, 3, 1, 2), (3, 4, 5, 6, 7),
+                  (4099,), (3, 4099), (70001,), (3, 70001)]
+        cases = [make(s) for s in shapes]
+        # strided / sliced / non-contiguous layouts
+        base = make((64, 97))
+        cases += [base.t(), base[::3, 1:], make((8, 6, 10, 4)).movedim(1, 2)[:, 2:7]]
+        if dtype.is_floating_point:
+            nanx = make((37, 53))
+            nanx[nanx > 1] = float('nan')
+            nanx[5] = float('nan')  # scattered NaNs plus an all-NaN row
+            cases += [nanx, torch.full((4, 5), float('nan'), dtype=dtype)]
+        for x in cases:
+            check(x)
+
+        if dtype.is_floating_point:
+            # empty: NaN global, empty outputs on non-zero dim, raise on zero dim
+            empty = torch.empty(0, 3, dtype=dtype)
+            self.assertTrue(op(empty.to('mps')).isnan())
+            self.assertEqual(op(empty, dim=1), op(empty.to('mps'), dim=1))
+            self.assertRaises(IndexError, lambda: op(empty.to('mps'), dim=0))
+
     def test_any(self):
         def helper(shape):
             input_xs = []
