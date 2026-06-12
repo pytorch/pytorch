@@ -123,6 +123,7 @@ from .source import (
     AttrSource,
     CallFunctionNoArgsSource,
     CallMethodItemSource,
+    CallMethodNoArgsSource,
     CellContentsSource,
     ChainedSource,
     ClosureSource,
@@ -1948,6 +1949,21 @@ class GuardBuilder(GuardBuilderBase):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.call_function_no_args_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, CallMethodNoArgsSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            if isinstance(base_guard_manager, DictGuardManager):
+                raise AssertionError("CallMethodNoArgsSource cannot be on a dict")
+
+            def python_lambda(x: Any, member: str = source.member) -> Any:
+                return getattr(x, member)()
+
+            out = base_guard_manager.lambda_manager(
+                python_lambda=python_lambda,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
