@@ -15,8 +15,11 @@
 #include <ATen/CachedTensorUtils.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
+#include <ATen/functorch/TensorWrapper.h>
 
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
@@ -2377,12 +2380,31 @@ void _initCrashHandler() {
   *_getOldHandler(SIGSEGV) = std::signal(SIGSEGV, _signalHandler);
 }
 
+static std::optional<at::Tensor> maybe_unwrap_functorch(const at::Tensor& t) {
+  if (auto* batched = at::functorch::maybeGetBatchedImpl(t)) {
+    return batched->value();
+  }
+  if (auto* wrapped = at::functorch::maybeGetTensorWrapper(t)) {
+    return wrapped->value();
+  }
+  if (at::functionalization::impl::isFunctionalTensor(t)) {
+    return at::functionalization::impl::unsafeGetFunctionalWrapper(t)->value();
+  }
+  return std::nullopt;
+}
+
 void cpp_fake_set_metadata(
     const std::shared_ptr<c10::FakeTensorMode>& mode,
     const at::Tensor& real,
     const at::Tensor& meta) {
   meta.unsafeGetTensorImpl()->set_and_normalize_fake_device(real.device());
   meta.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+
+  if (auto meta_inner = maybe_unwrap_functorch(meta)) {
+    cpp_fake_set_metadata(
+        mode, maybe_unwrap_functorch(real).value(), *meta_inner);
+    return;
+  }
 
   // return early for plain tensors
   if (!meta.key_set().has(c10::DispatchKey::Python)) {
@@ -2393,6 +2415,14 @@ void cpp_fake_set_metadata(
   if (!py::hasattr(py_meta, "__tensor_flatten__")) {
     return;
   }
+
+  const at::Storage& storage = meta.unsafeGetTensorImpl()->unsafe_storage();
+  if (storage) {
+    storage.unsafeGetStorageImpl()
+        ->_mutable_data_ptr_no_checks()
+        .unsafe_set_device(meta.device());
+  }
+
   py::object py_real = py::cast(real);
   py::tuple flat = py_meta.attr("__tensor_flatten__")();
   for (auto name : flat[0]) {
