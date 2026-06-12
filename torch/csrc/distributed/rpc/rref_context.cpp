@@ -169,7 +169,7 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
         << "GC has deleted them before calling shutdown(): \n"
         << ss.str();
     if (!ignoreRRefLeak) {
-      TORCH_CHECK(false, ss.str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
   }
 }

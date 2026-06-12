@@ -132,7 +132,8 @@ def comm_buffer_reuse_key(node: BufferLike) -> CommBufferReuseKey:
     # Comm buffers can only be reused by other comm buffers with the same (device, dtype, size, comm_buffer_type, group_name).
     storage_size = V.graph.get_allocation_storage_size(node)
     layout = node.get_output_spec()
-    assert isinstance(layout, ir.CommBufferLayout)
+    if not isinstance(layout, ir.CommBufferLayout):
+        raise AssertionError(f"expected CommBufferLayout, got {type(layout)}")
     return (
         node.get_device_or_error(),
         node.get_dtype(),
@@ -287,8 +288,12 @@ def user_defined_kernel_grid_fn_code(
             grid, example_grid = determine_grid(grids[0], example_grids[0])
             writeline(f"return {grid}", f"return {example_grid}")
         else:
-            assert len(grids) > 1
-            assert len(grids) == len(configs)
+            if len(grids) <= 1:
+                raise AssertionError(f"expected more than 1 grid, got {len(grids)}")
+            if len(grids) != len(configs):
+                raise AssertionError(
+                    f"expected len(grids) == len(configs), got {len(grids)} != {len(configs)}"
+                )
             seen: OrderedSet[str] = OrderedSet()
             # sort the configs from the largest # of kwargs to the smallest to
             # emit the grids in the order of (approximately) decreasing specificity
@@ -468,11 +473,13 @@ class MemoryPlanningState:
 
     def pop(self, key: ReuseKey) -> FreeIfNotReusedLine:
         item = self.reuse_pool[key].pop()
-        assert not item.is_reused
+        if item.is_reused:
+            raise AssertionError("expected popped reuse pool item to not be reused")
         return item
 
     def push(self, key: ReuseKey, item: FreeIfNotReusedLine) -> None:
-        assert not item.is_reused
+        if item.is_reused:
+            raise AssertionError("expected pushed reuse pool item to not be reused")
         self.reuse_pool[key].append(item)
 
     def comm_buffer_contains(self, key: CommBufferReuseKey) -> bool:
@@ -480,13 +487,19 @@ class MemoryPlanningState:
 
     def comm_buffer_pop(self, key: CommBufferReuseKey) -> FreeIfNotReusedLine:
         item = self.comm_buffer_reuse_pool[key].pop()
-        assert not item.is_reused
+        if item.is_reused:
+            raise AssertionError(
+                "expected popped comm buffer reuse pool item to not be reused"
+            )
         return item
 
     def comm_buffer_push(
         self, key: CommBufferReuseKey, item: FreeIfNotReusedLine
     ) -> None:
-        assert not item.is_reused
+        if item.is_reused:
+            raise AssertionError(
+                "expected pushed comm buffer reuse pool item to not be reused"
+            )
         self.comm_buffer_reuse_pool[key].append(item)
 
 
@@ -576,25 +589,26 @@ class EnterDeviceContextManagerLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         if V.graph.cpp_wrapper:
             code.writeline("\n")
-            if V.graph.aot_mode:
-                # In AOT mode, we have a stream provided as a param. A stream is
-                # associated with a device, so we never expect the device to change.
-                # CUDAStreamGuard sets the stream and the device.
-                if self.last_seen_device_guard_index is None:
-                    code.writeline(
-                        f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
-                    )
-                else:
-                    assert self.last_seen_device_guard_index == self.device_idx, (
-                        "AOTInductor only supports running on one CUDA device"
-                    )
+            # AOTI stream is bound to a device, so CUDAStreamGuard sets both
+            # stream and device, and the device cannot change later.
+            if self.last_seen_device_guard_index is None:
+                code.writeline_aot(
+                    f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
+                )
+                code.writeline_jit(
+                    f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
+                )
             else:
-                if self.last_seen_device_guard_index is None:
-                    code.writeline(
-                        f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
-                    )
-                else:
-                    code.writeline(f"device_guard.set_index({self.device_idx});")
+                if V.graph.aot_mode:
+                    # AOTI emits a single stream_guard on first use; later
+                    # contexts can only re-enter the same device. In dual-wrapper
+                    # mode the JIT side still needs device_guard updates.
+                    if self.last_seen_device_guard_index != self.device_idx:
+                        raise AssertionError(
+                            "AOTInductor only supports running on one CUDA device"
+                        )
+                if not V.graph.aot_mode or V.graph.is_dual_wrapper_mode:
+                    code.writeline_jit(f"device_guard.set_index({self.device_idx});")
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
@@ -690,7 +704,10 @@ class FreeLine(WrapperLine):
     node: BufferLike | ir.TorchBindObject
 
     def codegen(self, code: IndentedBuffer) -> None:
-        assert self.node.get_name() not in V.graph.removed_buffers
+        if self.node.get_name() in V.graph.removed_buffers:
+            raise AssertionError(
+                f"buffer {self.node.get_name()} was removed but is being freed"
+            )
         code.writeline(self.wrapper.make_buffer_free(self.node))
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -783,7 +800,7 @@ class MemoryPlanningLine(WrapperLine):
 
 @dataclasses.dataclass
 class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine):
-    """Enter a CUDA device context and retrieve user stream objects.
+    """Enter a device context and retrieve user stream objects.
 
     Attributes:
         num_streams: Number of streams (determined by user annotations on nodes).
@@ -800,7 +817,7 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
             super().codegen(code)
         else:
             super().codegen(code)
-            code.writeline(f"{DEFAULT_STREAM} = torch.cuda.current_stream()")
+            code.writeline(f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}")
 
             if self.num_streams > 1:
                 for i in range(1, self.num_streams):
@@ -813,7 +830,7 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
 
 @dataclasses.dataclass
 class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
-    """Exit a CUDA device context.
+    """Exit a device context.
 
     Attributes:
         num_streams: Number of streams that were allocated (must match Enter).
@@ -829,16 +846,16 @@ class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
 
 @dataclasses.dataclass
 class EnterCudaStreamContextLine(WrapperLine):
-    """Enter a context executed by respective CUDA Stream.
+    """Enter a context executed by the respective device stream.
 
     Attributes:
-        stream_idx: The index number corresponds to the entering CUDA Stream context.
+        stream_idx: The index number for the entering device stream context.
     """
 
     stream_idx: int
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.writeline(f"with torch.cuda.stream({get_stream_name(self.stream_idx)}):")
+        code.writeline(f"with {get_stream_name(self.stream_idx)}:")
         code.do_indent()
 
 
@@ -898,7 +915,8 @@ class AllocateLine(MemoryPlanningLine):
     comm_buffer: bool = False
 
     def __post_init__(self):
-        assert V.graph.scheduler.current_node is not None
+        if V.graph.scheduler.current_node is None:
+            raise AssertionError("expected scheduler.current_node to be set")
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
@@ -954,7 +972,10 @@ class AllocateLine(MemoryPlanningLine):
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
-        assert self.node.get_name() not in V.graph.removed_buffers
+        if self.node.get_name() in V.graph.removed_buffers:
+            raise AssertionError(
+                f"buffer {self.node.get_name()} was removed but is being freed"
+            )
         if self.comm_buffer:
             self._codegen_comm_buffer(code)
         else:
@@ -965,14 +986,16 @@ class AllocateLine(MemoryPlanningLine):
         """Generate allocation code for comm buffers."""
         name = self.node.get_name()
         device = self.node.get_device()
-        assert device is not None and device.index is not None, (
-            f"Comm buffer requires a valid CUDA device with index, got {device}"
-        )
+        if not (device is not None and device.index is not None):
+            raise AssertionError(
+                f"Comm buffer requires a valid CUDA device with index, got {device}"
+            )
         dtype = self.node.get_dtype()
         shape = tuple(self.node.get_size())
         stride = tuple(self.node.get_stride())
         layout = self.node.get_output_spec()
-        assert isinstance(layout, ir.CommBufferLayout)
+        if not isinstance(layout, ir.CommBufferLayout):
+            raise AssertionError(f"expected CommBufferLayout, got {type(layout)}")
         comm_buffer_type = layout.comm_buffer_type
         group_name = layout.group_name
 
@@ -1005,7 +1028,8 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     comm_buffer: bool = False
 
     def __post_init__(self):
-        assert V.graph.scheduler.current_node is not None
+        if V.graph.scheduler.current_node is None:
+            raise AssertionError("expected scheduler.current_node to be set")
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
@@ -1015,7 +1039,8 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
             return self
         if isinstance(self.node.layout, ir.MultiOutputLayout):
             return self
-        assert not self.is_reused
+        if self.is_reused:
+            raise AssertionError("expected line to not be reused")
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
         if config.allow_buffer_reuse:
@@ -1029,12 +1054,18 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
-        assert self.node.get_name() not in V.graph.removed_buffers
+        if self.node.get_name() in V.graph.removed_buffers:
+            raise AssertionError(
+                f"buffer {self.node.get_name()} was removed but is being freed"
+            )
         if not self.is_reused:
             line = self.wrapper.make_buffer_free(self.node)
             if self.comm_buffer:
                 layout = self.node.get_output_spec()
-                assert isinstance(layout, ir.CommBufferLayout)
+                if not isinstance(layout, ir.CommBufferLayout):
+                    raise AssertionError(
+                        f"expected CommBufferLayout, got {type(layout)}"
+                    )
                 code.writeline(f"{line} # {layout.comm_buffer_type.value} buffer free")
             else:
                 code.writeline(line)
@@ -1055,8 +1086,12 @@ class ReinterpretLine(MemoryPlanningLine):
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
-        assert isinstance(self.layout, ir.NonOwningLayout)
-        assert isinstance(self.layout.view, ir.ReinterpretView)
+        if not isinstance(self.layout, ir.NonOwningLayout):
+            raise AssertionError(f"expected NonOwningLayout, got {type(self.layout)}")
+        if not isinstance(self.layout.view, ir.ReinterpretView):
+            raise AssertionError(
+                f"expected ReinterpretView, got {type(self.layout.view)}"
+            )
         self.wrapper.codegen_deferred_allocation(
             self.reused_as.get_name(), self.layout.view
         )
@@ -1074,14 +1109,26 @@ class ReuseLine(MemoryPlanningLine):
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if self.node.get_name() in V.graph.removed_buffers:
-            assert self.reused_as.get_name() in V.graph.removed_buffers
+            if self.reused_as.get_name() not in V.graph.removed_buffers:
+                raise AssertionError(
+                    f"reuse target {self.reused_as.get_name()} expected to be removed"
+                )
             return NullLine(self.wrapper)
-        assert self.reused_as.get_name() not in V.graph.removed_buffers
+        if self.reused_as.get_name() in V.graph.removed_buffers:
+            raise AssertionError(
+                f"reuse target {self.reused_as.get_name()} was removed unexpectedly"
+            )
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
-        assert self.node.get_name() not in V.graph.removed_buffers
-        assert self.reused_as.get_name() not in V.graph.removed_buffers
+        if self.node.get_name() in V.graph.removed_buffers:
+            raise AssertionError(
+                f"buffer {self.node.get_name()} was removed but is being freed"
+            )
+        if self.reused_as.get_name() in V.graph.removed_buffers:
+            raise AssertionError(
+                f"reuse target {self.reused_as.get_name()} was removed unexpectedly"
+            )
         code.writeline(
             self.wrapper.make_buffer_reuse(self.node, self.reused_as, self.delete_old)
         )
@@ -1142,7 +1189,8 @@ class IndexPutFallbackLine(WrapperLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
-        assert ir.is_node_sequence(node.inputs)
+        if not ir.is_node_sequence(node.inputs):
+            raise AssertionError("expected node.inputs to be a node sequence")
         (x, values) = (t.codegen_reference() for t in node.inputs[:2])
         indices = [
             idx.codegen_reference() if idx else self.wrapper.none_str
@@ -1164,7 +1212,8 @@ class ScatterFallbackLine(WrapperLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
-        assert ir.is_node_sequence(node.inputs)
+        if not ir.is_node_sequence(node.inputs):
+            raise AssertionError("expected node.inputs to be a node sequence")
         if node.src_is_tensor:
             (x, index, src) = (t.codegen_reference() for t in node.inputs)
         else:
@@ -1360,6 +1409,11 @@ class PythonWrapperCodegen(CodeGen):
         # Additional files that are dependent to the wrapper (ex. cubin files)
         self.additional_files = []
 
+        # Precompiled kernel .so paths to link into the JIT cpp_wrapper
+        # (e.g. CUTLASS, ROCm CK). Populated by the scheduling layer when
+        # cpp_wrapper is set and not aot_mode.
+        self.external_kernel_libs: OrderedSet[str] = OrderedSet()
+
     @staticmethod
     def create(
         is_subgraph: bool,
@@ -1368,8 +1422,10 @@ class PythonWrapperCodegen(CodeGen):
         partition_signatures: ir.GraphPartitionSignature | None = None,
     ):
         if is_subgraph:
-            assert subgraph_name is not None
-            assert parent_wrapper is not None
+            if subgraph_name is None:
+                raise AssertionError("expected subgraph_name to be set")
+            if parent_wrapper is None:
+                raise AssertionError("expected parent_wrapper to be set")
             return SubgraphPythonWrapperCodegen(
                 subgraph_name, parent_wrapper, partition_signatures
             )
@@ -1673,7 +1729,8 @@ class PythonWrapperCodegen(CodeGen):
         return V.graph.graph_input_names
 
     def write_prefix(self) -> None:
-        assert self.launcher_fn_name is not None
+        if self.launcher_fn_name is None:
+            raise AssertionError("expected launcher_fn_name to be set")
         self.write_async_compile_wait()
         prefix_indent = self.write_launcher_fn_call_get_indent()
 
@@ -1830,7 +1887,8 @@ class PythonWrapperCodegen(CodeGen):
         stream_idx_to_user_obj_idx: dict[int, int] | None = None,
     ) -> None:
         if num_streams > 1:
-            assert stream_idx_to_user_obj_idx is not None
+            if stream_idx_to_user_obj_idx is None:
+                raise AssertionError("expected stream_idx_to_user_obj_idx to be set")
             import_line = (
                 "from torch._dynamo.graph_bytecode_inputs import "
                 "get_external_object_by_index"
@@ -2055,7 +2113,8 @@ class PythonWrapperCodegen(CodeGen):
                 desc, apply_size_hints
             )
         else:
-            assert isinstance(desc, ir.TMADescriptorStable)
+            if not isinstance(desc, ir.TMADescriptorStable):
+                raise AssertionError(f"expected TMADescriptorStable, got {type(desc)}")
             return self._generate_tma_descriptor_call_stable(desc, apply_size_hints)
 
     def generate_tma_descriptor(self, desc):
@@ -2094,7 +2153,8 @@ class PythonWrapperCodegen(CodeGen):
         for i, _ in enumerate(node.indices):
             if node.indices[i] is not None:
                 index = next(iter_valid_indices)
-                assert isinstance(index, ir.IRNode)
+                if not isinstance(index, ir.IRNode):
+                    raise AssertionError(f"expected IRNode, got {type(index)}")
                 indices.append(index)
             else:
                 indices.append(None)
@@ -2217,9 +2277,15 @@ class PythonWrapperCodegen(CodeGen):
         result.splice(self.imports)
         result.writeline("")
         result.splice(self.header)
-        # We do not want the cpp header for intermediate const graph. Headers would be
-        # rendered by the main module instead.
-        if V.graph.aot_mode and V.graph.cpp_wrapper and V.graph.is_const_graph:
+        # Intermediate const graphs normally use headers rendered by the main
+        # module. In dual-wrapper-mode, the const graph's JIT wrapper is emitted as
+        # standalone C++ and needs its own header.
+        if (
+            V.graph.aot_mode
+            and V.graph.cpp_wrapper
+            and V.graph.is_const_graph
+            and not V.graph.is_dual_wrapper_mode
+        ):
             result = IndentedBuffer()
 
         # Add subgraph definitions to the result
@@ -2330,7 +2396,10 @@ class PythonWrapperCodegen(CodeGen):
                 if config.allow_buffer_reuse:
                     self.estimate_peak = peak_estimate_stack.pop()
         past_planning_states.append(planning_states.pop())
-        assert len(planning_states) == 0
+        if len(planning_states) != 0:
+            raise AssertionError(
+                f"expected no remaining planning states, got {len(planning_states)}"
+            )
 
         # conservatively use the sum of all allocated buffer sizes
         # in potentially nested scopes as the total allocated size
@@ -2366,16 +2435,38 @@ class PythonWrapperCodegen(CodeGen):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
 
+        def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
+            # Deferred runtime asserts reference pre-replacement backed
+            # symbols (e.g. s77) that were replaced to this canonical
+            # symbol (s31) during constraint solving. Emit aliases so
+            # the asserts compile. Skip unbacked symbols — they are
+            # defined separately by the unbacked symbol codegen path.
+            from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+            for src, tgt in V.graph.sizevars.shape_env.replacements.items():
+                if (
+                    tgt == sym
+                    and isinstance(src, sympy.Symbol)
+                    and src not in bound_vars
+                    and not symbol_is_type(
+                        src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+                    )
+                ):
+                    code.writeline(f"{src} = {sym}")
+                    bound_vars.add(src)
+
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
             code.writeline(f"{value} = {name}")
             bound_vars.add(value)
+            maybe_emit_replacement_aliases(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
                 if isinstance(size, sympy.Symbol) and size not in bound_vars:
                     code.writeline(f"{size} = {sizeof(name)}[{dim}]")
                     bound_vars.add(size)
+                    maybe_emit_replacement_aliases(size)
             for dim, stride in enumerate(value.get_stride()):
                 if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
                     code.writeline(f"{stride} = {strideof(name)}[{dim}]")
@@ -2545,6 +2636,12 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_device_copy(self, src, dst, non_blocking: bool | str):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
+
+    def sync_d2h_copy(self, buffer_name: str) -> None:
+        event_var = f"_d2h_event_{buffer_name}"
+        self.writeline(f"{event_var} = torch.Event()")
+        self.writeline(f"{event_var}.record()")
+        self.writeline(f"{event_var}.synchronize()")
 
     def codegen_multi_output(self, node: ir.MultiOutput):
         result_name = node.get_name()
@@ -2913,7 +3010,8 @@ class PythonWrapperCodegen(CodeGen):
             else:
                 # the only case where arg name isn't in kwargs, should be
                 # when the arg is a constexpr.
-                assert arg.name in kwargs
+                if arg.name not in kwargs:
+                    raise AssertionError(f"expected {arg.name} in kwargs")
 
                 if equals_1:
                     if triton_version_uses_attrs_dict():
@@ -3049,13 +3147,17 @@ class PythonWrapperCodegen(CodeGen):
                             f"_launcher_s{len(extra_launcher_args)}"
                         )
                     return sympy_subs(expr, extra_launcher_args)
-                assert isinstance(expr, int)
+                if not isinstance(expr, int):
+                    raise AssertionError(f"expected int, got {type(expr)}")
                 return sympy.Integer(expr)
 
             extra_launcher_args: dict[sympy.Symbol, sympy.Symbol] = {}
             grids = [[*map(rename_sizes_for_launcher, grid)] for grid in grids]
 
-            assert grids and len(grids) == len(configs)
+            if not (grids and len(grids) == len(configs)):
+                raise AssertionError(
+                    f"expected non-empty grids matching configs, got {len(grids)} grids and {len(configs)} configs"
+                )
             precomputed_grids = []
             for grid, cfg in sorted(
                 zip(grids, configs), key=lambda x: len(x[1].kwargs), reverse=True
@@ -3204,9 +3306,13 @@ class PythonWrapperCodegen(CodeGen):
         elif ws.zero_mode == WorkspaceZeroMode.ZERO_PER_GRAPH:
             prior = self.allocated_workspaces.get(name)
             if prior:
-                assert isinstance(prior, AllocateLine) and isinstance(
-                    prior.node, WorkspaceArg
-                )
+                if not (
+                    isinstance(prior, AllocateLine)
+                    and isinstance(prior.node, WorkspaceArg)
+                ):
+                    raise AssertionError(
+                        "expected prior to be an AllocateLine with a WorkspaceArg node"
+                    )
                 # expand existing allocation
                 prior.node = WorkspaceArg.maximum(prior.node, ws)
             else:
@@ -3323,14 +3429,16 @@ class PythonWrapperCodegen(CodeGen):
                 buf_name = arg
                 buf = self.args_to_buffers[arg]
             else:
-                assert raw_arg is not None, (
-                    "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
-                )
+                if raw_arg is None:
+                    raise AssertionError(
+                        "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
+                    )
                 buf_name = f"tmp_arg_{self.kernel_autotune_tmp_arg_idx}"
                 buf = raw_arg
                 self.kernel_autotune_tmp_arg_idx += 1
 
-            assert buf is not None, f"Failed to find a buffer for arg {arg}"
+            if buf is None:
+                raise AssertionError(f"Failed to find a buffer for arg {arg}")
             size = V.graph.sizevars.optimization_hints(buf.get_size())
             allocation_size = V.graph.sizevars.optimization_hints(
                 V.graph.get_allocation_size(buf)
@@ -3494,9 +3602,8 @@ class PythonWrapperCodegen(CodeGen):
             and kernel_name not in self.kernel_autotune_names
         ):
             # Create example args for autotune in a separate epilogue
-            assert arg_types is not None and len(call_args) == len(arg_types), (
-                "call_args and arg_types do not match"
-            )
+            if not (arg_types is not None and len(call_args) == len(arg_types)):
+                raise AssertionError("call_args and arg_types do not match")
 
             autotune_args = None
             if original_fxnode_name and V.graph.autotuning_mapping:
@@ -3554,13 +3661,13 @@ class PythonWrapperCodegen(CodeGen):
             tensor_arg_strs = []  # used only when _per_kernel is True
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
-                assert raw_keys is None, "keys are not None but args are"
+                if raw_keys is not None:
+                    raise AssertionError("keys are not None but args are")
                 raw_keys = [None] * len(call_args)
                 raw_args = [None] * len(call_args)
             else:
-                assert len(raw_args) == len(call_args), (
-                    "call_args and raw_args do not match"
-                )
+                if len(raw_args) != len(call_args):
+                    raise AssertionError("call_args and raw_args do not match")
 
             reused_args = {}
             for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
@@ -3588,7 +3695,7 @@ class PythonWrapperCodegen(CodeGen):
                 elif raw_key == "" and infer_arg_by_inputs(
                     raw_keys, raw_args, i, reused_args
                 ):
-                    # Empty raw_key means this is a arg that's not native to the triton kernel,
+                    # Empty raw_key means this is an arg that's not native to the triton kernel,
                     # and is being added by inductor.
                     arg_str = reused_args[raw_arg]
                 elif isinstance(arg_type, torch_dtype):
@@ -3793,7 +3900,10 @@ class PythonWrapperCodegen(CodeGen):
             )
 
     def make_buffer_reuse(self, old: BufferLike, new: BufferLike, delete_old: bool):
-        assert old.get_dtype() == new.get_dtype()
+        if old.get_dtype() != new.get_dtype():
+            raise AssertionError(
+                f"expected matching dtypes, got {old.get_dtype()} and {new.get_dtype()}"
+            )
         old_name = old.get_name()
         new_name = new.get_name()
         del_line = ";"
@@ -3841,15 +3951,14 @@ class PythonWrapperCodegen(CodeGen):
         if isinstance(layout, ir.NoneLayout):
             return
         if isinstance(layout, ir.NonOwningLayout):
-            assert isinstance(layout.view, ir.ReinterpretView), (
-                f"unexpected {type(layout.view)}: {layout.view}"
-            )
+            if not isinstance(layout.view, ir.ReinterpretView):
+                raise AssertionError(f"unexpected {type(layout.view)}: {layout.view}")
             box = layout.view.data
-            assert isinstance(box, ir.StorageBox), type(box)
+            if not isinstance(box, ir.StorageBox):
+                raise AssertionError(type(box))
             input_buffer = box.data
-            assert isinstance(input_buffer, (ir.Buffer, ir.ReinterpretView)), type(
-                input_buffer
-            )
+            if not isinstance(input_buffer, (ir.Buffer, ir.ReinterpretView)):
+                raise AssertionError(type(input_buffer))
             if isinstance(input_buffer, ir.ReinterpretView):
 
                 def unwrap_views(target) -> ir.Buffer:
@@ -3857,7 +3966,8 @@ class PythonWrapperCodegen(CodeGen):
                         return unwrap_views(target.unwrap_view())
                     if isinstance(target, ir.MutableBox):
                         return unwrap_views(target.data)
-                    assert isinstance(target, ir.Buffer), type(target)
+                    if not isinstance(target, ir.Buffer):
+                        raise AssertionError(type(target))
                     return target
 
                 input_buffer = unwrap_views(input_buffer)
@@ -3916,7 +4026,10 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def codegen_inplace_reuse(self, input_buffer: ir.Buffer, output_buffer: ir.Buffer):
-        assert can_match_buffer_size(input_buffer, output_buffer)
+        if not can_match_buffer_size(input_buffer, output_buffer):
+            raise AssertionError(
+                "expected input_buffer and output_buffer sizes to match"
+            )
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
         self.allocated.add(output_buffer.get_name())
@@ -3986,7 +4099,8 @@ class PythonWrapperCodegen(CodeGen):
                     )
                 elif isinstance(keypath[0], DivideByKey):
                     # TODO: need to assert divisibility
-                    # TODO: this is invalid C++ codegen
+                    if V.graph.cpp_wrapper:
+                        return go(f"({expr} / {keypath[0].divisor})", keypath[1:])
                     return go(f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:])
                 else:
                     raise AssertionError(f"unrecognized keypath {keypath}")
@@ -4012,7 +4126,10 @@ class PythonWrapperCodegen(CodeGen):
                             else keypath,
                         )
                     else:
-                        assert isinstance(keypath[0], pytree.SequenceKey)
+                        if not isinstance(keypath[0], pytree.SequenceKey):
+                            raise AssertionError(
+                                f"expected SequenceKey, got {type(keypath[0])}"
+                            )
                         return go(outputs[keypath[0].idx].get_name(), keypath[1:])
                 else:
                     return go(output_name, keypath)
@@ -4036,7 +4153,10 @@ class PythonWrapperCodegen(CodeGen):
         # in the output code. Once we update CppWrapperCpu, we can remove this
         # function.
         def _codegen_subgraph_prefix():
-            assert len(subgraph.graph.graph_inputs) == len(outer_inputs)
+            if len(subgraph.graph.graph_inputs) != len(outer_inputs):
+                raise AssertionError(
+                    f"expected matching input counts, got {len(subgraph.graph.graph_inputs)} != {len(outer_inputs)}"
+                )
             for inner_input, outer_input in zip(
                 subgraph.graph.graph_inputs, outer_inputs
             ):
@@ -4045,7 +4165,10 @@ class PythonWrapperCodegen(CodeGen):
                 )
 
         def _codegen_subgraph_suffix():
-            assert len(subgraph.graph.graph_outputs) == len(outer_outputs)
+            if len(subgraph.graph.graph_outputs) != len(outer_outputs):
+                raise AssertionError(
+                    f"expected matching output counts, got {len(subgraph.graph.graph_outputs)} != {len(outer_outputs)}"
+                )
             for inner_output, outer_output in zip(
                 subgraph.graph.graph_outputs, outer_outputs
             ):
@@ -4494,7 +4617,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # pyre-fixme[16]: scheduler.current_stream_name added in scheduler commit
         if (current_stream_name := V.graph.scheduler.current_stream_name) is not None:
             name = f"{current_stream_name}_raw"
-            self.writeline(f"{name} = {current_stream_name}.cuda_stream")
+            self.writeline(
+                f"{name} = {V.graph.device_ops.stream_handle(current_stream_name)}"
+            )
         else:
             name = get_raw_stream_name(device_idx)
             self.writeline(f"{name} = get_raw_stream({device_idx})")
@@ -4533,7 +4658,8 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         while isinstance(root, SubgraphPythonWrapperCodegen):
             root = root.parent_wrapper
 
-        assert isinstance(root, PythonWrapperCodegen)
+        if not isinstance(root, PythonWrapperCodegen):
+            raise AssertionError(f"expected PythonWrapperCodegen, got {type(root)}")
         return root
 
     def generate_and_run_autotune_block(self):

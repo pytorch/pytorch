@@ -135,12 +135,16 @@ def try_import_cutlass() -> bool:
 
             def link_and_append(dst_link, src_path, parent_dir):
                 if os.path.lexists(dst_link):
-                    assert os.path.islink(dst_link), (
-                        f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
-                    )
-                    assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
+                    if not os.path.islink(dst_link):
+                        raise AssertionError(
+                            f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                        )
+                    if os.path.realpath(os.readlink(dst_link)) != os.path.realpath(
                         src_path,
-                    ), f"Symlink at {dst_link} does not point to {src_path}"
+                    ):
+                        raise AssertionError(
+                            f"Symlink at {dst_link} does not point to {src_path}"
+                        )
                 else:
                     os.makedirs(parent_dir, exist_ok=True)
                     os.symlink(src_path, dst_link)
@@ -277,7 +281,8 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
     # Note: Cache needs to be specific for cuda architecture and version
 
     # Import cutlass python scripts.
-    assert try_import_cutlass()
+    if not try_import_cutlass():
+        raise AssertionError("Failed to import CUTLASS library")
     import cutlass_library.generator as cutlass_generator
     import cutlass_library.manifest as cutlass_manifest
 
@@ -372,7 +377,8 @@ def torch_dtype_to_cutlass_type(
     torch_dtype: torch.dtype,
 ) -> "cutlass_library.library.DataType":  # type: ignore[name-defined] # noqa: F821
     # Import cutlass python scripts.
-    assert try_import_cutlass()
+    if not try_import_cutlass():
+        raise AssertionError("Failed to import CUTLASS library")
     import cutlass_library  # type: ignore[import]
 
     if torch_dtype == torch.float:
@@ -395,7 +401,8 @@ def dtype_match(
     cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]  # noqa: F821
 ) -> bool:
     # Import cutlass python scripts.
-    assert try_import_cutlass()
+    if not try_import_cutlass():
+        raise AssertionError("Failed to import CUTLASS library")
     import cutlass_library
 
     if torch_dtype == torch.float:
@@ -428,9 +435,8 @@ def get_accumulator_dtype(
     Given a pair of input torch dtypes, returns the inferred accumulator torch dtype.
     """
 
-    assert OrderedSet(input_torch_dtypes) <= XW_DTYPES, (
-        f"{input_torch_dtypes=} is not supported"
-    )
+    if not (OrderedSet(input_torch_dtypes) <= XW_DTYPES):
+        raise AssertionError(f"{input_torch_dtypes=} is not supported")
 
     if len(input_torch_dtypes) != 2:
         return None
@@ -469,9 +475,8 @@ def get_accumulator_dtype(
     else:
         raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
 
-    assert accumulator_dtype in ACCUMULATOR_DTYPES, (
-        f"{accumulator_dtype=} is not supported"
-    )
+    if accumulator_dtype not in ACCUMULATOR_DTYPES:
+        raise AssertionError(f"{accumulator_dtype=} is not supported")
     return accumulator_dtype
 
 
