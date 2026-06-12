@@ -5,7 +5,6 @@ import os
 import unittest
 
 import torch
-import torch._dynamo.config
 import torch.distributed as dist
 import torch.distributed._functional_collectives as _functional_collectives
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -48,16 +47,6 @@ from torch.utils._triton import has_triton_package
 
 @requires_cuda
 class TestDTensorDebugMode(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        torch._dynamo.config.canonicalize_output_graph_node_order = True
-
-    @classmethod
-    def tearDownClass(cls):
-        torch._dynamo.config.canonicalize_output_graph_node_order = False
-        super().tearDownClass()
-
     def tearDown(self):
         super().tearDown()
         dist.destroy_process_group()
