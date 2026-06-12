@@ -34,15 +34,10 @@ function install_torchbench() {
 conda_install pango
 
 # Detect CUDA version and use appropriate wheel index
-# DESIRED_CUDA is set as ENV in the Dockerfile (e.g., "13.0.2", "12.8.1")
-if [[ "${DESIRED_CUDA}" == 13.* ]]; then
-  CUDA_INDEX_URL="https://download.pytorch.org/whl/cu130"
-  echo "DESIRED_CUDA=${DESIRED_CUDA}, using cu130 wheels"
-else
-  # Default to cu128 for CUDA 12.x
-  CUDA_INDEX_URL="https://download.pytorch.org/whl/cu128"
-  echo "DESIRED_CUDA=${DESIRED_CUDA}, using cu128 wheels"
-fi
+# DESIRED_CUDA is set as ENV in the Dockerfile, but reality is that it can only be 13.0.2 atm
+# TODO: One shoudl not install GPU builds on ROCM or CPU inductorbeanch installs
+CUDA_INDEX_URL="https://download.pytorch.org/whl/cu130"
+echo "DESIRED_CUDA=${DESIRED_CUDA}, using cu130 wheels"
 
 # Stable packages are ok here, just to satisfy TorchBench check
 pip_install torch torchvision torchaudio --index-url "${CUDA_INDEX_URL}"
