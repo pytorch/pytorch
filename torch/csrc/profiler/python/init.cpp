@@ -390,12 +390,8 @@ void initPythonBindings(PyObject* module) {
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
-          "    profiler_metrics : DEPRECATED and ignored. CUPTI range-profiler\n"
-          "       support was removed (the feature was already a no-op on CUDA > 12.6).\n"
-          "       Retained only for backward compatibility; will be removed in a\n"
-          "       future release.\n"
+          "    profiler_metrics : DEPRECATED and ignored.\n"
           "    profiler_measure_per_kernel (bool) : DEPRECATED and ignored.\n"
-          "       See profiler_metrics.\n"
           "    verbose (bool) : whether the trace file has `Call stack` field or not.\n"
           "    performance_events : a list of profiler events to be used for measurement.\n"
           "    enable_cuda_sync_events : for CUDA profiling mode, enable adding CUDA synchronization events\n"

@@ -273,9 +273,7 @@ class profile:
         ):
             warn(
                 "profiler_metrics and profiler_measure_per_kernel are deprecated "
-                "and ignored. CUPTI range-profiler support was removed (the "
-                "feature was already a no-op on CUDA > 12.6). These options will "
-                "be removed in a future release.",
+                "and ignored. These options will be removed in a future release.",
                 FutureWarning,
                 stacklevel=2,
             )
