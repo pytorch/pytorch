@@ -36,6 +36,7 @@ from torch.testing._internal.common_cuda import (
     SM100OrLater,
     SM89OrLater,
     SM90OrLater,
+    TEST_WITH_ROCM,
     xfailIfSM100OrLater,
 )
 from torch.testing._internal.common_device_type import e4m3_type
@@ -533,7 +534,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 # MultiProcContinuousTest will skip all the following tests if a test fails (
 # we should fix this too). We still want to get the test signals for the core
 # symmetric memory APIs when Async TP ops fail.
-@skip_if_rocm_multiprocess  # AsyncTP is not yet supported on ROCm
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
@@ -591,7 +591,6 @@ class AsyncTPTest(MultiProcContinuousTest):
                     f"Expected mm_output_0.stride() to be truthy, got {mm_output_0.stride()}"
                 )
 
-    @skip_if_rocm_multiprocess  # this requires async_input_mm support
     @skipIf(
         not SM90OrLater,
         "_fused_all_gather_matmul_native currently only supports sm>=90",
@@ -637,11 +636,14 @@ class AsyncTPTest(MultiProcContinuousTest):
         ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
             A_shard, [B], gather_dim=0, group_name=group_name
         )
-        with torch.profiler.profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CUDA,
-            ],
-        ) as prof:
+
+        profiler_activities = [torch.profiler.ProfilerActivity.CUDA]
+        if TEST_WITH_ROCM:
+            # CK surfaces the scheduler path through RECORD_FUNCTION instead of
+            # the HIP kernel symbol, so we need CPU activity to observe it.
+            profiler_activities.insert(0, torch.profiler.ProfilerActivity.CPU)
+
+        with torch.profiler.profile(activities=profiler_activities) as prof:
             ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
                 A_shard, [B], gather_dim=0, group_name=group_name
             )

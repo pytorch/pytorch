@@ -440,7 +440,7 @@ def _pipelined_produce_and_all2all(
     symm_mem.barrier(channel=0)
 
 
-lib = torch.library.Library("symm_mem", "DEF")
+lib = torch.library.Library("symm_mem", "DEF")  # noqa: TOR901
 lib.define(
     "fused_all_gather_matmul("
     "Tensor A, Tensor[] Bs, int gather_dim, str group_name, *, bool return_A = True) -> (Tensor?, Tensor[])",
@@ -929,6 +929,16 @@ def _fused_all_gather_matmul_native(
     B: torch.Tensor,
     group_name: c10d.GroupName,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    if torch.version.hip is None:
+        return _fused_all_gather_matmul_native_cuda(A_shard, B, group_name)
+    return _fused_all_gather_matmul_native_rocm(A_shard, B, group_name)
+
+
+def _fused_all_gather_matmul_native_cuda(
+    A_shard: torch.Tensor,
+    B: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> tuple[torch.Tensor, torch.Tensor]:
     symm_mem = rendezvous(A_shard, group_name)
     if symm_mem is None:
         symm_mem = get_symm_mem_workspace(
@@ -972,7 +982,70 @@ def _fused_all_gather_matmul_native(
                 _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
 
     current_stream.wait_stream(backend_stream)
+
+    symm_mem.barrier()
+    return A, out
+
+
+def _fused_all_gather_matmul_native_rocm(
+    A_shard: torch.Tensor,
+    B: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    local_A_shard = A_shard
+    remote_A_shard = A_shard
+
+    symm_mem = rendezvous(remote_A_shard, group_name)
+    if symm_mem is None:
+        symm_mem = get_symm_mem_workspace(
+            group_name, remote_A_shard.numel() * remote_A_shard.element_size()
+        )
+        buf = symm_mem.get_buffer(
+            symm_mem.rank, remote_A_shard.shape, remote_A_shard.dtype
+        )
+        buf.copy_(remote_A_shard)
+        remote_A_shard = buf
+
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    current_stream = torch.cuda.current_stream()
+    backend_stream = _get_backend_stream(priority=-1)
+
+    A = local_A_shard.new_empty(
+        local_A_shard.shape[0] * world_size, local_A_shard.shape[1]
+    )
+    A_signals = torch.zeros(
+        world_size, dtype=torch.uint32, device=local_A_shard.device
+    )
+    A_shards = A.chunk(world_size)
+
+    # Order signal initialization before backend-stream signal writes.
+    symm_mem.barrier()
     backend_stream.wait_stream(current_stream)
+    current_stream.wait_stream(backend_stream)
+
+    A_shards[rank].copy_(local_A_shard)
+    if not torch.cuda.is_current_stream_capturing():
+        _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
+    else:
+        _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
+
+    out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
+    for step in range(1, world_size):
+        src_rank = (rank + step) % world_size
+        src_buf = symm_mem.get_buffer(
+            src_rank, remote_A_shard.shape, remote_A_shard.dtype
+        )
+        with backend_stream:
+            A_shards[src_rank].copy_(src_buf)
+            if not torch.cuda.is_current_stream_capturing():
+                # stream_write_value32 issues a system level fence before the write
+                _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
+            else:
+                _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
+
+    current_stream.wait_stream(backend_stream)
 
     symm_mem.barrier()
     return A, out

@@ -12,14 +12,28 @@ namespace pytorch_flash {
 
 fmha_bwd_traits get_ck_fmha_varlen_bwd_traits(const mask_info &mask,
                                               std::string dtype,
+                                              int total_q,
+                                              int total_k,
+                                              int batch_size,
+                                              int max_seqlen_q,
+                                              int max_seqlen_k,
+                                              int num_heads,
+                                              int num_heads_k,
                                               int head_size,
                                               bool has_dropout,
                                               bool enable_bias,
                                               bool deterministic,
                                               bool bias_requires_grad)
 {
-    return fmha_bwd_traits{head_size,
+    return fmha_bwd_traits{total_q,
+                           total_k,
+                           batch_size,
+                           max_seqlen_q,
+                           max_seqlen_k,
                            head_size,
+                           head_size,
+                           num_heads,
+                           num_heads_k,
                            dtype,
                            true, // is_group_mode
                            mask.type,
@@ -161,7 +175,9 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
                          dk.data_ptr(),
                          dv.data_ptr(),
                          dbias_ptr, // dbias
-                         dq_acc.data_ptr(), // dq_acc
+                         dq_acc.data_ptr(), // workspace
+                         nullptr, // sink
+                         nullptr, // d_sink
                          seqlens_q.data_ptr(), // seqstart_q
                          seqlens_k.data_ptr(), // seqstart_k
                          nullptr, // seqlen_q_ptr
@@ -185,7 +201,6 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
                          stride_o,
                          0, // stride_randval
                          stride_do,
-                         stride_dq_acc,
                          stride_dq,
                          stride_dk,
                          stride_dv,
@@ -198,7 +213,6 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
                          0, // nhead_stride_randval
                          nhead_stride_do,
                          nhead_stride_lse,
-                         nhead_stride_dq_acc,
                          nhead_stride_dq,
                          nhead_stride_dk,
                          nhead_stride_dv,
@@ -211,12 +225,10 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
                          0, // batch_stride_randval
                          batch_stride_do,
                          batch_stride_lse,
-                         batch_stride_dq_acc,
                          batch_stride_dq,
                          batch_stride_dk,
                          batch_stride_dv,
                          batch_stride_dbias, // batch_stride_dbias
-                         split_stride_dq_acc,
                          mask.left,
                          mask.right,
                          static_cast<ck_tile::index_t>(mask.type),
@@ -413,6 +425,13 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
         auto traits =
             get_ck_fmha_varlen_bwd_traits(mask,
                                           q_dtype_str,
+                                          static_cast<int>(q.size(0)),
+                                          static_cast<int>(k.size(0)),
+                                          batch_size,
+                                          max_seqlen_q,
+                                          max_seqlen_k,
+                                          num_heads,
+                                          num_heads_k,
                                           head_size_8x,
                                           is_dropout,
                                           attn_bias_.has_value(),
