@@ -2542,7 +2542,7 @@ If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathb
     XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
 If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True`), given an LU factorization of :math:`A`
-this function function returns the :math:`X \in \mathbb{K}^{n \times k}` that solves the system
+this function returns the :math:`X \in \mathbb{K}^{n \times k}` that solves the system
 
 .. math::
 
