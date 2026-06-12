@@ -141,6 +141,7 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
 
     {
       std::lock_guard<std::mutex> lock(mutex_);
+      levels_idx.reserve(content_.size());
       for (auto& c : content_) {
         levels_idx.push_back(c.first);
       }

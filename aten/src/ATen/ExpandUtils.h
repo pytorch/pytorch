@@ -468,6 +468,7 @@ inline Tensor _sum_to(
 
   auto sizes = at::symint::sizes<T>(tensor);
   c10::SmallVector<int64_t, 8> reduce_dims;
+  reduce_dims.reserve(sizes.size());
   const int64_t leading_dims = sizes.size() - shape.size();
   for (const auto i : c10::irange(leading_dims)) {
     reduce_dims.push_back(i);
