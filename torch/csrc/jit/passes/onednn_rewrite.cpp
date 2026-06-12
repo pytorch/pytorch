@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/mkldnn_rewrite.h>
+#include <torch/csrc/jit/passes/onednn_rewrite.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
 namespace torch::jit {

@@ -43,7 +43,7 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 
 #else // AT_MKLDNN_ENABLED
 
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 
 namespace at::native {
 

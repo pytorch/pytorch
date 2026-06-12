@@ -626,7 +626,7 @@ def _register_quantized_linear_binary_lowering(
         o_zero_point = kwargs["output_zero_point"]
 
         x2.realize()
-        from .mkldnn_fusion import _qlinear_binary_can_be_inplace
+        from .onednn_fusion import _qlinear_binary_can_be_inplace
 
         binary_op_name = kwargs["binary_op_name"]
         alpha = kwargs["alpha"]
@@ -742,7 +742,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
         # ancestor nodes of the compute node, except for the binary node
         # connected to the compute node.
 
-        from .mkldnn_fusion import _get_remaining_users
+        from .onednn_fusion import _get_remaining_users
 
         extra_input_of_pattern = (
             match.kwargs["other"]
@@ -806,7 +806,7 @@ def _register_quantized_conv_binary_lowering(
         unary_op_algorithm = kwargs["unary_op_algorithm"]
 
         accum.realize()
-        from .mkldnn_fusion import _can_be_inplace
+        from .onednn_fusion import _can_be_inplace
 
         if not _can_be_inplace(accum):
             raise AssertionError(
@@ -3149,7 +3149,7 @@ def _register_qconv_post_op_fusion_pass(
 
 
 def _register_qconv_unary_fusion():
-    from .mkldnn_fusion import _hardswish_fusion, _hardtanh_fusion, _silu_fusion
+    from .onednn_fusion import _hardswish_fusion, _hardtanh_fusion, _silu_fusion
 
     for original_pattern_output_dtype in [torch.float32, torch.bfloat16]:
         # Priority 1 to match: QConv2d Unary pattern with int8 output
@@ -3488,7 +3488,7 @@ def _register_qlinear_post_op_fusion_pass(
 
 
 def _register_qlinear_unary_fusion():
-    from .mkldnn_fusion import (
+    from .onednn_fusion import (
         _gelu_fusion_1 as _gelu_fusion_erf,
         _gelu_fusion_2 as _gelu_fusion_tanh,
     )
@@ -3827,7 +3827,7 @@ def _register_quantization_weight_pack_pass():
     _register_smooth_quant_int_mm_pattern()
 
     # Step 5: QLinear post op Fusion
-    if not torch.ops.mkldnn._is_mkldnn_acl_supported():
+    if not torch.ops.onednn._is_mkldnn_acl_supported():
         # skip fusion on ARM
         _register_qconv_unary_fusion()
         _register_qconv_binary_fusion()
