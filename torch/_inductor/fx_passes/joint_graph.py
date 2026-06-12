@@ -994,6 +994,35 @@ def _preserve_scaled_softmax_nonfinite_semantics(scaled, stable, dim, keepdim):
     return torch.where(finite_scaled, stable, original)
 
 
+def _is_static_safe_softmax_divisor(other) -> bool:
+    """
+    For scaled softmax of the form inp / other, the effective scale is 1 / other.
+    If other is a compile-time finite scalar and abs(other) >= 1,
+    then effective scale <= 1, so dividing finite inp by other will not introduce overflow.
+    """
+    import math
+
+    if not isinstance(other, (int, float)):
+        return False
+
+    other = float(other)
+    return math.isfinite(other) and abs(other) >= 1.0
+
+
+def _is_static_safe_softmax_scale(scale) -> bool:
+    """
+    Return True when the scale is a compile-time positive constant <= 1.
+    For finite score, multiplying by such a scale will not introduce overflow.
+    """
+    import math
+
+    if isinstance(scale, (int, float)):
+        scale = float(scale)
+        return math.isfinite(scale) and 0.0 < scale <= 1.0
+
+    return False
+
+
 def _other_is_broadcasted_in_dim(match):
     # Check that the scaling factor is constant across the reduction dim,
     # so scaling doesn't change which index corresponds to the maximum value
@@ -1033,9 +1062,8 @@ def _other_is_broadcasted_in_dim(match):
 
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
-        scaled = inp * other
+        orig_inp = inp
         if dtype is not None:
-            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -1045,10 +1073,17 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
             one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
             sign = torch.where(other >= 0, one, -one)
 
-        inp = inp * sign
-        max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
+        inp_for_stable = inp * sign
+        max_ = torch.amax(inp_for_stable, dim=dim, keepdim=keepdim)
+        stable = (inp_for_stable - max_) * (sign * other)
+        # Fast path for static small scales that will not cause overflow.
+        if _is_static_safe_softmax_scale(other):
+            return stable
 
-        stable = (inp - max_) * (sign * other)
+        scaled = orig_inp * other
+        if dtype is not None:
+            scaled = scaled.to(dtype)
+
         return _preserve_scaled_softmax_nonfinite_semantics(
             scaled, stable, dim, keepdim
         )
@@ -1068,9 +1103,9 @@ for reverse, to_dtype in itertools.product((False, True), repeat=2):
 
 def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
-        scaled = inp / other
+        orig_inp = inp
+
         if dtype is not None:
-            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -1080,10 +1115,18 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
             one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
             sign = torch.where(other >= 0, one, -one)
 
-        inp = inp * sign
-        max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
+        inp_for_stable = inp * sign
+        max_ = torch.amax(inp_for_stable, dim=dim, keepdim=keepdim)
+        stable = (inp_for_stable - max_) / (sign * other)
 
-        stable = (inp - max_) / (sign * other)
+        # Fast path for static safe divisor.
+        if _is_static_safe_softmax_divisor(other):
+            return stable
+
+        scaled = orig_inp / other
+        if dtype is not None:
+            scaled = scaled.to(dtype)
+
         return _preserve_scaled_softmax_nonfinite_semantics(
             scaled, stable, dim, keepdim
         )
