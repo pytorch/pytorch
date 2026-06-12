@@ -3202,9 +3202,16 @@ def _max_unpoolnd(
     ).reshape(-1)
 
     output = self.new_zeros(output_shape)
-    return aten._unsafe_index_put(
+    result = aten._unsafe_index_put(
         output.reshape(-1), [indices_flat], self.reshape(-1), accumulate=False
     ).view(output.shape)
+    if dim == 2 and self.device.type == "cpu":
+        # The native CPU kernel preserves the input's memory format
+        # (aten/src/ATen/native/MaxUnpooling.cpp uses suggest_memory_format),
+        # while the CUDA kernel and the 3d kernels always return contiguous
+        # output.
+        result = result.contiguous(memory_format=utils.suggest_memory_format(self))
+    return result
 
 
 @register_decomposition(aten.max_unpool2d)
