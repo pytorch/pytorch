@@ -317,28 +317,19 @@ _scaled_mm_cpu(const Tensor& mat_a, const Tensor& mat_b,
   return _scaled_mm_out_cpu(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
 }
 
-using acceptance_fn = std::function<bool(
-    c10::ScalarType,
-    std::vector<ScalingType>&,
-    ArrayRef<Tensor>&,
-    c10::ScalarType,
-    std::vector<ScalingType>&,
-    ArrayRef<Tensor>&)>;
-
 namespace scaled_blas = at::native::scaled;
 using scaled_blas::convert_int_to_enum;
 using scaled_blas::ScaledGemmImplementation;
+using scaled_blas::ScaleKernelDispatchEntry;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 2>
-    scale_kernel_dispatch = {{
-      {"tensorwise_tensorwise",
-       scaled_blas::check_tensorwise_recipe,
-       ScaledGemmImplementation::TENSORWISE_TENSORWISE},
-      {"rowwise_rowwise",
-       scaled_blas::check_rowwise_recipe,
-       ScaledGemmImplementation::ROWWISE_ROWWISE},
-
-  }};
+std::array<ScaleKernelDispatchEntry, 2> scale_kernel_dispatch = {{
+    {"tensorwise_tensorwise",
+     scaled_blas::check_tensorwise_recipe,
+     ScaledGemmImplementation::TENSORWISE_TENSORWISE},
+    {"rowwise_rowwise",
+     scaled_blas::check_rowwise_recipe,
+     ScaledGemmImplementation::ROWWISE_ROWWISE},
+}};
 
 Tensor& _scaled_mm_cpu_v2_out(
     const Tensor& mat_a,
@@ -429,27 +420,16 @@ Tensor& _scaled_mm_cpu_v2_out(
   // NOTE: support is deliberately sparse, can explicitly enumerate all
   // combinations allowed. Do this via a list of defined (name, acceptance,
   // concrete_impl) tuples.
-  bool found_impl = false;
-  ScaledGemmImplementation gemm_impl = ScaledGemmImplementation::NONE;
+  ScaledGemmImplementation gemm_impl = scaled_blas::find_scaled_gemm_impl(
+      scale_kernel_dispatch,
+      mat_a.scalar_type(),
+      scale_recipe_a_enum,
+      scale_a,
+      mat_b.scalar_type(),
+      scale_recipe_b_enum,
+      scale_b);
 
-  for (const auto& fn_entry : scale_kernel_dispatch) {
-    const auto [name, accept_fn, scaled_gemm_impl] = fn_entry;
-    const bool ok = accept_fn(
-        mat_a.scalar_type(),
-        scale_recipe_a_enum,
-        scale_a,
-        mat_b.scalar_type(),
-        scale_recipe_b_enum,
-        scale_b);
-
-    if (ok) {
-      gemm_impl = scaled_gemm_impl;
-      found_impl = true;
-      break;
-    }
-  }
-
-  if (!found_impl) {
+  if (gemm_impl == ScaledGemmImplementation::NONE) {
     const std::optional<at::Tensor> scale_a_opt = scale_a.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_a[0]};
     const std::optional<at::Tensor> scale_b_opt = scale_b.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_b[0]};
 
