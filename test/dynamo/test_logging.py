@@ -1542,6 +1542,34 @@ TorchDynamo attempted to trace the following frames: [
         self.assertIn("fn", msg)
 
 
+class PartitionedScatterLoggingTests(LoggingTestCase):
+    """
+    Dedicated tests for the partitioned_scatter TORCH_LOGS artifact.
+    """
+
+    @make_logging_test(partitioned_scatter=True)
+    def test_partitioned_scatter(self, records):
+        from torch._inductor import config as inductor_config
+
+        N, n = 8192, 8
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        with inductor_config.patch(
+            partitioned_scatter_enabled=True,
+            partitioned_scatter_force=True,
+        ):
+            fn_opt = torch.compile(f, backend="inductor", fullgraph=True)
+            out = torch.zeros(n)
+            idx = torch.randint(0, 4, (N,), dtype=torch.int64)
+            vals = torch.randn(N)
+            fn_opt(out, idx, vals)
+
+        # At least one debug record should be emitted (APPLY or SKIP decision).
+        self.assertGreater(len(records), 0)
+
+
 # non single record tests
 exclusions = {
     "bytecode",
@@ -1596,6 +1624,7 @@ exclusions = {
     "node_runtime_estimation",
     "caching",
     "overlap_scheduling",
+    "partitioned_scatter",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
