@@ -41,6 +41,17 @@ std::map<at::ScalarType, MPI_Datatype> mpiDatatype = {
     {at::kChar, MPI_CHAR},
     {at::kDouble, MPI_DOUBLE},
     {at::kFloat, MPI_FLOAT},
+// FP16 is generally supported if MPIX_C_FLOAT16 exists
+// for now the NVIDIA hpc sdk is built without (OpenMPI)
+#if defined(MPIX_C_FLOAT16)
+    {at::kHalf, MPIX_C_FLOAT16},
+#endif
+#if defined(MPIX_C_BF16)
+    {at::kBFloat16, MPIX_C_BF16},
+#endif
+#if defined(MPIX_BFLOAT16)
+    {at::kBFloat16, MPIX_BFLOAT16},
+#endif
     {at::kInt, MPI_INT},
     {at::kLong, MPI_LONG},
     {at::kShort, MPI_SHORT},
@@ -56,7 +67,15 @@ bool cudaAwareMpiCheck() {
   } else {
     return false;
   }
-#else // !defined(MPIX_CUDA_AWARE_SUPPORT)
+// Recognize that Cray MPICH is CUDA-aware (used on Cray/HPE supercomputers)
+#elif defined(MPIX_GPU_SUPPORT_CUDA)
+  const char* cray_gpu_support = std::getenv("MPICH_GPU_SUPPORT_ENABLED");
+  if (cray_gpu_support != nullptr && std::string(cray_gpu_support) == "1") {
+    return true;
+  } else {
+    return false;
+  }
+#else // !defined(MPIX_CUDA_AWARE_SUPPORT) && !defined(MPIX_GPU_SUPPORT_CUDA)
   return false;
 #endif // MPIX_CUDA_AWARE_SUPPORT
 }
@@ -226,8 +245,6 @@ void ProcessGroupMPI::AsyncWork::populateException() {
 // Static global states
 int ProcessGroupMPI::mpiThreadSupport_ = 0;
 std::mutex ProcessGroupMPI::pgGlobalMutex_;
-// We only want to initialize once
-c10::once_flag ProcessGroupMPI::onceFlagInitMPI;
 
 void ProcessGroupMPI::mpiExit() {
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
@@ -235,8 +252,8 @@ void ProcessGroupMPI::mpiExit() {
 }
 
 void ProcessGroupMPI::initMPIOnce() {
-  // Initialize MPI environment
-  c10::call_once(onceFlagInitMPI, []() {
+  // Initialize MPI environment. We only want to initialize once.
+  static bool init_mpi_flag [[maybe_unused]] = []() {
     int mpi_was_initialized = 0;
     MPI_CHECK(MPI_Initialized(&mpi_was_initialized));
     if (mpi_was_initialized == 0) {
@@ -256,12 +273,13 @@ void ProcessGroupMPI::initMPIOnce() {
     } else {
       TORCH_WARN_ONCE("MPI was previously initialized.");
     }
-  });
+    return true;
+  }();
 }
 
 c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
     std::vector<int> ranks) {
-  // Once initialization
+  // One-time initialization
   initMPIOnce();
 
   MPI_Comm groupComm = MPI_COMM_WORLD;
@@ -317,7 +335,7 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
 }
 
 ProcessGroupMPI::ProcessGroupMPI(int rank, int size, MPI_Comm pgComm)
-    : Backend(rank, size), stop_(false), pgComm_(pgComm) {
+    : Backend(rank, size), pgComm_(pgComm) {
   if (pgComm_ == MPI_COMM_NULL) {
     TORCH_CHECK(false, "pgComm_ must not be MPI_COMM_NULL");
   }
@@ -696,7 +714,47 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
-  TORCH_CHECK(false, "ProcessGroupMPI does not support reduce_scatter");
+  checkSingleTensor(outputTensors);
+  if (inputTensors.size() != 1) {
+    TORCH_CHECK(
+        false,
+        "MPI process group only supports a single "
+        "tensor op");
+  }
+  if (static_cast<size_t>(size_) != inputTensors[0].size()) {
+    TORCH_CHECK(
+        false,
+        "Reduce scatter: number of input tensors should equal "
+        "to the world size");
+  }
+  checkSameSizeAndType(outputTensors[0], inputTensors[0]);
+
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [opts, this](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (entry->dst)[0];
+        auto flatInputTensor = newLikeFlat(entry->src);
+        for (const auto i : c10::irange(entry->src.size())) {
+          flatInputTensor[static_cast<int64_t>(i)].copy_(entry->src[i]);
+        }
+        int recvcount = flatInputTensor.numel() / size_;
+
+        c10::DeviceGuard guard(data.device());
+        std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
+        MPI_CHECK(MPI_Reduce_scatter_block(
+            flatInputTensor.data_ptr(),
+            data.data_ptr(),
+            recvcount,
+            mpiDatatype.at(data.scalar_type()),
+            mpiOp.at(opts.reduceOp),
+            pgComm_));
+      };
+
+  auto entry = std::make_unique<WorkEntry>(
+      &inputTensors[0], &outputTensors, std::move(runFunc));
+  return enqueue(
+      std::move(entry),
+      "mpi:reduce_scatter",
+      std::optional<std::vector<at::Tensor>>(inputTensors[0]));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall_base(
@@ -942,10 +1000,70 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(const BarrierOptions& opts) {
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::_allgather_base(
-    at::Tensor& /*unused */,
-    at::Tensor& /*unused */,
-    const AllgatherOptions& /*unused */) {
-  TORCH_CHECK(false, "no support for _allgather_base in MPI process group");
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    const AllgatherOptions& opts) {
+  TORCH_CHECK(
+      outputTensor.numel() == inputTensor.numel() * size_,
+      "All gather: output tensor size must be equal to input tensor size times the world size");
+
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [this](std::unique_ptr<WorkEntry>& entry) {
+        auto dstdata = (entry->dst)[0];
+        auto srcdata = (entry->src)[0];
+        c10::DeviceGuard guard(srcdata.device());
+        std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
+        MPI_CHECK(MPI_Allgather(
+            srcdata.data_ptr(),
+            srcdata.numel(),
+            mpiDatatype.at(srcdata.scalar_type()),
+            dstdata.data_ptr(),
+            srcdata.numel(),
+            mpiDatatype.at(dstdata.scalar_type()),
+            pgComm_));
+      };
+
+  auto inputTensors = std::vector<at::Tensor>({inputTensor});
+  auto outputTensors = std::vector<at::Tensor>({outputTensor});
+  auto entry = std::make_unique<WorkEntry>(
+      &inputTensors, &outputTensors, std::move(runFunc));
+  return enqueue(
+      std::move(entry),
+      "mpi:_allgather_base",
+      std::optional<std::vector<at::Tensor>>(inputTensors));
+}
+
+c10::intrusive_ptr<Work> ProcessGroupMPI::_reduce_scatter_base(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    const ReduceScatterOptions& opts) {
+  TORCH_CHECK(
+      outputTensor.numel() * size_ == inputTensor.numel(),
+      "Reduce scatter: input tensor size must be equal to output tensor size times the world size");
+
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [opts, this](std::unique_ptr<WorkEntry>& entry) {
+        auto dstdata = (entry->dst)[0];
+        auto srcdata = (entry->src)[0];
+        c10::DeviceGuard guard(srcdata.device());
+        std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
+        MPI_CHECK(MPI_Reduce_scatter_block(
+            srcdata.data_ptr(),
+            dstdata.data_ptr(),
+            dstdata.numel(),
+            mpiDatatype.at(srcdata.scalar_type()),
+            mpiOp.at(opts.reduceOp),
+            pgComm_));
+      };
+
+  auto inputTensors = std::vector<at::Tensor>({inputTensor});
+  auto outputTensors = std::vector<at::Tensor>({outputTensor});
+  auto entry = std::make_unique<WorkEntry>(
+      &inputTensors, &outputTensors, std::move(runFunc));
+  return enqueue(
+      std::move(entry),
+      "mpi:_reduce_scatter_base",
+      std::optional<std::vector<at::Tensor>>(inputTensors));
 }
 
 } // namespace c10d

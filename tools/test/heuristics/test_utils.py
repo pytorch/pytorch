@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.append(str(REPO_ROOT))
 
 import tools.testing.target_determination.heuristics.utils as utils
@@ -21,7 +21,7 @@ class TestHeuristicsUtils(unittest.TestCase):
         self, first: dict[TestRun, Any], second: dict[TestRun, Any]
     ) -> None:
         self.assertEqual(first.keys(), second.keys())
-        for key in first.keys():
+        for key in first:
             self.assertAlmostEqual(first[key], second[key])
 
     def test_normalize_ratings(self) -> None:

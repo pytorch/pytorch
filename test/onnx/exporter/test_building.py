@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import numpy as np
+import onnx_ir as ir
 import onnxscript
-from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _building, _tensors
@@ -14,6 +14,7 @@ from torch.testing._internal import common_utils
 
 class TestOpRecorder(common_utils.TestCase):
     def setUp(self):
+        super().setUp()
         self.opset_version = 17
         self.opset = onnxscript.values.Opset("", self.opset_version)
         self.recorder = _building.OpRecorder(opset=self.opset, constant_farm={})
@@ -33,48 +34,13 @@ class TestOpRecorder(common_utils.TestCase):
             producer_version=torch.__version__,
         )
 
-    def test_skippable_castlike_is_ommited(self):
-        input_x = _tensors.SymbolicTensor(opset=self.opset, name="input_x")
-        input_x.dtype = ir.DataType.FLOAT
-
-        input_y = _tensors.SymbolicTensor(opset=self.opset, name="input_y")
-        input_y.dtype = ir.DataType.FLOAT
-
-        with onnxscript.evaluator.default_as(
-            tracer := self.recorder,
-        ):
-            cast = self.opset.CastLike(input_y, input_x)
-            _ = self.opset.Add(input_x, cast)
-
-        self.assertEqual(len(tracer.nodes), 1)
-        self.assertEqual(tracer.nodes[0].op_type, "Add")
-
-    def test_castlike_is_replaced_with_cast_when_it_is_traced(self):
-        input_x = _tensors.SymbolicTensor(opset=self.opset, name="input_x")
-        input_x.dtype = ir.DataType.FLOAT
-
-        input_y = _tensors.SymbolicTensor(opset=self.opset, name="input_y")
-        input_y.dtype = ir.DataType.INT64
-
-        with onnxscript.evaluator.default_as(
-            tracer := self.recorder,
-        ):
-            cast = self.opset.CastLike(input_y, input_x)
-            _ = self.opset.Add(input_x, cast)
-
-        self.assertEqual(len(tracer.nodes), 2)
-        self.assertEqual(tracer.nodes[0].op_type, "Cast")
-        self.assertEqual(tracer.nodes[1].op_type, "Add")
-
     def test_python_constant_added_as_constant_nodes(self):
         input_x = _tensors.SymbolicTensor(
             opset=self.opset, name="input_x", shape=ir.Shape([2, 3, 4])
         )
         new_shape = [3, 2, 4]
 
-        with onnxscript.evaluator.default_as(
-            tracer := self.recorder,
-        ):
+        with onnxscript.evaluator.default_as(tracer := self.recorder):
             _ = self.opset.Reshape(input_x, new_shape)
 
         self.assertEqual(len(tracer.nodes), 2)
@@ -95,9 +61,7 @@ class TestOpRecorder(common_utils.TestCase):
             opset=self.opset, name="input_z", shape=ir.Shape([1, 3])
         )
 
-        with onnxscript.evaluator.default_as(
-            tracer := self.recorder,
-        ):
+        with onnxscript.evaluator.default_as(tracer := self.recorder):
             _ = self.opset.SequenceAt([input_x, input_y, input_z], 1)
 
         self.assertEqual(len(tracer.nodes), 3)
@@ -114,33 +78,63 @@ class TestOpRecorder(common_utils.TestCase):
             opset=self.opset, name="input_z", shape=ir.Shape([1, 3])
         )
 
-        with onnxscript.evaluator.default_as(
-            tracer := self.recorder,
-        ):
+        with onnxscript.evaluator.default_as(tracer := self.recorder):
             _ = self.opset.Max(input_x, input_y, 0, input_z)
 
         self.assertEqual(len(tracer.nodes), 2)
         self.assertEqual(tracer.nodes[0].op_type, "Constant")
 
-    def test_process_python_sequence_with_an_extra_concat(self):
+    def test_process_python_sequence_creates_extra_concat(self):
+        # Elements in the list must be 0D tensors
         input_x = _tensors.SymbolicTensor(
-            opset=self.opset, name="input_x", shape=ir.Shape([2, 3])
+            opset=self.opset, name="input_x", shape=ir.Shape([])
         )
         input_y = _tensors.SymbolicTensor(
-            opset=self.opset, name="input_y", shape=ir.Shape([2, 3])
+            opset=self.opset, name="input_y", shape=ir.Shape([])
         )
         input_z = _tensors.SymbolicTensor(
             opset=self.opset, name="input_z", shape=ir.Shape([4, 3])
         )
 
-        with onnxscript.evaluator.default_as(
-            tracer := self.recorder,
-        ):
+        with onnxscript.evaluator.default_as(tracer := self.recorder):
             _ = self.opset.Add([input_x, input_y], input_z)
 
-        self.assertEqual(len(tracer.nodes), 2)
-        self.assertEqual(tracer.nodes[0].op_type, "Concat")
-        self.assertEqual(tracer.nodes[0].attributes["axis"].value, 0)
+        self.assertEqual(len(tracer.nodes), 6)
+        self.assertEqual(tracer.nodes[-2].op_type, "Concat")
+        self.assertEqual(tracer.nodes[-2].attributes["axis"].value, 0)
+
+    def test_process_python_sequence_mix_symbolic_constant_creates_extra_concat(self):
+        # Elements in the list must be 0D tensors
+        input_x = _tensors.SymbolicTensor(
+            opset=self.opset, name="input_x", shape=ir.Shape([])
+        )
+        input_z = _tensors.SymbolicTensor(
+            opset=self.opset, name="input_z", shape=ir.Shape([4, 3])
+        )
+
+        with onnxscript.evaluator.default_as(tracer := self.recorder):
+            _ = self.opset.Add([input_x, 42], input_z)
+
+        self.assertEqual(len(tracer.nodes), 5)
+        self.assertEqual(tracer.nodes[-2].op_type, "Concat")
+        self.assertEqual(tracer.nodes[-2].attributes["axis"].value, 0)
+
+    def test_process_python_sequence_mix_constant_symbolic_creates_extra_concat(self):
+        # Elements in the list must be 0D tensors
+        input_x = _tensors.SymbolicTensor(
+            opset=self.opset, name="input_x", shape=ir.Shape([])
+        )
+        input_z = _tensors.SymbolicTensor(
+            opset=self.opset, name="input_z", shape=ir.Shape([4, 3])
+        )
+
+        with onnxscript.evaluator.default_as(tracer := self.recorder):
+            # Constant first
+            _ = self.opset.Add([42, input_x], input_z)
+
+        self.assertEqual(len(tracer.nodes), 5)
+        self.assertEqual(tracer.nodes[-2].op_type, "Concat")
+        self.assertEqual(tracer.nodes[-2].attributes["axis"].value, 0)
 
 
 if __name__ == "__main__":

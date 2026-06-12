@@ -10,8 +10,8 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor mkldnn_softmax(
     const Tensor& self,
@@ -20,8 +20,8 @@ Tensor mkldnn_softmax(
   TORCH_CHECK(false, "mkldnn_softmax: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_MKLDNN_ENABLED
 

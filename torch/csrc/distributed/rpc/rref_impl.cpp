@@ -1,11 +1,8 @@
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 
 #include <ATen/record_function.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <fmt/format.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -15,6 +12,7 @@
 namespace {
 // If the type is subtype of named type, return its qualifiedname, otherwise
 // return its type str.
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 std::string getTypeStr(const c10::TypePtr& type) {
   switch (type->kind()) {
     case c10::TypeKind::FunctionType:
@@ -29,6 +27,7 @@ std::string getTypeStr(const c10::TypePtr& type) {
       return type->annotation_str();
   }
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace
 
@@ -53,10 +52,7 @@ RRefForkData::RRefForkData(
 //////////////////////////////  RRef  /////////////////////////////////////
 
 RRef::RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
-    : RRefInterface(),
-      ownerId_(ownerId),
-      rrefId_(rrefId),
-      type_(std::move(type)) {}
+    : ownerId_(ownerId), rrefId_(rrefId), type_(std::move(type)) {}
 
 RRefForkData RRef::fork() const {
   auto& ctx = RRefContext::getInstance();
@@ -291,12 +287,12 @@ void OwnerRRef::setError(std::exception_ptr eptr) {
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {
   if (rref.isOwner()) {
     return os << "OwnerRRef("
-              << "rref_id=" << rref.rrefId() << ")";
+              << "rref_id=" << rref.rrefId() << ')';
   } else {
     return os << "UserRRef("
               << "rref_id=" << rref.rrefId()
               << ", fork_id=" << static_cast<const UserRRef*>(&rref)->forkId()
-              << ")";
+              << ')';
   }
 }
 

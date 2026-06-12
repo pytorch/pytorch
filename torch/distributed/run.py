@@ -8,77 +8,47 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Superset of ``torch.distributed.launch``.
+Module ``torch.distributed.run``.
 
-``torchrun`` provides a superset of the functionality as ``torch.distributed.launch``
-with the following additional functionalities:
+``torch.distributed.run`` is a module that spawns up multiple distributed
+training processes on each of the training nodes.
 
-1. Worker failures are handled gracefully by restarting all workers.
+``torchrun`` is a python
+`console script <https://packaging.python.org/en/latest/specifications/entry-points/#use-for-scripts>`_
+to the main module
+`torch.distributed.run <https://github.com/pytorch/pytorch/blob/master/torch/distributed/run.py>`_
+declared in the ``entry_points`` configuration in
+`setup.py <https://github.com/pytorch/pytorch/blob/master/setup.py>`_.
+It is equivalent to invoking ``python -m torch.distributed.run``.
 
-2. Worker ``RANK`` and ``WORLD_SIZE`` are assigned automatically.
+``torchrun`` can be used for single-node distributed training, in which one or
+more processes per node will be spawned. It can be used for either
+CPU training or GPU training. If it is used for GPU training,
+each distributed process will be operating on a single GPU. This can achieve
+well-improved single-node training performance. ``torchrun`` can also be used in
+multi-node distributed training, by spawning up multiple processes on each node
+for well-improved multi-node distributed training performance as well.
+This will especially be beneficial for systems with multiple Infiniband
+interfaces that have direct-GPU support, since all of them can be utilized for
+aggregated communication bandwidth.
 
-3. Number of nodes is allowed to change between minimum and maximum sizes (elasticity).
-
-.. note:: ``torchrun`` is a python
-          `console script <https://packaging.python.org/en/latest/specifications/entry-points/#use-for-scripts>`_
-          to the main module
-          `torch.distributed.run <https://github.com/pytorch/pytorch/blob/master/torch/distributed/run.py>`_
-          declared in the ``entry_points`` configuration in
-          `setup.py <https://github.com/pytorch/pytorch/blob/master/setup.py>`_.
-          It is equivalent to invoking ``python -m torch.distributed.run``.
-
-
-Transitioning from torch.distributed.launch to torchrun
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-
-``torchrun`` supports the same arguments as ``torch.distributed.launch`` **except**
-for ``--use-env`` which is now deprecated. To migrate from ``torch.distributed.launch``
-to ``torchrun`` follow these steps:
-
-1.  If your training script is already reading ``local_rank`` from the ``LOCAL_RANK`` environment variable.
-    Then you need simply omit the ``--use-env`` flag, e.g.:
-
-    +--------------------------------------------------------------------+--------------------------------------------+
-    |         ``torch.distributed.launch``                               |                ``torchrun``                |
-    +====================================================================+============================================+
-    |                                                                    |                                            |
-    | .. code-block:: shell-session                                      | .. code-block:: shell-session              |
-    |                                                                    |                                            |
-    |    $ python -m torch.distributed.launch --use-env train_script.py  |    $ torchrun train_script.py              |
-    |                                                                    |                                            |
-    +--------------------------------------------------------------------+--------------------------------------------+
-
-2.  If your training script reads local rank from a ``--local-rank`` cmd argument.
-    Change your training script to read from the ``LOCAL_RANK`` environment variable as
-    demonstrated by the following code snippet:
-
-    +-------------------------------------------------------+----------------------------------------------------+
-    |         ``torch.distributed.launch``                  |                    ``torchrun``                    |
-    +=======================================================+====================================================+
-    |                                                       |                                                    |
-    | .. code-block:: python                                | .. code-block:: python                             |
-    |                                                       |                                                    |
-    |                                                       |                                                    |
-    |    import argparse                                    |     import os                                      |
-    |    parser = argparse.ArgumentParser()                 |     local_rank = int(os.environ["LOCAL_RANK"])     |
-    |    parser.add_argument("--local-rank", type=int)      |                                                    |
-    |    args = parser.parse_args()                         |                                                    |
-    |                                                       |                                                    |
-    |    local_rank = args.local_rank                       |                                                    |
-    |                                                       |                                                    |
-    +-------------------------------------------------------+----------------------------------------------------+
+In both cases of single-node distributed training or multi-node distributed
+training, ``torchrun`` will launch the given number of processes per node
+(``--nproc-per-node``). If used for GPU training, this number needs to be less
+or equal to the number of GPUs on the current system (``nproc_per_node``),
+and each process will be operating on a single GPU from *GPU 0 to
+GPU (nproc_per_node - 1)*.
 
 .. versionchanged:: 2.0.0
 
-    The launcher will pass the ``--local-rank=<rank>`` argument to your script.
+    ``torchrun`` will pass the ``--local-rank=<rank>`` argument to your script.
     From PyTorch 2.0.0 onwards, the dashed ``--local-rank`` is preferred over the
     previously used underscored ``--local_rank``.
 
     For backward compatibility, it may be necessary for users to handle both
     cases in their argument parsing code. This means including both ``"--local-rank"``
     and ``"--local_rank"`` in the argument parser. If only ``"--local_rank"`` is
-    provided, the launcher will trigger an error: "error: unrecognized arguments:
+    provided, ``torchrun`` will trigger an error: "error: unrecognized arguments:
     --local-rank=<rank>". For training code that only supports PyTorch 2.0.0+,
     including ``"--local-rank"`` should be sufficient.
 
@@ -90,19 +60,11 @@ to ``torchrun`` follow these steps:
         >>> parser.add_argument("--local-rank", "--local_rank", type=int)
         >>> args = parser.parse_args()
 
-The aformentioned changes suffice to migrate from ``torch.distributed.launch`` to ``torchrun``.
-To take advantage of new features such as elasticity, fault-tolerance, and error reporting of ``torchrun``
-please refer to:
-
-* :ref:`elastic_train_script` for more information on authoring training scripts that are ``torchrun`` compliant.
-* the rest of this page for more information on the features of ``torchrun``.
-
-
 Usage
---------
+-----
 
 Single-node multi-worker
-++++++++++++++++++++++++++++++
+++++++++++++++++++++++++
 
 ::
 
@@ -112,8 +74,20 @@ Single-node multi-worker
         --nproc-per-node=$NUM_TRAINERS
         YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
 
+.. note:: ``--nproc-per-node`` may be
+          ``"gpu"`` (spawn one process per GPU),
+          ``"cpu"`` (spawn one process per CPU),
+          ``"xpu"`` (spawn one process per XPU),
+          ``"auto"`` (equivalent to ``"gpu"`` if CUDA is available,
+          else equivalent to ``"xpu"`` if XPU is available,
+          else equivalent to ``"cpu"``),
+          or an integer specifying the number of processes.
+          See `torch.distributed.run.determine_local_world_size
+          <https://github.com/pytorch/pytorch/blob/0a94bb432ed75cc2d950d81b2921363218a7e459/torch/distributed/run.py#L673-L716>`_
+          for more details.
+
 Stacked single-node multi-worker
-+++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++
 
 To run multiple instances (separate jobs) of single-node, multi-worker on the
 same host, we need to make sure that each instance (job) is
@@ -134,7 +108,7 @@ port automatically instead of manually assigning different ports for each run.
 
 
 Fault tolerant (fixed sized number of workers, no elasticity, tolerates 3 failures)
-++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 ::
 
@@ -155,7 +129,7 @@ node in your training cluster, but ideally you should pick a node that has a hig
    If no port number is specified ``HOST_NODE_ADDR`` defaults to 29400.
 
 Elastic (``min=1``, ``max=4``, tolerates up to 3 membership changes or failures)
-+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 ::
 
@@ -176,7 +150,7 @@ node in your training cluster, but ideally you should pick a node that has a hig
    If no port number is specified ``HOST_NODE_ADDR`` defaults to 29400.
 
 Note on rendezvous backend
-------------------------------
+--------------------------
 
 For multi-node training you need to specify:
 
@@ -200,7 +174,7 @@ enabled (e.g. ``--enable-v2``).
    removed in a future version.
 
 Definitions
---------------
+-----------
 
 1. ``Node`` - A physical instance or a container; maps to the unit that the job manager works with.
 
@@ -230,7 +204,7 @@ A ``Node`` runs ``LOCAL_WORLD_SIZE`` workers which comprise a ``LocalWorkerGroup
 all ``LocalWorkerGroups`` in the nodes in the job comprise the ``WorkerGroup``.
 
 Environment Variables
-----------------------
+---------------------
 
 The following environment variables are made available to you in your script:
 
@@ -267,22 +241,21 @@ The following environment variables are made available to you in your script:
     use the value of ``PYTHON_EXEC`` as executable. The `sys.executable` is used by default.
 
 Deployment
-------------
+----------
 
 1. (Not needed for the C10d backend) Start the rendezvous backend server and get the endpoint (to be
-   passed as ``--rdzv-endpoint`` to the launcher script)
+   passed as ``--rdzv-endpoint`` to ``torchrun``)
 
-2. Single-node multi-worker: Start the launcher on the host to start the agent process which
+2. Single-node multi-worker: Start ``torchrun`` on the host to start the agent process which
    creates and monitors a local worker group.
 
-3. Multi-node multi-worker: Start the launcher with the same arguments on all the nodes
+3. Multi-node multi-worker: Start ``torchrun`` with the same arguments on all the nodes
    participating in training.
 
-When using a job/cluster manager the entry point command to the multi-node job should be this
-launcher.
+When using a job/cluster manager, the entry point command to the multi-node job should be ``torchrun``.
 
 Failure Modes
----------------
+-------------
 
 1. Worker failure: For a training job with ``n`` workers, if ``k<=n`` workers fail all workers
    are stopped and restarted up to ``max_restarts``.
@@ -294,7 +267,7 @@ Failure Modes
 3. Node failure: Same as agent failure.
 
 Membership Changes
---------------------
+------------------
 
 1. Node departure (scale-down): The agent is notified of the departure, all existing workers are
    stopped, a new ``WorkerGroup`` is formed, and all workers are started with a new ``RANK`` and
@@ -304,8 +277,21 @@ Membership Changes
    a new ``WorkerGroup`` is formed, and all workers are started with a new ``RANK`` and
    ``WORLD_SIZE``.
 
+NUMA Binding
+------------
+
+On multi-GPU systems with NUMA (Non-Uniform Memory Access) architecture, you can improve
+performance by binding worker processes to CPUs near their assigned GPUs. Use the
+``--numa-binding`` flag:
+
+::
+
+    torchrun --numa-binding=node --nproc-per-node=8 train.py
+
+See :ref:`numa-api` for more details.
+
 Important Notices
---------------------
+-----------------
 
 1. This utility and multi-process distributed (single-node or
    multi-node) GPU training currently only achieves the best performance using
@@ -318,9 +304,9 @@ Important Notices
 
 ::
 
- >>> # xdoctest: +SKIP("stub")
- >>> import torch.distributed as dist
- >>> dist.init_process_group(backend="gloo|nccl")
+    >>> # xdoctest: +SKIP("stub")
+    >>> import torch.distributed as dist
+    >>> dist.init_process_group(backend="gloo|nccl")
 
 3. In your training program, you can either use regular distributed functions
    or use :func:`torch.nn.parallel.DistributedDataParallel` module. If your
@@ -331,9 +317,9 @@ Important Notices
 ::
 
     local_rank = int(os.environ["LOCAL_RANK"])
-    model = torch.nn.parallel.DistributedDataParallel(model,
-                                                      device_ids=[local_rank],
-                                                      output_device=local_rank)
+    model = torch.nn.parallel.DistributedDataParallel(
+        model, device_ids=[local_rank], output_device=local_rank
+    )
 
 Please ensure that ``device_ids`` argument is set to be the only GPU device id
 that your code will be operating on. This is generally the local rank of the
@@ -360,17 +346,18 @@ utility
 
 ::
 
-  def main():
-    load_checkpoint(checkpoint_path)
-    initialize()
-    train()
+    def main():
+        load_checkpoint(checkpoint_path)
+        initialize()
+        train()
 
-  def train():
-    for batch in iter(dataset):
-      train_step(batch)
 
-      if should_checkpoint:
-        save_checkpoint(checkpoint_path)
+    def train():
+        for batch in iter(dataset):
+            train_step(batch)
+
+            if should_checkpoint:
+                save_checkpoint(checkpoint_path)
 
 9. (Recommended) On worker errors, this tool will summarize the details of the error
    (e.g. time, rank, host, pid, traceback, etc). On each node, the first error (by timestamp)
@@ -382,23 +369,25 @@ utility
 
 ::
 
-  from torch.distributed.elastic.multiprocessing.errors import record
+    from torch.distributed.elastic.multiprocessing.errors import record
 
-  @record
-  def main():
-      # do train
-      pass
 
-  if __name__ == "__main__":
-      main()
+    @record
+    def main():
+        # do train
+        pass
 
+
+    if __name__ == "__main__":
+        main()
 """
+
 import os
 import sys
 import uuid
 from argparse import ArgumentParser, REMAINDER
+from collections.abc import Callable
 from importlib import metadata
-from typing import Callable, List, Optional, Set, Tuple, Type, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -408,6 +397,10 @@ from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import elastic_launch, LaunchConfig
+from torch.numa.binding import (
+    AffinityMode as _AffinityMode,  # Signify as private with _
+    NumaOptions as _NumaOptions,
+)
 from torch.utils.backend_registration import _get_custom_mod_func
 
 
@@ -417,6 +410,13 @@ logger = get_logger(__name__)
 def get_args_parser() -> ArgumentParser:
     """Parse the command line options."""
     parser = ArgumentParser(description="Torch Distributed Elastic Training Launcher")
+
+    def comma_separated_list(value):
+        placeholder = "<COMMA_PLACEHOLDER>"
+        value = value.replace(",,", placeholder)
+        items = value.split(",")
+        items = [item.replace(placeholder, ",") for item in items]
+        return items
 
     #
     # Worker/node size related arguments.
@@ -435,7 +435,7 @@ def get_args_parser() -> ArgumentParser:
         action=env,
         type=str,
         default="1",
-        help="Number of workers per node; supported values: [auto, cpu, gpu, int].",
+        help="Number of workers per node; supported values: [auto, cpu, gpu, xpu, int].",
     )
 
     #
@@ -513,6 +513,14 @@ def get_args_parser() -> ArgumentParser:
         help="Multiprocessing start method to use when creating workers.",
     )
     parser.add_argument(
+        "--event-log-handler",
+        "--event_log_handler",
+        action=env,
+        type=str,
+        default="null",
+        help="name of a registered event logging handler (see: https://docs.pytorch.org/docs/stable/elastic/events.html)",
+    )
+    parser.add_argument(
         "--role",
         action=env,
         type=str,
@@ -549,7 +557,7 @@ def get_args_parser() -> ArgumentParser:
         type=str,
         default=None,
         help="Base directory to use for log files (e.g. /var/log/torch/elastic). The same "
-        "directory is re-used for multiple runs (a unique job-level sub-directory is created with "
+        "directory is reused for multiple runs (a unique job-level sub-directory is created with "
         "rdzv_id as the prefix).",
     )
     parser.add_argument(
@@ -582,6 +590,28 @@ def get_args_parser() -> ArgumentParser:
         "log files saved via --redirect or --tee",
     )
 
+    parser.add_argument(
+        "--duplicate-stdout-filters",
+        "--duplicate_stdout_filters",
+        action=env,
+        type=comma_separated_list,
+        default=[],
+        help="Duplicates logs streamed to stdout to another specified file with a list of filters (e.g. "
+        "[--duplicate_stdout_filters 'apple,orange'] will duplicate log lines matching 'apple' "
+        "OR 'orange'. An empty filters list won't duplicate any lines. Use double comma to escape a comma) ",
+    )
+
+    parser.add_argument(
+        "--duplicate-stderr-filters",
+        "--duplicate_stderr_filters",
+        action=env,
+        type=comma_separated_list,
+        default=[],
+        help="Duplicates logs streamed to stderr to another specified file with a list of filters (e.g. "
+        "[--duplicate_stdout_filters 'apple,orange'] will duplicate log lines matching 'apple' "
+        "OR 'orange'. An empty filters list won't duplicate any lines. Use double comma to escape a comma) ",
+    )
+
     #
     # Backwards compatible parameters with caffe2.distributed.launch.
     #
@@ -592,7 +622,8 @@ def get_args_parser() -> ArgumentParser:
         type=int,
         action=env,
         default=0,
-        help="Rank of the node for multi-node distributed training.",
+        help="Rank of the node for multi-node distributed training. It is only used for static "
+        "rendezvous (i.e., when ``--rdzv-backend=static``).",
     )
     parser.add_argument(
         "--master-addr",
@@ -608,11 +639,11 @@ def get_args_parser() -> ArgumentParser:
     parser.add_argument(
         "--master-port",
         "--master_port",
-        default=29500,
+        default=None,
         type=int,
         action=env,
         help="Port on the master node (rank 0) to be used for communication during distributed "
-        "training. It is only used for static rendezvous.",
+        "training. It is only used for static rendezvous. Defaults to 29500.",
     )
     parser.add_argument(
         "--local-addr",
@@ -632,6 +663,47 @@ def get_args_parser() -> ArgumentParser:
         type=str,
         help="torchrun.logs_specs group entrypoint name, value must be type of LogsSpecs. "
         "Can be used to override custom logging behavior.",
+    )
+
+    parser.add_argument(
+        "--numa-binding",
+        "--numa_binding",
+        type=str,
+        choices=[mode.value for mode in _AffinityMode],
+        default=None,
+        help="Bind worker processes to CPUs near their assigned GPUs for better performance. "
+        "See torch/numa/binding.py for available modes and details.",
+    )
+
+    parser.add_argument(
+        "--signals-to-handle",
+        "--signals_to_handle",
+        action=env,
+        type=str,
+        default="SIGTERM,SIGINT,SIGHUP,SIGQUIT",
+        help="Comma-separated list of signals to handle and forward to subprocesses. "
+        "Default: SIGTERM,SIGINT,SIGHUP,SIGQUIT. "
+        "Common additional signals: SIGUSR1,SIGUSR2 (used in SLURM environments).",
+    )
+
+    parser.add_argument(
+        "--shutdown-timeout",
+        "--shutdown_timeout",
+        action=env,
+        type=int,
+        default=None,
+        help="Time in seconds to wait for graceful shutdown of worker processes before "
+        "sending SIGKILL. If not specified, uses TORCH_ELASTIC_SHUTDOWN_TIMEOUT environment "
+        "variable or defaults to 30 seconds.",
+    )
+
+    parser.add_argument(
+        "--virtual-local-rank",
+        "--virtual_local_rank",
+        action=check_env,
+        help="Enable virtual local rank mode for workers. When enabled, LOCAL_RANK is set to 0 "
+        "for all workers and CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its "
+        "assigned GPU at device index 0.",
     )
 
     #
@@ -676,30 +748,29 @@ def determine_local_world_size(nproc_per_node: str):
         return int(nproc_per_node)
     except ValueError as e:
         if nproc_per_node == "cpu":
-            num_proc = os.cpu_count()
+            num_proc = torch._utils.cpu_count()
             device_type = "cpu"
         elif nproc_per_node == "gpu":
             if not torch.cuda.is_available():
                 raise ValueError("Cuda is not available.") from e
             device_type = "gpu"
             num_proc = torch.cuda.device_count()
+        elif nproc_per_node == "xpu":
+            if not torch.xpu.is_available():
+                raise ValueError("Xpu is not available.") from e
+            device_type = "xpu"
+            num_proc = torch.xpu.device_count()
         elif nproc_per_node == torch._C._get_privateuse1_backend_name():
             if not _get_custom_mod_func("is_available")():
                 raise ValueError(f"{nproc_per_node} is not available.") from e
             device_type = nproc_per_node
             num_proc = _get_custom_mod_func("device_count")()
         elif nproc_per_node == "auto":
-            if torch.cuda.is_available():
-                num_proc = torch.cuda.device_count()
-                device_type = "gpu"
-            elif (
-                hasattr(torch, torch._C._get_privateuse1_backend_name())
-                and _get_custom_mod_func("is_available")()
-            ):
-                num_proc = _get_custom_mod_func("device_count")()
-                device_type = torch._C._get_privateuse1_backend_name()
+            if torch.accelerator.is_available():
+                num_proc = torch.accelerator.device_count()
+                device_type = torch.accelerator.current_accelerator().type  # type: ignore[union-attr]
             else:
-                num_proc = os.cpu_count()
+                num_proc = torch._utils.cpu_count()
                 device_type = "cpu"
         else:
             raise ValueError(
@@ -736,9 +807,9 @@ def get_use_env(args) -> bool:
     return args.use_env
 
 
-def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
+def _get_logs_specs_class(logs_specs_name: str | None) -> type[LogsSpecs]:
     """
-    Attemps to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
+    Attempts to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
     Provides plugin mechanism to provide custom implementation of LogsSpecs.
 
     Returns `DefaultLogsSpecs` when logs_spec_name is None.
@@ -747,14 +818,10 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
     logs_specs_cls = None
     if logs_specs_name is not None:
         eps = metadata.entry_points()
-        if hasattr(eps, "select"):  # >= 3.10
-            group = eps.select(group="torchrun.logs_specs")
-            if group.select(name=logs_specs_name):
-                logs_specs_cls = group[logs_specs_name].load()
-
-        elif specs := eps.get("torchrun.logs_specs"):  # < 3.10
-            if entrypoint_list := [ep for ep in specs if ep.name == logs_specs_name]:
-                logs_specs_cls = entrypoint_list[0].load()
+        group = eps.select(group="torchrun.logs_specs")
+        if group.select(name=logs_specs_name):
+            # pyrefly: ignore [bad-index]
+            logs_specs_cls = group[logs_specs_name].load()
 
         if logs_specs_cls is None:
             raise ValueError(
@@ -762,7 +829,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
             )
 
         logger.info(
-            "Using logs_spec '%s' mapped to %s", logs_specs_name, str(logs_specs_cls)
+            "Using logs_spec '%s' mapped to %s", logs_specs_name, logs_specs_cls
         )
     else:
         logs_specs_cls = DefaultLogsSpecs
@@ -770,11 +837,15 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
     return logs_specs_cls
 
 
-def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str]]:
+def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
     # If ``args`` not passed, defaults to ``sys.argv[:1]``
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
-    assert 0 < min_nodes <= max_nodes
-    assert args.max_restarts >= 0
+    if not (0 < min_nodes <= max_nodes):
+        raise AssertionError(
+            f"min_nodes must be > 0 and <= max_nodes, got min_nodes={min_nodes}, max_nodes={max_nodes}"
+        )
+    if args.max_restarts < 0:
+        raise AssertionError("max_restarts must be >= 0")
 
     if (
         hasattr(args, "master_addr")
@@ -784,6 +855,17 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         logger.warning(
             "master_addr is only used for static rdzv_backend and when rdzv_endpoint "
             "is not specified."
+        )
+
+    if (
+        hasattr(args, "node_rank")
+        and args.node_rank != 0
+        and args.rdzv_backend != "static"
+    ):
+        logger.warning(
+            "node_rank is only used for static rdzv_backend. It will be ignored "
+            "for rdzv_backend=%s.",
+            args.rdzv_backend,
         )
 
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
@@ -810,22 +892,29 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
 
     rdzv_endpoint = get_rdzv_endpoint(args)
 
-    ranks: Optional[Set[int]] = None
+    ranks: set[int] | None = None
     if args.local_ranks_filter:
         try:
             ranks = set(map(int, args.local_ranks_filter.split(",")))
-            assert ranks
+            if not ranks:
+                raise AssertionError("ranks set cannot be empty")
         except Exception as e:
             raise ValueError(
                 "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
             ) from e
 
-    logs_specs_cls: Type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
+    logs_specs_cls: type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
+
     logs_specs = logs_specs_cls(
         log_dir=args.log_dir,
         redirects=Std.from_str(args.redirects),
         tee=Std.from_str(args.tee),
         local_ranks_filter=ranks,
+    )
+    numa_options = (
+        None
+        if args.numa_binding is None
+        else _NumaOptions(affinity_mode=_AffinityMode(args.numa_binding))
     )
 
     config = LaunchConfig(
@@ -843,10 +932,17 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         log_line_prefix_template=log_line_prefix_template,
         local_addr=args.local_addr,
         logs_specs=logs_specs,
+        event_log_handler=args.event_log_handler,
+        numa_options=numa_options,
+        signals_to_handle=args.signals_to_handle,
+        duplicate_stdout_filters=args.duplicate_stdout_filters,
+        duplicate_stderr_filters=args.duplicate_stderr_filters,
+        virtual_local_rank=args.virtual_local_rank,
+        shutdown_timeout=args.shutdown_timeout,
     )
 
     with_python = not args.no_python
-    cmd: Union[Callable, str]
+    cmd: Callable | str
     cmd_args = []
     use_env = get_use_env(args)
     if args.run_path:
@@ -904,6 +1000,20 @@ def run(args):
             args.rdzv_endpoint,
             args.rdzv_id,
         )
+    elif (
+        args.rdzv_backend == "static"
+        and not args.rdzv_endpoint
+        and args.master_port is None
+    ):
+        _, max_nodes = parse_min_max_nnodes(args.nnodes)
+        if max_nodes == 1:
+            args.rdzv_backend = "c10d"
+            args.rdzv_endpoint = "localhost:0"
+            args.rdzv_id = str(uuid.uuid4())
+
+    # master_port is only used for the static rendezvous backend, not c10d
+    if args.master_port is None:
+        args.master_port = 29500
 
     config, cmd, cmd_args = config_from_args(args)
     elastic_launch(

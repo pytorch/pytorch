@@ -63,7 +63,8 @@ class Event:
         self.time = time.perf_counter()
 
     def elapsed_time(self, end_event):
-        assert isinstance(end_event, Event)
+        if not isinstance(end_event, Event):
+            raise AssertionError(f"Expected Event, but got {type(end_event)}")
         return end_event.time - self.time
 
 
@@ -117,7 +118,8 @@ def trainbench(
         if modeldef.backward is not None:
             with torch.no_grad():
                 for param in modeldef.params:
-                    assert param.grad is not None
+                    if param.grad is None:
+                        raise AssertionError("Parameter gradient must not be None")
                     param.grad.zero_()
 
         if device == "cuda":
@@ -127,7 +129,7 @@ def trainbench(
         bwd_time = bwd_start_event.elapsed_time(bwd_end_event)
         return fwd_time, bwd_time
 
-    creator_args = creator_args = {
+    creator_args = {
         "seqLength": seqLength,
         "numLayers": numLayers,
         "inputSize": inputSize,
@@ -205,7 +207,7 @@ def bench(rnn_runners, group_name, print_json=False, sep=" ", **params):
                 result_with_no_info = result._replace(info_fwd="None", info_bwd="None")
                 print_stderr(pretty_print(result_with_no_info, sep=sep))
                 results[name] = result
-            except Exception as e:
+            except Exception:
                 if not print_json:
                     raise
 
@@ -322,7 +324,7 @@ if __name__ == "__main__":
     vlrnns = ["vl_cudnn", "vl_jit", "vl_py"]
 
     if args.print_json:
-        print_stderr = lambda *args, **kwargs: None  # noqa: E731,F811
+        print_stderr = lambda *args, **kwargs: None  # noqa: E731
     print_stderr(args)
 
     bench_args = copy.deepcopy(vars(args))

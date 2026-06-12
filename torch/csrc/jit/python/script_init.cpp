@@ -85,6 +85,153 @@ using ClassMethodDefaults = std::unordered_map<std::string, FunctionDefaults>;
 
 namespace {
 
+std::unordered_set<TypePtr> getSharedModuleTypes(Module& mod) {
+  std::unordered_set<TypePtr> types;
+  std::unordered_set<TypePtr> duplicate_types;
+
+  for (auto module : mod.modules()) {
+    auto module_type = module.type();
+    if (types.count(module_type) > 0) {
+      duplicate_types.insert(module_type);
+    }
+    types.insert(module_type);
+  }
+
+  return duplicate_types;
+}
+
+Module cloneSubmoduleToCompilationUnit(
+    const Module& source,
+    const std::shared_ptr<CompilationUnit>& target_cu) {
+  std::unordered_map<TypePtr, TypePtr> type_remap;
+  std::unordered_map<c10::ivalue::Object*, Module> module_remap;
+
+  std::function<Module(const Module&)> clone_module =
+      [&](const Module& current) -> Module {
+    auto* current_obj = current._ivalue().get();
+    auto existing = module_remap.find(current_obj);
+    if (existing != module_remap.end()) {
+      return existing->second;
+    }
+
+    const bool type_already_cloned =
+        type_remap.find(current.type()) != type_remap.end();
+    if (!type_already_cloned) {
+      TORCH_CHECK(
+          current.type()->name().has_value(),
+          "cloneSubmoduleToCompilationUnit requires module types to have a qualified name; got an unnamed type ",
+          current.type()->repr_str());
+    }
+    Module cloned = type_already_cloned
+        ? Module(target_cu, type_remap.at(current.type())->cast<ClassType>())
+        : Module(*current.type()->name(), target_cu, true);
+
+    if (!type_already_cloned) {
+      type_remap[current.type()] = cloned.type();
+    }
+    module_remap.emplace(current_obj, cloned);
+
+    const auto num_attrs = current.type()->numAttributes();
+    for (const auto i : c10::irange(num_attrs)) {
+      const auto& attr_name = current.type()->getAttributeName(i);
+      IValue attr = current._ivalue()->getSlot(i);
+      TypePtr attr_type = current.type()->getAttribute(i);
+      if (attr_type->is_module()) {
+        Module cloned_child = clone_module(attr.toModule());
+        cloned.type()->addOrCheckAttribute(
+            attr_name,
+            attr_type->cast<ClassType>() ? cloned_child.type() : attr_type,
+            current.type()->is_parameter(i),
+            current.type()->is_buffer(i));
+        cloned._ivalue()->setAttr(attr_name, cloned_child._ivalue());
+      } else {
+        cloned.register_attribute(
+            attr_name,
+            attr_type,
+            attr.deepcopy(),
+            current.type()->is_parameter(i),
+            current.type()->is_buffer(i));
+      }
+    }
+
+    if (!type_already_cloned) {
+      for (size_t i = 0; i < current.type()->numConstants(); ++i) {
+        cloned.type()->addConstant(
+            current.type()->getConstantName(i), current.type()->getConstant(i));
+      }
+      for (Function* fn : current.type()->methods()) {
+        cloned.clone_method(current, fn->name());
+      }
+    }
+
+    return cloned;
+  };
+
+  return clone_module(source);
+}
+
+std::pair<Module, std::string> lookupParentModuleAndAttribute(
+    Module root,
+    const std::string& qualified_name) {
+  TORCH_CHECK(
+      !qualified_name.empty(),
+      "_jit_replace_submodule requires a non-empty qualified_name");
+
+  std::vector<std::string> atoms;
+  std::stringstream qualified_name_stream(qualified_name);
+  std::string atom;
+  while (std::getline(qualified_name_stream, atom, '.')) {
+    TORCH_CHECK(
+        !atom.empty(),
+        "_jit_replace_submodule does not support empty path segments in qualified_name: ",
+        qualified_name);
+    atoms.push_back(atom);
+  }
+
+  TORCH_CHECK(
+      !atoms.empty(),
+      "_jit_replace_submodule requires a non-empty qualified_name");
+
+  Module parent = root;
+  for (const auto i : c10::irange(atoms.size() - 1)) {
+    const auto& child_name = atoms[i];
+    TORCH_CHECK(
+        parent.hasattr(child_name),
+        "_jit_replace_submodule could not find submodule path segment '",
+        child_name,
+        "' in qualified_name '",
+        qualified_name,
+        "'");
+    auto child = parent.attr(child_name);
+    TORCH_CHECK(
+        child.isModule(),
+        "_jit_replace_submodule path segment '",
+        child_name,
+        "' in qualified_name '",
+        qualified_name,
+        "' is not a submodule");
+    parent = child.toModule();
+  }
+
+  const auto& attr_name = atoms.back();
+  TORCH_CHECK(
+      parent.hasattr(attr_name),
+      "_jit_replace_submodule could not find submodule path segment '",
+      attr_name,
+      "' in qualified_name '",
+      qualified_name,
+      "'");
+  TORCH_CHECK(
+      parent.attr(attr_name).isModule(),
+      "_jit_replace_submodule path segment '",
+      attr_name,
+      "' in qualified_name '",
+      qualified_name,
+      "' is not a submodule");
+
+  return {parent, attr_name};
+}
+
 // A resolver that will inspect the outer Python scope to find `name`.
 struct PythonResolver : public Resolver {
   explicit PythonResolver(ResolutionCallback rcb) : rcb_(std::move(rcb)) {}
@@ -246,7 +393,7 @@ FunctionDefaults calcOverloadedFunctionDefaults(
 
 } // namespace
 
-bool checkMutableFunctionDefault(const py::object& def_arg) {
+static bool checkMutableFunctionDefault(const py::object& def_arg) {
   if (py::isinstance<py::list>(def_arg) || py::isinstance<py::dict>(def_arg)) {
     return true;
   }
@@ -262,7 +409,7 @@ bool checkMutableFunctionDefault(const py::object& def_arg) {
   return false;
 }
 
-void checkMutableFunctionDefault(
+static void checkMutableFunctionDefault(
     const SourceRange& range,
     const Argument& arg,
     const py::object& def_arg) {
@@ -272,11 +419,11 @@ void checkMutableFunctionDefault(
         << "Mutable default parameters are not supported because Python binds them to the function"
         << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
         << " the default parameter within the body of the function. Found "
-        << def_arg.get_type() << " on parameter " << arg.name());
+        << py::type::handle_of(def_arg) << " on parameter " << arg.name());
   }
 }
 
-FunctionSchema getSchemaWithNameAndDefaults(
+static FunctionSchema getSchemaWithNameAndDefaults(
     const SourceRange& range,
     const FunctionSchema& schema,
     const std::optional<std::string>& new_name,
@@ -472,7 +619,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
   return retval;
 }
 
-void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
+static void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
   auto graph = toGraphFunction(*func.function_).graph()->copy();
   auto v = graph->insertInput(0, "self");
@@ -484,7 +631,7 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
 }
 
 // this is used in our test suite to check that we correctly preserved type tags
-bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
+static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
   struct Work {
     IValue a;
     IValue b;
@@ -497,7 +644,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     if (item.a.isPtrType()) {
       // uncomment to debug type matching errors
       // std::cout << "MATCHING " << /*item.a <<*/ "(" << *item.a.type() << ") "
-      //          << item.a.internalToPointer() << " " << /*item.b <<*/ " ("
+      //          << item.a.internalToPointer() << ' ' << /*item.b <<*/ " ("
       //          << *item.b.type() << ") " << item.b.internalToPointer() <<
       //          "\n";
 
@@ -537,7 +684,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       auto ad = item.a.toGenericDict();
       auto bd = item.b.toGenericDict();
       for (auto& item : ad) {
-        // Dictionaory keys cannot contain List/Dicts that require tags
+        // Dictionary keys cannot contain List/Dicts that require tags
         // so we do not have to check them.
         // Furthermore without ordered dicts it is expensive to find the
         // equivalent key
@@ -605,7 +752,7 @@ struct slot_dict_impl {
 };
 
 template <typename T>
-py::list debugMakeList(const T& list) {
+static py::list debugMakeList(const T& list) {
   py::list result;
   for (const auto& elem : list) {
     result.append(py::cast(elem));
@@ -613,7 +760,7 @@ py::list debugMakeList(const T& list) {
   return result;
 }
 template <typename T>
-py::list debugMakeNamedList(const T& list) {
+static py::list debugMakeNamedList(const T& list) {
   py::list result;
   for (auto elem : list) {
     result.append(py::cast(std::make_pair(elem.name, elem.value)));
@@ -621,7 +768,7 @@ py::list debugMakeNamedList(const T& list) {
   return result;
 }
 template <typename T>
-py::set debugMakeSet(const T& list) {
+static py::set debugMakeSet(const T& list) {
   py::set result;
   for (const auto& elem : list) {
     result.add(py::cast(elem));
@@ -655,7 +802,7 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   return result;
 }
 
-static constexpr std::array<const char*, 48> magic_method_names = {
+static constexpr std::initializer_list<const char*> magic_method_names = {
     "__lt__",      "__le__",      "__eq__",        "__ne__",
     "__ge__",      "__gt__",      "__not__",       "__abs__",
     "__add__",     "__and__",     "__floordiv__",  "__index__",
@@ -674,7 +821,7 @@ struct DeepCopyMemoTable {
   std::shared_ptr<IValue::HashIdentityIValueMap> map;
 };
 
-IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
+static IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
   if (!memo.contains(py::str("__torch_script_memo_table"))) {
     memo["__torch_script_memo_table"] =
         DeepCopyMemoTable{std::make_shared<IValue::HashIdentityIValueMap>()};
@@ -684,7 +831,7 @@ IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
   return ivalue.deepcopy(ivalue_memo);
 }
 
-ExtraFilesMap extra_files_from_python(const py::dict& pydict) {
+static ExtraFilesMap extra_files_from_python(const py::dict& pydict) {
   ExtraFilesMap r;
   for (const auto& it : pydict) {
     r[py::cast<std::string>(it.first)] = "";
@@ -692,14 +839,16 @@ ExtraFilesMap extra_files_from_python(const py::dict& pydict) {
   return r;
 }
 
-void extra_files_to_python(const ExtraFilesMap& m, const py::dict& pydict) {
+static void extra_files_to_python(
+    const ExtraFilesMap& m,
+    const py::dict& pydict) {
   // py::dict is pointer-like type so it gets modified despite const&
   for (const auto& it : m) {
     pydict[py::str(it.first)] = py::bytes(it.second);
   }
 }
 
-void pyCompilationUnitDefine(
+static void pyCompilationUnitDefine(
     CompilationUnit& cu,
     const std::string& src,
     const ResolutionCallback* rcb,
@@ -785,7 +934,8 @@ void initJitScriptBindings(PyObject* module) {
                 try {
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  PyErr_SetString(PyExc_AttributeError, err.what());
+                  throw py::error_already_set();
                 }
               })
           .def(
@@ -806,7 +956,8 @@ void initJitScriptBindings(PyObject* module) {
                   }
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  PyErr_SetString(PyExc_AttributeError, err.what());
+                  throw py::error_already_set();
                 }
               })
           .def(
@@ -836,7 +987,8 @@ void initJitScriptBindings(PyObject* module) {
                   auto ivalue = toIValue(std::move(value), type);
                   self.setattr(name, ivalue);
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  PyErr_SetString(PyExc_AttributeError, err.what());
+                  throw py::error_already_set();
                 }
               })
           .def(
@@ -897,20 +1049,20 @@ void initJitScriptBindings(PyObject* module) {
                     std::stringstream err;
                     err << "Tried to deepcopy object ";
                     if (auto qualname = class_type->name()) {
-                      err << qualname->qualifiedName() << " ";
+                      err << qualname->qualifiedName() << ' ';
                     }
                     err << "which does not have a __setstate__ method defined!";
-                    throw std::runtime_error(err.str());
+                    throw std::runtime_error(std::move(err).str());
                   }
                 }
 
                 std::stringstream err;
                 err << "Tried to deepcopy object ";
                 if (auto qualname = self.type()->name()) {
-                  err << qualname->qualifiedName() << " ";
+                  err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               })
           .def(py::pickle(
               [](const Object& self)
@@ -924,10 +1076,10 @@ void initJitScriptBindings(PyObject* module) {
                 std::stringstream err;
                 err << "Tried to serialize object ";
                 if (auto qualname = self.type()->name()) {
-                  err << qualname->qualifiedName() << " ";
+                  err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               },
               [](const std::tuple<py::object, std::string>& state_tup)
                   -> Object {
@@ -961,10 +1113,10 @@ void initJitScriptBindings(PyObject* module) {
                 std::stringstream err;
                 err << "Tried to deserialize object ";
                 if (auto qualname = class_type->name()) {
-                  err << qualname->qualifiedName() << " ";
+                  err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __setstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               }));
 
   py::class_<Object::Property>(m, "ScriptObjectProperty")
@@ -1004,7 +1156,8 @@ void initJitScriptBindings(PyObject* module) {
         if (!method) {
           std::stringstream ss;
           ss << std::hex << static_cast<const void*>(&self);
-          return py::str("<torch.ScriptObject object at " + ss.str() + ">");
+          return py::str(
+              "<torch.ScriptObject object at " + std::move(ss).str() + ">");
         }
         return invokeScriptMethodFromPython(*method, args, kwargs);
       });
@@ -1425,7 +1578,7 @@ void initJitScriptBindings(PyObject* module) {
               return StrongFunctionPtr(std::move(self), fn);
             } else {
               throw AttributeError(
-                  "'CompilationUnit' has no attribute '%s'", name.c_str());
+                  fmt::format("'CompilationUnit' has no attribute '{}'", name));
             }
           })
       .def(
@@ -1480,12 +1633,30 @@ void initJitScriptBindings(PyObject* module) {
           "__call__",
           [](py::args args, const py::kwargs& kwargs) {
             HANDLE_TH_ERRORS
-            // see: [pybind11 varargs]
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
-            Function& callee = *strongPtr.function_;
-            py::object result = invokeScriptFunctionFromPython(
-                callee, tuple_slice(std::move(args), 1), kwargs);
-            return result;
+            if (py::module::import("torch")
+                    .attr("compiler")
+                    .attr("is_exporting")()
+                    .cast<bool>()) {
+              TORCH_INTERNAL_ASSERT(
+                  py::hasattr(args[0], py::str("_torchdynamo_inline")),
+                  "During PT2 exporting, we encountered TorchScripted function",
+                  strongPtr.function_->name(),
+                  "When tracing through it, we cannot find its _torchdynamo_inline attribute, ",
+                  "which stores non scripted kcallable. ",
+                  "Please file an issue to PyTorch if you see this error.");
+
+              // remove the function itself with args[1:]
+              py::slice slice0(1, args.size(), 1);
+              return args[0].attr("_torchdynamo_inline")(
+                  *args[slice0], **kwargs);
+            } else {
+              // see: [pybind11 varargs]
+              Function& callee = *strongPtr.function_;
+              py::object result = invokeScriptFunctionFromPython(
+                  callee, tuple_slice(std::move(args), 1), kwargs);
+              return result;
+            }
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def(
@@ -1585,12 +1756,29 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "__call__",
           [](py::args args, const py::kwargs& kwargs) {
-            // see: [pybind11 varargs]
             HANDLE_TH_ERRORS
-            Method& method = py::cast<Method&>(args[0]);
-
-            return invokeScriptMethodFromPython(
-                method, tuple_slice(std::move(args), 1), kwargs);
+            if (py::module::import("torch")
+                    .attr("compiler")
+                    .attr("is_exporting")()
+                    .cast<bool>() &&
+                // TODO: fix all cases where ScriptMethod doesn't have
+                // __wrapped__, which is the non-scripted original method. E.g.
+                // it seems the top-level script module's scriptMethod doesn't
+                // have __wrapped__ attributes:
+                //  class M(torch.nn.Module):
+                //    def forward(self, x):
+                //        return x.cos() + x.sin()
+                //  traced_module = torch.jit.trace(M(), example_inputs=inps)
+                // , where traced_module.forward is a ScriptMethod but doesn't
+                // have __wrapped__.
+                py::hasattr(args[0], "__wrapped__")) {
+              return args[0].attr("__wrapped__")(*args, **kwargs);
+            } else {
+              // see: [pybind11 varargs]
+              Method& method = py::cast<Method&>(args[0]);
+              return invokeScriptMethodFromPython(
+                  method, tuple_slice(std::move(args), 1), kwargs);
+            }
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def_property_readonly("graph", &Method::graph)
@@ -2399,6 +2587,79 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });
+
+  // Replace a submodule in a ScriptModule with type-safe ClassType update
+  // and graph type remapping.  Modelled after the backend-lowering pass in
+  // backend_init.cpp which does unsafeChangeAttributeType + remapTypes.
+  //
+  // Mutates ``root`` in place and returns it.  We deliberately do NOT
+  // ``root.clone()`` first, because ``Module::clone_impl`` reuses
+  // ``root``'s CompilationUnit and allocates a fresh ClassType per
+  // source ClassType with ``shouldMangle=true``. Callers that need the
+  // pre-swap module must clone before invoking this.  All current
+  // callers (regional-AOTI ``create_lowered_from_scripted_merge``)
+  // discard ``root`` immediately after the swap, so in-place mutation
+  // is the desired behaviour.
+  //
+  // Args:
+  //   root   – top-level ScriptModule to update in place.
+  //   qualified_name – fully qualified path to the submodule to replace.
+  //   new_submodule – the replacement ScriptModule.
+  m.def(
+      "_jit_replace_submodule",
+      [](Module& root,
+         const std::string& qualified_name,
+         Module& new_submodule) {
+        auto parent_and_attr =
+            lookupParentModuleAndAttribute(root, qualified_name);
+        auto parent = parent_and_attr.first;
+        const auto& attr_name = parent_and_attr.second;
+        auto old_submodule = parent.attr(attr_name).toModule();
+        auto old_type = old_submodule.type();
+        auto duplicate_types = getSharedModuleTypes(root);
+
+        if (duplicate_types.count(parent.type()) > 0) {
+          throw py::cast_error(c10::str(
+              "_jit_replace_submodule only supports module hierarchies with unique parent types; ",
+              parent.type()->repr_str(),
+              " is shared"));
+        }
+
+        auto remapped_submodule = cloneSubmoduleToCompilationUnit(
+            new_submodule, root._ivalue()->compilation_unit());
+        auto new_type = remapped_submodule.type();
+
+        // 1. Update the parent's ClassType to accept the new submodule type.
+        parent.type()->unsafeChangeAttributeType(attr_name, new_type);
+
+        // 2. Set the new submodule value (now passes the subtype check).
+        parent.setattr(attr_name, remapped_submodule._ivalue());
+
+        // 3. Remap the old type to the new type in all graphs reachable
+        //    from the root so that compiled code references the correct
+        //    type.
+        std::unordered_map<TypePtr, TypePtr> type_remap;
+        type_remap[old_type] = new_type;
+        auto type_remap_fn = [&type_remap](TypePtr in) {
+          auto it = type_remap.find(in);
+          if (it == type_remap.end()) {
+            return in;
+          }
+          return it->second;
+        };
+        for (auto module : root.modules()) {
+          auto module_type = module.type();
+          for (auto& fn : module_type->methods()) {
+            auto method = module.get_method(fn->name());
+            auto graph = method.graph();
+            graph->remapTypes(type_remap_fn);
+            auto new_schema =
+                fn->getSchema().cloneWithRemappedTypes(type_remap_fn);
+            fn->setSchema(new_schema);
+          }
+        }
+        return root;
+      });
 
   m.def("_get_file_format", [](const std::string& path) {
     switch (getFileFormat(path)) {

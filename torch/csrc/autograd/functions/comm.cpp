@@ -31,10 +31,10 @@ variable_list Scatter::apply(variable_list&& inputs) {
   AT_ASSERT(inputs.size() == 1);
   auto& input = inputs.front();
 
-  std::shared_ptr<Node> grad_fn;
+  c10::intrusive_ptr<Node> grad_fn;
   if (compute_requires_grad(input)) {
-    grad_fn =
-        std::make_shared<Gather>(/*destination_device=*/input.device(), dim_);
+    grad_fn = c10::make_intrusive<Gather>(
+        /*destination_device=*/input.device(), dim_);
     grad_fn->set_next_edges(collect_next_edges(input));
   }
 
@@ -88,7 +88,7 @@ variable_list Gather::apply(variable_list&& inputs) {
         "and return a vector.");
   }
 
-  std::shared_ptr<Node> grad_fn;
+  c10::intrusive_ptr<Node> grad_fn;
   // compute this before moving variables from `inputs`
   if (compute_requires_grad(inputs)) {
     std::vector<at::Device> source_devices;
@@ -99,7 +99,7 @@ variable_list Gather::apply(variable_list&& inputs) {
       source_devices.push_back(input.device());
       input_sizes.push_back(input.size(dim_));
     }
-    grad_fn = std::make_shared<Scatter>(
+    grad_fn = c10::make_intrusive<Scatter>(
         std::move(source_devices),
         std::move(input_sizes),
         dim_,
@@ -109,13 +109,13 @@ variable_list Gather::apply(variable_list&& inputs) {
   }
 
   std::vector<at::Tensor> tensors;
-  tensors.reserve(inputs.size());
-  for (auto& variable : inputs) {
-    if (unsqueeze_scalars) {
+  if (unsqueeze_scalars) {
+    tensors.reserve(inputs.size());
+    for (auto& variable : inputs) {
       tensors.push_back(variable.view(1));
-    } else {
-      tensors.push_back(std::move(variable));
     }
+  } else {
+    tensors = std::move(inputs);
   }
 
   // Disable the autograd during the actual computation

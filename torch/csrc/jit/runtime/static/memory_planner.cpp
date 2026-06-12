@@ -1,11 +1,8 @@
 #include <c10/core/alignment.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 
-#include <ATen/Tensor.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
-#include <iterator>
 
 namespace torch::jit {
 
@@ -76,7 +73,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   // This set maps each Value* to its assigned storage group.
   c10::FastMap<const Value*, size_t> storage_group_mapping;
   // On each iteration, this vector stores the set of storage groups that
-  // are available for re-use.
+  // are available for reuse.
   std::vector<size_t> free_storage_groups;
 
   auto makeNewStorageGroup = [&](const Value* value) {
@@ -134,8 +131,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   return managed_tensor_groups;
 }
 
-ManagedStorages::ManagedStorages()
-    : storages_(nullptr), size_(0), capacity_(0) {}
+ManagedStorages::ManagedStorages() = default;
 
 ManagedStorages::~ManagedStorages() {
   deallocate();

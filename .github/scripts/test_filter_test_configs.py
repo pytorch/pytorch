@@ -3,13 +3,14 @@
 import json
 import os
 import tempfile
-from typing import Any, Dict, List
+from typing import Any
 from unittest import main, mock, TestCase
 
 import yaml
 from filter_test_configs import (
     filter,
     filter_selected_test_configs,
+    get_ghstack_below_count,
     get_labels,
     mark_unstable_jobs,
     parse_reenabled_issues,
@@ -101,30 +102,6 @@ MOCKED_DISABLED_UNSTABLE_JOBS = {
         "linux-binary-manywheel",
         "manywheel-py3_8-cuda11_8-build",
         "",
-    ],
-    "inductor / cuda12.1-py3.10-gcc9-sm86 / test (inductor)": [
-        "pytorchbot",
-        "107079",
-        "https://github.com/pytorch/pytorch/issues/107079",
-        "inductor",
-        "cuda12.1-py3.10-gcc9-sm86",
-        "test (inductor)",
-    ],
-    "inductor / cuda12.1-py3.10-gcc9-sm86 / test (inductor_huggingface)": [
-        "pytorchbot",
-        "109153",
-        "https://github.com/pytorch/pytorch/issues/109153",
-        "inductor",
-        "cuda12.1-py3.10-gcc9-sm86",
-        "test (inductor_huggingface)",
-    ],
-    "inductor / cuda12.1-py3.10-gcc9-sm86 / test (inductor_huggingface_dynamic)": [
-        "pytorchbot",
-        "109154",
-        "https://github.com/pytorch/pytorch/issues/109154",
-        "inductor",
-        "cuda12.1-py3.10-gcc9-sm86",
-        "test (inductor_huggingface_dynamic)",
     ],
 }
 
@@ -362,7 +339,7 @@ class TestConfigFilter(TestCase):
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
     def test_set_periodic_modes(self) -> None:
-        testcases: List[Dict[str, str]] = [
+        testcases: list[dict[str, str]] = [
             {
                 "job_name": "a CI job",
                 "test_matrix": "{include: []}",
@@ -371,26 +348,26 @@ class TestConfigFilter(TestCase):
             {
                 "job_name": "a-ci-job",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "descripion": "Replicate each periodic mode in a different config",
+                "description": "Replicate each periodic mode in a different config",
             },
             {
                 "job_name": "a-ci-cuda11.8-job",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "descripion": "Replicate each periodic mode in a different config for a CUDA job",
+                "description": "Replicate each periodic mode in a different config for a CUDA job",
             },
             {
                 "job_name": "a-ci-rocm-job",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "descripion": "Replicate each periodic mode in a different config for a ROCm job",
+                "description": "Replicate each periodic mode in a different config for a ROCm job",
             },
             {
                 "job_name": "",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "descripion": "Empty job name",
+                "description": "Empty job name",
             },
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "descripion": "Missing job name",
+                "description": "Missing job name",
             },
         ]
 
@@ -400,12 +377,28 @@ class TestConfigFilter(TestCase):
             scheduled_test_matrix = set_periodic_modes(test_matrix, job_name)
 
             expected_modes = [
-                m for m, c in SUPPORTED_PERIODICAL_MODES.items() if c(job_name)
+                m for m, c in SUPPORTED_PERIODICAL_MODES.items() if c(job_name, None)
             ]
             self.assertEqual(
                 len(test_matrix["include"]) * len(expected_modes),
                 len(scheduled_test_matrix["include"]),
             )
+
+    def test_set_periodic_modes_gpu_runner(self) -> None:
+        """Job name without 'cuda' but runner indicates a CUDA job (e.g. inductor-unittest)."""
+        test_matrix = yaml.safe_load(
+            "{include: ["
+            '{config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu"}, '
+            '{config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu"}'
+            "]}"
+        )
+        scheduled = set_periodic_modes(test_matrix, "inductor-build / build")
+
+        modes_per_config = [
+            entry.get("rerun_disabled_tests") for entry in scheduled["include"]
+        ]
+        self.assertIn("rerun_disabled_tests", modes_per_config)
+        self.assertEqual(len(scheduled["include"]), 2)
 
     @mock.patch("filter_test_configs.download_json")
     def test_remove_disabled_jobs(self, mock_download_json: Any) -> None:
@@ -637,37 +630,6 @@ class TestConfigFilter(TestCase):
                 "expected": '{"include": [{"config": "default", "unstable": "unstable"}]}',
                 "description": "Both binary build and test jobs are unstable",
             },
-            {
-                "workflow": "inductor",
-                "job_name": "cuda12.1-py3.10-gcc9-sm86 / build",
-                "test_matrix": """
-                    { include: [
-                        { config: "inductor" },
-                        { config: "inductor_huggingface", shard: 1 },
-                        { config: "inductor_huggingface", shard: 2 },
-                        { config: "inductor_timm", shard: 1 },
-                        { config: "inductor_timm", shard: 2 },
-                        { config: "inductor_torchbench" },
-                        { config: "inductor_huggingface_dynamic" },
-                        { config: "inductor_torchbench_dynamic" },
-                        { config: "inductor_distributed" },
-                    ]}
-                """,
-                "expected": """
-                    { "include": [
-                        { "config": "inductor", "unstable": "unstable" },
-                        { "config": "inductor_huggingface", "shard": 1, "unstable": "unstable" },
-                        { "config": "inductor_huggingface", "shard": 2, "unstable": "unstable" },
-                        { "config": "inductor_timm", "shard": 1 },
-                        { "config": "inductor_timm", "shard": 2 },
-                        { "config": "inductor_torchbench" },
-                        { "config": "inductor_huggingface_dynamic", "unstable": "unstable" },
-                        { "config": "inductor_torchbench_dynamic" },
-                        { "config": "inductor_distributed" }
-                    ]}
-                """,
-                "description": "Marking multiple unstable configurations",
-            },
         ]
 
         for case in testcases:
@@ -702,7 +664,7 @@ class TestConfigFilter(TestCase):
             )
 
         mocked_subprocess.return_value = b""
-        testcases: List[Dict[str, Any]] = [
+        testcases: list[dict[str, Any]] = [
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',
@@ -862,7 +824,7 @@ class TestConfigFilter(TestCase):
         # test bad things
         pr_body = (
             "fixes189 fixeshttps://github.com/pytorch/pytorch/issues/75123 "
-            "closedhttps://githubcom/pytorch/pytorch/issues/75123"
+            "closedhttps://githubcom/pytorch/pytorch/issues/75123"  # @lint-ignore
             "fix 234, fixes # 45, fixing #123, close 234, closes#45, closing #123 resolve 234, "
             "resolves  #45, resolving #123"
         )
@@ -870,6 +832,29 @@ class TestConfigFilter(TestCase):
 
         pr_body = None
         self.assertEqual(parse_reenabled_issues(pr_body), [])
+
+    def test_get_ghstack_below_count(self) -> None:
+        # Not a ghstack body.
+        self.assertEqual(get_ghstack_below_count(""), 0)
+        self.assertEqual(get_ghstack_below_count("just a regular PR"), 0)
+
+        # Top of a 4-deep stack: 3 entries below the marker.
+        top_body = (
+            "Stack from ghstack (oldest at bottom):\n* __->__ #4\n* #3\n* #2\n* #1\n"
+        )
+        self.assertEqual(get_ghstack_below_count(top_body), 3)
+
+        # Middle of the same stack: 1 entry below the marker.
+        mid_body = (
+            "Stack from ghstack (oldest at bottom):\n* #4\n* #3\n* __->__ #2\n* #1\n"
+        )
+        self.assertEqual(get_ghstack_below_count(mid_body), 1)
+
+        # Bottom of the stack: 0 entries below the marker.
+        bottom_body = (
+            "Stack from ghstack (oldest at bottom):\n* #4\n* #3\n* #2\n* __->__ #1\n"
+        )
+        self.assertEqual(get_ghstack_below_count(bottom_body), 0)
 
 
 if __name__ == "__main__":

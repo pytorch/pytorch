@@ -85,7 +85,7 @@ class NodeNameGenerator {
 
  protected:
   virtual void CreateNodeName(Node* n) = 0;
-  void PopulateNodeNames(Block*);
+  void PopulateNodeNames(Block* /*b*/);
   void UpdateOutputsNames(Node* n);
   bool IsGraphOutput(const Value* v, const std::shared_ptr<Graph>& graph) const;
 
@@ -123,7 +123,7 @@ std::string NodeNameGenerator::CreateUniqueName(
     base_name_count[base_name] = 0;
   } else {
     auto count = ++base_name_count[base_name];
-    base_name += "_";
+    base_name += '_';
     base_name += std::to_string(count);
   }
   return base_name;

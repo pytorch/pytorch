@@ -1,6 +1,7 @@
 # Helper to get the id of the currently running job in a GitHub Actions
 # workflow. GitHub does not provide this information to workflow runs, so we
 # need to figure it out based on what they *do* provide.
+from __future__ import annotations
 
 import argparse
 import json
@@ -11,11 +12,15 @@ import sys
 import time
 import urllib
 import urllib.parse
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, TYPE_CHECKING
 from urllib.request import Request, urlopen
 
 
-def parse_json_and_links(conn: Any) -> Tuple[Any, Dict[str, Dict[str, str]]]:
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+def parse_json_and_links(conn: Any) -> tuple[Any, dict[str, dict[str, str]]]:
     links = {}
     # Extract links which GH uses for pagination
     # see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Link
@@ -42,9 +47,9 @@ def parse_json_and_links(conn: Any) -> Tuple[Any, Dict[str, Dict[str, str]]]:
 def fetch_url(
     url: str,
     *,
-    headers: Optional[Dict[str, str]] = None,
+    headers: dict[str, str] | None = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
-    retries: Optional[int] = 3,
+    retries: int | None = 3,
     backoff_timeout: float = 0.5,
 ) -> Any:
     if headers is None:
@@ -64,7 +69,7 @@ def fetch_url(
             )
         exception_message = (
             "Is github alright?",
-            f"Recieved status code '{err.code}' when attempting to retrieve {url}:\n",
+            f"Received status code '{err.code}' when attempting to retrieve {url}:\n",
             f"{err.reason}\n\nheaders={err.headers}",
         )
         raise RuntimeError(exception_message) from err
@@ -83,11 +88,12 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Dict[str, str]]:
+def fetch_jobs(url: str, headers: dict[str, str]) -> list[dict[str, str]]:
     response, links = fetch_url(url, headers=headers, reader=parse_json_and_links)
     jobs = response["jobs"]
-    assert type(jobs) is list
-    while "next" in links.keys():
+    if type(jobs) is not list:
+        raise AssertionError(f"Expected jobs to be a list, got {type(jobs).__name__}")
+    while "next" in links:
         response, links = fetch_url(
             links["next"]["url"], headers=headers, reader=parse_json_and_links
         )
@@ -111,7 +117,7 @@ def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Dict[str, str]]:
 # running.
 
 
-def find_job_id_name(args: Any) -> Tuple[str, str]:
+def find_job_id_name(args: Any) -> tuple[str, str]:
     # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
     PYTORCH_REPO = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
     PYTORCH_GITHUB_API = f"https://api.github.com/repos/{PYTORCH_REPO}"
@@ -136,10 +142,10 @@ def find_job_id_name(args: Any) -> Tuple[str, str]:
 
 
 def set_output(name: str, val: Any) -> None:
+    print(f"Setting output {name}={val}")
     if os.getenv("GITHUB_OUTPUT"):
         with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
             print(f"{name}={val}", file=env)
-        print(f"setting {name}={val}")
     else:
         print(f"::set-output name={name}::{val}")
 

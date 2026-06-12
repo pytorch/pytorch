@@ -1,8 +1,5 @@
-#include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
-#include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
@@ -102,7 +99,7 @@ void prepare_and_call_rpc_op(
     std::vector<std::string> names;
     for (const auto& entry : kwargsDict) {
       const IValue& keyIValue = entry.key();
-      const string& keyStr = keyIValue.toStringRef();
+      const std::string& keyStr = keyIValue.toStringRef();
       names.emplace_back(keyStr);
     }
     throw std::runtime_error(functionSchema.findErrorInKwargs(names));

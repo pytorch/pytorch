@@ -86,7 +86,7 @@ using ConvParamsSerializationTypeV3 = std::tuple<
 // Parses any historical conv packed params format into
 // the current format.
 template <uint32_t kSpatialDim>
-ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
+ConvParamsSerializationTypeV3 parse_conv_serialized_state(const c10::IValue& v) {
 
   // determine the version based on IValue contents
   int version = -1;
@@ -131,15 +131,15 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
         dilation_x_kSpatialDim.size() + kSpatialDim + 3);
     config_vals.push_back(kSpatialDim);
     for (const auto i : c10::irange(stride_x_kSpatialDim.size())) {
-      auto stride = stride_x_kSpatialDim.get(i);
+      auto const & stride = stride_x_kSpatialDim.get(i);
       config_vals.push_back(stride[0].item<int16_t>());
     }
     for (const auto i : c10::irange(padding_x_kSpatialDim.size())) {
-      auto padding = padding_x_kSpatialDim.get(i);
+      auto const &padding = padding_x_kSpatialDim.get(i);
       config_vals.push_back(padding[0].item<int16_t>());
     }
     for (const auto i : c10::irange(dilation_x_kSpatialDim.size())) {
-      auto dilation = dilation_x_kSpatialDim.get(i);
+      auto const &dilation = dilation_x_kSpatialDim.get(i);
       config_vals.push_back(dilation[0].item<int16_t>());
     }
     // output_padding does not exist in v1, so we fill in a default value
@@ -283,13 +283,13 @@ ConvParamsSerializationTypeV3 serialize_conv(
 template <uint32_t kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     ConvParamsSerializationTypeV3 state) {
-  auto [version, config_vals, tensors] = state;
+  auto & [version, config_vals, tensors] = state;
   TORCH_INTERNAL_ASSERT(version == 3, "Unexpected serialized qconv version: ", version);
 
   TORCH_CHECK(tensors.size() == 3, "Wrong number of tensors", tensors.size());
-  std::optional<at::Tensor> weight = tensors[1];
-  std::optional<at::Tensor> bias = tensors[2];
-  TORCH_INTERNAL_ASSERT(weight, "Weight should always be present in serialized qconv.");
+  auto & weight = tensors[1];
+  auto & bias [[maybe_unused]] = tensors[2];
+  TORCH_INTERNAL_ASSERT(weight.has_value(), "Weight should always be present in serialized qconv.");
 
   torch::List<int64_t> stride, padding, output_padding, dilation;
   // skip kSpatialDim
@@ -340,8 +340,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
         weight.value(), transpose, groups, output_padding);
     if (use_onednn) {
       return PackedConvWeightsOnednn<kSpatialDim>::prepack(
-        weight.value(),
-        bias,
+        std::move(weight.value()),
+        std::move(bias),
         stride,
         padding,
         output_padding,
@@ -352,8 +352,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     }
 #endif
     return PackedConvWeight<kSpatialDim>::prepack(
-      weight.value(),
-      bias,
+      std::move(weight.value()),
+      std::move(bias),
       stride,
       padding,
       output_padding,
@@ -367,8 +367,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::FBGEMM) {
     return PackedConvWeight<kSpatialDim>::prepack(
-      weight.value(),
-      bias,
+      std::move(weight.value()),
+      std::move(bias),
       stride,
       padding,
       output_padding,
@@ -385,8 +385,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
         "prepack/__setstate__: QNNPACK only supports Conv2d "
         "now.");
     return PackedConvWeightsQnnp<kSpatialDim>::prepack(
-      weight.value(),
-      bias,
+      std::move(weight.value()),
+      std::move(bias),
       stride,
       padding,
       output_padding,
@@ -399,8 +399,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
 #if AT_MKLDNN_ENABLED()
   if (ctx.qEngine() == at::QEngine::ONEDNN) {
     return PackedConvWeightsOnednn<kSpatialDim>::prepack(
-      weight.value(),
-      bias,
+      std::move(weight.value()),
+      std::move(bias),
       stride,
       padding,
       output_padding,

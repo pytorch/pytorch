@@ -5,7 +5,7 @@ namespace {
     template <typename T>
     class Memory : public ::testing::Test {};
     template <typename T>
-    class Arithmetics : public ::testing::Test {};
+    class Arithmetic : public ::testing::Test {};
     template <typename T>
     class Comparison : public ::testing::Test {};
     template <typename T>
@@ -61,6 +61,8 @@ namespace {
     template <typename T>
     class QuantizationTests : public ::testing::Test {};
     template <typename T>
+    class Quantization8BitTests : public ::testing::Test {};
+    template <typename T>
     class Quantization8BitWithTailTests : public ::testing::Test {};
     template <typename T>
     class FunctionalTests : public ::testing::Test {};
@@ -79,6 +81,7 @@ namespace {
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
+    using Quantization8BitTestedTypes = ::testing::Types<vqint8, vquint8>;
 #if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     using Quantization8BitWithTailTestedTypes =
         ::testing::Types<vqint8, vquint8>;
@@ -89,7 +92,7 @@ namespace {
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
-    TYPED_TEST_SUITE(Arithmetics, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(Arithmetic, FloatIntTestedTypes);
     TYPED_TEST_SUITE(Comparison, RealFloatIntReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
     TYPED_TEST_SUITE(MinMax, RealFloatIntTestedTypes);
@@ -113,9 +116,10 @@ namespace {
     TYPED_TEST_SUITE(Pow, RealFloatTestedTypes);
     TYPED_TEST_SUITE(RealTests, RealFloatTestedTypes);
     TYPED_TEST_SUITE(RangeFactories, FloatIntTestedTypes);
-    TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatReducedFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
+    TYPED_TEST_SUITE(Quantization8BitTests, Quantization8BitTestedTypes);
     TYPED_TEST_SUITE(InfiniteTests, RealFloatTestedTypes);
 #if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     TYPED_TEST_SUITE(
@@ -192,6 +196,11 @@ namespace {
             [](vec v) { return v.neg(); },
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_int_minimum));
+        test_unary<vec>(
+            NAME_INFO(negate), std::negate<ValueType<vec>>(),
+            [](vec v) { return -v; },
+            createDefaultUnaryTestCase<vec>(TestSeed()),
+            RESOLVE_OVERLOAD(filter_int_minimum));
     }
     TYPED_TEST(SignManipulationHalfPrecision, AbsNegate) {
       typedef enum  {
@@ -223,7 +232,7 @@ namespace {
       auto half_precision_ut = [&](SignOpType op_type) {
         constexpr auto N = vec::size();
         CACHE_ALIGN RT x_fp[N];
-        CACHE_ALIGN VT x_hp[N];
+        CACHE_ALIGN VT x_hp[N] = {};
         auto seed = TestSeed();
         ValueGen<RT> generator(RT(-1), RT(1), seed);
         for (const auto i : c10::irange(N)) {
@@ -329,7 +338,7 @@ namespace {
       test_binary<vec>(
           NAME_INFO(fmod),
           RESOLVE_OVERLOAD(std::fmod),
-          [](vec v0, vec v1) { return v0.fmod(v1); },
+          [](const auto& v0, const auto& v1) { return vec(v0).fmod(v1); },
           createDefaultBinaryTestCase<vec>(TestSeed()),
           RESOLVE_OVERLOAD(filter_fmod));
     }
@@ -371,11 +380,22 @@ namespace {
     }
     TYPED_TEST(Hyperbolic, Tanh) {
         using vec = TypeParam;
+// NOTE: Because SVE uses ACL logic, the precision changes, hence the adjusted tolerance.
+#if defined(CPU_CAPABILITY_SVE256)
+        using UVT = UvalueType<vec>;
+        UVT tolerance = getDefaultTolerance<UVT>();
+        test_unary<vec>(
+            NAME_INFO(tanH),
+            RESOLVE_OVERLOAD(std::tanh),
+            [](vec v) { return v.tanh(); },
+            createDefaultUnaryTestCase<vec>(TestSeed(), tolerance));
+#else
         test_unary<vec>(
             NAME_INFO(tanH),
             RESOLVE_OVERLOAD(std::tanh),
             [](vec v) { return v.tanh(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
+#endif
     }
     TYPED_TEST(Hyperbolic, Sinh) {
         using vec = TypeParam;
@@ -506,6 +526,41 @@ namespace {
             [](const vec& v) { return v.expm1(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+    TYPED_TEST(Exponents, ExpU20) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        using UVT = UvalueType<TypeParam>;
+
+        // Explicit edge values
+        VT v_too_small = VT(-100.0); // much less than -87.3
+        VT exp_too_small = std::exp(v_too_small);
+        VT v_neg_edge = VT(-0x1.5d5e2ap+6f);   // just at the edge
+        VT exp_neg_edge = std::exp(v_neg_edge);
+        VT v_zero = VT(0.0);         // middle, normal case
+        VT exp_zero = std::exp(v_zero);
+        VT v_pos_edge = VT(0x1.5d5e2ap+6f);    // just at the edge
+        VT exp_pos_edge = std::exp(v_pos_edge);
+        VT v_too_large = VT(100.0);  // much more than 87.3
+        VT exp_too_large = std::exp(v_too_large);
+
+        auto test_case = TestingCase<vec>::getBuilder()
+            // Randoms in normal range, but the .addCustom() below guarantees we hit the special/fallback cases
+            .addDomain(CheckWithinDomains<UVT>{{{-100, 100}}, false, getDefaultTolerance<UVT>()})
+            .addCustom({ {v_too_small}, exp_too_small })
+            .addCustom({ {v_neg_edge}, exp_neg_edge })
+            .addCustom({ {v_zero}, exp_zero })
+            .addCustom({ {v_pos_edge}, exp_pos_edge })
+            .addCustom({ {v_too_large}, exp_too_large })
+            .setTrialCount(65536)
+            .setTestSeed(TestSeed());
+
+        test_unary<vec>(
+            NAME_INFO(exp_u20_edge_cases),
+            RESOLVE_OVERLOAD(std::exp),
+            [](const vec& v) { return v.exp_u20(); },
+            test_case
+        );
+    }
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -561,11 +616,24 @@ namespace {
         bool expected = std::isnan(val);
         CACHE_ALIGN c10::Half actual_vals[vHalf::size()];
         vHalf(val).isnan().store(actual_vals);
-        for (int jj = 0; jj < vHalf::size(); ++jj) {
-          EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_vals[jj]) != 0) << "fp16 isnan failure for bit pattern " << std::hex << ii << std::dec;
+        for (auto actual_val : actual_vals) {
+          EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_val) != 0) << "fp16 isnan failure for bit pattern " << std::hex << ii << std::dec;
         }
       }
     }
+#if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
+    TEST(NanBfloat16, IsNan) {
+      for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
+        c10::BFloat16 val(ii, c10::BFloat16::from_bits());
+        bool expected = std::isnan(val);
+        CACHE_ALIGN c10::BFloat16 actual_vals[at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>::size()];
+        at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>(val).isnan().store(actual_vals);
+        for (int jj = 0; jj < at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>::size(); ++jj) {
+          EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_vals[jj]) != 0) << "bf16 isnan failure for bit pattern " << std::hex << ii << std::dec;
+        }
+      }
+    }
+#endif
     TYPED_TEST(LGamma, LGamma) {
         using vec = TypeParam;
         using UVT = UvalueType<vec>;
@@ -588,8 +656,8 @@ namespace {
         test_binary<vec>(
             NAME_INFO(atan2),
             RESOLVE_OVERLOAD(std::atan2),
-            [](vec v0, vec v1) {
-                return v0.atan2(v1);
+            [](const auto& v0, const auto& v1) {
+              return vec(v0).atan2(v1);
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
@@ -598,7 +666,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(pow),
             RESOLVE_OVERLOAD(std::pow),
-            [](vec v0, vec v1) { return v0.pow(v1); },
+            [](const auto& v0, const auto& v1) { return vec(v0).pow(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
     TYPED_TEST(RealTests, Hypot) {
@@ -606,7 +674,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(hypot),
             RESOLVE_OVERLOAD(std::hypot),
-            [](vec v0, vec v1) { return v0.hypot(v1); },
+            [](const auto& v0, const auto& v1) { return vec(v0).hypot(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
     TYPED_TEST(RealTests, NextAfter) {
@@ -614,7 +682,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(nextafter),
             RESOLVE_OVERLOAD(std::nextafter),
-            [](vec v0, vec v1) { return v0.nextafter(v1); },
+            [](const auto& v0, const auto& v1) { return vec(v0).nextafter(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
     TYPED_TEST(Interleave, Interleave) {
@@ -658,46 +726,46 @@ namespace {
         AssertVectorized<vec>(NAME_INFO(DeInterleave FirstHalf), std::get<0>(cc), vec::loadu(vals)).check(true);
         AssertVectorized<vec>(NAME_INFO(DeInterleave SecondHalf), std::get<1>(cc), vec::loadu(vals + vec::size())).check(true);
     }
-    TYPED_TEST(Arithmetics, Plus) {
+    TYPED_TEST(Arithmetic, Plus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
             NAME_INFO(plus),
             std::plus<VT>(),
-            [](const vec& v0, const vec& v1) -> vec {
+            [](const auto& v0, const auto& v1) -> vec {
                 return v0 + v1;
             },
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_add_overflow));
     }
-    TYPED_TEST(Arithmetics, Minus) {
+    TYPED_TEST(Arithmetic, Minus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
             NAME_INFO(minus),
             std::minus<VT>(),
-            [](const vec& v0, const vec& v1) -> vec {
+            [](const auto& v0, const auto& v1) -> vec {
                 return v0 - v1;
             },
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_sub_overflow));
     }
-    TYPED_TEST(Arithmetics, Multiplication) {
+    TYPED_TEST(Arithmetic, Multiplication) {
         using vec = TypeParam;
         test_binary<vec>(
             NAME_INFO(mult),
             RESOLVE_OVERLOAD(local_multiply),
-            [](const vec& v0, const vec& v1) { return v0 * v1; },
+            [](const auto& v0, const auto& v1) { return v0 * v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true),
             RESOLVE_OVERLOAD(filter_mult_overflow));
     }
-    TYPED_TEST(Arithmetics, Division) {
+    TYPED_TEST(Arithmetic, Division) {
         using vec = TypeParam;
         TestSeed seed;
         test_binary<vec>(
             NAME_INFO(division),
             RESOLVE_OVERLOAD(local_division),
-            [](const vec& v0, const vec& v1) { return v0 / v1; },
+            [](const auto& v0, const auto& v1) { return v0 / v1; },
             createDefaultBinaryTestCase<vec>(seed),
             RESOLVE_OVERLOAD(filter_div_ub));
     }
@@ -706,7 +774,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(bit_and),
             RESOLVE_OVERLOAD(local_and),
-            [](const vec& v0, const vec& v1) { return v0 & v1; },
+            [](const auto& v0, const auto& v1) { return v0 & v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Bitwise, BitOr) {
@@ -714,7 +782,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(bit_or),
             RESOLVE_OVERLOAD(local_or),
-            [](const vec& v0, const vec& v1) { return v0 | v1; },
+            [](const auto& v0, const auto& v1) { return v0 | v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Bitwise, BitXor) {
@@ -722,7 +790,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(bit_xor),
             RESOLVE_OVERLOAD(local_xor),
-            [](const vec& v0, const vec& v1) { return v0 ^ v1; },
+            [](const auto& v0, const auto& v1) { return v0 ^ v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Comparison, Equal) {
@@ -785,7 +853,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(minimum),
             minimum<VT>,
-            [](const vec& v0, const vec& v1) {
+            [](const auto& v0, const auto& v1) {
                 return minimum(v0, v1);
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
@@ -796,7 +864,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(maximum),
             maximum<VT>,
-            [](const vec& v0, const vec& v1) {
+            [](const auto& v0, const auto& v1) {
                 return maximum(v0, v1);
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
@@ -807,7 +875,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(clamp min),
             clamp_min<VT>,
-            [](const vec& v0, const vec& v1) {
+            [](const auto& v0, const auto& v1) {
                 return clamp_min(v0, v1);
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
@@ -818,7 +886,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(clamp max),
             clamp_max<VT>,
-            [](const vec& v0, const vec& v1) {
+            [](const auto& v0, const auto& v1) {
                 return clamp_max(v0, v1);
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
@@ -851,7 +919,7 @@ namespace {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT test_vals[vec::size()];
         //all sets will be within 0  2^(n-1)
-        auto power_sets = 1 << (vec::size());
+        auto power_sets = 1UL << (vec::size());
         for (const auto expected : c10::irange(power_sets)) {
             // generate test_val based on expected
             for (int i = 0; i < vec::size(); ++i)
@@ -1046,7 +1114,7 @@ namespace {
           mask[idx] = (VT)0;
         }
         else {
-          int64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
+          uint64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
           std::memcpy(&mask[idx], &hex_mask, sizeof(VT));
         }
         if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
@@ -1077,9 +1145,6 @@ namespace {
         blend_init(a, b);
         test_blendv<vec, VT, 0, vec::size()>(expected_val, a, b, mask);
     }
-// NOTE: In this test, blend<mask> is not required to implement SVE Vectorized::set.
-// so, this test is disabled for SVE.
-#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(BitwiseFloatsAdditional2, Blend) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1093,7 +1158,6 @@ namespace {
         constexpr int64_t power_sets = 1LL << (vec::size());
         test_blend<vec, VT, power_sets - 1>(expected_val, a, b);
     }
-#endif
     template<typename vec, typename VT>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     void test_set(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], int64_t count){
@@ -1315,8 +1379,8 @@ namespace {
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(2));
         for ([[maybe_unused]] const auto i : c10::irange(trials)) {
           float scale = generator_sc.get();
-          int32_t zero_point_val = generator.get();
-          float scale_zp_premul = -(scale * zero_point_val);
+          auto zero_point_val = generator.get();
+          float scale_zp_premul = -(scale * static_cast<float>(zero_point_val));
           vfloat vf_scale = vfloat{scale};
           vfloat vf_zp = vfloat{static_cast<float>(zero_point_val)};
           vfloat vf_scale_zp = vfloat{scale_zp_premul};
@@ -1399,7 +1463,6 @@ namespace {
         CACHE_ALIGN underlying qint_vals[vec::size()];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN underlying qint_b[vec::size()];
-        typename vec::int_vec_return_type  expected_int_ret;
         auto seed = TestSeed();
         ValueGen<underlying> generator(min_val, max_val, seed);
         for ([[maybe_unused]] const auto i : c10::irange(trials)) {
@@ -1471,6 +1534,100 @@ namespace {
             },
             test_case);
     }
+#ifndef _WIN32
+    TYPED_TEST(Quantization8BitTests, Transpose) {
+        using VT = ValueType<TypeParam>;
+        constexpr auto M = 4;
+        constexpr auto N = 64;
+        constexpr auto L = M * N;
+        constexpr auto ld_src = N;
+        constexpr auto ld_dst = M;
+        CACHE_ALIGN VT x[L];
+        CACHE_ALIGN VT y[L];
+        CACHE_ALIGN VT ref[L];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (const auto i : c10::irange(L)) {
+          x[i] = generator.get();
+        }
+        at::native::utils::transpose<uint8_t>(
+            M, N,
+            reinterpret_cast<uint8_t*>(x), ld_src,
+            reinterpret_cast<uint8_t*>(y), ld_dst);
+        for (int64_t j = 0; j < N; j++) {
+          for (int64_t i = 0; i < M; i++) {
+            ref[j * ld_dst + i] = c10::load(&(x[i * ld_src + j]));
+          }
+        }
+        for (const auto i : c10::irange(L)) {
+          ASSERT_EQ(y[i], ref[i])
+              << "Failure Details:\nTest Seed to reproduce: " << seed;
+        }
+    }
+#endif
+#if defined(CPU_CAPABILITY_AVX512)
+    TYPED_TEST(Quantization8BitTests, PackVNNI4) {
+        using VT = ValueType<TypeParam>;
+        constexpr auto K = 8;
+        constexpr auto N = 128;
+        constexpr auto L = K * N;
+        constexpr auto ld_src = N;
+        CACHE_ALIGN VT x[L];
+        CACHE_ALIGN VT y[L];
+        CACHE_ALIGN VT ref[L];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (const auto i : c10::irange(L)) {
+          x[i] = generator.get();
+        }
+        at::vec::pack_vnni4(x, y, ld_src, K, N);
+        int64_t _K = K / 4;
+        for (int64_t k = 0; k < _K; k++) {
+          for(int64_t n = 0; n < N; n++) {
+            for(int64_t l = 0; l < 4; l++) {
+              ref[k * N * 4 + n * 4 + l] =
+                  c10::load(&(x[k * ld_src * 4 + l * ld_src + n]));
+            }
+          }
+        }
+        for (const auto i : c10::irange(L)) {
+          ASSERT_EQ(y[i], ref[i])
+              << "Failure Details:\nTest Seed to reproduce: " << seed;
+        }
+    }
+#endif
+#if defined(CPU_CAPABILITY_AVX512)
+    TYPED_TEST(Quantization8BitTests, TransposePackVNNI4) {
+        using VT = ValueType<TypeParam>;
+        constexpr auto K = 197;
+        constexpr auto N = 64;
+        constexpr auto L = K * N;
+        constexpr auto ld_src = N;
+        constexpr auto ld_dst = K * 4;
+        CACHE_ALIGN VT x[L];
+        CACHE_ALIGN VT y[L];
+        CACHE_ALIGN VT ref[L];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (const auto i : c10::irange(L)) {
+          x[i] = generator.get();
+        }
+        at::vec::transpose_pack_vnni4(x, y, ld_src, K, N);
+        int64_t _N = N / 4;
+        for (int64_t k = 0; k < K; k++) {
+          for(int64_t n = 0; n < _N; n++) {
+            for(int64_t l = 0; l < 4; l++) {
+              ref[n * ld_dst + k * 4 + l] =
+                  c10::load(&(x[k * ld_src + n * 4 + l]));
+            }
+          }
+        }
+        for (const auto i : c10::irange(L)) {
+          ASSERT_EQ(y[i], ref[i])
+              << "Failure Details:\nTest Seed to reproduce: " << seed;
+        }
+    }
+#endif
     TYPED_TEST(FunctionalTests, Map) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1657,25 +1814,357 @@ namespace {
     TEST(HalfConversionTest, HalfFloat) {
       float f32s[100];
       for (const auto i : c10::irange(100)) {
-        f32s[i] = i + 0.3;
+        f32s[i] = static_cast<float>(i + 0.3);
       }
-      uint16_t u16;
-      float x;
       for (const auto i : c10::irange(100)) {
       #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
           !defined(__APPLE__)
-        u16 = at::vec::float2half_scalar(f32s[i]);
-        x = at::vec::half2float_scalar(u16);
+        uint16_t u16 = at::vec::float2half_scalar(f32s[i]);
+        float x = at::vec::half2float_scalar(u16);
       #else
-        u16 = c10::detail::fp16_ieee_from_fp32_value(f32s[i]);
-        x = c10::detail::fp16_ieee_to_fp32_value(u16);
+        uint16_t u16 = c10::detail::fp16_ieee_from_fp32_value(f32s[i]);
+        float x = c10::detail::fp16_ieee_to_fp32_value(u16);
       #endif
 
         EXPECT_EQ(u16, c10::detail::fp16_ieee_from_fp32_value(f32s[i]))
-            << "Test failed for float to uint16 " << f32s[i] << "\n";
+            << "Test failed for float to uint16 " << f32s[i] << '\n';
         EXPECT_EQ(x, c10::detail::fp16_ieee_to_fp32_value(u16))
-            << "Test failed for uint16 to float " << u16 << "\n";
+            << "Test failed for uint16 to float " << u16 << '\n';
       }
+    }
+    TEST(FP8E4M3Test, FP8E4M3ConversionFloat) {
+      for (uint32_t index = 0; index < 256; ++index) {
+        uint8_t input = static_cast<uint8_t>(index);
+      #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+        float f32 = at::vec::fp8e4m3_to_fp32_scalar(input);
+        uint8_t u8 = at::vec::fp32_to_fp8e4m3_scalar(f32);
+      #else
+        float f32 = c10::detail::fp8e4m3fn_to_fp32_value(input);
+        uint8_t u8 = c10::detail::fp8e4m3fn_from_fp32_value(f32);
+      #endif
+        if (index == 255 || index == 127) {
+          // EXPECT_EQ failed to check nan
+          EXPECT_TRUE(std::isnan(f32));
+        } else {
+          EXPECT_EQ(f32, c10::detail::fp8e4m3fn_to_fp32_value(input))
+              << "Test failed for u8 to float " << input << '\n';
+        }
+        EXPECT_EQ(u8, c10::detail::fp8e4m3fn_from_fp32_value(f32))
+            << "Test failed for float to u8 " << f32 << '\n';
+      }
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryAdd) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 + f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 + f8_e4m3_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinarySub) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 - f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 - f8_e4m3_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryMul) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 * f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 * f8_e4m3_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryDiv) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 / f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 / f8_e4m3_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryEQ) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 == f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 == f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryNE) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 != f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 != f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryGT) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 > f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 > f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryGE) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 >= f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 >= f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryLT) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 < f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 < f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryLE) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 <= f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 <= f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E5M2Test, FP8E5M2ConversionFloat) {
+      for (uint32_t index = 0; index < 256; ++index) {
+        uint8_t input = static_cast<uint8_t>(index);
+      #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+        float f32 = at::vec::fp8e5m2_to_fp32_scalar(input);
+        uint8_t u8 = at::vec::fp32_to_fp8e5m2_scalar(f32);
+      #else
+        float f32 = c10::detail::fp8e5m2_to_fp32_value(input);
+        uint8_t u8 = c10::detail::fp8e5m2_from_fp32_value(f32);
+      #endif
+        if (index == 255 || index == 127 || index == 254 || index == 126 || index == 253 || index == 125) {
+          // EXPECT_EQ failed to check nan
+          EXPECT_TRUE(std::isnan(f32));
+        } else {
+          EXPECT_EQ(f32, c10::detail::fp8e5m2_to_fp32_value(input))
+              << "Test failed for u8 to float " << input << '\n';
+        }
+        EXPECT_EQ(u8, c10::detail::fp8e5m2_from_fp32_value(f32))
+            << "Test failed for float to u8 " << f32 << '\n';
+      }
+    }
+    TEST(FP8E5M2Test, FP8E5M2BinaryAdd) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e5m2(
+          [](c10::Float8_e5m2 f8_e5m2_0, c10::Float8_e5m2 f8_e5m2_1) {
+            return f8_e5m2_0 + f8_e5m2_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_0,
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_1) {
+            return f8_e5m2_0 + f8_e5m2_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E5M2Test, FP8E5M2BinarySub) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e5m2(
+          [](c10::Float8_e5m2 f8_e5m2_0, c10::Float8_e5m2 f8_e5m2_1) {
+            return f8_e5m2_0 - f8_e5m2_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_0,
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_1) {
+            return f8_e5m2_0 - f8_e5m2_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E5M2Test, FP8E5M2BinaryMul) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e5m2(
+          [](c10::Float8_e5m2 f8_e5m2_0, c10::Float8_e5m2 f8_e5m2_1) {
+            return f8_e5m2_0 * f8_e5m2_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_0,
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_1) {
+            return f8_e5m2_0 * f8_e5m2_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E5M2Test, FP8E5M2BinaryDiv) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e5m2(
+          [](c10::Float8_e5m2 f8_e5m2_0, c10::Float8_e5m2 f8_e5m2_1) {
+            return f8_e5m2_0 / f8_e5m2_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_0,
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_1) {
+            return f8_e5m2_0 / f8_e5m2_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E5M2Test, FP8E5M2BinaryEQ) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e5m2(
+          [](c10::Float8_e5m2 f8_e5m2_0, c10::Float8_e5m2 f8_e5m2_1) {
+            return f8_e5m2_0 == f8_e5m2_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_0,
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_1) {
+            return f8_e5m2_0 == f8_e5m2_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E5M2Test, FP8E5M2BinaryNE) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e5m2(
+          [](c10::Float8_e5m2 f8_e5m2_0, c10::Float8_e5m2 f8_e5m2_1) {
+            return f8_e5m2_0 != f8_e5m2_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_0,
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_1) {
+            return f8_e5m2_0 != f8_e5m2_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E5M2Test, FP8E5M2BinaryGT) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e5m2(
+          [](c10::Float8_e5m2 f8_e5m2_0, c10::Float8_e5m2 f8_e5m2_1) {
+            return f8_e5m2_0 > f8_e5m2_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_0,
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_1) {
+            return f8_e5m2_0 > f8_e5m2_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E5M2Test, FP8E5M2BinaryGE) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e5m2(
+          [](c10::Float8_e5m2 f8_e5m2_0, c10::Float8_e5m2 f8_e5m2_1) {
+            return f8_e5m2_0 >= f8_e5m2_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_0,
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_1) {
+            return f8_e5m2_0 >= f8_e5m2_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E5M2Test, FP8E5M2BinaryLT) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e5m2(
+          [](c10::Float8_e5m2 f8_e5m2_0, c10::Float8_e5m2 f8_e5m2_1) {
+            return f8_e5m2_0 < f8_e5m2_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_0,
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_1) {
+            return f8_e5m2_0 < f8_e5m2_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E5M2Test, FP8E5M2BinaryLE) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e5m2(
+          [](c10::Float8_e5m2 f8_e5m2_0, c10::Float8_e5m2 f8_e5m2_1) {
+            return f8_e5m2_0 <= f8_e5m2_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_0,
+            at::vec::Vectorized<c10::Float8_e5m2> f8_e5m2_1) {
+            return f8_e5m2_0 <= f8_e5m2_1;
+          },
+          true
+      );
+    #endif
     }
     TYPED_TEST(InfiniteTests, HasInfNan) {
       using vec = TypeParam;
@@ -1697,7 +2186,7 @@ namespace {
       VT v_pinf = static_cast<VT>(*(float *)&infBits);
       values[index] = v_pinf;
       auto vec_pinf = vec::loadu(values);
-      int negInfBits = 0xFF800000;
+      unsigned int negInfBits = 0xFF800000;
       VT v_ninf  = static_cast<VT>(*(float *)&negInfBits);
       values[index] = v_ninf;
       auto vec_ninf = vec::loadu(values);
@@ -1707,7 +2196,12 @@ namespace {
       ASSERT_TRUE(vec_pinf.has_inf_nan()) << "Test failed for positive Infinity\n";
       ASSERT_TRUE(vec_ninf.has_inf_nan()) << "Test failed for negative Infinity\n";
     }
-#if !defined(CPU_CAPABILITY_SVE)
+// Building below for SVE with gcc-13 fails with following internal error
+// during GIMPLE pass: sink
+// In member function ‘virtual void {anonymous}::VecConvertBFloat16_ExhaustiveToFloat_Test::TestBody()’:
+// vec_test_all_types.cpp:2265:10: internal compiler error: Segmentation fault
+// 2265 |     TEST(VecConvertBFloat16, ExhaustiveToFloat) {
+#if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE128)
     template <typename vec, typename dst_t>
     void test_convert_to(const char* dst_t_name) {
       using src_t = ValueType<vec>;
@@ -1779,8 +2273,8 @@ namespace {
         const auto expected = static_cast<float>(val);
         CACHE_ALIGN float actual_vals[vfloat::size()];
         at::vec::convert<float>(vBFloat16(val)).store(actual_vals);
-        for (int jj = 0; jj < vfloat::size(); ++jj) {
-          EXPECT_EQ(c10::bit_cast<uint32_t>(expected), c10::bit_cast<uint32_t>(actual_vals[jj]))
+        for (auto actual_val : actual_vals) {
+          EXPECT_EQ(c10::bit_cast<uint32_t>(expected), c10::bit_cast<uint32_t>(actual_val))
             << "convert-to-float failure for bf16 bit pattern "
             << std::hex << ii << std::dec;
         }
@@ -1794,20 +2288,20 @@ namespace {
 
     #define TEST_MASK_LOAD(dst_t, mask_t, mask_n)                           \
       do {                                                                  \
-        CACHE_ALIGN dst_t x[mask_n * size];                                 \
-        CACHE_ALIGN dst_t y[mask_n * size];                                 \
-        CACHE_ALIGN dst_t ref[mask_n * size];                               \
-        auto seed = TestSeed();                                             \
-        dst_t generator_min = std::numeric_limits<dst_t>::is_signed ? dst_t(-100) : dst_t(0); \
-        ValueGen<dst_t> generator(generator_min, dst_t(100), seed);     \
-        for (const auto i : c10::irange(mask_n * size)) {                   \
-          x[i] = generator.get();                                           \
-        }                                                                   \
-        auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);            \
         constexpr int dst_size = at::vec::Vectorized<dst_t>::size();        \
         constexpr int dst_n = mask_n * size / dst_size;                     \
-        constexpr int rnd_n = (mask_n * size + dst_size - 1) / dst_size;    \
         if constexpr(dst_n * dst_size >= mask_n * size) {                   \
+            CACHE_ALIGN dst_t x[mask_n * size];                             \
+            CACHE_ALIGN dst_t y[mask_n * size];                             \
+            CACHE_ALIGN dst_t ref[mask_n * size];                           \
+            auto seed = TestSeed();                                         \
+            dst_t generator_min = std::numeric_limits<dst_t>::is_signed ? dst_t(-100) : dst_t(0); \
+            ValueGen<dst_t> generator(generator_min, dst_t(100), seed);     \
+            for (const auto i : c10::irange(mask_n * size)) {               \
+              x[i] = generator.get();                                       \
+            }                                                               \
+            auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);        \
+            constexpr int rnd_n = (mask_n * size + dst_size - 1) / dst_size;\
             auto x_vec = vec_mask.template loadu<dst_t, rnd_n>(x);          \
             x_vec.store(y);                                                 \
             for (const auto i : c10::irange(mask_n * size)) {               \
@@ -1846,7 +2340,7 @@ namespace {
     #undef TEST_MASK_LOAD
     #undef TEST_MASK_LOAD_N
     }
-#if !defined(CPU_CAPABILITY_SVE)
+#if !defined(CPU_CAPABILITY_SVE256)
     TYPED_TEST(VecMaskTests, MaskedCheck) {
       using VT = ValueType<TypeParam>;
       using vec = TypeParam;
@@ -1871,7 +2365,7 @@ namespace {
     #undef TEST_MASK_CHECK_N
     }
 #endif
-#if !defined(CPU_CAPABILITY_SVE)
+#if !defined(CPU_CAPABILITY_SVE256)
     TYPED_TEST(VecMaskTests, ToFrom) {
       using vec = TypeParam;
       using VT = ValueType<TypeParam>;
@@ -1898,7 +2392,7 @@ namespace {
       }
     }
 #endif
-#if !defined(CPU_CAPABILITY_SVE)
+#if !defined(CPU_CAPABILITY_SVE256)
     TYPED_TEST(VecMaskTests, Cast) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;

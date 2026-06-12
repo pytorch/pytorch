@@ -14,6 +14,7 @@ enum class C10_API_ENUM ActivityType {
   CPU = 0,
   XPU, // XPU kernels, runtime
   CUDA, // CUDA kernels, runtime
+  HPU, // HPU kernels, runtime
   MTIA, // MTIA kernels, runtime
   PrivateUse1, // PrivateUse1 kernels, runtime
   NUM_KINETO_ACTIVITIES, // must be the last one
@@ -37,6 +38,7 @@ enum class C10_API_ENUM ProfilerState {
   KINETO, // use libkineto
   KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
   KINETO_PRIVATEUSE1_FALLBACK, // use PrivateUse1 events
+  KINETO_PRIVATEUSE1, // use Kineto with registered IActivityProfiler
   KINETO_ONDEMAND, // run the profiler in on-demand mode
   NUM_PROFILER_STATES, // must be the last one
 };
@@ -58,7 +60,14 @@ struct TORCH_API ExperimentalConfig {
       std::vector<std::string> performance_events = {},
       bool enable_cuda_sync_events = false,
       bool adjust_profiler_step = false,
-      bool adjust_timestamps = false);
+      bool disable_external_correlation = false,
+      bool profile_all_threads = false,
+      bool capture_overload_names = false,
+      bool record_python_gc_info = false,
+      bool expose_kineto_event_metadata = false,
+      std::string custom_profiler_config = "",
+      bool adjust_timestamps = false,
+      bool trace_only = false);
   explicit operator bool() const;
 
   std::vector<std::string> profiler_metrics;
@@ -81,6 +90,37 @@ struct TORCH_API ExperimentalConfig {
    * affects only the start of profiler step events.
    */
   bool adjust_profiler_step;
+  /*
+   * Controls whether or not external correlation is disabled. This is used to
+   * lower the amount of events received by CUPTI as correlation events are
+   * paired with runtime/gpu events for each kind of correlation
+   */
+  bool disable_external_correlation;
+
+  /* controls whether profiler records cpu events on threads
+   * that are not spawned from the main thread on which the
+   * profiler was enabled, similar to on_demand mode */
+  bool profile_all_threads;
+
+  /* controls whether overload names are queried from an ATen
+   * function schema and stored in the profile  */
+  bool capture_overload_names;
+
+  /*
+   * Controls whether or not python gc info is recorded. This is used to
+   * determine if gc collect is slowing down your profile.
+   */
+  bool record_python_gc_info;
+
+  /* controls whether KinetoEvent metadata is exposed to FunctionEvent
+   * in the PyTorch Profiler as a JSON string */
+  bool expose_kineto_event_metadata;
+
+  /*
+   * A custom_profiler_config option is introduced to allow custom backends
+   * to apply custom configurations as needed.
+   */
+  std::string custom_profiler_config;
 
   /*
    * Controls whether or not timestamp adjustment occurs after profiling.
@@ -93,6 +133,11 @@ struct TORCH_API ExperimentalConfig {
    * information instead of the original information.
    */
   bool adjust_timestamps;
+
+  // When true, __exit__ skips TransferEvents, build_tree, and
+  // materializeOpEvents. Only export_chrome_trace / save() will work;
+  // accessing events() raises an error.
+  bool trace_only;
 };
 
 struct TORCH_API ProfilerConfig {
@@ -108,6 +153,7 @@ struct TORCH_API ProfilerConfig {
 
   bool disabled() const;
   bool global() const;
+  bool pushGlobalCallbacks() const;
 
   ProfilerState state;
   ExperimentalConfig experimental_config;
