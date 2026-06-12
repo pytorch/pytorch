@@ -4047,6 +4047,24 @@ class AssociativeScanTests(TestCase):
                 inputs=x,
             )
 
+    def test_associative_scan_pointwise_cpu_lowering_error(self):
+        # The eager wrapper skips its device check while compiling, so the
+        # Inductor lowering must reject pointwise associative_scan on CPU. The
+        # check fires before any Triton codegen, so no GPU is required. See
+        # https://github.com/pytorch/pytorch/issues/186594.
+        def combine_fn(x, y):
+            return x + y
+
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+        from torch._inductor.exc import InductorError
+
+        xs = torch.randn(8, 4)
+        with self.assertRaisesRegex(InductorError, "only supports CUDA or XPU"):
+            torch.compile(M(), fullgraph=True)(xs)
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
