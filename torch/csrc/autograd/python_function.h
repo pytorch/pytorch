@@ -3,6 +3,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/saved_variable.h>
@@ -23,9 +24,11 @@ namespace torch::autograd {
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
+//
+// Ownership: THPFunction holds an owning intrusive_ptr<Node> (cdata).
+// PyNode points back to its THPFunction via pyobj_slot(), managed by the
+// kHasPyObject machinery (same pattern as TensorImpl ↔ THPVariable).
 struct PyNode : public Node {
-  PyNode(THPObjectPtr obj) : obj(obj.release()) {}
-
   PyObject* to_py_args(
       const variable_list& inputs,
       at::OptionalDeviceGuard* device_guard);
@@ -34,41 +37,24 @@ struct PyNode : public Node {
       const std::vector<bool>& is_variable_input);
 
   variable_list apply(variable_list&& inputs) override;
-  variable_list defer_to_dynamo(
-      variable_list&& inputs,
-      std::optional<PyObject*> compiler);
+  variable_list apply_with_saved_impl(
+      const variable_list& inputs,
+      const SwapSavedVariables& saved);
 
   void release_variables() override;
   std::string name() const override;
   bool is_traceable() override;
 
-  void compiled_args(CompiledNodeArgs& args) override;
+  bool is_aot_backward() const override;
+
+  void compiled_args(CompiledNodeArgs& args) const override;
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
 
-  bool compiled_autograd_should_lift() const;
-
-  // THPFunction this Function is wrapping.  Owning!
-  PyObject* obj;
-
-  // The AutogradCompilerCall::hooks idx corresponding to this node's backward
-  std::optional<int> _backward_idx;
-
-  // The AutogradCompilerCall::hooks idx corresponding to this node's
-  // backward_state
-  std::optional<int> _backward_state_idx;
-
-  // NOLINTNEXTLINE(bugprone-exception-escape)
-  ~PyNode() override {
-    // Can't use THPObjectPtr as a field in this class; destructor won't take
-    // out GIL!  When I forgot to do this by hand
-    // TestAutograd.test_inplace_view_python called me out about it.
-    // If python is already dead, leak the wrapped python objects
-    if (Py_IsInitialized()) {
-      pybind11::gil_scoped_acquire gil;
-      Py_DECREF(obj);
-    }
+  // Returns the THPFunction Python object for this node.
+  PyObject* pyobj() const noexcept {
+    return pyobj_slot()->load_pyobj();
   }
 };
 
@@ -114,6 +100,10 @@ struct THPFunction {
   // Default is true.
   bool materialize_grads;
 
+  // boolean indicating whether the function is a "pure view", meaning that
+  // replaying the view is enough to get a correct backward.
+  bool pure_view;
+
   // boolean indicating whether to materialize output grad tensors
   // corresponding to non-differentiable outputs. Normally, someone would
   // already get this behavior by switching off materialize_grads,
@@ -121,9 +111,14 @@ struct THPFunction {
   // https://github.com/pytorch/pytorch/pull/98659#pullrequestreview-1376822560
   bool materialize_non_diff_grads;
 
-  // This is enabled by compiled autograd as a way to signal to AotAutograd it
-  // should call the original FX graph rather than compiling.
-  bool compiled_autograd_tracing;
+  // When true, PyNode::apply passes grads as a single mutable list argument
+  // instead of individual args in an immutable tuple, allowing backward to
+  // free individual grads mid-execution and reduce peak memory.
+  // Used by pt2 compiled AutogradFunctions: the standard calling convention
+  // keeps a reference to all grads (via the immutable args tuple) for the
+  // entire backward, preventing deallocation after last use.
+  bool boxed_grads_call = false;
+
   PyObject* compiled_autograd_backward_state;
   std::vector<c10::SymInt> compiled_autograd_symints;
 
@@ -134,25 +129,22 @@ struct THPFunction {
   std::vector<bool> is_variable_input;
   char has_freed_buffers;
 
+  // Flag for clear_saved_tensors_on_access feature
+  bool clear_saved_tensors_on_access;
+  bool saved_tensors_accessed_and_cleared;
+
   PyObject* saved_for_forward;
-  // The actual PyNode (in the autograd graph) that this data was
-  // saved for.  This field may be NULL (because a user can construct
-  // a THPFunction directly from Python), but when this field is non-NULL,
-  // it is guaranteed that cdata.lock()->obj == this
-  //
-  // In most ordinary use, this field should always be non-NULL; e.g.,
-  // when we allocate a THPFunction because we are running Node.apply,
-  // after constructing a THPFunction, we immediately allocate a PyNode
-  // for it.  We can't enforce this directly in the constructor of
-  // THPFunction though, because there's no way to keep it live long enough
-  // to save an owning reference to PyNode into the grad_fn of a Variable.
-  std::weak_ptr<torch::autograd::PyNode> cdata;
+  // The C++ PyNode for this THPFunction. Ownership follows the same
+  // pattern as TensorImpl/THPVariable: THPFunction holds a strong
+  // intrusive_ptr, and PyNode points back via pyobj_slot() with
+  // kHasPyObject managing the cycle.
+  c10::intrusive_ptr<torch::autograd::Node> cdata;
 };
 
 bool THPFunction_initModule(PyObject* module);
-extern PyTypeObject THPFunctionType;
-extern PyObject* THPFunctionClass;
-extern PyObject* THPGradientEdgeClass;
+TORCH_PYTHON_API extern PyTypeObject THPFunctionType;
+TORCH_PYTHON_API extern PyObject* THPFunctionClass;
+TORCH_PYTHON_API extern PyObject* THPGradientEdgeClass;
 
 inline bool THPFunction_Check(PyObject* obj) {
   return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);

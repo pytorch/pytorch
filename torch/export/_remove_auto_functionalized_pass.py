@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -13,11 +12,12 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._inductor.fx_passes.post_grad import decompose_auto_functionalized
 from torch.export import ExportedProgram
+from torch.fx import Graph
 
 
-def remove_self_clone(graph: torch.fx.Graph):
+def remove_self_clone(graph: Graph) -> None:
     for node in graph.nodes:
-        if node.target == torch.ops.aten.copy_.default and node.args[0] == node.args[1]:
+        if node.target is torch.ops.aten.copy_.default and node.args[0] == node.args[1]:
             node.replace_all_uses_with(node.args[0])
             graph.erase_node(node)
 
@@ -42,7 +42,10 @@ def unsafe_remove_auto_functionalized_pass(
                     node.op == "call_function" and node.target is auto_functionalized_v2
                 ):
                     func = node.args[0]
-                    assert isinstance(func, torch._ops.OpOverload)
+                    if not isinstance(func, torch._ops.OpOverload):
+                        raise AssertionError(
+                            f"Expected func to be an OpOverload, but got {type(func)}"
+                        )
                     # re-inplace everything
                     node.meta["only_clone_these_tensors"] = []
             decompose_auto_functionalized(ep.graph)

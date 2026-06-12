@@ -9,6 +9,7 @@
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #include <ATen/native/Distance.h>
+#include <ATen/NumericUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -34,7 +35,13 @@ struct dists {
 
   // Zero norm
   struct zero {
-    static __forceinline__ __device__ void inc(scalar_t& agg, const scalar_t diff, const scalar_t /*p*/) { agg += diff != 0.0; }
+    static __forceinline__ __device__ void inc(scalar_t& agg, const scalar_t diff, const scalar_t /*p*/) {
+      if (diff != diff) { // NaN
+        agg = diff;
+      } else if (diff != 0.0) {
+        agg += 1.0;
+      }
+    }
     static __forceinline__ __device__ scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
     static __forceinline__ __device__ void agg(scalar_t& update, const scalar_t other) { update += other; }
   };
@@ -154,7 +161,7 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 template <typename scalar_t, typename F>
 __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * self, const scalar_t * dist, int64_t gs, const int64_t n, const int64_t m, const int64_t combs, const scalar_t p,
                                                        const double n2, const double n2_squared_minus_1) {
-  const int64_t k = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t k = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   const int init = blockIdx.y * blockDim.y + threadIdx.y;
   const int stride = blockDim.y * gridDim.y;
 

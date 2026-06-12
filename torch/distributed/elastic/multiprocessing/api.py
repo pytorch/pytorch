@@ -19,12 +19,13 @@ import tempfile
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from enum import IntFlag
 from multiprocessing import synchronize
 from types import FrameType
-from typing import Any, Callable, Dict, Optional, Set, Tuple, Union
+from typing import Any, TextIO, Union
 
 import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure, record
@@ -37,6 +38,7 @@ from torch.distributed.elastic.multiprocessing.subprocess_handler import (
     SubprocessHandler,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
+from torch.numa.binding import _maybe_wrap_with_numa_binding, NumaOptions
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -71,7 +73,7 @@ class SignalException(Exception):
         self.sigval = sigval
 
 
-def _terminate_process_handler(signum: int, frame: Optional[FrameType]) -> None:
+def _terminate_process_handler(signum: int, frame: FrameType | None) -> None:
     """Termination handler that raises exceptions on the main process.
 
     When the process receives death signal(SIGTERM, SIGINT), this termination handler will
@@ -87,7 +89,7 @@ def _terminate_process_handler(signum: int, frame: Optional[FrameType]) -> None:
 def _get_kill_signal() -> signal.Signals:
     """Get the kill signal. SIGKILL for unix, CTRL_C_EVENT for windows."""
     if IS_WINDOWS:
-        return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
+        return signal.CTRL_C_EVENT  # type: ignore[attr-defined]
     else:
         return signal.SIGKILL
 
@@ -95,12 +97,12 @@ def _get_kill_signal() -> signal.Signals:
 def _get_default_signal() -> signal.Signals:
     """Get the default termination signal. SIGTERM for unix, CTRL_C_EVENT for windows."""
     if IS_WINDOWS:
-        return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
+        return signal.CTRL_C_EVENT  # type: ignore[attr-defined]
     else:
         return signal.SIGTERM
 
 
-def _validate_full_rank(d: Dict[int, Any], nprocs: int, what: str):
+def _validate_full_rank(d: dict[int, Any], nprocs: int, what: str):
     actual_keys = set(d.keys())
     expected_keys = set(range(nprocs))
 
@@ -122,7 +124,7 @@ class Std(IntFlag):
     ALL = OUT | ERR
 
     @classmethod
-    def from_str(cls, vm: str) -> Union["Std", Dict[int, "Std"]]:
+    def from_str(cls, vm: str) -> Union["Std", dict[int, "Std"]]:
         """
         Example:
         ::
@@ -143,7 +145,7 @@ class Std(IntFlag):
         if re.match(_VALUE_REGEX, vm):  # vm is a number (e.g. 0)
             return to_std(vm)
         elif re.match(_MAPPING_REGEX, vm):  # vm is a mapping (e.g. 0:1,1:2)
-            d: Dict[int, Std] = {}
+            d: dict[int, Std] = {}
             for m in vm.split(","):
                 i, v = m.split(":")
                 d[int(i)] = to_std(v)
@@ -154,9 +156,7 @@ class Std(IntFlag):
             )
 
 
-def to_map(
-    val_or_map: Union[Std, Dict[int, Std]], local_world_size: int
-) -> Dict[int, Std]:
+def to_map(val_or_map: Std | dict[int, Std], local_world_size: int) -> dict[int, Std]:
     """
     Certain APIs take redirect settings either as a single value (e.g. apply to all
     local ranks) or as an explicit user-provided mapping. This method is a convenience
@@ -165,9 +165,11 @@ def to_map(
     Example:
     ::
 
-     to_map(Std.OUT, local_world_size=2) # returns: {0: Std.OUT, 1: Std.OUT}
-     to_map({1: Std.OUT}, local_world_size=2) # returns: {0: Std.NONE, 1: Std.OUT}
-     to_map({0: Std.OUT, 1: Std.OUT}, local_world_size=2) # returns: {0: Std.OUT, 1: Std.OUT}
+     to_map(Std.OUT, local_world_size=2)  # returns: {0: Std.OUT, 1: Std.OUT}
+     to_map({1: Std.OUT}, local_world_size=2)  # returns: {0: Std.NONE, 1: Std.OUT}
+     to_map(
+         {0: Std.OUT, 1: Std.OUT}, local_world_size=2
+     )  # returns: {0: Std.OUT, 1: Std.OUT}
     """
     if isinstance(val_or_map, Std):
         return dict.fromkeys(range(local_world_size), val_or_map)
@@ -184,11 +186,13 @@ class LogsDest:
     For each log type, holds mapping of local rank ids to file paths.
     """
 
-    stdouts: Dict[int, str] = field(default_factory=dict)
-    stderrs: Dict[int, str] = field(default_factory=dict)
-    tee_stdouts: Dict[int, str] = field(default_factory=dict)
-    tee_stderrs: Dict[int, str] = field(default_factory=dict)
-    error_files: Dict[int, str] = field(default_factory=dict)
+    stdouts: dict[int, str] = field(default_factory=dict)
+    stderrs: dict[int, str] = field(default_factory=dict)
+    tee_stdouts: dict[int, str] = field(default_factory=dict)
+    tee_stderrs: dict[int, str] = field(default_factory=dict)
+    error_files: dict[int, str] = field(default_factory=dict)
+    filtered_stdout: str = field(default_factory=str)
+    filtered_stderr: str = field(default_factory=str)
 
 
 class LogsSpecs(ABC):
@@ -210,10 +214,10 @@ class LogsSpecs(ABC):
 
     def __init__(
         self,
-        log_dir: Optional[str] = None,
-        redirects: Union[Std, Dict[int, Std]] = Std.NONE,
-        tee: Union[Std, Dict[int, Std]] = Std.NONE,
-        local_ranks_filter: Optional[Set[int]] = None,
+        log_dir: str | None = None,
+        redirects: Std | dict[int, Std] = Std.NONE,
+        tee: Std | dict[int, Std] = Std.NONE,
+        local_ranks_filter: set[int] | None = None,
     ) -> None:
         self._root_log_dir = log_dir
         self._redirects = redirects
@@ -223,7 +227,7 @@ class LogsSpecs(ABC):
     @abstractmethod
     def reify(
         self,
-        envs: Dict[int, Dict[str, str]],
+        envs: dict[int, dict[str, str]],
     ) -> LogsDest:
         """
         Given the environment variables, builds destination of log files for each of the local ranks.
@@ -248,10 +252,10 @@ class DefaultLogsSpecs(LogsSpecs):
 
     def __init__(
         self,
-        log_dir: Optional[str] = None,
-        redirects: Union[Std, Dict[int, Std]] = Std.NONE,
-        tee: Union[Std, Dict[int, Std]] = Std.NONE,
-        local_ranks_filter: Optional[Set[int]] = None,
+        log_dir: str | None = None,
+        redirects: Std | dict[int, Std] = Std.NONE,
+        tee: Std | dict[int, Std] = Std.NONE,
+        local_ranks_filter: set[int] | None = None,
     ) -> None:
         if log_dir != os.devnull:
             if not log_dir:
@@ -269,7 +273,7 @@ class DefaultLogsSpecs(LogsSpecs):
     def root_log_dir(self) -> str:
         return str(self._root_log_dir)
 
-    def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
+    def _make_log_dir(self, log_dir: str | None, rdzv_run_id: str):
         base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
         os.makedirs(base_log_dir, exist_ok=True)
         dir = tempfile.mkdtemp(prefix=f"{rdzv_run_id}_", dir=base_log_dir)
@@ -278,7 +282,7 @@ class DefaultLogsSpecs(LogsSpecs):
 
     def reify(
         self,
-        envs: Dict[int, Dict[str, str]],
+        envs: dict[int, dict[str, str]],
     ) -> LogsDest:
         """
         Uses following scheme to build log destination paths:
@@ -286,9 +290,11 @@ class DefaultLogsSpecs(LogsSpecs):
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/stdout.log`
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/stderr.log`
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/error.json`
+        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/filtered_stdout.log`
+        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/filtered_stderr.log`
         """
         nprocs = len(envs)
-        global_env = {}  # use only to query properies that are not dependent on a rank
+        global_env = {}  # use only to query properties that are not dependent on a rank
         if nprocs > 0:
             global_env = envs[0]
         else:
@@ -304,7 +310,9 @@ class DefaultLogsSpecs(LogsSpecs):
             if not self._run_log_dir:
                 self._run_log_dir = self._make_log_dir(self._root_log_dir, run_id)
 
-            attempt_log_dir = os.path.join(self._run_log_dir, f"attempt_{restart_count}")  # type: ignore[call-overload]
+            attempt_log_dir = os.path.join(
+                self._run_log_dir, f"attempt_{restart_count}"
+            )  # type: ignore[call-overload]
             shutil.rmtree(attempt_log_dir, ignore_errors=True)
             os.makedirs(attempt_log_dir)
 
@@ -331,8 +339,8 @@ class DefaultLogsSpecs(LogsSpecs):
         SYS_STREAM = ""  # special case to indicate to output to console
         stdouts = dict.fromkeys(range(nprocs), SYS_STREAM)
         stderrs = dict.fromkeys(range(nprocs), SYS_STREAM)
-        tee_stdouts: Dict[int, str] = {}
-        tee_stderrs: Dict[int, str] = {}
+        tee_stdouts: dict[int, str] = {}
+        tee_stderrs: dict[int, str] = {}
         error_files = {}
 
         for local_rank in range(nprocs):
@@ -374,13 +382,23 @@ class DefaultLogsSpecs(LogsSpecs):
                         stderrs[local_rank] = os.devnull
 
                 error_file = os.path.join(clogdir, "error.json")
+                # pyrefly: ignore [unsupported-operation]
                 error_files[local_rank] = error_file
                 logger.info(
                     "Setting worker%s reply file to: %s", local_rank, error_file
                 )
                 envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 
-        return LogsDest(stdouts, stderrs, tee_stdouts, tee_stderrs, error_files)
+        return LogsDest(
+            stdouts,
+            stderrs,
+            tee_stdouts,
+            tee_stderrs,
+            # pyrefly: ignore [bad-argument-type]
+            error_files,
+            os.path.join(attempt_log_dir, "filtered_stdout.log"),
+            os.path.join(attempt_log_dir, "filtered_stderr.log"),
+        )
 
     def __repr__(self) -> str:
         return (
@@ -414,10 +432,10 @@ class RunProcsResult:
 
     """
 
-    return_values: Dict[int, Any] = field(default_factory=dict)
-    failures: Dict[int, ProcessFailure] = field(default_factory=dict)
-    stdouts: Dict[int, str] = field(default_factory=dict)
-    stderrs: Dict[int, str] = field(default_factory=dict)
+    return_values: dict[int, Any] = field(default_factory=dict)
+    failures: dict[int, ProcessFailure] = field(default_factory=dict)
+    stdouts: dict[int, str] = field(default_factory=dict)
+    stderrs: dict[int, str] = field(default_factory=dict)
 
     def is_failed(self) -> bool:
         return len(self.failures) > 0
@@ -432,23 +450,35 @@ class PContext(abc.ABC):
     .. warning:: stdouts and stderrs should ALWAYS be a superset of
                  tee_stdouts and tee_stderrs (respectively) this is b/c
                  tee is implemented as a redirect + tail -f <stdout/stderr.log>
+
+    Args:
+        duplicate_stdout_filters:
+            If non-empty, duplicates stdouts specified in ``logs_specs``'s ``tee``
+            to a file containing only lines that match _any_ of the filter strings.
+            The log file is aggregated across all ranks selected by ``tee``.
+        duplicate_stderr_filters:
+            If non-empty, duplicates stderrs specified in ``logs_specs``'s ``tee``
+            to a file containing only lines that match _any_ of the filter strings.
+            The log file is aggregated across all ranks selected by ``tee``.
     """
 
     def __init__(
         self,
         name: str,
-        entrypoint: Union[Callable, str],
-        args: Dict[int, Tuple],
-        envs: Dict[int, Dict[str, str]],
+        entrypoint: Callable | str,
+        args: dict[int, tuple],
+        envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,
-        log_line_prefixes: Optional[Dict[int, str]] = None,
+        log_line_prefixes: dict[int, str] | None = None,
+        duplicate_stdout_filters: list[str] | None = None,
+        duplicate_stderr_filters: list[str] | None = None,
     ):
         self.name = name
         # validate that all mappings have the same number of keys and
         # all local ranks are accounted for
         nprocs = len(args)
 
-        # TODO log_line_prefixes can be exanded too
+        # TODO log_line_prefixes can be expanded too
         logs_dest = logs_specs.reify(envs)
 
         _validate_full_rank(logs_dest.stdouts, nprocs, "stdouts")
@@ -461,30 +491,90 @@ class PContext(abc.ABC):
         self.stderrs = logs_dest.stderrs
         self.error_files = logs_dest.error_files
         self.nprocs = nprocs
+        self.filtered_stdout: TextIO | None = None
+        self.filtered_stderr: TextIO | None = None
 
-        self._stdout_tail = TailLog(
-            name, logs_dest.tee_stdouts, sys.stdout, log_line_prefixes
-        )
-        self._stderr_tail = TailLog(
-            name, logs_dest.tee_stderrs, sys.stderr, log_line_prefixes
-        )
+        self._tail_logs = [
+            TailLog(name, logs_dest.tee_stdouts, sys.stdout, log_line_prefixes),
+            TailLog(name, logs_dest.tee_stderrs, sys.stderr, log_line_prefixes),
+        ]
+
+        if duplicate_stdout_filters:
+            self.filtered_stdout = open(  # noqa: SIM115
+                logs_dest.filtered_stdout, mode="w", errors="replace", buffering=1
+            )
+            self._tail_logs.append(
+                TailLog(
+                    name,
+                    logs_dest.tee_stdouts,
+                    self.filtered_stdout,
+                    log_line_prefixes,
+                    log_line_filter=lambda line: any(
+                        needle in line for needle in duplicate_stdout_filters
+                    ),
+                )
+            )
+
+        if duplicate_stderr_filters:
+            self.filtered_stderr = open(  # noqa: SIM115
+                logs_dest.filtered_stderr, mode="w", errors="replace", buffering=1
+            )
+            self._tail_logs.append(
+                TailLog(
+                    name,
+                    logs_dest.tee_stderrs,
+                    self.filtered_stderr,
+                    log_line_prefixes,
+                    log_line_filter=lambda line: any(
+                        needle in line for needle in duplicate_stderr_filters
+                    ),
+                )
+            )
 
     def start(self) -> None:
         """Start processes using parameters defined in the constructor."""
         if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGTERM, _terminate_process_handler)
-            signal.signal(signal.SIGINT, _terminate_process_handler)
-            if not IS_WINDOWS:
-                signal.signal(signal.SIGHUP, _terminate_process_handler)
-                signal.signal(signal.SIGQUIT, _terminate_process_handler)
+            # Register signal handlers for the signals specified in the environment variable
+            signals_to_handle = os.environ.get(
+                "TORCHELASTIC_SIGNALS_TO_HANDLE", "SIGTERM,SIGINT,SIGHUP,SIGQUIT"
+            )
+            signal_list = signals_to_handle.split(",")
+
+            for sig_name in signal_list:
+                try:
+                    sig = getattr(signal, sig_name.strip())
+                    signal.signal(sig, _terminate_process_handler)
+                    logger.info("Registered signal handler for %s", sig_name)
+                except (AttributeError, ValueError):
+                    logger.warning(
+                        "Failed to register signal handler for %s",
+                        sig_name,
+                        exc_info=True,
+                    )
+                except RuntimeError:
+                    if IS_WINDOWS and sig_name.strip() in [
+                        "SIGHUP",
+                        "SIGQUIT",
+                        "SIGUSR1",
+                        "SIGUSR2",
+                    ]:
+                        logger.info(
+                            "Signal %s is not supported on Windows, skipping", sig_name
+                        )
+                    else:
+                        logger.warning(
+                            "Failed to register signal handler for %s",
+                            sig_name,
+                            exc_info=True,
+                        )
         else:
             logger.warning(
                 "Failed to register signal handlers since torchelastic is running on a child thread. "
                 "This could lead to orphaned worker processes if the torchrun is terminated."
             )
         self._start()
-        self._stdout_tail.start()
-        self._stderr_tail.start()
+        for tail_log in self._tail_logs:
+            tail_log.start()
 
     @abc.abstractmethod
     def _start(self) -> None:
@@ -492,7 +582,7 @@ class PContext(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _poll(self) -> Optional[RunProcsResult]:
+    def _poll(self) -> RunProcsResult | None:
         """
         Poll the run status of the processes running under this context.
         This method follows an "all-or-nothing" policy and returns
@@ -502,7 +592,7 @@ class PContext(abc.ABC):
         """
         raise NotImplementedError
 
-    def wait(self, timeout: float = -1, period: float = 1) -> Optional[RunProcsResult]:
+    def wait(self, timeout: float = -1, period: float = 1) -> RunProcsResult | None:
         """
         Wait for the specified ``timeout`` seconds, polling every ``period`` seconds
         for the processes to be done. Returns ``None`` if the processes are still running
@@ -510,10 +600,11 @@ class PContext(abc.ABC):
         A timeout value of zero simply queries the status of the processes (e.g. equivalent
         to a poll).
 
-        ..note: Multiprocessing library registers SIGTERM and SIGINT signal handlers that raise
-                ``SignalException`` when the signals received. It is up to the consumer of the code
-                to properly handle the exception. It is important not to swallow the exception otherwise
-                the process would not terminate. Example of the typical workflow can be:
+        .. note::
+            Multiprocessing library registers SIGTERM and SIGINT signal handlers that raise
+            ``SignalException`` when the signals received. It is up to the consumer of the code
+            to properly handle the exception. It is important not to swallow the exception otherwise
+            the process would not terminate. Example of the typical workflow can be:
 
         .. code-block:: python
             pc = start_processes(...)
@@ -543,7 +634,7 @@ class PContext(abc.ABC):
         return None
 
     @abc.abstractmethod
-    def pids(self) -> Dict[int, int]:
+    def pids(self) -> dict[int, int]:
         """Return pids of processes mapped by their respective local_ranks."""
         raise NotImplementedError
 
@@ -555,9 +646,7 @@ class PContext(abc.ABC):
         """
         raise NotImplementedError
 
-    def close(
-        self, death_sig: Optional[signal.Signals] = None, timeout: int = 30
-    ) -> None:
+    def close(self, death_sig: signal.Signals | None = None, timeout: int = 30) -> None:
         r"""
         Terminates all processes managed by this context and cleans up any
         meta resources (e.g. redirect, error_file files).
@@ -570,10 +659,12 @@ class PContext(abc.ABC):
         if not death_sig:
             death_sig = _get_default_signal()
         self._close(death_sig=death_sig, timeout=timeout)
-        if self._stdout_tail:
-            self._stdout_tail.stop()
-        if self._stderr_tail:
-            self._stderr_tail.stop()
+        for tail_log in self._tail_logs:
+            tail_log.stop()
+        if self.filtered_stdout:
+            self.filtered_stdout.close()
+        if self.filtered_stderr:
+            self.filtered_stderr.close()
 
 
 def get_std_cm(std_rd: str, redirect_fn):
@@ -586,12 +677,13 @@ def get_std_cm(std_rd: str, redirect_fn):
 def _wrap(
     local_rank: int,
     fn: Callable,
-    args: Dict[int, Tuple],
-    envs: Dict[int, Dict[str, str]],
-    stdout_redirects: Dict[int, str],  # redirect file for stdout (to console if None)
-    stderr_redirects: Dict[int, str],  # redirect file for stderr (to console if None)
-    ret_vals: Dict[int, mp.SimpleQueue],
+    args: dict[int, tuple],
+    envs: dict[int, dict[str, str]],
+    stdout_redirects: dict[int, str],  # redirect file for stdout (to console if None)
+    stderr_redirects: dict[int, str],  # redirect file for stderr (to console if None)
+    ret_vals: dict[int, mp.SimpleQueue],
     queue_finished_reading_event: synchronize.Event,
+    numa_options: NumaOptions | None,
 ) -> None:
     # get the per-rank params up front so we fail fast if no mapping is found
     args_ = args[local_rank]
@@ -608,6 +700,9 @@ def _wrap(
         os.environ[k] = v
 
     with stdout_cm, stderr_cm:
+        fn = _maybe_wrap_with_numa_binding(
+            fn, gpu_index=local_rank, numa_options=numa_options
+        )
         ret = record(fn)(*args_)
     ret_val_.put(ret)
     queue_finished_reading_event.wait()
@@ -620,11 +715,14 @@ class MultiprocessContext(PContext):
         self,
         name: str,
         entrypoint: Callable,
-        args: Dict[int, Tuple],
-        envs: Dict[int, Dict[str, str]],
+        args: dict[int, tuple],
+        envs: dict[int, dict[str, str]],
         start_method: str,
         logs_specs: LogsSpecs,
-        log_line_prefixes: Optional[Dict[int, str]] = None,
+        log_line_prefixes: dict[int, str] | None = None,
+        numa_options: NumaOptions | None = None,
+        duplicate_stdout_filters: list[str] | None = None,
+        duplicate_stderr_filters: list[str] | None = None,
     ):
         super().__init__(
             name,
@@ -633,6 +731,8 @@ class MultiprocessContext(PContext):
             envs,
             logs_specs,
             log_line_prefixes,
+            duplicate_stdout_filters,
+            duplicate_stderr_filters,
         )
 
         self.start_method = start_method
@@ -643,11 +743,13 @@ class MultiprocessContext(PContext):
         }
 
         # see comments in ``join()`` for what this is
-        self._return_values: Dict[int, Any] = {}
-        self._pc: Optional[mp.ProcessContext] = None
+        self._return_values: dict[int, Any] = {}
+        self._pc: mp.ProcessContext | None = None
         # Note: set method should ONLY be invoked for the use case when all processes finished
         # successfully. If any process died on event.wait() calling set() method will deadlock.
         self._worker_finished_event = mp.get_context(self.start_method).Event()
+
+        self._numa_options: NumaOptions | None = numa_options
 
     def _start(self):
         if self._pc:
@@ -665,6 +767,7 @@ class MultiprocessContext(PContext):
                 self.stderrs,
                 self._ret_vals,
                 self._worker_finished_event,
+                self._numa_options,
             ),
             nprocs=self.nprocs,
             join=False,
@@ -675,8 +778,9 @@ class MultiprocessContext(PContext):
     def _is_done(self) -> bool:
         return len(self._return_values) == self.nprocs
 
-    def _poll(self) -> Optional[RunProcsResult]:
-        assert self._pc is not None  # assertion for mypy type checker
+    def _poll(self) -> RunProcsResult | None:
+        if self._pc is None:
+            raise AssertionError  # assertion for mypy type checker
 
         try:
             # torch.mp.ProcessContext Throws an Exception if some/all of
@@ -692,7 +796,7 @@ class MultiprocessContext(PContext):
             # pipe. Hence to prevent deadlocks on large return values,
             # we opportunistically try queue.get on each join call
             # See: https://docs.python.org/2/library/multiprocessing.html#all-platforms
-            for local_rank in range(0, self.nprocs):
+            for local_rank in range(self.nprocs):
                 return_queue = self._ret_vals[local_rank]
                 if not return_queue.empty():
                     # save the return values temporarily into a member var
@@ -735,7 +839,7 @@ class MultiprocessContext(PContext):
                 " of fn: %s (start_method: %s)",
                 failed_proc.exitcode,
                 failed_local_rank,
-                e.pid,
+                e.error_pid,
                 fn_name,
                 self.start_method,
             )
@@ -745,7 +849,7 @@ class MultiprocessContext(PContext):
                 failures={
                     failed_local_rank: ProcessFailure(
                         local_rank=failed_local_rank,
-                        pid=e.pid,
+                        pid=e.error_pid,
                         exitcode=failed_proc.exitcode,
                         error_file=error_filepath,
                     )
@@ -754,8 +858,9 @@ class MultiprocessContext(PContext):
                 stderrs=self.stderrs,
             )
 
-    def pids(self) -> Dict[int, int]:
-        assert self._pc is not None  # assertion for mypy type checking
+    def pids(self) -> dict[int, int]:
+        if self._pc is None:
+            raise AssertionError  # assertion for mypy type checking
         return dict(enumerate(self._pc.pids()))
 
     def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
@@ -792,7 +897,21 @@ class MultiprocessContext(PContext):
                     # If the process exited because of some reason,
                     # `ProcessLookupError` will be raised, it is safe to ignore it.
                     pass
-            proc.join()
+            # Bounded join: a process stuck in uninterruptible kernel sleep
+            # (Linux D-state, common with hung NCCL/GPU collectives) cannot
+            # be reaped by SIGKILL. Without a timeout the agent itself would
+            # wedge here and the supervising launcher could never exit.
+            proc.join(timeout)
+            if proc.is_alive():
+                logger.error(
+                    "Process %s did not exit after %s within %ss;"
+                    " abandoning and continuing teardown."
+                    " Worker may be in uninterruptible kernel sleep"
+                    " (e.g. wedged on GPU/NIC); host may need to be recycled.",
+                    proc.pid,
+                    _get_kill_signal().name,
+                    timeout,
+                )
 
 
 class SubprocessContext(PContext):
@@ -802,10 +921,13 @@ class SubprocessContext(PContext):
         self,
         name: str,
         entrypoint: str,
-        args: Dict[int, Tuple],
-        envs: Dict[int, Dict[str, str]],
+        args: dict[int, tuple],
+        envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,
-        log_line_prefixes: Optional[Dict[int, str]] = None,
+        log_line_prefixes: dict[int, str] | None = None,
+        numa_options: NumaOptions | None = None,
+        duplicate_stdout_filters: list[str] | None = None,
+        duplicate_stderr_filters: list[str] | None = None,
     ):
         super().__init__(
             name,
@@ -814,12 +936,15 @@ class SubprocessContext(PContext):
             envs,
             logs_specs,
             log_line_prefixes,
+            duplicate_stdout_filters,
+            duplicate_stderr_filters,
         )
 
         # state vector; _vdone[local_rank] -> is local_rank finished or not
-        self._running_local_ranks: Set[int] = set(range(self.nprocs))
-        self._failures: Dict[int, ProcessFailure] = {}
-        self.subprocess_handlers: Dict[int, SubprocessHandler] = {}
+        self._running_local_ranks: set[int] = set(range(self.nprocs))
+        self._failures: dict[int, ProcessFailure] = {}
+        self.subprocess_handlers: dict[int, SubprocessHandler] = {}
+        self._numa_options: NumaOptions | None = numa_options
 
     def _start(self):
         if self.subprocess_handlers:
@@ -834,12 +959,12 @@ class SubprocessContext(PContext):
                 stdout=self.stdouts[local_rank],
                 stderr=self.stderrs[local_rank],
                 local_rank_id=local_rank,
+                numa_options=self._numa_options,
             )
             for local_rank in range(self.nprocs)
         }
 
-    def _poll(self) -> Optional[RunProcsResult]:
-        done_local_ranks = set()
+    def _capture_process_failures(self, done_local_ranks: set[int]):
         for local_rank in self._running_local_ranks:
             handler = self.subprocess_handlers[local_rank]
             exitcode = handler.proc.poll()
@@ -854,11 +979,19 @@ class SubprocessContext(PContext):
                     )
                 # else: --> succeeded; nothing to do
 
+    def _poll(self) -> RunProcsResult | None:
+        done_local_ranks: set[int] = set()
+        self._capture_process_failures(done_local_ranks)
+
         self._running_local_ranks.difference_update(done_local_ranks)
 
         # if ALL procs are finished or ANY have failed
         if not self._running_local_ranks or self._failures:
             self.close()  # terminate all running procs
+            self._capture_process_failures(
+                done_local_ranks
+            )  # log sigterms and sigkill exit codes in the self._failures for bookkeeping purposes
+
             result = RunProcsResult(
                 failures=self._failures,
                 stdouts=self.stdouts,
@@ -867,9 +1000,7 @@ class SubprocessContext(PContext):
             if result.is_failed():
                 first_failure = min(result.failures.values(), key=lambda f: f.timestamp)
                 logger.error(
-                    "failed (exitcode: %s)"
-                    " local_rank: %s (pid: %s)"
-                    " of binary: %s",
+                    "failed (exitcode: %s) local_rank: %s (pid: %s) of binary: %s",
                     first_failure.exitcode,
                     first_failure.local_rank,
                     first_failure.pid,
@@ -883,7 +1014,7 @@ class SubprocessContext(PContext):
         else:  # there are no failures and procs still running
             return None
 
-    def pids(self) -> Dict[int, int]:
+    def pids(self) -> dict[int, int]:
         return {
             local_rank: sh.proc.pid
             for local_rank, sh in self.subprocess_handlers.items()
@@ -920,4 +1051,20 @@ class SubprocessContext(PContext):
                     _get_kill_signal(),
                 )
                 handler.close(death_sig=_get_kill_signal())
-                handler.proc.wait()
+                # Bounded wait: a process stuck in uninterruptible kernel sleep
+                # (Linux D-state, common with hung NCCL/GPU collectives) cannot
+                # be reaped by SIGKILL. Without a timeout the agent itself would
+                # wedge here and the supervising launcher could never exit.
+                try:
+                    handler.proc.wait(timeout)
+                except subprocess.TimeoutExpired:
+                    logger.error(
+                        "Process %s did not exit after %s within %ss;"
+                        " abandoning and continuing teardown."
+                        " Worker may be in uninterruptible kernel sleep"
+                        " (e.g. wedged on GPU/NIC);"
+                        " host may need to be recycled.",
+                        handler.proc.pid,
+                        _get_kill_signal().name,
+                        timeout,
+                    )

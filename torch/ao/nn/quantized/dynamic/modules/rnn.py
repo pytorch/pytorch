@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import numbers
 import warnings
@@ -6,7 +5,7 @@ from typing_extensions import deprecated
 
 import torch
 import torch.nn as nn
-from torch import Tensor  # noqa: F401
+from torch import Tensor
 from torch._jit_internal import Dict, List, Optional, Tuple, Union  # noqa: F401
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils.rnn import PackedSequence
@@ -137,7 +136,8 @@ class RNNBase(torch.nn.Module):
                 "dropout option adds dropout after all but last "
                 "recurrent layer, so non-zero dropout expects "
                 f"num_layers greater than 1, but got dropout={dropout} and "
-                f"num_layers={num_layers}"
+                f"num_layers={num_layers}",
+                stacklevel=2,
             )
 
         if mode == "LSTM":
@@ -167,6 +167,7 @@ class RNNBase(torch.nn.Module):
                     )
                     packed_ih = torch.ops.quantized.linear_prepack(w_ih, b_ih)
                     packed_hh = torch.ops.quantized.linear_prepack(w_hh, b_hh)
+                    # pyrefly: ignore [unnecessary-comparison]
                     if self.version is None or self.version < 2:
                         cell_params = (
                             torch.ops.quantized.make_quantized_cell_params_dynamic(
@@ -249,7 +250,7 @@ class RNNBase(torch.nn.Module):
 
     def get_expected_hidden_size(
         self, input: Tensor, batch_sizes: Optional[Tensor]
-    ) -> Tuple[int, int, int]:
+    ) -> tuple[int, int, int]:
         if batch_sizes is not None:
             mini_batch = int(batch_sizes[0])
         else:
@@ -265,7 +266,7 @@ class RNNBase(torch.nn.Module):
     def check_hidden_size(
         self,
         hx: Tensor,
-        expected_hidden_size: Tuple[int, int, int],
+        expected_hidden_size: tuple[int, int, int],
         msg: str = "Expected hidden size {}, got {}",
     ) -> None:
         if hx.size() != expected_hidden_size:
@@ -352,11 +353,12 @@ class RNNBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        assert type(mod) in {
-            torch.nn.LSTM,
-            torch.nn.GRU,
-        }, "nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU"
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        if type(mod) not in {torch.nn.LSTM, torch.nn.GRU}:
+            raise AssertionError(
+                "nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU"
+            )
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined")
 
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer_method = mod.qconfig.weight
@@ -405,7 +407,8 @@ class RNNBase(torch.nn.Module):
 
         num_directions = 2 if mod.bidirectional else 1
 
-        assert mod.bias
+        if not mod.bias:
+            raise AssertionError("mod.bias must be True")
 
         _all_weight_values = []
         for layer in range(qRNNBase.num_layers):
@@ -521,6 +524,7 @@ class LSTM(RNNBase):
         >>> c0 = torch.randn(2, 3, 20)
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
+
     _FLOAT_MODULE = nn.LSTM
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -534,11 +538,11 @@ class LSTM(RNNBase):
     def forward_impl(
         self,
         input: Tensor,
-        hx: Optional[Tuple[Tensor, Tensor]],
+        hx: Optional[tuple[Tensor, Tensor]],
         batch_sizes: Optional[Tensor],
         max_batch_size: int,
         sorted_indices: Optional[Tensor],
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             zeros = torch.zeros(
@@ -592,8 +596,8 @@ class LSTM(RNNBase):
 
     @torch.jit.export
     def forward_tensor(
-        self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+        self, input: Tensor, hx: Optional[tuple[Tensor, Tensor]] = None
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         batch_sizes = None
         max_batch_size = input.size(0) if self.batch_first else input.size(1)
         sorted_indices = None
@@ -607,8 +611,8 @@ class LSTM(RNNBase):
 
     @torch.jit.export
     def forward_packed(
-        self, input: PackedSequence, hx: Optional[Tuple[Tensor, Tensor]] = None
-    ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:
+        self, input: PackedSequence, hx: Optional[tuple[Tensor, Tensor]] = None
+    ) -> tuple[PackedSequence, tuple[Tensor, Tensor]]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = int(batch_sizes[0])
 
@@ -622,9 +626,9 @@ class LSTM(RNNBase):
     # "type: ignore" is required due to issue #43072
     def permute_hidden(  # type: ignore[override]
         self,
-        hx: Tuple[Tensor, Tensor],
+        hx: tuple[Tensor, Tensor],
         permutation: Optional[Tensor],
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor]:
         if permutation is None:
             return hx
         return _apply_permutation(hx[0], permutation), _apply_permutation(
@@ -635,7 +639,7 @@ class LSTM(RNNBase):
     def check_forward_args(  # type: ignore[override]
         self,
         input: Tensor,
-        hidden: Tuple[Tensor, Tensor],
+        hidden: tuple[Tensor, Tensor],
         batch_sizes: Optional[Tensor],
     ) -> None:
         self.check_input(input, batch_sizes)
@@ -663,8 +667,11 @@ class LSTM(RNNBase):
 
     @classmethod
     def from_reference(cls, ref_mod):
-        assert hasattr(ref_mod, "weight_ih_l0_dtype"), "We are assuming weight_ih_l0 "
-        "exists in LSTM, may need to relax the assumption to support the use case"
+        if not hasattr(ref_mod, "weight_ih_l0_dtype"):
+            raise AssertionError(
+                "We are assuming weight_ih_l0 exists in LSTM, "
+                "may need to relax the assumption to support the use case"
+            )
         qmod = cls(
             ref_mod.input_size,
             ref_mod.hidden_size,
@@ -805,6 +812,7 @@ class GRU(RNNBase):
         >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
+
     _FLOAT_MODULE = nn.GRU
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -832,7 +840,7 @@ class GRU(RNNBase):
         batch_sizes: Optional[Tensor],
         max_batch_size: int,
         sorted_indices: Optional[Tensor],
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor]:
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             zeros = torch.zeros(
@@ -883,7 +891,7 @@ class GRU(RNNBase):
     @torch.jit.export
     def forward_tensor(
         self, input: Tensor, hx: Optional[Tensor] = None
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor]:
         batch_sizes = None
         max_batch_size = input.size(0) if self.batch_first else input.size(1)
         sorted_indices = None
@@ -898,7 +906,7 @@ class GRU(RNNBase):
     @torch.jit.export
     def forward_packed(
         self, input: PackedSequence, hx: Optional[Tensor] = None
-    ) -> Tuple[PackedSequence, Tensor]:
+    ) -> tuple[PackedSequence, Tensor]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = int(batch_sizes[0])
         output_, hidden = self.forward_impl(
@@ -928,8 +936,11 @@ class GRU(RNNBase):
 
     @classmethod
     def from_reference(cls, ref_mod):
-        assert hasattr(ref_mod, "weight_ih_l0_dtype"), "We are assuming weight_ih_l0 "
-        "exists in LSTM, may need to relax the assumption to support the use case"
+        if not hasattr(ref_mod, "weight_ih_l0_dtype"):
+            raise AssertionError(
+                "We are assuming weight_ih_l0 exists in GRU, "
+                "may need to relax the assumption to support the use case"
+            )
         qmod = cls(
             ref_mod.input_size,
             ref_mod.hidden_size,
@@ -1032,13 +1043,13 @@ class RNNCellBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        assert type(mod) in {
-            torch.nn.LSTMCell,
-            torch.nn.GRUCell,
-            torch.nn.RNNCell,
-        }, "nn.quantized.dynamic.RNNCellBase.from_float \
-                                 only works for nn.LSTMCell, nn.GRUCell and nn.RNNCell"
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        if type(mod) not in {torch.nn.LSTMCell, torch.nn.GRUCell, torch.nn.RNNCell}:
+            raise AssertionError(
+                "nn.quantized.dynamic.RNNCellBase.from_float "
+                "only works for nn.LSTMCell, nn.GRUCell and nn.RNNCell"
+            )
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined")
 
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer_method = mod.qconfig.weight
@@ -1059,15 +1070,15 @@ class RNNCellBase(torch.nn.Module):
 
         qRNNCellBase: Union[LSTMCell, GRUCell, RNNCell]
 
-        if type(mod) == torch.nn.LSTMCell:
+        if type(mod) is torch.nn.LSTMCell:
             qRNNCellBase = LSTMCell(
                 mod.input_size, mod.hidden_size, bias=mod.bias, dtype=dtype
             )
-        elif type(mod) == torch.nn.GRUCell:
+        elif type(mod) is torch.nn.GRUCell:
             qRNNCellBase = GRUCell(
                 mod.input_size, mod.hidden_size, bias=mod.bias, dtype=dtype
             )
-        elif type(mod) == torch.nn.RNNCell:
+        elif type(mod) is torch.nn.RNNCell:
             qRNNCellBase = RNNCell(
                 mod.input_size,
                 mod.hidden_size,
@@ -1081,7 +1092,8 @@ class RNNCellBase(torch.nn.Module):
             are supported for QuantizedRNN for now"
             )
 
-        assert mod.bias
+        if not mod.bias:
+            raise AssertionError("mod.bias must be True")
 
         def _observe_and_quantize_weight(weight):
             if dtype == torch.qint8:
@@ -1102,8 +1114,11 @@ class RNNCellBase(torch.nn.Module):
 
     @classmethod
     def from_reference(cls, ref_mod):
-        assert hasattr(ref_mod, "weight_ih_dtype"), "We are assuming weight_ih "
-        "exists in reference module, may need to relax the assumption to support the use case"
+        if not hasattr(ref_mod, "weight_ih_dtype"):
+            raise AssertionError(
+                "We are assuming weight_ih exists in reference module, "
+                "may need to relax the assumption to support the use case"
+            )
         if hasattr(ref_mod, "nonlinearity"):
             qmod = cls(
                 ref_mod.input_size,
@@ -1210,6 +1225,7 @@ class RNNCell(RNNCellBase):
         ...     hx = rnn(input[i], hx)
         ...     output.append(hx)
     """
+
     __constants__ = ["input_size", "hidden_size", "bias", "nonlinearity"]
 
     def __init__(
@@ -1285,8 +1301,8 @@ class LSTMCell(RNNCellBase):
         return "DynamicQuantizedLSTMCell"
 
     def forward(
-        self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None
-    ) -> Tuple[Tensor, Tensor]:
+        self, input: Tensor, hx: Optional[tuple[Tensor, Tensor]] = None
+    ) -> tuple[Tensor, Tensor]:
         self.check_forward_input(input)
         if hx is None:
             zeros = torch.zeros(

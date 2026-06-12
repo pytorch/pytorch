@@ -1,36 +1,23 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import math as pymath
 import warnings
+from collections.abc import Callable
+from typing import Any, TypeVar
 
-import triton
-import triton.language as tl
-
-
-# In the latest triton, math functions were shuffled around into different modules:
-# https://github.com/openai/triton/pull/3172
-try:
-    from triton.language.extra import libdevice
-
-    libdevice = tl.extra.libdevice  # noqa: F811
-    math = tl.math
-except ImportError:
-    if hasattr(tl.extra, "cuda") and hasattr(tl.extra.cuda, "libdevice"):
-        libdevice = tl.extra.cuda.libdevice
-        math = tl.math
-    elif hasattr(tl.extra, "intel") and hasattr(tl.extra.intel, "libdevice"):
-        libdevice = tl.extra.intel.libdevice
-        math = tl.math
-    else:
-        libdevice = tl.math
-        math = tl
+from .triton_compat import (
+    _log2,
+    builtins_use_semantic_kwarg,
+    JITFunction,
+    libdevice,
+    math,
+    tl,
+    triton,
+)
 
 
-try:
-    from triton.language.standard import _log2
-except ImportError:
-
-    def _log2(x):
-        raise NotImplementedError
+_T = TypeVar("_T")
+_LOG_2_E: tl.constexpr = tl.constexpr(pymath.log2(pymath.e))
 
 
 def set_driver_to_cpu():
@@ -47,11 +34,34 @@ def set_driver_to_cpu():
     )
 
 
+def _is_backend_active(name, backend):
+    if backend.driver.is_active():
+        return True
+    # Triton may fail to detect the GPU in subprocess workers when using
+    # ctypes-based driver detection (triton-lang/triton#9578). Fall back
+    # to torch's own device checks which are more reliable in these environments.
+    if name == "nvidia":
+        import torch
+
+        return torch.cuda.is_available() and torch.version.hip is None
+    if name == "amd":
+        import torch
+
+        return torch.cuda.is_available() and torch.version.hip is not None
+    return False
+
+
 def set_driver_to_gpu():
     driver = triton.runtime.driver
     for name, backend in triton.backends.backends.items():
-        if backend.driver.is_active() and name != "cpu":
-            if isinstance(driver.active, backend.driver):
+        if _is_backend_active(name, backend) and name != "cpu":
+            # After https://github.com/triton-lang/triton/commit/b844d519bc5e86edf00fe6b3c6c2d1badcd509a4,
+            # `driver.active` can be of `LazyProxy` type and the sign of this - `_obj` attribute.
+            if (
+                isinstance(driver.active, backend.driver)
+                or hasattr(driver.active, "_obj")
+                and isinstance(driver.active._obj, backend.driver)
+            ):
                 # Don't re-initialize backend if it is already active
                 return
             driver.set_active(backend.driver())
@@ -60,17 +70,41 @@ def set_driver_to_gpu():
 
 
 def get_backend_options():
-    driver = triton.runtime.driver
+    from triton.runtime import driver
+
     target = driver.active.get_current_target()
     backend = triton.compiler.compiler.make_backend(target)
     options = backend.parse_options(dict())
     return options.__dict__
 
 
+def get_constexprs(kernel: JITFunction) -> list[int]:
+    return [p.num for p in kernel.params if p.is_constexpr]
+
+
 @triton.jit
 def promote_to_tensor(x):
     # Addition promotes to tensor for us
     return x + tl.zeros((1,), tl.int1)
+
+
+@triton.jit
+def fp8e4m3fn_to_float32(x):
+    x_u32 = x.to(tl.uint32)
+    sign = (x_u32 & 0x80) << 24
+    exp = (x_u32 >> 3) & 0xF
+    mant = x_u32 & 0x7
+
+    normal_bits = sign | ((exp + 120) << 23) | (mant << 20)
+    normal = normal_bits.to(tl.float32, bitcast=True)
+
+    subnormal_abs = mant.to(tl.float32) * 0.001953125
+    subnormal_bits = subnormal_abs.to(tl.uint32, bitcast=True) | sign
+    subnormal = subnormal_bits.to(tl.float32, bitcast=True)
+
+    nan = (sign | 0x7FF00000).to(tl.float32, bitcast=True)
+    result = tl.where(exp == 0, subnormal, normal)
+    return tl.where((exp == 0xF) & (mant == 0x7), nan, result)
 
 
 @triton.jit
@@ -87,7 +121,24 @@ def div_floor_integer(a, b):
 def remainder_integer(a, b):
     # NOTE: a % b matches C division, not floor division
     remainder = a % b
-    return tl.where(remainder != 0 and ((a < 0) != (b < 0)), remainder + b, remainder)
+    return tl.where((remainder != 0) & ((a < 0) != (b < 0)), remainder + b, remainder)
+
+
+@triton.jit
+def pow_integer(base, exponent):
+    # Triton has no exact integer pow primitive; use repeated squaring for
+    # nonnegative integer exponents so integral scalar pow does not round
+    # through libdevice.pow before casting back to int.
+    exponent_dtype: tl.constexpr = tl.core.get_int_dtype(
+        exponent.dtype.primitive_bitwidth, signed=False
+    )
+    exp = exponent.to(exponent_dtype)
+    result = tl.full(base.shape, 1, base.dtype)
+    for _ in tl.static_range(exponent_dtype.primitive_bitwidth):
+        result = tl.where((exp & 1) != 0, result * base, result)
+        exp = exp >> 1
+        base = base * base
+    return result
 
 
 @triton.jit
@@ -138,9 +189,9 @@ def minimum_with_index(a_value, a_index, b_value, b_index):
     if is_floating(a_value):
         a_isnan = a_value != a_value
         b_isnan = b_value != b_value
-        mask |= a_isnan and not b_isnan
+        mask |= a_isnan & (not b_isnan)
         # Consider NaNs as equal
-        equal |= a_isnan and b_isnan
+        equal |= a_isnan & b_isnan
 
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
@@ -154,9 +205,9 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
     if is_floating(a_value):
         a_isnan = a_value != a_value
         b_isnan = b_value != b_value
-        mask |= a_isnan and not b_isnan
+        mask |= a_isnan & (not b_isnan)
         # Consider NaNs as equal
-        equal |= a_isnan and b_isnan
+        equal |= a_isnan & b_isnan
 
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
@@ -171,6 +222,64 @@ def min_with_index(value, index, dim):
 @triton.jit
 def max_with_index(value, index, dim):
     return tl.reduce((value, index), dim, maximum_with_index)
+
+
+@triton.jit
+def exp(x, use_fast_math: tl.constexpr):
+    if use_fast_math:
+        return math.exp(x)
+    else:
+        return libdevice.exp(x)
+
+
+@triton.jit
+def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
+    out_max = max2(lhs_max, dim)
+    out_max_keepdim = tl.expand_dims(out_max, dim)
+    delta = tl.where(out_max_keepdim == float("-inf"), 0, lhs_max - out_max_keepdim)
+    out_sum = tl.sum(lhs_sum * exp(delta, use_fast_math), dim)
+    return out_max, out_sum
+
+
+@triton.jit
+def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexpr):
+    """
+    When we do combine, we assume lhs is the accumulator and rhs is the next
+    block of data.
+    Then rhs_sum is always 1. With that assumption, we can save some registers
+    and computation.
+    """
+    out_max = maximum(lhs_max, rhs_max)
+
+    lhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    )
+    rhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
+    )
+
+    # Should be
+    #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    # but since rhs_sum is all 1, we can simplify it.
+    out_sum = lhs_sum * lhs_scale + rhs_scale
+    return out_max, out_sum
+
+
+@triton.jit
+def online_softmax_combine_with_sum(
+    lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math: tl.constexpr
+):
+    out_max = maximum(lhs_max, rhs_max)
+
+    lhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    )
+    rhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
+    )
+
+    out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    return out_max, out_sum
 
 
 @triton.jit
@@ -189,7 +298,9 @@ def welford_reduce(value, mean, m2, weight, first_iteration):
 
 @triton.jit
 def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
-    delta = mean_2 - mean_1
+    # Guard against inf - inf = NaN when both means are infinite and equal.
+    # This occurs during FP16/BF16 LayerNorm when inputs overflow to inf.
+    delta = tl.where(mean_1 == mean_2, 0.0, mean_2 - mean_1)
     new_weight = weight_1 + weight_2
     w2_over_w = tl.where(new_weight == 0.0, 0.0, weight_2 / new_weight)
     return (
@@ -208,6 +319,65 @@ def welford(mean, m2, weight, dim):
 def device_assert_then(cond, msg, r):
     tl.device_assert(cond, msg)
     return r
+
+
+@triton.jit
+def rand_eager_kernel(seed, offset_blocks, tid: tl.tensor, VEC: tl.constexpr):
+    inv = 1.0 / 4294967296.0
+    half = inv * 0.5
+
+    tid_u64 = tid.to(tl.uint64)
+
+    subseq = tid_u64 // VEC
+    which4 = (tid_u64 % VEC) // 4
+    lane = tid_u64 % 4
+
+    offblk = offset_blocks.to(tl.uint64) + which4
+
+    u0, u1, u2, u3 = tl.philox(
+        seed,
+        (offblk & 0xFFFFFFFF).to(tl.uint32),
+        ((offblk >> 32) & 0xFFFFFFFF).to(tl.uint32),
+        (subseq & 0xFFFFFFFF).to(tl.uint32),
+        ((subseq >> 32) & 0xFFFFFFFF).to(tl.uint32),
+    )
+
+    v01 = tl.where(lane == 0, u0, u1)
+    v23 = tl.where(lane == 2, u2, u3)
+    rand_int = tl.where((lane == 0) | (lane == 1), v01, v23)
+
+    return 1.0 - (rand_int.to(tl.float32) * inv + half)
+
+
+@triton.jit
+def _random_4x_to_block(r0, r1, r2, r3):
+    # Pack lanes by logical offset so the random stream is independent of XBLOCK.
+    size: tl.constexpr = r0.numel
+    return tl.reshape(tl.join(tl.join(r0, r2), tl.join(r1, r3)), [size * 4])
+
+
+@triton.jit
+def rand4x(seed, offsets, BLOCK: tl.constexpr):
+    offsets = offsets.to(tl.uint32)
+    seed = tl.min(seed + offsets * 0, axis=0)
+    if BLOCK >= 4 and BLOCK % 4 == 0:
+        base = tl.min(offsets, axis=0)
+        reduced_offsets = base // 4 + tl.arange(0, BLOCK // 4)
+        r0, r1, r2, r3 = tl.rand4x(seed, reduced_offsets)
+        return _random_4x_to_block(r0, r1, r2, r3)
+    return tl.rand(seed, offsets)
+
+
+@triton.jit
+def randn4x(seed, offsets, BLOCK: tl.constexpr):
+    offsets = offsets.to(tl.uint32)
+    seed = tl.min(seed + offsets * 0, axis=0)
+    if BLOCK >= 4 and BLOCK % 4 == 0:
+        base = tl.min(offsets, axis=0)
+        reduced_offsets = base // 4 + tl.arange(0, BLOCK // 4)
+        r0, r1, r2, r3 = tl.randn4x(seed, reduced_offsets)
+        return _random_4x_to_block(r0, r1, r2, r3)
+    return tl.randn(seed, offsets)
 
 
 @triton.jit
@@ -245,7 +415,6 @@ def bucketize_binary_search(
     sorter_ptr: tl.tensor,
     SORTER_STRIDE: int,
     sorter_indices: tl.tensor,
-    BLOCK_SHAPE,
 ):
     """
     See [Note: Inductor bucketize op]
@@ -275,15 +444,15 @@ def bucketize_binary_search(
     BLOCK_SHAPE: the shape of the data block being processed.
     """
 
-    low = tl.zeros(BLOCK_SHAPE, dtype=indexing_dtype)
-    high = tl.full(BLOCK_SHAPE, BOUNDARIES_SIZE, dtype=indexing_dtype)
+    low = tl.zeros(values.shape, dtype=indexing_dtype)
+    high = tl.full(values.shape, BOUNDARIES_SIZE, dtype=indexing_dtype)
 
     full_range = BOUNDARIES_SIZE + 1
     while full_range > 1:
         mid = (high + low) // 2
         mask = (
-            mid * BOUNDARIES_STRIDE + boundary_indices
-        ) < BOUNDARIES_UNDERLYING_NUMEL and mid < BOUNDARIES_SIZE
+            (mid * BOUNDARIES_STRIDE + boundary_indices) < BOUNDARIES_UNDERLYING_NUMEL
+        ).logical_and(mid < BOUNDARIES_SIZE)
         mid_indices = (
             mid
             if sorter_ptr is None or SORTER_STRIDE is None
@@ -304,6 +473,9 @@ def bucketize_binary_search(
         else:
             is_above = values > bucket_upper_bound
 
+        if is_floating(values):
+            is_above = is_above | (values != values)
+
         low = tl.where(is_above & mask, mid + 1, low)
         high = tl.where(is_above, high, mid)
 
@@ -320,7 +492,7 @@ def pack_value_flag(
     DTYPE_PACK: tl.constexpr,
 ):
     # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
-    DTYPE_VALUE_AS_UINT = tl.core._constexpr_to_value(DTYPE_VALUE_AS_UINT)
+    DTYPE_VALUE_AS_UINT = tl.core._unwrap_if_constexpr(DTYPE_VALUE_AS_UINT)
     bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
     uv = value.to(DTYPE_VALUE_AS_UINT, bitcast=True).to(DTYPE_PACK)
     return flag.to(DTYPE_PACK) | (uv << bitwidth)
@@ -333,8 +505,8 @@ def unpack_value(
     DTYPE_VALUE_AS_UINT,
 ):
     # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
-    DTYPE_VALUE = tl.core._constexpr_to_value(DTYPE_VALUE)
-    DTYPE_VALUE_AS_UINT = tl.core._constexpr_to_value(DTYPE_VALUE_AS_UINT)
+    DTYPE_VALUE = tl.core._unwrap_if_constexpr(DTYPE_VALUE)
+    DTYPE_VALUE_AS_UINT = tl.core._unwrap_if_constexpr(DTYPE_VALUE_AS_UINT)
     bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
     value_uint = (pack >> bitwidth).to(DTYPE_VALUE_AS_UINT)
     return value_uint.to(DTYPE_VALUE, bitcast=True)
@@ -427,7 +599,7 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
     block_value: Scalar value for this block, must be 64-bits wide
     index: Scalar index of this block relative to the current scan
     combine_fn: Function ``(value, value) -> value`` which is scanned over
-    init: Scalar value equal to the identiy of combine_fn
+    init: Scalar value equal to the identity of combine_fn
     """
     # Publish block sum so subsequent blocks don't get stuck waiting for us
     if index > 0:
@@ -455,7 +627,7 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
             prefix_valid = True
 
         if flag == 2:
-            test_target = -1
+            test_target = tl.full([], -1, index.dtype)  # Match the original type
         else:
             test_target = test_target - 1
 
@@ -476,9 +648,13 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 @triton.jit
 def frexp(x):
     # TODO(isuruf): use inline_asm_elementwise here
-    y = libdevice.ilogb(x) + 1
-    exponent = tl.where(x == 0, 0, y)
-    mantissa = tl.where(x == 0, 0, libdevice.ldexp(x, -y))
+    zero = x == 0
+    not_finite = libdevice.isinf(x).to(tl.int1) | libdevice.isnan(x).to(tl.int1)
+    special = zero | not_finite
+    safe_x = tl.where(special, 1.0, x)
+    y = libdevice.ilogb(safe_x) + 1
+    exponent = tl.where(special, 0, y)
+    mantissa = tl.where(zero, 0, tl.where(not_finite, x, libdevice.ldexp(safe_x, -y)))
     return mantissa, exponent
 
 
@@ -503,8 +679,8 @@ def _compare_and_swap_with_index(
     # slice left/right with 'stride' 2**(n_dims - i - 1)
     right_mask = tl.arange(0, 2)[None, :, None].to(idtype)
     left_mask = (1 - right_mask).to(idtype)
-    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1)[:, None, :], shape)
-    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1)[:, None, :], shape)
+    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1).to(idtype)[:, None, :], shape)
+    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1).to(idtype)[:, None, :], shape)
     ileft = tl.reshape(ileft, x.shape)
     iright = tl.reshape(iright, x.shape)
     left = ileft.to(x.dtype, bitcast=True)
@@ -532,14 +708,34 @@ def _compare_and_swap_with_index(
     # actual compare-and-swap
     ix = x.to(idtype, bitcast=True)
 
+    # sort treats nan as having the higher value. comparisons with nan always return False.
+    # to align with sort semantics, we need to update descending to check if right_isnan,
+    # and ascending to check if left_isnan.
+    left_isnan = left != left
+    right_isnan = right != right
+
     if descending:
         cond = left < right
+        if is_floating(left):
+            if not stable:
+                cond = cond | right_isnan
+            else:
+                cond = cond | (right_isnan & (~left_isnan))
+
     else:
         cond = left > right
+        if is_floating(left):
+            if not stable:
+                cond = cond | left_isnan
+            else:
+                cond = cond | (left_isnan & (~right_isnan))
 
     if stable:
         # When stable sorting, tie break by index
-        cond = cond | ((left == right) & (left_idx > right_idx))
+        eq = left == right
+        if is_floating(left):
+            eq = eq | (left_isnan & right_isnan)
+        cond = cond | (eq & (left_idx > right_idx))
 
     cond = (right_valid_mask > left_valid_mask) | (
         (right_valid_mask == left_valid_mask) & cond
@@ -621,7 +817,7 @@ def select_one(x, mask, dim, keep_dims=False):
     idtype = tl.core.get_int_dtype(x.dtype.primitive_bitwidth, signed=False)
     ix = x.to(idtype, bitcast=True)
     iy = tl.sum(ix * mask, dim, keep_dims=keep_dims)
-    return iy.to(x.dtype, bitcast=True)
+    return iy.to(idtype).to(x.dtype, bitcast=True)
 
 
 @triton.jit
@@ -655,3 +851,74 @@ def x_grid_barrier(sem):
 
     # TODO(jansel): is this needed?
     tl.debug_barrier()
+
+
+def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
+    """
+    Decorator to mark a function as a Triton built-in function.  These functions
+    are evaluated at compile time.
+
+    Args:
+        f (function): The function to be marked as a Triton built-in.
+
+    Returns:
+        function: The same function, marked as a Triton built-in.
+    """
+    if builtins_use_semantic_kwarg:
+        # support Triton before and after https://github.com/triton-lang/triton/pull/7054
+        # and after https://github.com/triton-lang/triton/pull/7239
+        def wrapper(*args, _semantic, **kwargs):
+            kwargs["_builder"] = _semantic
+            return f(*args, **kwargs)
+    else:
+        wrapper = f  # type: ignore[assignment]
+
+    wrapper.__triton_builtin__ = True  # type: ignore[attr-defined]
+    return wrapper
+
+
+@triton_builtin
+def constexpr_next_power_of_2(
+    n: tl.constexpr, *, _builder: object = None
+) -> tl.constexpr:
+    """
+    A version triton.next_power_of_two that can be used within a kernel on constants.
+    """
+    if not isinstance(n, tl.constexpr):
+        raise AssertionError(f"Expected tl.constexpr, got {type(n)}")
+    return tl.constexpr(triton.next_power_of_2(n.value))
+
+
+@triton_builtin
+def if_mask(mask: Any, val, *, _builder: object = None) -> tl.constexpr:
+    """
+    Work around triton compile error: `ValueError: `other` cannot be provided without `mask``
+    A compile-time to check to return either `val` or `None` depending on the value of mask.
+    """
+    if isinstance(mask, tl.constexpr) and mask.value is None:
+        return tl.constexpr(None)
+    return val
+
+
+@triton.jit
+def inline_asm_pack(x, pack: tl.constexpr):
+    """Ravel to 1D and pad (via join with zeros) so numel is divisible by pack."""
+    result = x.ravel()
+    # Only pad when the block size is smaller than pack. When block >= pack
+    # the numel is already divisible by pack (both are powers of 2).
+    n_pad: tl.constexpr = _log2(pack) - _log2(result.numel)
+    for _ in tl.static_range(n_pad):
+        result = tl.reshape(
+            tl.join(result, tl.zeros_like(result)), (result.shape[0] * 2,)
+        )
+    return result
+
+
+@triton.jit
+def inline_asm_unpack(x, orig, pack: tl.constexpr):
+    """Unpad and reshape back to orig's shape."""
+    result = x
+    n_pad: tl.constexpr = _log2(pack) - _log2(orig.numel)
+    for _ in tl.static_range(n_pad):
+        result, _ = tl.split(tl.reshape(result, (result.shape[0] // 2, 2)))
+    return tl.reshape(result, orig.shape)

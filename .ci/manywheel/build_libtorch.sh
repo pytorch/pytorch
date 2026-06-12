@@ -22,9 +22,7 @@ retry () {
 
 # TODO move this into the Docker images
 OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
-if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
-    retry yum install -q -y zip openssl
-elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
+if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
     retry dnf install -q -y zip openssl
@@ -35,6 +33,9 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
     retry apt-get update
     retry apt-get -y install zip openssl
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
 
 # Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
@@ -57,12 +58,6 @@ export PYTORCH_BUILD_NUMBER=$build_number
 
 export CMAKE_LIBRARY_PATH="/opt/intel/lib:/lib:$CMAKE_LIBRARY_PATH"
 export CMAKE_INCLUDE_PATH="/opt/intel/include:$CMAKE_INCLUDE_PATH"
-
-# set OPENSSL_ROOT_DIR=/opt/openssl if it exists
-if [[ -e /opt/openssl ]]; then
-    export OPENSSL_ROOT_DIR=/opt/openssl
-    export CMAKE_INCLUDE_PATH="/opt/openssl/include":$CMAKE_INCLUDE_PATH
-fi
 
 # If given a python version like 3.6m or 2.7mu, convert this to the format we
 # expect. The binary CI jobs pass in python versions like this; they also only
@@ -91,15 +86,10 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
     exit 1
 fi
 pushd "$PYTORCH_ROOT"
+retry pip install -qUr requirements-build.txt
 python setup.py clean
 retry pip install -qr requirements.txt
 retry pip install -q numpy==2.0.1
-
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    export _GLIBCXX_USE_CXX11_ABI=1
-else
-    export _GLIBCXX_USE_CXX11_ABI=0
-fi
 
 if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     echo "Calling build_amd.py at $(date)"
@@ -108,7 +98,7 @@ if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     export ROCclr_DIR=/opt/rocm/rocclr/lib/cmake/rocclr
 fi
 
-echo "Calling setup.py install at $(date)"
+echo "Calling -m pip install . -v --no-build-isolation at $(date)"
 
 if [[ $LIBTORCH_VARIANT = *"static"* ]]; then
     STATIC_CMAKE_FLAG="-DTORCH_STATIC=1"
@@ -124,7 +114,7 @@ fi
         # TODO: Remove this flag once https://github.com/pytorch/pytorch/issues/55952 is closed
         CFLAGS='-Wno-deprecated-declarations' \
         BUILD_LIBTORCH_CPU_WITH_DEBUG=1 \
-        python setup.py install
+        python -m pip install --no-build-isolation -v .
 
     mkdir -p libtorch/{lib,bin,include,share}
 
@@ -168,12 +158,6 @@ fi
     echo "$(pushd $PYTORCH_ROOT && git rev-parse HEAD)" > libtorch/build-hash
 
 )
-
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    LIBTORCH_ABI="cxx11-abi-"
-else
-    LIBTORCH_ABI=
-fi
 
 (
     set -x

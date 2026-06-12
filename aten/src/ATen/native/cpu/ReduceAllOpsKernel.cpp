@@ -62,7 +62,7 @@ inline void reduce_all_impl(
   output.fill_(result);
 }
 
-static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
+void min_all_kernel_impl(Tensor& result, const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
       .add_input(input)
@@ -87,7 +87,7 @@ static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
   }
 }
 
-static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
+void max_all_kernel_impl(Tensor& result, const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
       .add_input(input)
@@ -167,7 +167,7 @@ inline void reduce_all_impl_vec_two_outputs(
   output2.fill_(result.second);
 }
 
-static void aminmax_allreduce_kernel(
+void aminmax_allreduce_kernel(
     const Tensor& input,
     Tensor& min_result,
     Tensor& max_result) {
