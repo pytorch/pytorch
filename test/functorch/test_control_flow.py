@@ -10256,6 +10256,7 @@ class <lambda>(torch.nn.Module):
             self.assertEqual(mod0._buffers[k], mod1._buffers[k])
         return backend.fw_graphs[0]
 
+    @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
     def test_scan_auto_functionalize_buffer_mutation(self, dynamic):
         device = "cpu"
@@ -10277,14 +10278,11 @@ class <lambda>(torch.nn.Module):
         init = torch.zeros(4, requires_grad=False)
         xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
         fw_gm = self._check_eager_and_aot_eager_only(M, (init, xs), device, dynamic)
-        # The captured AOT forward graph must contain an
-        # auto_functionalized_v2 call wrapping torch.ops.higher_order.scan.
-        # Snapshot fragments rather than the entire graph (Inductor-side
-        # decisions and dynamic shapes change the rest).
         graph_str = fw_gm.print_readable(print_output=False)
         self.assertIn("auto_functionalized_v2", graph_str)
         self.assertIn("torch.ops.higher_order.scan", graph_str)
 
+    @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
     def test_scan_auto_functionalize_multiple_buffer_mutation(self, dynamic):
         device = "cpu"
@@ -10309,6 +10307,7 @@ class <lambda>(torch.nn.Module):
         graph_str = fw_gm.print_readable(print_output=False)
         self.assertIn("auto_functionalized_v2", graph_str)
 
+    @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
     def test_scan_auto_functionalize_captured_tensor_mutation(self, dynamic):
         device = "cpu"
@@ -10367,6 +10366,7 @@ class <lambda>(torch.nn.Module):
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(init, xs)
 
+    @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
     def test_scan_auto_functionalize_partial_buffer_mutation(self, dynamic):
         device = "cpu"
