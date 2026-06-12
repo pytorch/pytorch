@@ -268,7 +268,17 @@ class UserDefinedVariable(VariableTracker):
 
     def _maybe_get_baseclass_method(self, name: str) -> Any:
         """Get method from the base class if not overridden in value's __dict__."""
-        if name not in getattr(self.value, "__dict__", {}):
+        value_dict: Any
+        try:
+            value_dict = object.__getattribute__(self.value, "__dict__")
+        except AttributeError:
+            if issubclass(type(self.value), threading.local):
+                value_dict = threading.local.__getattribute__(
+                    cast(Any, self.value), "__dict__"
+                )
+            else:
+                value_dict = cast(dict[str, object], {})
+        if name not in value_dict:
             try:
                 return inspect.getattr_static(type(self.value), name)
             except AttributeError:
@@ -553,6 +563,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Step 3-5: Class MRO lookup.
         cls_attr = self.lookup_cls_mro_attr(name)
         if cls_attr is not NO_SUCH_SUBOBJ:
+            from ..mutation_guard import unpatched_nn_module_init
+
+            if cls_attr is torch.nn.Module.__init__:
+                cls_attr = unpatched_nn_module_init
             if hasattr(type(cls_attr), "__get__"):
                 # Step 4: Descriptor — invoke __get__(None, cls).
                 return self.resolve_cls_descriptor(tx, name, cls_attr, source)
@@ -718,7 +732,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
         if (
             isinstance(cls_attr, types.WrapperDescriptorType)
-            and not is_torch_class(self.value)
+            and (
+                not is_torch_class(self.value)
+                or (name == "__init__" and issubclass(self.value, (dict, list, set)))
+            )
             and name not in ("__get__", "__set__", "__delete__")
         ):
             return variables.WrapperDescriptorVariable(
@@ -1011,10 +1028,80 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # instance as the sole argument; dispatch to the instance so the
             # default_factory and contents are preserved.
             return args[0].call_method(tx, name, [], kwargs)
+        elif self.value is collections.OrderedDict and name == "__init__" and args:
+            if len(args) > 1 or kwargs:
+                args[0].call_method(tx, "update", [*args[1:]], kwargs)
+            return variables.ConstantVariable.create(None)
+        elif issubclass(self.value, dict) and name == "__init__" and args:
+            if len(args) > 1 or kwargs:
+                if isinstance(args[0], variables.UserDefinedObjectVariable):
+                    if args[0]._base_vt is None:
+                        raise AssertionError(
+                            "UserDefinedObjectVariable._base_vt must not be None"
+                        )
+                    args[0]._base_vt.call_method(tx, "__init__", args[1:], kwargs)
+                else:
+                    args[0].call_method(tx, "__init__", args[1:], kwargs)
+            return variables.ConstantVariable.create(None)
+        elif (
+            issubclass(self.value, list) and name == "__init__" and args and not kwargs
+        ):
+            if isinstance(args[0], variables.UserDefinedObjectVariable):
+                if args[0]._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedObjectVariable._base_vt must not be None"
+                    )
+                args[0]._base_vt.call_method(tx, "__init__", args[1:], {})
+            else:
+                args[0].call_method(tx, "__init__", args[1:], {})
+            return variables.ConstantVariable.create(None)
+        elif issubclass(self.value, set) and name == "__init__" and args:
+            receiver = args[0]
+            if not issubclass(receiver.python_type(), set):
+                raise_type_error(
+                    tx,
+                    f"descriptor '__init__' requires a 'set' object but received a '{receiver.python_type_name()}'",
+                )
+            if kwargs:
+                raise_type_error(tx, "set() takes no keyword arguments")
+            if isinstance(receiver, variables.UserDefinedObjectVariable):
+                if receiver._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedObjectVariable._base_vt must not be None"
+                    )
+                receiver._base_vt.call_method(tx, "__init__", args[1:], {})
+            else:
+                receiver.call_method(tx, "__init__", args[1:], {})
+            return variables.ConstantVariable.create(None)
+        elif issubclass(self.value, BaseException) and name == "__init__" and args:
+            receiver = args[0]
+            init = self.lookup_cls_mro_attr("__init__")
+            owner = getattr(init, "__objclass__", BaseException)
+            if not issubclass(receiver.python_type(), owner):
+                raise_type_error(
+                    tx,
+                    f"descriptor '__init__' requires a '{owner.__name__}' object but received a '{receiver.python_type_name()}'",
+                )
+            if isinstance(receiver, variables.UserDefinedExceptionObjectVariable):
+                result = receiver.exc_vt.call_method(tx, "__init__", args[1:], kwargs)
+                receiver.init_args = args[1:]
+                return result
+            receiver.call_method(tx, "__init__", args[1:], kwargs)
+            return variables.ConstantVariable.create(None)
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_len
 
             return generic_len(tx, args[0])
+        elif name == "__init__" and not kwargs:
+            init = self.lookup_cls_mro_attr("__init__")
+            if len(args) == 1 and (
+                init is object.__init__
+                or (
+                    issubclass(self.value, BaseException)
+                    and init in (BaseException.__init__, Exception.__init__)
+                )
+            ):
+                return variables.ConstantVariable.create(None)
         elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
             return SourcelessBuilder.create(tx, dict).call_method(
@@ -1676,7 +1763,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # to early return the mutated value.
         self._looked_up_attrs: dict[str, object] = {}
 
-        # This is to avoid getattr_static calls to look up the subobj from the self.value.__class__
+        # This avoids getattr_static calls to look up the subobj from type(self.value).
         self._subobj_from_class: dict[str, object] = {}
 
         import torch.utils._pytree as pytree
@@ -1705,6 +1792,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self.dict_vt is None:
             self.dict_vt = variables.DunderDictVariable.create(tx, self)
         return self.dict_vt
+
+    def has_generic_dict(self) -> bool:
+        if issubclass(type(self.value), threading.local):
+            return True
+        return (
+            inspect.getattr_static(self.value, "__dict__", NO_SUCH_SUBOBJ)
+            is not NO_SUCH_SUBOBJ
+        )
+
+    def get_generic_dict(self) -> dict[str, object]:
+        return cast(dict[str, object], self._getattr_static("__dict__"))
 
     def is_base_vt_modified(self, side_effects: "SideEffects") -> bool:
         if self._base_vt is not None:
@@ -2661,9 +2759,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
-                return ConstantVariable.create(None)
+                if not args and not kwargs:
+                    return ConstantVariable.create(None)
 
-            if is_standard_setattr(method) or isinstance(self.value, threading.local):
+            if is_standard_setattr(method) or issubclass(
+                type(self.value), threading.local
+            ):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
             if is_standard_delattr(method):
@@ -2982,7 +3083,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
 
-        if hasattr(self.value, "__dict__"):
+        if self.has_generic_dict():
             dict_vt = self.get_dict_vt(tx)
             if isinstance(value, variables.DeletedVariable):
                 if not dict_vt.contains(name_str):
@@ -2997,7 +3098,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def needs_slow_setattr(self) -> bool:
         return not is_standard_setattr(
             inspect.getattr_static(self.value, "__setattr__", None)
-        ) and not isinstance(self.value, threading.local)
+        ) and not issubclass(type(self.value), threading.local)
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
@@ -3110,7 +3211,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # __getattribute__ because they fall back to
         # type(self.value).__getattribute__ which could be user-overridden.
         if inspect.ismemberdescriptor(subobj) or inspect.isgetsetdescriptor(subobj):
-            subobj = type(self.value).__getattribute__(self.value, name)
+            subobj = subobj.__get__(self.value, type(self.value))
         elif not self._object_has_getattribute and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
             or self._is_c_defined_property(subobj)
@@ -3142,7 +3243,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if name in self._subobj_from_class:
             return self._subobj_from_class[name]
         result = NO_SUCH_SUBOBJ
-        for base in self.value.__class__.__mro__:
+        for base in type(self.value).__mro__:
             if name in base.__dict__:
                 result = base.__dict__[name]
                 break
@@ -3158,8 +3259,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)
 
-        # TODO(guilhermeleobas): This can trigger a side effect
-        return key in self.value.__dict__
+        return self.has_generic_dict() and key in self.get_generic_dict()
 
     def get_source_by_walking_mro(
         self, tx: "InstructionTranslatorBase", name: str
@@ -3199,8 +3299,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # directly writing to obj.__dict__, not via setattr.
                 if (
                     self.source
-                    and hasattr(self.value, "__dict__")
-                    and name not in self.value.__dict__
+                    and self.has_generic_dict()
+                    and name not in self.get_generic_dict()
                     and not hasattr(descriptor, "__set__")
                 ):
                     install_guard(
@@ -3259,7 +3359,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         source: Source | None = AttrSource(self.source, name) if self.source else None
 
         if name == "__dict__":
-            if not hasattr(self.value, "__dict__"):
+            if not self.has_generic_dict():
                 raise_observed_exception(AttributeError, tx)
             return self.get_dict_vt(tx)
 
@@ -3325,10 +3425,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             skip_instance_dict = True
         if (
             not skip_instance_dict
-            and hasattr(self.value, "__dict__")
-            and name in self.value.__dict__
+            and self.has_generic_dict()
+            and name in self.get_generic_dict()
         ):
-            subobj = self.value.__dict__[name]
+            subobj = self.get_generic_dict()[name]
             source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
             return VariableTracker.build(tx, subobj, source)
 
@@ -4177,9 +4277,10 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             name == "__init__"
             and (method := self._maybe_get_baseclass_method(name))
             and inspect.ismethoddescriptor(method)
-            and len(kwargs) == 0
         ):
-            return variables.ConstantVariable.create(None)
+            result = self.exc_vt.call_method(tx, "__init__", args, kwargs)
+            self.init_args = args
+            return result
         elif (
             name == "__setattr__"
             and len(args) == 2
@@ -4623,7 +4724,7 @@ class OrderedDictVariable(UserDefinedDictVariable):
 
         if reverse:
             new = VariableTracker.build(
-                tx, self.value.__class__, source=EphemeralSource()
+                tx, type(self.value), source=EphemeralSource()
             ).call_function(tx, [other], {})
             new.call_method(tx, "update", [self], {})
         else:

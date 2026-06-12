@@ -85,6 +85,389 @@ class SlotsShadowed(SlotsBase):
     x = 42  # class attribute shadows parent's slot descriptor
 
 
+class TestUserDefinedObjectConstruction(TestCase):
+    def test_instantiate_class_with_custom_getattribute(self):
+        class Foo:
+            def __init__(self, a):
+                self.a = a
+
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+        def fn(t):
+            _ = Foo(3)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_custom_getattribute_and_attr_read(self):
+        class Foo:
+            def __init__(self, a):
+                self.a = a
+
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_ignores_instance_init_attr(self):
+        class Foo:
+            def __new__(cls, *args):
+                obj = object.__new__(cls)
+
+                def wrong_init(*args, **kwargs):
+                    raise AssertionError("should call class __init__")
+
+                obj.__init__ = wrong_init
+                return obj
+
+            def __init__(self, a):
+                self.a = a
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_class_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            pass
+
+        def fn(t):
+            f = Foo()
+            Foo.__init__(f, 1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_fn(x)
+
+    def test_explicit_bound_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            pass
+
+        def fn(t):
+            f = Foo()
+            f.__init__(1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_fn(x)
+
+    def test_explicit_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            pass
+
+        def fn(t):
+            f = Foo()
+            object.__init__(f, 1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_fn(x)
+
+    def test_super_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            def __init__(self):
+                super().__init__(1)
+
+        def fn(t):
+            Foo()
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_fn(x)
+
+    def test_explicit_exception_init_updates_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn(t):
+            e = MyError()
+            MyError.__init__(e, 1)
+            return t.sin() + len(e.args)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_exception_init_updates_escaped_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn():
+            e = MyError()
+            MyError.__init__(e, 1)
+            return e
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn().args, fn().args)
+
+    def test_bound_exception_init_updates_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn(t):
+            e = MyError(1)
+            e.__init__()
+            return t.sin() + len(e.args)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_bound_exception_init_updates_escaped_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn():
+            e = MyError(1)
+            e.__init__()
+            return e
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn().args, fn().args)
+
+    def test_exception_new_returned_instance_no_arg_init_graph_breaks(self):
+        class MyError(Exception):
+            saved = None
+
+            def __new__(cls):
+                return cls.saved
+
+        MyError.saved = Exception.__new__(MyError)
+        BaseException.__init__(MyError.saved, "stale")
+
+        def fn():
+            e = MyError()
+            return len(e.args)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported method call"
+        ):
+            opt_fn()
+
+    def test_explicit_exception_init_with_wrong_receiver_not_supported(self):
+        class MyError(Exception):
+            pass
+
+        def fn():
+            values = []
+            MyError.__init__(values, 1)
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_builtin_exception_init_requires_descriptor_owner(self):
+        def fn():
+            e = BaseException("x")
+            Exception.__init__(e)
+            return e
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_exception_init_requires_descriptor_owner(self):
+        class MyError(OSError):
+            pass
+
+        def fn():
+            e = BaseException()
+            MyError.__init__(e, 1)
+            return e
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_set_init_with_kwargs_not_supported(self):
+        class MySet(set):
+            pass
+
+        def fn():
+            s = MySet()
+            MySet.__init__(s, iterable=[1])
+            return s
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_set_init_with_wrong_receiver_not_supported(self):
+        class MySet(set):
+            pass
+
+        def fn():
+            values = []
+            MySet.__init__(values, [1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_set_init_with_wrong_receiver_and_kwargs_not_supported(self):
+        class MySet(set):
+            pass
+
+        def fn():
+            values = []
+            MySet.__init__(values, iterable=[1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_instantiate_class_with_staticmethod_init(self):
+        class Foo:
+            def __new__(cls, *args):
+                return object.__new__(cls)
+
+            def init(a):
+                pass
+
+            __init__ = staticmethod(init)
+
+        def fn(t):
+            Foo(3)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_classmethod_init(self):
+        class Foo:
+            def __new__(cls, *args):
+                return object.__new__(cls)
+
+            def init(cls, a):
+                pass
+
+            __init__ = classmethod(init)
+
+        def fn(t):
+            Foo(3)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_list_subclass_init_replaces_contents(self):
+        class MyList(list):
+            pass
+
+        def fn(t):
+            l = MyList([t])
+            MyList.__init__(l, [t + 1])
+            first = l[0]
+            MyList.__init__(l)
+            return first, len(l)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_custom_getattribute_reads_init_state(self):
+        class Foo:
+            def __init__(self, a):
+                object.__setattr__(self, "ready", True)
+                self.a = a
+
+            def __getattribute__(self, name):
+                if super().__getattribute__("ready"):
+                    return super().__getattribute__(name)
+                raise RuntimeError("not ready")
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_custom_getattribute_normal_setattr(self):
+        class Foo:
+            def __init__(self, a):
+                self.ready = True
+                self.a = a
+
+            def __getattribute__(self, name):
+                try:
+                    ready = super().__getattribute__("ready")
+                except AttributeError:
+                    raise RuntimeError("not ready") from None
+                if ready:
+                    return super().__getattribute__(name)
+                raise RuntimeError("not ready")
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_slotted_class_with_custom_getattribute(self):
+        class Foo:
+            __slots__ = ("ready", "a")
+
+            def __init__(self, a):
+                object.__setattr__(self, "ready", True)
+                self.a = a
+
+            def __getattribute__(self, name):
+                if super().__getattribute__("ready"):
+                    return super().__getattribute__(name)
+                raise RuntimeError("not ready")
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+
 class SlotsAndProperty:
     __slots__ = ("_x",)
 
