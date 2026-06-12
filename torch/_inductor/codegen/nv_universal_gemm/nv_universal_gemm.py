@@ -516,11 +516,10 @@ def _add_nv_gemm_choices_impl(
         # broadcast bug. Tracking: https://github.com/pytorch/pytorch/issues/181901
         return -1
 
-    include_efc = config.epilogue_fusion
     non_efc_kernels, efc_kernels = partition_compatible_kernels(
         args, cc_int, _classify, num_buckets=2
     )
-    if not include_efc:
+    if not config.epilogue_fusion:
         efc_kernels = []
     if not non_efc_kernels and not efc_kernels:
         log.debug("No compatible %s kernels found", variant.op_name)
