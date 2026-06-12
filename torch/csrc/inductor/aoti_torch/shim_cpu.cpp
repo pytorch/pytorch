@@ -17,7 +17,7 @@
 
 using namespace torch::aot_inductor;
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
     AtenTensorHandle X,
@@ -515,7 +515,7 @@ AOTITorchError aoti_torch_cpu__mkl_linear(
 
 #endif // AT_MKL_ENABLED
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
 AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
     AtenTensorHandle X,

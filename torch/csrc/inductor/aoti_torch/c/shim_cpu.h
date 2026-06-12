@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cpu_mkldnn__convolution_pointwise_binary(

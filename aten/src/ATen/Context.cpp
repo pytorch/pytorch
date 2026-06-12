@@ -701,7 +701,7 @@ bool Context::hasMKL() {
 }
 
 bool Context::hasMKLDNN() {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
   return true;
 #else
   return false;
@@ -743,7 +743,7 @@ at::QEngine Context::qEngine() const {
     qengine = at::kQNNPACK;
 #endif
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     qengine = at::kONEDNN;
 #endif
 
@@ -782,7 +782,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
     engines.push_back(at::kQNNPACK);
 #endif
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     engines.push_back(at::kONEDNN);
 #endif
 
