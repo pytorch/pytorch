@@ -2,7 +2,7 @@
 #include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cpp_custom_type_hack.h>
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/onednn/MKLDNNCommon.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/ACLUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>

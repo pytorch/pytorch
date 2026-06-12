@@ -9,7 +9,7 @@
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/library.h>
 #include <ATen/native/quantized/PackedParams.h>
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/onednn/MKLDNNCommon.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 

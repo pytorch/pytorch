@@ -4,8 +4,8 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Config.h>
 
-#include <ATen/native/mkldnn/Matmul.h>
-#include <ATen/native/mkldnn/Linear.h>
+#include <ATen/native/onednn/Matmul.h>
+#include <ATen/native/onednn/Linear.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/BlasBackend.h>
