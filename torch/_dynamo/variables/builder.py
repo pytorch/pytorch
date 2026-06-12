@@ -2601,8 +2601,9 @@ class VariableBuilder:
                     # Explicit static value — verify the actual matches.
                     if value != int_spec:
                         raise ValueError(
-                            f"shapes_spec declares {self.source.name} as static "
-                            f"with value {int_spec}, but got {value}"
+                            f"shapes_spec declared {self.source.name} as static "
+                            f"with value {int_spec}, but while tracing we found "
+                            f"that it was actually {value}"
                         )
                     self.install_guards(GuardBuilder.CONSTANT_MATCH)
                     return ConstantVariable.create(value=value, source=self.source)
