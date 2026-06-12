@@ -1469,6 +1469,13 @@ class _LazyConvXdMixin(LazyModuleMixin):
                 self.bias.materialize((self.out_channels,))
             self.reset_parameters()
 
+    def _lazy_load_pre_materialize_hook(self):
+        if self.in_channels == 0 and isinstance(self.weight, Tensor):
+            if self.transposed:
+                self.in_channels = self.weight.shape[0]
+            else:
+                self.in_channels = self.weight.shape[1] * self.groups
+
     # Function to extract in_channels from first input.
     def _get_in_channels(self, input: Tensor) -> int:
         num_spatial_dims = self._get_num_spatial_dims()
