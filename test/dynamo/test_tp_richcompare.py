@@ -1785,9 +1785,12 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
             return s1 == s2
 
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        item1 = torch._C._set_grad_enabled
+        item2 = torch.amp._enter_autocast
+        item3 = torch.amp._exit_autocast
         inputs = (
-            ({1, 2, 3}, MySet({1, 2, 3})),
-            ({1, 2, 4}, MySet({1, 2, 3})),
+            ({item1, item2}, MySet({item1, item2})),
+            ({item1, item3}, MySet({item1, item2})),
         )
         for s1, s2 in inputs:
             self.assertEqual(compiled_fn(s1, s2), fn(s1, s2))
