@@ -541,8 +541,9 @@ void kthvalue_out_mps_impl(const Tensor& self, int64_t k, int64_t dim, Tensor& v
     indices.copy_(values.toType(at::ScalarType::Long));
     return;
   }
-  // to mimic cpu behaviour
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "kthvalue_mps", [] {});
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self) || isIntegralType(self.scalar_type(), /*includeBool=*/false),
+                              "kthvalue_mps not implemented for ",
+                              self.scalar_type());
 
   sort_out_mps_impl(self,
                     /*stable=*/false,
@@ -583,7 +584,9 @@ static std::tuple<Tensor&, Tensor&> median_with_indices_impl_mps(Tensor& values,
                                                                  bool keepdim,
                                                                  bool ignore_nan) {
   dim = at::maybe_wrap_dim(dim, self.dim());
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "median_mps", [] {});
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self) || isIntegralType(self.scalar_type(), /*includeBool=*/false),
+                              "median_mps not implemented for ",
+                              self.scalar_type());
   checkDeviceType("median", {values, indices}, self.device().type());
   checkScalarType("median", {indices, "indices", 1}, kLong);
   checkSameType("median", {values, "values", 0}, {self, "self", 2});
@@ -667,8 +670,9 @@ static void median_radix_select(const Tensor& flat, const Tensor& out_val, bool 
 }
 
 static Tensor median_impl_mps(const Tensor& self, bool ignore_nan) {
-  // to mimic cpu behaviour
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "median_mps", [] {});
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self) || isIntegralType(self.scalar_type(), /*includeBool=*/false),
+                              "median_mps not implemented for ",
+                              self.scalar_type());
   if (self.numel() == 0) {
     return at::full({}, std::numeric_limits<float>::quiet_NaN()).to(self.options());
   }

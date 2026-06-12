@@ -75,55 +75,8 @@ struct MedianSelectState {
   uint done;
 };
 
-// 64-bit keys for long; every other type fits the existing uint radix key.
-template <typename T>
-struct select_key_traits {
-  using type = uint;
-};
-template <>
-struct select_key_traits<long> {
-  using type = ulong;
-};
-
-template <typename T>
-inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, uint> to_select_key(
-    T v) {
-  return to_radix_key(v, /*desc=*/false);
-}
-
-inline ulong to_select_key(long v) {
-  return as_type<ulong>(v) ^ (ulong(1) << 63);
-}
-
-template <typename T>
-inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> from_select_key(
-    uint key) {
-  return from_radix_key<T>(typename radix_bits<T>::type(key), /*desc=*/false);
-}
-
-template <typename T>
-inline ::metal::enable_if_t<
-    !::metal::is_floating_point_v<T> && ::metal::is_signed_v<T> &&
-        !::metal::is_same_v<T, long>,
-    T>
-from_select_key(uint key) {
-  using U = typename radix_bits<T>::type;
-  return as_type<T>(U(U(key) ^ (U(1) << (sizeof(T) * 8 - 1))));
-}
-
-template <typename T>
-inline ::metal::
-    enable_if_t<!::metal::is_floating_point_v<T> && !::metal::is_signed_v<T>, T>
-    from_select_key(uint key) {
-  return T(key);
-}
-
-template <typename T>
-inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> from_select_key(
-    ulong key) {
-  return as_type<long>(key ^ (ulong(1) << 63));
-}
-
+// Keys come from SortRadix.h: radix_bits<T>::type is the key container
+// (ulong for long), to_radix_key/from_radix_key map values to/from key order.
 template <typename T>
 kernel void median_select_hist(
     const device T* input [[buffer(0)]],
@@ -136,7 +89,7 @@ kernel void median_select_hist(
     uint lid [[thread_position_in_threadgroup]],
     uint tptg [[threads_per_threadgroup]],
     uint tpg [[threads_per_grid]]) {
-  using KeyT = typename select_key_traits<T>::type;
+  using KeyT = typename radix_bits<T>::type;
   if (state->done) {
     return;
   }
@@ -153,7 +106,7 @@ kernel void median_select_hist(
     if (first_pass && v != v) {
       local_nan++;
     }
-    const KeyT key = to_select_key(v);
+    const KeyT key = KeyT(to_radix_key(v, /*desc=*/false));
     if (first_pass || (key >> (shift + 8)) == prefix) {
       const uint digit = uint((key >> shift) & 0xFF);
       atomic_fetch_add_explicit(&lhist[digit], 1u, memory_order_relaxed);
@@ -183,7 +136,7 @@ kernel void median_select_pick(
     constant bool& first_pass [[buffer(4)]],
     constant bool& last_pass [[buffer(5)]],
     constant bool& ignore_nan [[buffer(6)]]) {
-  using KeyT = typename select_key_traits<T>::type;
+  using KeyT = typename radix_bits<T>::type;
   if (state->done) {
     return;
   }
@@ -214,7 +167,7 @@ kernel void median_select_pick(
   state->prefix = (state->prefix << 8) | ulong(digit);
   state->k = k;
   if (last_pass) {
-    out[0] = from_select_key<T>(KeyT(state->prefix));
+    out[0] = from_radix_key<T>(KeyT(state->prefix), /*desc=*/false);
     state->done = 1;
   }
 }
