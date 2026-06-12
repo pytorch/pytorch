@@ -14,8 +14,10 @@
 #include <ATen/ops/relu_native.h>
 #include <ATen/ops/rsub.h>
 #include <ATen/ops/sigmoid.h>
+#include <ATen/ops/sigmoid_backward_native.h>
 #include <ATen/ops/sigmoid_native.h>
 #endif
+#include <ATen/native/BinaryOps.h>
 #include <ATen/native/Gelu.h>
 #include <ATen/native/mps/kernels/Activation.h>
 #include <fmt/format.h>
@@ -141,6 +143,10 @@ static void gelu_backward_kernel(TensorIteratorBase& iter, GeluType approximate)
   lib.exec_binary_kernel(iter, name);
 }
 
+static void sigmoid_backward_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "sigmoid_backward");
+}
+
 REGISTER_DISPATCH(hardshrink_stub, hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, shrink_backward_kernel);
@@ -156,5 +162,6 @@ REGISTER_DISPATCH(silu_stub, silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, silu_backward_kernel);
 REGISTER_DISPATCH(GeluKernel, gelu_kernel);
 REGISTER_DISPATCH(GeluBackwardKernel, gelu_backward_kernel);
+REGISTER_DISPATCH(sigmoid_backward_stub, sigmoid_backward_kernel);
 
 } // namespace at::native

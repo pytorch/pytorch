@@ -303,3 +303,23 @@ REGISTER_BINARY_OP(gelu_backward, bfloat, bfloat);
 REGISTER_BINARY_OP(gelu_tanh_backward, float, float);
 REGISTER_BINARY_OP(gelu_tanh_backward, half, half);
 REGISTER_BINARY_OP(gelu_tanh_backward, bfloat, bfloat);
+
+struct sigmoid_backward_functor {
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T grad_output, const T output) {
+    const float of = float(output);
+    return static_cast<T>(float(grad_output) * (1.0f - of) * of);
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T grad_output, const T output) {
+    return c10::metal::mul(
+        grad_output,
+        c10::metal::conj(c10::metal::mul(T(1, 0) - output, output)));
+  }
+};
+
+REGISTER_BINARY_OP(sigmoid_backward, float, float);
+REGISTER_BINARY_OP(sigmoid_backward, half, half);
+REGISTER_BINARY_OP(sigmoid_backward, bfloat, bfloat);
+REGISTER_BINARY_OP(sigmoid_backward, float2, float2);
+REGISTER_BINARY_OP(sigmoid_backward, half2, half2);

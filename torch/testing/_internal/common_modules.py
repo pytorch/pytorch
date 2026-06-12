@@ -4882,16 +4882,6 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Sigmoid,
                module_inputs_func=module_inputs_torch_nn_Sigmoid,
-               skips=None if _macos15_or_newer else (
-                   # Fails on backward check on MPS
-                   # See https://github.com/pytorch/pytorch/issues/107214
-                   DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
-                   ),)
                ),
     ModuleInfo(torch.nn.LogSigmoid,
                module_inputs_func=module_inputs_torch_nn_LogSigmoid,
