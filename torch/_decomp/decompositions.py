@@ -6064,6 +6064,12 @@ def max_pool2d_with_indices_backward(
     if torch.are_deterministic_algorithms_enabled():
         return NotImplemented
 
+    # XPU: Use native kernel. scatter_add decomposition lowers to atomic adds
+    # which cause heavy contention with overlapping pooling windows, resulting
+    # in significant performance regression vs the eager ATen kernel.
+    if grad_output.is_xpu:
+        return NotImplemented
+
     # MPS: Use native kernel. scatter_add has correctness issues on macOS 14
     # (#163327) and numerical differences on macOS 15+.
     if grad_output.device.type == "mps":

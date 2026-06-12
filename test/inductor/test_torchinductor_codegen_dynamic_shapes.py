@@ -198,6 +198,11 @@ test_failures = {
         ("cpu", "cuda", "xpu")
     ),
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    # XPU falls back max_pool2d_with_indices_backward to ATen eager
+    # (torch/_decomp/decompositions.py). scatter_add decomposition causes
+    # atomic contention performance regression with overlapping windows.
+    "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(("xpu",)),
+    "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(("xpu",)),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d_backward4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
