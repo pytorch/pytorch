@@ -200,6 +200,7 @@ TEST(TestDtype, TestScalarType) {
       ScalarType::Int7,
       ScalarType::Float8_e8m0fnu,
       ScalarType::Float4_e2m1fn_x2,
+      ScalarType::BComplex32,
       ScalarType::Undefined,
   };
   for (int8_t i = 0; i < static_cast<int8_t>(torch::headeronly::NumScalarTypes);
