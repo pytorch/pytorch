@@ -1214,7 +1214,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         )
 
 
-class MkldnnRnnLayer(ExternKernelAlloc):
+class OnednnRnnLayer(ExternKernelAlloc):
     def __init__(
         self,
         layout,
@@ -1296,7 +1296,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         device = x.get_device()
         if device is None:
             raise AssertionError("expected x to have a device")
-        packed = MkldnnRnnLayer(
+        packed = OnednnRnnLayer(
             MultiOutputLayout(device=device),
             inputs=inputs,
             constant_args=constant_args,

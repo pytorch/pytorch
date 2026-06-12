@@ -194,8 +194,8 @@ static void _mkldnn_convolution_out(
     const ideep::attr_t& op_attr,
     const ideep::prop_kind aprop_kind = ideep::prop_kind::forward) {
   auto memory_format = onednn_convolution_memory_format(input_t.ndimension(), is_channels_last);
-  auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
-  auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
+  auto input = input_t.is_onednn() ? input_t : input_t.contiguous(memory_format);
+  auto weight = weight_t.is_onednn() ? weight_t : weight_t.contiguous(memory_format);
   const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
   const ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
   auto algo = ideep::algorithm::convolution_direct;
@@ -300,7 +300,7 @@ static Tensor _mkldnn_convolution(
       op_attr,
       aprop_kind);
 
-  if (input_t.is_mkldnn()) {
+  if (input_t.is_onednn()) {
     return MKLDNNTensor(y, input_t.options());
   } else if (!use_channels_last) {
     return mkldnn_to_dense(MKLDNNTensor(y, input_t.options()));
@@ -342,7 +342,7 @@ Tensor mkldnn_convolution_pointwise(
     std::optional<std::string_view> algorithm) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   bool use_channels_last =
-      weight_t.is_mkldnn() || onednn_conv_use_channels_last(input_t, weight_t);
+      weight_t.is_onednn() || onednn_conv_use_channels_last(input_t, weight_t);
   auto aprop_kind = ideep::prop_kind::forward;
   bool maybe_backward = GradMode::is_enabled() &&
       (input_t.requires_grad() || weight_t.requires_grad() ||
@@ -423,7 +423,7 @@ Tensor mkldnn_convolution_pointwise_binary(
   // TODO: OneDNN doesn't optimize well for groups > 1 case, it will be enabled
   // at next OneDNN release.
   bool use_channels_last =
-      weight_t.is_mkldnn() || onednn_conv_use_channels_last(input_t, weight_t);
+      weight_t.is_onednn() || onednn_conv_use_channels_last(input_t, weight_t);
   bool can_be_fused = groups == 1 && use_channels_last;
 
   std::string_view unary_attr_value = "none";
@@ -447,7 +447,7 @@ Tensor mkldnn_convolution_pointwise_binary(
         onednn_convolution_memory_format(input_t.ndimension(), true);
     auto input = input_t.contiguous(memory_format);
     auto weight =
-        weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
+        weight_t.is_onednn() ? weight_t : weight_t.contiguous(memory_format);
     auto other = other_t.contiguous(memory_format);
     auto output = at::empty(
         output_sizes,
@@ -519,7 +519,7 @@ Tensor mkldnn_convolution_pointwise_binary(
     // Fallback case, if inputs are not channels last or have different dtype,
     // OneDNN fusion may have performance regression.
     Tensor output;
-    if (weight_t.is_mkldnn()) {
+    if (weight_t.is_onednn()) {
       output = _mkldnn_convolution(
           input_t, weight_t, bias, padding_expanded, stride_expanded, dilation, groups, true);
     } else {
@@ -602,7 +602,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
       output_sizes == other_t.sizes(),
       "Add Fusion's inputs should have same shape");
   // Only calling fusion path for channels_last path and the output is contiguous tensor(channels_last).
-  bool can_be_fused = (weight_t.is_mkldnn() ||
+  bool can_be_fused = (weight_t.is_onednn() ||
                        onednn_conv_use_channels_last(input_t, weight_t)) &&
       (other_t.is_contiguous(at::MemoryFormat::ChannelsLast) ||
        other_t.is_contiguous(at::MemoryFormat::ChannelsLast3d));
@@ -641,7 +641,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
     // Fallback case, if inputs are not channels last or have different dtype,
     // OneDNN fusion may have performance regression.
     Tensor output;
-    if (weight_t.is_mkldnn()) {
+    if (weight_t.is_onednn()) {
       output = _mkldnn_convolution(
           input_t, weight_t, bias, padding_expanded, stride_expanded, dilation_expanded, groups, true);
     } else {
@@ -661,7 +661,7 @@ namespace{
 std::vector<int64_t> _original_deconv_weight_size(
     const Tensor& weight_t,
     int64_t groups) {
-  TORCH_CHECK(weight_t.is_mkldnn() || weight_t.is_meta(), "expects weight_t to be mkldnn or meta tensor");
+  TORCH_CHECK(weight_t.is_onednn() || weight_t.is_meta(), "expects weight_t to be mkldnn or meta tensor");
   // The size of weight_t is the prepacked size.
   //  Groups > 1: [g*o, i/g, ...]
   //  Groups == 1: [o, i, ...]
@@ -711,13 +711,13 @@ Tensor _mkldnn_convolution_transpose(
 
   onednn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution_transpose");
 
-  std::vector<int64_t> weight_IOHW_sizes = weight_t.is_mkldnn() ? _original_deconv_weight_size(weight_t, groups) : weight_t.sizes().vec();
+  std::vector<int64_t> weight_IOHW_sizes = weight_t.is_onednn() ? _original_deconv_weight_size(weight_t, groups) : weight_t.sizes().vec();
 
   auto memory_format =
       onednn_convolution_memory_format(input_t.ndimension(), use_channels_last);
 
-  auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
-  auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
+  auto input = input_t.is_onednn() ? input_t : input_t.contiguous(memory_format);
+  auto weight = weight_t.is_onednn() ? weight_t : weight_t.contiguous(memory_format);
 
   int64_t dim = input.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -730,7 +730,7 @@ Tensor _mkldnn_convolution_transpose(
   const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
 
   ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
-  if (!weight.is_mkldnn()) {
+  if (!weight.is_onednn()) {
     // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
     // while PyTorch has IOHW or IODHW, `._transpose()` switches strides (no memory copy).
     w.transpose_(0, 1);
@@ -778,7 +778,7 @@ Tensor _mkldnn_convolution_transpose(
         use_channels_last,
         op_attr);
   }
-  if (input.is_mkldnn()) {
+  if (input.is_onednn()) {
     return MKLDNNTensor(y, input.options());
   } else if (!use_channels_last) {
     return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
@@ -869,7 +869,7 @@ Tensor mkldnn_convolution_backward_input(
       }
 #endif
 
-  if (grad_output.is_mkldnn()) {
+  if (grad_output.is_onednn()) {
     return MKLDNNTensor(grad_x, grad_output.options());
   } else if (!is_channels_last){
     return mkldnn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
@@ -948,10 +948,10 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
 {
   bool is_channels_last = onednn_conv_use_channels_last(input_t, weight_t);
   auto memory_format = onednn_convolution_memory_format(input_t.ndimension(), is_channels_last);
-  Tensor grad_output = grad_output_t.is_mkldnn() ? grad_output_t : grad_output_t.contiguous(memory_format);
+  Tensor grad_output = grad_output_t.is_onednn() ? grad_output_t : grad_output_t.contiguous(memory_format);
 
-  Tensor input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
-  Tensor weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
+  Tensor input = input_t.is_onednn() ? input_t : input_t.contiguous(memory_format);
+  Tensor weight = weight_t.is_onednn() ? weight_t : weight_t.contiguous(memory_format);
   int64_t dim = input.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
@@ -1072,7 +1072,7 @@ Tensor mkldnn_convolution_transpose_backward_input(
       is_channels_last,
       op_attr);
 
-  if (grad_output.is_mkldnn()) {
+  if (grad_output.is_onednn()) {
     return MKLDNNTensor(grad_x, grad_output.options());
   } else if (!is_channels_last){
     return mkldnn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
@@ -1153,9 +1153,9 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
 {
   bool is_channels_last = onednn_conv_use_channels_last(input_t, weight_t);
   auto memory_format = onednn_convolution_memory_format(input_t.ndimension(), is_channels_last);
-  Tensor grad_output = grad_output_t.is_mkldnn() ? grad_output_t : grad_output_t.contiguous(memory_format);
-  auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
-  auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
+  Tensor grad_output = grad_output_t.is_onednn() ? grad_output_t : grad_output_t.contiguous(memory_format);
+  auto input = input_t.is_onednn() ? input_t : input_t.contiguous(memory_format);
+  auto weight = weight_t.is_onednn() ? weight_t : weight_t.contiguous(memory_format);
   int64_t dim = input.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);

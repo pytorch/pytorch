@@ -2011,14 +2011,14 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
-  if (self.is_contiguous_or_false() && !self.is_mkldnn()) {
+  if (self.is_contiguous_or_false() && !self.is_onednn()) {
     return self.view_symint(proposed_shape);
   }
 
   auto sym_numel = self.sym_numel();
   c10::SymDimVector shape = infer_size_dv(proposed_shape, sym_numel);
 
-  if (self.is_mkldnn()) {
+  if (self.is_onednn()) {
     return at::_mkldnn_reshape(self, C10_AS_INTARRAYREF_SLOW(shape));
   }
   auto sym_sizes = self.sym_sizes();
@@ -2063,7 +2063,7 @@ Tensor _reshape_copy_symint(
   }
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
 
-  if (self.is_mkldnn()) {
+  if (self.is_onednn()) {
     TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
   }
 
@@ -2083,7 +2083,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   }
   DimVector shape = infer_size_dv(proposed_shape, self.numel());
 
-  if (self.is_mkldnn()) {
+  if (self.is_onednn()) {
     return at::_mkldnn_reshape(self, shape);
   }
 
@@ -3605,7 +3605,7 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
     return sparse_transpose_(self, dim0, dim1);
   }
 
-  if (self.is_mkldnn()) {
+  if (self.is_onednn()) {
     return at::_mkldnn_transpose_(self, dim0, dim1);
   }
 
@@ -3760,7 +3760,7 @@ Tensor transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
     return sparse_compressed_transpose(self, dim0, dim1);
   }
 
-  if (self.is_mkldnn()) {
+  if (self.is_onednn()) {
     return at::_mkldnn_transpose(self, dim0, dim1);
   }
 

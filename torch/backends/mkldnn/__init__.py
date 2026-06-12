@@ -110,7 +110,7 @@ def flags(enabled=False, deterministic=False, allow_tf32=True, fp32_precision="n
             set_flags(*orig_flags)
 
 
-class MkldnnModule(PropModule):
+class OnednnModule(PropModule):
     def is_available(self):
         return is_available()
 
@@ -136,4 +136,4 @@ if TYPE_CHECKING:
     allow_tf32: ContextProp
     fp32_precision: str
 
-sys.modules[__name__] = MkldnnModule(sys.modules[__name__], __name__)
+sys.modules[__name__] = OnednnModule(sys.modules[__name__], __name__)
