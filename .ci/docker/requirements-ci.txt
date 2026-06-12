@@ -433,8 +433,3 @@ uv
 #Description: required for running spin commands via uvx
 #Pinned version:
 #test that import:
-
-spmd-types==0.2.1
-#Description: type stubs for SPMD; optional runtime dependency of torch.distributed
-#Pinned versions: 0.2.1
-#test that import:
