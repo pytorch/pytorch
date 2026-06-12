@@ -4,7 +4,7 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/onednn/MKLDNNCommon.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/ACLUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
