@@ -1,23 +1,15 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import os
 import re
 import tempfile
 from collections import defaultdict
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from functools import wraps
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Iterator,
-    List,
-    Optional,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, cast, TypeVar
 
 
 T = TypeVar("T")
@@ -32,20 +24,20 @@ def get_git_remote_name() -> str:
 def get_git_repo_dir() -> str:
     from pathlib import Path
 
-    return os.getenv("GIT_REPO_DIR", str(Path(__file__).resolve().parent.parent.parent))
+    return os.getenv("GIT_REPO_DIR", str(Path(__file__).resolve().parents[2]))
 
 
-def fuzzy_list_to_dict(items: List[Tuple[str, str]]) -> Dict[str, List[str]]:
+def fuzzy_list_to_dict(items: list[tuple[str, str]]) -> dict[str, list[str]]:
     """
     Converts list to dict preserving elements with duplicate keys
     """
-    rc: Dict[str, List[str]] = defaultdict(list)
+    rc: dict[str, list[str]] = defaultdict(list)
     for key, val in items:
         rc[key].append(val)
     return dict(rc)
 
 
-def _check_output(items: List[str], encoding: str = "utf-8") -> str:
+def _check_output(items: list[str], encoding: str = "utf-8") -> str:
     from subprocess import CalledProcessError, check_output, STDOUT
 
     try:
@@ -70,7 +62,7 @@ class GitCommit:
     body: str
     author: str
     author_date: datetime
-    commit_date: Optional[datetime]
+    commit_date: datetime | None
 
     def __init__(
         self,
@@ -79,7 +71,7 @@ class GitCommit:
         author_date: datetime,
         title: str,
         body: str,
-        commit_date: Optional[datetime] = None,
+        commit_date: datetime | None = None,
     ) -> None:
         self.commit_hash = commit_hash
         self.author = author
@@ -95,7 +87,7 @@ class GitCommit:
         return item in self.body or item in self.title
 
 
-def parse_fuller_format(lines: Union[str, List[str]]) -> GitCommit:
+def parse_fuller_format(lines: str | list[str]) -> GitCommit:
     """
     Expect commit message generated using `--format=fuller --date=unix` format, i.e.:
         commit <sha1>
@@ -114,13 +106,30 @@ def parse_fuller_format(lines: Union[str, List[str]]) -> GitCommit:
     # TODO: Handle merge commits correctly
     if len(lines) > 1 and lines[1].startswith("Merge:"):
         del lines[1]
-    assert len(lines) > 7
-    assert lines[0].startswith("commit")
-    assert lines[1].startswith("Author: ")
-    assert lines[2].startswith("AuthorDate: ")
-    assert lines[3].startswith("Commit: ")
-    assert lines[4].startswith("CommitDate: ")
-    assert len(lines[5]) == 0
+    if len(lines) <= 7:
+        raise AssertionError(
+            f"Expected at least 8 lines in git log fuller format, got {len(lines)}"
+        )
+    if not lines[0].startswith("commit"):
+        raise AssertionError(f"Expected line 0 to start with 'commit', got: {lines[0]}")
+    if not lines[1].startswith("Author: "):
+        raise AssertionError(
+            f"Expected line 1 to start with 'Author: ', got: {lines[1]}"
+        )
+    if not lines[2].startswith("AuthorDate: "):
+        raise AssertionError(
+            f"Expected line 2 to start with 'AuthorDate: ', got: {lines[2]}"
+        )
+    if not lines[3].startswith("Commit: "):
+        raise AssertionError(
+            f"Expected line 3 to start with 'Commit: ', got: {lines[3]}"
+        )
+    if not lines[4].startswith("CommitDate: "):
+        raise AssertionError(
+            f"Expected line 4 to start with 'CommitDate: ', got: {lines[4]}"
+        )
+    if len(lines[5]) != 0:
+        raise AssertionError(f"Expected line 5 to be empty, got: {lines[5]}")
     return GitCommit(
         commit_hash=lines[0].split()[1].strip(),
         author=lines[1].split(":", 1)[1].strip(),
@@ -142,13 +151,13 @@ class GitRepo:
             print(f"+ git -C {self.repo_dir} {' '.join(args)}")
         return _check_output(["git", "-C", self.repo_dir] + list(args))
 
-    def revlist(self, revision_range: str) -> List[str]:
+    def revlist(self, revision_range: str) -> list[str]:
         rc = self._run_git("rev-list", revision_range, "--", ".").strip()
         return rc.split("\n") if len(rc) > 0 else []
 
     def branches_containing_ref(
         self, ref: str, *, include_remote: bool = True
-    ) -> List[str]:
+    ) -> list[str]:
         rc = (
             self._run_git("branch", "--remote", "--contains", ref)
             if include_remote
@@ -156,7 +165,7 @@ class GitRepo:
         )
         return [x.strip() for x in rc.split("\n") if x.strip()] if len(rc) > 0 else []
 
-    def current_branch(self) -> Optional[str]:
+    def current_branch(self) -> str | None:
         try:
             return self._run_git("symbolic-ref", "--short", "HEAD").strip()
         except RuntimeError:
@@ -169,7 +178,7 @@ class GitRepo:
     def create_branch_and_checkout(self, branch: str) -> None:
         self._run_git("checkout", "-b", branch)
 
-    def fetch(self, ref: Optional[str] = None, branch: Optional[str] = None) -> None:
+    def fetch(self, ref: str | None = None, branch: str | None = None) -> None:
         if branch is None and ref is None:
             self._run_git("fetch", self.remote)
         elif branch is None:
@@ -189,7 +198,7 @@ class GitRepo:
     def get_merge_base(self, from_ref: str, to_ref: str) -> str:
         return self._run_git("merge-base", from_ref, to_ref).strip()
 
-    def patch_id(self, ref: Union[str, List[str]]) -> List[Tuple[str, str]]:
+    def patch_id(self, ref: str | list[str]) -> list[tuple[str, str]]:
         is_list = isinstance(ref, list)
         if is_list:
             if len(ref) == 0:
@@ -198,9 +207,9 @@ class GitRepo:
         rc = _check_output(
             ["sh", "-c", f"git -C {self.repo_dir} show {ref}|git patch-id --stable"]
         ).strip()
-        return [cast(Tuple[str, str], x.split(" ", 1)) for x in rc.split("\n")]
+        return [cast(tuple[str, str], x.split(" ", 1)) for x in rc.split("\n")]
 
-    def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
+    def commits_resolving_gh_pr(self, pr_num: int) -> list[str]:
         owner, name = self.gh_owner_and_name()
         msg = f"Pull Request resolved: https://github.com/{owner}/{name}/pull/{pr_num}"
         rc = self._run_git("log", "--format=%H", "--grep", msg).strip()
@@ -219,9 +228,9 @@ class GitRepo:
 
     def compute_branch_diffs(
         self, from_branch: str, to_branch: str
-    ) -> Tuple[List[str], List[str]]:
+    ) -> tuple[list[str], list[str]]:
         """
-        Returns list of commmits that are missing in each other branch since their merge base
+        Returns list of commits that are missing in each other branch since their merge base
         Might be slow if merge base is between two branches is pretty far off
         """
         from_ref = self.rev_parse(from_branch)
@@ -281,7 +290,8 @@ class GitRepo:
 
     def cherry_pick_commits(self, from_branch: str, to_branch: str) -> None:
         orig_branch = self.current_branch()
-        assert orig_branch is not None, "Must be on a branch"
+        if orig_branch is None:
+            raise AssertionError("Must be on a branch to cherry pick commits")
         self.checkout(to_branch)
         from_commits, to_commits = self.compute_branch_diffs(from_branch, to_branch)
         if len(from_commits) == 0:
@@ -311,14 +321,14 @@ class GitRepo:
     def remote_url(self) -> str:
         return self._run_git("remote", "get-url", self.remote)
 
-    def gh_owner_and_name(self) -> Tuple[str, str]:
+    def gh_owner_and_name(self) -> tuple[str, str]:
         url = os.getenv("GIT_REMOTE_URL", None)
         if url is None:
             url = self.remote_url()
         rc = RE_GITHUB_URL_MATCH.match(url)
         if rc is None:
             raise RuntimeError(f"Unexpected url format {url}")
-        return cast(Tuple[str, str], rc.groups())
+        return cast(tuple[str, str], rc.groups())
 
     def commit_message(self, ref: str) -> str:
         return self._run_git("log", "-1", "--format=%B", ref)
@@ -326,7 +336,7 @@ class GitRepo:
     def amend_commit_message(self, msg: str) -> None:
         self._run_git("commit", "--amend", "-m", msg)
 
-    def diff(self, from_ref: str, to_ref: Optional[str] = None) -> str:
+    def diff(self, from_ref: str, to_ref: str | None = None) -> str:
         if to_ref is None:
             return self._run_git("diff", f"{from_ref}^!")
         return self._run_git("diff", f"{from_ref}..{to_ref}")
@@ -350,12 +360,12 @@ class PeekableIterator(Iterator[str]):
         self._val = val
         self._idx = -1
 
-    def peek(self) -> Optional[str]:
+    def peek(self) -> str | None:
         if self._idx + 1 >= len(self._val):
             return None
         return self._val[self._idx + 1]
 
-    def __iter__(self) -> "PeekableIterator":
+    def __iter__(self) -> PeekableIterator:
         return self
 
     def __next__(self) -> str:
@@ -366,7 +376,7 @@ class PeekableIterator(Iterator[str]):
         return rc
 
 
-def patterns_to_regex(allowed_patterns: List[str]) -> Any:
+def patterns_to_regex(allowed_patterns: list[str]) -> Any:
     """
     pattern is glob-like, i.e. the only special sequences it has are:
       - ? - matches single character
@@ -380,7 +390,10 @@ def patterns_to_regex(allowed_patterns: List[str]) -> Any:
         if idx > 0:
             rc += "|"
         pattern_ = PeekableIterator(pattern)
-        assert not any(c in pattern for c in "{}()[]\\")
+        if any(c in pattern for c in "{}()[]\\"):
+            raise AssertionError(
+                f"Pattern contains invalid characters (braces/parens/brackets/backslash): {pattern}"
+            )
         for c in pattern_:
             if c == ".":
                 rc += "\\."
@@ -416,7 +429,7 @@ def is_commit_hash(ref: str) -> bool:
 
 
 def are_ghstack_branches_in_sync(
-    repo: GitRepo, head_ref: str, base_ref: Optional[str] = None
+    repo: GitRepo, head_ref: str, base_ref: str | None = None
 ) -> bool:
     """Checks that diff between base and head is the same as diff between orig and its parent"""
     orig_ref = re.sub(r"/head$", "/orig", head_ref)
@@ -437,7 +450,7 @@ def retries_decorator(
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     def decorator(f: Callable[..., T]) -> Callable[..., T]:
         @wraps(f)
-        def wrapper(*args: List[Any], **kwargs: Dict[str, Any]) -> T:
+        def wrapper(*args: list[Any], **kwargs: dict[str, Any]) -> T:
             for idx in range(num_retries):
                 try:
                     return f(*args, **kwargs)

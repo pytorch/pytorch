@@ -1,4 +1,4 @@
-from typing import Callable, List
+from collections.abc import Callable
 
 import torch
 from torch.ao.nn.intrinsic import _FusedModule
@@ -20,7 +20,7 @@ class ScopeContextManager(torch.fx.proxy.ScopeContextManager):
 
 class QuantizationTracer(Tracer):
     def __init__(
-        self, skipped_module_names: List[str], skipped_module_classes: List[Callable]
+        self, skipped_module_names: list[str], skipped_module_classes: list[Callable]
     ):
         super().__init__()
         self.skipped_module_names = skipped_module_names
@@ -31,7 +31,7 @@ class QuantizationTracer(Tracer):
         # We can change this if there is a use case that configures
         # qconfig using top level module type
         self.scope = Scope("", None)
-        self.record_stack_traces = True
+        self.record_stack_traces = not torch.fx.config.do_not_emit_stack_traces
 
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
         return (

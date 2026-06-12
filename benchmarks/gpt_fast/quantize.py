@@ -1,4 +1,4 @@
-# flake8: noqa: E266, C417, B950
+# flake8: noqa: E266
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -93,7 +93,6 @@ class WeightOnlyInt8Linear(torch.nn.Module):
         device=None,
         dtype=None,
     ) -> None:
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features

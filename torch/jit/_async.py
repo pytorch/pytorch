@@ -9,6 +9,8 @@ This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
 
+import warnings
+
 import torch
 from torch._jit_internal import Future
 from torch.jit._builtins import _register_builtin
@@ -21,6 +23,9 @@ set_module(Future, "torch.jit")
 def fork(func, *args, **kwargs):
     r"""
     Create an asynchronous task executing `func` and a reference to the value of the result of this execution.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
 
     `fork` will return immediately, so the return value of `func` may not have been computed yet. To force completion
     of the task and access the return value invoke `torch.jit.wait` on the Future. `fork` invoked
@@ -50,11 +55,17 @@ def fork(func, *args, **kwargs):
 
         import torch
         from torch import Tensor
-        def foo(a : Tensor, b : int) -> Tensor:
+
+
+        def foo(a: Tensor, b: int) -> Tensor:
             return a + b
+
+
         def bar(a):
-            fut : torch.jit.Future[Tensor] = torch.jit.fork(foo, a, b=2)
+            fut: torch.jit.Future[Tensor] = torch.jit.fork(foo, a, b=2)
             return torch.jit.wait(fut)
+
+
         script_bar = torch.jit.script(bar)
         input = torch.tensor(2)
         # only the scripted version executes asynchronously
@@ -69,20 +80,31 @@ def fork(func, *args, **kwargs):
 
         import torch
         from torch import Tensor
+
+
         class AddMod(torch.nn.Module):
-            def forward(self, a: Tensor, b : int):
+            def forward(self, a: Tensor, b: int):
                 return a + b
+
+
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
                 super(self).__init__()
                 self.mod = AddMod()
+
             def forward(self, input):
                 fut = torch.jit.fork(self.mod, a, b=2)
                 return torch.jit.wait(fut)
+
+
         input = torch.tensor(2)
         mod = Mod()
         assert mod(input) == torch.jit.script(mod).forward(input)
     """
+    warnings.warn(
+        "`torch.jit.fork` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     return torch._C.fork(func, *args, **kwargs)
 
 
@@ -90,12 +112,19 @@ def wait(future):
     r"""
     Force completion of a `torch.jit.Future[T]` asynchronous task, returning the result of the task.
 
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+
     See :func:`~fork` for docs and examples.
     Args:
         future (torch.jit.Future[T]): an asynchronous task reference, created through `torch.jit.fork`
     Returns:
         `T`: the return value of the completed task
     """
+    warnings.warn(
+        "`torch.jit.wait` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     return torch._C.wait(future)
 
 

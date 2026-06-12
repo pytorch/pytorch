@@ -1,4 +1,5 @@
 #include <c10/core/SymBool.h>
+#include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
 
 namespace c10 {
@@ -72,6 +73,30 @@ bool SymBool::guard_size_oblivious(const char* file, int64_t line) const {
   return a->guard_size_oblivious(file, line);
 }
 
+bool SymBool::guard_or_false(const char* file, int64_t line) const {
+  if (auto ma = maybe_as_bool()) {
+    return *ma;
+  }
+  SymNode a = toSymNodeImpl();
+  return a->guard_or_false(file, line);
+}
+
+bool SymBool::statically_known_true(const char* file, int64_t line) const {
+  if (auto ma = maybe_as_bool()) {
+    return *ma;
+  }
+  SymNode a = toSymNodeImpl();
+  return a->statically_known_true(file, line);
+}
+
+bool SymBool::guard_or_true(const char* file, int64_t line) const {
+  if (auto ma = maybe_as_bool()) {
+    return *ma;
+  }
+  SymNode a = toSymNodeImpl();
+  return a->guard_or_true(file, line);
+}
+
 bool SymBool::expect_true(const char* file, int64_t line) const {
   if (auto ma = maybe_as_bool()) {
     return *ma;
@@ -85,6 +110,19 @@ bool SymBool::has_hint() const {
     return true;
   }
   return toSymNodeImpl()->has_hint();
+}
+
+SymInt SymBool::toSymInt() const {
+  // If concrete bool, return concrete SymInt
+  if (auto ma = maybe_as_bool()) {
+    return SymInt(*ma ? 1 : 0);
+  }
+
+  // Symbolic case: use sym_ite to convert bool to int (0 or 1)
+  auto node = toSymNodeImpl();
+  auto one_node = node->wrap_int(1);
+  auto zero_node = node->wrap_int(0);
+  return SymInt(node->sym_ite(one_node, zero_node));
 }
 
 } // namespace c10

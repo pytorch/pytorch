@@ -15,6 +15,7 @@
 #endif
 #include <c10/core/SymNodeImpl.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -77,6 +78,8 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
+#include <torch/csrc/jit/python/init.h>
+#include <torch/csrc/jit/python/opaque_obj.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
@@ -156,13 +159,14 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
   // on various object types, but we want it to work with all types.
   try {
     return toTypeInferredIValue(input);
-  } catch (const c10::Error& e) {
+  } catch (const c10::Error&) {
     return std::nullopt;
   }
 }
 } // anonymous namespace
 
-#if !defined(USE_ROCM)
+#if defined(BUILDING_TESTS) && !defined(USE_ROCM)
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 TORCH_API void runJITCPPTests();
 #endif
 
@@ -291,6 +295,9 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) {
             return EliminateDeadCode(g->block()); // overload resolution
           })
+      .def(
+          "_jit_pass_dce_graph",
+          [](std::shared_ptr<Graph>& g) { return EliminateDeadCode(g); })
       .def(
           "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
           [](std::shared_ptr<Graph>& g) {
@@ -560,7 +567,7 @@ void initJITBindings(PyObject* module) {
             arg_spec_creator.specializeTypes(*graph, spec);
             // We only get partial specialization from the arg_spec_creator, but
             // we want full shape specialization. The alternative would be to
-            // have a "complete type inference" function in ArguemntSpecCreator.
+            // have a "complete type inference" function in ArgumentSpecCreator.
             auto g_inputs = graph->inputs();
             for (const auto i : c10::irange(inputs.size())) {
               if (stack[i].isTensor()) {
@@ -871,9 +878,8 @@ void initJITBindings(PyObject* module) {
               } else if (pair.first == "DYNAMIC") {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
-                TORCH_INTERNAL_ASSERT(
-                    false,
-                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
+                throw py::value_error(
+                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: " +
                     pair.first);
               }
             }
@@ -1249,15 +1255,20 @@ void initJITBindings(PyObject* module) {
             return a->expect_true(file, line);
           })
       .def(
-          "expect_size",
-          [](const c10::SymNode& a, const char* file, int64_t line) {
-            return a->expect_size(file, line);
-          })
-      .def(
           "guard_size_oblivious",
           [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->guard_size_oblivious(file, line);
           })
+      .def(
+            "guard_or_false",
+            [](const c10::SymNode& a, const char* file, int64_t line) {
+              return a->guard_or_false(file, line);
+            })
+      .def(
+              "guard_or_true",
+              [](const c10::SymNode& a, const char* file, int64_t line) {
+                return a->guard_or_true(file, line);
+              })
       .def(
           "has_hint",
           [](const c10::SymNode& a) {
@@ -1390,11 +1401,14 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(
-          py::init<std::string, bool>(),
+          py::init<std::string, bool, uint64_t>(),
           py::arg("file_name"),
-          py::arg("compute_crc32") = true)
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
       .def(
-          py::init([](const py::object& buffer, bool compute_crc32 = true) {
+          py::init([](const py::object& buffer,
+                      bool compute_crc32 = true,
+                      uint64_t storage_alignment = 64) {
             auto writer_func = [=](const void* data, size_t size) {
               // Writing an empty file is a noop
               if (size == 0) {
@@ -1413,14 +1427,19 @@ void initJITBindings(PyObject* module) {
               return size;
             };
             return std::make_unique<PyTorchStreamWriter>(
-                std::move(writer_func), compute_crc32);
+                std::move(writer_func), compute_crc32, storage_alignment);
           }),
           py::arg("buffer"),
-          py::arg("compute_crc32") = true)
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
       .def(
-          py::init<const std::function<size_t(const void*, size_t)>&, bool>(),
+          py::init<
+              const std::function<size_t(const void*, size_t)>&,
+              bool,
+              uint64_t>(),
           py::arg("writer_func"),
-          py::arg("compute_crc32") = true)
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
       // [Note: write_record_metadata]
       // The write_record_metadata function is intended to write metadata (i.e.
       // the zipfile header and end of central directory record) for a file
@@ -1594,9 +1613,22 @@ void initJITBindings(PyObject* module) {
              const std::string& key,
              size_t numel,
              py::object data_type_obj) {
-            at::DataPtr data(std::get<0>(self.getRecord(key)));
+            auto [data, size] = self.getRecord(key);
             auto scalar_type =
                 reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+
+            TORCH_CHECK(
+                size == numel * elementSize(scalar_type),
+                "record size (",
+                size,
+                " bytes) does not match expected size (",
+                numel * elementSize(scalar_type),
+                " bytes = ",
+                numel,
+                " elements * ",
+                elementSize(scalar_type),
+                " bytes/element) for dtype ",
+                scalar_type);
 
             c10::Storage storage(
                 c10::Storage::use_byte_size_t(),
@@ -1619,6 +1651,26 @@ void initJITBindings(PyObject* module) {
           "get_record_offset",
           [](PyTorchStreamReader& self, const std::string& key) {
             return self.getRecordOffset(key);
+          })
+      .def(
+          "get_record_header_offset",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordHeaderOffset(key);
+          })
+      .def(
+          "get_record_offset_no_read",
+          [](PyTorchStreamReader& self,
+             size_t zipfile_header_offset,
+             const std::string& filename,
+             size_t size,
+             uint64_t storage_alignment) {
+            return self.getRecordOffsetNoRead(
+                zipfile_header_offset, filename, size, storage_alignment);
+          })
+      .def(
+          "get_record_size",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordSize(key);
           });
 
   // Used by torch.Package to coordinate deserialization of storages across
@@ -1688,7 +1740,7 @@ void initJITBindings(PyObject* module) {
                       const py::args& args, const py::kwargs& kwargs) {
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, /*is_overload*/ true);
+                        op, symbol, args, kwargs, /*is_overload*/ true);
                   });
               auto func_dk =
                   py::cpp_function([op, symbol, allow_numbers_as_tensors](
@@ -1697,10 +1749,12 @@ void initJITBindings(PyObject* module) {
                                        const py::kwargs& kwargs) {
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk_);
+                        op, symbol, args, kwargs, /*is_overload*/ true, dk_);
                   });
               return py::make_tuple(
-                  func, func_dk, py::cast(op->getTags().vec()));
+                  std::move(func),
+                  std::move(func_dk),
+                  py::cast(op->getTags().vec()));
             }
           }
           return std::nullopt;
@@ -1724,7 +1778,7 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_jit_resolve_packet",
-      [](const char* op_name, py::args args, const py::kwargs& kwargs) {
+      [](const char* op_name, const py::args& args, const py::kwargs& kwargs) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
@@ -1747,7 +1801,7 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_jit_get_operation",
-      [](const std::string& op_name) {
+      [](const std::string& op_name) -> py::tuple {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           const auto sortedOps = getAllSortedOperatorsFor(symbol);
@@ -1761,7 +1815,7 @@ void initJITBindings(PyObject* module) {
                     << "' with schema(s):\n";
 
           for (const auto& op : sortedOps) {
-            docstring << "  " << op->schema() << "\n";
+            docstring << "  " << op->schema() << '\n';
           }
 
           py::list overload_names;
@@ -1794,7 +1848,7 @@ void initJITBindings(PyObject* module) {
       "_maybe_call_torch_function_for_op_packet",
       [](py::handle op_overload_packet,
          const py::args& args,
-         const py::kwargs& kwargs) {
+         const py::kwargs& kwargs) -> py::tuple {
         py::list ns_method =
             op_overload_packet.attr("_qualified_op_name").attr("split")("::");
         auto res = _maybe_handle_torch_function(
@@ -1825,6 +1879,24 @@ void initJITBindings(PyObject* module) {
       &parseSchema,
       py::arg("schema"),
       py::arg("allow_typevars") = true);
+  m.def(
+      "_register_opaque_type",
+      [](const std::string& type_name) {
+        torch::jit::registerOpaqueType(type_name);
+      },
+      R"doc(Registers a type name to be treated as an opaque type (PyObject) in schema parsing.)doc");
+  m.def(
+      "_is_opaque_type_registered",
+      [](const std::string& type_name) -> bool {
+        return torch::jit::isRegisteredOpaqueType(type_name);
+      },
+      R"doc(Checks if a type name is registered as an opaque type.)doc");
+  m.def(
+      "_unregister_opaque_type",
+      [](const std::string& type_name) {
+        torch::jit::unregisterOpaqueType(type_name);
+      },
+      R"doc(Unregisters a type name from the opaque type registry.)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
@@ -1913,17 +1985,32 @@ void initJITBindings(PyObject* module) {
         self.addArgumentValues(value_map);
       });
   py::class_<FunctionSchema>(m, "FunctionSchema")
-      .def_property_readonly(
-          "name", [](FunctionSchema& self) { return self.name(); })
-      .def_property_readonly(
-          "overload_name",
-          [](FunctionSchema& self) { return self.overload_name(); })
-      .def_property_readonly(
-          "arguments", [](FunctionSchema& self) { return self.arguments(); })
-      .def_property_readonly(
-          "returns", [](FunctionSchema& self) { return self.returns(); })
+      .def(py::init<
+           std::string,
+           std::string,
+           std::vector<Argument>,
+           std::vector<Argument>,
+           bool,
+           bool>())
+      .def_property_readonly("name", &FunctionSchema::name)
+      .def_property_readonly("overload_name", &FunctionSchema::overload_name)
+      .def_property_readonly("arguments", &FunctionSchema::arguments)
+      .def_property_readonly("returns", &FunctionSchema::returns)
+      .def(
+          "_is_view_op",
+          [](const FunctionSchema& self) -> bool {
+            for (const auto& arg : self.arguments()) {
+              if (arg.alias_info() && !arg.alias_info()->isWrite()) {
+                return true;
+              }
+            }
+            return false;
+          })
       .def(
           "is_backward_compatible_with",
+          // FunctionSchema::isBackwardCompatibleWith has an extra
+          // defaulted argument, so we can't just use a
+          // pointer-to-member here.
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
             return self.isBackwardCompatibleWith(old_schema);
           })
@@ -1946,42 +2033,49 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "__str__",
-          [](FunctionSchema& self) {
+          [](const FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(
           "__repr__",
-          [](FunctionSchema& self) {
+          [](const FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(py::pickle(
           [](const FunctionSchema& self) { // __getstate__
             std::stringstream ss;
             ss << self;
-            return py::str(ss.str());
+            return py::str(std::move(ss).str());
           },
           [](const py::str& schema) { // __setstate__, note: no `self` argument
             return parseSchema(schema);
           }))
-      .def_property_readonly(
-          "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
+      .def_property_readonly("is_mutable", [](const FunctionSchema& self) {
+        return self.is_mutable();
+      });
   py::class_<Argument>(m, "Argument")
-      .def_property_readonly("name", [](Argument& self) { return self.name(); })
-      .def_property_readonly("type", [](Argument& self) { return self.type(); })
-      .def_property_readonly(
-          "real_type", [](Argument& self) { return self.real_type(); })
+      .def(py::init<
+           std::string,
+           const TypePtr&,
+           std::optional<int32_t>,
+           std::optional<IValue>,
+           bool,
+           std::optional<AliasInfo>>())
+      .def_property_readonly("name", &Argument::name)
+      .def_property_readonly("type", &Argument::type)
+      .def_property_readonly("real_type", &Argument::real_type)
       .def_property_readonly(
           "N",
-          [](Argument& self) -> py::object {
+          [](const Argument& self) -> py::object {
             return (self.N()) ? py::cast(*self.N()) : py::none();
           })
       .def_property_readonly(
           "default_value",
-          [](Argument& self) -> py::object {
+          [](const Argument& self) -> py::object {
             if (!self.default_value()) {
               return py::none();
             }
@@ -1990,37 +2084,38 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "has_default_value",
-          [](Argument& self) -> py::bool_ {
+          [](const Argument& self) -> py::bool_ {
             return self.default_value().has_value();
           })
       .def_property_readonly(
-          "alias_info", [](Argument& self) { return self.alias_info(); })
+          "alias_info", [](const Argument& self) { return self.alias_info(); })
       .def_property_readonly(
           "is_write",
-          [](Argument& self) {
+          [](const Argument& self) {
             if (self.alias_info() == nullptr) {
               return false;
             }
             return self.alias_info()->isWrite();
           })
       .def_property_readonly(
-          "is_out", [](Argument& self) { return self.is_out(); })
-      .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
+          "is_out", [](const Argument& self) { return self.is_out(); })
+      .def_property_readonly("kwarg_only", [](const Argument& self) -> bool {
         return self.kwarg_only();
       });
   py::class_<AliasInfo>(m, "_AliasInfo")
+      .def(py::init<bool, std::set<std::string>, std::set<std::string>>())
       .def_property_readonly(
-          "is_write", [](AliasInfo& self) { return self.isWrite(); })
+          "is_write", [](const AliasInfo& self) { return self.isWrite(); })
       .def_property_readonly(
           "before_set",
-          [](AliasInfo& self) {
+          [](const AliasInfo& self) {
             std::set<py::str> before_set_python;
             for (const auto& set : self.beforeSets()) {
               before_set_python.insert(py::str(set.toUnqualString()));
             }
             return before_set_python;
           })
-      .def_property_readonly("after_set", [](AliasInfo& self) {
+      .def_property_readonly("after_set", [](const AliasInfo& self) {
         std::set<py::str> after_set_python;
         for (const auto& set : self.afterSets()) {
           after_set_python.insert(py::str(set.toUnqualString()));
@@ -2093,20 +2188,12 @@ void initJITBindings(PyObject* module) {
       .def(
           py::pickle(
               /* __getstate__ */
-              [](const PythonFutureWrapper& /* unused */) {
+              [](const PythonFutureWrapper& /* unused */) -> py::tuple {
                 TORCH_CHECK(false, "Can not pickle torch.futures.Future");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy Pybind API's
-                // requirement.
-                return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) { // NOLINT
+              [](const py::tuple& /* unused */) -> std::nullptr_t {
                 TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy PyBind's API
-                // requirement.
-                return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
 
@@ -2130,20 +2217,12 @@ void initJITBindings(PyObject* module) {
       .def(
           py::pickle(
               /* __getstate__ */
-              [](const PythonAwaitWrapper& /* unused */) {
+              [](const PythonAwaitWrapper& /* unused */) -> py::tuple {
                 TORCH_CHECK(false, "Can not pickle torch.jit._Await");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy Pybind API's
-                // requirement.
-                return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) { // NOLINT
+              [](const py::tuple& /* unused */) -> std::nullptr_t {
                 TORCH_CHECK(false, "Can not unpickle torch.jit._Await");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy PyBind's API
-                // requirement.
-                return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
 
@@ -2263,7 +2342,7 @@ void initJITBindings(PyObject* module) {
               // Throw errors when calling wait() on the returned Future if
               // any of the original futures would throw.
               // NB: PythonFutureWrapper takes an unwrap_func which serves as a
-              // callback to evalute the value in the Future. RPC uses this
+              // callback to evaluate the value in the Future. RPC uses this
               // unwrap_func to check whether the returned py::object is a
               // RemoteException object, and re-throw the exception if it is.
               // By extracting the c10::ivalue::Future from PythonFutureWrapper

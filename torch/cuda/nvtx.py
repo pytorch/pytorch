@@ -41,7 +41,7 @@ def range_pop():
 
 def range_start(msg) -> int:
     """
-    Mark the start of a range with string message. It returns an unique handle
+    Mark the start of a range with string message. It returns a unique handle
     for this range to pass to the corresponding call to rangeEnd().
 
     A key difference between this and range_push/range_pop is that the
@@ -53,6 +53,7 @@ def range_start(msg) -> int:
     Args:
         msg (str): ASCII message to associate with the range.
     """
+    # pyrefly: ignore [missing-attribute]
     return _nvtx.rangeStartA(msg)
 
 
@@ -61,8 +62,9 @@ def range_end(range_id) -> None:
     Mark the end of a range for a given range_id.
 
     Args:
-        range_id (int): an unique handle for the start range.
+        range_id (int): a unique handle for the start range.
     """
+    # pyrefly: ignore [missing-attribute]
     _nvtx.rangeEnd(range_id)
 
 
@@ -83,6 +85,7 @@ def _device_range_start(msg: str, stream: int = 0) -> object:
         msg (str): ASCII message to associate with the range.
         stream (int): CUDA stream id.
     """
+    # pyrefly: ignore [missing-attribute]
     return _nvtx.deviceRangeStart(msg, stream)
 
 
@@ -92,9 +95,10 @@ def _device_range_end(range_handle: object, stream: int = 0) -> None:
     on the CUDA stream are completed.
 
     Args:
-        range_handle: an unique handle for the start range.
+        range_handle: a unique handle for the start range.
         stream (int): CUDA stream id.
     """
+    # pyrefly: ignore [missing-attribute]
     _nvtx.deviceRangeEnd(range_handle, stream)
 
 

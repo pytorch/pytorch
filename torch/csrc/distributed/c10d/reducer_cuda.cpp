@@ -76,11 +76,11 @@ class CudaTimer : public Timer {
     if (milliseconds < 0) {
       return std::nullopt;
     }
-    return int64_t(milliseconds * kMilliSecondToNanosSecond);
+    return static_cast<int64_t>(milliseconds * kMilliSecondToNanosSecond);
   }
 };
 
-C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCUDA, CudaTimer);
+C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCUDA, CudaTimer)
 
 } // namespace
 } // namespace c10d

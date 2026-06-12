@@ -4,7 +4,7 @@ import contextlib
 import itertools
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import torch
 from torch import distributed as dist
@@ -17,14 +17,13 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -61,7 +60,7 @@ class _GradAccConfig:
     def __repr__(self) -> str:
         # Override to remove any spaces in the string to appease the internal
         # build's test name parser
-        return f"(use_no_sync={self.use_no_sync}," f"num_iters={self.num_iters})"
+        return f"(use_no_sync={self.use_no_sync},num_iters={self.num_iters})"
 
 
 @dataclass
@@ -71,7 +70,7 @@ class _GradAccConfigs:
     sole purpose of overriding :meth:`__repr__` to remove spaces.
     """
 
-    configs: List[_GradAccConfig]
+    configs: list[_GradAccConfig]
 
     def __repr__(self) -> str:
         # Override to remove any spaces in the string to appease the internal
@@ -79,7 +78,7 @@ class _GradAccConfigs:
         return "[" + ",".join(config.__repr__() for config in self.configs) + "]"
 
 
-class TestGradAcc(FSDPTest):
+class TestGradAcc(FSDPTestContinuous):
     """Tests ``FullyShardedDataParallel``'s gradient accumulation via both its
     ``no_sync()`` context manager and without the context manager."""
 
@@ -90,9 +89,9 @@ class TestGradAcc(FSDPTest):
     def _test_grad_acc(
         self,
         batch_dim: int,
-        configs: List[_GradAccConfig],
+        configs: list[_GradAccConfig],
         cpu_offload: CPUOffload,
-        backward_prefetch: Optional[BackwardPrefetch],
+        backward_prefetch: BackwardPrefetch | None,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
     ):
@@ -146,19 +145,20 @@ class TestGradAcc(FSDPTest):
         def permute_tensor(x: torch.Tensor):
             return x.view(-1)[torch.randperm(x.numel())].view_as(x)
 
-        batch: Tuple[torch.Tensor, ...] = fsdp_model.module.get_input(device)
-        batches: List[Tuple[torch.Tensor, ...]] = [batch]
+        batch: tuple[torch.Tensor, ...] = fsdp_model.module.get_input(device)
+        batches: list[tuple[torch.Tensor, ...]] = [batch]
         num_iters_to_acc = sum(config.num_iters for config in configs)
         for _ in range(num_iters_to_acc - 1):
             batches.append(tuple(permute_tensor(t) for t in batch))
         for batch1, batch2 in itertools.combinations(batches, r=2):
             for t1, t2 in zip(batch1, batch2):
-                assert not torch.all(
-                    t1 == t2
-                ), "Check the test to make sure that batches are distinct"
+                if torch.all(t1 == t2):
+                    raise AssertionError(
+                        "Check the test to make sure that batches are distinct"
+                    )
 
         # Concatenate the batches along the given batch dimension
-        concat_batch: Tuple[torch.Tensor, ...] = tuple(
+        concat_batch: tuple[torch.Tensor, ...] = tuple(
             torch.cat(ts, dim=batch_dim) for ts in zip(*batches)
         )
 
@@ -214,7 +214,7 @@ class TestGradAcc(FSDPTest):
         # Check that the optimizer step does not error
         optim.step()
 
-    def _get_subtest_config(self) -> Dict[str, List[Any]]:
+    def _get_subtest_config(self) -> dict[str, list[Any]]:
         """Returns a subtest configuration that subtests prefetching."""
         return {
             "backward_prefetch": [
@@ -275,7 +275,6 @@ class TestGradAcc(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm
     @parametrize("use_orig_params", [False, True])
     def test_grad_acc_cpu_offload(
         self,

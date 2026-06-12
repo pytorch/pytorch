@@ -456,7 +456,7 @@ struct FractionalMaxPoolOptions {
   using ExpandingArrayDouble = torch::ExpandingArray<D, double>;
   TORCH_ARG(std::optional<ExpandingArrayDouble>, output_ratio) = std::nullopt;
 
-  TORCH_ARG(torch::Tensor, _random_samples) = Tensor();
+  TORCH_ARG(torch::Tensor, _random_samples);
 };
 
 /// `FractionalMaxPoolOptions` specialized for the `FractionalMaxPool2d` module.

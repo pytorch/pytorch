@@ -10,16 +10,25 @@ import pandas as pd
 
 flaky_models = {
     "yolov3",
-    "gluon_inception_v3",
     "detectron2_maskrcnn_r_101_c4",
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
+    "moondream",  # discovered in https://github.com/pytorch/pytorch/pull/159291
+    # discovered in https://github.com/pytorch/pytorch/issues/161419. Its not flaky but really hard to repro, so skipping it
+    "mobilenetv3_large_100",
+    # https://github.com/pytorch/pytorch/issues/163670
+    "vision_maskrcnn",
+    # Old TorchBench SAM is flaky even with mask IoU checking.
+    # Borderline mask thresholding can flip a single pixel and give IoU=0
+    # when both masks are nearly empty.
+    # https://github.com/pytorch/pytorch/issues/176776
+    "sam",
 }
 
 
 def get_field(csv, model_name: str, field: str):
     try:
         return csv.loc[csv["name"] == model_name][field].item()
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -27,11 +36,41 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
 
+    if "rocm" in expected_filename:
+        flaky_models.update(
+            {
+                "Background_Matting",
+                "mnasnet1_0",
+                "llava",
+                "repvgg_a2",
+                "resnet152",
+                "resnet18",
+                "resnet50",
+                "stable_diffusion_unet",
+                "torchrec_dlrm",
+                "shufflenet_v2_x1_0",
+                "vgg16",
+                "BERT_pytorch",
+                # LLM
+                "google/gemma-2-2b",
+                "tts_angular",  # RuntimeError: Cannot access data pointer of Tensor
+                # Discovered on gfx950 CI after ROCm 7.2 upgrade, eager mode non determinism
+                "alexnet",
+                "demucs",
+            }
+        )
+
     for model in actual_csv["name"]:
         accuracy = get_field(actual_csv, model, "accuracy")
         expected_accuracy = get_field(expected_csv, model, "accuracy")
 
-        if accuracy == expected_accuracy:
+        if accuracy is None:
+            status = "MISSING_ACCURACY:"
+            failed.append(model)
+        elif expected_accuracy is None:
+            status = "MISSING_EXPECTED:"
+            failed.append(model)
+        elif accuracy == expected_accuracy:
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue
@@ -58,7 +97,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             msg += textwrap.dedent(
                 f"""
             Error: {len(failed)} models have accuracy status regressed:
-                {' '.join(failed)}
+                {" ".join(failed)}
 
             """
             )
@@ -66,7 +105,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             msg += textwrap.dedent(
                 f"""
             Improvement: {len(improved)} models have accuracy status improved:
-                {' '.join(improved)}
+                {" ".join(improved)}
 
             """
             )

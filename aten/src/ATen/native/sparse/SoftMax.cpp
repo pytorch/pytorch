@@ -2,7 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NamedTensorUtils.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/native/sparse/ParamUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/Parallel.h>
@@ -295,6 +295,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
     to exp functions as well as reuse of softmax implementation for
     log_softmax.
   */
+  using accscalar_t = at::acc_type<scalar_t, false>;
   auto sparse_dim = input.sparse_dim();
   auto indices = input._indices().contiguous();
   auto values = input._values().contiguous();
@@ -340,14 +341,14 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
           continue;
 
         /* Prepare scratch space */
-        std::vector<scalar_t> mx_row(nvalues, -std::numeric_limits<scalar_t>::infinity());
-        std::vector<scalar_t> exp_sums_row(nvalues, 0);
+        std::vector<accscalar_t> mx_row(nvalues, -std::numeric_limits<accscalar_t>::infinity());
+        std::vector<accscalar_t> exp_sums_row(nvalues, 0);
 
         /* Compute mx */
         for (int64_t i : pool_indices) {
           auto values_row = values_accessor[i];
           for (const auto j : c10::irange(nvalues)) {
-            mx_row[j] = std::max(mx_row[j], values_row[j]);
+            mx_row[j] = std::max(mx_row[j], accscalar_t(values_row[j]));
           }
         }
 
@@ -608,7 +609,6 @@ Tensor log_softmax_backward_sparse_cpu(
 
 Tensor _sparse_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
-    NoNamesGuard guard;
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
         return at::_sparse_softmax(input_, dim_, true);
     } else {
@@ -616,17 +616,12 @@ Tensor _sparse_softmax(const Tensor& input_, const int64_t dim_, std::optional<S
         return at::_sparse_softmax(converted, dim_, false);
     }
   }();
-  namedinference::propagate_names(result, input_);
   return result;
 }
 
-Tensor _sparse_softmax(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::_sparse_softmax(self, dimname_to_position(self, dim), dtype);
-}
 
 Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
-    NoNamesGuard guard;
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
         return at::_sparse_log_softmax(input_, dim_, true);
     } else {
@@ -634,12 +629,8 @@ Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_, std::option
         return at::_sparse_log_softmax(converted, dim_, false);
     }
   }();
-  namedinference::propagate_names(result, input_);
   return result;
 }
 
-Tensor _sparse_log_softmax(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::_sparse_log_softmax(self, dimname_to_position(self, dim), dtype);
-}
 
 } // namespace at::native

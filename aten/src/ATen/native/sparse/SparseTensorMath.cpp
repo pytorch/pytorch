@@ -551,7 +551,7 @@ static SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const Sparse
     return r;
 }
 
-Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, const Scalar& value);
+static Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, const Scalar& value);
 
 SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src, const Scalar& value, SparseTensor& r) {
   if (!t.is_sparse()) {
@@ -593,7 +593,7 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
 //    formerly known as spcadd
 // --------------------------------------------------------------------
 template <typename scalar_t>
-void add_dense_sparse_worker_non_hybrid_cpu(Tensor& r, const Scalar& value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
+static void add_dense_sparse_worker_non_hybrid_cpu(Tensor& r, const Scalar& value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
   auto indices_accessor = indices.accessor<int64_t, 2>();
   auto values_accessor = values.accessor<scalar_t, 1>();
 
@@ -616,7 +616,7 @@ void add_dense_sparse_worker_non_hybrid_cpu(Tensor& r, const Scalar& value, cons
 }
 
 template <typename scalar_t>
-inline void add_dense_sparse_worker_hybrid_cpu(Tensor& r, const Scalar& value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
+static inline void add_dense_sparse_worker_hybrid_cpu(Tensor& r, const Scalar& value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
 
   // Get the dense dimension element numbers of hybrid sparse tensor
   int64_t values_dense_size = values.stride(0);
@@ -647,7 +647,7 @@ inline void add_dense_sparse_worker_hybrid_cpu(Tensor& r, const Scalar& value, c
 }
 
 template <typename scalar_t>
-inline void add_dense_sparse_worker_non_coalesced_cpu(Tensor& r, const Scalar& value,
+static inline void add_dense_sparse_worker_non_coalesced_cpu(Tensor& r, const Scalar& value,
     const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
 
   // Get the dense dimension element numbers of hybrid sparse tensor
@@ -829,7 +829,7 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
 // so it is up to the user to supply right implementations for non-commutative
 // operations.
 template <typename binary_func_t>
-Tensor& intersection_binary_op_sparse_dense_out(
+static Tensor& intersection_binary_op_sparse_dense_out(
     const Tensor& d,
     const SparseTensor& s_,
     Tensor& res,
@@ -1183,7 +1183,7 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
 // --------------------------------------------------------------------
 
 template <typename scalar_t>
-void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, const Scalar& beta, const Tensor& t, const Scalar& alpha, const Tensor& indices, const Tensor& values, const Tensor& dense) {
+static void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, const Scalar& beta, const Tensor& t, const Scalar& alpha, const Tensor& indices, const Tensor& values, const Tensor& dense) {
 
   // r_ = alpha * sparse * dense
   scalar_t cast_alpha = alpha.to<scalar_t>();
@@ -1496,12 +1496,16 @@ SparseTensor& _sspaddmm_out_cpu(
   TORCH_CHECK(!sparse_.is_cuda(), "sspaddmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
   TORCH_CHECK(!dense.is_cuda(), "sspaddmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
+  TORCH_CHECK(sparse_.layout() == kSparse,
+      "sspaddmm: expected 'mat1' to have sparse layout, got 'mat1' with layout ", sparse_.layout());
+  TORCH_CHECK(dense.layout() == kStrided,
+      "sspaddmm: expected 'mat2' to have strided layout, got 'mat2' with layout ", dense.layout());
   TORCH_CHECK(sparse_.sparse_dim() == 2,
       "sspaddmm: Argument #2: matrices expected, got ", sparse_.sparse_dim(), "D tensor");
   TORCH_CHECK(sparse_.dense_dim() == 0,
       "sspaddmm: Argument #2: scalar values expected, got ", sparse_.dense_dim(), "D values");
   TORCH_CHECK(dense.dim() == 2,
-      "sspaddmm: Argument #2: matrices expected, got ", dense.dim(), "D tensor");
+      "sspaddmm: Argument #3: matrices expected, got ", dense.dim(), "D tensor");
 
   SparseTensor sparse = sparse_.coalesce();
 
@@ -1526,7 +1530,7 @@ SparseTensor& _sspaddmm_out_cpu(
   Tensor indices = sparse._indices().contiguous();
   Tensor values      = sparse._values();
 
-  Tensor csr = coo_to_csr(indices.data_ptr<int64_t>(), dim_i, nnz);
+  Tensor csr = coo_to_csr(indices.const_data_ptr<int64_t>(), dim_i, nnz);
 
   int64_t t_nnz = t._nnz();
   int64_t r_nnz = nnz * dim_k + t_nnz;
@@ -1905,7 +1909,7 @@ Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
 // Returns the index of the found element.
 // Returns by reference `found`, true if search value was found, false otherwise
 template<typename scalar_t>
-scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAccessor<scalar_t, 1>& sorted_arr_accessor, int64_t sorted_arr_begin_idx, int64_t length, bool* found) {
+static scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAccessor<scalar_t, 1>& sorted_arr_accessor, int64_t sorted_arr_begin_idx, int64_t length, bool* found) {
   if (length == 0) {
     *found = false;
     return -1;

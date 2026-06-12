@@ -2,7 +2,9 @@
 # Please add a new import when adding a new polyfill module.
 
 import importlib
-from typing import Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
+
+import torch.utils._pytree as python_pytree
 
 from .. import polyfills, trace_rules
 
@@ -12,16 +14,25 @@ if TYPE_CHECKING:
 
 
 # See also the TYPE_CHECKING block in torch/_dynamo/polyfills/__init__.py
-POLYFILLED_MODULE_NAMES: Tuple[str, ...] = (
+POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
+    "_collections",
     "builtins",
+    "copy",
     "functools",
     "itertools",
     "operator",
     "os",
-    "pytree",
+    "struct",
     "sys",
+    "fx",
+    "tensor",
+    "torch_c_nn",
+    "traceback",
 )
-POLYFILLED_MODULES: Tuple["ModuleType", ...] = tuple(
+if python_pytree._cxx_pytree_dynamo_traceable:
+    POLYFILLED_MODULE_NAMES += ("pytree",)
+
+POLYFILLED_MODULES: tuple["ModuleType", ...] = tuple(
     importlib.import_module(f".{submodule}", package=polyfills.__name__)
     for submodule in POLYFILLED_MODULE_NAMES
 )
