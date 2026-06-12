@@ -20,6 +20,7 @@ void topk_impl_loop(
     const int64_t dim_size,
     const bool largest,
     const bool sorted,
+    const bool stable,
     char** data, const int64_t* strides, const int64_t n) {
 
   // If k is zero, then output values and indices are empty tensors
@@ -48,42 +49,26 @@ void topk_impl_loop(
       queue[j].second = j;
     }
 
-    // we want nan to be sorted as top for numpy compatibility
-    if (use_partial_sort) {
+    auto topk_comp = [largest](const elem_t& x, const elem_t& y) -> bool {
+      // we want nan to be sorted as top for numpy compatibility
       if (largest) {
-        std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-          });
-      } else {
-        std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-          });
+        return ((_isnan<accscalar_t>(x.first) &&
+                 !_isnan<accscalar_t>(y.first)) ||
+                (x.first > y.first));
       }
+      return ((!_isnan<accscalar_t>(x.first) &&
+               _isnan<accscalar_t>(y.first)) ||
+              (x.first < y.first));
+    };
+
+    if (stable) {
+      std::stable_sort(queue.begin(), queue.end(), topk_comp);
+    } else if (use_partial_sort) {
+      std::partial_sort(queue.begin(), queue.begin() + k, queue.end(), topk_comp);
     } else {
-      if (largest) {
-        std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-          });
-        if (sorted) {
-          std::sort(queue.begin(), queue.begin() + k - 1,
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-            });
-        }
-      } else {
-        std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-          });
-        if (sorted) {
-          std::sort(queue.begin(), queue.begin() + k -1,
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-            });
-        }
+      std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(), topk_comp);
+      if (sorted) {
+        std::sort(queue.begin(), queue.begin() + k - 1, topk_comp);
       }
     }
 

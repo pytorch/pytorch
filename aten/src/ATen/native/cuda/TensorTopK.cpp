@@ -23,9 +23,10 @@ void topk_out_with_sort(
   const Tensor& self,
   int64_t k, int64_t dim, bool largest,
   const Tensor& values,
-  const Tensor& indices
+  const Tensor& indices,
+  bool stable
 ) {
-  auto [sorted_values, sorted_indices] = at::cuda::sort(self, /* stable= */false, dim, largest);
+  auto [sorted_values, sorted_indices] = at::cuda::sort(self, stable, dim, largest);
   values.copy_(sorted_values.narrow(dim, 0, k));
   indices.copy_(sorted_indices.narrow(dim, 0, k));
 }
@@ -77,6 +78,7 @@ bool should_use_sort(const Tensor& self, int64_t dim) {
 TORCH_IMPL_FUNC(topk_out_cuda)
   (const Tensor& self,
    int64_t k, int64_t dim, bool largest, bool sorted,
+   bool stable,
    const Tensor& values,
    const Tensor& indices) {
   TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
@@ -85,7 +87,12 @@ TORCH_IMPL_FUNC(topk_out_cuda)
   dim = at::maybe_wrap_dim(dim, self);
 
   if (should_use_sort(self, dim)) {
-    topk_out_with_sort(self, k, dim, largest, values, indices);
+    topk_out_with_sort(self, k, dim, largest, values, indices, stable);
+    return;
+  }
+
+  if (stable) {
+    topk_out_with_sort(self, k, dim, largest, values, indices, /*stable=*/true);
     return;
   }
 

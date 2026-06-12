@@ -1229,7 +1229,14 @@ def _shape_as_tensor(self: list[int]) -> list[int]:
     return [len(self)]
 
 
-def topk(self: list[int], k: int, dim: int = -1) -> tuple[list[int], list[int]]:
+def topk(
+    self: list[int],
+    k: int,
+    dim: int = -1,
+    largest: bool = True,
+    sorted: bool = True,
+    stable: bool = False,
+) -> tuple[list[int], list[int]]:
     if len(self) == 0:
         result: list[int] = []
     else:
@@ -1576,7 +1583,7 @@ add_shape_compute_mapping(
     "aten::_shape_as_tensor(Tensor self) -> Tensor", _shape_as_tensor
 )
 add_shape_compute_mapping(
-    "aten::topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)",
+    "aten::topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, bool stable=False) -> (Tensor values, Tensor indices)",
     topk,
 )
 add_shape_compute_mapping(

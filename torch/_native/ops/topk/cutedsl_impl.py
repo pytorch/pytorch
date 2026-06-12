@@ -100,8 +100,15 @@ def _min_rows_for_full_wave(device_idx: int) -> int:
 
 
 def _eligible(
-    self: torch.Tensor, k: int, dim: int, largest: bool, sorted_: bool
+    self: torch.Tensor,
+    k: int,
+    dim: int,
+    largest: bool,
+    sorted_: bool,
+    stable: bool,
 ) -> bool:
+    if stable:
+        return False
     if not self.is_cuda or self.dtype != torch.float32:
         return False
     if any_cow(self):
@@ -129,9 +136,14 @@ def _cond(
     largest: bool = True,
     sorted: bool = True,
     *args,
+    stable: bool = False,
     **kwargs,
 ) -> bool:
-    return _eligible(self, int(k), int(dim), bool(largest), bool(sorted))
+    if args:
+        if len(args) != 1:
+            return False
+        stable = bool(args[0])
+    return _eligible(self, int(k), int(dim), bool(largest), bool(sorted), bool(stable))
 
 
 def _out_cond(
@@ -140,11 +152,22 @@ def _out_cond(
     dim: int = -1,
     largest: bool = True,
     sorted: bool = True,
-    *,
-    values: torch.Tensor,
-    indices: torch.Tensor,
+    *args,
+    stable: bool = False,
+    values: torch.Tensor | None = None,
+    indices: torch.Tensor | None = None,
+    **kwargs,
 ) -> bool:
-    if not _cond(self, k, dim, largest, sorted):
+    if args:
+        if len(args) == 3:
+            stable, values, indices = args
+        elif len(args) == 2:
+            values, indices = args
+        else:
+            return False
+    if values is None or indices is None:
+        return False
+    if not _cond(self, k, dim, largest, sorted, stable=stable):
         return False
     if any_cow(values, indices):
         return False
@@ -180,6 +203,7 @@ def _impl(
     largest: bool = True,
     sorted: bool = True,
     *args,
+    stable: bool = False,
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     return _run(self, int(k))
@@ -191,10 +215,21 @@ def _out_impl(
     dim: int = -1,
     largest: bool = True,
     sorted: bool = True,
-    *,
-    values: torch.Tensor,
-    indices: torch.Tensor,
+    *args,
+    stable: bool = False,
+    values: torch.Tensor | None = None,
+    indices: torch.Tensor | None = None,
+    **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    if args:
+        if len(args) == 3:
+            stable, values, indices = args
+        elif len(args) == 2:
+            values, indices = args
+        else:
+            raise TypeError("topk.values expects values and indices outputs")
+    if values is None or indices is None:
+        raise TypeError("topk.values expects values and indices outputs")
     v, i = _run(self, int(k))
     values.copy_(v)
     indices.copy_(i)

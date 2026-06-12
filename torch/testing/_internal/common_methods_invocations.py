@@ -5447,7 +5447,7 @@ def _topk_method_deterministic(self, *args, **kwargs):
         torch.use_deterministic_algorithms(prior)
 
 
-def reference_topk(a, k, dim=-1, largest=True, sorted=True):
+def reference_topk(a, k, dim=-1, largest=True, sorted=True, *, stable=False):
     # OpInfo numpy ref hook. NumPy has no direct topk, so we sort the whole
     # axis and take the first k (sample shapes are small enough that this
     # is fine).
