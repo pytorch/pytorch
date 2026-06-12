@@ -26,6 +26,10 @@
 #include <cuda_runtime.h>
 #endif
 
+#ifdef USE_XPU
+#include <c10/xpu/XPUCachingAllocator.h>
+#endif
+
 #include <ATen/MapAllocator.h>
 #include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -442,7 +446,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     return nullptr;
   }
 
-  size_t storage_size = THPUtils_unpackUInt64(_size_bytes) / sizeof(uint8_t);
+  size_t storage_size = THPUtils_unpackUInt64(_size_bytes);
   ptrdiff_t storage_offset_bytes =
       static_cast<ptrdiff_t>(THPUtils_unpackLong(_offset_bytes));
 
@@ -555,6 +559,140 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+#ifdef USE_XPU
+  const auto& storage = THPStorage_Unpack(self);
+  TORCH_CHECK(
+      storage.device_type() == at::kXPU, "_share_xpu_: only available on XPU");
+  at::DeviceGuard device_guard(storage.device());
+
+  THPObjectPtr tuple(PyTuple_New(4));
+  THPObjectPtr device(THPUtils_packInt32(storage.device().index()));
+  THPObjectPtr _handle(Py_None);
+  THPObjectPtr size_bytes(THPUtils_packUInt64(storage.nbytes()));
+  THPObjectPtr _offset_bytes(THPUtils_packInt32(0));
+
+  if (storage.data()) {
+    auto shandle =
+        c10::xpu::XPUCachingAllocator::shareIpcHandle(storage.mutable_data());
+
+    TORCH_CHECK(
+        shandle.is_fd && shandle.is_dma_buf,
+        "XPU IPC requires DMA-BUF handle export");
+    THPObjectPtr handle_tuple(PyTuple_New(2));
+    THPObjectPtr _fd(PyLong_FromLongLong(shandle.fd));
+    THPObjectPtr _alloc_size(PyLong_FromLongLong(shandle.alloc_size));
+    if (!handle_tuple || !_fd || !_alloc_size) {
+      return nullptr;
+    }
+    PyTuple_SET_ITEM(handle_tuple.get(), 0, _fd.release());
+    PyTuple_SET_ITEM(handle_tuple.get(), 1, _alloc_size.release());
+    _handle = handle_tuple.release();
+    _offset_bytes = PyLong_FromSsize_t(static_cast<Py_ssize_t>(shandle.offset));
+  }
+
+  if (!tuple || !device || !_handle || !size_bytes || !_offset_bytes) {
+    return nullptr;
+  }
+  PyTuple_SET_ITEM(tuple.get(), 0, device.release());
+  PyTuple_SET_ITEM(tuple.get(), 1, _handle.release());
+  PyTuple_SET_ITEM(tuple.get(), 2, size_bytes.release());
+  PyTuple_SET_ITEM(tuple.get(), 3, _offset_bytes.release());
+  return tuple.release();
+#else
+  TORCH_CHECK(false, "XPU is not available");
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_newSharedXpu(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+#ifdef USE_XPU
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 4, "tuple of 4 items expected");
+  PyObject* _device = PyTuple_GET_ITEM(args, 0);
+  PyObject* _handle = PyTuple_GET_ITEM(args, 1);
+  PyObject* _size_bytes = PyTuple_GET_ITEM(args, 2);
+  PyObject* _offset_bytes = PyTuple_GET_ITEM(args, 3);
+  const bool is_dma_buf_tuple = PyTuple_Check(_handle) &&
+      PyTuple_GET_SIZE(_handle) == 2 &&
+      THPUtils_checkLong(PyTuple_GET_ITEM(_handle, 0)) &&
+      THPUtils_checkLong(PyTuple_GET_ITEM(_handle, 1));
+
+  if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size_bytes) &&
+        is_dma_buf_tuple && THPUtils_checkLong(_offset_bytes))) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "_new_shared in XPU mode",
+        1,
+        "(int device, (int,int) handle, int storage_size_bytes, int storage_offset_bytes)");
+    return nullptr;
+  }
+
+  size_t storage_size = THPUtils_unpackUInt64(_size_bytes) / sizeof(uint8_t);
+  ptrdiff_t storage_offset_bytes =
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(_offset_bytes));
+  const auto device = c10::checked_convert<c10::DeviceIndex>(
+      THPUtils_unpackLong(_device), "c10::DeviceIndex");
+  at::DeviceGuard device_guard(at::Device(at::kXPU, device));
+
+  const auto fd = THPUtils_unpackLong(PyTuple_GET_ITEM(_handle, 0));
+  const auto alloc_size = THPUtils_unpackLong(PyTuple_GET_ITEM(_handle, 1));
+  TORCH_CHECK(fd >= 0, "invalid DMA-BUF fd for XPU IPC");
+  TORCH_CHECK(alloc_size > 0, "invalid DMA-BUF allocation size for XPU IPC");
+  TORCH_CHECK(
+      storage_offset_bytes >= 0, "invalid negative storage offset for XPU IPC");
+  const auto alloc_size_u64 = static_cast<uint64_t>(alloc_size);
+  const auto storage_offset_u64 = static_cast<uint64_t>(storage_offset_bytes);
+  const auto storage_size_u64 = static_cast<uint64_t>(storage_size);
+  TORCH_CHECK(
+      storage_offset_u64 <= alloc_size_u64,
+      "XPU IPC storage offset exceeds allocation size");
+  TORCH_CHECK(
+      storage_size_u64 <= alloc_size_u64,
+      "XPU IPC storage size exceeds allocation size");
+  TORCH_CHECK(
+      storage_offset_u64 <= alloc_size_u64 - storage_size_u64,
+      "XPU IPC storage range exceeds allocation size");
+  std::string handle = std::string("dmabuf:") + std::to_string(fd) + ":" +
+      std::to_string(alloc_size);
+
+  std::shared_ptr<void> base_ptr =
+      c10::xpu::XPUCachingAllocator::getIpcDevPtr(std::move(handle), device);
+  void* dev_ptr = static_cast<char*>(base_ptr.get()) + storage_offset_bytes;
+
+  struct XpuIpcDeleterContext {
+    std::shared_ptr<void> base_ptr;
+  };
+
+  auto ctx = std::make_unique<XpuIpcDeleterContext>();
+  ctx->base_ptr = std::move(base_ptr);
+
+  c10::DataPtr data_ptr(
+      dev_ptr,
+      ctx.release(),
+      +[](void* ctx_) {
+        std::unique_ptr<XpuIpcDeleterContext> ctx(
+            static_cast<XpuIpcDeleterContext*>(ctx_));
+        ctx->base_ptr.reset();
+      },
+      at::Device(at::DeviceType::XPU, device));
+
+  auto base = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      storage_size,
+      std::move(data_ptr),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+  return THPStorage_NewWithStorage(THPStorageClass, std::move(base));
+#else
+  TORCH_CHECK(false, "XPU is not available");
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
 // Returns an object that holds a "weak" pointer to the c10::StorageImpl.  This
 // pointer keeps the c10::StorageImpl struct live, but does not retain the data
 // pointer.
@@ -642,6 +780,11 @@ static PyMethodDef THPStorage_sharingMethods[] = {
     {"_share_cuda_", THPStorage_shareCuda, METH_NOARGS, nullptr},
     {"_new_shared_cuda",
      THPStorage_newSharedCuda,
+     METH_VARARGS | METH_STATIC,
+     nullptr},
+    {"_share_xpu_", THPStorage_shareXpu, METH_NOARGS, nullptr},
+    {"_new_shared_xpu",
+     THPStorage_newSharedXpu,
      METH_VARARGS | METH_STATIC,
      nullptr},
     {"_release_ipc_counter_cuda",

@@ -2,9 +2,23 @@
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
+#include <ATen/DeviceGuard.h>
+
+#include <level_zero/ze_api.h>
+#include <sycl/ext/oneapi/backend/level_zero.hpp>
+#if defined(__linux__)
+#include <unistd.h>
+#endif
+#include <algorithm>
+#include <array>
+#include <cstdlib>
+#include <cstring>
 #include <deque>
+#include <limits>
 #include <mutex>
 #include <set>
+#include <sstream>
+#include <thread>
 #include <vector>
 
 namespace c10::xpu::XPUCachingAllocator {
@@ -16,6 +30,43 @@ using namespace c10::CachingDeviceAllocator;
 constexpr size_t kDeviceAlignment = 512;
 
 namespace {
+struct ZeIpcApi {
+  ze_result_t get_alloc_properties(
+      ze_context_handle_t context,
+      const void* ptr,
+      ze_memory_allocation_properties_t* props,
+      ze_device_handle_t* device) {
+    return zeMemGetAllocProperties(context, ptr, props, device);
+  }
+
+  ze_result_t alloc_device(
+      ze_context_handle_t context,
+      const ze_device_mem_alloc_desc_t* alloc_desc,
+      size_t size,
+      size_t alignment,
+      ze_device_handle_t device,
+      void** ptr) {
+    return zeMemAllocDevice(context, alloc_desc, size, alignment, device, ptr);
+  }
+
+  ze_result_t free_device(ze_context_handle_t context, void* ptr) {
+    return zeMemFree(context, ptr);
+  }
+
+  bool dma_buf_available() {
+#if defined(__linux__)
+    return true;
+#else
+    return false;
+#endif
+  }
+};
+
+ZeIpcApi& get_ze_ipc_api() {
+  static ZeIpcApi api;
+  return api;
+}
+
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
 struct Block;
@@ -53,6 +104,7 @@ struct Block {
   void* ptr{nullptr}; // memory address
   bool allocated{false}; // in-use flag
   bool mapped{true}; // True if this Block is backed by physical pages
+  bool dma_buf_allocated{false}; // True if allocated with DMA-BUF export flag
   Block* prev{nullptr}; // prev block if split from a larger allocation
   Block* next{nullptr}; // next block if split from a larger allocation
   int event_count{0}; // number of outstanding XPU events
@@ -357,6 +409,7 @@ struct AllocParams {
   BlockPool* pool;
   size_t alloc_size;
   Block* block{nullptr};
+  bool dma_buf_used{false};
   StatTypes stat_types = {};
 };
 
@@ -410,6 +463,32 @@ void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
   } else {
+#if defined(__linux__)
+    auto& ze_ipc_api = get_ze_ipc_api();
+    auto ze_context = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
+        xpu::get_device_context());
+    auto ze_device = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
+        xpu::get_raw_device(p.device()));
+
+    ze_external_memory_export_desc_t export_desc = {};
+    export_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_EXPORT_DESC;
+    export_desc.pNext = nullptr;
+    export_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+
+    ze_device_mem_alloc_desc_t alloc_desc = {};
+    alloc_desc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+    alloc_desc.pNext = &export_desc;
+    alloc_desc.flags = 0;
+    alloc_desc.ordinal = 0;
+
+    const auto alloc_result = ze_ipc_api.alloc_device(
+        ze_context, &alloc_desc, size, kDeviceAlignment, ze_device, ptr);
+    if (alloc_result == ZE_RESULT_SUCCESS) {
+      p.dma_buf_used = true;
+      return;
+    }
+#endif
+
     *ptr = sycl::aligned_alloc_device(
         kDeviceAlignment,
         size,
@@ -418,10 +497,24 @@ void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   }
 }
 
-void deletePrimitive(void* ptr, BlockPool* pool) {
+void deletePrimitive(void* ptr, BlockPool* pool, bool dma_buf_allocated) {
   if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
     pool->owner_PrivatePool->allocator()->raw_delete(ptr);
   } else {
+#if defined(__linux__)
+    auto& ze_ipc_api = get_ze_ipc_api();
+    if (dma_buf_allocated) {
+      auto ze_context = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
+          xpu::get_device_context());
+      const auto free_result = ze_ipc_api.free_device(ze_context, ptr);
+      if (free_result == ZE_RESULT_SUCCESS) {
+        return;
+      }
+    }
+#else
+    (void)dma_buf_allocated;
+#endif
+
     sycl::free(ptr, xpu::get_device_context());
   }
 }
@@ -929,6 +1022,7 @@ class DeviceCachingAllocator {
       p.pool->owner_PrivatePool->allocation_count++;
     }
     p.block = new Block(p.device(), p.queue(), size, p.pool, ptr);
+    p.block->dma_buf_allocated = p.dma_buf_used;
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.segment[stat_type].increase(1);
       stats.reserved_bytes[stat_type].increase(size);
@@ -1013,7 +1107,7 @@ class DeviceCachingAllocator {
         context ? context : block->context_when_segment_allocated);
 
     auto* pool = block->pool;
-    deletePrimitive(block->ptr, pool);
+    deletePrimitive(block->ptr, pool, block->dma_buf_allocated);
 
     if (pool->owner_PrivatePool) {
       TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->allocation_count > 0);
@@ -1790,7 +1884,129 @@ static void local_raw_delete(void* ptr);
 class NativeCachingAllocator : public XPUAllocator {
  private:
   alignas(hardware_destructive_interference_size) std::mutex mutex;
+  std::mutex ipc_mutex_;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
+  struct MemHandleCacheEntry {
+    MemHandleCacheEntry(c10::DeviceIndex device, const std::string& handle)
+        : device_(device), initialized_(false), fd_(-1), alloc_size_(0) {
+#if !defined(__linux__)
+      (void)device;
+      (void)handle;
+      TORCH_CHECK(false, "XPU IPC storage sharing is only supported on Linux");
+#else
+      auto& ze_ipc_api = get_ze_ipc_api();
+
+      if (handle.rfind("dmabuf:", 0) == 0) {
+        const auto fd_end = handle.find(':', 7);
+        TORCH_CHECK(
+            fd_end != std::string::npos,
+            "invalid dmabuf handle format for XPU IPC");
+        fd_ = std::stoll(handle.substr(7, fd_end - 7));
+        alloc_size_ =
+            static_cast<size_t>(std::stoull(handle.substr(fd_end + 1)));
+        TORCH_CHECK(
+            alloc_size_ > 0, "invalid dmabuf allocation size for XPU IPC");
+      } else {
+        TORCH_CHECK(
+            false,
+            "unsupported XPU IPC handle format; expected dmabuf:<fd>:<alloc_size>");
+      }
+
+      (void)ze_ipc_api;
+#endif
+    }
+
+    ~MemHandleCacheEntry() {
+#if defined(__linux__)
+      if (fd_ >= 0) {
+        ::close(static_cast<int>(fd_));
+        fd_ = -1;
+      }
+#endif
+    }
+
+    void init() {
+      if (initialized_) {
+        return;
+      }
+
+#if !defined(__linux__)
+      TORCH_CHECK(false, "XPU IPC storage sharing is only supported on Linux");
+#else
+      // Child processes must initialize XPU state.
+      at::DeviceGuard guard(at::Device(at::kXPU, device_));
+      c10::xpu::device_count_ensure_non_zero();
+
+      ze_context_ = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
+          xpu::get_device_context());
+      auto ze_device = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
+          xpu::get_raw_device(device_));
+
+      auto& ze_ipc_api = get_ze_ipc_api();
+
+      ze_external_memory_import_fd_t import_desc = {};
+      import_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
+      import_desc.pNext = nullptr;
+      import_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+      import_desc.fd = static_cast<int>(fd_);
+
+      ze_device_mem_alloc_desc_t alloc_desc = {};
+      alloc_desc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+      alloc_desc.pNext = &import_desc;
+      alloc_desc.flags = 0;
+      alloc_desc.ordinal = 0;
+
+      const auto alloc_result = ze_ipc_api.alloc_device(
+          ze_context_,
+          &alloc_desc,
+          alloc_size_,
+          kDeviceAlignment,
+          ze_device,
+          &xpu_ipc_ptr_);
+      if (fd_ >= 0) {
+        ::close(static_cast<int>(fd_));
+        fd_ = -1;
+      }
+      TORCH_CHECK(
+          alloc_result == ZE_RESULT_SUCCESS,
+          "zeMemAllocDevice (DMA-BUF import) failed with code ",
+          static_cast<int>(alloc_result));
+      initialized_ = true;
+#endif
+    }
+
+    void clear() {
+      if (xpu_ipc_ptr_ == nullptr) {
+        return;
+      }
+
+#if defined(__linux__)
+      auto& ze_ipc_api = get_ze_ipc_api();
+      const auto free_result =
+          ze_ipc_api.free_device(ze_context_, xpu_ipc_ptr_);
+      if (free_result != ZE_RESULT_SUCCESS) {
+        TORCH_WARN(
+            "zeMemFree (DMA-BUF import) failed with code ",
+            static_cast<int>(free_result));
+      }
+#endif
+      xpu_ipc_ptr_ = nullptr;
+    }
+
+    void* ptr() const {
+      TORCH_CHECK(initialized_, "MemHandleCacheEntry not initialized");
+      return xpu_ipc_ptr_;
+    }
+
+    c10::DeviceIndex device_;
+    ze_context_handle_t ze_context_{nullptr};
+    void* xpu_ipc_ptr_{nullptr};
+    std::weak_ptr<void> wp_;
+    bool initialized_;
+    int64_t fd_;
+    size_t alloc_size_;
+  };
+  ska::flat_hash_map<std::string, MemHandleCacheEntry> ipcMemHandle_to_devptr;
   c10::ApproximateClockToUnixTimeConverter clock_converter;
 
   void add_allocated_block(Block* block) {
@@ -1926,6 +2142,115 @@ class NativeCachingAllocator : public XPUAllocator {
 
   void raw_delete(void* ptr) override {
     this->free(ptr);
+  }
+
+  ShareableHandle shareIpcHandle(void* ptr) override {
+#if !defined(__linux__)
+    (void)ptr;
+    TORCH_CHECK(false, "XPU IPC storage sharing is only supported on Linux");
+#else
+    Block* block = get_allocated_block(ptr);
+    TORCH_CHECK(block, "invalid device pointer for XPU IPC: ", ptr);
+    TORCH_CHECK(
+        !block->expandable_segment,
+        "XPU IPC is not supported for expandable segments");
+
+    Block* base_block = block;
+    while (base_block->prev != nullptr) {
+      base_block = base_block->prev;
+    }
+
+    const auto storage_offset_bytes = static_cast<ptrdiff_t>(
+        reinterpret_cast<char*>(block->ptr) -
+        reinterpret_cast<char*>(base_block->ptr));
+
+    size_t allocation_size_bytes = 0;
+    for (Block* cursor = base_block; cursor != nullptr; cursor = cursor->next) {
+      TORCH_CHECK(
+          allocation_size_bytes <=
+              std::numeric_limits<size_t>::max() - cursor->size,
+          "XPU IPC allocation size overflow");
+      allocation_size_bytes += cursor->size;
+    }
+
+    auto ze_context = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
+        xpu::get_device_context());
+    auto& ze_ipc_api = get_ze_ipc_api();
+    (void)ze_ipc_api;
+
+    ze_external_memory_export_fd_t export_fd = {};
+    export_fd.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_EXPORT_FD;
+    export_fd.pNext = nullptr;
+    export_fd.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+    export_fd.fd = -1;
+
+    ze_memory_allocation_properties_t alloc_props = {};
+    alloc_props.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
+    alloc_props.pNext = &export_fd;
+
+    const auto alloc_props_result = ze_ipc_api.get_alloc_properties(
+        ze_context, base_block->ptr, &alloc_props, nullptr);
+    TORCH_CHECK(
+        alloc_props_result == ZE_RESULT_SUCCESS,
+        "zeMemGetAllocProperties (DMA-BUF export) failed with code ",
+        static_cast<int>(alloc_props_result));
+    TORCH_CHECK(
+        export_fd.fd >= 0,
+        "zeMemGetAllocProperties did not provide a valid DMA-BUF fd for XPU IPC");
+
+    return {
+        std::string(),
+        storage_offset_bytes,
+        true,
+        static_cast<int64_t>(export_fd.fd),
+        true,
+        static_cast<int64_t>(allocation_size_bytes)};
+#endif
+  }
+
+  std::shared_ptr<void> getIpcDevPtr(
+      const std::string& handle,
+      c10::DeviceIndex device) override {
+#if !defined(__linux__)
+    (void)handle;
+    (void)device;
+    TORCH_CHECK(false, "XPU IPC storage sharing is only supported on Linux");
+#else
+    std::lock_guard<std::mutex> lock(ipc_mutex_);
+    auto iter = ipcMemHandle_to_devptr.find(handle);
+    if (iter != ipcMemHandle_to_devptr.end()) {
+      auto devptr = iter->second.wp_.lock();
+      if (devptr) {
+        return devptr;
+      }
+      ipcMemHandle_to_devptr.erase(iter);
+    }
+
+    MemHandleCacheEntry entry(device, handle);
+    entry.init();
+
+    auto inserted = ipcMemHandle_to_devptr.emplace(handle, std::move(entry));
+    TORCH_INTERNAL_ASSERT(inserted.second);
+    auto& inserted_entry = inserted.first->second;
+    auto shared_handle = inserted.first->first;
+
+    auto sp = std::shared_ptr<void>(
+        inserted_entry.ptr(), [shared_handle, this](void* p) {
+          (void)p;
+          std::unique_lock<std::mutex> deleter_lock(ipc_mutex_);
+
+          auto it = ipcMemHandle_to_devptr.find(shared_handle);
+          TORCH_INTERNAL_ASSERT(it != ipcMemHandle_to_devptr.end());
+          auto entry = std::move(it->second);
+          ipcMemHandle_to_devptr.erase(it);
+
+          deleter_lock.unlock();
+
+          entry.clear();
+        });
+    inserted_entry.wp_ = sp;
+    return sp;
+#endif
   }
 
   void copy_data(void* dest, const void* src, std::size_t count) const final {

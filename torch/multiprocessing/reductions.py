@@ -218,6 +218,67 @@ def rebuild_cuda_tensor(
     return t
 
 
+def rebuild_xpu_tensor(
+    tensor_cls,
+    tensor_size,
+    tensor_stride,
+    tensor_offset,
+    storage_cls,
+    dtype,
+    storage_device,
+    storage_handle,
+    storage_size_bytes,
+    storage_offset_bytes,
+    requires_grad,
+):
+    if isinstance(storage_handle, tuple):
+        storage_handle_list = list(storage_handle)
+        if storage_handle_list:
+            detach = getattr(storage_handle_list[0], "detach", None)
+            if callable(detach):
+                storage_handle_list[0] = detach()
+        storage_handle = tuple(storage_handle_list)
+    else:
+        detach = getattr(storage_handle, "detach", None)
+        if callable(detach):
+            storage_handle = detach()
+
+    if storage_handle is None or storage_size_bytes == 0:
+        storage = storage_cls(0, dtype=dtype, device=storage_device, _internal=True)
+    else:
+        cache_key = (storage_handle, storage_offset_bytes)
+        storage = storage_from_cache(storage_cls, cache_key)
+        if storage is None:
+            torch.xpu._lazy_init()
+            storage = storage_cls._new_shared_xpu(
+                storage_device,
+                storage_handle,
+                storage_size_bytes,
+                storage_offset_bytes,
+            )
+            shared_cache[cache_key] = StorageWeakRef(storage)
+
+    _storage = (
+        storage
+        if isinstance(storage, torch.UntypedStorage)
+        else storage._untyped_storage
+    )
+
+    t = torch._utils._rebuild_tensor(
+        torch.storage.TypedStorage(wrap_storage=_storage, dtype=dtype, _internal=True),
+        tensor_offset,
+        tensor_size,
+        tensor_stride,
+    )
+
+    if tensor_cls == torch.nn.parameter.Parameter:
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
+
+    return t
+
+
 def reduce_tensor(tensor):
     if tensor.requires_grad and not tensor.is_leaf:
         raise RuntimeError(
@@ -383,6 +444,43 @@ def reduce_tensor(tensor):
                 tensor.storage_offset(),
                 tensor.dtype,
                 tensor.untyped_storage().size(),
+                tensor.requires_grad,
+            ),
+        )
+    elif storage._untyped_storage.device.type == "xpu":
+        (
+            device,
+            handle,
+            storage_size_bytes,
+            storage_offset_bytes,
+        ) = storage._share_xpu_()
+        tensor_offset = tensor.storage_offset()
+
+        if (
+            isinstance(handle, tuple)
+            and len(handle) == 2
+            and isinstance(handle[0], int)
+        ):
+            orig_fd = handle[0]
+            fd = os.dup(orig_fd)
+            handle = (multiprocessing.reduction.DupFd(fd), handle[1])
+        elif handle is not None:
+            raise RuntimeError(
+                f"Unsupported XPU IPC handle type: {type(handle)!r}. Expected DMA-BUF tuple."
+            )
+        return (
+            rebuild_xpu_tensor,
+            (
+                type(tensor),
+                tensor.size(),
+                tensor.stride(),
+                tensor_offset,
+                type(storage),
+                tensor.dtype,
+                device,
+                handle,
+                storage_size_bytes,
+                storage_offset_bytes,
                 tensor.requires_grad,
             ),
         )
