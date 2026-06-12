@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 #include <c10/core/Allocator.h>
 // needs to be included only once in library.
@@ -29,4 +29,4 @@ void clear_computation_cache() {
 
 } // namespace  at::native::mkldnn
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
