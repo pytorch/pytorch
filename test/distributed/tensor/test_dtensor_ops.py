@@ -1009,11 +1009,12 @@ class TestSingleDimStrategies(DTensorOpTestBase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(
         {
-            # Stochastic: each shard gets independent RNG, so
-            # op(full) != cat(op(shard0), op(shard1)).
+            # Value validation cannot compare nondeterministic or
+            # uninitialized outputs shard-by-shard.
             skip("exponential"),
             skip("geometric"),
             skip("log_normal"),
+            skip("nn.functional.rrelu"),
             skip("normal", "in_place"),
             skip("uniform"),
         },
