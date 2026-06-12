@@ -7177,7 +7177,7 @@ def scaled_mm(
     contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
     *,
-    out: Optional[torch.Tensor] = None,
+    out: torch.Tensor | None = None,
 ) -> Tensor:
     r"""
     scaled_mm(mat_a, mat_b, scale_a, scale_recipe_a, scale_b, scale_recipe_b, swizzle_a, swizzle_b, bias, output_dtype,
