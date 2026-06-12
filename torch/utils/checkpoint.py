@@ -185,8 +185,7 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
 
     fwd_device_states = []
     for device_id in fwd_device_ids:
-        with torch.accelerator.device_index(device_id):
-            fwd_device_states.append(torch.accelerator.get_rng_state())
+        fwd_device_states.append(torch.accelerator.get_rng_state(device_id))
 
     return fwd_device_ids, fwd_device_states
 
@@ -206,8 +205,7 @@ def set_device_states(devices, states, *, device_type=None) -> None:
     if device_type == "meta":
         return
     for device, state in zip(devices, states, strict=False):
-        with torch.accelerator.device_index(device):
-            torch.accelerator.set_rng_state(state)
+        torch.accelerator.set_rng_state(state, device)
 
 
 def _get_autocast_kwargs(device_type="cuda"):
