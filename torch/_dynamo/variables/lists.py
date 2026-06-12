@@ -1546,6 +1546,32 @@ class DequeVariable(CommonListMethodsVariable):
         else:
             slice_within_maxlen = None
 
+        if name == "__init__" and self.is_mutable():
+            # deque_init: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1810
+            # Re-init resets maxlen (to None unless given), clears the deque,
+            # then extends with the iterable.
+            iterable = args[0] if len(args) >= 1 else kwargs.pop("iterable", None)
+            new_maxlen = (
+                args[1]
+                if len(args) >= 2
+                else kwargs.pop("maxlen", ConstantVariable.create(None))
+            )
+            if len(args) > 2 or kwargs:
+                raise_args_mismatch(tx, name)
+            if not new_maxlen.is_python_constant():
+                raise_type_error(tx, "an integer is required")
+            new_maxlen_val = new_maxlen.as_python_constant()
+            if new_maxlen_val is not None and new_maxlen_val < 0:
+                raise_observed_exception(
+                    ValueError, tx, args=["maxlen must be non-negative"]
+                )
+            tx.output.side_effects.mutation(self)
+            self.maxlen = new_maxlen
+            self.items[:] = []
+            if iterable is not None:
+                self.call_method(tx, "extend", [iterable], {})
+            return ConstantVariable.create(None)
+
         if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
