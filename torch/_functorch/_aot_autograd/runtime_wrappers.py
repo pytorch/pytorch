@@ -64,7 +64,7 @@ from .descriptors import (
 from .functional_utils import gen_alias_from_base
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
-    add_input_mutation_storage_overlap_guards,
+    add_input_mutation_storage_overlap_partition_guard,
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
     remove_dupe_metadata,
@@ -2177,7 +2177,7 @@ def merge_view_inputs(
         # Return early when there are no mutations.
         return fwd_inputs, fwd_inputs_descs, None
 
-    add_input_mutation_storage_overlap_guards(
+    add_input_mutation_storage_overlap_partition_guard(
         aot_config, fwd_inputs, mutated_input_info
     )
 

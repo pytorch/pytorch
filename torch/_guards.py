@@ -489,16 +489,14 @@ class StorageOverlap(GuardEnvExpr):
 
 
 @dataclasses.dataclass(frozen=True)
-class StorageOverlapPair(GuardEnvExpr):
-    input_source_a: Source
-    input_source_b: Source
-    overlaps: bool
+class StorageOverlapPartition(GuardEnvExpr):
+    input_sources: list[Source]
+    overlapping_indices: tuple[tuple[int, ...], ...]
 
     def __post_init__(self) -> None:
-        if self.input_source_a == self.input_source_b:
+        if len(set(self.input_sources)) != len(self.input_sources):
             raise AssertionError(
-                f"input_source_a and input_source_b must be different, "
-                f"got {self.input_source_a}"
+                f"input_sources must be unique, got {self.input_sources}"
             )
 
 
