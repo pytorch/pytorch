@@ -44,6 +44,7 @@ from torch._inductor.runtime.hints import (
     HeuristicType,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
+    ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
@@ -60,6 +61,7 @@ from torch._inductor.runtime.triton_heuristics import (
     CachingAutotunerPlugin,
     DEFER,
     make_matmul_triton_config,
+    match_target_block_product,
     template,
     triton_config,
 )
@@ -166,6 +168,59 @@ class TestTritonHeuristics(TestCase):
 
         with self.assertRaisesRegex(AssertionError, "exceeds Triton maximum"):
             make_matmul_triton_config({"x": 256, "y": 128, "r": 64}, 8, 1)
+
+    def test_match_target_block_product_breaks_ties_by_coalescing_score(self):
+        block_sizes = match_target_block_product(
+            {"x": 128, "y": 4096},
+            {"x": 1, "y": 16},
+            target_block_product=32,
+        )
+
+        self.assertEqual(block_sizes, {"x": 1, "y": 32})
+
+    def test_persistent_tiled_inner_reduction_default_config(self):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=80,
+            major=8,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+        configs = _persistent_reduction_configs(
+            {"y": 4096, "x": 128, "r0_": 32},
+            ReductionHint.INNER,
+            {
+                "tiling_scores": {
+                    "y": 33554432,
+                    "x": 2097152,
+                    "r0_": 67108864,
+                },
+                "max_autotune": False,
+                "max_autotune_pointwise": False,
+            },
+            {"native_matmul": False, "device": device},
+        )
+
+        self.assertTrue(
+            any(
+                cfg.kwargs == {"YBLOCK": 32, "XBLOCK": 1}
+                and cfg.num_warps == 1
+                and cfg.num_stages == 1
+                for cfg in configs
+            ),
+            configs,
+        )
+        self.assertTrue(
+            any(
+                cfg.kwargs == {"YBLOCK": 64, "XBLOCK": 1}
+                and cfg.num_warps == 1
+                and cfg.num_stages == 1
+                for cfg in configs
+            ),
+            configs,
+        )
 
     def test_reduction_min_block_preserves_tile_product(self):
         cfg = _enforce_reduction_config_block_minimums(
