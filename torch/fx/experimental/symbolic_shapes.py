@@ -7594,6 +7594,29 @@ class ShapeEnv:
                 "guard_or_false, guard_or_true and statically_known_true."
             )
 
+        # If the ShapesSpec/ParamsSpec dynamic-shapes API is in use, this DDE is
+        # often a derived dim / unanchored IntVar whose relation has not been
+        # lowered. Point the user at the `assumptions=` bypass and list any
+        # un-materialized relations so the cause is visible (the structural check
+        # `_finalize_spec_wiring` runs post-trace, so a branch can DDE first).
+        spec_msg = ""
+        pending = self._shape_spec_pending_assumptions
+        if self._spec_symbol_to_compile_symbol or pending:
+            spec_msg = (
+                "\n\nThe ShapesSpec/ParamsSpec dynamic-shapes API is in use. You can "
+                "often resolve this by adding a relational assumption to your "
+                "ShapesSpec, e.g. `assumptions=[a == 2 * b]`, so the relation is "
+                "known at trace time."
+            )
+            if pending:
+                relations = "\n".join(
+                    f"  - {re.sub(r'#[0-9]+', '', str(b))}" for _free, b in pending
+                )
+                spec_msg += (
+                    "\nThe following spec relation(s) were not materialized before "
+                    f"this guard and may be the cause:\n{relations}"
+                )
+
         msg = (
             f"{desc} {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
@@ -7606,6 +7629,7 @@ class ShapeEnv:
             "For more debugging help, see "
             "https://docs.google.com/document/d/1HSuTTVvYH1pTew89Rtpeu84Ht3nQEFTYhAX3Ypa_xJs/edit?usp=sharing\n"
             + maybe_extra_debug
+            + spec_msg
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
