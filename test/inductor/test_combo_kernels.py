@@ -868,6 +868,14 @@ class ComboKernelTests(TestCase):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        # XPU persistent reduction uses tl.atomic_add(sem='relaxed') which can
+        # produce slightly different float32 results due to different atomic
+        # ordering on Intel GPU hardware. Tracked as accuracy issue.
+        # See: https://github.com/intel/torch-xpu-ops/issues/3973
+        if GPU_TYPE == "xpu":
+            raise unittest.SkipTest(
+                "XPU: persistent reduction atomic ordering accuracy issue"
+            )
         self.assertEqual(out_eager, out_compiled)
         combined = " ".join(code)
         self.assertEqual(combined.count("async_compile.triton("), 1)
