@@ -5992,6 +5992,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
 
         a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
         b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b))
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
@@ -6018,6 +6019,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
+
 
 if HAS_CUDA_AND_TRITON:
 
