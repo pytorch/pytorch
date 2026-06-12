@@ -273,18 +273,18 @@ class DispatchKeySet final {
       : repr_(backend_bits_to_repr(ks)) {}
 
   // Test if a DispatchKey is in the set
-  inline bool has(DispatchKey t) const {
+  [[nodiscard]] inline bool has(DispatchKey t) const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t != DispatchKey::Undefined);
     return has_all(DispatchKeySet(t));
   }
-  constexpr bool has_backend(BackendComponent t) const {
+  [[nodiscard]] constexpr bool has_backend(BackendComponent t) const {
     return has_all(DispatchKeySet(t));
   }
 
   // Test if a DispatchKey is in the set
   // Given a DispatchKeySet of functionality keys and (potentially) backend
   // keys, tests if all of them are in the current set.
-  constexpr bool has_all(DispatchKeySet ks) const {
+  [[nodiscard]] constexpr bool has_all(DispatchKeySet ks) const {
     return static_cast<bool>((repr_ & ks.repr_) == ks.repr_);
   }
 
@@ -297,7 +297,7 @@ class DispatchKeySet final {
   // function, because you can end up with weird results. e.g.
   // DispatchKeySet(DispatchKey::AutogradCPU).has_any(DispatchKeySet(DispatchKey::CPU))
   // would return true.
-  inline bool has_any(DispatchKeySet ks) const {
+  [[nodiscard]] inline bool has_any(DispatchKeySet ks) const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         // Either there are no backend bits in the input keyset
         ((ks.repr_ & full_backend_mask) == 0) ||
@@ -315,7 +315,7 @@ class DispatchKeySet final {
     return static_cast<bool>((repr_ & ks.repr_) != 0);
   }
   // Test if DispatchKeySet is a superset of ks.
-  bool isSupersetOf(DispatchKeySet ks) const {
+  [[nodiscard]] bool isSupersetOf(DispatchKeySet ks) const {
     return (repr_ & ks.repr_) == ks.repr_;
   }
   // Perform set union
@@ -389,10 +389,10 @@ class DispatchKeySet final {
     return DispatchKeySet(repr_ & ~(DispatchKeySet(b).repr_));
   }
   // Is the set empty?  (AKA undefined tensor)
-  bool empty() const {
+  [[nodiscard]] bool empty() const {
     return repr_ == 0;
   }
-  uint64_t raw_repr() const {
+  [[nodiscard]] uint64_t raw_repr() const {
     return repr_;
   }
 
@@ -400,7 +400,7 @@ class DispatchKeySet final {
     return DispatchKeySet(RAW, x);
   }
 
-  DispatchKey highestFunctionalityKey() const {
+  [[nodiscard]] DispatchKey highestFunctionalityKey() const {
     auto functionality_idx = indexOfHighestBit();
     // This means that none of the functionality bits were set.
     if (functionality_idx < num_backends)
@@ -416,7 +416,7 @@ class DispatchKeySet final {
   // here that can also handle "fake" backends like FPGA, because they need to
   // map to the AutogradOther key. For those backends, we return
   // BackendComponent::InvalidBit.
-  BackendComponent highestBackendKey() const {
+  [[nodiscard]] BackendComponent highestBackendKey() const {
     // mask to mask out functionality bits
     auto backend_idx =
         DispatchKeySet(repr_ & full_backend_mask).indexOfHighestBit();
@@ -427,7 +427,7 @@ class DispatchKeySet final {
   }
 
   // returns the DispatchKey of highest priority in the set.
-  DispatchKey highestPriorityTypeId() const {
+  [[nodiscard]] DispatchKey highestPriorityTypeId() const {
     auto functionality_k = highestFunctionalityKey();
     if (isPerBackendFunctionalityKey(functionality_k)) {
       return toRuntimePerBackendFunctionalityKey(
@@ -440,7 +440,7 @@ class DispatchKeySet final {
   // This is used to as part of the calculation into the operator table to get:
   // - the highest "functionality" bit in the keyset.
   // - the highest "backend" bit in the keyset.
-  uint8_t indexOfHighestBit() const {
+  [[nodiscard]] uint8_t indexOfHighestBit() const {
     return 64 - llvm::countLeadingZeros(repr_);
   }
 
@@ -453,7 +453,7 @@ class DispatchKeySet final {
    * unnecessary to reserve additional space for dispatch keys that will
    * never be used on mobile.
    */
-  int getDispatchTableIndexForDispatchKeySet() const {
+  [[nodiscard]] int getDispatchTableIndexForDispatchKeySet() const {
     auto dk = highestPriorityTypeId();
     switch (dk) {
       case DispatchKey::Undefined:
@@ -481,7 +481,7 @@ class DispatchKeySet final {
   // keyset Note that we could in theory implement this using
   // highestPriorityTypeId(), but this code is very hotpath and we can do it
   // faster without it.
-  int getDispatchTableIndexForDispatchKeySet() const {
+  [[nodiscard]] int getDispatchTableIndexForDispatchKeySet() const {
     auto functionality_idx =
         DispatchKeySet(repr_ >> num_backends).indexOfHighestBit();
     auto offset_and_mask = offsetsAndMasks()[functionality_idx];

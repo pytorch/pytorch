@@ -5,8 +5,8 @@
 #include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
-#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
-#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCCTracing.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCCUtils.hpp>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -1330,7 +1330,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::gather(
           TORCH_UCC_COLL_POST, "requires empty output on non-root");
     }
     outputs = {};
-    // append a empty tensor to the list to be used by future mark
+    // append an empty tensor to the list to be used by future mark
     outputs.emplace_back();
   }
 

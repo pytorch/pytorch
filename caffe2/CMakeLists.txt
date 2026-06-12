@@ -579,6 +579,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
@@ -1004,6 +1005,9 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
+  if(USE_NCCL_EP)
+    target_compile_definitions(torch_cuda PRIVATE USE_NCCL_EP)
+  endif()
 
   # Compile with NVSHMEM
   # Default value of `USE_NVSHMEM` is set in CMakeLists.txt under root, to ON.
@@ -1373,6 +1377,7 @@ if(BUILD_TEST)
     add_subdirectory(${TORCH_ROOT}/test/cpp/profiler ${CMAKE_BINARY_DIR}/test_profiler)
     add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
     add_subdirectory(${TORCH_ROOT}/test/cpp/aoti_abi_check ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/shim ${CMAKE_BINARY_DIR}/test_shim)
     if(BUILD_AOT_INDUCTOR_TEST)
       add_subdirectory(${TORCH_ROOT}/test/cpp/aoti_inference ${CMAKE_BINARY_DIR}/test_aoti_inference)
     endif()
@@ -1464,7 +1469,7 @@ if(USE_ROCM)
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
   endif()
-  if(USE_ROCM_CK_SDPA)
+  if(TARGET ck_sdpa)
     target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
   endif()
 
@@ -1849,7 +1854,7 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
-  if(USE_ROCM_CK_SDPA)
+  if(TARGET ck_sdpa)
     target_link_libraries(torch_hip PRIVATE ck_sdpa)
   endif()
 
@@ -1917,7 +1922,9 @@ if(BUILD_TEST)
             if(TARGET Sanitizer::address)
               target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::address)
             endif()
-            if(TARGET Sanitizer::undefined)
+            # Skip UBSan on ROCm: see cmake/Dependencies.cmake (UBSan + ASAN
+            # on ROCm Clang produces misaligned ASAN globals that abort).
+            if(TARGET Sanitizer::undefined AND NOT USE_ROCM)
               target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::undefined)
             endif()
           endif()

@@ -208,7 +208,7 @@ if(USE_FLASH_ATTENTION)
         if(ENV{USE_ROCM_CK_SDPA} EQUAL 1)
           caffe2_update_option(USE_ROCM_CK_SDPA ON)
         endif()
-    else()
+    elseif(NOT WIN32)
       caffe2_update_option(USE_ROCM_CK_SDPA ON)
     endif()
     # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
@@ -291,6 +291,7 @@ if(USE_FLASH_ATTENTION)
         CK_USE_FNUZ_FP8
         CK_USE_GFX94
         CK_USE_XDL
+        ENABLE_CK
         __HIP_PLATFORM_AMD__=1
         __HIP_PLATFORM_HCC__=1
         CK_TILE_FMHA_FWD_FAST_EXP2=1

@@ -17,6 +17,11 @@ flaky_models = {
     "mobilenetv3_large_100",
     # https://github.com/pytorch/pytorch/issues/163670
     "vision_maskrcnn",
+    # Old TorchBench SAM is flaky even with mask IoU checking.
+    # Borderline mask thresholding can flip a single pixel and give IoU=0
+    # when both masks are nearly empty.
+    # https://github.com/pytorch/pytorch/issues/176776
+    "sam",
 }
 
 
