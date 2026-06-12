@@ -70,6 +70,7 @@ from ..utils import (
     dict_methods,
     extract_fake_example_value,
     get_fake_value,
+    guard_if_dyn,
     is_tensor_getset_descriptor,
     is_wrapper_or_member_descriptor,
     istype,
@@ -1835,10 +1836,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         try:
-            if isinstance(args[0], variables.NestedUserFunctionVariable):
-                fn = args[0].get_function(allow_sourced_cells=True)
-            else:
-                fn = args[0].get_function()
+            fn = args[0].get_function()
         except NotImplementedError:
             fail(args, kwargs)
 
@@ -2022,9 +2020,14 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_range(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
-    ) -> VariableTracker:
-        args = tuple(VariableTracker.build(tx, arg.nb_index_impl(tx)) for arg in args)
-        return variables.RangeVariable(list(args))
+    ) -> VariableTracker | None:
+        if check_unspec_or_constant_args(args, {}):
+            return variables.RangeVariable(list(args))
+        elif self._dynamic_args(*args):
+            args = tuple(VariableTracker.build(tx, guard_if_dyn(arg)) for arg in args)
+            return variables.RangeVariable(list(args))
+        # None no-ops this handler and lets the driving function proceed
+        return None
 
     def _dynamic_args(self, *args: VariableTracker, **kwargs: VariableTracker) -> bool:
         return any(isinstance(x, SymNodeVariable) for x in args) or any(
