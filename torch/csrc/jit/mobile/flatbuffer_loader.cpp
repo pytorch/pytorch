@@ -348,6 +348,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
       c10::QualifiedName(method->qn()->str()));
   // TODO(qihan) add debug handle
   // const auto* debug_handle = method->debug_info()->debug_handle();
+  function->reserve_instructions(method->instructions()->size());
   for (const auto* inst : *method->instructions()) {
     function->append_instruction(
         static_cast<OpCode>(inst->op()), inst->x(), inst->n());

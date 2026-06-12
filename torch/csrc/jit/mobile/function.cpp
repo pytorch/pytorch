@@ -23,6 +23,13 @@ const c10::QualifiedName& Function::qualname() const {
   return name_;
 }
 
+void Function::reserve_instructions(size_t n, bool with_debug_handles) {
+  code_.instructions_.reserve(n);
+  if (with_debug_handles) {
+    code_.debug_handles_.reserve(n);
+  }
+}
+
 void Function::append_instruction(
     OpCode op,
     int64_t X,
@@ -254,6 +261,7 @@ Function& Function::registerFunc(
     auto name_function_pair =
         upgrader_function_holder.emplace(name, Function(name));
     auto& func = name_function_pair.first->second;
+    func.reserve_instructions(instructions.size());
     for (auto const& inst : instructions) {
       func.append_instruction(inst.op, inst.X, inst.N);
     }

@@ -33,6 +33,7 @@ class TORCH_API Function : public torch::jit::Function {
   // NOTE: the APIs below is dangerous: if you call append_instruction with
   // dbg_handle and then call it without; then the dbg_handle will become
   // misaligned. Therefore only use ONE variant at time.
+  void reserve_instructions(size_t n, bool with_debug_handles = false);
   void append_instruction(OpCode op, int64_t X, int64_t N, int64_t dbg_handle);
   void append_instruction(OpCode op, int64_t X, int64_t N);
   void append_operator(

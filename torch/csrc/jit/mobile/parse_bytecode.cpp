@@ -145,6 +145,8 @@ void parseInstructions(
   // interned. Consider adding a flag to bypass the cache if that
   // becomes an important use case.
   OpCodeCache opCodeCache;
+  function->reserve_instructions(
+      ins_list.size(), !debug_handles_list.empty());
   for (const auto j : c10::irange(ins_list.size())) {
     auto ins_tuple = std::move(ins_list[j]).toTuple();
     c10::ArrayRef<IValue> ins_item = ins_tuple->elements();
