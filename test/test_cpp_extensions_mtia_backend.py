@@ -21,17 +21,18 @@ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 # define TEST_ROCM before changing TEST_CUDA
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
+TEST_MTIA = not (
+    IS_ARM64 or not IS_LINUX or TEST_CUDA or TEST_PRIVATEUSE1 or TEST_ROCM or TEST_XPU
+)
 
 
 @unittest.skipIf(
-    IS_ARM64 or not IS_LINUX or TEST_CUDA or TEST_PRIVATEUSE1 or TEST_ROCM or TEST_XPU,
+    not TEST_MTIA,
     "Only on linux platform and mutual exclusive to other backends",
 )
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionMTIABackend(common.TestCase):
     """Tests MTIA backend with C++ extensions."""
-
-    module = None
 
     def setUp(self):
         super().setUp()
@@ -48,24 +49,6 @@ class TestCppExtensionMTIABackend(common.TestCase):
     @classmethod
     def tearDownClass(cls):
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
-
-    @classmethod
-    def setUpClass(cls):
-        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
-        build_dir = tempfile.mkdtemp()
-        # Load the fake device guard impl.
-        cls.module = torch.utils.cpp_extension.load(
-            name="mtia_extension",
-            sources=["cpp_extensions/mtia_extension.cpp"],
-            build_directory=build_dir,
-            extra_include_paths=[
-                "cpp_extensions",
-                "path / with spaces in it",
-                "path with quote'",
-            ],
-            is_python_module=False,
-            verbose=True,
-        )
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_get_device_module(self):
@@ -166,5 +149,30 @@ class TestCppExtensionMTIABackend(common.TestCase):
         self.assertIsInstance(gen, torch.Generator)
 
 
+def _setup_mtia_extension():
+    torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+    build_dir = tempfile.mkdtemp()
+    # Load the fake device guard/hooks impl.
+    _ = torch.utils.cpp_extension.load(
+        name="mtia_extension",
+        sources=["cpp_extensions/mtia_extension.cpp"],
+        build_directory=build_dir,
+        extra_include_paths=[
+            "cpp_extensions",
+            "path / with spaces in it",
+            "path with quote'",
+        ],
+        is_python_module=False,
+        verbose=True,
+    )
+
+
 if __name__ == "__main__":
+    # Load the MTIA cpp extension before run_tests(): run_tests() may probe the
+    # current accelerator, so the MTIA backend must already be registered by
+    # then. Doing it here (instead of setUpClass) also guarantees the extension
+    # is loaded exactly once per process, before any test discovery side
+    # effects.
+    if TEST_MTIA:
+        _setup_mtia_extension()
     common.run_tests()
