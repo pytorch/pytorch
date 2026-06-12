@@ -35,6 +35,9 @@ struct SDPALogicalParams {
     value,
     attention,
     logsumexp,
+    dropout_probability,
+    dropout_seed,
+    dropout_offset,
     end,
   };
 
@@ -46,6 +49,13 @@ struct SDPALogicalParams {
   logical_tensor value{};
   logical_tensor attention{};
   std::optional<logical_tensor> logsumexp;
+  std::optional<logical_tensor> dropout_probability;
+  std::optional<logical_tensor> dropout_seed;
+  std::optional<logical_tensor> dropout_offset;
+
+  bool is_causal;
+  bool compute_logsumexp;
+  bool enable_dropout;
 
   SDPALogicalParams(
       const at::Tensor& query_,
@@ -61,8 +71,12 @@ struct SDPALogicalParams {
       int num_head_kv,
       int head_dim_qk,
       int head_dim_v,
-      bool is_causal,
-      bool compute_logsumexp) {
+      bool is_causal_,
+      bool compute_logsumexp_,
+      bool enable_dropout_)
+      : is_causal(is_causal_),
+        compute_logsumexp(compute_logsumexp_),
+        enable_dropout(enable_dropout_) {
     const data_type dtype = to_logical_tensor_data_type(query_.scalar_type());
     TORCH_INTERNAL_ASSERT(
         (dtype != data_type::undef),
@@ -108,8 +122,12 @@ struct SDPALogicalParams {
       reshaped_value = value_.unsqueeze(2);
       reshaped_attention = attention_.view(
           {batch_size, group_num, group_size, seq_len_q, head_dim_v});
+      if (compute_logsumexp) {
+        reshaped_logsumexp = reshaped_logsumexp.view(
+            {batch_size, group_num, group_size, seq_len_q, 1});
+      }
       if (attn_mask_.has_value() && attn_mask_.value().dim() == 4) {
-        reshaped_attn_mask = attn_mask_.value().unsqueeze(2);
+        reshaped_attn_mask = reshaped_attn_mask.unsqueeze(2);
       }
     }
 
@@ -120,21 +138,19 @@ struct SDPALogicalParams {
       reshaped_##name.sizes().vec(),       \
       reshaped_##name.strides().vec()}
 
+#define LOGIC_SCALAR_TENSOR_DESC(name, dtype) \
+  name = {                                    \
+      static_cast<size_t>(TensorID::name),    \
+      dtype,                                  \
+      0,                                      \
+      logical_tensor::layout_type::strided,   \
+      logical_tensor::property_type::host_scalar}
+
     LOGIC_TENSOR_DESC(query, dtype);
     LOGIC_TENSOR_DESC(key, dtype);
-    scale = {
-        static_cast<size_t>(TensorID::scale),
-        logical_tensor::data_type::f32,
-        0,
-        logical_tensor::layout_type::strided,
-        logical_tensor::property_type::host_scalar};
+    LOGIC_SCALAR_TENSOR_DESC(scale, logical_tensor::data_type::f32);
     if (is_causal) {
-      neg_inf = {
-          static_cast<size_t>(TensorID::neg_inf),
-          logical_tensor::data_type::f32,
-          0,
-          logical_tensor::layout_type::strided,
-          logical_tensor::property_type::host_scalar};
+      LOGIC_SCALAR_TENSOR_DESC(neg_inf, logical_tensor::data_type::f32);
     }
     if (attn_mask_.has_value()) {
       const data_type mask_dtype =
@@ -154,7 +170,14 @@ struct SDPALogicalParams {
           " instead.");
       LOGIC_TENSOR_DESC(logsumexp, sdpa_intermediate_dtype);
     }
+    if (enable_dropout) {
+      LOGIC_SCALAR_TENSOR_DESC(
+          dropout_probability, logical_tensor::data_type::f32);
+      LOGIC_SCALAR_TENSOR_DESC(dropout_seed, logical_tensor::data_type::s64);
+      LOGIC_SCALAR_TENSOR_DESC(dropout_offset, logical_tensor::data_type::s64);
+    }
 #undef LOGIC_TENSOR_DESC
+#undef LOGIC_SCALAR_TENSOR_DESC
   }
   std::vector<logical_tensor> get_input() const {
     std::vector<logical_tensor> input = {query, key, scale};
@@ -163,6 +186,11 @@ struct SDPALogicalParams {
     }
     if (attn_mask.has_value()) {
       input.push_back(attn_mask.value());
+    }
+    if (dropout_probability.has_value()) {
+      input.push_back(dropout_probability.value());
+      input.push_back(dropout_seed.value());
+      input.push_back(dropout_offset.value());
     }
     input.push_back(value);
     return input;
@@ -177,12 +205,12 @@ struct SDPALogicalParams {
   }
 };
 
-partition create_sdpa_graph_partition(
-    bool is_causal,
-    bool compute_logsumexp,
-    data_type dtype,
-    const SDPALogicalParams& params) {
+partition create_sdpa_graph_partition(const SDPALogicalParams& params) {
   // graph building and partitioning
+  bool is_causal = params.is_causal;
+  bool compute_logsumexp = params.compute_logsumexp;
+  bool enable_dropout = params.enable_dropout;
+  data_type dtype = params.query.get_data_type();
 
   size_t lt_id = static_cast<size_t>(SDPALogicalParams::TensorID::end);
   size_t op_id = 0;
@@ -280,16 +308,46 @@ partition create_sdpa_graph_partition(
   softmax.set_attr<std::string>(op::attr::mode, "inf_as_zero");
 
   logical_tensor softmax_out{lt_id++, dtype};
+  if (enable_dropout) {
+    softmax_out = {lt_id++, sdpa_intermediate_dtype};
+  }
   softmax.add_input(masked_qk_out.value_or(scaled_qk_out));
   softmax.add_output(softmax_out);
   if (compute_logsumexp) {
     softmax.add_output(params.logsumexp.value());
   }
 
+  std::optional<op> dropout;
+  std::optional<logical_tensor> dropout_softmax_out;
+  std::optional<op> dropout_typecast;
+  std::optional<logical_tensor> dropout_out;
+  if (enable_dropout) {
+    dropout_softmax_out = {lt_id++, sdpa_intermediate_dtype};
+    dropout = {
+        op_id++,
+        op::kind::Dropout,
+        {softmax_out,
+         params.dropout_seed.value(),
+         params.dropout_offset.value(),
+         params.dropout_probability.value()},
+        {dropout_softmax_out.value()},
+        "dropout"};
+    dropout_out = dropout_softmax_out;
+    if (dtype != sdpa_intermediate_dtype) {
+      dropout_out = {lt_id++, dtype};
+      dropout_typecast = {
+          op_id++,
+          op::kind::TypeCast,
+          {dropout_softmax_out.value()},
+          {dropout_out.value()},
+          "dropout_typecast"};
+    }
+  }
+
   op matmul_v{
       op_id++,
       op::kind::MatMul,
-      {softmax_out, params.value},
+      {dropout_out.value_or(softmax_out), params.value},
       {params.attention},
       "matmul_v"};
 
@@ -308,6 +366,12 @@ partition create_sdpa_graph_partition(
   }
 
   g.add_op(softmax);
+  if (enable_dropout) {
+    g.add_op(dropout.value());
+    if (dropout_typecast.has_value()) {
+      g.add_op(dropout_typecast.value());
+    }
+  }
   g.add_op(matmul_v);
   g.finalize();
   auto partitions = g.get_partitions();
@@ -317,10 +381,7 @@ partition create_sdpa_graph_partition(
   return partitions[0];
 }
 
-partition& find_or_create_graph_partition(
-    bool is_causal,
-    bool compute_logsumexp,
-    const SDPALogicalParams& params) {
+partition& find_or_create_graph_partition(const SDPALogicalParams& params) {
   thread_local PartitionCache cache;
   const data_type dtype = params.query.get_data_type();
 
@@ -340,16 +401,17 @@ partition& find_or_create_graph_partition(
   int pos = 8;
   // attn_mask
   patternID.set(pos++, params.attn_mask.has_value());
-  patternID.set(pos++, is_causal);
+  patternID.set(pos++, params.is_causal);
   // compute_logsumexp
-  patternID.set(pos++, compute_logsumexp);
+  patternID.set(pos++, params.compute_logsumexp);
+  // enable_dropout
+  patternID.set(pos++, params.enable_dropout);
 
   auto partition_ = cache.find_partition(patternID);
   if (!partition_.has_value()) {
     // partition cache no hit
     // graph building and partitioning
-    partition sdp_partition = create_sdpa_graph_partition(
-        is_causal, compute_logsumexp, dtype, params);
+    partition sdp_partition = create_sdpa_graph_partition(params);
     partition_ = cache.insert_partition_cache(patternID, sdp_partition);
   }
   return *partition_;
@@ -369,6 +431,9 @@ struct SDPABackwardLogicalParams {
     scale,
     neg_inf,
     attn_mask,
+    dropout_probability,
+    dropout_seed,
+    dropout_offset,
     grad_query,
     grad_key,
     grad_value,
@@ -384,9 +449,16 @@ struct SDPABackwardLogicalParams {
   logical_tensor scale{};
   std::optional<logical_tensor> neg_inf;
   std::optional<logical_tensor> attn_mask;
+  std::optional<logical_tensor> dropout_probability;
+  std::optional<logical_tensor> dropout_seed;
+  std::optional<logical_tensor> dropout_offset;
   logical_tensor grad_query{};
   logical_tensor grad_key{};
   logical_tensor grad_value{};
+
+  bool is_causal;
+  bool is_gqa;
+  bool enable_dropout;
 
   SDPABackwardLogicalParams(
       const at::Tensor& grad_out_,
@@ -406,7 +478,11 @@ struct SDPABackwardLogicalParams {
       int seq_len_kv,
       int head_dim_qk,
       int head_dim_v,
-      bool is_causal) {
+      bool is_causal_,
+      bool enable_dropout_)
+      : is_causal(is_causal_),
+        is_gqa(num_head_q != num_head_kv),
+        enable_dropout(enable_dropout_) {
     const data_type dtype = to_logical_tensor_data_type(query_.scalar_type());
     TORCH_INTERNAL_ASSERT(
         (dtype != data_type::undef),
@@ -460,7 +536,32 @@ struct SDPABackwardLogicalParams {
       at::native::onednn::undo_broadcast(reshaped_attn_mask);
     }
 
-    // TODO: Support GQA in backward pass once OneDNN supports it.
+    if (is_gqa) { // Check whether the attention is a
+                  // Grouped-Query Attention (GQA)
+      int group_num = num_head_kv;
+      int group_size = num_head_q / num_head_kv;
+      // oneDNN requires the shape of the query tensor to be represented as
+      // [batch_size, num_head_q / num_head_kv, num_head_kv, seq_len_q,
+      // head_dim_qk]. Please refer to
+      // https://uxlfoundation.github.io/oneDNN/dev_guide_graph_gqa.html#gqa-pattern
+      reshaped_query = query_.view(
+          {batch_size, group_num, group_size, seq_len_q, head_dim_qk});
+      reshaped_grad_query = grad_query_.view(
+          {batch_size, group_num, group_size, seq_len_q, head_dim_qk});
+      reshaped_key = key_.unsqueeze(2);
+      reshaped_grad_key = grad_key_.unsqueeze(2);
+      reshaped_value = value_.unsqueeze(2);
+      reshaped_grad_value = grad_value_.unsqueeze(2);
+      reshaped_out =
+          out_.view({batch_size, group_num, group_size, seq_len_q, head_dim_v});
+      reshaped_grad_out = grad_out_.view(
+          {batch_size, group_num, group_size, seq_len_q, head_dim_v});
+      reshaped_logsumexp = reshaped_logsumexp.view(
+          {batch_size, group_num, group_size, seq_len_q, 1});
+      if (attn_mask_.has_value() && attn_mask_.value().dim() == 4) {
+        reshaped_attn_mask = reshaped_attn_mask.unsqueeze(2);
+      }
+    }
 
 #define LOGIC_TENSOR_DESC(name, dtype)     \
   name = {                                 \
@@ -469,25 +570,23 @@ struct SDPABackwardLogicalParams {
       reshaped_##name.sizes().vec(),       \
       reshaped_##name.strides().vec()}
 
+#define LOGIC_SCALAR_TENSOR_DESC(name, dtype) \
+  name = {                                    \
+      static_cast<size_t>(TensorID::name),    \
+      dtype,                                  \
+      0,                                      \
+      logical_tensor::layout_type::strided,   \
+      logical_tensor::property_type::host_scalar}
+
     LOGIC_TENSOR_DESC(grad_out, dtype);
     LOGIC_TENSOR_DESC(query, dtype);
     LOGIC_TENSOR_DESC(key, dtype);
     LOGIC_TENSOR_DESC(value, dtype);
     LOGIC_TENSOR_DESC(out, dtype);
     LOGIC_TENSOR_DESC(logsumexp, sdpa_intermediate_dtype);
-    scale = {
-        static_cast<size_t>(TensorID::scale),
-        logical_tensor::data_type::f32,
-        0,
-        logical_tensor::layout_type::strided,
-        logical_tensor::property_type::host_scalar};
+    LOGIC_SCALAR_TENSOR_DESC(scale, logical_tensor::data_type::f32);
     if (is_causal) {
-      neg_inf = {
-          static_cast<size_t>(TensorID::neg_inf),
-          logical_tensor::data_type::f32,
-          0,
-          logical_tensor::layout_type::strided,
-          logical_tensor::property_type::host_scalar};
+      LOGIC_SCALAR_TENSOR_DESC(neg_inf, logical_tensor::data_type::f32);
     }
     if (attn_mask_.has_value()) {
       const data_type mask_dtype =
@@ -500,6 +599,12 @@ struct SDPABackwardLogicalParams {
     LOGIC_TENSOR_DESC(grad_query, dtype);
     LOGIC_TENSOR_DESC(grad_key, dtype);
     LOGIC_TENSOR_DESC(grad_value, dtype);
+    if (enable_dropout) {
+      LOGIC_SCALAR_TENSOR_DESC(
+          dropout_probability, logical_tensor::data_type::f32);
+      LOGIC_SCALAR_TENSOR_DESC(dropout_seed, logical_tensor::data_type::s64);
+      LOGIC_SCALAR_TENSOR_DESC(dropout_offset, logical_tensor::data_type::s64);
+    }
 #undef LOGIC_TENSOR_DESC
   }
   std::vector<logical_tensor> get_input() const {
@@ -511,6 +616,11 @@ struct SDPABackwardLogicalParams {
     if (attn_mask.has_value()) {
       input.push_back(attn_mask.value());
     }
+    if (dropout_probability.has_value()) {
+      input.push_back(dropout_probability.value());
+      input.push_back(dropout_seed.value());
+      input.push_back(dropout_offset.value());
+    }
     return input;
   }
   std::vector<logical_tensor> get_output() const {
@@ -520,10 +630,13 @@ struct SDPABackwardLogicalParams {
 };
 
 partition create_sdpa_backward_graph_partition(
-    bool is_causal,
-    data_type dtype,
     const SDPABackwardLogicalParams& params) {
   // graph building and partitioning
+  bool is_causal = params.is_causal;
+  bool is_gqa = params.is_gqa;
+  bool enable_dropout = params.enable_dropout;
+  data_type dtype = params.query.get_data_type();
+
   size_t lt_id = static_cast<size_t>(SDPABackwardLogicalParams::TensorID::end);
   size_t op_id = 0;
 
@@ -620,50 +733,115 @@ partition create_sdpa_backward_graph_partition(
   logical_tensor prob{lt_id++, sdpa_intermediate_dtype};
   op exp{op_id++, op::kind::Exp, {sub_out}, {prob}, "exp"};
 
+  // dropout_probs = dropout(probs)
+  std::optional<op> dropout;
+  std::optional<logical_tensor> dropout_prob;
+  if (enable_dropout) {
+    dropout_prob = {lt_id++, sdpa_intermediate_dtype};
+    dropout = {
+        op_id++,
+        op::kind::Dropout,
+        {prob,
+         params.dropout_seed.value(),
+         params.dropout_offset.value(),
+         params.dropout_probability.value()},
+        {dropout_prob.value()},
+        "dropout"};
+  }
+
   // The following matmul doesn't support different input dtypes, insert a
   // typecast
-  logical_tensor prob_casted = prob;
+  logical_tensor prob_casted = dropout_prob.value_or(prob);
   op typecast = op(op_id++, op::kind::TypeCast, "typecast");
   if (dtype != sdpa_intermediate_dtype) {
     prob_casted = logical_tensor(lt_id++, dtype);
-    typecast.add_inputs({prob});
+    typecast.add_inputs({dropout_prob.value_or(prob)});
     typecast.add_outputs({prob_casted});
   }
 
   // grad_value = prob^T * grad_out
-  // TODO: handle GQA headnum because (batch_size, num_head_kv, seq_len_kv,
-  // head_dim_v) != (batch_size, num_head_q, seqlen_kv, seq_len_q) *
-  // (batch_size, num_head_q, seqlen_q, head_dim_v)
+  logical_tensor intermediate_grad_value{lt_id++, dtype};
   op matmul_grad_value{
       op_id++,
       op::kind::MatMul,
       {prob_casted, params.grad_out},
-      {params.grad_value},
+      {is_gqa ? intermediate_grad_value : params.grad_value},
       "matmul_grad_value"};
   matmul_grad_value.set_attr<bool>(op::attr::transpose_a, true);
 
-  // grad_prop = grad_out * value^T
-  // TODO: handle GQA headnum because (batch_size, num_head_q, seq_len_q,
-  // seq_len_kv) != (batch_size, num_head_q, seq_len_q, head_dim_v) *
-  // (batch_size, num_head_kv, head_dim_v, seq_len_kv)
-  logical_tensor grad_prop{lt_id++, sdpa_intermediate_dtype};
-  op matmul_grad_prop{
+  // prob^T * grad_out has shape (batch_size, num_head_q, seq_len_kv,
+  // head_dim_v), which doesn't match the shape of grad_value
+  // (batch_size, num_head_kv, seq_len_kv, head_dim_v) if gqa.
+  // Need to do a reduction.
+  op reduce_dv = op(op_id++, op::kind::ReduceSum, "reduce_dv");
+  if (is_gqa) {
+    reduce_dv.set_attr<std::vector<int64_t>>(op::attr::axes, {2});
+    reduce_dv.set_attr<bool>(op::attr::keep_dims, true);
+    reduce_dv.add_inputs({intermediate_grad_value});
+    reduce_dv.add_outputs({params.grad_value});
+  }
+
+  // grad_prob = grad_out * value^T
+  logical_tensor grad_prob{lt_id++, sdpa_intermediate_dtype};
+  op matmul_grad_prob{
       op_id++,
       op::kind::MatMul,
       {params.grad_out, params.value},
-      {grad_prop},
-      "matmul_grad_prop"};
-  matmul_grad_prop.set_attr<bool>(op::attr::transpose_b, true);
+      {grad_prob},
+      "matmul_grad_prob"};
+  matmul_grad_prob.set_attr<bool>(op::attr::transpose_b, true);
 
-  // grad_masked_score = softmaxbackward(grad_prop)
-  logical_tensor grad_masked_score{lt_id++, sdpa_intermediate_dtype};
-  op softmax_backward{
+  // grad_prob = dropout_bwd(grad_prob) = dropout(grad_prob) if dropout enabled
+  std::optional<op> dropout_bwd;
+  std::optional<logical_tensor> dropout_grad_prob;
+  if (enable_dropout) {
+    dropout_grad_prob = {lt_id++, sdpa_intermediate_dtype};
+    dropout_bwd = {
+        op_id++,
+        op::kind::Dropout,
+        {grad_prob,
+         params.dropout_seed.value(),
+         params.dropout_offset.value(),
+         params.dropout_probability.value()},
+        {dropout_grad_prob.value()},
+        "dropout"};
+  }
+
+  // grad_masked_score = softmaxbackward(grad_prob)
+  // decompos softmax backward: dS = P * (dP - rowsum(O * dO))
+  logical_tensor out_dot_gradout{lt_id++, sdpa_intermediate_dtype};
+  op mul_odo{
       op_id++,
-      op::kind::SoftMaxBackward,
-      {grad_prop, prob},
+      op::kind::Multiply,
+      {params.out, params.grad_out},
+      {out_dot_gradout},
+      "mul_odo"};
+
+  logical_tensor reduced_odo{lt_id++, sdpa_intermediate_dtype};
+  op reduce_odo{
+      op_id++,
+      op::kind::ReduceSum,
+      {out_dot_gradout},
+      {reduced_odo},
+      "reducesum_odo"};
+  reduce_odo.set_attr<std::vector<int64_t>>(op::attr::axes, {-1});
+  reduce_odo.set_attr<bool>(op::attr::keep_dims, true);
+
+  logical_tensor dp_sub_reduced_odo{lt_id++, sdpa_intermediate_dtype};
+  op dp_sub{
+      op_id++,
+      op::kind::Subtract,
+      {dropout_grad_prob.value_or(grad_prob), reduced_odo},
+      {dp_sub_reduced_odo},
+      "dp_sub"};
+
+  logical_tensor grad_masked_score{lt_id++, sdpa_intermediate_dtype};
+  op mul_softmax_backward{
+      op_id++,
+      op::kind::Multiply,
+      {prob, dp_sub_reduced_odo},
       {grad_masked_score},
-      "softmax_backward"};
-  softmax_backward.set_attr<int64_t>(op::attr::axis, -1);
+      "mul_softmax_backward"};
 
   // TODO: add output tensor grad_attn_mask = grad_masked_score once OneDNN
   // supports output grad_attn_mask.
@@ -688,9 +866,6 @@ partition create_sdpa_backward_graph_partition(
   }
 
   // grad_query = grad_scaled_score_cast * key
-  // TODO: handle GQA headnum because (batch_size, num_head_q, seq_len_q,
-  // head_dim_qk) != (batch_size, num_head_q, seq_len_q, seq_len_kv) *
-  // (batch_size, num_head_kv, seq_len_kv, head_dim_qk)
   op matmul_grad_query{
       op_id++,
       op::kind::MatMul,
@@ -699,13 +874,23 @@ partition create_sdpa_backward_graph_partition(
       "matmul_grad_query"};
 
   // grad_key = grad_scaled_score_cast^T * query
+  logical_tensor intermediate_grad_key{lt_id++, dtype};
   op matmul_grad_key{
       op_id++,
       op::kind::MatMul,
       {grad_scaled_score_cast, params.query},
-      {params.grad_key},
+      {is_gqa ? intermediate_grad_key : params.grad_key},
       "matmul_grad_key"};
   matmul_grad_key.set_attr<bool>(op::attr::transpose_a, true);
+
+  // same as grad_value, need to do a reduction if gqa
+  op reduce_dk = op(op_id++, op::kind::ReduceSum, "reduce_dk");
+  if (is_gqa) {
+    reduce_dk.set_attr<std::vector<int64_t>>(op::attr::axes, {2});
+    reduce_dk.set_attr<bool>(op::attr::keep_dims, true);
+    reduce_dk.add_inputs({intermediate_grad_key});
+    reduce_dk.add_outputs({params.grad_key});
+  }
 
   constexpr auto ekind = dnnl::engine::kind::gpu;
   dnnl::graph::graph g(ekind);
@@ -720,11 +905,24 @@ partition create_sdpa_backward_graph_partition(
     g.add_op(mask_gt.value());
     g.add_op(mask_select.value());
   }
+  if (is_gqa) {
+    g.add_op(reduce_dv);
+    g.add_op(reduce_dk);
+  }
   g.add_op(subtract);
   g.add_op(exp);
+  if (enable_dropout) {
+    g.add_op(dropout.value());
+  }
   g.add_op(matmul_grad_value);
-  g.add_op(matmul_grad_prop);
-  g.add_op(softmax_backward);
+  g.add_op(matmul_grad_prob);
+  if (enable_dropout) {
+    g.add_op(dropout_bwd.value());
+  }
+  g.add_op(mul_odo);
+  g.add_op(reduce_odo);
+  g.add_op(dp_sub);
+  g.add_op(mul_softmax_backward);
   g.add_op(grad_scale_mul);
   g.add_op(matmul_grad_query);
   g.add_op(matmul_grad_key);
@@ -741,7 +939,6 @@ partition create_sdpa_backward_graph_partition(
 }
 
 partition& find_or_create_backward_graph_partition(
-    bool is_causal,
     const SDPABackwardLogicalParams& params) {
   thread_local PartitionCache cache;
   const data_type dtype = params.query.get_data_type();
@@ -763,14 +960,16 @@ partition& find_or_create_backward_graph_partition(
   int pos = 8;
   // attn_mask
   patternID.set(pos++, params.attn_mask.has_value());
-  patternID.set(pos++, is_causal);
+  patternID.set(pos++, params.is_causal);
+  patternID.set(pos++, params.is_gqa);
+  patternID.set(pos++, params.enable_dropout);
 
   auto partition_ = cache.find_partition(patternID);
   if (!partition_.has_value()) {
     // partition cache no hit
     // graph building and partitioning
     partition sdpa_backward_partition =
-        create_sdpa_backward_graph_partition(is_causal, dtype, params);
+        create_sdpa_backward_graph_partition(params);
     partition_ =
         cache.insert_partition_cache(patternID, sdpa_backward_partition);
   }
@@ -810,7 +1009,10 @@ void sdpa(
     float softmax_scale,
     const Tensor& attention,
     bool compute_logsumexp,
-    const Tensor& logsumexp) {
+    const Tensor& logsumexp,
+    float dropout_probability,
+    const Tensor& philox_seed,
+    const Tensor& philox_offset) {
   auto& eng = GpuEngineManager::Instance().get_engine();
   auto& strm = GpuStreamManager::Instance().get_stream();
 
@@ -842,6 +1044,7 @@ void sdpa(
     attn_mask = get_tril_mask();
     is_causal = false;
   }
+  const bool enable_dropout = dropout_probability > 0.0f;
 
   std::vector<dnnl::graph::logical_tensor> l_inputs, l_outputs;
   std::optional<dnnl::graph::compiled_partition> compiled_partition;
@@ -861,9 +1064,10 @@ void sdpa(
       head_dim_qk,
       head_dim_v,
       is_causal,
-      compute_logsumexp);
-  auto& partition = sdpa_forward::find_or_create_graph_partition(
-      is_causal, compute_logsumexp, logical_params);
+      compute_logsumexp,
+      enable_dropout);
+  auto& partition =
+      sdpa_forward::find_or_create_graph_partition(logical_params);
   l_inputs = std::move(logical_params.get_input());
   l_outputs = std::move(logical_params.get_output());
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
@@ -894,6 +1098,14 @@ void sdpa(
   if (attn_mask.has_value()) {
     ADD_INPUT((*attn_mask));
   }
+  if (enable_dropout) {
+    inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(
+        l_inputs[i++], &dropout_probability));
+    inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(
+        l_inputs[i++], static_cast<uint64_t*>(philox_seed.data_ptr())));
+    inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(
+        l_inputs[i++], static_cast<uint64_t*>(philox_offset.data_ptr())));
+  }
   ADD_INPUT(value_aligned);
 #undef ADD_INPUT
 
@@ -919,7 +1131,10 @@ void sdpa_backward(
     float softmax_scale,
     Tensor& grad_query,
     Tensor& grad_key,
-    Tensor& grad_value) {
+    Tensor& grad_value,
+    float dropout_probability,
+    const Tensor& philox_seed,
+    const Tensor& philox_offset) {
   auto& eng = GpuEngineManager::Instance().get_engine();
   auto& strm = GpuStreamManager::Instance().get_stream();
 
@@ -953,6 +1168,7 @@ void sdpa_backward(
     attn_mask = get_tril_mask();
     is_causal = false;
   }
+  const bool enable_dropout = dropout_probability > 0.0f;
 
   std::vector<dnnl::graph::logical_tensor> l_inputs, l_outputs;
   std::optional<dnnl::graph::compiled_partition> compiled_partition;
@@ -975,9 +1191,10 @@ void sdpa_backward(
       seq_len_kv,
       head_dim_qk,
       head_dim_v,
-      is_causal);
-  auto& partition = sdpa_backward::find_or_create_backward_graph_partition(
-      is_causal, logical_params);
+      is_causal,
+      enable_dropout);
+  auto& partition =
+      sdpa_backward::find_or_create_backward_graph_partition(logical_params);
   l_inputs = std::move(logical_params.get_input());
   l_outputs = std::move(logical_params.get_output());
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
@@ -1010,6 +1227,14 @@ void sdpa_backward(
   }
   if (attn_mask.has_value()) {
     ADD_INPUT((*attn_mask));
+  }
+  if (enable_dropout) {
+    inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(
+        l_inputs[i++], &dropout_probability));
+    inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(
+        l_inputs[i++], static_cast<uint64_t*>(philox_seed.data_ptr())));
+    inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(
+        l_inputs[i++], static_cast<uint64_t*>(philox_offset.data_ptr())));
   }
 #undef ADD_INPUT
 
