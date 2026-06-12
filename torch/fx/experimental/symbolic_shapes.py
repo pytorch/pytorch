@@ -110,6 +110,7 @@ if TYPE_CHECKING:
     from torch import Tensor
     from torch._dynamo.source import TensorPropertySource
     from torch._subclasses.fake_tensor import FakeTensor
+    from torch.fx.experimental.dynamic_spec import IntVar, ShapesSpec, TensorSpec
     from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
 
@@ -8960,3 +8961,225 @@ def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
     if result in shape_env.unbacked_renamings:
         return shape_env.unbacked_renamings[result]
     return result
+
+
+# ---------------------------------------------------------------------------
+# ShapesSpec wiring: bind spec leaves into the real (compile-time) ShapeEnv.
+#
+# These helpers operate on ShapeEnv plus the spec types from
+# torch.fx.experimental.dynamic_spec. They live here because they are
+# fundamentally shape-env operations (mutating var_to_hint_override,
+# _spec_symbol_to_compile_symbol, _shape_spec_pending_assumptions, etc.)
+# and are consumed by both make_fx and the dynamo strict export tracer.
+# ---------------------------------------------------------------------------
+
+
+def _symbolic_context_from_shapes_spec(
+    e: Any,
+    source: Source,
+    tensor_spec: TensorSpec | None,
+    view_base_context: SymbolicContext | None,
+    shape_env_to_source_to_symbol_cache: dict[Any, Any],
+) -> StatefulSymbolicContext:
+    if tensor_spec is not None and len(tensor_spec) != e.dim():
+        raise ValueError(
+            f"TensorSpec has {len(tensor_spec)} dims but tensor {source.name} "
+            f"has {e.dim()} dims"
+        )
+    dynamic_sizes = []
+    dynamic_strides = [DimDynamic.INFER_STRIDE] * e.dim()
+
+    for i in range(e.dim()):
+        if tensor_spec is None:
+            dynamic_sizes.append(DimDynamic.STATIC)
+        else:
+            dim_spec = tensor_spec[i]
+            if isinstance(dim_spec, int):
+                actual_size = e.size(i)
+                if actual_size != dim_spec:
+                    raise ValueError(
+                        f"shapes_spec declares dim {i} as static with value "
+                        f"{dim_spec}, but got {actual_size}"
+                    )
+                dynamic_sizes.append(DimDynamic.STATIC)
+            elif isinstance(dim_spec, torch.SymInt):
+                dynamic_sizes.append(DimDynamic.UNBACKED)
+            elif dim_spec is None:
+                dynamic_sizes.append(DimDynamic.STATIC)
+            else:
+                raise ValueError(
+                    f"shapes_spec dim {i}: unexpected value {dim_spec!r} "
+                    f"(expected LeafIntSpec)"
+                )
+
+    return StatefulSymbolicContext(
+        dynamic_sizes=dynamic_sizes,
+        dynamic_strides=dynamic_strides,
+        view_base_context=view_base_context,
+        tensor_source=source,
+        shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+    )
+
+
+def _wire_tensor_spec_dims(tensor_spec: TensorSpec, fake_tensor: torch.Tensor) -> None:
+    """Wire each ``ShapeVar``/``IntVar`` dim of ``tensor_spec`` to the
+    corresponding fake-tensor symbolic size via ``_wire_spec_slot``.
+    """
+    for dim_i in range(fake_tensor.dim()):
+        dim_spec = tensor_spec[dim_i]
+        if dim_spec is None or isinstance(dim_spec, int):
+            continue
+        size_sym = fake_tensor.size(dim_i)
+        if not isinstance(size_sym, torch.SymInt):
+            continue
+        _wire_spec_slot(dim_spec, size_sym)
+
+
+def _wire_spec_slot(
+    spec: IntVar | SymInt,
+    size_sym: torch.SymInt,
+) -> None:
+    """Wire an IntVar or SymInt spec leaf into the real shape env.
+
+    A spec leaf may be:
+      - IntVar:  bare spec variable. Records
+        ``_spec_symbol_to_compile_symbol[A.sympy_sym] = u_new`` so future bare/derived
+        uses can resolve A; emits a runtime eq-check on repeat occurrences
+        (dedup).
+      - SymInt:  derived expression (e.g. ``A * 2 + 1``) backed by the spec
+        ShapeEnv. Emits
+        ``torch._check(u_new == expr.xreplace(_spec_symbol_to_compile_symbol))``, or
+        defers to ``_shape_spec_pending_assumptions`` if any free spec symbol isn't
+        bound yet (drained on the next bare-IntVar binding).
+
+    ``_spec_symbol_to_compile_symbol`` only ever holds IntVar sympy.Symbol entries.
+
+    ``size_sym`` is the freshly allocated unbacked SymInt for this leaf's
+    input (tensor dim or scalar arg).
+    """
+    from torch.fx.experimental.dynamic_spec import IntVar
+
+    shape_env = size_sym.node.shape_env
+
+    if isinstance(spec, IntVar):
+        # Bare IntVar — first occurrence binds the spec sym to this input;
+        # subsequent occurrences dedup via runtime eq-check.
+        spec_sym = spec.sympy_sym
+        compile_expr = size_sym.node.expr
+        # Apply optimization hint on EVERY occurrence: var_to_hint_override
+        # is per-symbol and doesn't propagate via equivalence.
+        if spec.optimization_hint is not None:
+            shape_env.var_to_hint_override[compile_expr] = spec.optimization_hint
+        if spec_sym not in shape_env._spec_symbol_to_compile_symbol:
+            shape_env._spec_symbol_to_compile_symbol[spec_sym] = compile_expr
+            # Bounds apply ONLY on the canonical (first) symbol. Subsequent
+            # occurrences are tied to this one via the Eq runtime assert
+            # below; ShapeEnv._set_replacement / _refine_ranges intersect
+            # var_to_range across both sides of an integer Eq, so the
+            # bounds propagate to every other occurrence's symbol
+            # automatically.
+            if spec.min is not None:
+                torch._check(size_sym >= spec.min)
+            if spec.max is not None:
+                torch._check(size_sym <= spec.max)
+            _drain_shape_spec_pending_assumptions(shape_env)
+        else:
+            existing_expr = shape_env._spec_symbol_to_compile_symbol[spec_sym]
+            shape_env.guard_or_defer_runtime_assert(
+                sympy.Eq(compile_expr, existing_expr),
+                f"IntVar({spec.name}) dedup eq-check",
+            )
+    elif isinstance(spec, torch.SymInt):
+        spec_expr = spec.node.expr
+        free = spec_expr.free_symbols
+        deferred_bool = sympy.Eq(size_sym.node.expr, spec_expr)
+        if free.issubset(shape_env._spec_symbol_to_compile_symbol):
+            _emit_pending_spec_assumption(shape_env, deferred_bool)
+        else:
+            shape_env._shape_spec_pending_assumptions.append((free, deferred_bool))
+    else:
+        raise TypeError(
+            f"_wire_spec_slot: expected IntVar or SymInt, got {type(spec).__name__}"
+        )
+
+
+def _emit_pending_spec_assumption(shape_env: ShapeEnv, bool_expr: sympy.Expr) -> None:
+    """Substitute spec symbols and defer the resulting boolean as a runtime
+    assert. ``bool_expr`` is a sympy boolean (e.g. ``Eq``, ``Gt``) whose free
+    spec symbols must already be present in ``_spec_symbol_to_compile_symbol``."""
+    substituted = bool_expr.xreplace(shape_env._spec_symbol_to_compile_symbol)
+    shape_env.guard_or_defer_runtime_assert(substituted, "shapes_spec deferred check")
+
+
+def _drain_shape_spec_pending_assumptions(shape_env: ShapeEnv) -> None:
+    """Re-scan pending derived/assumption checks; emit any whose deps are now bound.
+
+    TODO: optimize with an inverted index (sym → pending entries) if the
+    pending list grows large. Inductor uses this pattern in
+    ``graph.py:ras_by_symbol``. Spec wiring typically has < 10 entries so
+    the linear scan here is fine; revisit if profiling shows otherwise.
+    """
+    pending = shape_env._shape_spec_pending_assumptions
+    if not pending:
+        return
+    subst_keys = shape_env._spec_symbol_to_compile_symbol.keys()
+    keep = []
+    for free, bool_expr in pending:
+        if free.issubset(subst_keys):
+            _emit_pending_spec_assumption(shape_env, bool_expr)
+        else:
+            keep.append((free, bool_expr))
+    shape_env._shape_spec_pending_assumptions[:] = keep
+
+
+def _wire_spec_assumptions(shape_env: ShapeEnv, shapes_spec: ShapesSpec) -> None:
+    """Append each ShapesSpec.assumptions SymBool to the pending list.
+    Called BEFORE any input is processed.
+    """
+    for a in shapes_spec._assumptions:
+        bool_expr = a.node.expr
+        shape_env._shape_spec_pending_assumptions.append(
+            (bool_expr.free_symbols, bool_expr)
+        )
+
+
+def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
+    """Verify all pending spec assumptions/derived-dim checks have been
+    emitted (i.e. every spec IntVar referenced by a derived expression or
+    user assumption has been bound by some bare-IntVar input slot).
+    """
+    pending = shape_env._shape_spec_pending_assumptions
+    if not pending:
+        return
+
+    subst_keys = shape_env._spec_symbol_to_compile_symbol.keys()
+
+    # Strip "#N" uid suffixes for user-facing error messages so callers see
+    # the original IntVar name ("a") rather than the disambiguated internal
+    # form ("a#0"). Works on both single sympy.Symbols and stringified
+    # expressions (e.g. "a#0 > b#1" -> "a > b").
+    def _pretty(s: object) -> str:
+        return re.sub(r"#\d+", "", str(s))
+
+    # Build a "expr (unbound: [...])" line per pending check that still
+    # has unbound deps.
+    lines = []
+    all_unbound: set[sympy.Symbol] = set()
+    for free, bool_expr in pending:
+        missing = free - subst_keys
+        if not missing:
+            raise RuntimeError(
+                f"_finalize_spec_wiring: pending entry has all symbols bound "
+                f"({bool_expr}); _drain_shape_spec_pending_assumptions should "
+                f"have removed it before finalize."
+            )
+        all_unbound |= missing
+        missing_names = sorted(_pretty(s) for s in missing)
+        lines.append(f"  - {_pretty(bool_expr)}  (unbound: {missing_names})")
+    raise ValueError(
+        f"shapes_spec: {len(lines)} pending check(s) reference unbound "
+        f"IntVar(s) {sorted(_pretty(s) for s in all_unbound)}. Every IntVar "
+        f"used in a derived expression or assumption must also appear as a "
+        f"bare-IntVar slot somewhere in the spec. Offending checks:\n"
+        + "\n".join(lines)
+    )
