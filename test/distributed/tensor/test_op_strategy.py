@@ -30,6 +30,7 @@ from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
+from torch.distributed.tensor._ops._math_ops import common_reduction_strategy
 from torch.distributed.tensor._ops.utils import replicate_op_strategy
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
@@ -227,50 +228,25 @@ class TestCostModel(DTensorOpTestBase):
         self.assertEqual(redistribute_cost(replica_spec, strided_shard_spec), 0.0)
 
     def test_redistribute_cost_latency(self):
-        # test cost model on addmm op
-        from torch.distributed.tensor._ops._matrix_ops import addmm_strategy
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        torch.manual_seed(0)
+        bias = torch.randn(8)
+        mat1 = torch.randn(50, 6)
+        mat2 = torch.randn(6, 8)
 
-        mesh = self.build_device_mesh()
-        shard0_placement = (Shard(0),)
-        partial_placement = (Partial(),)
-        shard1_placement = (Shard(1),)
-
-        shard0_tensor_meta = extract_tensor_meta(torch.randn(8))
-        partial_tensor_meta = extract_tensor_meta(torch.randn(50, 6))
-        shard1_tensor_meta = extract_tensor_meta(torch.randn(6, 8))
-
-        # shard spec
-        shard0_spec = DTensorSpec(mesh, shard0_placement, shard0_tensor_meta)
-        # replica spec
-        partial_spec = DTensorSpec(mesh, partial_placement, partial_tensor_meta)
-        # partial spec
-        shard1_spec = DTensorSpec(mesh, shard1_placement, shard1_tensor_meta)
-
-        op_schema = OpSchema(
-            torch.ops.aten.addmm.default,
-            (
-                OpStrategy([OpSpec(shard0_spec)]),
-                OpStrategy([OpSpec(partial_spec)]),
-                OpStrategy([OpSpec(shard1_spec)]),
-            ),
-            {},
+        dist_bias = distribute_tensor(bias, mesh, [Shard(0)])
+        dist_mat1 = DTensor.from_local(
+            mat1 / self.world_size,
+            mesh,
+            [Partial()],
+            run_check=False,
         )
+        dist_mat2 = distribute_tensor(mat2, mesh, [Shard(1)])
 
-        output_strategy = addmm_strategy(op_schema)
-        strategy_costs = {}
-        for strategy in output_strategy.strategies:
-            redistribute_cost = sum(chain.from_iterable(strategy.redistribute_cost))
-            strategy_costs[str(strategy)] = redistribute_cost
+        dist_out = torch.addmm(dist_bias, dist_mat1, dist_mat2)
 
-        # assert that cost model counts for collective latency (i.e. multiple comm is penalized)
-        self.assertTrue(
-            strategy_costs["(S(0), R, S(1)) -> S(1)"]
-            < strategy_costs["(R, S(0), R) -> S(0)"]
-        )
-        # assert a single allreduce is the best one
-        self.assertEqual(
-            strategy_costs["(S(0), R, S(1)) -> S(1)"], min(strategy_costs.values())
-        )
+        self.assertEqual(dist_out.placements, (Shard(1),))
+        self.assertEqual(dist_out.full_tensor(), torch.addmm(bias, mat1, mat2))
 
     def test_redistribute_cost_mesh_2d(self):
         mesh_2d = DeviceMesh(
@@ -305,8 +281,6 @@ class TestCostModel(DTensorOpTestBase):
         self.assertTrue(allreduce_cost > reduce_scatter_cost)
 
     def test_mm_strategies(self):
-        from torch.distributed.tensor._ops._matrix_ops import mm_strategy
-
         mesh = self.build_device_mesh()
         lhs_tensor = torch.randn(6, 8)
         rhs_tensor = torch.randn(8, 12)
@@ -325,22 +299,6 @@ class TestCostModel(DTensorOpTestBase):
 
             op_schema = OpSchema(
                 torch.ops.aten.mm.default,
-                (
-                    OpStrategy([OpSpec(lhs_spec)]),
-                    OpStrategy([OpSpec(rhs_spec)]),
-                ),
-                {},
-            )
-            # test the strategy
-            res_strategies = mm_strategy(op_schema)
-
-            for strtgy in res_strategies.strategies:
-                if strtgy.input_specs == (lhs_spec, rhs_spec):
-                    self.assertEqual(strtgy.redistribute_cost, [[0.0], [0.0]])
-                    break
-
-            op_schema = OpSchema(
-                torch.ops.aten.mm.default,
                 (lhs_spec, rhs_spec),
                 {},
             )
@@ -351,8 +309,6 @@ class TestCostModel(DTensorOpTestBase):
             self.assertFalse(output_sharding.needs_redistribute)
 
     def test_bmm_strategies(self):
-        from torch.distributed.tensor._ops._matrix_ops import bmm_strategy
-
         mesh = self.build_device_mesh()
         lhs_tensor = torch.randn(8, 6, 8)
         rhs_tensor = torch.randn(8, 8, 12)
@@ -369,22 +325,6 @@ class TestCostModel(DTensorOpTestBase):
         for lhs, rhs in bmm_combs:
             lhs_spec = DTensorSpec(mesh, (lhs,), lhs_tensor_meta)
             rhs_spec = DTensorSpec(mesh, (rhs,), rhs_tensor_meta)
-
-            op_schema = OpSchema(
-                torch.ops.aten.bmm.default,
-                (
-                    OpStrategy([OpSpec(lhs_spec)]),
-                    OpStrategy([OpSpec(rhs_spec)]),
-                ),
-                {},
-            )
-            # test the strategy
-            res_strategies = bmm_strategy(op_schema)
-
-            for strtgy in res_strategies.strategies:
-                if strtgy.input_specs == (lhs_spec, rhs_spec):
-                    self.assertEqual(strtgy.redistribute_cost, [[0.0], [0.0]])
-                    break
 
             op_schema = OpSchema(
                 torch.ops.aten.bmm.default,
@@ -444,6 +384,46 @@ class TestCostModel(DTensorOpTestBase):
         # Cost increases with earlier mesh dimensions due to the way
         # mesh dimensions are ordered (outer to inner in device hierarchy)
         self.assertGreater(cost_mesh_dim0, cost_mesh_dim1)
+
+
+class TestReductionStrategy(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.world_size = 4
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def _make_spec(self, mesh: DeviceMesh, placements):
+        tensor_meta = TensorMeta(
+            shape=torch.Size([8, 8]), stride=(8, 1), dtype=torch.float32
+        )
+        return DTensorSpec(mesh, tuple(placements), tensor_meta)
+
+    def test_common_reduction_strategy_uses_per_strategy_linearity(self):
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size).reshape(2, 2))
+        partial_avg_spec = self._make_spec(mesh, (Partial("avg"), Replicate()))
+        sharded_spec = self._make_spec(mesh, (Shard(0), Shard(1)))
+
+        reduction_strategy = common_reduction_strategy(
+            OpStrategy([OpSpec(partial_avg_spec), OpSpec(sharded_spec)]),
+            [0],
+            reduction_op="sum",
+        )
+
+        sharded_reduction_spec = reduction_strategy.strategies[1]
+        self.assertEqual(
+            sharded_reduction_spec.input_specs[0].placements, (Shard(0), Shard(1))
+        )
+        self.assertEqual(
+            sharded_reduction_spec.output_spec.placements,
+            (Partial("sum"), Shard(0)),
+        )
 
 
 # -------------Test op strategy registration-------------
@@ -1092,6 +1072,80 @@ class TestOpSchemaMetaProperties(TestCase):
         )
         shard_dims = {s[0].dim for s in strategies if hasattr(s[0], "dim")}
         self.assertNotIn(1, shard_dims, "Should not shard on padded dim")
+
+
+class TestOpSpecMesh(TestCase):
+    """Tests for OpSpec.mesh property handling of None specs."""
+
+    def setUp(self):
+        super().setUp()
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=4, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def _make_spec(self, placements):
+        mesh = DeviceMesh("cpu", torch.arange(4))
+        tm = TensorMeta(
+            shape=torch.Size([8, 16]),
+            stride=(16, 1),
+            dtype=torch.float32,
+        )
+        return DTensorSpec(mesh, placements, tm)
+
+    def test_mesh_from_single_output_spec(self):
+        spec = self._make_spec((Replicate(),))
+        op_spec = OpSpec(output_specs=spec, input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_tuple_output_specs(self):
+        spec = self._make_spec((Shard(0),))
+        op_spec = OpSpec(output_specs=(spec, spec), input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_tuple_output_specs_with_leading_none(self):
+        """When the first output spec is None, mesh should come from the
+        next non-None entry."""
+        spec = self._make_spec((Replicate(),))
+        op_spec = OpSpec(output_specs=(None, spec), input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_input_specs_when_output_is_none(self):
+        """When output_specs is None, mesh should come from input_specs."""
+        spec = self._make_spec((Shard(0),))
+        op_spec = OpSpec(output_specs=None, input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_input_specs_with_leading_none(self):
+        """When output_specs is None and input_specs has leading None entries,
+        mesh should come from the first non-None input spec."""
+        spec = self._make_spec((Replicate(),))
+        op_spec = OpSpec(output_specs=None, input_specs=(None, spec))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_input_specs_when_tuple_output_all_none(self):
+        """When output_specs is a tuple of all None, mesh should fall through
+        to input_specs — same behavior as output_specs=None."""
+        spec = self._make_spec((Shard(0),))
+        op_spec = OpSpec(output_specs=(None, None), input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_raises_when_all_specs_none(self):
+        """When both output_specs and all input_specs are None, mesh should
+        raise AssertionError."""
+        op_spec = OpSpec(output_specs=None, input_specs=(None, None))
+        with self.assertRaisesRegex(AssertionError, "Cannot determine mesh"):
+            _ = op_spec.mesh
+
+    def test_op_strategy_str_handles_all_specs_none(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/182370."""
+        op_strategy = OpStrategy([OpSpec(output_specs=None, input_specs=(None,))])
+
+        self.assertEqual(str(op_strategy), "OpStrategy[(None) -> None]")
 
 
 class TestExpandToFullMeshOpStrategy(TestCase):

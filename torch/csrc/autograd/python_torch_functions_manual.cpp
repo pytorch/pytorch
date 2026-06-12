@@ -22,6 +22,7 @@
 #include <ATen/ATen.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/native/Resize.h>
+#include <ATen/ops/from_blob.h>
 
 #include <Python.h>
 #include <fmt/format.h>
@@ -30,7 +31,6 @@
 #include <vector>
 
 using at::DeviceGuard;
-using at::DimnameList;
 using at::IntArrayRef;
 using at::OptionalDeviceGuard;
 using at::Scalar;
@@ -248,10 +248,10 @@ static PyObject* THPVariable_tensor(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
+      "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
   });
 
-  constexpr int ctor_num_args = 6;
+  constexpr int ctor_num_args = 5;
   ParsedArgs<ctor_num_args> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.has_torch_function()) {
@@ -287,6 +287,51 @@ static PyObject* THPVariable_get_device(
   if (r.idx == 0) {
     return wrap(r.tensor(0).get_device());
   }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+// Not registered through native_functions.yaml because from_blob takes a raw
+// pointer and has no autograd or JIT semantics. Exposed as a private API for
+// advanced use cases (e.g. wrapping externally managed memory).
+static PyObject* THPVariable__from_blob(
+    PyObject* self_,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {
+          "_from_blob(int64_t data, IntArrayRef sizes, IntArrayRef? strides=None, *, ScalarType? dtype=None, Device? device=None)",
+      },
+      /*traceable=*/false);
+
+  ParsedArgs<5> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.idx == 0) {
+    auto data_ptr = reinterpret_cast<void*>(r.toInt64(0));
+    auto sizes = r.intlist(1);
+    auto strides = r.intlistOptional(2);
+    auto dtype = r.scalartypeOptional(3);
+    auto device = r.deviceOptional(4);
+
+    auto options = at::TensorOptions{};
+    if (dtype.has_value()) {
+      options = options.dtype(*dtype);
+    }
+    if (device.has_value()) {
+      options = options.device(*device);
+    }
+
+    at::Tensor tensor;
+    if (strides.list.has_value()) {
+      tensor = at::from_blob(data_ptr, sizes, *strides.list, options);
+    } else {
+      tensor = at::from_blob(data_ptr, sizes, options);
+    }
+    return THPVariable_Wrap(std::move(tensor));
+  }
+
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -374,6 +419,10 @@ static PyMethodDef torch_functions_manual[] = {
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"from_numpy", THPVariable_from_numpy, METH_STATIC | METH_O, nullptr},
+    {"_from_blob",
+     castPyCFunctionWithKeywords(THPVariable__from_blob),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
     {"frombuffer",
      castPyCFunctionWithKeywords(THPVariable_frombuffer),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
@@ -797,10 +846,8 @@ void initTorchFunctions(PyObject* module) {
         if (inner_autograd_meta) {
           dst_.set_requires_grad(src_.requires_grad());
           if (dst_.requires_grad()) {
-            auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
-                new torch::autograd::Error(
-                    "Cannot backprop through mirrored meta, file a bug in PyTorch"),
-                torch::autograd::deleteNode);
+            auto new_grad_fn = c10::make_intrusive<torch::autograd::Error>(
+                "Cannot backprop through mirrored meta, file a bug in PyTorch");
             torch::autograd::set_history(dst_, new_grad_fn);
           }
         }

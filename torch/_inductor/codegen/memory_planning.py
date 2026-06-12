@@ -7,11 +7,10 @@ import itertools
 import pprint
 from typing import Any, Protocol, TYPE_CHECKING
 
-import sympy
-
 import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Max
 
 from .. import config
 from ..utils import _align, align, cache_on_self, CachedMethod, IndentedBuffer
@@ -28,6 +27,8 @@ from .wrapper import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    import sympy
 
 
 @dataclasses.dataclass
@@ -67,7 +68,8 @@ class LiveRanges:
         ranges = [*sorted(ranges, key=lambda x: x.begin)]
         self.ranges = ranges[:1]
         for r in ranges[1:]:
-            assert self.ranges[-1].begin <= r.begin
+            if self.ranges[-1].begin > r.begin:
+                raise AssertionError("ranges must be sorted by begin")
             if self.ranges[-1].end >= r.begin:
                 self.ranges[-1] = LiveRange.join(self.ranges[-1], r)
             else:
@@ -80,7 +82,8 @@ class LiveRanges:
         while left and right:
             if left[0].begin > right[0].begin:
                 left, right = right, left
-            assert left[0].begin <= right[0].begin
+            if left[0].begin > right[0].begin:
+                raise AssertionError("left should begin no later than right")
             if left[0].end > right[0].begin:
                 return True
             left.popleft()
@@ -169,17 +172,20 @@ class Allocation(AllocationTreeNode):
         return self.symbolic_size
 
     def mark_allocated(self):
-        assert not self.allocated
+        if self.allocated:
+            raise AssertionError("block already allocated")
         self.allocated = True
 
     def finalize(self, pool, offset):
-        assert self.pool is None and self.offset is None
+        if not (self.pool is None and self.offset is None):
+            raise AssertionError("block already finalized")
         self.pool = pool
         self.offset = offset
         return self
 
     def codegen_alloc_from_pool(self, wrapper):
-        assert self.pool
+        if not self.pool:
+            raise AssertionError("block has no pool assigned")
         node = self.node
         shape = tuple(node.get_size())
         stride = tuple(node.get_stride())
@@ -290,7 +296,8 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
                     SpatialSplit.create(block, slot_size - block_size)
                 )
             else:  # grow this allocation
-                assert is_last
+                if not is_last:
+                    raise AssertionError("can only grow allocation when is_last")
                 self.allocations = [
                     *(
                         SpatialSplit.create(a, block_size - slot_size)
@@ -318,7 +325,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
     def get_symbolic_size(self) -> sympy.Expr:
         if not self.allocations:
             return 0  # type: ignore[return-value]
-        return sympy.Max(*[x.get_symbolic_size() for x in self.allocations])
+        return Max(*[x.get_symbolic_size() for x in self.allocations])
 
     def is_empty(self):
         return len(self.allocations) == 1 and self.allocations[0].is_empty()
@@ -343,8 +350,12 @@ class SpatialSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
 
     @staticmethod
     def create(left, extra_space):
-        assert isinstance(left, AllocationTreeNode)
-        assert isinstance(extra_space, int) and extra_space >= 1
+        if not isinstance(left, AllocationTreeNode):
+            raise AssertionError(f"expected AllocationTreeNode, got {type(left)}")
+        if not (isinstance(extra_space, int) and extra_space >= 1):
+            raise AssertionError(
+                f"expected positive int extra_space, got {extra_space}"
+            )
         return SpatialSplit(TemporalSplit([left]), TemporalSplit([Empty(extra_space)]))
 
     def _allocate(self, block: Allocation, is_last: bool):
@@ -438,13 +449,15 @@ class AllocationPool:
         return True
 
     def finalize(self, name):
-        assert not self.name
+        if self.name:
+            raise AssertionError("pool already finalized")
         self.name = name
         self.names_to_del.append(name)
         self.root.finalize(self, 0)
 
     def codegen_create(self, wrapper, code: IndentedBuffer):
-        assert self.name
+        if not self.name:
+            raise AssertionError("pool must be finalized before codegen_create")
         nbytes = self.root.get_symbolic_size()
         for block in self.root.allocations:
             if isinstance(block, Allocation) and nbytes == block.get_symbolic_size():
@@ -567,8 +580,10 @@ class BufferGroup:
         return self.node.get_layout().storage_size() * self.node.get_dtype().itemsize
 
     def make_allocation(self):
-        assert not self.allocation, "multiple allocations"
-        assert isinstance(self.live_range.begin, int), "live ranges not computed"
+        if self.allocation:
+            raise AssertionError("multiple allocations")
+        if not isinstance(self.live_range.begin, int):
+            raise AssertionError("live ranges not computed")
         nbytes = self.sym_nbytes()
         # For now, fallback value will be used if we encounter an unbacked SymInt. The longer-term plan is to have
         # size_hint() use better heuristics for unbackeds, at which point the fallback value will be ignored.
@@ -607,7 +622,8 @@ class AllocFromPoolLine(PoolMemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer):
         allocation = self.group.allocation
-        assert allocation and allocation.pool
+        if not (allocation and allocation.pool):
+            raise AssertionError("group must have an allocation with a pool")
         pool = allocation.pool
         name = self.node.get_name()
 
@@ -640,7 +656,8 @@ class DeallocFromPoolLine(PoolMemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer):
         if self.is_last_pool_usage:
-            assert self.group.allocation and self.group.allocation.pool
+            if not (self.group.allocation and self.group.allocation.pool):
+                raise AssertionError("group must have an allocation with a pool")
             self.group.allocation.pool.codegen_destroy(self.wrapper, code)
 
 
@@ -685,12 +702,14 @@ class MemoryPlanner:
         for line in lines:
             if isinstance(line, AllocateLine):
                 name = line.node.get_name()
-                assert name not in name_to_group
+                if name in name_to_group:
+                    raise AssertionError(f"duplicate allocation for {name}")
                 name_to_group[name] = BufferGroup(line.node)
             elif isinstance(line, ReuseLine):
                 old_name = line.node.get_name()
                 new_name = line.reused_as.get_name()
-                assert new_name not in name_to_group
+                if new_name in name_to_group:
+                    raise AssertionError(f"duplicate group for reused {new_name}")
                 # TODO(jansel): we should support reusing buffers created via ExternKernelAlloc
                 if old_name in name_to_group:
                     name_to_group[old_name].names.append(new_name)
@@ -701,7 +720,8 @@ class MemoryPlanner:
         for group in unique_groups:
             group.is_output = any(x in outputs for x in group.names)
 
-        assert self.buffer_groups is None
+        if self.buffer_groups is not None:
+            raise AssertionError("buffer_groups already computed")
         self.buffer_groups = unique_groups
         return name_to_group
 
@@ -718,7 +738,8 @@ class MemoryPlanner:
                         self.wrapper, name_to_group[line.node.get_name()]
                     )
             elif isinstance(line, FreeIfNotReusedLine):
-                assert not line.is_reused
+                if line.is_reused:
+                    raise AssertionError("expected line not to be reused")
                 if line.node.get_name() in name_to_group:
                     lines[i] = DeallocFromPoolLine(
                         self.wrapper, name_to_group[line.node.get_name()]
@@ -743,7 +764,8 @@ class MemoryPlanner:
                 worklist.popleft()
 
         timestep += 1
-        assert self.buffer_groups is not None
+        if self.buffer_groups is None:
+            raise AssertionError("buffer_groups not computed")
         for group in self.buffer_groups:
             if group.is_output:
                 group.update_usage(timestep)
@@ -752,8 +774,10 @@ class MemoryPlanner:
         """
         Assign every allocation to a specific location in a specific AllocationPool.
         """
-        assert config.memory_pool in ("none", "intermediates", "outputs", "combined")
-        assert self.buffer_groups is not None
+        if config.memory_pool not in ("none", "intermediates", "outputs", "combined"):
+            raise AssertionError(f"invalid memory_pool {config.memory_pool}")
+        if self.buffer_groups is None:
+            raise AssertionError("buffer_groups not computed")
 
         for group in self.buffer_groups:
             group.make_allocation()
@@ -761,7 +785,8 @@ class MemoryPlanner:
         outputs: list[Allocation] = []
         intermediates: list[Allocation] = []
         for group in self.buffer_groups:
-            assert group.allocation
+            if not group.allocation:
+                raise AssertionError("group has no allocation")
             if group.is_output and config.memory_pool != "combined":
                 outputs.append(group.allocation)
             else:
@@ -796,9 +821,11 @@ class MemoryPlanner:
         seen = OrderedSet[AllocationPool]()
         for line in lines:
             if isinstance(line, AllocFromPoolLine):
-                assert line.group.allocation
+                if not line.group.allocation:
+                    raise AssertionError("group has no allocation")
                 pool = line.group.allocation.pool
-                assert pool is not None
+                if pool is None:
+                    raise AssertionError("allocation has no pool")
                 if pool not in seen:
                     line.is_first_pool_usage = True
                     seen.add(pool)
@@ -806,9 +833,11 @@ class MemoryPlanner:
         seen = OrderedSet[AllocationPool]()
         for line in reversed(lines):
             if isinstance(line, DeallocFromPoolLine):
-                assert line.group.allocation
+                if not line.group.allocation:
+                    raise AssertionError("group has no allocation")
                 pool = line.group.allocation.pool
-                assert pool is not None
+                if pool is None:
+                    raise AssertionError("allocation has no pool")
                 if pool not in seen:
                     line.is_last_pool_usage = (
                         pool.root.get_live_ranges().end <= line.timestep

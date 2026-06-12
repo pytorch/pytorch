@@ -9,6 +9,7 @@ import torch._dynamo
 import torch.utils.cpp_extension
 from torch._C import FileCheck
 from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.inductor_utils import has_cpp_wrapper_for_device
 
 
 try:
@@ -34,7 +35,13 @@ from torch._inductor.codegen.common import (
     register_device_op_overrides,
 )
 from torch._inductor.codegen.cpu_device_op_overrides import CpuDeviceOpOverrides
-from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS, xfailIfS390X
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_MACOS,
+    parametrize,
+    xfailIfS390X,
+)
 
 
 try:
@@ -166,6 +173,32 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
                 opt_fn(x, y, z)
                 res = opt_fn(x, y, z)
                 self.assertEqual(ref, res.to(device="cpu"))
+
+    @parametrize("device", ["cpu", "has_cpp_wrapper_extension_device"])
+    def test_has_cpp_wrapper_for_device(self, device: str):
+        # Check that calling the function without having registered a backend
+        # ourselves doesn't error.
+        _ = has_cpp_wrapper_for_device(device)
+
+        # Check when we don't have a C++ wrapper
+        register_backend_for_device(
+            device,
+            ExtensionScheduling,
+            ExtensionWrapperCodegen,
+        )
+        self.assertFalse(has_cpp_wrapper_for_device(device))
+
+        # Check when we have a C++ wrapper
+        register_backend_for_device(
+            device,
+            ExtensionScheduling,
+            ExtensionWrapperCodegen,
+            ExtensionCppWrapperCodegen,
+        )
+        self.assertTrue(has_cpp_wrapper_for_device(device))
+
+
+instantiate_parametrized_tests(ExtensionBackendTests)
 
 
 if __name__ == "__main__":

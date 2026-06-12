@@ -249,7 +249,7 @@ class ExperimentalConfigWrapper {
     LOG(INFO) << "Generated config = " << configss.str();
 
     libkineto::api().activityProfiler().prepareTrace(
-        k_activities, configss.str());
+        k_activities, std::move(configss).str());
 #endif // USE_KINETO
   }
 
@@ -276,7 +276,7 @@ static const std::string setTraceID(const std::string& trace_id) {
   std::stringstream configss;
   configss << "REQUEST_TRACE_ID=" << trace_id << '\n';
   configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << '\n';
-  return configss.str();
+  return std::move(configss).str();
 }
 
 static const std::string appendCustomConfig(
@@ -288,7 +288,7 @@ static const std::string appendCustomConfig(
   std::stringstream configss;
   configss << config;
   configss << "CUSTOM_CONFIG=" << custom_profiler_config << '\n';
-  return configss.str();
+  return std::move(configss).str();
 }
 #endif
 
@@ -549,6 +549,17 @@ void profilerStep() {
     VLOG(1) << "Profiler is not initialized: skipping step() invocation";
   }
 #endif // USE_KINETO
+}
+
+bool isKinetoStopped() {
+#ifdef USE_KINETO
+  if (libkineto::api().isProfilerInitialized()) {
+    return libkineto::api().activityProfiler().isStopped();
+  }
+  return false;
+#else
+  return false;
+#endif
 }
 
 } // namespace autograd::profiler
