@@ -47,10 +47,18 @@ TORCH_META_FUNC(nll_loss_forward)
   TORCH_CHECK(
       target.dim() <= 1,
       "0D or 1D target tensor expected, multi-target not supported");
-
-  auto no_batch_dim = self.dim() == 1  && target.dim() == 0;
   TORCH_CHECK(
-      no_batch_dim || (self.size(0) == target.size(0)),
+      target.scalar_type() == kLong || target.scalar_type() == kByte,
+      "expected target dtype to be Long or Byte, but got ",
+      target.scalar_type());
+  if (self.dim() == 1 && target.dim() == 1) {
+      TORCH_CHECK_VALUE(
+          target.size(0) == 1,
+          "For 1D input, 1D target must have size 1, but got target size: ",
+          target.size(0));
+  }
+  TORCH_CHECK(
+      self.dim() == 1 || (self.size(0) == target.size(0)),
       "size mismatch (got input: ",
       self.sizes(),
       ", target: ",
@@ -155,7 +163,7 @@ inline scalar_t* optional_data(const Tensor& source) {
 }
 
 template <typename scalar_t, typename target_t>
-static void nll_loss_out_frame(
+void nll_loss_out_frame(
     const Tensor& output,
     const Tensor& total_weight,
     const Tensor& input,
@@ -231,7 +239,7 @@ static void nll_loss_out_frame(
 
   constexpr int64_t cascade_sum_num_levels = 8;
   const int64_t level_power =
-      std::max(int64_t(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
+      std::max(static_cast<int64_t>(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
@@ -334,7 +342,7 @@ void nll_loss_forward_out_cpu_template(
 }
 
 template <typename scalar_t, typename target_t>
-static void nll_loss_backward_out_frame(
+void nll_loss_backward_out_frame(
     const Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,
@@ -494,14 +502,14 @@ static Tensor cross_entropy_loss_prob_target(
     int64_t reduction,
     double label_smoothing) {
   const auto class_dim = self.dim() == 1 ? 0 : 1;
-  const auto n_classes = self.size(class_dim);
+  const auto n_classes = self.sym_size(class_dim);
   TORCH_CHECK(
-      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
+      !weight.defined() || (weight.dim() == 1 && weight.sym_numel() == n_classes),
       "cross_entropy: weight tensor should be defined either for all ",
       n_classes,
       " classes or no classes"
       " but got weight tensor of shape: ",
-      weight.sizes());
+      weight.sym_sizes());
 
   auto input = at::log_softmax(self, class_dim, self.scalar_type());
   Tensor target;
@@ -659,20 +667,12 @@ Tensor cross_entropy_loss_symint(
 }
 
 Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
   Tensor total_weight = at::empty({0}, self.options());
-  return std::get<0>(at::nll_loss_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss_forward_out(output, total_weight, self, target, weight_opt, reduction, ignore_index));
 }
 
 Tensor nll_loss_symint(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, c10::SymInt ignore_index) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
-  return std::get<0>(at::nll_loss_forward_symint(self, target, weight, reduction, std::move(ignore_index)));
+  return std::get<0>(at::nll_loss_forward_symint(self, target, weight_opt, reduction, std::move(ignore_index)));
 }
 
 Tensor nll_loss_nd_symint(
@@ -686,9 +686,21 @@ Tensor nll_loss_nd_symint(
         false, "Expected 1 or more dimensions (got ", self.dim(), ")");
   }
 
-  if (self.dim() != 1 && self.sym_sizes()[0] != target.sym_sizes()[0]) {
-    TORCH_CHECK_VALUE(
-        false,
+  if (self.dim() != 1) {
+    auto sizes_match = self.sym_sizes()[0].sym_eq(target.sym_sizes()[0]);
+    if (TORCH_GUARD_OR_FALSE(sizes_match.sym_not())) {
+      // Statically known mismatch - raise ValueError for eager mode
+      TORCH_CHECK_VALUE(
+          false,
+          "Expected input batch_size (",
+          self.sym_sizes()[0],
+          ") to match target batch_size (",
+          target.sym_sizes()[0],
+          ").");
+    }
+    // For unbacked symbolic shapes, emit runtime check.
+    TORCH_SYM_CHECK(
+        sizes_match,
         "Expected input batch_size (",
         self.sym_sizes()[0],
         ") to match target batch_size (",

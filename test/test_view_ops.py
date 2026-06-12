@@ -14,12 +14,13 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyNativeDeviceTypes,
-    onlyNativeDeviceTypesAnd,
     skipLazy,
     skipMeta,
     skipXLA,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
+    all_mps_types_and,
     all_types_and,
     all_types_and_complex_and,
     complex_types,
@@ -44,14 +45,9 @@ def _generate_input(shape, dtype, device, with_extremal):
         x = torch.tensor((), dtype=dtype, device=device)
     else:
         if dtype.is_floating_point or dtype.is_complex:
-            # work around torch.randn not being implemented for bfloat16
-            if dtype == torch.bfloat16:
-                x = torch.randn(*shape, device=device) * random.randint(30, 100)
-                x = x.to(torch.bfloat16)
-            else:
-                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(
-                    30, 100
-                )
+            x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(
+                30, 100
+            )
             x[torch.randn(*shape) > 0.5] = 0
             if with_extremal and dtype.is_floating_point:
                 # Use extremal values
@@ -71,46 +67,28 @@ def _generate_input(shape, dtype, device, with_extremal):
     return x
 
 
-# TODO: replace this with make_tensor() in common_utils.py
 def _rand_shape(dim, min_size, max_size):
     shape = []
-    for i in range(dim):
+    for _ in range(dim):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
 
-# TODO: refactor tests to avoid this function
-# Converts half/bfloat16 dtype to float when device is cpu
-def _convert_t(dtype, device):
-    if device == "cpu" and dtype in {torch.half, torch.bfloat16}:
-        return torch.float
-    return dtype
-
-
 # TODO: replace this with make_tensor() in common_utils.py
-# Returns a tensor of the requested shape, dtype, and device
-# Requesting a half CPU tensor returns a float CPU tensor with
-# values representable by a half.
+# Returns a tensor of the requested shape, dtype, and device.
 # Initialization uses randint for non-float types and randn for float types.
 def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
     # Returns a tensor filled with ones
     if fill_ones:
-        return torch.ones(*shape, dtype=_convert_t(dtype, device), device=device)
+        return torch.ones(*shape, dtype=dtype, device=device)
 
     # Returns a tensor with random integer values
     if not (dtype.is_floating_point or dtype.is_complex):
         t = torch.randint(0, 10, shape, device=device)
         if dtype != torch.uint8:
             t = t - 5  # generate negative values also
-        return t.to(_convert_t(dtype, device))
+        return t.to(dtype)
 
-    # Populates the CPU tensor with floats representable as half/bfloat16
-    if dtype == torch.half and device == "cpu":
-        return torch.randn(*shape, dtype=torch.float, device=device).half().float()
-    if dtype == torch.bfloat16 and device == "cpu":
-        return torch.randn(*shape, dtype=torch.float, device=device).bfloat16().float()
-
-    # Default: returns a tensor with random float values
     return torch.randn(shape, dtype=dtype, device=device).to(dtype=dtype)
 
 
@@ -129,7 +107,7 @@ class TestViewOps(TestCase):
             return False
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
-        if base.device.type == "cpu" or base.device.type == "cuda":
+        if base.device.type in ["cpu", "cuda", "xpu"]:
             if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                 return False
 
@@ -157,8 +135,11 @@ class TestViewOps(TestCase):
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
+    @dtypesIfMPS(*integral_types_and(torch.cfloat, torch.float, torch.half, torch.bool))
     def test_view_dtype_new(self, device, dtype):
         dtypes = {value: key for (key, value) in numpy_to_torch_dtype_dict.items()}
+        if device.startswith("mps"):
+            del dtypes[torch.float64]
         del dtypes[torch.bool]
 
         def generate_inputs():
@@ -271,6 +252,7 @@ class TestViewOps(TestCase):
     # has a greater element size than the original dtype
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_view_dtype_upsize_errors(self, device, dtype):
         dtype_size = torch._utils._element_size(dtype)
 
@@ -370,11 +352,39 @@ class TestViewOps(TestCase):
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0]))
 
+        # See issue #150050: singleton dimension stride doesn't need to be divisible by 2
+        x = torch.rand(336, 2, 1, device=device)
+        x_transposed = x.transpose(1, 2).contiguous()
+        result = torch.view_as_complex(x_transposed)
+        self.assertEqual(result.shape, torch.Size([336, 1]))
+        self.assertTrue(self.is_view_of(x, result))
+
+        # sparse matrix
+        x = torch.tensor([[2.0, 3.0], [4.0, 5.0]], device=device)
+        indices = torch.tensor([[0, 2], [0, 1]], device=device)
+        size = torch.Size([3, 3, 2])
+        xs = torch.sparse_coo_tensor(indices, x, size)
+        res = torch.view_as_complex(xs)
+        # self.is_view_of() does not work with sparse tensors
+        self.assertTrue(res._is_view())
+        self.assertIs(res._base, xs)
+        self.assertEqual(
+            res._values().untyped_storage().data_ptr(),
+            xs._values().untyped_storage().data_ptr(),
+        )
+        self.assertEqual(res.shape, xs.shape[:-1])
+
     @onlyNativeDeviceTypes
     @dtypes(*complex_types(), torch.complex32)
+    @dtypesIfMPS(torch.cfloat, torch.chalf)
     def test_view_as_real(self, device, dtype):
         def fn(contiguous_input=True):
-            t = torch.randn(3, 4, dtype=dtype, device=device)
+            # `torch.bcomplex32` doesn't have randn yet
+            real_dt = torch.empty((0,), dtype=dtype, device=device).real.dtype
+            r = torch.randn(3, 4, dtype=real_dt, device=device)
+            c = torch.randn(3, 4, dtype=real_dt, device=device)
+            t = torch.complex(r, c)
+            self.assertEqual(t.dtype, dtype)
             input = self._do_transpose(t, contiguous_input)
             res = torch.view_as_real(input)
             self.assertEqual(res[:, :, 0], input.real)
@@ -396,11 +406,24 @@ class TestViewOps(TestCase):
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([2]))
 
+        # sparse matrix
+        x = torch.tensor(2 + 3j, dtype=dtype, device=device)
+        indices = torch.tensor([[0], [0]], device=device)
+        size = torch.Size([3, 3])
+        xs = torch.sparse_coo_tensor(indices, x, size, dtype=dtype)
+        res = torch.view_as_real(xs)
+        # self.is_view_of() does not work with sparse tensors
+        self.assertTrue(res._is_view())
+        self.assertIs(res._base, xs)
+        self.assertEqual(
+            res._values().untyped_storage().data_ptr(),
+            xs._values().untyped_storage().data_ptr(),
+        )
+        self.assertEqual(res.shape, xs.shape + (2,))
+
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
-    @dtypesIfMPS(
-        *integral_types_and(torch.half, torch.bfloat16, torch.bool, torch.float32)
-    )
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_view_tensor_split(self, device, dtype):
         a = make_tensor((40, 30), dtype=dtype, device=device, low=-9, high=9)
         a_split_dim0 = a.tensor_split(7, 0)
@@ -412,6 +435,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypesIfMPS(*all_mps_types_and(torch.cfloat, torch.bool))
     def test_view_tensor_hsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
         t_hsplit = torch.hsplit(t, 2)
@@ -422,6 +446,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypesIfMPS(*all_mps_types_and(torch.cfloat, torch.bool))
     def test_view_tensor_vsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
         t_vsplit = torch.vsplit(t, 2)
@@ -432,6 +457,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypesIfMPS(*all_mps_types_and(torch.cfloat, torch.bool))
     def test_view_tensor_dsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
         t_dsplit = torch.dsplit(t, 2)
@@ -440,9 +466,9 @@ class TestViewOps(TestCase):
         t[2, 2, 2] = 7
         self.assertEqual(t_dsplit[1][2, 2, 0], t[2, 2, 2])
 
-    @onlyNativeDeviceTypesAnd("mps")
+    @onlyNativeDeviceTypes
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
-    @dtypesIfMPS(*integral_types_and(torch.half, torch.bool, torch.float32))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
 
@@ -451,6 +477,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*complex_types())
+    @dtypesIfMPS(torch.cfloat)
     def test_real_imag_view(self, device, dtype):
         def compare_with_numpy(contiguous_input=True):
             t = torch.randn(3, 3, dtype=dtype, device=device)
@@ -482,6 +509,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*complex_types())
+    @dtypesIfMPS(torch.cfloat)
     def test_conj_imag_view(self, device, dtype) -> None:
         t = _make_tensor((4, 5), dtype, device)
         t_numpy_conj = torch.from_numpy(t.cpu().numpy().conj()).to(device=device)
@@ -510,6 +538,12 @@ class TestViewOps(TestCase):
         *product(
             complex_types(),
             all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
+        )
+    )
+    @dtypesIfMPS(
+        *product(
+            [torch.cfloat, torch.chalf],
+            all_mps_types_and(torch.cfloat, torch.chalf, torch.bool),
         )
     )
     @suppress_warnings
@@ -743,7 +777,8 @@ class TestViewOps(TestCase):
                 y = prepro_fn(x) if prepro_fn is not None else x
                 max_offset = sum((si - 1) * st for si, st in zip(size, strides))
                 max_offset += offset if offset is not None else y.storage_offset()
-                assert max_offset < len(y.storage()), "test case resizes storage"
+                if max_offset >= len(y.storage()):
+                    raise AssertionError("test case resizes storage")
 
             def closure(x):
                 if prepro_fn is not None:
@@ -901,7 +936,7 @@ class TestViewOps(TestCase):
         assert_is_nonview(t, nv)
 
         # flatten returns the original object if start_dim=end_dim
-        t = t = torch.ones(2, 2, device=device)
+        t = torch.ones(2, 2, device=device)
         nv = t.flatten(1, 1)
         self.assertTrue(t is nv)
 
@@ -949,7 +984,7 @@ class TestViewOps(TestCase):
         t[rows, cols] = 0
         self.assertEqual(t[2, 2], 0)
 
-    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    @onlyNativeDeviceTypes
     def test_chunk_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.chunk(t, 3)
@@ -960,7 +995,7 @@ class TestViewOps(TestCase):
             v[0, 0] = idx + 1
             self.assertEqual(t[idx, 0], v[0, 0])
 
-    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    @onlyNativeDeviceTypes
     def test_split_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.split(t, [1, 1, 1])
@@ -1036,8 +1071,60 @@ class TestViewOps(TestCase):
         self.assertEqual(expected1, out1)
         self.assertEqual(expected2, out2)
 
+    @skipLazy  # Lazy backend has issues with this operation
+    def test_maybe_view_chunk_cat(self, device):
+        """Test _maybe_view_chunk_cat is equivalent to torch.cat(torch.chunk(...))"""
+        from torch._utils import _maybe_view_chunk_cat
+
+        # Helper to test a configuration
+        def test_config(shape, group_size, gather_dim):
+            x = torch.randn(shape, device=device)
+            result = _maybe_view_chunk_cat(
+                x, group_size=group_size, gather_dim=gather_dim
+            )
+            expected = torch.cat(torch.chunk(x, group_size, dim=0), dim=gather_dim)
+            self.assertEqual(result, expected)
+            self.assertTrue(result.is_contiguous())
+
+            # Check that whether result is a view matches the movedim reference implementation
+            # Reference: chunks = torch.unflatten(x, 0, [group_size, -1])
+            #            ref = torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
+            chunks = torch.unflatten(x, 0, [group_size, -1])
+            ref = torch.flatten(
+                torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1
+            )
+
+            # Check if result is a view of x by comparing data pointers
+            result_is_view = result.data_ptr() == x.data_ptr()
+            # Check if ref is a view of x by comparing data pointers
+            ref_is_view = ref.data_ptr() == x.data_ptr()
+
+            self.assertEqual(
+                result_is_view,
+                ref_is_view,
+                f"View status mismatch for shape={shape}, group_size={group_size}, "
+                f"gather_dim={gather_dim}: result_is_view={result_is_view}, "
+                f"ref_is_view={ref_is_view}",
+            )
+
+        # Test various configurations - one per line as requested
+        test_config((4, 8, 16), group_size=4, gather_dim=0)  # no-op case
+        test_config((4, 8, 16), group_size=4, gather_dim=1)  # docstring example 1
+        test_config((4, 2, 8), group_size=4, gather_dim=2)  # docstring example 2
+        test_config((2, 10, 20), group_size=2, gather_dim=1)  # different group_size
+        test_config((4, 16), group_size=4, gather_dim=1)  # 2D tensor
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=0)  # 4D, gather_dim=0
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=1)  # 4D, gather_dim=1
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=2)  # 4D, gather_dim=2
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=3)  # 4D, gather_dim=3
+        test_config((8, 4, 6), group_size=8, gather_dim=1)  # group_size=8
+
 
 class TestOldViewOps(TestCase):
+    @skipXPUIf(
+        True,
+        "NotImplementedError with test_ravel, https://github.com/intel/torch-xpu-ops/issues/2358",
+    )
     def test_ravel(self, device):
         def _test_ravel(tensors, size, nc=False):
             for src in tensors:
@@ -1168,6 +1255,8 @@ class TestOldViewOps(TestCase):
         self.assertEqual(x.data_ptr(), x.reshape(1, 9, 1).data_ptr())
         self.assertEqual(torch.reshape(x, (9,)), x.reshape(9))
         self.assertRaises(RuntimeError, lambda: x.reshape(-1, -1))
+        # ensure reshape() throws an error if extra positional arguments are given.
+        self.assertRaises(TypeError, lambda: x.reshape((9,), torch.float32))
 
         y = torch.randn(4, 4, 4, device=device)[:, 0, :]
         # .data_ptr() on meta tensors is always 0 so they are equal regardless of the reshape
@@ -1196,6 +1285,10 @@ class TestOldViewOps(TestCase):
             RuntimeError, lambda: x.reshape_as(torch.rand(10, device=device))
         )
 
+    @skipXPUIf(
+        True,
+        "NotImplementedError with test_flatten,https://github.com/intel/torch-xpu-ops/issues/2358",
+    )
     def test_flatten(self, device):
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
         zero_dim_tensor = torch.tensor(123, device=device)
@@ -1544,9 +1637,9 @@ class TestOldViewOps(TestCase):
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
-        for ndims in range(0, 5):
+        for ndims in range(5):
             shape = _rand_shape(ndims, min_size=5, max_size=10)
-            for n in range(ndims + 1):
+            for _ in range(ndims + 1):
                 for with_extremal in [False, True]:
                     for contiguous in [False, True]:
                         # Generate Input.
@@ -1641,7 +1734,7 @@ class TestOldViewOps(TestCase):
         inputs_with_neg_vals = [[1, 1, -12], [-1, 1], [-11]]
         for integral_inputs_with_neg_vals in inputs_with_neg_vals:
             with self.assertRaisesRegex(
-                RuntimeError, "Trying to create tensor with negative dimension"
+                ValueError, "Attempting to broadcast a dimension with negative length!"
             ):
                 torch.broadcast_shapes(*integral_inputs_with_neg_vals)
 
@@ -1649,20 +1742,21 @@ class TestOldViewOps(TestCase):
         for error_input in integral_inputs_error_case:
             with self.assertRaisesRegex(
                 RuntimeError,
-                "Shape mismatch: objects cannot be broadcast to a single shape",
+                ".*expected shape should be broadcastable to*",
             ):
                 torch.broadcast_shapes(*error_input)
 
         negative_inputs = [(-1,), (1, -12), (4, -11), (-4, 1), (1, 1, -2)]
         for s0 in negative_inputs:
             with self.assertRaisesRegex(
-                RuntimeError, "Trying to create tensor with negative dimension"
+                ValueError, "Attempting to broadcast a dimension with negative length!"
             ):
                 torch.broadcast_shapes(s0)
 
             for s1 in negative_inputs:
                 with self.assertRaisesRegex(
-                    RuntimeError, "Trying to create tensor with negative dimension"
+                    ValueError,
+                    "Attempting to broadcast a dimension with negative length!",
                 ):
                     torch.broadcast_shapes(s0, s1)
 
@@ -1710,6 +1804,9 @@ class TestOldViewOps(TestCase):
                     r"must match the existing size \(\d\)",
                 ):
                     torch.broadcast_to(t, s1)
+        # ensure broadcast_to() throws an error when extra positional arguments are given.
+        t = torch.tensor([1, 2, 3])
+        self.assertRaises(TypeError, lambda: t.broadcast_to((3, 3), torch.float32))
 
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
@@ -1795,6 +1892,11 @@ class TestOldViewOps(TestCase):
         self.assertEqual(tensor.view(-1, 1), contig_tensor.view(-1, 1))
         self.assertEqual(tensor.view(6, 2, 1), contig_tensor.view(6, 2, 1))
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
+
+        # ensure view() throws an error if extra positional arguments are given.
+        self.assertRaises(
+            TypeError, lambda: tensor.view((tensor.numel(),), torch.float32)
+        )
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_reshape_view_semantics(self, device, dtype):
@@ -1955,7 +2057,7 @@ class TestOldViewOps(TestCase):
             with self.assertRaises(numpy_err, msg=msg):
                 np.array_split(a.cpu().numpy(), sections_or_indices, dim)
 
-        # addtional tests for tensor_split with tensor_indices_or_sections
+        # additional tests for tensor_split with tensor_indices_or_sections
         with self.assertRaisesRegex(
             RuntimeError,
             r"tensor_split expected tensor_indices_or_sections to have dtype of long, but got Float",
@@ -1994,6 +2096,18 @@ class TestOldViewOps(TestCase):
             x.resize_([8, 8, 2**29, 2**29])
         with self.assertRaisesRegex(RuntimeError, "Stride calculation overflowed"):
             x.resize_([0, 4, 2305843009213693952])
+
+    @onlyNativeDeviceTypes
+    def test_as_strided_overflow_storage_offset(self, device):
+        t = torch.randn(2, 3, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.as_strided(t, [1], [1], 2**63 - 1)
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.as_strided(t, [1], [1], 2**61 - 1)
 
     def test_view_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
@@ -2037,8 +2151,10 @@ class TestOldViewOps(TestCase):
         t.col_indices()
 
 
-instantiate_device_type_tests(TestViewOps, globals(), include_lazy=True, allow_mps=True)
-instantiate_device_type_tests(TestOldViewOps, globals())
+instantiate_device_type_tests(
+    TestViewOps, globals(), include_lazy=True, allow_mps=True, allow_xpu=True
+)
+instantiate_device_type_tests(TestOldViewOps, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

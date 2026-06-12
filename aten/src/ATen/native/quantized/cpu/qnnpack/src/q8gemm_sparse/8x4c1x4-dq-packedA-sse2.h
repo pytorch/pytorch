@@ -47,7 +47,7 @@ void KERNEL_NAME(
   const __m128i vzero = _mm_setzero_si128();
 
   // Packed A format.
-  // 8kx4m blocks for alls blocks given 4 rows (4m) are placed in contiguous memory.
+  // 8kx4m blocks for all blocks given 4 rows (4m) are placed in contiguous memory.
   // Original A
   // --------- K -----------          -- (K + 4 - 1) / 4 --
   // |                     |          |                   |
@@ -68,7 +68,7 @@ void KERNEL_NAME(
   // This locality helps in loading 8kx8m blocks of activations
   // Note when M is not multiple of 8, the rest can contain arbitrary
   // data in packed A as we will not be writing those out.
-  // This wil be taken care by just copying the appropriate valid data
+  // This will be taken care by just copying the appropriate valid data
 
   __m128i vacc_low[4];
   __m128i vacc_high[4];

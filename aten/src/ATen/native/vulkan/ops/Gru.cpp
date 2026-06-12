@@ -14,6 +14,8 @@
 #include <ATen/ops/tanh.h>
 #endif
 
+#include <utility>
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -122,7 +124,7 @@ std::tuple<Tensor, Tensor> gru_input(
   auto h_n = at::cat(h_n_list, 1);
   x = x.reshape({batch_size, seq_length, x.size(1)});
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
-  return std::tuple<Tensor, Tensor>(x, h_n);
+  return std::tuple<Tensor, Tensor>(std::move(x), std::move(h_n));
 }
 
 #ifdef USE_VULKAN_API
@@ -240,7 +242,7 @@ const c10::impl::GenericList GruPackedContext::unpack() const {
         packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
 
     TORCH_CHECK(
-        unpacked_linear_context.size() > 0u,
+        !unpacked_linear_context.empty(),
         "unpacked_linear_context does not have any elements!");
 
     params_cpu.emplace_back(
@@ -351,7 +353,7 @@ std::tuple<Tensor, Tensor> run_gru_context(
   auto h_n = at::cat(h_n_list, 1);
   x = x.reshape({batch_size, seq_length, x.size(1)});
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
-  return std::tuple<Tensor, Tensor>(x, h_n);
+  return std::tuple<Tensor, Tensor>(std::move(x), std::move(h_n));
 }
 
 } // namespace ops

@@ -23,7 +23,7 @@ class MapperIterDataPipe(IterDataPipe):
 ```
 Note:
 - Avoid loading data from the source DataPipe in `__init__` function, in order to support lazy data loading and save memory.
-- If `IterDataPipe` instance holds data in memory, please be ware of the in-place modification of data. When second iterator is created from the instance, the data may have already changed. Please take [`IterableWrapper`](https://github.com/pytorch/pytorch/blob/main/torch/utils/data/datapipes/iter/utils.py) class as reference to `deepcopy` data for each iterator.
+- If `IterDataPipe` instance holds data in memory, please beware of the in-place modification of data. When second iterator is created from the instance, the data may have already changed. Please take [`IterableWrapper`](https://github.com/pytorch/pytorch/blob/main/torch/utils/data/datapipes/iter/utils.py) class as reference to `deepcopy` data for each iterator.
 
 ### Iterator
 For `IterDataPipe`, an `__iter__` function is needed to consume data from the source `IterDataPipe` then apply operation over the data before yield.
@@ -51,7 +51,7 @@ Note that `__len__` method is optional for `IterDataPipe`.
 Like `CSVParserIterDataPipe` in the [Using DataPipe sector](#using-datapipe), `__len__` is not implemented because the size of each file streams is unknown for us before loading it.
 
 Besides, in some special cases, `__len__` method can be provided, but it would either return an integer length or raise Error depending on the arguments of DataPipe.
-And, the Error is required to be `TypeError` to support Python's build-in functions like `list(dp)`.
+And, the Error is required to be `TypeError` to support Python's built-in functions like `list(dp)`.
 Please check NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ] for detailed reason in PyTorch.
 
 ### Registering DataPipe with functional API

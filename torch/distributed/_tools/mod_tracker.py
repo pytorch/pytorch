@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 import weakref
-from typing import Callable, Optional, Set
+from collections.abc import Callable
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -42,13 +42,14 @@ class ModTracker:
             def my_linear(m1, m2, bias):
                 print(f"Current modules: {tracker.parents}")
                 return torch.mm(m1, m2.t()) + bias
+
             torch.nn.functional.linear = my_linear
 
             mod(torch.rand(2, 2))
 
     """
 
-    parents: Set[str]
+    parents: set[str]
     """
     A Set containing the fqn for each module currently running their forward
     """
@@ -59,6 +60,7 @@ class ModTracker:
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._seen_modules: weakref.WeakSet = weakref.WeakSet()
         self._has_callback = False
+        self._post_bw_callbacks_to_enqueue: list[Callable] = []
         self._user_pre_fw_hook = None
         self._user_post_fw_hook = None
         self._user_pre_bw_hook = None
@@ -68,6 +70,10 @@ class ModTracker:
         # This assumes no concurrent calls to backward
         if self._has_callback:
             return
+
+        for post_bw_callback in reversed(self._post_bw_callbacks_to_enqueue):
+            torch.autograd.Variable._execution_engine.queue_callback(post_bw_callback)
+        self._post_bw_callbacks_to_enqueue.clear()
 
         def callback():
             self.parents = {"Global"}
@@ -91,10 +97,10 @@ class ModTracker:
 
     def register_user_hooks(
         self,
-        pre_fw_hook: Optional[Callable] = None,
-        post_fw_hook: Optional[Callable] = None,
-        pre_bw_hook: Optional[Callable] = None,
-        post_bw_hook: Optional[Callable] = None,
+        pre_fw_hook: Callable | None = None,
+        post_fw_hook: Callable | None = None,
+        pre_bw_hook: Callable | None = None,
+        post_bw_hook: Callable | None = None,
     ):
         """
         Registers user-specified hooks to be called before/after the forward/backward pass for each
@@ -171,10 +177,12 @@ class ModTracker:
                 def custom_formatwarning(msg, category, filename, lineno, line=None):
                     return f"{filename}:{lineno}: {category.__name__}: {msg} \n"
 
+                # pyrefly: ignore [bad-assignment]
                 warnings.formatwarning = custom_formatwarning
                 warnings.warn(
                     "The module hierarchy tracking maybe be messed up."
-                    " Please file a bug to PyTorch, if it is the case."
+                    " Please file a bug to PyTorch, if it is the case.",
+                    stacklevel=2,
                 )
             if name not in self.parents:
                 self._active_module_cnt[name] = 1
@@ -205,6 +213,9 @@ class ModTracker:
         return fn
 
     def _fw_pre_hook(self, mod, input):
+        if torch._dynamo.eval_frame._is_in_optimized_module():
+            return
+
         name = self._get_mod_name(mod)
         w_mod = weakref.ref(mod)
         self._get_append_fn(w_mod, name, False)()
@@ -212,10 +223,18 @@ class ModTracker:
             self._user_pre_fw_hook(mod, input)
         args, _ = tree_flatten(input)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
-        if not self.is_bw and tensors:
-            register_multi_grad_hook(tensors, self._get_pop_fn(w_mod, name, True))
+        if not self.is_bw:
+            if tensors:
+                register_multi_grad_hook(tensors, self._get_pop_fn(w_mod, name, True))
+            else:
+                self._post_bw_callbacks_to_enqueue.append(
+                    self._get_pop_fn(w_mod, name, True)
+                )
 
     def _fw_post_hook(self, mod, input, output):
+        if torch._dynamo.eval_frame._is_in_optimized_module():
+            return
+
         name = self._get_mod_name(mod)
         w_mod = weakref.ref(mod)
         if self._user_post_fw_hook is not None:
@@ -224,7 +243,9 @@ class ModTracker:
         args, _ = tree_flatten(output)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if not self.is_bw and tensors:
-            register_multi_grad_hook(tensors, self._get_append_fn(w_mod, name, True))
+            register_multi_grad_hook(
+                tensors, self._get_append_fn(w_mod, name, True), mode="any"
+            )
 
     def __enter__(self):
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)

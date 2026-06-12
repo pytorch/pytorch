@@ -1,25 +1,16 @@
-# mypy: allow-untyped-defs
 import enum
 import inspect
 import numbers
 import types
 import typing
 import warnings
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-)
+from collections.abc import Callable
+from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING
 
 import torch
 from torch._jit_internal import boolean_dispatched
 from torch._ops import OpOverload, OpOverloadPacket
+from torch.utils._inspect import _fast_bind
 
 from ._compatibility import compatibility
 
@@ -44,22 +35,22 @@ class ArgsKwargsPair(NamedTuple):
     Simple named tuple for wrapping args/kwargs pairs.
     """
 
-    args: Tuple[Any, ...]
-    kwargs: Dict[str, Any]
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
 
 
-_manual_overrides: Dict[Callable, List[inspect.Signature]] = {}
+_manual_overrides: dict[Callable[..., Any], list[inspect.Signature]] = {}
 
 
-def _nonzero_schemas():
+def _nonzero_schemas() -> list[inspect.Signature]:
     signatures = []
 
-    def nonzero(self):
+    def nonzero(self: torch.Tensor) -> None:
         pass
 
     signatures.append(inspect.signature(nonzero))
 
-    def nonzero(self, *, as_tuple: bool):  # type: ignore[no-redef]
+    def nonzero(self: torch.Tensor, *, as_tuple: bool) -> None:  # type: ignore[no-redef]
         pass
 
     signatures.append(inspect.signature(nonzero))
@@ -71,7 +62,7 @@ _manual_overrides[torch.nonzero] = _nonzero_schemas()
 
 
 class _FakeGlobalNamespace:
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> types.ModuleType:
         if name == "torch":
             return torch
         raise RuntimeError("Expected a torch namespace lookup")
@@ -89,6 +80,7 @@ _type_eval_globals = {
     "NoneType": type(None),
     "Storage": torch.UntypedStorage,
     "t": typing.TypeVar("t"),
+    "PyObject": Any,
 }
 for k in dir(typing):
     _type_eval_globals[k] = getattr(typing, k)
@@ -108,7 +100,7 @@ def _torchscript_schema_to_signature_impl(
 ) -> inspect.Signature:
     from inspect import Parameter
 
-    parameters: List[Parameter] = []
+    parameters: list[Parameter] = []
     for arg in ts_schema.arguments:
         arg_type = _torchscript_type_to_python_type(arg.type)
         default = arg.default_value if arg.has_default_value() else Parameter.empty
@@ -125,19 +117,25 @@ def _torchscript_schema_to_signature_impl(
         )
         # "from" is a keyword therefore it must be a POSITIONAL_ONLY argument
         if name == "from":
-            assert kind == Parameter.POSITIONAL_OR_KEYWORD
-            # ParameterKind type is internal implementation detail to inspec package
+            if kind != Parameter.POSITIONAL_OR_KEYWORD:
+                raise AssertionError(f"Expected POSITIONAL_OR_KEYWORD, got {kind}")
+            # ParameterKind type is internal implementation detail to inspect package
             # which makes it hard to do type annotation
             kind = Parameter.POSITIONAL_ONLY  # type: ignore[assignment]
             # This renders all previous arguments to positional only
+
             for idx, p in enumerate(parameters):
-                assert p.kind == Parameter.POSITIONAL_OR_KEYWORD
+                if p.kind != Parameter.POSITIONAL_OR_KEYWORD:
+                    raise AssertionError(
+                        f"Expected POSITIONAL_OR_KEYWORD for param {p.name}, got {p.kind}"
+                    )
                 parameters[idx] = Parameter(
                     name=p.name,
                     kind=Parameter.POSITIONAL_ONLY,
                     default=p.default,
                     annotation=p.annotation,
                 )
+
         parameters.append(
             Parameter(name=name, kind=kind, default=default, annotation=arg_type)
         )
@@ -154,7 +152,7 @@ def _torchscript_schema_to_signature_impl(
     return inspect.Signature(parameters, return_annotation=return_type)
 
 
-_SCHEMA_TO_SIGNATURE_CACHE: Dict[Tuple[str, str], inspect.Signature] = {}
+_SCHEMA_TO_SIGNATURE_CACHE: dict[tuple[str, str], inspect.Signature] = {}
 
 
 def _torchscript_schema_to_signature(
@@ -173,24 +171,26 @@ def _torchscript_schema_to_signature(
 
 @compatibility(is_backward_compatible=False)
 def check_for_mutable_operation(
-    target: Callable, args: Tuple["Argument", ...], kwargs: Dict[str, "Argument"]
-):
+    target: Callable[..., Any],
+    args: tuple["Argument", ...],
+    kwargs: dict[str, "Argument"],
+) -> None:
     signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
 
     if signatures and schemas:
-        matched_schemas = []
+        matched_schemas: list[tuple[inspect.Signature, torch._C.FunctionSchema]] = []
 
         # Iterate through all of the schema until we find one that matches
         # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
         # values. If none matches, `new_args_and_kwargs` will be None
         for candidate_signature, schema in zip(signatures, schemas):
             try:
-                candidate_signature.bind(*args, **kwargs)
+                _fast_bind(candidate_signature, *args, **kwargs)
                 matched_schemas.append((candidate_signature, schema))
             except TypeError:
                 continue
 
-        def throw_if_mutable(schema):
+        def throw_if_mutable(schema: torch._C.FunctionSchema) -> None:
             if schema.is_mutable:
                 raise RuntimeError(
                     f"Tried to trace mutable operation {schema}. FX only supports functional "
@@ -211,8 +211,26 @@ def check_for_mutable_operation(
             pass
 
 
+@overload
+def get_signature_for_torch_op(
+    op: Callable[..., Any], return_schemas: Literal[True]
+) -> tuple[list[inspect.Signature] | None, list[torch._C.FunctionSchema] | None]: ...
+
+
+@overload
+def get_signature_for_torch_op(
+    op: Callable[..., Any], return_schemas: Literal[False] = ...
+) -> list[inspect.Signature] | None: ...
+
+
 @compatibility(is_backward_compatible=False)
-def get_signature_for_torch_op(op: Callable, return_schemas: bool = False):
+def get_signature_for_torch_op(
+    op: Callable[..., Any], return_schemas: bool = False
+) -> (
+    list[inspect.Signature]
+    | tuple[list[inspect.Signature] | None, list[torch._C.FunctionSchema] | None]
+    | None
+):
     """
     Given an operator on the `torch` namespace, return a list of `inspect.Signature`
     objects corresponding to the overloads of that op.. May return `None` if a signature
@@ -230,7 +248,7 @@ def get_signature_for_torch_op(op: Callable, return_schemas: bool = False):
     if isinstance(op, OpOverload):
         schemas = [op._schema]
     elif isinstance(op, OpOverloadPacket):
-        schemas = [getattr(op, overload)._schema for overload in op.overloads()]
+        schemas = [overload._schema for overload in op.op_overloads()]
     else:
         override = _manual_overrides.get(op)
         if override:
@@ -247,7 +265,7 @@ def get_signature_for_torch_op(op: Callable, return_schemas: bool = False):
 
 
 @compatibility(is_backward_compatible=False)
-def create_type_hint(x):
+def create_type_hint(x: object) -> object:
     """
     Produces a type hint for the given argument.
 
@@ -264,13 +282,13 @@ def create_type_hint(x):
             # todo(chilli): Figure out the right way for mypy to handle this
             if isinstance(x, list):
 
-                def ret_type(x):
-                    return List[x]  # type: ignore[valid-type]
+                def ret_type(x: Any) -> Any:
+                    return list[x]  # type: ignore[valid-type]
 
             else:
 
-                def ret_type(x):
-                    return Tuple[x, ...]
+                def ret_type(x: Any) -> Any:
+                    return tuple[x, ...]  # type: ignore[valid-type]
 
             if len(x) == 0:
                 return ret_type(Any)
@@ -292,7 +310,7 @@ def create_type_hint(x):
 
 
 @compatibility(is_backward_compatible=False)
-def type_matches(signature_type: Any, argument_type: Any):
+def type_matches(signature_type: Any, argument_type: Any) -> bool:
     sig_origin_type = getattr(signature_type, "__origin__", signature_type)
 
     if signature_type is argument_type:
@@ -301,28 +319,29 @@ def type_matches(signature_type: Any, argument_type: Any):
     # Union types in signature. Given type needs to match one of the
     # contained types in the Union
     if sig_origin_type is typing.Union and signature_type != argument_type:
-        sig_contained = signature_type.__args__
+        sig_contained = typing.get_args(signature_type)
         return any(type_matches(c, argument_type) for c in sig_contained)
 
-    if signature_type is List[int] and argument_type is int:
-        # int can be promoted to List[int]
-        return True
+    if getattr(signature_type, "__origin__", None) is list:
+        sig_el_type = typing.get_args(signature_type)[0]
 
-    if getattr(signature_type, "__origin__", None) in {list, List}:
-        sig_el_type = signature_type.__args__[0]
+        # int can be promoted to list[int]
+        if argument_type is int and sig_el_type is int:
+            return True
+
         if not inspect.isclass(sig_el_type):
             warnings.warn(
                 f"Does not support nested parametric types, got {signature_type}. Please file a bug."
             )
             return False
-        if getattr(argument_type, "__origin__", None) in {list, List}:
-            return issubclass(argument_type.__args__[0], sig_el_type)
+        if getattr(argument_type, "__origin__", None) is list:
+            return issubclass(typing.get_args(argument_type)[0], sig_el_type)
 
-        def is_homogeneous_tuple(t):
-            if getattr(t, "__origin__", None) not in {tuple, Tuple}:
+        def is_homogeneous_tuple(t: object) -> bool:
+            if typing.get_origin(t) is not tuple:
                 return False
-            contained = t.__args__
-            if t.__args__ == ((),):  # Tuple[()].__args__ == ((),) for some reason
+            contained = typing.get_args(t)
+            if contained == ((),):  # Tuple[()].__args__ == ((),) for some reason
                 return True
             return all((c is Ellipsis) or issubclass(c, sig_el_type) for c in contained)
 
@@ -342,21 +361,45 @@ def type_matches(signature_type: Any, argument_type: Any):
 
 
 @compatibility(is_backward_compatible=False)
-def normalize_function(
-    target: Callable,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
-    arg_types: Optional[Tuple[Any]] = None,
-    kwarg_types: Optional[Dict[str, Any]] = None,
+def _normalize_function_or_error(
+    target: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None = None,
+    arg_types: tuple[Any] | None = None,
+    kwarg_types: dict[str, Any] | None = None,
     normalize_to_only_use_kwargs: bool = False,
-) -> Optional[ArgsKwargsPair]:
+) -> ArgsKwargsPair:
+    """
+    Wrapper around normalize_function that never returns None, but
+    loudly errors instead
+    """
+    res = normalize_function(
+        target, args, kwargs, arg_types, kwarg_types, normalize_to_only_use_kwargs
+    )
+    if res is None:
+        raise RuntimeError(
+            f"Failed to normalize function {target} with args {args} and kwargs {kwargs}"
+        )
+    else:
+        return res
+
+
+@compatibility(is_backward_compatible=False)
+def normalize_function(
+    target: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None = None,
+    arg_types: tuple[Any] | None = None,
+    kwarg_types: dict[str, Any] | None = None,
+    normalize_to_only_use_kwargs: bool = False,
+) -> ArgsKwargsPair | None:
     """
     Returns normalized arguments to PyTorch functions. This means that
     `args/kwargs` will be matched up to the functional's
     signature and return exclusively kwargs in positional order if
     `normalize_to_only_use_kwargs` is True.
     Also populates default values. Does not support positional-only
-    parameters or varargs parameters (*args, **kwargs). Does not support modules.
+    parameters or varargs parameters (``*args``, ``**kwargs``). Does not support modules.
 
     May require `arg_types` and `kwarg_types` in order to disambiguate overloads.
 
@@ -375,6 +418,18 @@ def normalize_function(
     if kwargs is None:
         kwargs = {}
     new_args_and_kwargs = None
+    if (
+        not isinstance(target, types.BuiltinFunctionType)
+        and not (isinstance(target, (OpOverloadPacket, OpOverload)))
+        and hasattr(target, "_op")
+    ):
+        # ExecuTorch's EdgeOpOverload are a wrapper around PyTorch's OpOverload,
+        # so we can unwrap it here to get its schema
+        # Can't import EdgeOpOverload directly because of a circular dependency,
+        # so checking for "_op" existing is the next best thing.
+        target = target._op
+
+    # Repeat the condition after checking for the inner _op field.
     if not isinstance(target, types.BuiltinFunctionType) and not (
         isinstance(target, (OpOverloadPacket, OpOverload))
     ):
@@ -384,7 +439,8 @@ def normalize_function(
             # a 2-way dispatch based on a boolean value. Here we check that the `true` and `false`
             # branches of the dispatch have exactly the same signature. If they do, use the `true`
             # branch signature for analysis. Otherwise, leave this un-normalized
-            assert not isinstance(target, str)
+            if isinstance(target, str):
+                raise AssertionError("target should not be a string here")
             dispatched = boolean_dispatched[target]
             if_true, if_false = dispatched["if_true"], dispatched["if_false"]
             if (
@@ -394,22 +450,26 @@ def normalize_function(
                 return None
             target_for_analysis = if_true
 
-        assert callable(target_for_analysis)
+        if not callable(target_for_analysis):
+            raise AssertionError(
+                f"target_for_analysis must be callable, got {type(target_for_analysis)}"
+            )
         sig = inspect.signature(inspect.unwrap(target_for_analysis))
         new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(
             sig, args, kwargs, normalize_to_only_use_kwargs
         )
     else:
-        assert callable(target)
+        if not callable(target):
+            raise AssertionError(f"target must be callable, got {type(target)}")
         torch_op_schemas = get_signature_for_torch_op(target)
-        matched_schemas = []
+        matched_schemas: list[inspect.Signature] = []
         if torch_op_schemas:
             # Iterate through all of the schema until we find one that matches
             # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
             # values. If none matches, `new_args_and_kwargs` will be None
             for candidate_signature in torch_op_schemas:
                 try:
-                    candidate_signature.bind(*args, **kwargs)
+                    _fast_bind(candidate_signature, *args, **kwargs)
                     matched_schemas.append(candidate_signature)
                 except TypeError:
                     continue
@@ -424,13 +484,13 @@ def normalize_function(
                 )
             else:
                 if arg_types is not None or kwarg_types is not None:
-                    arg_types = arg_types if arg_types else cast(Tuple[Any], ())
+                    arg_types = arg_types if arg_types else cast(tuple[Any], ())
                     kwarg_types = kwarg_types if kwarg_types else {}
                     for candidate_signature in torch_op_schemas:
                         sig_matches = True
                         try:
-                            bound_types = candidate_signature.bind(
-                                *arg_types, **kwarg_types
+                            bound_types = _fast_bind(
+                                candidate_signature, *arg_types, **kwarg_types
                             )
                             for arg_name, arg_type in bound_types.arguments.items():
                                 param = candidate_signature.parameters[arg_name]
@@ -468,17 +528,17 @@ def normalize_function(
 def normalize_module(
     root: torch.nn.Module,
     target: str,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any],
+    kwargs: dict[str, Any] | None = None,
     normalize_to_only_use_kwargs: bool = False,
-) -> Optional[ArgsKwargsPair]:
+) -> ArgsKwargsPair | None:
     """
     Returns normalized arguments to PyTorch modules. This means that
     `args/kwargs` will be matched up to the functional's
     signature and return exclusively kwargs in positional order if
     `normalize_to_only_use_kwargs` is True.
     Also populates default values. Does not support positional-only
-    parameters or varargs parameters (*args, **kwargs).
+    parameters or varargs parameters (``*args``, ``**kwargs``).
 
     Args:
         root (nn.Module): root module upon which we query modules
@@ -513,10 +573,10 @@ def normalize_module(
 
 def _args_kwargs_to_normalized_args_kwargs(
     sig: inspect.Signature,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     normalize_to_only_use_kwargs: bool,
-) -> Optional[ArgsKwargsPair]:
+) -> ArgsKwargsPair | None:
     """
     Given a call target, args, and kwargs, return the arguments normalized into
     an ArgsKwargsPair, or None if the type signature is not supported by
@@ -549,11 +609,11 @@ def _args_kwargs_to_normalized_args_kwargs(
         if list(sig.parameters.keys()) != ["input", "from", "to", "generator"]:
             return None
 
-    bound_args = sig.bind(*args, **kwargs)
+    bound_args = _fast_bind(sig, *args, **kwargs)
     bound_args.apply_defaults()
 
-    new_kwargs: Dict[str, Any] = {}
-    new_args: List[Any] = []
+    new_kwargs: dict[str, Any] = {}
+    new_args: list[Any] = []
     for i, param in enumerate(sig.parameters):
         if not normalize_to_only_use_kwargs and i < len(args):
             new_args.append(bound_args.arguments[param])

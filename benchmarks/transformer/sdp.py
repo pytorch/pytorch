@@ -5,7 +5,6 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from pprint import pprint
-from typing import List, Optional
 
 import numpy as np
 from prettytable import PrettyTable
@@ -26,13 +25,13 @@ class ExperimentConfig:
     max_sequence_len: int
     embed_dimension: int
     dtype: torch.dtype
-    pad_percentage: Optional[float]
+    pad_percentage: float | None
     enable_math: bool
     enable_flash: bool
     enable_mem_efficient: bool
     enable_cudnn: bool
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return [
             self.batch_size,
             self.num_heads,
@@ -47,7 +46,7 @@ class ExperimentConfig:
         ]
 
     @classmethod
-    def get_entry_names(cls) -> List[str]:
+    def get_entry_names(cls) -> list[str]:
         return [
             "batch_size",
             "num_heads",
@@ -65,11 +64,11 @@ class ExperimentConfig:
 @dataclass(frozen=True)
 class ExperimentResults:
     nn_mha_time: float
-    compiled_nn_mha_time: Optional[float]
+    compiled_nn_mha_time: float | None
     composite_mha_time: float
-    compiled_composite_mha_time: Optional[float]
+    compiled_composite_mha_time: float | None
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return [
             f"{self.nn_mha_time:2f}",
             f"{self.compiled_nn_mha_time:2f}" if self.compiled_nn_mha_time else None,
@@ -80,7 +79,7 @@ class ExperimentResults:
         ]
 
     @classmethod
-    def get_entry_names(cls) -> List[str]:
+    def get_entry_names(cls) -> list[str]:
         return [
             "nn_mha_time (\u00b5s)",
             "compiled_nn_mha_time (\u00b5s)",
@@ -94,7 +93,7 @@ class Experiment:
     config: ExperimentConfig
     results: ExperimentResults
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return self.config.get_entries() + self.results.get_entries()
 
 
@@ -144,10 +143,13 @@ class CompositeMHA(torch.nn.Module):
 
 
 def build_composite_mha_from_nn_mha(pt):
-    assert pt._qkv_same_embed_dim
+    if not pt._qkv_same_embed_dim:
+        raise AssertionError("pt._qkv_same_embed_dim must be True")
     in_proj_weight = pt.in_proj_weight
-    assert in_proj_weight is not None
-    assert pt.batch_first
+    if in_proj_weight is None:
+        raise AssertionError("pt.in_proj_weight must not be None")
+    if not pt.batch_first:
+        raise AssertionError("pt.batch_first must be True")
     return CompositeMHA(pt.num_heads, pt.in_proj_weight, pt.in_proj_bias, pt.out_proj)
 
 
@@ -200,9 +202,15 @@ def assert_close_tensors(tensor_a, tensor_b):
     # First order sanity check. Not a replacement for rigorous tests.
     if tensor_a.is_nested and tensor_b.is_nested:
         for a, b in zip(tensor_a.unbind(), tensor_b.unbind()):
-            assert torch.allclose(a, b, atol=1e-2, rtol=1e-2)
+            if not torch.allclose(a, b, atol=1e-2, rtol=1e-2):
+                raise AssertionError(
+                    f"Nested tensors not close: max diff = {(a - b).abs().max()}"
+                )
     else:
-        assert torch.allclose(tensor_a, tensor_b, atol=1e-3, rtol=1e-3)
+        if not torch.allclose(tensor_a, tensor_b, atol=1e-3, rtol=1e-3):
+            raise AssertionError(
+                f"Tensors not close: max diff = {(tensor_a - tensor_b).abs().max()}"
+            )
 
 
 def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
@@ -211,7 +219,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         enable_flash=config.enable_flash,
         enable_mem_efficient=config.enable_mem_efficient,
         enable_cudnn=config.enable_cudnn,
-    ) as kernel_choice, torch.inference_mode() as inference_mode:
+    ):
         dropout_p = 0.0
         mask = None
 
@@ -275,7 +283,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
 # Could return generator
 def generate_experiments(
     batch_sizes, num_heads, max_seq_lens, embed_dims, dtypes, pad_percentages
-) -> List[ExperimentConfig]:
+) -> list[ExperimentConfig]:
     configs = []
     for bsz, n_heads, seq_len, embed_dim, dtype, padding in itertools.product(
         batch_sizes, num_heads, max_seq_lens, embed_dims, dtypes, pad_percentages
@@ -297,7 +305,7 @@ def generate_experiments(
     return configs
 
 
-def main(save_path: Optional[Path]):
+def main(save_path: Path | None):
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -337,7 +345,7 @@ def main(save_path: Optional[Path]):
         batch_sizes, num_heads, max_seq_lens, embed_dims, dtypes, pad_percentages
     )
 
-    experiments: List[Experiment] = []
+    experiments: list[Experiment] = []
     for experiment_config in tqdm(experiment_configs):
         experiment = run_single_experiment(experiment_config)
         experiments.append(experiment)

@@ -32,6 +32,7 @@ import io
 import itertools
 import logging
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -90,8 +91,6 @@ TABLE = {
         "inductor_max_autotune_no_cudagraphs": (
             "--inference -n50 --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
         ),
-        "torchscript-onnx": "--inference -n5 --torchscript-onnx",
-        "dynamo-onnx": "--inference -n5 --dynamo-onnx",
     },
 }
 
@@ -271,7 +270,7 @@ def parse_args():
         "--no-graphs",
         action="store_true",
         default=False,
-        help="Do not genenerate and upload metric graphs",
+        help="Do not generate and upload metric graphs",
     )
     parser.add_argument(
         "--no-update-archive",
@@ -370,12 +369,13 @@ def get_mode(args):
 
 def get_skip_tests(suite, device, is_training: bool):
     """
-    Generate -x seperated string to skip the unusual setup training tests
+    Generate -x separated string to skip the unusual setup training tests
     """
     skip_tests = set()
     original_dir = abspath(os.getcwd())
     module = importlib.import_module(suite)
     os.chdir(original_dir)
+    arch = platform.machine()
 
     if suite == "torchbench":
         skip_tests.update(module.TorchBenchmarkRunner().skip_models)
@@ -385,6 +385,10 @@ def get_skip_tests(suite, device, is_training: bool):
             )
         if device == "cpu":
             skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cpu)
+            if arch == "aarch64":
+                skip_tests.update(
+                    module.TorchBenchmarkRunner().skip_models_for_cpu_aarch64
+                )
         elif device == "cuda":
             skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cuda)
 
@@ -543,7 +547,7 @@ def build_summary(args):
         out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
         out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
         out_io.write(
-            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
+            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory / 1e9}\n"
         )
 
     title = "## Build Summary"
@@ -552,7 +556,7 @@ def build_summary(args):
         gh_fh.write(comment)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def archive_data(archive_name):
     if archive_name is not None:
         prefix_match = re.search(r"\w+(?=_performance)", archive_name)
@@ -572,7 +576,7 @@ def archive_data(archive_name):
     return day, prefix
 
 
-@functools.lru_cache(None)
+@functools.cache
 def default_archive_name(dtype):
     _, prefix = archive_data(None)
     return f"{prefix}_performance_{dtype}_{randint(100, 999)}"
@@ -713,9 +717,10 @@ class ParsePerformanceLogs(Parser):
             for idx, (batch_a, batch_b) in enumerate(
                 zip(batch_sizes, frame_batch_sizes)
             ):
-                assert batch_a == batch_b or batch_a == 0 or batch_b == 0, print(
-                    f"a={batch_a}, b={batch_b}"
-                )
+                if not (batch_a == batch_b or batch_a == 0 or batch_b == 0):
+                    raise AssertionError(
+                        f"batch size mismatch: a={batch_a}, b={batch_b}"
+                    )
                 batch_sizes[idx] = max(batch_a, batch_b)
         for frame in frames:
             frame["batch_size"] = batch_sizes
@@ -1067,7 +1072,8 @@ class SummaryStatDiffer:
     def __init__(self, args):
         self.args = args
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
-        assert os.path.exists(self.lookup_file)
+        if not os.path.exists(self.lookup_file):
+            raise AssertionError(f"lookup file not found: {self.lookup_file}")
 
     def generate_diff(self, last2, filename, caption):
         df_cur, df_prev = (pd.read_csv(os.path.join(path, filename)) for path in last2)
@@ -1132,7 +1138,8 @@ class RegressionDetector:
     def __init__(self, args):
         self.args = args
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
-        assert os.path.exists(self.lookup_file)
+        if not os.path.exists(self.lookup_file):
+            raise AssertionError(f"lookup file not found: {self.lookup_file}")
 
     def generate_comment(self):
         title = "## Recent Regressions ##\n"
@@ -1252,7 +1259,8 @@ class RegressionTracker:
         self.args = args
         self.suites = self.args.suites
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
-        assert os.path.exists(self.lookup_file)
+        if not os.path.exists(self.lookup_file):
+            raise AssertionError(f"lookup file not found: {self.lookup_file}")
         self.k = 10
 
     def find_last_k(self):
@@ -1267,7 +1275,10 @@ class RegressionTracker:
         for day, path in zip(df["day"], df["path"]):
             log_infos.append(LogInfo(day, path))
 
-        assert len(log_infos) >= self.k
+        if len(log_infos) < self.k:
+            raise AssertionError(
+                f"expected at least {self.k} log entries, got {len(log_infos)}"
+            )
         log_infos = log_infos[len(log_infos) - self.k :]
         return log_infos
 
@@ -1298,7 +1309,8 @@ class RegressionTracker:
                     dir_path = os.path.join(
                         self.args.dashboard_archive_path, log_info.dir_path
                     )
-                    assert os.path.exists(dir_path)
+                    if not os.path.exists(dir_path):
+                        raise AssertionError(f"directory not found: {dir_path}")
                     gmean_filename = os.path.join(dir_path, f"{metric}.csv")
                     if not os.path.exists(gmean_filename):
                         continue
@@ -1350,7 +1362,8 @@ class DashboardUpdater:
         self.args = args
         self.output_dir = args.output_dir
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
-        assert os.path.exists(self.lookup_file)
+        if not os.path.exists(self.lookup_file):
+            raise AssertionError(f"lookup file not found: {self.lookup_file}")
         try:
             if not self.args.update_dashboard_test and not self.args.no_update_archive:
                 self.update_lookup_file()
@@ -1361,7 +1374,7 @@ class DashboardUpdater:
         dtype = self.args.dtypes[0]
         day, _ = archive_data(self.args.archive_name)
         target_dir = get_archive_name(self.args, dtype)
-        # Update lookup csv the folder to arhived logs
+        # Update lookup csv the folder to archived logs
         subprocess.check_call(
             f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
             shell=True,
@@ -1420,7 +1433,7 @@ class DashboardUpdater:
 
     def comment_on_gh(self, comment):
         """
-        Send a commment to dashboard
+        Send a comment to dashboard
         """
         with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
             f.write(comment)
@@ -1451,8 +1464,8 @@ class DashboardUpdater:
             RegressionDetector(self.args).generate_comment()
             try:
                 RegressionTracker(self.args).diff()
-            except Exception as e:
-                logging.exception("")
+            except Exception:
+                log.exception("")
                 with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
                     gh_fh.write("")
 
@@ -1484,7 +1497,8 @@ if __name__ == "__main__":
             else args.flag_compilers
         )
     else:
-        assert args.training
+        if not args.training:
+            raise AssertionError("expected args.training to be True")
         compilers = DEFAULTS["training"] if args.compilers is None else args.compilers
         flag_compilers = (
             DEFAULTS["flag_compilers"]["training"]

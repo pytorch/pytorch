@@ -89,9 +89,10 @@ class PipeTests(TestCase):
             mb_args=(x, y),
         )
 
-        assert (
-            pipe.num_stages == EXPECTED_N_STAGES[ModelClass]
-        ), f"nstages = {pipe.num_stages}, expect {EXPECTED_N_STAGES[ModelClass]}"
+        if pipe.num_stages != EXPECTED_N_STAGES[ModelClass]:
+            raise AssertionError(
+                f"nstages = {pipe.num_stages}, expect {EXPECTED_N_STAGES[ModelClass]}"
+            )
 
         ref_out = mod(x, y)
         out = pipe(x, y)[0]
@@ -105,17 +106,48 @@ class PipeTests(TestCase):
         for idx in range(pipe.num_stages):
             stage_mod = pipe.get_stage_module(idx)
             stage_fqns = set(stage_mod.state_dict().keys())
-            assert stage_fqns.issubset(old_names)
+            if not stage_fqns.issubset(old_names):
+                raise AssertionError(
+                    f"stage_fqns {stage_fqns} is not a subset of old_names {old_names}"
+                )
             new_names.update(stage_fqns)
 
         if CHECK_FQN_SET_EQUALITY:
-            assert (
-                old_names == new_names
-            ), f"""
+            if old_names != new_names:
+                raise AssertionError(f"""
             old names {old_names}
             new names {new_names}
-            """
+            """)
         print("Qualname check passed")
+
+    def test_pipeline_with_non_float_inputs(self):
+        """Test that pipeline() handles non-float tensors crossing stage boundaries."""
+
+        class EmbeddingModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed = torch.nn.Embedding(100, 64)
+                self.linear = torch.nn.Linear(64, 64)
+
+            def forward(self, input_ids, mask):
+                x = self.embed(input_ids)
+                pipe_split()
+                x = self.linear(x)
+                x = x * mask.unsqueeze(-1).float()
+                return x
+
+        model = EmbeddingModel()
+        input_ids = torch.randint(0, 100, (2, 16))
+        mask = torch.ones(2, 16, dtype=torch.bool)
+
+        # This should not raise "only Tensors of floating point dtype can require gradients"
+        pipe = pipeline(model, mb_args=(input_ids, mask))
+        self.assertEqual(pipe.num_stages, 2)
+
+        # Verify non-float tensors don't have requires_grad in metadata
+        ref_out = model(input_ids, mask)
+        out = pipe(input_ids, mask)[0]
+        torch.testing.assert_close(out, ref_out)
 
 
 instantiate_parametrized_tests(PipeTests)

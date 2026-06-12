@@ -4,15 +4,16 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 
 
-sys.path.append(
-    os.path.realpath(
-        os.path.join(
-            __file__, os.path.pardir, os.path.pardir, os.path.pardir, "torch", "utils"
-        )
-    )
-)
+# NOTE: `tools/amd_build/build_amd.py` could be a symlink.
+# The behavior of `symlink / '..'` is different from `symlink.parent`.
+# Use `pardir` three times rather than using `path.parents[2]`.
+REPO_ROOT = (
+    Path(__file__).absolute() / os.path.pardir / os.path.pardir / os.path.pardir
+).resolve()
+sys.path.append(str(REPO_ROOT / "torch" / "utils"))
 
 from hipify import hipify_python  # type: ignore[import]
 
@@ -53,8 +54,9 @@ parser.add_argument(
 
 args = parser.parse_args()
 
+# NOTE: `tools/amd_build/build_amd.py` could be a symlink.
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
-proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)))
+proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
 
 if args.project_directory:
     proj_dir = args.project_directory
@@ -99,7 +101,6 @@ includes = [
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/debug_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h",
-    "aten/src/ATen/native/transformers/cuda/flash_attn/flash_api.h",
     "aten/src/THC/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
@@ -107,6 +108,8 @@ includes = [
     "aten/src/THC/CMakeLists.txt",
     "torch/*",
     "tools/autograd/templates/python_variable_methods.cpp",
+    "torch/csrc/stable/*",
+    "test/cpp/c10d/*",
 ]
 
 includes = [os.path.join(proj_dir, include) for include in includes]
@@ -135,6 +138,7 @@ ignores = [
     "third_party/nvfuser/runtime/helpers.cu",
     "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
+    "torch/csrc/jit/ir/ir.h",
     # generated files we shouldn't frob
     "torch/lib/tmp_install/*",
     "torch/include/*",
@@ -144,13 +148,11 @@ ignores = [os.path.join(proj_dir, ignore) for ignore in ignores]
 
 
 # Check if the compiler is hip-clang.
+#
+# This used to be a useful function but now we can safely always assume hip-clang.
+# Leaving the function here avoids bc-linter errors.
 def is_hip_clang() -> bool:
-    try:
-        hip_path = os.getenv("HIP_PATH", "/opt/rocm/hip")
-        with open(hip_path + "/lib/.hipInfo") as f:
-            return "HIP_COMPILER=clang" in f.read()
-    except OSError:
-        return False
+    return True
 
 
 # TODO Remove once the following submodules are updated
@@ -200,16 +202,120 @@ for hip_platform_file in hip_platform_files:
                     sources.write(line)
             print(f"{hip_platform_file} updated")
 
+# NOTE: MSLK sources needing hipify
+# MSLK is its own project with its own build system. pytorch uses mslk as
+# a submodule to acquire some gpu source files but compiles only those sources
+# instead of using mslk's own build system. One of the source files refers
+# to a header file that is the result of running hipify, but mslk uses
+# slightly different hipify settings than pytorch. mslk normally hipifies
+# and renames tuning_cache.cuh to tuning_cache_hip.cuh, but pytorch's settings
+# for hipify puts it into its own 'hip' directory. After hipify runs below with
+# the added mslk file, we move it to its expected location.
+# NOTE: Internal meta builds (using buck) don't need this step, so conditionally disable it
+buck_build = os.environ.get("FBCODE_BUILD_TOOL", "") == "buck"
+
+extra_files = [
+    "torch/_inductor/codegen/cuda/device_op_overrides.py",
+    "torch/_inductor/codegen/cpp_wrapper_cpu.py",
+    "torch/_inductor/codegen/cpp_wrapper_gpu.py",
+    "torch/_inductor/codegen/wrapper.py",
+]
+
+mslk_dir = REPO_ROOT / "third_party/mslk/include/mslk/utils/"
+
+
+if not buck_build:
+    mslk_original = mslk_dir / "tuning_cache.cuh"
+    if mslk_original.exists():
+        extra_files.append(mslk_original.as_posix())
+
+# TODO Remove once the following submodules are updated to use hipify v2
+hipify_v1_to_v2_files = [
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/gemm/ck_extensions.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/bf16_grouped/bf16_grouped_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/bf16_grouped/kernels/bf16_grouped_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/ck_utility.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_blockwise_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_batched/kernels/fp8_rowwise_batched_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise/kernels/fp8_rowwise_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_preshuffle/kernels/fp8_rowwise_preshuffle_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_tensorwise_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fused_moe/fused_moe_kernel.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include/fbgemm_gpu/quantize/tuning_cache.hpp",
+    "third_party/mslk/csrc/moe/ck_extensions/fused_moe_kernel.hip",
+    "third_party/mslk/csrc/gemm/ck/bf16_grouped/bf16_grouped_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/bf16_grouped/kernels/bf16_grouped_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise/kernels/fp8_rowwise_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_batched/kernels/fp8_rowwise_batched_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_preshuffle/kernels/fp8_rowwise_preshuffle_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_tensorwise_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/fp8_blockwise_gemm.hip",
+]
+
+
+def hipify_v1_to_v2(line: str) -> str:
+    line = line.replace("hip::HIPStreamMasqueradingAsCUDA", "cuda::CUDAStream")
+    line = line.replace(
+        "hip::HIPStreamGuardMasqueradingAsCUDA", "cuda::CUDAStreamGuard"
+    )
+    line = line.replace(
+        "hip::getStreamFromPoolMasqueradingAsCUDA", "cuda::getStreamFromPool"
+    )
+    line = line.replace("getCurrentHIPStream", "getCurrentCUDAStream")
+    return line
+
+
+for hipify_v1_to_v2_file in hipify_v1_to_v2_files:
+    do_write = False
+    if os.path.exists(hipify_v1_to_v2_file):
+        with open(hipify_v1_to_v2_file) as sources:
+            lines = sources.readlines()
+        newlines = [hipify_v1_to_v2(line) for line in lines]
+        if lines == newlines:
+            print(f"{hipify_v1_to_v2_file} skipped")
+        else:
+            with open(hipify_v1_to_v2_file, "w") as sources:
+                for line in newlines:
+                    sources.write(line)
+            print(f"{hipify_v1_to_v2_file} updated")
+
+
 hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=out_dir,
     includes=includes,
     ignores=ignores,
-    extra_files=[
-        "torch/_inductor/codegen/cpp_wrapper_cpu.py",
-        "torch/_inductor/codegen/cpp_wrapper_gpu.py",
-        "torch/_inductor/codegen/wrapper.py",
-    ],
+    extra_files=extra_files,
     out_of_place_only=args.out_of_place_only,
     hip_clang_launch=is_hip_clang(),
 )
+
+if not buck_build:
+    mslk_move_src = mslk_dir / "hip/tuning_cache.cuh"
+    mslk_move_dst = mslk_dir / "tuning_cache_hip.cuh"
+
+    # only update the file if it changes or doesn't exist
+    do_write = True
+    src_lines = None
+
+    if not mslk_move_src.exists():
+        _error = f"Error: Source file {mslk_move_src} does not exist"
+        sys.exit(_error)
+    with open(mslk_move_src) as src:
+        src_lines = src.readlines()
+    if os.path.exists(mslk_move_dst):
+        dst_lines = None
+        with open(mslk_move_dst) as dst:
+            dst_lines = dst.readlines()
+        if src_lines == dst_lines:
+            print(f"{mslk_move_dst} skipped")
+            do_write = False
+    if do_write:
+        with open(mslk_move_dst, "w") as dst:
+            for line in src_lines:
+                dst.write(line)
+        print(f"{mslk_move_dst} updated")

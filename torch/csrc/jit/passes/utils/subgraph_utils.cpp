@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 
 #include <ATen/core/symbol.h>
-#include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 
@@ -62,7 +61,7 @@ struct ValueMapper {
     auto new_outputs = merged_node->outputs();
     for (Value* v : new_outputs) {
       auto maybe_last_use = firstOrLastUse(v, /*find_first*/ false);
-      // if it doesnt have a use it shouldnt have been added as output
+      // if it doesn't have a use it shouldn't have been added as output
       TORCH_INTERNAL_ASSERT(maybe_last_use);
       const Use last_use = *maybe_last_use;
 
@@ -517,7 +516,6 @@ void unmergeNode(Node* n, Node* subgraphNode) {
         false,
         "all inputs should've been mapped. Couldn't map %",
         v->debugName());
-    return v;
   };
 
   for (auto i : c10::irange(subgraph->outputs().size())) {
@@ -612,8 +610,8 @@ static std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
       (maxlen > hash_str.size() + 1) ? (maxlen - hash_str.size() - 1) : maxlen;
   std::stringstream truncated;
   truncated << s.substr(0, trunc_len);
-  truncated << "_" << hash_str;
-  return truncated.str();
+  truncated << '_' << hash_str;
+  return std::move(truncated).str();
 }
 
 std::string generateNameForGraph(
@@ -626,9 +624,9 @@ std::string generateNameForGraph(
     if (!node->kind().is_aten()) {
       continue;
     }
-    graph_name << "_" << node->kind().toUnqualString();
+    graph_name << '_' << node->kind().toUnqualString();
   }
-  return truncateStrWithHash(graph_name.str(), maxlen);
+  return truncateStrWithHash(std::move(graph_name).str(), maxlen);
 }
 
 } // namespace torch::jit::SubgraphUtils

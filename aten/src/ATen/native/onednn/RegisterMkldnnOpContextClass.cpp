@@ -25,7 +25,7 @@ static bool is_onednn_fp16_supported() {
   return onednn_fp16_device_check();
 }
 
-constexpr bool is_onednn_acl_supported() {
+static constexpr bool is_onednn_acl_supported() {
   return AT_ONEDNN_ACL_ENABLED();
 }
 

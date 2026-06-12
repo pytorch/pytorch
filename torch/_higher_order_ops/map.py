@@ -1,22 +1,21 @@
 # mypy: allow-untyped-defs
+import functools
+from collections.abc import Callable
+from typing_extensions import TypeVarTuple
+
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._functorch.aot_autograd import AOTConfig, create_joint
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
     _maybe_run_with_interpreter,
     reenter_make_fx,
-    UnsupportedAliasMutationException,
+    register_fake,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
-    make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -25,21 +24,16 @@ from .utils import (
     _from_fun,
     _stack_pytree,
     _unstack_pytree,
-    clone_outputs_aliasing_inputs,
-    prepare_fw_with_masks,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    check_input_alias_and_mutation_return_outputs,
+    create_bw_fn,
+    fill_none_with_masks,
+    filter_with_masks,
+    first_slice_copy,
+    materialize_as_graph,
+    save_values_for_backward,
+    saved_values,
+    split_into_chunks,
 )
-
-
-# TODO: We add this to prevent dymamo from tracing into map_wrapper,
-# remove the wrapper call when it's ready.
-class MapWrapper(HigherOrderOperator):
-    def __init__(self):
-        super().__init__("map")
-
-    def __call__(self, xs, *args):
-        return map_wrapper(xs, *args)
 
 
 class MapImpl(HigherOrderOperator):
@@ -47,89 +41,120 @@ class MapImpl(HigherOrderOperator):
         super().__init__("map_impl")
 
     def __call__(self, *args, **kwargs):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
 
+    # pyrefly: ignore [bad-override]
+    def gen_schema(self, f, xs, pos_args):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
 
-map = MapWrapper()
+        # Mutation semantics for map:
+        # - xs is mutable: each iteration sees a storage-disjoint slice
+        #   (xs[t] and xs[t+1] share no storage), so in-place writes are
+        #   race-free regardless of evaluation order, preserving map's
+        #   "iterations are independent" contract.
+        # - pos_args is NOT mutable: every iteration sees the same
+        #   tensor, so mutating it makes iterations depend on each
+        #   other, breaking the independence contract and introducing a
+        #   data race under any parallel lowering. Users who need a
+        #   shared mutable buffer should use scan / while_loop, where
+        #   sequential iteration is part of the contract.
+        xs_slices = [first_slice_copy(x) for x in xs]
+        all_inputs = tuple(xs_slices + list(pos_args))
+
+        body_gm: torch.fx.GraphModule = materialize_as_graph(f, all_inputs)
+        (
+            _,
+            _,
+            _,
+            mutated_inputs,
+            outputs,
+        ) = check_input_alias_and_mutation_return_outputs(body_gm)
+
+        n_xs = len(xs)
+        pos_args_mutated = [i for i in mutated_inputs if i >= n_xs]
+        if pos_args_mutated:
+            raise RuntimeError(
+                "For map, f cannot mutate pos_args inputs but found "
+                f"{[i - n_xs for i in pos_args_mutated]}-th pos_args inputs "
+                "are mutated. Map iterations are independent, so mutating "
+                "a shared pos_args buffer is undefined under parallel "
+                "lowering. Use scan or while_loop if sequential buffer "
+                "updates are required."
+            )
+        mutated_set = set(mutated_inputs)
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("f", body_gm)
+
+        for idx, x in enumerate(xs):
+            schema_gen.add_arg(f"xs{idx}", x, is_mutated=idx in mutated_set)
+
+        for idx, arg in enumerate(pos_args):
+            schema_gen.add_arg(f"additional_input{idx}", arg)
+
+        for out in outputs:
+            schema_gen.add_output(out)
+
+        schema_gen.add_schema_tree_spec(f, xs, pos_args)
+        return schema_gen.gen_schema()
+
 
 map_impl = MapImpl()
 
-dummy_aot_config = AOTConfig(
-    fw_compiler=None,  # type: ignore[arg-type]
-    bw_compiler=None,  # type: ignore[arg-type]
-    partition_fn=None,  # type: ignore[arg-type]
-    decompositions={},
-    num_params_buffers=0,
-    aot_id=0,
-    keep_inference_input_mutations=False,
-)
+
+def map(
+    f: Callable[[pytree.PyTree, tuple[pytree.PyTree, ...]], pytree.PyTree],
+    xs: pytree.PyTree | torch.Tensor,
+    *args: TypeVarTuple,
+):
+    r"""
+    Performs a map of f with xs. Intuitively, you can think of the semantic being::
+
+        out = []
+        for idx in len(xs.size(0)):
+            xs_sliced = xs.select(0, idx)
+            out.append(f(xs_sliced, *args))
+        torch.stack(out)
+
+    .. warning::
+
+        ``torch._higher_order_ops.map`` is a prototype feature in PyTorch. It currently
+        does not support autograd and you may run into miscompiles.
+        Read more about feature classification at:
+        https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
 
-def create_fw_bw_graph(f, num_mapped_args, *args):
-    mapped_xs = args[:num_mapped_args]
-    pos_args = args[num_mapped_args:]
+    Args:
+        f (Callable): a callable that takes an input x, that could either be a single Tensor
+            or a nested dict, list of tensors and some additional inputs
+        xs: the inputs that're to be mapped over. We'll iterate over the first dim of each x
+            and perform f on each slice.
 
-    # See Note [HOP create fw_bw graph] in create_fw_bw_graph in utils.py
+        *args: additional arguments provided to each step of f. They could also be omitted and
+            map is able to automatically figure out the read dependency.
 
-    with suspend_functionalization(), disable_functional_mode():
-        with disable_proxy_modes_tracing():
-            unwrapped_mapped_xs = pytree.tree_map(_from_fun, mapped_xs)
-            example_xs = _unstack_pytree(unwrapped_mapped_xs)[0]
+    Return:
+        the stacked output for each step of f
 
-            example_pos_args = [
-                _from_fun(arg) if isinstance(arg, torch.Tensor) else arg
-                for arg in pos_args
-            ]
-            example_flat_out = pytree.tree_map(
-                _from_fun, f(*example_xs, *example_pos_args)
-            )
-            if any(
-                not isinstance(out, torch.Tensor)
-                for out in example_flat_out
-                if out is not None
-            ):
-                raise RuntimeError(
-                    "Expect outputs of map only contains tensors or None. "
-                    f"Got types {[type(out) for out in example_flat_out]}."
-                )
-            example_grad = [_from_fun(out) for out in example_flat_out]
+    Example::
 
-            fw_graph = make_fx(f)(*example_xs, *example_pos_args)
-
-        def joint_f(*example_args):
-            joint_mapped_args = example_args[:joint_num_mapped]
-            args = example_args[joint_num_mapped:]
-
-            mapped_input = joint_mapped_args[:num_mapped_args]
-            mapped_grads = joint_mapped_args[num_mapped_args:]
-
-            joint = create_joint(prepare_fw_with_masks(f), aot_config=dummy_aot_config)
-            _, grads = joint(
-                list(mapped_input) + list(args),
-                [
-                    grad
-                    for grad in mapped_grads
-                    if grad is not None and grad.requires_grad
-                ],
-            )
-
-            # In order to keep map functional for backward graph,
-            # we clone outputs that are aliasing inputs
-            maybe_clone = clone_outputs_aliasing_inputs(example_args)
-
-            return pytree.tree_map(maybe_clone, grads)
-
-        joint_num_mapped = len(example_grad) + len(example_xs)
-        joint_graph = make_fx(joint_f)(*example_xs, *example_grad, *example_pos_args)
-        return fw_graph, joint_graph
+        def f(xs):
+            return xs[0] + xs[1] + const1 + const2
 
 
-def map_wrapper(f, xs, *args):
+        xs = [torch.randn(2, 3), torch.randn(2, 3)]
+        const1 = torch.randn(2, 3)
+        const2 = torch.randn(2, 3)
+        # returns a tensor of shape [2, 2, 3]
+        torch._higher_order_ops.map(f, xs)
+
+    """
     flat_xs, xs_spec = pytree.tree_flatten(xs)
+    flat_args, args_spec = pytree.tree_flatten(args)
     if not all(isinstance(t, torch.Tensor) for t in flat_xs):
         raise RuntimeError(f"Mapped xs can only consist of tensors. Got xs {flat_xs}.")
 
-    num_mapped_args = len(flat_xs)
     shapes = [xs.shape for xs in flat_xs]
     leading_dim_size = shapes[0][0]
     if leading_dim_size == 0:
@@ -140,70 +165,158 @@ def map_wrapper(f, xs, *args):
             f"Leading dimensions of mapped xs must be consistent. Got shapes {shapes}."
         )
 
-    out_spec = None
+    def run_flattened_map(f, flat_xs, flat_args):
+        def wrapped_fn(*flat_args, f, xs_tree_spec, args_tree_spec, num_xs):
+            xs = pytree.tree_unflatten(flat_args[:num_xs], xs_tree_spec)
+            args = pytree.tree_unflatten(flat_args[num_xs:], args_tree_spec)
+            return f(xs, *args)
 
-    def flat_fn(*flat_args):
-        xs = pytree.tree_unflatten(list(flat_args[:num_mapped_args]), xs_spec)
-        unflattened_out = f(xs, *flat_args[num_mapped_args:])
-        flat_out, tmp_out_spec = pytree.tree_flatten(unflattened_out)
+        inner_f = functools.partial(
+            wrapped_fn,
+            f=f,
+            xs_tree_spec=xs_spec,
+            args_tree_spec=args_spec,
+            num_xs=len(flat_xs),
+        )
+        return map_impl(inner_f, flat_xs, flat_args)
 
-        nonlocal out_spec
-        out_spec = tmp_out_spec
-        return flat_out
+    from torch._higher_order_ops.utils import _maybe_compile_and_run_fn
 
-    return pytree.tree_unflatten(
-        map_impl(flat_fn, flat_xs, args), out_spec  # type: ignore[arg-type]
-    )
+    return _maybe_compile_and_run_fn(run_flattened_map, f, flat_xs, flat_args)
 
 
 class MapAutogradOp(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, fw_graph, joint_graph, num_mapped_args, *flat_args):
-        save_tensors_and_symints_for_backward(ctx, flat_args)
-        ctx._joint_graph = joint_graph
+    # pyrefly: ignore [bad-override]
+    def forward(ctx, f, num_mapped_args, *flat_args):
+        ctx._f = f
         ctx._num_mapped_args = num_mapped_args
+        ctx._num_pos_args = len(flat_args) - num_mapped_args
+
+        # We snapshot the dispatch keys in forward for materializing the
+        # the bw_graph in backward.
+        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
+        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+        save_values_for_backward(ctx, flat_args)
         with torch._C._AutoDispatchBelowAutograd():
             return (
-                *map_impl(
-                    fw_graph, flat_args[:num_mapped_args], flat_args[num_mapped_args:]
-                ),
+                *map_impl(f, flat_args[:num_mapped_args], flat_args[num_mapped_args:]),
             )
 
     @staticmethod
     def backward(ctx, *flat_grads):
-        fw_args = saved_tensors_and_symints(ctx)
-        fw_mapped_args = fw_args[: ctx._num_mapped_args]
-        pos_args = fw_args[ctx._num_mapped_args :]
+        fw_args = saved_values(ctx)
+        num_mapped_args = ctx._num_mapped_args
+        num_pos_args = ctx._num_pos_args
+        num_grads = len(flat_grads)
 
-        grads = map_impl(
-            ctx._joint_graph,
-            fw_mapped_args + flat_grads,
-            pos_args,
+        fw_mapped_args, pos_args = split_into_chunks(
+            fw_args,
+            [
+                num_mapped_args,
+                num_pos_args,
+            ],
         )
-        return None, None, None, *grads
+
+        bw_f = create_bw_fn(ctx._f, fw_args)
+
+        grads_tensor_masks = []
+
+        # Create a wrapper around thefor the bw_f
+        def bw_f_wrapper(*args):
+            nonlocal grads_tensor_masks
+
+            # Dissect args and re-order them for the ``ctx._bw_f``
+            # args provided to the wrapper are composed of [*fw_mapped_args, *flat_grads, *pos_args]
+            # The content of ``bw_f_tangents`` are the upstream gradients, i.e. flat_grads
+            # The content of ``bw_f_primals`` are the fw_args, i.e., [*fw_mapped_args, *pos_args]
+            # The bw_f requires *bw_f_primals, *bw_f_tangents
+            fw_m_args, bw_f_tangents, pos_args = split_into_chunks(
+                args, [num_mapped_args, num_grads, num_pos_args]
+            )
+            bw_f_primals = *fw_m_args, *pos_args
+            gradients = bw_f(*bw_f_primals, *bw_f_tangents)
+            grads_tensor_masks = [
+                True if isinstance(out, torch.Tensor) else out for out in gradients
+            ]
+            return filter_with_masks(gradients, grads_tensor_masks)
+
+        def construct_args_single_step_bw():
+            unwrapped_mapped_xs = pytree.tree_map(_from_fun, fw_mapped_args)
+            # Use first_slice_copy instead of _unstack_pytree to avoid
+            # iterating over batch dim, which would guard on symbolic sizes.
+            example_xs = [
+                first_slice_copy(x).requires_grad_(x.requires_grad)
+                for x in unwrapped_mapped_xs
+            ]
+            unwrapped_grads = pytree.tree_map(_from_fun, flat_grads)
+            example_grads = [
+                first_slice_copy(x).requires_grad_(x.requires_grad)
+                for x in unwrapped_grads
+            ]
+            example_pos_args = [
+                _from_fun(arg) if isinstance(arg, torch.Tensor) else arg
+                for arg in pos_args
+            ]
+            return *example_xs, *example_grads, *example_pos_args
+
+        with suspend_functionalization(), disable_functional_mode():
+            with disable_proxy_modes_tracing():
+                args_single_step_bw = construct_args_single_step_bw()
+
+            # TODO: we need to materialize the bw graphs because dynamo is unable to
+            # trace through the joint function when torch.compile torch.autograd.grad.
+            fn_bw_gm = materialize_as_graph(
+                bw_f_wrapper,
+                args_single_step_bw,
+                ctx._fw_include_key_set,
+                ctx._fw_exclude_key_set,
+                force_enable_grad=True,
+            )
+
+        grads = map_impl(fn_bw_gm, fw_mapped_args + flat_grads, pos_args)
+
+        return None, None, *fill_none_with_masks(grads, grads_tensor_masks)
+
+
+def _broadcast_to_batch(output, batch_size):
+    """Expand each tensor in output pytree to include batch dimension.
+
+    Note: Although outputs are flattened in the compiled path (via torch.compile),
+    users may call map_impl directly with pytree outputs, so we support pytrees
+    for backward compatibility.
+    """
+
+    def expand_with_batch(t):
+        if isinstance(t, torch.Tensor):
+            # Use contiguous_format to match torch.stack behavior
+            return (
+                t.unsqueeze(0)
+                .expand(batch_size, *t.shape)
+                .clone(memory_format=torch.contiguous_format)
+            )
+        return t
+
+    return pytree.tree_map(expand_with_batch, output)
 
 
 def trace_map(proxy_mode, func_overload, f, xs, pos_args):
-    leading_dim_size = xs[0].shape[0]
+    from torch._higher_order_ops.utils import first_slice_copy
 
-    example_input = _unstack_pytree(xs)[0]
-    body_graph = f
+    with disable_proxy_modes_tracing():
+        # Use first_slice_copy instead of _unstack_pytree to avoid
+        # iterating over batch dim, which would guard on symbolic sizes.
+        example_input = pytree.tree_map(first_slice_copy, xs)
 
-    body_graph = reenter_make_fx(body_graph)(*example_input, *pos_args)
+        body_graph = f
+
+        body_graph = reenter_make_fx(body_graph)(*example_input, *pos_args)
 
     next_name = proxy_mode.tracer.get_fresh_qualname("body_graph_")
 
     proxy_mode.tracer.root.register_module(next_name, body_graph)
 
-    with disable_proxy_modes_tracing():
-        example_outs = body_graph(*example_input, *pos_args)
-
-        def expand_tensor(t):
-            if isinstance(t, torch.Tensor):
-                return t.expand(leading_dim_size, *t.shape)
-            return t
-
-        expanded_outs = pytree.tree_map(expand_tensor, example_outs)
+    fake_outs = map_impl(body_graph, xs, pos_args)
 
     node_args = (body_graph, list(xs), list(pos_args))
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
@@ -211,7 +324,7 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
         "call_function", func_overload, proxy_args, {}, name="map_impl"
     )
     return track_tensor_tree(
-        expanded_outs, out_proxy, constant=None, tracer=proxy_mode.tracer
+        fake_outs, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
 
 
@@ -221,11 +334,10 @@ def map_dense(f, xs, pos_args):
     return _stack_pytree(pytrees)
 
 
-@map_impl.py_impl(DispatchKey.Autograd)
+@map_impl.py_autograd_impl
 def map_autograd(f, xs, pos_args):
     num_mapped_args = len(xs)
-    fw_graph, bw_graph = create_fw_bw_graph(f, num_mapped_args, *xs, *pos_args)
-    flat_out = MapAutogradOp.apply(fw_graph, bw_graph, num_mapped_args, *xs, *pos_args)
+    flat_out = MapAutogradOp.apply(f, num_mapped_args, *xs, *pos_args)
     return flat_out
 
 
@@ -234,31 +346,50 @@ def map_proxy_torch_dispatch_mode(mode, f, xs, args):
     return trace_map(mode, map_impl, f, xs, args)
 
 
-@map_impl.py_impl(FakeTensorMode)
-def map_fake_tensor_mode(mode, f, xs, args):
-    with mode:
-        return map_dense(f, xs, args)
+@register_fake(map_impl, skip_cache=True)
+def map_fake_tensor_mode(f, xs, args):
+    from torch._higher_order_ops.utils import first_slice_copy
+
+    # Use first_slice_copy instead of _unstack_pytree to avoid
+    # iterating over batch dim, which would guard on symbolic sizes.
+    first_row = pytree.tree_map(first_slice_copy, xs)
+    example_output = f(*first_row, *args)
+
+    flat_xs, _ = pytree.tree_flatten(xs)
+    batch_size = flat_xs[0].shape[0]
+
+    return _broadcast_to_batch(example_output, batch_size)
 
 
 @map_impl.py_functionalize_impl
 def map_functionalize(ctx, f, xs, pos_args):
+    from torch._higher_order_ops.utils import (
+        _check_alias_and_mutation,
+        first_slice_copy,
+    )
+
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)
     wrapped_fn = ctx.functionalize(_maybe_run_with_interpreter(f))
 
     with ctx.redispatch_to_next():
-        with disable_proxy_modes_tracing():
-            example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
+        # Use first_slice_copy instead of _unstack_pytree to avoid
+        # iterating over batch dim, which would guard on symbolic sizes.
+        example_inputs = (
+            *pytree.tree_map(first_slice_copy, unwrapped_xs),
+            *unwrapped_args,
+        )
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        if _has_potential_branch_input_mutation(
-            f, example_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException("torch.map is mutating the input!")
-
-        if _has_potential_branch_input_alias(
-            f, example_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
-
+        _check_alias_and_mutation(f, example_inputs, "map", pre_dispatch)
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
         return ctx.wrap_tensors(map_return)
+
+
+def _fake_map(f, x, *args):
+    from functorch.experimental.control_flow import _stack_pytree, _unstack_pytree
+
+    x_pytrees = _unstack_pytree(x)
+    zs = []
+    for xp in x_pytrees:
+        zs.append(f(xp, *args))
+    return _stack_pytree(zs)
