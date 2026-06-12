@@ -27,7 +27,6 @@ from typing import (
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
-    TypeGuard,
     TypeVar,
     Union,
 )
@@ -1167,66 +1166,72 @@ def _coor_enabled() -> bool:
     return dist_config.compile_on_one_rank
 
 
-def _is_indexed_accelerator_device(obj: object) -> TypeGuard[torch.device]:
-    """A concrete device with an explicit index (e.g. cuda:0, xpu:1) -- the
-    rank-specific case we rewrite to ``prim.device(input)``.
+def _coor_current_accelerator() -> torch.device | None:
+    """The current accelerator as an indexed device (e.g. cuda:0), or None if there is no
+    accelerator. Used to classify device operands under compile-on-one-rank."""
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
+        return None
+    return torch.device(acc.type, torch.accelerator.current_device_index())
 
-    The rewrite is device-type agnostic: the operand follows whatever device its input
-    is, so a graph traced on cuda vs rocm becomes identical (both ``prim.device(arg)``).
 
-    TODO: revisit two cases left baked here, for fuller device-type agnosticism:
-      - bare ``cpu``: left baked because cpu is identical on every rank/host (already
-        portable), and cpu helper tensors (e.g. an index tensor) should stay on cpu
-        rather than follow an accelerator input; parameterizing it would also need the
-        no-input handling (cpu factories often have no cpu input to derive from).
-      - unindexed accelerator (``device("cuda")``, index None): bakes only the device
-        *type*, so two nodes on different accelerator types (cuda vs rocm) still differ.
-        Doesn't occur in practice today (factory/cast ops resolve to an indexed device
-        or omit ``device``); closing it needs matching an input by device *type* rather
-        than exact device, which conflates multiple indices of one type.
+def _coor_match_current_accelerator(
+    device: torch.device, cur: torch.device | None
+) -> bool:
+    """Whether ``device`` should be replaced by the current-accelerator node under CooR.
+
+    Returns True for the current accelerator: matching type, and index either None or
+    equal to the current index (so both bare ``cuda`` and the matching ``cuda:0``
+    qualify). Returns False for devices left untouched (``cpu``, ``meta``). Raises for an
+    operand naming a different accelerator type, or a different index of the current
+    accelerator -- such a device is rank-specific and cannot be made device-agnostic by
+    deriving the current accelerator, so a silently non-portable graph is refused.
     """
-    return isinstance(obj, torch.device) and obj.index is not None and obj.type != "cpu"
+    if device.type in ("cpu", "meta"):
+        return False
+    if cur is None or device.type != cur.type:
+        raise RuntimeError(
+            f"device_as_parameter: an op targets {device}, which is not the current "
+            f"accelerator ({cur}); the traced graph cannot be made device-agnostic for "
+            f"compile-on-one-rank."
+        )
+    if device.index is not None and device.index != cur.index:
+        raise RuntimeError(
+            f"device_as_parameter: an op targets {device}, whose index differs from the "
+            f"current accelerator ({cur}); the traced graph cannot be made "
+            f"device-agnostic for compile-on-one-rank."
+        )
+    return True
 
 
-def _device_edge(tracer: _ProxyTracer, device: torch.device) -> Proxy:
-    """Return a ``prim.device(input)`` proxy that yields ``device`` at runtime.
+def _current_accelerator_edge(tracer: _ProxyTracer, device: torch.device) -> Proxy:
+    """Return a per-graph ``torch.accelerator.current_accelerator()`` proxy for CooR.
 
-    Rewrites a baked rank-specific device into a graph edge derived from an existing
-    graph input that lives on that device, making the traced graph device-agnostic for
-    CooR. Cached per device on the tracer for CSE. Raises if no input is on ``device``;
-    the general fix for that case (a synthesized device input parameter) is a follow-up.
+    Under compile-on-one-rank we replace a baked accelerator device operand (e.g.
+    ``device(type='cuda', index=0)`` or a bare ``device(type='cuda')``) with a reference
+    to a single ``current_accelerator()`` node. At runtime that node yields the running
+    process's accelerator device (index None) and factory/cast ops resolve the concrete
+    index from the current device -- so the graph follows each rank's current accelerator
+    rather than a baked, rank-specific device. Cached once per graph.
 
-    Caveat: we pick *one* representative input per device, so the rewrite bakes in the
-    trace-time input device-co-location partition -- it is only valid at runtime if
-    inputs that shared a device at trace time still share one. For single-device CooR
-    that is the trivial one-class partition; for mixed-device graphs it is a real
-    assumption. TODO: since the assumption is created here, core should record this
-    partition (e.g. as graph metadata) and expose a helper to recompute it from runtime
-    inputs; a serialization/precompile layer (e.g. torchtitan) then consumes that to
-    reject a load whose input co-location differs. Fingerprint the *overlap* equivalence
-    classes over input indices, NOT the device identities -- the latter would defeat the
-    device-index/type agnosticism this rewrite provides.
+    Device-agnosticism is a property of this *operand* only. ``node.meta["val"]`` is set
+    to the node's faithful trace-time return (the accelerator type, index None); like
+    every fake-tensor val in the graph it is inherently trace-machine-relative (a
+    ``torch.device`` always carries a type), so a graph fingerprint must ignore device
+    identities in ``meta`` rather than rely on them.
+
+    Assumes each rank has set its current device (the standard CooR runtime contract).
+    NOTE: ``current_accelerator()`` as an FX node target is novel; a consumer that lowers
+    this graph (e.g. inductor) must handle a device-returning ``call_function`` node.
     """
-    cached = tracer._device_edge_cache.get(device)
+    cached = tracer._current_accelerator_node
     if cached is not None:
         return cached
-    ref_node = None
-    for node in tracer.graph.find_nodes(op="placeholder"):
-        val = node.meta.get("val")
-        if isinstance(val, torch.Tensor) and val.device == device:
-            ref_node = node
-            break
-    if ref_node is None:
-        raise RuntimeError(
-            f"device_as_parameter: an op targets {device} but no graph input is on that "
-            f"device; cannot make it device-agnostic. (Supplying device as an explicit "
-            f"graph input is the planned resolution.)"
-        )
     edge = tracer.create_proxy(
-        "call_function", torch.ops.prim.device.default, (Proxy(ref_node, tracer),), {}
+        "call_function", torch.accelerator.current_accelerator, (), {}
     )
-    edge.node.meta["val"] = device
-    tracer._device_edge_cache[device] = edge
+    edge.node.meta["val"] = torch.device(device.type)
+    tracer._current_accelerator_node = edge
     return edge
 
 
@@ -1316,13 +1321,18 @@ def proxy_call(
                 "in your make_fx call."
             )
 
-    # [device-as-parameter] Under compile-on-one-rank, replace a baked rank-specific
-    # device operand (e.g. device(type='cuda', index=0)) with a prim.device(input)
-    # edge so the traced graph is device-agnostic. Only the node operand changes; the
-    # fake op below still runs with the real device, so the fake output is unaffected.
+    # [device-as-parameter] Under compile-on-one-rank, replace a baked accelerator device
+    # operand (e.g. device(type='cuda', index=0), or a bare device(type='cuda')) that
+    # matches the current accelerator with a reference to a single current_accelerator()
+    # node, so the traced graph follows each rank's current accelerator instead of the
+    # baked device. Only the node operand changes; the fake op below still runs with the
+    # real device, so the fake output is unaffected.
     if _coor_enabled():
+        cur = _coor_current_accelerator()
         proxy_flat_args_kwargs = [
-            _device_edge(tracer, e) if _is_indexed_accelerator_device(e) else e
+            _current_accelerator_edge(tracer, e)
+            if isinstance(e, torch.device) and _coor_match_current_accelerator(e, cur)
+            else e
             for e in proxy_flat_args_kwargs
         ]
 
@@ -1493,7 +1503,7 @@ def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> N
     tracer.opaque_tracker = WeakIdKeyDictionary()
     tracer._opaque_real_obj_proxy = {}
     tracer.sympy_expr_tracker = {}
-    tracer._device_edge_cache = {}
+    tracer._current_accelerator_node = None
     # Stores the torch function that was called during tracing
     tracer.torch_fn_metadata = None
     # Stores the counts for every torch function called. This is to help
@@ -1515,8 +1525,8 @@ class PythonKeyTracer(Tracer):
     symnode_tracker: _SymNodeDict
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
-    # [device-as-parameter] cache of prim.device(input) edges, keyed by device (CooR)
-    _device_edge_cache: dict[torch.device, Proxy]
+    # [device-as-parameter] the single current_accelerator() edge for this graph (CooR)
+    _current_accelerator_node: Proxy | None
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
@@ -2219,8 +2229,8 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     symnode_tracker: _SymNodeDict
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
-    # [device-as-parameter] cache of prim.device(input) edges, keyed by device (CooR)
-    _device_edge_cache: dict[torch.device, Proxy]
+    # [device-as-parameter] the single current_accelerator() edge for this graph (CooR)
+    _current_accelerator_node: Proxy | None
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False

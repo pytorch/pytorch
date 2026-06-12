@@ -240,8 +240,8 @@ def _indexed_cuda_device_nodes(gm):
     """Nodes carrying a concrete, indexed cuda device in their args/kwargs.
 
     These are the rank-specific constants that make a make_fx graph non
-    device-agnostic. A device-agnostic graph derives device in-graph (via
-    prim.device) and so has none of these.
+    device-agnostic. A device-agnostic graph fetches the device in-graph (via the
+    current_accelerator() node) and so has none of these.
     """
     found = []
     for node in gm.graph.nodes:
@@ -257,28 +257,38 @@ def _indexed_cuda_device_nodes(gm):
     return found
 
 
+def _current_accelerator_nodes(gm):
+    """Nodes that fetch the current accelerator device in-graph."""
+    return [
+        n
+        for n in gm.graph.nodes
+        if n.op == "call_function" and n.target is torch.accelerator.current_accelerator
+    ]
+
+
 class TestCompileOnOneRankDeviceAsParameter(TestCase):
     """Device-as-parameter for the make_fx tracing path used by graph_trainer/CooR.
 
-    Under compile_on_one_rank, a factory op whose device is derived from an input
-    tensor's .device should trace with its device= fed by an in-graph
-    prim.device(input) node, instead of baking the input's concrete device index.
-    That keeps the traced graph device-agnostic so one compiled artifact runs on
-    each rank's real GPU without --virtual-local-rank.
+    Under compile_on_one_rank, a factory/cast op whose device matches the current
+    accelerator (e.g. cuda:0, or a bare cuda) traces with its device= fed by a single
+    in-graph current_accelerator() node, instead of baking the concrete device. At
+    runtime the device follows each rank's current accelerator device (not any input),
+    so one compiled artifact runs on each rank's real GPU without --virtual-local-rank.
+    A device that is a different accelerator, or a different index of the current
+    accelerator, is refused (it could not run SPMD).
     """
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @dist_config.patch(compile_on_one_rank=True)
-    def test_factory_device_derived_from_input_not_baked(self):
+    def test_factory_device_replaced_with_current_accelerator(self):
         gm = make_fx(_factory_from_input_device, tracing_mode="fake")(
             torch.randn(2, 8, device="cuda:0")
         )
-        targets = [n.target for n in gm.graph.nodes]
-        self.assertIn(
-            torch.ops.prim.device.default,
-            targets,
-            "device should be derived in-graph from the input via prim.device",
+        ca = _current_accelerator_nodes(gm)
+        self.assertEqual(
+            len(ca), 1, "device should be fetched in-graph via a single node"
         )
+        self.assertTrue(ca[0].users, "the current_accelerator() node must be consumed")
         baked = _indexed_cuda_device_nodes(gm)
         self.assertEqual(
             baked,
@@ -288,16 +298,20 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     @dist_config.patch(compile_on_one_rank=True)
-    def test_factory_device_is_runtime_agnostic(self):
+    def test_runtime_follows_current_device_not_input(self):
+        # The runtime device follows the process's current device, not the input's.
+        # The input is kept on cuda:0 in both runs; only the current device changes.
         gm = make_fx(_factory_from_input_device, tracing_mode="fake")(
             torch.randn(2, 8, device="cuda:0")
         )
-        self.assertEqual(
-            gm(torch.randn(2, 8, device="cuda:0")).device, torch.device("cuda:0")
-        )
-        self.assertEqual(
-            gm(torch.randn(2, 8, device="cuda:1")).device, torch.device("cuda:1")
-        )
+        with torch.cuda.device(0):
+            self.assertEqual(
+                gm(torch.randn(2, 8, device="cuda:0")).device, torch.device("cuda:0")
+            )
+        with torch.cuda.device(1):
+            self.assertEqual(
+                gm(torch.randn(2, 8, device="cuda:0")).device, torch.device("cuda:1")
+            )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_default_path_unchanged_bakes_device(self):
@@ -306,36 +320,79 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         gm = make_fx(_factory_from_input_device, tracing_mode="fake")(
             torch.randn(2, 8, device="cuda:0")
         )
-        self.assertNotIn(
-            torch.ops.prim.device.default, [n.target for n in gm.graph.nodes]
-        )
+        self.assertEqual(_current_accelerator_nodes(gm), [])
         self.assertTrue(_indexed_cuda_device_nodes(gm))
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @dist_config.patch(compile_on_one_rank=True)
-    def test_to_copy_explicit_device_derived_from_input(self):
+    def test_to_copy_explicit_device_replaced(self):
         # An explicit-device dtype cast (the SimpleFSDP mixed-precision pattern,
-        # aten._to_copy with a device= kwarg) also gets its baked device rewired
-        # to prim.device(input), alongside the factory-op path.
+        # aten._to_copy with a device= kwarg) also gets its baked device rewired to
+        # the current_accelerator() node, alongside the factory-op path.
         def f(x):
             return x.to(device="cuda:0", dtype=torch.bfloat16)
 
         gm = make_fx(f, tracing_mode="fake")(torch.randn(2, 8, device="cuda:0"))
-        self.assertIn(torch.ops.prim.device.default, [n.target for n in gm.graph.nodes])
+        self.assertEqual(len(_current_accelerator_nodes(gm)), 1)
         self.assertEqual(_indexed_cuda_device_nodes(gm), [])
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @dist_config.patch(compile_on_one_rank=True)
-    def test_no_input_on_device_raises(self):
-        # A cuda factory in a graph whose only input is on CPU has no input to
-        # derive the device from, so we raise rather than silently emit a
-        # non-portable graph. (The general fix -- a synthesized device input
-        # parameter supplied by the executor -- is a planned follow-up.)
+    def test_unindexed_accelerator_device_replaced(self):
+        # A bare device="cuda" (index None) matching the current accelerator is also
+        # replaced by the current_accelerator() node.
+        def f(x):
+            return torch.zeros(4, x.shape[1], device="cuda", dtype=x.dtype)
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(2, 8, device="cuda:0"))
+        self.assertEqual(len(_current_accelerator_nodes(gm)), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @dist_config.patch(compile_on_one_rank=True)
+    def test_cpu_device_left_alone(self):
+        # cpu is portable on every rank, so a cpu factory is not rewritten.
+        def f(x):
+            return torch.zeros(4, x.shape[1], device="cpu")
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(2, 8, device="cuda:0"))
+        self.assertEqual(_current_accelerator_nodes(gm), [])
+        cpu_ops = [
+            n
+            for n in gm.graph.nodes
+            if any(
+                isinstance(o, torch.device) and o.type == "cpu"
+                for o in list(n.args) + list(n.kwargs.values())
+            )
+        ]
+        self.assertTrue(cpu_ops, "the cpu device should stay baked")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @dist_config.patch(compile_on_one_rank=True)
+    def test_factory_without_matching_input_succeeds(self):
+        # Unlike provenance-following, matching the current accelerator needs no input
+        # on that device: a cuda factory in a cpu-input graph is now rewritten, not
+        # rejected.
         def f(x):
             return torch.zeros(x.shape[0], device="cuda:0")
 
-        with self.assertRaisesRegex(RuntimeError, "no graph input is on that device"):
-            make_fx(f, tracing_mode="fake")(torch.randn(2, device="cpu"))
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(2, device="cpu"))
+        self.assertEqual(len(_current_accelerator_nodes(gm)), 1)
+        self.assertEqual(_indexed_cuda_device_nodes(gm), [])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @dist_config.patch(compile_on_one_rank=True)
+    def test_wrong_index_raises(self):
+        # A cuda index that is not the current device's index cannot be made SPMD, so
+        # the rewrite refuses it (raised during tracing before the fake op runs, so
+        # this needs only the current device to exist).
+        def f(x):
+            return torch.zeros(4, device="cuda:1")
+
+        with torch.cuda.device(0):
+            with self.assertRaisesRegex(
+                RuntimeError, "index differs from the current accelerator"
+            ):
+                make_fx(f, tracing_mode="fake")(torch.randn(2, device="cuda:0"))
 
 
 if __name__ == "__main__":
