@@ -47,12 +47,7 @@ from ..bytecode_transformation import (
     create_instruction,
 )
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import (
-    raise_observed_exception,
-    raise_type_error,
-    raise_value_error,
-    unimplemented,
-)
+from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
@@ -70,7 +65,6 @@ from ..utils import (
     istype,
     proxy_args_kwargs,
     raise_args_mismatch,
-    unpack_iterable,
 )
 from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
 from .constant import ConstantVariable
@@ -2473,52 +2467,6 @@ class RandomVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.random.setstate(self.unwrap_state(args[0]))
             return variables.ConstantVariable.create(None)
-        elif name == "shuffle":
-            if len(args) != 1 or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            seq = args[0].realize()
-            tx.output.side_effects.mutation(self)
-            # shuffle's permutation depends only on the sequence length and the
-            # RNG state, not on the elements, so shuffle a list of indices to
-            # both advance the symbolic RNG and obtain the permutation to apply.
-            if not hasattr(seq, "items"):
-                raise AssertionError(
-                    "shuffle only supports ListVariable and TupleVariable"
-                )
-            perm = list(range(len(seq.items)))
-            self.random.shuffle(perm)
-            tx.output.side_effects.mutation(seq)
-            seq.items[:] = [seq.items[i] for i in perm]
-            return variables.ConstantVariable.create(None)
-        elif name == "sample":
-            if kwargs or len(args) != 2:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "2 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            elems = unpack_iterable(tx, args[0])
-            k = args[1].as_python_constant()
-            if not isinstance(k, int) or k < 0 or k > len(elems):
-                raise_value_error(
-                    tx,
-                    "Sample larger than population or is negative",
-                )
-            tx.output.side_effects.mutation(self)
-            # Like shuffle, sample's selected positions depend only on the
-            # population length and RNG state, so sample over an index range to
-            # advance the symbolic RNG and pick the population elements to keep.
-            indices = self.random.sample(range(len(elems)), k)
-            return variables.ListVariable(
-                [elems[i] for i in indices],
-                mutation_type=variables.base.ValueMutationNew(),
-            )
         elif name in self._supported_fn_names:
             tx.output.side_effects.mutation(self)
             state = self.random.getstate()
