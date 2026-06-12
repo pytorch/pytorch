@@ -231,6 +231,7 @@ TRAINING_IR_DECOMP_NON_STRICT_SUFFIX = "_training_ir_to_decomp_nonstrict"
 CPP_RUNTIME_STRICT_SUFFIX = "_cpp_runtime_strict"
 CPP_RUNTIME_NONSTRICT_SUFFIX = "_cpp_runtime_nonstrict"
 STRICT_EXPORT_V2_SUFFIX = "_strict_export_v2"
+DYNAMIC_SPEC_SUFFIX = "_dynamic_spec"
 
 
 # Now default mode is non strict, so original unammended test names
@@ -251,6 +252,10 @@ def is_strict_v2_test(test_name):
 
 def is_inline_and_install_strict_test(test_name: str) -> bool:
     return test_name.endswith(INLINE_AND_INSTALL_STRICT_SUFFIX)
+
+
+def is_dynamic_spec_test(test_name):
+    return test_name.endswith(DYNAMIC_SPEC_SUFFIX)
 
 
 def is_retracebility_test(test_name):
@@ -337,6 +342,7 @@ class TestDynamismExpression(TestCase):
         res = gm(*inp)
         self.assertTrue(torchdynamo.utils.same(ref, res))
 
+    @testing.expectedFailureDynamicSpecConversion  # backed binds the example size (3) to the symbol and flags 3 not in range [6, inf] at export. unbacked is agnostic to the example value: it adds a runtime assertion (size >= 6) but never verifies the example, so export succeeds
     def test_export_constraints_error_not_in_range(self):
         class InvalidInputConflictWithInputConstraints(torch.nn.Module):
             def forward(self, x):
@@ -3648,6 +3654,7 @@ def forward(self, add):
         self.assertEqual(list(ep_model.graph.nodes)[-1].name, "output")
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
+    @testing.expectedFailureDynamicSpecConversion  # real-tensor/custom-op path, unrelated to the dynamic-shapes spec
     def test_real_tensor_size_mismatch(self):
         from torch._subclasses.fake_tensor import MetadataMismatchError
 
@@ -4495,6 +4502,7 @@ graph():
 
         TS2EPConverter(foo_script, inp).convert()
 
+    @testing.expectedFailureDynamicSpecConversion  # uses Dim.AUTO, which has no unbacked ShapesSpec equivalent
     def test_dim_auto_and_dim(self):
         # test basic Dims
         class Foo(torch.nn.Module):
@@ -4547,6 +4555,7 @@ graph():
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
+    @testing.expectedFailureDynamicSpecConversion  # graph differs on the unbacked path (u-symbol)
     def test_issue_157289(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -5089,6 +5098,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ep = export(mod, inputs)
         self.assertTrue(torch.allclose(ep.module()(*inputs), mod(*inputs)))
 
+    @testing.expectedFailureDynamicSpecConversion  # unbacked lowers the derived relation to a runtime assert Eq(u1,u0+1) that fails at module() on the test's mismatched inputs
     def test_derived_dim_basic(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -5141,6 +5151,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
 
         self.assertEqual(ep.module()(torch.randn(4), torch.randn(5)).size()[0], 4)
 
+    @testing.expectedFailureDynamicSpecConversion  # derived-dim gap: derived root has no bare-dim anchor (unbound IntVar)
     def test_derived_dim_nested(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -5209,6 +5220,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
 
         self.assertEqual(ep.module()(torch.randn(5), torch.randn(9)).size()[0], 4)
 
+    @testing.expectedFailureDynamicSpecConversion  # user `% 2` branch DDEs under unbacked (Mod(u0,2)); backed resolves it via the 2*dimx form
     def test_derived_dim_integer(self):
         class Foo(torch.nn.Module):
             def forward(self, w):
@@ -5254,6 +5266,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             # expected <= 12, but got 14
             ep.module()(torch.randn(14))
 
+    @testing.expectedFailureDynamicSpecConversion  # derived-dim gap: derived root has no bare-dim anchor (unbound IntVar)
     def test_derived_dim_repeat_derived(self):
         class Foo(torch.nn.Module):
             def forward(self, u, v):
@@ -5271,6 +5284,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         )
         self.assertEqual(ep.module()(torch.randn(8), torch.randn(8)).size()[0], 4)
 
+    @testing.expectedFailureDynamicSpecConversion  # derived-dim gap: derived relation lowers to a different runtime assert
     def test_derived_dim_out_of_order(self):
         dimy = torch.export.Dim("dimy", min=5, max=7)
         dimx = dimy - 1  # out of order, effectively dimy = dimx + 1
@@ -5377,6 +5391,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             6,
         )
 
+    @testing.expectedFailureDynamicSpecConversion  # backed derived-root specialization; unbacked export succeeds so the test's manual 'should have failed' fires
     def test_specialize_derived_dim_roots(self):
         # dim & derived dim both specialize
         class Foo(torch.nn.Module):
@@ -5756,6 +5771,7 @@ def forward(self, x):
         after = torch.is_grad_enabled()
         self.assertEqual(before, after)
 
+    @testing.expectedFailureDynamicSpecConversion  # derived-dim gap: derived root has no bare-dim anchor (unbound IntVar)
     def test_derived_dim_out_of_order_simplified(self):
         _dimz = torch.export.Dim("_dimz", min=6, max=8)
         dimy = _dimz - 1
@@ -5884,6 +5900,7 @@ def forward(self, x):
             )
         )
 
+    @testing.expectedFailureDynamicSpecConversion  # range differs: unbacked dims default to min=1, not 0
     def test_export_for_training_with_dynamic_shapes(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -6182,6 +6199,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     return (add, add_1)""",
         )
 
+    @testing.expectedFailureDynamicSpecConversion  # derived-dim gap: derived root has no bare-dim anchor (unbound IntVar)
     def test_derived_dim_out_of_order_simplified_repeat_non_derived(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y, y1, z):
@@ -6221,6 +6239,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             6,
         )
 
+    @testing.expectedFailureDynamicSpecConversion  # asserts backed static-constraint behavior (no unbacked analog)
     def test_static_dim_constraints(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -6302,6 +6321,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(vr.lower, 1)
         self.assertEqual(vr.upper, 2)
 
+    @testing.expectedFailureDynamicSpecConversion  # backed raises a derived-dim error; unbacked accepts the relation so export succeeds
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
@@ -6324,6 +6344,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(range_lower_bounds, [1, 2])
         self.assertEqual(range_upper_bounds, [2, 3])
 
+    @testing.expectedFailureDynamicSpecConversion  # uses Dim.DYNAMIC/AUTO, which has no unbacked ShapesSpec equivalent
     def test_issue_161902(self):
         class Add(torch.nn.Module):
             def forward(self, x, y):
@@ -6680,6 +6701,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             torch.export.export(M(), input1, dynamic_shapes=ai)
 
+    @testing.expectedFailureDynamicSpecConversion  # asserts a backed mismatch error; the converter rejects it differently
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -6892,6 +6914,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.tensor(6), torch.tensor(6), torch.tensor(6), torch.randn(1)),
         )
 
+    @testing.expectedFailureDynamicSpecConversion  # unbacked-binding assertion differs on the unbacked path
     def test_replaced_unbacked_bindings(self):
         import sympy
 
@@ -8307,6 +8330,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(m.t, epm_foo.t))
         self.assertTrue(torch.allclose(m.t, epm_bar.t))
 
+    @testing.expectedFailureDynamicSpecConversion  # nested-container input -> DictSpec, not supported on strict export at this commit (added in #186167)
     def test_export_api_with_dynamic_shapes(self):
         from torch.export import Dim, dims
 
@@ -8553,6 +8577,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 dynamic_shapes={"x": (batch, M, K), "y": (batch, K, N)},
             )
 
+    @testing.expectedFailureDynamicSpecConversion  # derived new-root DDEs under unbacked (no backed suggested-fixes solver)
     def test_suggested_fixes_new_roots(self):
         from torch.export import dims
 
@@ -8602,6 +8627,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dynamic_shapes = {"x": (3 * _dx - 1,), "y": (3 * _dx,), "z": (3 * _dx + 2,)}
         export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
 
+    @testing.expectedFailureDynamicSpecConversion  # backed suggested-fixes solver; unbacked export succeeds so the test's manual 'should have raised' fires
     def test_refine_dynamic_shapes_from_suggested_fixes(self):
         from torch.export.dynamic_shapes import (
             refine_dynamic_shapes_from_suggested_fixes,
@@ -9143,6 +9169,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 ops.append(node.target)
         self.assertEqual(len(ops), 1)
 
+    @testing.expectedFailureDynamicSpecConversion  # unbacked path produces a different flat-input layout for this model
     def test_device_to_dynamic(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -10388,8 +10415,11 @@ def forward(self, x):
         inp = (torch.tensor([1, 1, 1, 0, 1]),)
         dim = torch.export.Dim("dim")
         ep = export(m, inp, dynamic_shapes=((dim,),))
+        # The unbacked (ShapesSpec) path additionally emits a size assert for the
+        # input dim, so it has one more `_assert_scalar` than the backed path.
+        expected = 2 if is_dynamic_spec_test(self._testMethodName) else 1
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+            "torch.ops.aten._assert_scalar.default", expected, exactly=True
         ).run(ep.graph_module.code)
 
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
@@ -10505,6 +10535,7 @@ def forward(self, x):
             # expected >= 3, but got 2
             torch.export.export(exported_v2.module(), (torch.randn(2, 2),))
 
+    @testing.expectedFailureDynamicSpecConversion  # graph differs on the unbacked path (u-symbol / extra size assert)
     def test_export_cond_symbool_pred(self):
         class A(torch.nn.Module):
             def __init__(self) -> None:
@@ -15620,6 +15651,7 @@ def forward(self, x, y):
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
+    @testing.expectedFailureDynamicSpecConversion  # unbacked emits runtime asserts (Eq(Mod(...)), u1>=2) that fail at module() on the test inputs
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
         # with prefer_deferred_runtime_asserts_over_guards=True to successfully export
@@ -17033,6 +17065,7 @@ def forward(self, x):
             else:
                 raise AssertionError(f"Node not checked: {node}, {node.target}")
 
+    @testing.expectedFailureDynamicSpecConversion  # nested-container spec, not supported on strict export at this commit (added in #186167)
     def test_dynamic_shapes_serdes_generic(self):
         from torch._export.serde.dynamic_shapes import (
             _dump_dynamic_shapes,
