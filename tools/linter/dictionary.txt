@@ -32,6 +32,7 @@ inpts
 mata
 matb
 matc
+nax
 nd
 nin
 NotIn

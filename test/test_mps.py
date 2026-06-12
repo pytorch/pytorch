@@ -1380,6 +1380,20 @@ class TestMPS(TestCaseMPS):
         helper(input_shape=(10, 3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(1, 77, 77), batch1_shape=(8, 77, 64), batch2_shape=(8, 64, 77))
 
+    def test_matmul_fp32_default_full_precision(self):
+        a, b = torch.randn(256, 2048), torch.randn(2048, 256)
+        ref = a @ b
+        self.assertEqual("highest", torch.get_float32_matmul_precision())
+        self.assertEqual(ref, (a.to("mps") @ b.to("mps")).cpu(), atol=1e-4, rtol=1e-4)
+        prev = torch.get_float32_matmul_precision()
+        try:
+            for p in ("high", "medium"):
+                torch.set_float32_matmul_precision(p)
+                out = (a.to("mps") @ b.to("mps")).cpu()
+                self.assertFalse(out.isnan().any() or out.isinf().any())
+        finally:
+            torch.set_float32_matmul_precision(prev)
+
     def test_local_scalar_dense_mps(self):
         x_cpu = torch.randn(1)
         y_mps = x_cpu.to("mps")
