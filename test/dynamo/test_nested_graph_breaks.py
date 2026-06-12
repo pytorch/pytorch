@@ -1530,7 +1530,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 2)
 
-
     def test_ngb_suppressed_for_inline_module(self):
         """NGB should be suppressed for functions in NGB_SUPPRESS_INLINELIST."""
         from unittest.mock import patch
