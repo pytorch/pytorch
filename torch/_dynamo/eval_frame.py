@@ -58,6 +58,7 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
+    get_fullgraph_compiled_frame_count,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,

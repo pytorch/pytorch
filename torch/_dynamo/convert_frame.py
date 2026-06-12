@@ -904,7 +904,21 @@ def trace_frame(
     distributed_state: DistributedState | None = None,
     package: CompilePackage | None = None,
 ) -> DynamoTracerOutput:
+    from torch._dynamo.eval_frame import get_fullgraph_compiled_frame_count
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
+
+    if (
+        torch.cuda.is_available()
+        and hasattr(torch._C, "_cuda_isCurrentStreamCapturing")
+        and not isinstance(torch._C._cuda_isCurrentStreamCapturing, type)
+        and torch.cuda.is_current_stream_capturing()
+        and get_fullgraph_compiled_frame_count() == -1
+    ):
+        raise exc.TorchRuntimeError(
+            "torch.compile cannot JIT compile during CUDA graph capture. "
+            "Execute warmup iterations outside of CUDA graph capture to trigger "
+            "compilation, then capture the graph after compilation has completed."
+        )
 
     speculation_log.restart()  # type: ignore[has-type]
     exn_vt_stack = ExceptionStack()
