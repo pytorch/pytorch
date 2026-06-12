@@ -5,9 +5,11 @@ r"""
 Regression contract (three layers):
 
 1. **Grid math** — ``bmm_grid`` invariants (``grid_y`` cap, ``grid_z`` split, PID linearization).
-2. **Codegen** — emitted Triton for ``aten.bmm`` includes the ``idx_q`` reconstruction using
-   ``tl.program_id(2)`` and ``tl.num_programs(1)`` (with ``triton.native_matmul`` disabled so
-   we exercise ``templates/triton_bmm.py.jinja``, not the native-matmul PID layout).
+2. **Codegen** — same gate as other Inductor TRITON-only autotune tests: ``IS_BIG_GPU``
+   (``HAS_GPU_AND_TRITON`` and ``is_big_gpu()``). With ``max_autotune_gemm`` and TRITON-only
+   backends we force ``triton_bmm``; emitted code must contain ``idx_q`` with
+   ``tl.program_id(2) * tl.num_programs(1)`` (``triton.native_matmul`` off so we use
+   ``templates/triton_bmm.py.jinja``, not native-matmul PID layout).
 3. **Semantics** — K=1, values in ``{0, 1}`` only: each output entry is one exact multiply;
    ``torch.equal`` vs a hand-built expected tensor catches wrong batch slices (wrong ``idx_q``).
 """
@@ -23,7 +25,7 @@ from torch._inductor.runtime.runtime_utils import get_max_y_grid
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing import FileCheck
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 
 
 def sparse_probe_bmm_tensors(
@@ -100,7 +102,9 @@ class TestBmmBatchGridYz(TestCase):
                     msg="Kernel idx_q uses pid_y + pid_z * num_programs(1) with num_programs(1)==grid_y",
                 )
 
-    @unittest.skipIf(not HAS_GPU, "requires CUDA/XPU Triton")
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @inductor_config.patch(
         {
             "triton.native_matmul": False,
@@ -111,8 +115,6 @@ class TestBmmBatchGridYz(TestCase):
     )
     def test_triton_bmm_kernel_reconstructs_batch_from_yz_program_ids(self):
         """Emitted Triton must contain the idx_q formula from triton_bmm.py.jinja."""
-        if GPU_TYPE == "cpu":
-            raise unittest.SkipTest("Triton BMM codegen test is GPU-only")
 
         max_y = get_max_y_grid()
         B = max_y + 1
@@ -136,14 +138,7 @@ class TestBmmBatchGridYz(TestCase):
         FileCheck().check("idx_q").check("tl.program_id(1)").check(needle).run(code)
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
-    @inductor_config.patch(
-        {
-            "triton.native_matmul": False,
-            "max_autotune": False,
-            "max_autotune_gemm": True,
-            "max_autotune_gemm_backends": "TRITON",
-        }
-    )
+    @inductor_config.patch({"triton.native_matmul": False})
     def test_bmm_sparse_probe_exact_equal_inductor(self):
         """End-to-end: torch.compile Inductor path matches hand-built expected (no allclose)."""
         if GPU_TYPE == "cpu":
