@@ -4,7 +4,6 @@
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <algorithm>
-#include <numeric>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -73,8 +72,11 @@ FFTAxisPlan computeFFTAxisPlan(IntArrayRef dim, int64_t ndim) {
   for (const auto i : c10::irange(ndim)) {
     inverse[perm[i]] = i;
   }
-  std::vector<int64_t> remappedAxes(dim.size());
-  std::iota(remappedAxes.begin(), remappedAxes.end(), ndim - static_cast<int64_t>(dim.size()));
+  std::vector<int64_t> remappedAxes;
+  remappedAxes.reserve(dim.size());
+  for (const auto i : c10::irange(ndim - static_cast<int64_t>(dim.size()), ndim)) {
+    remappedAxes.push_back(i);
+  }
   plan.axes = IntArrayToNSArray(remappedAxes);
   plan.permutation = IntArrayToNSArray(perm);
   plan.inversePermutation = IntArrayToNSArray(inverse);
