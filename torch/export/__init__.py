@@ -151,10 +151,10 @@ def export(
            expression over the spec's symbols (e.g. ``TensorSpec([B * 2,
            ...])``), and you can pass relational ``assumptions`` between
            symbols (e.g. ``[B % 2 == 0]``) that export validates.
-         * **Export-time soundness.** The exported graph is guaranteed valid
-           for every assumption provided, otherwise export fails. (The legacy
-           ``Dim.DYNAMIC`` / ``Dim.AUTO`` mode may silently specialize a
-           dynamic dim, yielding a graph only valid for the example shape.)
+         * **No silent specialization.** The exported graph is guaranteed valid
+           for every assumption provided, otherwise export fails. (By
+           contrast, ``Dim.DYNAMIC`` / ``Dim.AUTO`` may silently specialize a
+           dynamic dim, yielding a graph that is not valid for all the inputs).
 
          Example::
 

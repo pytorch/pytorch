@@ -131,7 +131,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
     def test_static_int_spec_mismatch_raises(self):
         with self.assertRaisesRegex(
             ValueError,
-            r"shapes_spec declares L\['flat_args'\]\[1\] as static with value 10, but got 42",
+            r"shapes_spec declared L\['flat_args'\]\[1\] as static with value 10, but while tracing we found that it was actually 42",
         ):
             export(
                 _ModXN(),
@@ -1391,10 +1391,9 @@ class TestContainerSpec(TestCase):
         for arg_value in cases:
             spec = _build_complete_spec(arg_value)
             leaves = pytree.tree_leaves(arg_value)
-            out: list = [None] * len(leaves)
-            consumed = _walk_spec(spec, arg_value, out, 0, where="<root>")
+            out = _walk_spec(spec, arg_value, where="<root>")
             self.assertEqual(
-                consumed, len(leaves), f"leaf-count drift for case {arg_value!r}"
+                len(out), len(leaves), f"leaf-count drift for case {arg_value!r}"
             )
             # Per-slot check: each slot's spec name must match the
             # tensor at that flat position from pytree.tree_flatten.
@@ -1431,9 +1430,9 @@ class TestContainerSpec(TestCase):
         ]
         for arg_value in cases:
             expected = len(pytree.tree_leaves(arg_value))
-            consumed = _walk_spec(None, arg_value, [None] * expected, 0, where="<root>")
+            out = _walk_spec(None, arg_value, where="<root>")
             self.assertEqual(
-                consumed, expected, f"no-spec leaf-count drift for {arg_value!r}"
+                len(out), expected, f"no-spec leaf-count drift for {arg_value!r}"
             )
 
 
