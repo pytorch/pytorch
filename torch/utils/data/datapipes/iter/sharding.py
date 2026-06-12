@@ -44,6 +44,7 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
     def __init__(
         self, source_datapipe: IterDataPipe, sharding_group_filter=None
     ) -> None:
+        super().__init__()
         self.source_datapipe = source_datapipe
         self.sharding_group_filter = sharding_group_filter
         self.groups: dict[int, tuple[int, int]] = {}
@@ -93,6 +94,7 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
                 yield item
 
     def __len__(self) -> int:
+        # pyrefly: ignore [unsafe-overlap]
         if isinstance(self.source_datapipe, Sized):
             return len(self.source_datapipe) // self.num_of_instances + (
                 1

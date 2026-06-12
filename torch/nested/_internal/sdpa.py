@@ -55,7 +55,7 @@ def _validate_sdpa_input(
         )
     if query.dim() < 3 or key.dim() < 3 or value.dim() < 3:
         raise ValueError(
-            f"Expected query, key, and value to all be  at least 3 dimensional, but got query.dim: "
+            f"Expected query, key, and value to all be at least 3 dimensional, but got query.dim: "
             f"{query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead."
         )
     if query._ragged_idx != key._ragged_idx or query._ragged_idx != value._ragged_idx:
@@ -141,7 +141,8 @@ def _check_head_dim_size_cudnn_nested(params: SDPAParams, debug=False) -> bool:
 def _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
     param: torch.Tensor, param_name: str, debug=False
 ) -> bool:
-    assert isinstance(param, NestedTensor), "param should be a jagged NT"
+    if not isinstance(param, NestedTensor):
+        raise AssertionError("param should be a jagged NT")
 
     if param._ragged_idx == 1:
         # num_head_dims is ragged
@@ -369,11 +370,12 @@ def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor) -> bool:
     # needing to call contiguous on the nested tensor input.
     # It checks that the storage offsets' adjacent_differences are a constant
     # multiple of the previous tensor in the nested tensor and that the strides
-    # are monitonically decreasing. This check is done after calling transpose on
+    # are monotonically decreasing. This check is done after calling transpose on
     # the nested tensor resulting in a Nt of shape [bsz, {seq_len}, num_heads, dim]
 
     # Returns a boolean indicating if contiguous needs to be called for input
-    assert isinstance(tensor, NestedTensor)
+    if not isinstance(tensor, NestedTensor):
+        raise AssertionError("tensor must be a NestedTensor")
     offsets = tensor.offsets()
     strides = tensor._strides
 
@@ -722,11 +724,12 @@ def jagged_scaled_dot_product_attention(
     query, key, value, attn_mask = _autocast(query, key, value, attn_mask)
     _validate_sdpa_input(query, key, value, attn_mask, dropout_p, is_causal, scale)
     # for mypy, ugh
-    assert (
+    if not (
         isinstance(query, NestedTensor)
         and isinstance(key, NestedTensor)
         and isinstance(value, NestedTensor)
-    )
+    ):
+        raise AssertionError("query, key, and value must all be NestedTensor instances")
     from torch.nested._internal.nested_tensor import (
         nested_view_from_values_offsets_lengths,
     )

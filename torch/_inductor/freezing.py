@@ -4,7 +4,7 @@ from __future__ import annotations
 import itertools
 import logging
 import weakref
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -107,9 +107,13 @@ def _freeze(
 
     if tracing_context := torch._guards.TracingContext.try_get():
         fw_metadata = tracing_context.fw_metadata
-        assert tracing_context.params_flat_unwrap_subclasses is not None
+        if tracing_context.params_flat_unwrap_subclasses is None:
+            raise AssertionError(
+                "expected tracing_context.params_flat_unwrap_subclasses to be set"
+            )
         params_flat = tracing_context.params_flat_unwrap_subclasses
-        assert fw_metadata is not None and params_flat is not None
+        if not (fw_metadata is not None and params_flat is not None):
+            raise AssertionError("expected fw_metadata and params_flat to be set")
 
         preserved_arg_indices = replace_params_with_constants(
             aot_autograd_gm, params_flat, fw_metadata
@@ -145,7 +149,7 @@ class ErasedTensor(torch.Tensor):
     def __new__(cls, elem, name, owning_mod):
         return super().__new__(cls, elem.to(device="meta"))
 
-    def __init__(self, elem, name: Optional[str], mod) -> None:
+    def __init__(self, elem, name: str | None, mod) -> None:
         self.erased_name = name
         self.owning_mod_ref = weakref.ref(mod)
 
@@ -157,7 +161,8 @@ class ErasedTensor(torch.Tensor):
             for e in pytree.arg_tree_leaves(*args, **kwargs)
             if isinstance(e, ErasedTensor)
         ]
-        assert len(erased_tensors) > 0
+        if len(erased_tensors) == 0:
+            raise AssertionError("expected at least one ErasedTensor argument")
         e = erased_tensors[0]
 
         raise RuntimeError(
@@ -220,13 +225,16 @@ def enforce_output_layout(gm: torch.fx.GraphModule):
         for n in out_list:
             if not isinstance(
                 n.meta["val"], torch.Tensor
-            ) or not torch._prims_common.is_non_overlapping_and_dense(n.meta["val"]):
+            ) or not torch._prims_common.is_non_overlapping_and_dense_or_false(
+                n.meta["val"]
+            ):
                 continue
 
-            # add a node to enforce eager layout
+            # Use materialize_symints intentionally; see its docstring for why.
             ft = n.meta["val"]
+            stride_args = tuple(gm.graph.materialize_symints(ft.stride()))
             new_node = gm.graph.call_function(
-                prims.inductor_force_stride_order.default, (n, ft.stride())
+                prims.inductor_force_stride_order.default, (n, stride_args)
             )
 
             # can not call
@@ -252,12 +260,13 @@ def enforce_as_strided_input_layout(gm: torch.fx.GraphModule):
     strided_nodes = [n for n in gm.graph.nodes if n.target in as_strided_ops]
     for n in strided_nodes:
         with gm.graph.inserting_before(n):
-            # add a node to enforce eager layout
+            # Use materialize_symints intentionally; see its docstring for why.
             ft = n.args[0].meta["val"]
+            stride_args = tuple(gm.graph.materialize_symints(ft.stride()))
             new_node = gm.graph.call_function(
-                prims.inductor_force_stride_order.default, (n.args[0], ft.stride())
+                prims.inductor_force_stride_order.default, (n.args[0], stride_args)
             )
-            n.replace_input_with(n.args[0], new_node)
+        n.replace_input_with(n.args[0], new_node)
 
     gm.graph.lint()
     gm.recompile()

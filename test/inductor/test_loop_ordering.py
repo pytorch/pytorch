@@ -23,7 +23,7 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -84,7 +84,8 @@ class ImplDetailTest(MockSchedulerTest):
             prefix = str(var)[0]
             break
 
-        assert prefix
+        if not prefix:
+            raise AssertionError
         return prefix
 
     @staticmethod
@@ -415,7 +416,272 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    def test_reshape_reindexing_for_reduction(self):
+        """
+        RMS norm pattern where reshape(-1, head_dim) changes the loop
+        decomposition from [M, N] to [M*num_heads, head_dim]. Without
+        reindexing, the pointwise and reduction have different MemoryDep
+        indexing and can't fuse. With reindexing, the pointwise's
+        iteration is re-factored to match the reduction's, enabling fusion
+        into a single kernel.
+        """
+
+        def f(x):
+            head_dim = 128
+            M, N = x.shape
+            x_reshaped = x.reshape(-1, head_dim)
+            x_f32 = x_reshaped.float()
+            variance = x_f32.pow(2).mean(dim=-1, keepdim=True)
+            x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
+            return x_normed.reshape(M, N).to(x.dtype)
+
+        if DO_PERF_TEST:
+            M = 1024
+        else:
+            M = 16
+        # Non-contiguous input (simulating a slice from qkv projection)
+        qkv = torch.randn(M, 10240, dtype=torch.bfloat16)
+        x = qkv[:, :8192]
+
+        ref = f(x)
+        actual = torch.compile(f)(x)
+        torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            optf = torch.compile(f)
+            print(f"ms={do_bench(lambda: optf(x))}")
+
+    def test_reshape_reindexing_transposed_input(self):
+        """
+        Same RMS norm pattern but with a transposed input. The reshape
+        sees transposed strides, so the reduction's memory access
+        pattern differs from the contiguous case. Reindexing should
+        still enable fusion.
+        """
+
+        def f(x):
+            head_dim = 128
+            M, N = x.shape
+            x_reshaped = x.reshape(-1, head_dim)
+            x_f32 = x_reshaped.float()
+            variance = x_f32.pow(2).mean(dim=-1, keepdim=True)
+            x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
+            return x_normed.reshape(M, N).to(x.dtype)
+
+        M = 16
+        # Transposed input: shape [M, 8192] but stride (1, M)
+        x = torch.randn(8192, M, dtype=torch.bfloat16).T
+
+        ref = f(x)
+        actual = torch.compile(f)(x)
+        torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    @inductor_config.patch("loop_ordering_after_fusion", False)
+    def test_reshape_reindexing_without_loop_ordering(self):
+        """
+        Reindexing should enable fusion even when loop ordering is
+        disabled. Same RMS norm pattern as test_reshape_reindexing_for_reduction.
+        """
+
+        def f(x):
+            head_dim = 128
+            M, N = x.shape
+            x_reshaped = x.reshape(-1, head_dim)
+            x_f32 = x_reshaped.float()
+            variance = x_f32.pow(2).mean(dim=-1, keepdim=True)
+            x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
+            return x_normed.reshape(M, N).to(x.dtype)
+
+        M = 16
+        qkv = torch.randn(M, 10240, dtype=torch.bfloat16)
+        x = qkv[:, :8192]
+
+        ref = f(x)
+        actual = torch.compile(f)(x)
+        torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_reindex_unfusable_write_read_dep(self):
+        """
+        Grouped quantization where a custom op consumes both the
+        quantized tensor and the scale, forcing the reduction (amax)
+        and scale epilogue to fuse into a FusedSchedulerNode while
+        the quantize pointwise remains separate.
+
+        The FusedSchedulerNode's dep on the input has 3 vars (from the
+        reduction + scale bodies), while the pointwise has 2 vars.
+        This num_vars mismatch causes _try_reorder_loops_for_candidates
+        to return a score based on the shared read (input), short-
+        circuiting reindexing. The write-read dep prioritization
+        detects the unfusable dep and returns -1, letting reindexing
+        fire.
+        """
+        HIDDEN, GROUP_SIZE = 7168, 128
+
+        @torch.library.custom_op("test::opaque_gemm", mutates_args=())
+        def opaque_gemm(x_q: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+            return torch.zeros(
+                x_q.shape[0], 1024, device=x_q.device, dtype=torch.bfloat16
+            )
+
+        @opaque_gemm.register_fake
+        def _(x_q, scale):
+            return torch.zeros(
+                x_q.shape[0], 1024, device=x_q.device, dtype=torch.bfloat16
+            )
+
+        def f(x):
+            grouped = x.reshape(-1, HIDDEN // GROUP_SIZE, GROUP_SIZE).float()
+            absmax = grouped.abs().amax(dim=-1, keepdim=True)
+            scale = (absmax / FP8_MAX).clamp(min=1e-6)
+            x_q = (
+                (grouped / scale)
+                .clamp(-FP8_MAX, FP8_MAX)
+                .to(torch.float16)
+                .reshape(x.shape)
+            )
+            scale = scale.squeeze(-1)
+            return torch.ops.test.opaque_gemm(x_q, scale)
+
+        FP8_MAX = 448.0  # arbitrary clamp range
+        x = torch.randn(8, HIDDEN, dtype=torch.bfloat16)
+        self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_reindex_rollback_on_no_improvement(self):
+        """
+        When reindexing is attempted but doesn't improve the fusion
+        score, the node state should be rolled back. Here a reduction
+        and pointwise both read from x but at different slices (offsets).
+        They share the buffer and have the same iteration numel, so
+        reindexing is attempted, but the offset means deps still don't
+        match after reindexing. The rollback restores the original
+        node state so the pointwise isn't left with a wrong iteration
+        domain.
+        """
+        M, N = 16, 128
+
+        def f(x):
+            r = x[:, :N].sum(dim=-1)
+            p = x[:, N:] * 2
+            return r, p
+
+        x = torch.randn(M, N * 2, device=GPU_TYPE)
+        self.do_acc_test(f, x)
+
+    def test_floordiv_broadcast_vertical_fusion(self):
+        """
+        Block-wise quantization pattern: a reduction produces per-block
+        values (e.g., amax) and a following pointwise broadcasts them
+        back to element granularity via unsqueeze, creating a FloorDiv
+        index pattern.
+
+        The reduction writes buf[G*p0 + p1] (p1 in [0, G)) and the
+        pointwise reads buf[G*p0 + (p1 // block_size)] (p1 in [0, N)).
+        Without reindexing in can_fuse_vertical, this FloorDiv mismatch
+        causes "memory deps did not match" rejection, producing an
+        extra kernel.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/183542
+        """
+        BLOCK_SIZE = 32
+
+        def f(x):
+            M, N = x.shape
+            x_blocked = x.unflatten(-1, (N // BLOCK_SIZE, BLOCK_SIZE))
+            # Per-block reduction (like amax in MXFP8)
+            block_max = x_blocked.abs().amax(dim=-1)
+            scale = block_max.clamp(min=1e-6)
+            # Broadcast scale back to elements via unsqueeze (FloorDiv pattern)
+            x_scaled = x_blocked / scale.unsqueeze(-1)
+            return x_scaled.flatten(-2)
+
+        M, N = 8, 8192
+        x = torch.randn(M, N, dtype=torch.float32)
+        self.do_acc_test(f, x)
+        # Block reduction + broadcast pointwise should fuse into 1 kernel
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_floordiv_broadcast_with_preceding_reduction(self):
+        """
+        RMSNorm followed by block-wise quantization: two reductions
+        with different rnumel (variance over K, then amax over
+        block_size=32) separated by pointwise ops.
+
+        Expected: 2 kernels (variance reduction fused with norm,
+        block reduction fused with broadcast pointwise).
+        The FloorDiv broadcast between block reduction and the final
+        pointwise must not cause a third kernel.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/183542
+        """
+        BLOCK_SIZE = 32
+
+        def f(x, weight):
+            # RMSNorm
+            x_fp32 = x.to(torch.float32)
+            variance = x_fp32.pow(2).mean(dim=-1, keepdim=True)
+            normed = x_fp32 * torch.rsqrt(variance + 1e-5)
+            normed = normed.to(torch.bfloat16) * weight
+
+            # Block-wise quantization (simplified, no FP8 cast)
+            M, N = normed.shape
+            normed_fp32 = normed.to(torch.float32)
+            blocked = normed_fp32.unflatten(-1, (N // BLOCK_SIZE, BLOCK_SIZE))
+            block_max = blocked.abs().amax(dim=-1)
+            scale = block_max.clamp(min=1e-6)
+            x_scaled = blocked / scale.unsqueeze(-1)
+            return x_scaled.flatten(-2)
+
+        M, K = 8, 8192
+        x = torch.randn(M, K, dtype=torch.bfloat16)
+        weight = torch.randn(K, dtype=torch.bfloat16)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        expect = f(x, weight)
+        actual = torch.compile(f)(x, weight)
+        self.assertTrue(same(expect, actual, tol=1e-2))
+        # variance reduction + block reduction = 2 kernels
+        self.assertEqual(2, metrics.generated_kernel_count)
+
+    def test_reshape_reindexing_fused_pointwise(self):
+        """
+        Redecomposition where the pointwise side is a FusedSchedulerNode.
+        realize() forces ops to materialize as separate nodes, so
+        add and clamp become two SchedulerNodes that fuse into a
+        FusedSchedulerNode before the reindexing fuses them with
+        the reduction.
+        """
+
+        def f(x, bias):
+            head_dim = 128
+            M, N = x.shape
+            y = realize(x + bias)
+            z = realize(y.clamp(-1, 1))
+            x_reshaped = z.reshape(-1, head_dim)
+            x_f32 = x_reshaped.float()
+            variance = x_f32.pow(2).mean(dim=-1, keepdim=True)
+            x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
+            return x_normed.reshape(M, N).to(x.dtype)
+
+        M = 16
+        qkv = torch.randn(M, 10240, dtype=torch.bfloat16)
+        x = qkv[:, :8192]
+        bias = torch.randn(8192, dtype=torch.bfloat16)
+
+        ref = f(x, bias)
+        actual = torch.compile(f)(x, bias)
+        torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(1, metrics.generated_kernel_count)
+        torch._dynamo.reset()
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
+    @unittest.skipIf(not SM90OrLater, "sm89 errors out on this test")
     def test_fp8_cast_and_t(self):
         """
         This test repros the not able to fuses issue in
@@ -561,6 +827,48 @@ class LoopOrderingTest(TestCase):
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
+    def test_factored_vs_expanded_pw_numel_in_fused_group(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/181563
+
+        Conv2d(kernel=1, stride=4) decomposes its output spatial size as
+        ``1 + (T - 1)//4``, so when those ranges are multiplied together for
+        a node body via ``sympy_product`` the result stays factored
+        (``s*(a+1)*(b+1)``). The fused-group's ``pointwise_numel`` for the
+        same value goes through ``SizeVarAllocator.simplify`` which calls
+        ``sympy.expand`` and yields the expanded form
+        (``s + s*a + s*b + s*a*b``). Sympy's structural ``==`` says these are
+        not equal, so without the fix the early-return guard in
+        ``get_pw_red_splits`` is missed and we fall through to an assert
+        that can never hold for a non-reduction body in a group whose
+        ``red_numel > 1``.
+        """
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = nn.Conv2d(8, 8, kernel_size=1, stride=4, bias=False)
+
+            def forward(self, x):
+                a = self.proj(x)
+                # Outer-only pointwise sharing `a`'s sym shape; returning it
+                # forces materialization as its own SchedulerNode rather than
+                # being inlined into the softmax kernel.
+                bias = a[:, 0]
+                bias = bias * 2 + 1
+                a = a.permute(0, 2, 3, 1).contiguous()
+                a = a + bias.unsqueeze(-1)
+                b = a.softmax(dim=-1)  # red_numel = 8 in the fused group
+                return b, bias
+
+        mod = Mod().to(GPU_TYPE)
+        x = torch.randn(2, 8, 17, 19, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 2)
+        torch._dynamo.mark_dynamic(x, 3)
+
+        with torch.no_grad():
+            self.do_acc_test(mod, x)
+
     @inductor_config.patch(
         {
             "max_autotune": True,
@@ -584,11 +892,19 @@ class LoopOrderingTest(TestCase):
 
         out, code = run_and_get_code(f, x, y)
 
-        # well when benchmark_kernel flag is on, we have one more .run
-        # call in the benchmarking code.
-        FileCheck().check("def call(").check_count(
-            ".run(", 1 + int(inductor_config.benchmark_kernel), exactly=True
-        ).run(code[0])
+        FileCheck().check("def call(").run(code[0])
+        # Prologue fused with mm: 1 kernel. Unfused: 2 kernels (expand+add + mm).
+        # With benchmark_kernel, add 1 for the benchmarking code path.
+        base_expected = 1 + int(inductor_config.benchmark_kernel)
+        run_count = code[0].count(".run(")
+        self.assertGreaterEqual(
+            run_count, base_expected, "Expected at least one kernel launch"
+        )
+        self.assertLessEqual(
+            run_count,
+            base_expected + 1,
+            "Prologue fusion produces 1 kernel; unfused produces 2",
+        )
 
     @inductor_config.patch(
         {
@@ -662,6 +978,69 @@ class LoopOrderingTest(TestCase):
         x = torch.randn(M, N, K, device=GPU_TYPE)
         self.do_acc_test(f, x)
         self.assertEqual(0, metrics.num_loop_reordering)
+
+    def test_qknorm_rope_fusion(self):
+        """
+        When qknorm (RMS norm) is followed by RoPE which uses cat, the cat
+        inputs read from the same buffers. Pointwise cat should be used so
+        everything fuses into a single kernel.
+        """
+        B, H, S, D = 4, 8, 128, 64
+
+        def rms_norm(x, weight):
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6)
+            return x * weight
+
+        def apply_rope(x, freqs_cos, freqs_sin):
+            half = x.shape[-1] // 2
+            x1 = x[..., :half]
+            x2 = x[..., half:]
+            out1 = x1 * freqs_cos - x2 * freqs_sin
+            out2 = x2 * freqs_cos + x1 * freqs_sin
+            return torch.cat([out1, out2], dim=-1)
+
+        def f(q, norm_weight, freqs_cos, freqs_sin):
+            q = rms_norm(q, norm_weight)
+            return apply_rope(q, freqs_cos, freqs_sin)
+
+        q = torch.randn(B, H, S, D)
+        norm_weight = torch.randn(D)
+        freqs_cos = torch.randn(1, 1, S, D // 2)
+        freqs_sin = torch.randn(1, 1, S, D // 2)
+
+        self.do_acc_test(f, q, norm_weight, freqs_cos, freqs_sin)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_qknorm_interleaved_rope_fusion(self):
+        """
+        Interleaved RoPE (stack + flatten) should also fuse with qknorm.
+        """
+        B, H, S, D = 4, 8, 128, 64
+
+        def rms_norm(x, weight):
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6)
+            return x * weight
+
+        def apply_interleaved_rope(x, cos, sin):
+            pairs = x.reshape(*x.shape[:-1], -1, 2)
+            a, b = pairs[..., 0], pairs[..., 1]
+            out_real = a * cos - b * sin
+            out_imag = a * sin + b * cos
+            return torch.stack([out_real, out_imag], dim=-1).flatten(-2)
+
+        def f(q, norm_weight, cos, sin):
+            q = rms_norm(q, norm_weight)
+            return apply_interleaved_rope(q, cos, sin)
+
+        q = torch.randn(B, H, S, D)
+        norm_weight = torch.randn(D)
+        cos = torch.randn(1, 1, S, D // 2)
+        sin = torch.randn(1, 1, S, D // 2)
+
+        self.do_acc_test(f, q, norm_weight, cos, sin)
+        self.assertEqual(1, metrics.generated_kernel_count)
 
 
 @inductor_config.patch(
@@ -761,7 +1140,8 @@ class MemoryCoalescingTest(MockSchedulerTest):
         from torch._inductor import tiling_utils
 
         def fn(nodes):
-            assert len(nodes) == 1
+            if len(nodes) != 1:
+                raise AssertionError(f"Expected 1 node, got {len(nodes)}")
             fused_norm_read_writes = tiling_utils.extract_normalized_read_writes(
                 nodes[0]
             )
@@ -831,7 +1211,8 @@ class MemoryCoalescingTest(MockSchedulerTest):
                 torch.rand([6, 6], device=GPU_TYPE).T,
             )
 
-    def test_reduction_pointwise(self):
+    @parametrize("dynamic", (False, True))
+    def test_reduction_pointwise(self, dynamic):
         # test one pw var, one red var
         from torch._inductor import tiling_utils
 
@@ -864,17 +1245,20 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
         with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
 
-            @torch.compile()
             def foo(x, y):
                 out = torch.ops._inductor_test.realize(x + y)
                 return out.sum(dim=1)
 
-            foo(
-                torch.rand(256, 256, device=GPU_TYPE),
-                torch.rand(256, 256, device=GPU_TYPE),
-            )
+            x = torch.rand(256, 256, device=GPU_TYPE)
+            y = torch.rand(256, 256, device=GPU_TYPE)
+            if dynamic:
+                torch._dynamo.mark_dynamic(x, 0)
+                torch._dynamo.mark_dynamic(y, 0)
 
-    def test_reduction_no_pointwise(self):
+            self.assertEqual(foo(x, y), torch.compile(foo)(x, y))
+
+    @parametrize("dynamic", (False, True))
+    def test_reduction_no_pointwise(self, dynamic):
         # test one pw var, one red var
         from torch._inductor import tiling_utils
 
@@ -890,11 +1274,14 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
         with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
 
-            @torch.compile()
             def foo(x):
                 return x.sum()
 
-            foo(torch.rand(1024, device=GPU_TYPE))
+            x = torch.rand(1024, device=GPU_TYPE)
+            if dynamic:
+                torch._dynamo.mark_dynamic(x, 0)
+
+            self.assertEqual(foo(x), torch.compile(foo)(x))
 
     def test_coalescing(self):
         from torch._inductor import tiling_utils
@@ -926,14 +1313,13 @@ class MemoryCoalescingTest(MockSchedulerTest):
             self.assertEqual(result, expected)
 
     @parametrize("downcast_transposed_v", (False, True))
-    def test_tiled_coalesce_analysis(self, downcast_transposed_v):
+    @parametrize("dynamic", (False, True))
+    def test_tiled_coalesce_analysis(self, downcast_transposed_v, dynamic):
         # test one pw var, one red var
-        from torch._inductor import tiling_utils
-
         def fn(nodes):
             self.assertTrue(len(nodes) == 1)
 
-            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+            coalesce_analysis = nodes[0].get_coalesce_analysis()
 
             i_vars = coalesce_analysis.norm_read_writes.index_vars
 
@@ -948,21 +1334,55 @@ class MemoryCoalescingTest(MockSchedulerTest):
             if not downcast_transposed_v:
                 self.assertEqual(cont_reads, t_reads * 3)
             else:
-                self.assertEqual(cont_reads, t_reads * 1.5)
+                self.assertEqual(cont_reads, t_reads * 3 / 2)
 
             return nodes
 
         with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
 
-            @torch.compile()
             def foo(x, y):
                 return x + y.to(x.dtype)
 
+            x = torch.rand(256, 256, device=GPU_TYPE)
             y_dtype = torch.float if not downcast_transposed_v else torch.float64
-            foo(
-                torch.rand(256, 256, device=GPU_TYPE),
-                torch.rand(256, 256, device=GPU_TYPE, dtype=y_dtype).T,
+            y = torch.rand(256, 256, device=GPU_TYPE, dtype=y_dtype).T
+            if dynamic:
+                torch._dynamo.mark_dynamic(x, 0)
+                torch._dynamo.mark_dynamic(y, 0)
+
+            self.assertEqual(foo(x, y), torch.compile(foo)(x, y))
+
+    def test_multiple_reduction_dims(self):
+        def foo(x):
+            return (*torch.var_mean(x, [1, 3]),)
+
+        inp = torch.randn(1, 2, 4, 8, device=GPU_TYPE)
+        out_eager = foo(inp)
+
+        def fn(nodes):
+            self.assertTrue(len(nodes) == 1)
+
+            coalesce_analysis = nodes[0].get_coalesce_analysis()
+            red_vars = coalesce_analysis.norm_read_writes.reduce_vars
+
+            self.assertTrue(len(red_vars) == 2)
+
+            n1, n2 = red_vars
+            n0 = coalesce_analysis.norm_read_writes.index_vars[0]
+
+            self.assertEqual(
+                coalesce_analysis.coalesced_by_var[n2], inp.numel() * inp.itemsize
             )
+            WRITE_WEIGHTING = 2
+
+            out_bytes = sum(a.numel() * a.itemsize * WRITE_WEIGHTING for a in out_eager)
+            self.assertEqual(coalesce_analysis.coalesced_by_var[n0], out_bytes)
+
+            return nodes
+
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
+            out = torch.compile(foo)(inp)
+            self.assertEqual(out, out_eager)
 
     def test_solve_for_zero(self):
         from torch._inductor import tiling_utils
@@ -1013,13 +1433,12 @@ class MemoryCoalescingTest(MockSchedulerTest):
             result = tiling_utils.solve_for_tiling(expr)
             self.assertEqual(result, expected)
 
-    def test_induced_fused_tiling(self):
-        from torch._inductor import tiling_utils
-
+    @parametrize("dynamic", (False, True))
+    def test_induced_fused_tiling(self, dynamic):
         def fn(nodes):
             self.assertTrue(len(nodes) == 1)
 
-            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+            coalesce_analysis = nodes[0].get_coalesce_analysis()
             self.assertEqual(coalesce_analysis.suggested_split.tiling_factor, 64)
             return nodes
 
@@ -1037,11 +1456,16 @@ class MemoryCoalescingTest(MockSchedulerTest):
             YDIM = 4096
 
             arg0_1 = torch.randn([XDIM, YDIM], device=GPU_TYPE, dtype=torch.bfloat16)
+            if dynamic:
+                torch._dynamo.mark_dynamic(arg0_1, 0)
+
             permute = torch.ops.aten.permute.default(arg0_1, [1, 0])
 
             out, code = run_and_get_code(torch.compile(forward), (permute))
 
             self.assertEqual(out, forward(permute))
+            # Assert that we captured code, before checking it.
+            self.assertTrue(code)
             FileCheck().check("YBLOCK").check("XBLOCK").run(code[0])
 
 
@@ -1073,19 +1497,21 @@ class TestTiling(TestCase):
                 .unsqueeze(0)
             )
         else:
-            assert layout == "NHWC"
+            if layout != "NHWC":
+                raise AssertionError(f"Unexpected layout: {layout}")
             return torch.rand([1, SIZE_A, SIZE_B, SIZE_C], device=GPU_TYPE).to(
                 memory_format=torch.channels_last
             )
 
     @parametrize("a", layouts)
     @parametrize("b", layouts)
-    def test_pointwise(self, a, b):
+    @parametrize("dynamic", (False, True))
+    def test_pointwise(self, a, b, dynamic):
         def foo(x, y):
             return x + y
 
         x, y = self.T(a), self.T(b)
-        res, code = run_and_get_code(torch.compile(foo), x, y)
+        res, code = run_and_get_code(torch.compile(foo, dynamic=dynamic), x, y)
 
         if a != b:
             FileCheck().check("ynumel").run(code[0])
@@ -1111,13 +1537,14 @@ class TestTiling(TestCase):
         ).run(code[0])
         self.assertEqual(out, f(*inps), atol=0.001, rtol=0.04)
 
-    def test_3d_pointwise(self):
+    @parametrize("dynamic", (False, True))
+    def test_3d_pointwise(self, dynamic):
         inps = (self.T("cont"), self.T("T"), self.T("NHWC"))
 
         def f(x, y, z):
             return x + y + z
 
-        f_c = torch.compile(f)
+        f_c = torch.compile(f, dynamic=dynamic)
         out, code = run_and_get_code(f_c, *inps)
 
         FileCheck().check_dag("znumel").check_dag("ynumel").check_dag("xnumel").run(
@@ -1162,13 +1589,12 @@ class TestTiling(TestCase):
 
         x = self.T("cont")
 
-        from torch._inductor import tiling_utils
-
         def fn(nodes):
             self.assertTrue(len(nodes) == 1)
 
-            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
-            assert coalesce_analysis is not None
+            coalesce_analysis = nodes[0].get_coalesce_analysis()
+            if coalesce_analysis is None:
+                raise AssertionError
 
             reads = coalesce_analysis.norm_read_writes.reads
             writes = coalesce_analysis.norm_read_writes.writes
@@ -1204,6 +1630,206 @@ class TestTiling(TestCase):
         result = tiling_utils.find_broadcast_var(i + j * 10, {i: 10, j: 8, k: 20})
         self.assertEqual(result, None)
 
+    def test_indirect_access_not_coalesced(self):
+        """Test that memory accesses with indirect indexing are treated as uncoalesced.
+
+        When we have an access pattern like weights[indices[i]], the weight load
+        uses an indirect index and should NOT be counted as coalesced since the
+        access pattern is effectively random.
+
+        For w[idx] where idx is (4096,) and w is (1024, 256):
+        - Read of idx: coalesced (simple linear access)
+        - Read of w: uncoalesced (uses indirect index)
+        - Write to output: coalesced (contiguous)
+        """
+        from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+        def fn(nodes):
+            self.assertTrue(len(nodes) == 1)
+
+            coalesce_analysis = nodes[0].get_coalesce_analysis()
+            self.assertIsNotNone(coalesce_analysis)
+
+            # Should have exactly 1 uncoalesced access (the indirect weight read)
+            self.assertEqual(
+                len(coalesce_analysis.uncoalesced_addrs),
+                1,
+                f"Expected 1 uncoalesced access, got {len(coalesce_analysis.uncoalesced_addrs)}",
+            )
+
+            # The uncoalesced access should have an INDIRECT symbol
+            for expr in coalesce_analysis.uncoalesced_addrs:
+                has_indirect = any(
+                    symbol_is_type(s, SymT.INDIRECT) for s in expr.free_symbols
+                )
+                self.assertTrue(
+                    has_indirect,
+                    f"Expected uncoalesced expr {expr} to have INDIRECT symbol",
+                )
+
+            # Should have coalesced accesses (idx read + output write)
+            self.assertGreater(
+                len(coalesce_analysis.coalesced_by_var),
+                0,
+                "Expected at least one coalesced variable",
+            )
+
+            # Verify no INDIRECT symbols ended up as coalesced vars
+            for var in coalesce_analysis.coalesced_by_var:
+                self.assertFalse(
+                    symbol_is_type(var, SymT.INDIRECT),
+                    f"INDIRECT symbol {var} should not be in coalesced_by_var",
+                )
+
+            return nodes
+
+        V, D = 1024, 256
+        indices = torch.randint(0, V, (4096,), device=GPU_TYPE)
+        weights = torch.randn(V, D, device=GPU_TYPE)
+
+        def embedding_1d(idx, w):
+            return w[idx]
+
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn):
+            out = torch.compile(embedding_1d)(indices, weights)
+
+        # Verify correctness
+        expected = embedding_1d(indices, weights)
+        self.assertEqual(out, expected)
+
+    @parametrize("dynamic", (False, True))
+    def test_scatter_broadcast_no_tiling(self, dynamic):
+        """Scatter with broadcast loads should not trigger 2D tiling."""
+        num_nodes = 4096
+        num_edges = 16384
+        feat_dim = 64
+
+        src = torch.randint(0, num_nodes, (num_edges,), device=GPU_TYPE)
+        features = torch.randn(num_nodes, feat_dim, device=GPU_TYPE)
+
+        if dynamic:
+            torch._dynamo.mark_dynamic(src, 0)
+            torch._dynamo.mark_dynamic(features, 0)
+
+        def f(src, features):
+            gathered = features[src]
+            out = torch.zeros(num_nodes, feat_dim, device=GPU_TYPE)
+            return out.scatter_add_(0, src.unsqueeze(1).expand_as(gathered), gathered)
+
+        out, code = run_and_get_code(torch.compile(f), src, features)
+        FileCheck().check_not("ynumel").run(code[0])
+        self.assertEqual(out, f(src, features))
+
+    def test_cont_plus_transposed_picks_2d(self):
+        """Contiguous + transposed addition should still pick 2D tiling."""
+        x = torch.randn(256, 256, device=GPU_TYPE)
+        y = torch.randn(256, 256, device=GPU_TYPE).T
+
+        def f(x, y):
+            return x + y
+
+        out, code = run_and_get_code(torch.compile(f), x, y)
+        FileCheck().check("ynumel").run(code[0])
+        self.assertEqual(out, f(x, y))
+
+    def test_mixed_broadcast_transpose_picks_2d(self):
+        """Mixed broadcast and transposed access: 2D chosen for real coalescing only."""
+        x = torch.randn(256, 256, device=GPU_TYPE)
+        y = torch.randn(256, 256, device=GPU_TYPE).T
+        z = torch.randn(256, device=GPU_TYPE)
+
+        def f(x, y, z):
+            return x + y + z.unsqueeze(1)
+
+        out, code = run_and_get_code(torch.compile(f), x, y, z)
+        # 2D tiling should be selected because of real transposed coalescing
+        # from y, even though z's broadcast score is filtered as already-
+        # coalesced-in-1D. Both y and z contribute to the same variable (n0),
+        # so this tests per-expression filtering within a single variable.
+        FileCheck().check("ynumel").run(code[0])
+        self.assertEqual(out, f(x, y, z))
+
+
+class TestSplitIterationRanges(MockSchedulerTest):
+    """Unit tests for SIMDKernel._split_iteration_ranges."""
+
+    def test_exact_match(self):
+        """Groups exactly match lengths — no splitting needed."""
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        new_ranges, getters = SIMDKernel._split_iteration_ranges(
+            [sympy.Integer(4), sympy.Integer(8)],
+            [[sympy.Integer(4)], [sympy.Integer(8)]],
+        )
+        self.assertEqual(len(new_ranges), 2)
+        self.assertEqual(len(new_ranges[0]), 1)
+        self.assertEqual(len(new_ranges[1]), 1)
+
+    def test_two_way_split(self):
+        """A single large dimension splits across two groups."""
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        new_ranges, getters = SIMDKernel._split_iteration_ranges(
+            [sympy.Integer(4), sympy.Integer(8)],
+            [[sympy.Integer(32)], []],
+        )
+        # 32 should split into 4 * 8 across the two groups
+        self.assertEqual(len(new_ranges), 2)
+
+    def test_two_way_split_with_factorable_add_floordiv(self):
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        s52, s97 = sympy.symbols("s52 s97", integer=True, positive=True)
+        k = FloorDiv(s97, s52)
+        den = s52 * k + k
+        num = 128 * s52 * k + 128 * k
+
+        new_ranges, getters = SIMDKernel._split_iteration_ranges(
+            [den, sympy.Integer(128)],
+            [[num], []],
+        )
+
+        self.assertEqual(new_ranges, [[den], [sympy.Integer(128)]])
+        i0, i1 = sympy.symbols("i0 i1", integer=True)
+        self.assertEqual(getters[0][0]([i0, i1]), 128 * i0 + i1)
+
+    def test_groups_exhausted_raises_cant_split(self):
+        """When all groups are consumed but sizes remain, CantSplit is raised."""
+        from torch._inductor.codegen.simd import CantSplit, SIMDKernel
+
+        # groups=[1, 2, 2] can only absorb 2 sizes of 2 (consuming groups 1 and 2),
+        # leaving the third size=2 with no group to map to.
+        with self.assertRaises(CantSplit):
+            SIMDKernel._split_iteration_ranges(
+                [sympy.Integer(1), sympy.Integer(2), sympy.Integer(2)],
+                [[], [sympy.Integer(2), sympy.Integer(2), sympy.Integer(2)]],
+            )
+
+    def test_single_group_multiple_sizes(self):
+        """Multiple sizes fitting within a single group."""
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        # groups=[8], lengths=[[2, 2, 2], []] — all 3 sizes fit in group 0
+        new_ranges, getters = SIMDKernel._split_iteration_ranges(
+            [sympy.Integer(8)],
+            [[sympy.Integer(2), sympy.Integer(2), sympy.Integer(2)], []],
+        )
+        self.assertEqual(len(new_ranges), 1)
+        self.assertEqual(len(new_ranges[0]), 3)
+
+    def test_size_one_skipped(self):
+        """Dimensions of size 1 produce a zero-constant getter."""
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        new_ranges, getters = SIMDKernel._split_iteration_ranges(
+            [sympy.Integer(4)],
+            [[sympy.Integer(1), sympy.Integer(4)], []],
+        )
+        # Size-1 dim should not consume any range
+        self.assertEqual(len(getters[0]), 2)
+        # The first getter should return 0 for any input
+        self.assertEqual(getters[0][0]([sympy.Integer(99)]), sympy.Integer(0))
+
 
 class TestIndexInversion(TestCase):
     @classmethod
@@ -1220,7 +1846,10 @@ class TestIndexInversion(TestCase):
         import numpy as np
         from sympy import lambdify
 
-        assert len(expr.free_symbols) == 1
+        if len(expr.free_symbols) != 1:
+            raise AssertionError(
+                f"Expected 1 free symbol, got {len(expr.free_symbols)}"
+            )
         p0 = next(iter(expr.free_symbols))
 
         def floordiv_replacement(a, b):

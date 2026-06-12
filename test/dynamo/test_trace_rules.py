@@ -12,6 +12,7 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
+from torch._dynamo.testing import CompileCounter
 from torch._dynamo.trace_rules import (
     LEGACY_MOD_INLINELIST,
     load_object,
@@ -206,7 +207,6 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch._lobpcg",
             "torch._logging",
             "torch._meta_registrations",
-            "torch._namedtensor_internals",
             "torch._numpy",
             "torch._sources",
             "torch._subclasses",
@@ -339,6 +339,19 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     "is not a python module, please check and correct it.",
                 )
 
+    def test_cuda_manual_seed_functions_graph_break(self):
+        for name in (
+            "torch.cuda.manual_seed",
+            "torch.cuda.manual_seed_all",
+            "torch.cuda.random.manual_seed",
+            "torch.cuda.random.manual_seed_all",
+        ):
+            self.assertIs(
+                torch._dynamo.trace_rules.lookup(load_object(name)),
+                SkipFunctionVariable,
+            )
+
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/114831")
     @unittest.skip(
         "This test keeps getting broken and our disable infra is not handling well. see #120627"
     )
@@ -473,6 +486,8 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             "handle_assert",  # No global state (constant)
             "handle_nested_tensor",  # No global state
             "handle_current_stream",  # Safely implemented
+            "handle_synchronize",  # Device type from function identity or arg
+            "handle_functorch_autograd_grad",  # Only inspects placeholder metadata
         )
         for fn in handlers:
             if isinstance(fn, staticmethod) or inspect.ismethod(fn):
@@ -493,7 +508,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             )
 
     def test_almost_impossible_missing_name(self):
-        class weird:  # noqa: UP004
+        class weird:
             def __getattribute__(self, name):
                 if name == "__name__":
                     raise AttributeError("test")
@@ -525,6 +540,32 @@ class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             frame_count_after > frame_count_before, "MLP did not survive skip files"
         )
+
+
+class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
+    def test_top_level_torch_exp_compiles_through_dynamo(self):
+        x = torch.randn(4)
+
+        # Sanity: lambda version should go through Dynamo
+        lambda_counter = CompileCounter()
+        opt_lambda = torch.compile(lambda t: torch.exp(t), backend=lambda_counter)
+        y_lambda = opt_lambda(x)
+        self.assertEqual(
+            lambda_counter.frame_count,
+            1,
+            "Sanity check failed: lambda version did not compile through Dynamo exactly once.",
+        )
+        # Regression target: torch.compile(torch.exp)
+        top_level_counter = CompileCounter()
+        opt_exp = torch.compile(torch.exp, backend=top_level_counter)
+        y_exp = opt_exp(x)
+        self.assertEqual(
+            top_level_counter.frame_count,
+            1,
+            "Expected torch.compile(torch.exp) to compile through Dynamo exactly once.",
+        )
+        # Numerical results should match
+        self.assertTrue(torch.allclose(y_lambda, y_exp))
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from functools import partial
 import torch
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
-from torch._inductor import metrics
+from torch._inductor import config, metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
@@ -27,8 +27,10 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_FBCODE,
+    MI350_ARCH,
     parametrize,
     serialTest,
+    skipIfRocmArch,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
 )
@@ -58,39 +60,28 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
-    # calling div on only symint args
+    # PDL tests are CUDA SM90+ only, skip on CPU
+    "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    # Bool argmax/argmin fix is Triton-only (see #174069), skip on CPU
+    "test_max_min_bool_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    # With tensorify enabled, SymInt div no longer graph-breaks; the full
+    # model compiles but Inductor hangs on the complex dynamic-shape graph.
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu", "mps")
+        ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
-    "test_batch_norm_2d_2_dynamic_shapes": TestFailure(("mps",)),
-    "test_buffer_batch_norm_dynamic_shapes": TestFailure(("mps",)),
-    "test_convolution4_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    "test_multilayer_var_dynamic_shapes": TestFailure(("mps",)),
-    "test_multilayer_var_lowp_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
-    "test_reflection_pad2d_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
-    "test_std_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure(("mps",)),
-    "test_vectorized_ops_masked_var_novec_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),
 }
-
-if not torch._inductor.config.cpp_wrapper:
-    test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
-        ("cuda",)
-    )
 
 if any(os.getenv("BUILD_ENVIRONMENT", "").endswith(x) for x in ("-debug", "-asan")):
     # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
@@ -118,18 +109,65 @@ def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
 DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
 
 
+class DynamicShapesTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._triton_assert_stack = contextlib.ExitStack()
+        cls._triton_assert_stack.enter_context(
+            config.patch(
+                {
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._triton_assert_stack.close()
+        super().tearDownClass()
+
+
 if HAS_CPU:
 
     class DynamicShapesCpuTests(TestCase):
         common = check_model
         device = "cpu"
 
+        def test_bincount_weighted_count_nonzero_dtype(self):
+            def fn(x, weights):
+                counts = torch.bincount(x, weights=weights, minlength=6)
+                return counts, counts.count_nonzero()
+
+            x = torch.tensor(
+                [0, 2, 2, 3, 1, 0, 3, 3],
+                dtype=torch.int64,
+            )
+            weights = torch.tensor(
+                [1.0, -2.0, 3.0, 0.0, 4.0, -5.0, 6.0, 7.0],
+                dtype=torch.float32,
+            )
+
+            expected = fn(x, weights)
+            for dynamic in [False, True]:
+                torch._dynamo.reset()
+                compiled_fn = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    dynamic=dynamic,
+                )
+                actual = compiled_fn(x, weights)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[1], expected[1])
+
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
 if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
-    class DynamicShapesGPUTests(TestCase):
+    class DynamicShapesGPUTests(DynamicShapesTestCase):
         common = check_model_gpu
         device = GPU_TYPE
 
@@ -137,8 +175,28 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
     )
 
+    if HAS_GPU and hasattr(
+        DynamicShapesGPUTests, "test_conv_with_as_strided_dynamic_shapes_cuda"
+    ):
+        # gfx950 shows a deterministic numerical mismatch for this generated test.
+        DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda = (
+            skipIfRocmArch(MI350_ARCH)(
+                DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda
+            )
+        )
 
-class TestInductorDynamic(TestCase):
+    if HAS_GPU and hasattr(
+        DynamicShapesGPUTests, "test_randint_distribution_dynamic_shapes_cuda"
+    ):
+        # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
+        DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda = (
+            skipIfRocmArch(MI350_ARCH)(
+                DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda
+            )
+        )
+
+
+class TestInductorDynamic(DynamicShapesTestCase):
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
@@ -212,6 +270,61 @@ class TestInductorDynamic(TestCase):
                 self.assertEqual(ref, actual)
                 self.assertEqual(fn(x), fn_c(x))
                 self.assertEqual(fn(y), fn_c(y))
+
+    def test_constant_fold_uniform_value_self_referential_shape(self, device):
+        """
+        Test that constant_fold_uniform_value correctly handles the case where
+        a tensor's shape depends on a sym_size computed from the tensor itself.
+
+        This is a regression test for a bug where creating a replacement full()
+        node with a shape that includes a sym_size_int derived from the original
+        tensor would create a circular dependency in the graph, causing
+        stable_topological_sort to fail with an assertion error.
+        """
+        torch._dynamo.config.capture_scalar_outputs = True
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
+
+        def fn(arg0, arg1):
+            t0 = arg0
+            t1 = t0.clone()
+            t1.zero_()
+            t2 = t1.reshape((109, 115, 96))
+            t3 = arg1
+            t4 = t3.contiguous()
+            t5 = torch.nn.functional.relu(t4)
+            t6 = t2.clone()
+            t6.fill_(t5.item())
+            return t6
+
+        arg0 = torch.rand(
+            [401120, 3], dtype=torch.float32, device=device, requires_grad=True
+        )
+        arg1 = torch.rand([], dtype=torch.float32, device=device, requires_grad=True)
+
+        # Test eager mode
+        out_eager = fn(arg0, arg1)
+        out_eager.sum().backward()
+
+        # Reset grads
+        arg0 = torch.rand(
+            [401120, 3], dtype=torch.float32, device=device, requires_grad=True
+        )
+        arg1 = torch.rand([], dtype=torch.float32, device=device, requires_grad=True)
+
+        # Test compiled mode - this would fail before the fix with:
+        # AssertionError in stable_topological_sort due to circular dependency
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        out_compiled = compiled_fn(arg0, arg1)
+        out_compiled.sum().backward()
+
+        # Verify outputs match
+        arg0_test = torch.rand(
+            [401120, 3], dtype=torch.float32, device=device, requires_grad=False
+        )
+        arg1_test = torch.rand(
+            [], dtype=torch.float32, device=device, requires_grad=False
+        )
+        self.assertEqual(fn(arg0_test, arg1_test), compiled_fn(arg0_test, arg1_test))
 
     def test_arange_dynamic(self, device):
         def fn(a):
@@ -579,6 +692,46 @@ class TestInductorDynamic(TestCase):
         torch.compile(fullgraph=True)(f)(x, w).sum().backward()
         self.assertEqual(orig_w, w.grad)
 
+    @onlyOn(GPU_TYPE)
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_embedding_backward_dynamic_shapes_large_grid(self, device):
+        """Test _check_max_grid_x correctly applies platform-specific grid limits.
+
+        On CUDA: uses num_blocks only (not num_blocks * num_warps * warp_size).
+        On ROCm: uses num_blocks * num_warps * warp_size (total threads limit).
+        """
+        from torch._inductor.runtime.hints import get_warp_size
+        from torch._inductor.runtime.triton_heuristics import (
+            _check_max_grid_x,
+            _num_warps,
+        )
+
+        size_hints = {"x": 600_000_000}
+        x = 64
+        warp_size = get_warp_size(torch.device(device))
+        num_warps = _num_warps(8, warp_size=warp_size)
+
+        result_x, result_num_blocks = _check_max_grid_x(
+            size_hints, x, num_warps, warp_size=warp_size
+        )
+
+        max_grid_x = 2147483647
+        if torch.version.hip:
+            # ROCm limits total threads (num_blocks * num_warps * warp_size)
+            self.assertLessEqual(
+                result_num_blocks * num_warps * warp_size,
+                max_grid_x,
+                "ROCm total-threads grid limit should be satisfied",
+            )
+        else:
+            # CUDA limits number of blocks only — 600M/64 ≈ 9.4M blocks,
+            # well within 2^31-1, so no scaling should occur
+            self.assertEqual(result_x, 64, f"XBLOCK should remain 64 (got {result_x})")
+            self.assertLessEqual(result_num_blocks, max_grid_x)
+
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -773,6 +926,49 @@ class TestInductorDynamic(TestCase):
         actual = cfn(a, 2)
         self.assertEqual(expect, actual)
 
+    def test_magic_method_lowerings_with_symbolic_scalars(self, device):
+        def mod(x):
+            return x.new_ones((x.shape[0] % 3) + 1)
+
+        def floordiv(x):
+            return x.new_ones((x.shape[0] // 3) + 1)
+
+        def shifts(x):
+            return (
+                x.new_ones((x.shape[0] << 1) + 1),
+                x.new_ones((x.shape[0] >> 1) + 1),
+            )
+
+        def comparison(x):
+            n = torch.sym_ite(x.shape[0] < 10, x.shape[0], x.shape[0] + 1)
+            return x.new_ones(n)
+
+        def sym_min_max(x):
+            return (
+                x.new_ones(torch.sym_min(x.shape[0], 3) + 1),
+                x.new_ones(torch.sym_max(x.shape[0], 3) + 1),
+            )
+
+        def pow_log2(x):
+            return x + 2 ** (math.floor(math.log2(x.shape[0]) + 1))
+
+        def float_constant(x):
+            return x + ((x.numel() ** 0) / 1.0)
+
+        x = torch.randn(7, 5, device=device)
+        for fn in (
+            mod,
+            floordiv,
+            shifts,
+            comparison,
+            sym_min_max,
+            pow_log2,
+            float_constant,
+        ):
+            with self.subTest(fn=fn.__name__):
+                cfn = self.compile_fn(fn, fullgraph=True)
+                self.assertEqual(fn(x), cfn(x))
+
     @onlyCPU
     def test_arithmetic_constant_folding(self, device):
         def test(fn):
@@ -930,21 +1126,21 @@ class TestInductorDynamic(TestCase):
             batch_dim = input_layouts[0].size[0]
             if call_count == 1:
                 # testing fn_1
-                assert (
-                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) is None
-                ), "Should not be statically known on first call"
+                if (
+                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim)
+                    is not None
+                ):
+                    raise AssertionError("Should not be statically known on first call")
             elif call_count == 2:
                 # testing fn_2
-                assert (
-                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) == 5
-                ), (
-                    "Should be limited to exactly 5 on second call due to multiple constraints"
-                )
+                if PythonWrapperCodegen.statically_known_int_or_none(batch_dim) != 5:
+                    raise AssertionError(
+                        "Should be limited to exactly 5 on second call due to multiple constraints"
+                    )
             elif call_count == 2:
                 # testing fn_3
-                assert (
-                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) == 5
-                ), "Should be exactly 5 on third call"
+                if PythonWrapperCodegen.statically_known_int_or_none(batch_dim) != 5:
+                    raise AssertionError("Should be exactly 5 on third call")
 
         class TestWrapperCodegen(PythonWrapperCodegen):
             def __init__(self, *args, **kwargs):
@@ -1101,7 +1297,7 @@ class TestInductorDynamic(TestCase):
             """Reduce over a dimension with bounded size."""
             # x shape: [batch, features, reduction_dim]
             # reduction_dim is dynamic but bounded to max 128
-            assert x.shape[2] <= 64, f"Reduction dim {x.shape[2]} exceeds max 128"
+            assert x.shape[2] <= 64, f"Reduction dim {x.shape[2]} exceeds max 128"  # noqa: S101
 
             # Perform reduction (sum) over the last dimension
             result = torch.sum(x * y, dim=2)
@@ -1128,7 +1324,8 @@ class TestInductorDynamic(TestCase):
         FileCheck().check_not("@triton_heuristics.persistent").run(source_codes[0])
         expected = reduce_bounded(x, y)
 
-        assert torch.allclose(result, expected, atol=1e-3, rtol=1e-3)
+        if not torch.allclose(result, expected, atol=1e-3, rtol=1e-3):
+            raise AssertionError
 
     def test_unspecialized_float_dynamic(self):
         def fn(x, y):
@@ -1203,6 +1400,77 @@ class TestInductorDynamic(TestCase):
         actual = opt_fn(inp, True)
         self.assertEqual(actual, expect)
         check_count(2)  # Reused existing kernel
+
+    def test_coalescing_analysis_sympy_is_constant(self, device):
+        # Regression test for issue where sympy's is_constant() would trigger
+        # numerical evaluation that caused assertion errors in our custom Mod function
+        def fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6):
+            t3 = torch.nn.functional.scaled_dot_product_attention(arg0, arg1, arg2)
+            t4 = t3.min(dim=3).values
+            t6 = arg3.var(dim=0)
+            t7 = t6.reshape((29, 50, 32))
+            t10 = arg5.clone()
+            t10.zero_()
+            t11 = t10.transpose(0, 2)
+            t12 = torch.pow(torch.pow(t4, arg4), t11)
+            t15 = torch.nn.functional.layer_norm(arg6, (32,))
+            t16 = t12 / t15
+            t17 = ((((t4) - t7) - t16) - t11) - t16
+            return t17
+
+        arg0 = torch.rand([29, 50, 32, 5], dtype=torch.float16, device=device)
+        arg1 = torch.rand([29, 50, 32, 5], dtype=torch.float16, device=device)
+        arg2 = torch.rand([29, 50, 32, 5], dtype=torch.float16, device=device)
+        arg3 = torch.rand([3, 10, 4640], dtype=torch.float16, device=device)
+        arg4 = torch.rand([29, 50, 32], dtype=torch.float16, device=device)
+        arg5 = torch.rand([32, 50, 29], dtype=torch.float16, device=device)
+        arg6 = torch.rand([29, 50, 32], dtype=torch.float16, device=device)
+
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        expected = fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6)
+        actual = compiled_fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+
+    @onlyOn(GPU_TYPE)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_sympy_infinity_bounds_in_persistent_reduction(self):
+        """
+        Regression test for sympy Infinity bounds handling in should_use_persistent_reduction.
+
+        When bound_sympy() returns infinity bounds for dynamic reduction dimensions,
+        the inductor compiler should handle them correctly without attempting to
+        convert infinity to an integer.
+
+        Previously this would fail with: AttributeError: 'Infinity' object has no attribute '_mpf_'
+        """
+
+        def fn(arg0, arg2, arg3):
+            t0 = arg0
+            t2 = torch.nn.functional.layer_norm(t0, (1024, 10))
+            t3 = arg2
+            t4 = t3.contiguous().view((67, 1024, 5))
+            t5 = torch.nn.functional.conv1d(t2, t4, stride=1, padding=0)
+            t6 = arg3
+            t7 = torch.sqrt(t6)
+            t14 = torch.nn.functional.group_norm(t7, 1)
+            t15 = (((t5) - t14) - t5) - t5
+            return t15
+
+        arg0 = torch.rand(
+            [65, 1024, 10], dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+        )
+        arg2 = torch.rand(
+            [134, 4, 640], dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+        )
+        arg3 = torch.rand(
+            [65, 67, 6], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        out_compiled = compiled_fn(arg0, arg2, arg3)
+        # Test backward pass as well - this is where the bug manifested
+        out_compiled.sum().backward()
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)

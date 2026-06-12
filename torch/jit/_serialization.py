@@ -125,7 +125,7 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
 
     .. warning::
         It is possible to construct malicious pickle data which will execute arbitrary code
-        during func:`torch.jit.load`. Never load data that could have come from an untrusted
+        during :func:`torch.jit.load`. Never load data that could have come from an untrusted
         source, or that could have been tampered with. **Only load data you trust**.
 
     Example:
@@ -200,7 +200,6 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(
             cu,
-            # pyrefly: ignore [missing-attribute]
             f.read(),
             map_location,
             _extra_files,

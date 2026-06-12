@@ -245,7 +245,11 @@ void PyTorchStreamReader::valid(const char* what, const char* info) {
       what,
       info,
       ": ",
-      mz_zip_get_error_string(err));
+      mz_zip_get_error_string(err),
+      ". This is an internal miniz error. If you are seeing this error, there "
+      "is a high likelihood that your checkpoint file is corrupted. "
+      "This can happen if the checkpoint was not saved properly, "
+      "was transferred incorrectly, or the file was modified after saving.");
 }
 
 constexpr int MZ_ZIP_LOCAL_DIR_HEADER_SIZE = 30;
@@ -420,7 +424,7 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
               recordOff + startPos, (char*)dst + startPos, threadReadSize);
         }
         readSizes[i] = size;
-        LOG(INFO) << "Thread " << i << " read [" << startPos << "-" << endPos
+        LOG(INFO) << "Thread " << i << " read [" << startPos << '-' << endPos
                   << "] " << "from " << name << " of size " << n;
         TORCH_CHECK(
             threadReadSize == size,

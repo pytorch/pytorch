@@ -17,7 +17,7 @@ import sys
 import types
 from collections import Counter, deque
 from collections.abc import Callable, Iterable
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
@@ -38,7 +38,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import IncorrectUsage, unimplemented
+from .exc import unimplemented
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -47,6 +47,7 @@ from .variables.functions import (
     LocalGeneratorObjectVariable,
 )
 from .variables.nn_module import NNModuleVariable
+from .variables.script_object import TorchScriptObjectVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -76,21 +77,21 @@ class PyCodegen:
     def __init__(
         self,
         tx: "InstructionTranslatorBase",
-        root: Optional[torch.nn.Module] = None,
-        graph_output_var: Optional[str] = None,
-        tempvars: Optional[dict[Union[VariableTracker, Source], Any]] = None,
-        overridden_sources: Optional[dict[Source, Source]] = None,
+        root: torch.nn.Module | None = None,
+        graph_output_var: str | None = None,
+        tempvars: dict[VariableTracker | Source, Any] | None = None,
+        overridden_sources: dict[Source, Source] | None = None,
     ) -> None:
         self.root = root
-        self.top_of_stack: Optional[Union[VariableTracker, Source]] = None
-        self.uses: Counter[Union[VariableTracker, Source]] = collections.Counter()
+        self.top_of_stack: VariableTracker | Source | None = None
+        self.uses: Counter[VariableTracker | Source] = collections.Counter()
         self.graph_outputs: dict[int, GraphOutputEntry] = {}
         self._output: list[Instruction] = []
         # This determines which VariableTracker/Source should be stored as
         # locals, and maps the VariableTracker/Source to the local variable
         # name. Note that it could map to None initially, in which case we'll
         # overwrite it to map to real temporary names via `add_cache`.
-        self.tempvars: dict[Union[VariableTracker, Source], Any] = tempvars or {}
+        self.tempvars: dict[VariableTracker | Source, Any] = tempvars or {}
         self.tx = tx
         self.graph_output_var = graph_output_var
         self.code_options = self.tx.output.code_options
@@ -101,6 +102,15 @@ class PyCodegen:
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
         self.overridden_sources: dict[Source, Source] = overridden_sources or {}
+        self.pycodes = []
+
+    def add_pycode(self, pycode: str, *args):
+        if not config.generate_pycode:
+            return
+        for a in args:
+            if isinstance(a, VariableTracker):
+                a.realize()
+        self.pycodes.append(pycode.format(*[a.reconstruct_pycode(self) for a in args]))
 
     def restore_stack(
         self, stack_values: list[Any], *, value_from_source: bool = True
@@ -109,6 +119,12 @@ class PyCodegen:
         self.value_from_source &= value_from_source
         try:
             self.foreach(stack_values)
+            # `restore_stack` is called once per codegen pass (e.g. pass1 for
+            # use tracking, pass2 for actual emission). Reset the stack counter
+            # so each pass produces the same `__stackN` names.
+            self.tx.reset_pycode_varname_counter("stack")
+            for v in stack_values:
+                self.add_pycode(f"{self.tx.new_pycode_varname('stack')} = {{}}", v)
         finally:
             self.value_from_source = prev
 
@@ -119,7 +135,8 @@ class PyCodegen:
         self, value: Union[VariableTracker, Source, "GraphArg"]
     ) -> None:
         res = value.reconstruct(self)
-        assert res is None, f"reconstruct!=None {value}"
+        if res is not None:
+            raise AssertionError(f"reconstruct!=None {value}")
 
     def add_push_null(
         self, gen_fn: Callable[[], None], call_function_ex: bool = False
@@ -153,7 +170,7 @@ class PyCodegen:
             self.clear_tos()
 
     def __call__(
-        self, value: Union[VariableTracker, Source, None], allow_cache: bool = True
+        self, value: VariableTracker | Source | None, allow_cache: bool = True
     ) -> None:
         """
         Generate code such that top-of-stack (TOS) is set to value.
@@ -197,11 +214,13 @@ class PyCodegen:
             `top_of_stack` or cached `tempvars`, or (b). `value` has special VT
             types like `NNModuleVariable`, etc.
         """
-        assert value is not None
+        if value is None:
+            raise AssertionError("value must not be None")
         if isinstance(value, Source):
             # If the source needs to be overridden, use the new one.
             source = self.overridden_sources.get(value, value)
-            assert allow_cache is True, "allow_cache must be True for Source"
+            if allow_cache is not True:
+                raise AssertionError("allow_cache must be True for Source")
             if self.top_of_stack is value:
                 self._output.append(create_dup_top())
                 return
@@ -228,7 +247,8 @@ class PyCodegen:
 
             return
 
-        assert isinstance(value, VariableTracker)
+        if not isinstance(value, VariableTracker):
+            raise AssertionError(f"expected VariableTracker, got {type(value)}")
         output = self._output
         graph_outputs = self.graph_outputs
 
@@ -245,8 +265,13 @@ class PyCodegen:
         if value.is_realized() and isinstance(
             value, ContextlibContextManagerLocalGeneratorObjectVariable
         ):
-            raise IncorrectUsage(
-                "NYI: Returning a @contextmanager object from a torch.compile function"
+            unimplemented(
+                gb_type="reconstructing @contextmanager object",
+                context=f"object: {value}",
+                explanation="Returning a @contextmanager object from a compiled function is not supported.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         # Dynamo normally prefers codegen from source to account for aliasing.
@@ -324,6 +349,7 @@ class PyCodegen:
                 SymNodeVariable,
                 UnspecializedPythonVariable,
                 NumpyNdarrayVariable,
+                TorchScriptObjectVariable,
             ),
         ):
             graph_outputs_key = self.add_graph_output(value)
@@ -350,7 +376,8 @@ class PyCodegen:
                 output.append(self.create_load(parts[0]))
                 parts = parts[1:]
             else:
-                assert self.root is not None
+                if self.root is None:
+                    raise AssertionError("self.root must not be None")
                 output.append(self.create_load_const_unchecked(self.root))
             for part in parts:
                 output.append(self.create_load_attr(part))
@@ -358,7 +385,7 @@ class PyCodegen:
             self.uses[value] += 1
             try:
                 self.call_reconstruct(value)
-            except NotImplementedError:
+            except NotImplementedError as e:
                 unimplemented(
                     gb_type="Reconstruction failure",
                     context=str(value),
@@ -370,6 +397,7 @@ class PyCodegen:
                         "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have "
                         "reconstruction rules may be fundamentally unreconstructable.",
                     ],
+                    from_exc=e,
                 )
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
@@ -387,17 +415,25 @@ class PyCodegen:
 
     def load_graph_output(self, index: int) -> None:
         output = self._output
-        assert self.graph_output_var is not None
+        if self.graph_output_var is None:
+            raise AssertionError("graph_output_var must not be None")
         output.append(self.create_load(self.graph_output_var))
         output.append(self.create_load_const(index))
         output.append(self.create_binary_subscr())
 
-    def add_cache(self, value: Union[VariableTracker, Source]) -> None:
+    def add_cache(self, value: VariableTracker | Source) -> None:
         var = self.new_var()
         self.tempvars[value] = var
         self._output.append(self.create_store(var))
 
-    def foreach(self, items: Iterable[Union[VariableTracker, Source]]) -> None:
+    def clear_tempvars(self) -> None:
+        for key, var in list(self.tempvars.items()):
+            if var is not None:
+                self._output.append(self.create_delete(var))
+            del self.tempvars[key]
+        self.top_of_stack = None
+
+    def foreach(self, items: Iterable[VariableTracker | Source]) -> None:
         for i in items:
             self(i)
 
@@ -409,7 +445,10 @@ class PyCodegen:
         name = re.sub(r"[^a-zA-Z0-9_]+", "_", name)
         f_globals = self.tx.f_globals
         if name in f_globals:
-            assert id(f_globals[name]) == id(value)
+            if id(f_globals[name]) != id(value):
+                raise AssertionError(
+                    f"f_globals[{name!r}] already exists with a different identity"
+                )
         else:
             f_globals[name] = value
         return [self.create_load_global(name, add=True)]
@@ -418,43 +457,56 @@ class PyCodegen:
         self.top_of_stack = None
 
     def append_output(self, inst: Instruction) -> None:
-        assert isinstance(inst, Instruction)
+        if not isinstance(inst, Instruction):
+            raise AssertionError(f"expected Instruction, got {type(inst)}")
         self._output.append(inst)
         self.clear_tos()
 
     def extend_output(self, insts: list[Instruction]) -> None:
-        assert all(isinstance(x, Instruction) for x in insts)
+        if not all(isinstance(x, Instruction) for x in insts):
+            raise AssertionError("all elements of insts must be Instruction instances")
         self._output.extend(insts)
         self.clear_tos()
 
     def get_instructions(self) -> list[Instruction]:
         return self._output
 
+    def get_pycode(self) -> list[str] | None:
+        if not config.generate_pycode:
+            return None
+        return self.pycodes
+
     def create_load(self, name: str) -> Instruction:
-        assert name in self.code_options["co_varnames"], f"{name} missing"
+        if name not in self.code_options["co_varnames"]:
+            raise AssertionError(f"{name} missing")
         return create_instruction("LOAD_FAST", argval=name)
 
     def create_load_closure(self, name: str) -> Instruction:
-        assert name in self.cell_and_freevars()
+        if name not in self.cell_and_freevars():
+            raise AssertionError(f"{name!r} not in cell_and_freevars")
         inst_name = "LOAD_FAST" if sys.version_info >= (3, 13) else "LOAD_CLOSURE"
         return create_instruction(inst_name, argval=name)
 
     def create_load_deref(self, name: str) -> Instruction:
-        assert name in self.cell_and_freevars()
+        if name not in self.cell_and_freevars():
+            raise AssertionError(f"{name!r} not in cell_and_freevars")
         return create_instruction("LOAD_DEREF", argval=name)
 
     def create_store(self, name: str) -> Instruction:
-        assert name in self.code_options["co_varnames"], f"{name} missing"
+        if name not in self.code_options["co_varnames"]:
+            raise AssertionError(f"{name} missing")
         return create_instruction("STORE_FAST", argval=name)
 
     def create_store_deref(self, name: str) -> Instruction:
-        assert name in self.cell_and_freevars()
+        if name not in self.cell_and_freevars():
+            raise AssertionError(f"{name!r} not in cell_and_freevars")
         return create_instruction("STORE_DEREF", argval=name)
 
     def create_load_global(self, name: str, add: bool = False) -> Instruction:
         if add:
             self.tx.output.update_co_names(name)
-        assert name in self.code_options["co_names"], f"{name} not in co_names"
+        if name not in self.code_options["co_names"]:
+            raise AssertionError(f"{name} not in co_names")
         return create_instruction("LOAD_GLOBAL", argval=name)
 
     def create_load_const(self, value: Any) -> Instruction:
@@ -524,6 +576,23 @@ class PyCodegen:
                 *create_call_function_ex(False, False),
                 create_instruction("UNPACK_SEQUENCE", arg=n),
             ]
+
+    def pop_null(self) -> list[Instruction]:
+        # POP_TOP doesn't work for null, so we pop nulls by pushing in a
+        # nop function, calling it (which consumes the null), and popping the result.
+        if sys.version_info < (3, 11):
+            raise AssertionError("pop_null requires Python 3.11+")
+        return [
+            self.create_load_const_unchecked(lambda: None),
+            # 3.13 swapped NULL and callable
+            *(
+                (create_instruction("SWAP", arg=2),)
+                if sys.version_info >= (3, 13)
+                else ()
+            ),
+            *create_call_function(0, False),
+            create_instruction("POP_TOP"),
+        ]
 
     def pop_top(self) -> None:
         self.append_output(create_instruction("POP_TOP"))
@@ -614,7 +683,7 @@ class PyCodegen:
                 if current_source in seen_sources:
                     # This source is used at least twice, so it can be reused
                     codegen.mark_source_temp(current_source)
-                    # Dont trace source further. This prevents us from marking too
+                    # Don't trace source further. This prevents us from marking too
                     # many nodes as temp sources.
                     continue
                 seen_sources.add(current_source)
@@ -639,7 +708,10 @@ class PyCodegen:
             cm_var = self.new_var()
             self.store(cm_var)
 
-        for arg in graphargs:
+        arg_varnames = []
+        for i, arg in enumerate(graphargs):
+            arg_varname = self.tx.new_pycode_varname("arg")
+            arg_varnames.append(arg_varname)
             if arg.pass_arg_as_tensor:
                 self.add_push_null(
                     lambda: self.extend_output(
@@ -651,8 +723,10 @@ class PyCodegen:
                 )
                 self.call_reconstruct(arg)
                 self.extend_output(create_call_function(1, False))
+                self.add_pycode(f"{arg_varname} = torch._as_tensor_fullprec({{}})", arg)
             else:
                 self.call_reconstruct(arg)
+                self.add_pycode(f"{arg_varname} = {{}}", arg)
 
         if config.record_runtime_overhead:
             # Record the pregraph bytecode end
@@ -661,12 +735,17 @@ class PyCodegen:
                     utils.__name__, "record_pregraph_bytecode_exit"
                 )
             )
-            assert cm_var is not None
+            if cm_var is None:
+                raise AssertionError("cm_var must not be None")
             self.extend_output([self.create_load(cm_var)])
             self.extend_output(create_call_function(1, False))
             self.pop_top()
 
         self.extend_output(create_call_function(len(graphargs), False))
+        self.clear_tempvars()
+        self.add_pycode(
+            f"__graph_out = {fn_name}({', '.join(arg_varnames)})",
+        )
 
     def create_import_name(self, module_name: str) -> Instruction:
         return create_instruction("IMPORT_NAME", argval=module_name)
@@ -685,7 +764,10 @@ class PyCodegen:
     ) -> list[Instruction]:
         if sys.version_info >= (3, 13):
             output = create_call_function(nargs, push_null)
-            assert output[-1].opname == "CALL"
+            if output[-1].opname != "CALL":
+                raise AssertionError(
+                    f"expected last instruction to be CALL, got {output[-1].opname}"
+                )
             output.insert(-1, self.create_load_const(kw_names))
             output[-1] = create_instruction("CALL_KW", arg=nargs)
             return output
@@ -697,7 +779,11 @@ class PyCodegen:
             else:
                 idx = -2
                 expected_inst = "PRECALL"
-            assert output[idx].opname == expected_inst
+            if output[idx].opname != expected_inst:
+                raise AssertionError(
+                    f"expected instruction at index {idx} to be {expected_inst}, "
+                    f"got {output[idx].opname}"
+                )
             kw_names_inst = create_instruction("KW_NAMES", argval=kw_names)
             output.insert(idx, kw_names_inst)
             return output

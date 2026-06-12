@@ -1318,7 +1318,7 @@ class OpKernel_aten__to_copy : public C10Kernel {
     }
   }
 
-  void computeInternal(ExecutionFrame& executionFrame) const override final {
+  void computeInternal(ExecutionFrame& executionFrame) const final {
     const auto& self = KernelInput(0).toTensor();
     auto& out = KernelOutput(0);
 

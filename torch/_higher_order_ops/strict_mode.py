@@ -1,17 +1,13 @@
 # mypy: allow-untyped-defs
-from typing import Any, TYPE_CHECKING, Union
 
 import torch
 import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._functorch.utils import exposed_in
-from torch._higher_order_ops.utils import _set_compilation_env, autograd_not_implemented
+from torch._higher_order_ops.utils import autograd_not_implemented, register_fake
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
-    _temp_remove_metadata_torch_function_mode,
-    _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
     make_fx,
     ProxyTorchDispatchMode,
@@ -20,34 +16,14 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-
 @exposed_in("torch")
 def strict_mode(callable, operands):
-    from torch._dynamo.backends.debugging import (
-        make_eager_backend_with_torch_function_modes,
-    )
-
     if torch.compiler.is_dynamo_compiling():
         return strict_mode_op(callable, operands)
 
-    with _set_compilation_env():
-        with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-            with _temp_remove_pre_dispatch_torch_function_mode() as predispatch_mode:
-                modes = [metadata_mode, predispatch_mode]
-                modes = [mode for mode in modes if mode is not None]
-                if modes:
-                    backend: Union[str, Callable[..., Any]] = (
-                        make_eager_backend_with_torch_function_modes(modes)
-                    )
-                else:
-                    backend = "eager"
-                with torch._dynamo.utils.disable_cache_limit():
-                    return torch.compile(
-                        strict_mode_op, backend=backend, fullgraph=True
-                    )(callable, operands)
+    from torch._higher_order_ops.utils import _hop_compile_and_call
+
+    return _hop_compile_and_call(strict_mode_op, (callable, operands))
 
 
 class StrictMode(HigherOrderOperator):
@@ -55,6 +31,7 @@ class StrictMode(HigherOrderOperator):
         super().__init__("strict_mode")
 
     def __call__(self, callable, operands):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(callable, operands)
 
 
@@ -64,7 +41,8 @@ strict_mode_op = StrictMode()
 @strict_mode_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def strict_mode_op_dense(callable, operands):
     mode = _get_current_dispatch_mode()
-    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+    if mode is not None:
+        raise AssertionError("Mode should never be enabled for CPU/CUDA key")
     return callable(*operands)
 
 
@@ -99,11 +77,9 @@ def trace_strict_mode(mode, strict_mode_op, callable, operands):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
 
 
-@strict_mode_op.py_impl(FakeTensorMode)
-def strict_mode_fake_tensor_mode(mode, callable, operands):
-    with mode:
-        true_outs = callable(*operands)
-    return true_outs
+@register_fake(strict_mode_op, skip_cache=True)
+def strict_mode_fake_tensor_mode(callable, operands):
+    return callable(*operands)
 
 
 @strict_mode_op.py_functionalize_impl

@@ -7,7 +7,6 @@
 #include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/socket.h>
 
-#include <cstring>
 #include <optional>
 #include <system_error>
 #include <utility>
@@ -25,7 +24,6 @@
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -193,7 +191,7 @@ class SocketImpl {
 };
 
 std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
-  // It can be be very slow to repeatedly hit DNS resolution failure, but its
+  // It can be very slow to repeatedly hit DNS resolution failure, but its
   // very helpful to have DNS names in logs by default. So we try to use DNS but
   // if we hit a transient failure we just disable it for the remainder of the
   // job, logging IP addresses instead. See

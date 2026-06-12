@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
+import math
 from typing import *  # noqa: F403
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
-from torch._prims_common import is_expandable_to
+from torch._prims_common import canonicalize_dim, is_expandable_to
 from torch.nested._internal.nested_int import NestedIntNode
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -43,6 +44,23 @@ def _store_val_in_tensor(val) -> torch.Tensor:
 
 def _load_val_from_tensor(t: torch.Tensor):
     return t.shape[0]
+
+
+def _jagged_numel(inp, func):
+    if inp._lengths is None:
+        return inp._values.numel()
+
+    fixed_shape = (*inp._size[1 : inp._ragged_idx], *inp._size[inp._ragged_idx + 1 :])
+    fixed_numel = math.prod(fixed_shape)
+
+    from torch._subclasses.fake_tensor import DynamicOutputShapeException, is_fake
+    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+
+    lengths = mb_unwrap_functional_tensor(inp._lengths)
+    if is_fake(lengths):
+        raise DynamicOutputShapeException(func)
+
+    return int(inp._lengths.sum().item()) * fixed_numel
 
 
 # serialization function must be defined at top level
@@ -87,10 +105,17 @@ class NestedTensor(torch.Tensor):
         ks = ks.add(DispatchKey.AutogradNestedTensor)
 
         # Only support jagged for now.
-        assert offsets is not None
-        assert offsets.ndim == 1
-        assert not isinstance(values, NestedTensor)
-        assert values.device == offsets.device
+        if offsets is None:
+            raise AssertionError("offsets must not be None")
+        if offsets.ndim != 1:
+            raise AssertionError(f"offsets must be 1D, but got {offsets.ndim}D")
+        if isinstance(values, NestedTensor):
+            raise AssertionError("values must not be a NestedTensor")
+        if values.device != offsets.device:
+            raise AssertionError(
+                f"values and offsets must be on the same device, but got "
+                f"values.device={values.device} and offsets.device={offsets.device}"
+            )
 
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
@@ -99,7 +124,11 @@ class NestedTensor(torch.Tensor):
         _ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         if lengths is not None:
-            assert B == lengths.shape[0]
+            if B != lengths.shape[0]:
+                raise AssertionError(
+                    f"offsets and lengths batch sizes must match: "
+                    f"offsets.shape[0] - 1 = {B}, lengths.shape[0] = {lengths.shape[0]}"
+                )
 
         # subtract 1 to convert to values dim space
         r = _ragged_idx - 1
@@ -141,9 +170,16 @@ class NestedTensor(torch.Tensor):
         # holds properties that are computed lazily
         self._metadata_cache = kwargs.get("_metadata_cache") or {}
 
-        # collapsed ragged dim must always be dynamic
-        torch._dynamo.maybe_mark_dynamic(self, self._ragged_idx)
-        torch._dynamo.maybe_mark_dynamic(self._values, self._ragged_idx - 1)
+        # Collapsed ragged dim must always be dynamic.
+        # Use _dynamo_propagated_dynamic_indices (unguarded) rather than
+        # maybe_mark_dynamic (which sets _dynamo_weak_dynamic_indices, a guarded
+        # attribute) to avoid spurious guard failures when the same tensor is
+        # reused across multiple compile calls. The builder reads both attributes,
+        # so dynamism propagation still works.
+        # See [Note: Dimension Marking Guards] in torch/_dynamo/guards.py.
+        # Inlined here to avoid circular import from runtime_wrappers.
+        self._dynamo_propagated_dynamic_indices = {self._ragged_idx}  # type: ignore[attr-defined]
+        self._values._dynamo_propagated_dynamic_indices = {self._ragged_idx - 1}  # type: ignore[attr-defined]
 
         # min / max sequence length should be dynamic if present
         max_seqlen_tensor = self._metadata_cache.get("max_seqlen", None)
@@ -263,7 +299,8 @@ class NestedTensor(torch.Tensor):
         # See Note [Tensor Subclass custom size/stride caching strategy]
         self._clear_non_serializable_cached_data()
         # SymNodes are not serializable
-        assert "_size" in state and "_strides" in state
+        if "_size" not in state or "_strides" not in state:
+            raise AssertionError("state must contain '_size' and '_strides'")
         state = dict(state)
         del state["_size"]
         del state["_strides"]
@@ -299,7 +336,10 @@ class NestedTensor(torch.Tensor):
         from torch._subclasses.fake_tensor import FakeTensor
 
         # inner tensors: _values, _offsets, [_lengths], [_min_seqlen], [_max_seqlen]
-        assert len(inner_tensors) >= 2 and len(inner_tensors) <= 5
+        if not (len(inner_tensors) >= 2 and len(inner_tensors) <= 5):
+            raise AssertionError(
+                f"Expected 2-5 inner tensors, but got {len(inner_tensors)}"
+            )
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
         lengths = inner_tensors.get("_lengths", None)
@@ -335,6 +375,23 @@ class NestedTensor(torch.Tensor):
         # size = -1, see note: [NJT outer_size in AOTDispatcher]
         kwargs = {} if kwargs is None else kwargs
 
+        if args and isinstance(args[0], NestedTensor) and len(args) == 1 and not kwargs:
+            inp = args[0]
+            if func is torch.ops.aten.is_non_overlapping_and_dense.default:
+                return False
+            if func is torch.ops.aten.sym_size.default:
+                return inp._size
+            if func is torch.ops.aten.dim.default:
+                return len(inp._size)
+            if func in (torch.ops.aten.sym_numel.default, torch.ops.aten.numel.default):
+                return _jagged_numel(inp, func)
+            if func is torch.ops.aten.sym_stride.default:
+                return inp._strides
+            if func is torch.ops.aten.sym_storage_offset.default:
+                return inp._values.storage_offset()
+            if func is torch.ops.prim.layout.default:
+                return torch.jagged
+
         # Lazy import to avoid circular dependency
         from .ops import lookup_jagged
 
@@ -362,6 +419,31 @@ class NestedTensor(torch.Tensor):
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        if args and isinstance(args[0], NestedTensor):
+            inp = args[0]
+            if (
+                (func is torch.Tensor.size or func is torch.Tensor.stride)
+                and len(args) <= 2
+                and (not kwargs or set(kwargs) == {"dim"})
+            ):
+                dim = kwargs.get("dim", args[1] if len(args) == 2 else None)
+                data = inp._size if func is torch.Tensor.size else inp._strides
+                if dim is None:
+                    return torch.Size(data) if func is torch.Tensor.size else data
+                return data[canonicalize_dim(len(data), dim)]
+            if func is torch.Tensor.dim and len(args) == 1 and not kwargs:
+                return len(inp._size)
+            if (
+                getattr(func, "__name__", None) == "__get__"
+                and len(args) == 1
+                and not kwargs
+            ):
+                descriptor = getattr(func, "__self__", None)
+                if descriptor is torch.Tensor.shape:
+                    return torch.Size(inp._size)
+                if descriptor is torch.Tensor.ndim:
+                    return len(inp._size)
 
         from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
 
@@ -540,9 +622,10 @@ def jagged_from_tensor_and_lengths(
         )
 
     # Calculate jagged offsets
-    assert len(tensor.shape) >= 2, (
-        "tensor must at least be 2D for the nested narrow op to work"
-    )
+    if len(tensor.shape) < 2:
+        raise AssertionError(
+            "tensor must at least be 2D for the nested narrow op to work"
+        )
     max_seq_len = tensor.shape[1]
     offset_lengths = max_seq_len * torch.arange(
         0, batch_size, dtype=torch.int64, device=tensor.device

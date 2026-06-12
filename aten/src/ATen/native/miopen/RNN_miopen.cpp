@@ -76,14 +76,14 @@ namespace {
 
     struct DropoutState {
         DropoutState(size_t size) : size(size), data(NULL) {
-            data = c10::hip::HIPCachingAllocator::raw_alloc(size);
+            data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
         }
         DropoutState(const DropoutState&) = delete;
-        DropoutState(DropoutState&&) = default;
-        DropoutState& operator=(DropoutState&&) = default;
+        DropoutState(DropoutState&&) = delete;
+        DropoutState& operator=(DropoutState&&) = delete;
         ~DropoutState() {
             if (data) {
-                c10::hip::HIPCachingAllocator::raw_delete(data);
+                c10::cuda::CUDACachingAllocator::raw_delete(data);
             }
         }
 
@@ -627,7 +627,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         output.transpose_(0, 1);
     }
 
-    return std::make_tuple(output, hy, cy, reserve, weight_buf);
+    return std::make_tuple(
+        std::move(output),
+        std::move(hy),
+        std::move(cy),
+        std::move(reserve),
+        std::move(weight_buf));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
@@ -743,7 +748,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
         dx = dx.transpose_(0, 1);
     }
 
-    return std::make_tuple(dx, dhx, dcx, workspace);
+    return std::make_tuple(std::move(dx), std::move(dhx), std::move(dcx), std::move(workspace));
 }
 
 std::vector<Tensor> miopen_rnn_backward_weight(
@@ -866,7 +871,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
             }
         }
     }
-    return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{dx, dhx, dcx, dw};
+    return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{std::move(dx), std::move(dhx), std::move(dcx), std::move(dw)};
 }
 
 namespace {
@@ -905,7 +910,11 @@ std::pair<Tensor, hidden_type> _miopen_impl(
     int64_t hidden_size = hx.size(2);
 
     TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-    IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
+    TORCH_CHECK(
+        _batch_sizes.device().is_cpu(),
+        "batch_sizes tensor should be on CPU, but got ",
+        _batch_sizes.device());
+    IntArrayRef batch_sizes { _batch_sizes.const_data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
     Tensor dropout_state = at::empty({0}, input.options());
 

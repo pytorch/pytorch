@@ -92,13 +92,13 @@ inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 template <typename T>
 std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
   size_t i = 0;
-  out << "{";
+  out << '{';
   for (auto&& e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
@@ -143,7 +143,7 @@ TEST(FromQualStringTest, Basic) {
     try {
       Symbol::fromQualString(input);
       ASSERT_TRUE(0);
-    } catch (const std::exception& c) {
+    } catch (const std::exception&) {
     }
   }
 }
@@ -2304,12 +2304,12 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
   ASSERT_NE(add_ss.str().find("line 4"), std::string::npos);
   ASSERT_NE(
       add_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
-  ASSERT_NE(add_ss.str().find("return x + y"), std::string::npos);
+  ASSERT_NE(std::move(add_ss).str().find("return x + y"), std::string::npos);
   ASSERT_NE(mul_ss.str().find("line 3"), std::string::npos);
   ASSERT_NE(mul_ss.str().find("line 6"), std::string::npos);
   ASSERT_NE(
       mul_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
-  ASSERT_NE(mul_ss.str().find("return x * y"), std::string::npos);
+  ASSERT_NE(std::move(mul_ss).str().find("return x * y"), std::string::npos);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -2395,7 +2395,7 @@ def a(x, y:int=1):
   try {
     compile(text_non_hinted);
     ASSERT_TRUE(0);
-  } catch (const std::exception& c) {
+  } catch (const std::exception&) {
   }
 
   auto cu = compile(text_hinted);
@@ -3157,6 +3157,11 @@ TEST_F(Composed, ComposedOp) {
 }
 
 TEST(ConstantPropagation, CustomClassesCanBePropagated) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  // See https://github.com/pytorch/pytorch/issues/178522.
+  GTEST_SKIP()
+      << "Skipping ConstantPropagation.CustomClassesCanBePropagated on AArch64.";
+#endif
 #ifdef USE_PYTORCH_QNNPACK
   const auto src = R"IR(
     graph():

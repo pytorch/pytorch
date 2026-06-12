@@ -68,12 +68,19 @@ class TestExpandedWeightHelperFunction(TestCase):
             self.assertEqual(res, expected)
 
             self.assertEqual(len(expanded_args), 2)
-            assert expanded_args[0] is args[0]  # avoids property checks in assertEquals
-            assert expanded_args[1] is args[1]  # avoids property checks in assertEquals
+            if (
+                expanded_args[0] is not args[0]
+            ):  # avoids property checks in assertEquals
+                raise AssertionError("expanded_args[0] should be args[0]")
+            if (
+                expanded_args[1] is not args[1]
+            ):  # avoids property checks in assertEquals
+                raise AssertionError("expanded_args[1] should be args[1]")
             self.assertEqual(len(expanded_kwargs), 1)
-            assert (
-                expanded_kwargs["bias"] is args[2]
-            )  # avoids property checks in assertEquals
+            if (
+                expanded_kwargs["bias"] is not args[2]
+            ):  # avoids property checks in assertEquals
+                raise AssertionError("expanded_kwargs['bias'] should be args[2]")
 
     def test_forward_helper_failure_args(self, device):
         weight = torch.randn(5, 4, device=device)
@@ -731,10 +738,8 @@ class TestExpandedWeightModule(TestCase):
             for expected_grad in expected_grads
             if expected_grad is not None
         )
-        assert [
+        for actual, expected in zip(actual_grads, expected_grads):
             self.assertEqual(actual, 2 * expected)
-            for (actual, expected) in zip(actual_grads, expected_grads)
-        ]
 
     def _do_test_rnn_packed_sequence(
         self, module, input, args=None, kwargs=None, atol=None, rtol=None
@@ -798,7 +803,8 @@ class TestExpandedWeightModule(TestCase):
 
             def forward(self, *inps):
                 ret = self.m(*inps)
-                assert isinstance(ret, tuple)
+                if not isinstance(ret, tuple):
+                    raise AssertionError(f"expected tuple, got {type(ret)}")
                 return ret[0]
 
         def batch_hidden(h):
@@ -968,7 +974,7 @@ class ContextManagerTests(TestBase):
         module = self.constructor(*self.constructor_args).to(**kwargs)
         if "Embedding" in self.get_name():
             kwargs["dtype"] = torch.long
-        input = self._get_input().to(**kwargs)
+        input = self._get_input().detach().clone().to(**kwargs)
         if len(input.shape) == 0 or input.shape[0] == 0:
             raise unittest.SkipTest(
                 "Can't get per sample gradients when no batch dim or batch dim is 0"
@@ -981,7 +987,7 @@ class ContextManagerTests(TestBase):
 
     def test_context_manager_multiple_inputs(self, test_case, device):
         module = self.constructor(*self.constructor_args).to(device)
-        input = self._get_input()
+        input = self._get_input().detach().clone()
         if len(input.shape) == 0 or input.shape[0] == 0:
             raise unittest.SkipTest(
                 "Can't get per sample gradients when no batch dim or batch dim is 0"

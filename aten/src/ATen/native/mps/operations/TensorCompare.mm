@@ -5,15 +5,13 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/TensorCompare.h>
 #include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/clamp_max_native.h>
-#include <ATen/ops/clamp_min_native.h>
-#include <ATen/ops/clamp_native.h>
 #include <ATen/ops/eq.h>
 #include <ATen/ops/isin_native.h>
 #include <ATen/ops/nan_to_num_native.h>
@@ -23,6 +21,12 @@
 #endif
 
 namespace at::native {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/TensorCompare_metallib.h>
+#endif
+
 namespace mps {
 
 struct CachedGraph : public MPSCachedGraph {
@@ -30,263 +34,6 @@ struct CachedGraph : public MPSCachedGraph {
   MPSGraphTensor *inputTensor = nil, *outputTensor = nil;
   MPSGraphTensor *minTensor = nil, *maxTensor = nil;
 };
-
-static void clamp_mps_graph(CachedGraph* cachedGraph,
-                            const Tensor& input_tensor,
-                            const at::ScalarType min_type,
-                            const at::ScalarType max_type,
-                            const at::ScalarType result_type) {
-  MPSGraph* mpsGraph = cachedGraph->graph();
-
-  cachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
-
-  auto minTensor = cachedGraph->minTensor;
-  auto maxTensor = cachedGraph->maxTensor;
-  auto inputTensor = cachedGraph->inputTensor;
-
-  if (minTensor && min_type != result_type) {
-    minTensor = castMPSTensor(mpsGraph, minTensor, result_type);
-  }
-  if (maxTensor && max_type != result_type) {
-    maxTensor = castMPSTensor(mpsGraph, maxTensor, result_type);
-  }
-  if (input_tensor.scalar_type() != result_type) {
-    inputTensor = castMPSTensor(mpsGraph, inputTensor, result_type);
-  }
-  if (c10::isIntegralType(result_type, /*includeBool=*/true)) {
-    if (minTensor && maxTensor) {
-      cachedGraph->outputTensor = [mpsGraph clampWithTensor:inputTensor
-                                             minValueTensor:minTensor
-                                             maxValueTensor:maxTensor
-                                                       name:nil];
-    } else if (maxTensor) {
-      cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:inputTensor secondaryTensor:maxTensor name:nil];
-    } else if (minTensor) {
-      cachedGraph->outputTensor = [mpsGraph maximumWithPrimaryTensor:inputTensor secondaryTensor:minTensor name:nil];
-    }
-    return;
-  }
-  // clampWithTensor doesn't propagate NaN through so simulate it as composition of
-  // maximumWithNaNPropagationWithPrimaryTensor and minimumWithNaNPropagationWithPrimaryTensor
-  auto outputTensor = inputTensor;
-  if (minTensor) {
-    outputTensor = [mpsGraph maximumWithNaNPropagationWithPrimaryTensor:outputTensor
-                                                        secondaryTensor:minTensor
-                                                                   name:nil];
-  }
-  if (maxTensor) {
-    outputTensor = [mpsGraph minimumWithNaNPropagationWithPrimaryTensor:outputTensor
-                                                        secondaryTensor:maxTensor
-                                                                   name:nil];
-  }
-  cachedGraph->outputTensor = outputTensor;
-}
-
-static void check_min_max_dims(const OptionalTensorRef clamp_opt, const Tensor& input_t, std::string op_name) {
-  if (!clamp_opt->is_same_size(input_t)) {
-    auto num_clamp_dims = clamp_opt->dim();
-    auto num_input_dims = input_t.dim();
-
-    auto clamp_shape = clamp_opt->sizes();
-    auto input_shape = input_t.sizes();
-
-    if (num_clamp_dims > num_input_dims) {
-      auto leading_dims = num_clamp_dims - num_input_dims;
-      for (int64_t i = 0; i < leading_dims; ++i) {
-        TORCH_CHECK(clamp_shape[i] == 1,
-                    op_name + ": clamp tensor leading shape must be 1 to broadcast with input tensor");
-      }
-    }
-
-    auto clamp_idx = num_clamp_dims - 1;
-    auto input_idx = num_input_dims - 1;
-    auto common_dims = std::min(num_clamp_dims, num_input_dims);
-    for (int64_t i = 0; i < common_dims; ++i)
-      // One of the indices is allowed to be 1; will be handled by broadcast
-      TORCH_CHECK(clamp_shape[clamp_idx - i] == input_shape[input_idx - i] || clamp_shape[clamp_idx - i] == 1 ||
-                      input_shape[input_idx - i] == 1,
-                  op_name + ": clamp tensor trailing shape must match input tensor")
-  }
-}
-
-static void fill_new_shape(int64_t num_input_dims,
-                           int64_t num_clamp_dims,
-                           int64_t* new_shape,
-                           IntArrayRef clamp_shape) {
-  // Extend the shape with ones to the left
-  int clamp_idx = 0;
-  for (int i = 0; i < num_input_dims; i++) {
-    if (i < num_input_dims - num_clamp_dims)
-      new_shape[i] = 1;
-    else {
-      new_shape[i] = clamp_shape[clamp_idx];
-      clamp_idx++;
-    }
-  }
-}
-
-static void clamp_tensor_out_mps(const Tensor& input_t,
-                                 const OptionalTensorRef min_opt,
-                                 const OptionalTensorRef max_opt,
-                                 const Tensor& output_t,
-                                 std::string op_name) {
-  const bool has_min = (min_opt.has_value() && min_opt->defined());
-  const bool has_max = (max_opt.has_value() && max_opt->defined());
-
-  TORCH_CHECK(has_min || has_max, op_name + ": either min, max or both tensors must be defined")
-  if (has_min)
-    check_min_max_dims(min_opt, input_t, op_name);
-
-  if (has_max)
-    check_min_max_dims(max_opt, input_t, op_name);
-
-  if (output_t.numel() == 0)
-    return;
-
-  auto result_type = output_t.scalar_type();
-
-  auto num_min_dims = min_opt->dim();
-  auto num_max_dims = max_opt->dim();
-  auto num_input_dims = input_t.dim();
-
-  std::vector<int64_t> new_min_arr(num_input_dims);
-  std::vector<int64_t> new_max_arr(num_input_dims);
-
-  Tensor min_opt_tensor;
-  Tensor max_opt_tensor;
-
-  auto reshape_clamp_tensor = [&](const OptionalTensorRef clamp_tensor_ref,
-                                  int64_t num_clamp_dims,
-                                  std::vector<int64_t>& new_shape_storage) -> Tensor {
-    IntArrayRef clamp_shape = clamp_tensor_ref->sizes();
-    bool requires_view = false;
-
-    if (num_clamp_dims > num_input_dims) {
-      clamp_shape = clamp_shape.slice(num_clamp_dims - num_input_dims);
-      requires_view = true;
-    } else if (num_clamp_dims < num_input_dims) {
-      fill_new_shape(num_input_dims, num_clamp_dims, new_shape_storage.data(), clamp_shape);
-      clamp_shape = IntArrayRef(new_shape_storage);
-      requires_view = true;
-    }
-
-    return requires_view ? (*clamp_tensor_ref).view(clamp_shape) : *clamp_tensor_ref;
-  };
-
-  if (has_min) {
-    min_opt_tensor = reshape_clamp_tensor(min_opt, num_min_dims, new_min_arr);
-  }
-  if (has_max) {
-    max_opt_tensor = reshape_clamp_tensor(max_opt, num_max_dims, new_max_arr);
-  }
-
-  @autoreleasepool {
-    // the optional min/max refs could affect how we build the cached graph
-
-    auto tensor_key = has_min
-        ? (has_max ? getTensorsStringKey({input_t, min_opt_tensor, max_opt_tensor})
-                   : getTensorsStringKey({input_t, min_opt_tensor}))
-        : (has_max ? getTensorsStringKey({input_t, max_opt_tensor}) : getTensorsStringKey({input_t}));
-
-    std::string key = op_name + (has_min ? "_min" : "") + (has_max ? "_max" : "") + "_tensor" + tensor_key;
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      if (has_min) {
-        newCachedGraph->minTensor = mpsGraphRankedPlaceHolder(mpsGraph, min_opt_tensor);
-      }
-      if (has_max) {
-        newCachedGraph->maxTensor = mpsGraphRankedPlaceHolder(mpsGraph, max_opt_tensor);
-        ;
-      }
-
-      clamp_mps_graph(newCachedGraph, input_t, min_opt_tensor.scalar_type(), max_opt_tensor.scalar_type(), result_type);
-    });
-
-    bool gatherTensorData = true;
-    if (!output_t.is_contiguous() || output_t.is_view()) {
-      gatherTensorData = false;
-    }
-
-    auto inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor, input_t, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
-    auto outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor, output_t, /*mpsShape=*/nil, /*gatherTensorData=*/false);
-
-    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
-    if (has_min) {
-      min_opt_tensor =
-          gatherTensorData && !min_opt_tensor.is_contiguous() ? min_opt_tensor.contiguous() : min_opt_tensor;
-      auto minPlaceholder =
-          Placeholder(cachedGraph->minTensor, min_opt_tensor, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
-      feeds[minPlaceholder.getMPSGraphTensor()] = minPlaceholder.getMPSGraphTensorData();
-    }
-    if (has_max) {
-      max_opt_tensor =
-          gatherTensorData && !max_opt_tensor.is_contiguous() ? max_opt_tensor.contiguous() : max_opt_tensor;
-      auto maxPlaceholder =
-          Placeholder(cachedGraph->maxTensor, max_opt_tensor, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
-      feeds[maxPlaceholder.getMPSGraphTensor()] = maxPlaceholder.getMPSGraphTensorData();
-    }
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-}
-
-static void clamp_scalar_out_mps(const Tensor& input_t,
-                                 const OptionalScalarRef min_opt,
-                                 const OptionalScalarRef max_opt,
-                                 const Tensor& output_t,
-                                 std::string op_name) {
-  using scalar_t = double;
-
-  const bool has_min = (min_opt.has_value());
-  const bool has_max = (max_opt.has_value());
-  TORCH_CHECK(has_min || has_max, op_name + ": either min, max or both scalars must be defined")
-
-  scalar_t min_scalar = std::numeric_limits<scalar_t>::infinity();
-  scalar_t max_scalar = -std::numeric_limits<scalar_t>::infinity();
-
-  if (has_min)
-    min_scalar = min_opt.get().to<scalar_t>();
-  if (has_max)
-    max_scalar = max_opt.get().to<scalar_t>();
-
-  if (output_t.numel() == 0)
-    return;
-
-  auto result_type = output_t.scalar_type();
-
-  @autoreleasepool {
-    // the optional min/max refs could affect how we build the cached graph
-    std::string key = op_name + (has_min ? ("_min:" + to_hex_key(min_scalar)) : "") +
-        (has_max ? ("_max:" + to_hex_key(max_scalar)) : "") + "_scalar:" + getTensorsStringKey({input_t});
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      if (has_min)
-        newCachedGraph->minTensor = [mpsGraph constantWithScalar:min_scalar
-                                                           shape:mps::getMPSShape(input_t)
-                                                        dataType:mps::getMPSScalarType(result_type)];
-      if (has_max)
-        newCachedGraph->maxTensor = [mpsGraph constantWithScalar:max_scalar
-                                                           shape:mps::getMPSShape(input_t)
-                                                        dataType:mps::getMPSScalarType(result_type)];
-
-      clamp_mps_graph(newCachedGraph, input_t, result_type, result_type, result_type);
-    });
-
-    bool gatherTensorData = true;
-    if (!output_t.is_contiguous() || output_t.is_view()) {
-      gatherTensorData = false;
-    }
-
-    auto inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor, input_t, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
-    auto outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor, output_t, /*mpsShape=*/nil, /*gatherTensorData=*/false);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-}
 
 static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
                                        const Tensor& test_elements,
@@ -374,35 +121,6 @@ static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
 } // namespace mps
 
 // APIs exposed to at::native scope
-TORCH_IMPL_FUNC(clamp_Tensor_out_mps)
-(const Tensor& input_t, const OptionalTensorRef min, const OptionalTensorRef max, const Tensor& output_t) {
-  mps::clamp_tensor_out_mps(input_t, min, max, output_t, __func__);
-}
-
-TORCH_IMPL_FUNC(clamp_out_mps)
-(const Tensor& input_t, const OptionalScalarRef min, const OptionalScalarRef max, const Tensor& output_t) {
-  mps::clamp_scalar_out_mps(input_t, min, max, const_cast<Tensor&>(output_t), "clamp_out_mps");
-}
-
-TORCH_IMPL_FUNC(clamp_min_Tensor_out_mps)
-(const Tensor& input_t, const Tensor& min, const Tensor& output_t) {
-  mps::clamp_tensor_out_mps(input_t, min, at::OptionalTensorRef(), output_t, __func__);
-}
-
-TORCH_IMPL_FUNC(clamp_min_out_mps)
-(const Tensor& input_t, const Scalar& min, const Tensor& output_t) {
-  mps::clamp_scalar_out_mps(input_t, min, at::OptionalScalarRef(), output_t, __func__);
-}
-
-TORCH_IMPL_FUNC(clamp_max_Tensor_out_mps)
-(const Tensor& input_t, const Tensor& max, const Tensor& output_t) {
-  mps::clamp_tensor_out_mps(input_t, at::OptionalTensorRef(), max, output_t, __func__);
-}
-
-TORCH_IMPL_FUNC(clamp_max_out_mps)
-(const Tensor& input_t, const Scalar& max, const Tensor& output_t) {
-  mps::clamp_scalar_out_mps(input_t, at::OptionalScalarRef(), max, output_t, __func__);
-}
 
 TORCH_IMPL_FUNC(isin_Tensor_Tensor_out_mps)
 (const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert, const Tensor& out) {
@@ -604,8 +322,33 @@ static void isposinf_kernel_mps(TensorIteratorBase& iter) {
   mps::is_posneginf_helper(iter, false);
 }
 
+static void clamp_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_ternary_kernel(iter, "clamp");
+}
+
+static void clamp_scalar_kernel_mps(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
+  auto scalar_type = iter.common_dtype();
+  AT_DISPATCH_ALL_TYPES_AND3(c10::kBool, c10::kBFloat16, c10::kHalf, scalar_type, "clamp_scalar_mps", [&]() {
+    ClampScalarParams<scalar_t> params{min_.to<scalar_t>(), max_.to<scalar_t>()};
+    lib.exec_unary_kernel_with_params(
+        iter, "clamp_scalar", params, fmt::format("ClampScalarParams_{}", mps::scalarToMetalTypeString(scalar_type)));
+  });
+}
+
+static void clamp_min_scalar_kernel_mps(TensorIteratorBase& iter, Scalar min_) {
+  lib.exec_unary_kernel(iter, "clamp_min_scalar", min_, iter.common_dtype());
+}
+
+static void clamp_max_scalar_kernel_mps(TensorIteratorBase& iter, Scalar max_) {
+  lib.exec_unary_kernel(iter, "clamp_max_scalar", max_, iter.common_dtype());
+}
+
 REGISTER_DISPATCH(where_kernel, &where_kernel_mps)
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_mps)
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_mps)
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel_mps)
+REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_mps)
+REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_mps)
+REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_mps)
 
 } // namespace at::native

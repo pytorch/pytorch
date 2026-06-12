@@ -13,6 +13,9 @@ from torch.utils._triton import has_triton
 requires_cuda_and_triton = unittest.skipUnless(
     HAS_CUDA_AND_TRITON, "requires cuda and triton"
 )
+requires_xpu_and_triton = unittest.skipUnless(
+    HAS_XPU_AND_TRITON, "requires xpu and triton"
+)
 requires_gpu_and_triton = unittest.skipUnless(
     HAS_XPU_AND_TRITON or HAS_CUDA_AND_TRITON, "requires gpu and triton"
 )
@@ -950,6 +953,14 @@ if has_triton():
         tl.store(out_ptr + offsets, ones, mask=offsets < numel)
 
     @triton.jit
+    def kernel_with_backslash_in_docstring(out_ptr, numel, BLOCK_SIZE: tl.constexpr):
+        """Docstring with literal backslash escapes: \n \t \\"""
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        ones = tl.full([BLOCK_SIZE], 1.0, dtype=tl.float32)
+        tl.store(out_ptr + offsets, ones, mask=offsets < numel)
+
+    @triton.jit
     def kernel_inline_asm_double_quotes(
         in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
     ):
@@ -995,6 +1006,46 @@ if has_triton():
         tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
 
     @triton.jit
+    def kernel_inline_asm_rocm_double_quotes(
+        in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        data = tl.load(in_ptr + offsets, mask=offsets < numel)
+        cos_pow = tl.inline_asm_elementwise(
+            asm="""
+            v_sin_f32 $0, $1
+            v_exp_f32 $0, $0
+                """,
+            constraints=("=v, v"),
+            args=[data],
+            dtype=tl.float32,
+            is_pure=True,
+            pack=1,
+        )
+        tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
+
+    @triton.jit
+    def kernel_inline_asm_rocm_single_quotes(
+        in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        data = tl.load(in_ptr + offsets, mask=offsets < numel)
+        cos_pow = tl.inline_asm_elementwise(
+            asm="""
+            v_sin_f32 $0, $1
+            v_exp_f32 $0, $0
+                """,
+            constraints=("=v, v"),
+            args=[data],
+            dtype=tl.float32,
+            is_pure=True,
+            pack=1,
+        )
+        tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
+
+    @triton.jit
     def add_kernel_with_boolean_param(
         in_ptr0,
         in_ptr1,
@@ -1015,6 +1066,26 @@ if has_triton():
             output = x
         tl.store(out_ptr + offsets, output, mask=mask)
 
+    @triton.jit
+    def masked_add_kernel_with_bool_tensor(
+        in_ptr0,
+        in_ptr1,
+        mask_ptr,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        """Kernel that loads a bool tensor and uses it as a mask."""
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        valid = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=valid)
+        y = tl.load(in_ptr1 + offsets, mask=valid)
+        keep = tl.load(mask_ptr + offsets, mask=valid, other=0) != 0
+        output = tl.where(keep, x + y, x)
+        tl.store(out_ptr + offsets, output, mask=valid)
+
     # support the old (experimental) and new (tensor_descriptor) APIs
     def create_tensor_descriptor_shim(
         tensor, block_sizes: list[int], new_api: bool = True
@@ -1032,7 +1103,10 @@ if has_triton():
                     tensor.element_size(),
                 )
             else:
-                assert len(block_sizes) == 2
+                if len(block_sizes) != 2:
+                    raise AssertionError(
+                        f"Expected len(block_sizes) == 2, got {len(block_sizes)}"
+                    )
                 return triton.tools.experimental_descriptor.create_2d_tma_descriptor(
                     tensor.data_ptr(),
                     tensor.size(0),

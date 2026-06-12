@@ -2,7 +2,6 @@ import os
 import signal
 from threading import Thread
 from time import sleep
-from typing import Optional
 
 
 _IN_TOPLEVEL_PROCESS = True
@@ -11,6 +10,22 @@ _IN_TOPLEVEL_PROCESS = True
 def in_toplevel_process() -> bool:
     global _IN_TOPLEVEL_PROCESS
     return _IN_TOPLEVEL_PROCESS
+
+
+def _pin_triton_worker_driver() -> None:
+    # Pin the nvidia driver so a worker forked after CUDA init doesn't raise
+    # "0 active drivers" resolving driver.active (triton#9578, pytorch#184643).
+    import torch
+
+    if not torch.cuda.is_available() or torch.version.hip is not None:
+        return
+    try:
+        import triton
+    except ImportError:
+        return
+    driver = triton.runtime.driver
+    if driver._active is None:
+        driver.set_active(triton.backends.backends["nvidia"].driver())
 
 
 # If this process dies abnormally (e.g. segfault)
@@ -41,13 +56,15 @@ def _async_compile_initializer(orig_ppid: int) -> None:
     # Install a crash handler to print out the stacktrace for SEGV
     torch._C._initCrashHandler()
 
+    _pin_triton_worker_driver()
+
     # Set a bit to distinguish async_compile subprocesses from the toplevel process.
     global _IN_TOPLEVEL_PROCESS
     _IN_TOPLEVEL_PROCESS = False
 
 
-_watchdog_thread: Optional[Thread] = None
-_original_parent: Optional[int] = None
+_watchdog_thread: Thread | None = None
+_original_parent: int | None = None
 
 
 def has_parent_changed() -> bool:

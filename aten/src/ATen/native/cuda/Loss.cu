@@ -6,7 +6,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
 
@@ -286,6 +285,15 @@ void nll_loss_forward_out_cuda_template(
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
 
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
+
+  if (weight_.defined()) {
+  TORCH_CHECK(
+      input.scalar_type() == weight_.scalar_type(),
+      "expected scalar type ",
+      input.scalar_type(),
+      " but found ",
+      weight_.scalar_type());
+  }
 
   if (reduction == Reduction::None && n_dims == 2) {
     at::native::resize_output(output, {batch_size});

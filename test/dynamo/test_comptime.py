@@ -4,6 +4,7 @@ import collections
 import re
 import sys
 import time
+import typing
 from io import StringIO
 
 import torch._dynamo.test_case
@@ -30,7 +31,9 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
             def _(ctx):
                 ctx.print(ctx.get_local("e"), file=FILE)
 
-        Employee = collections.namedtuple("Employee", ["name", "id"])
+        class Employee(typing.NamedTuple):
+            name: object
+            id: object
 
         class mylist(list):
             pass
@@ -46,7 +49,6 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
             comptime_print(range(1, 3))
             comptime_print(Employee("foo", 2))
             comptime_print(mylist([1, 2]))
-            comptime_print(collections.defaultdict(lambda: None))
             comptime_print(set())
             comptime_print({"a", "b"})
             comptime_print(x.size(0))
@@ -57,18 +59,33 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-FakeTensor(..., size=(s77,))
+Tensor(shape=(s77,), dtype=torch.float32)
 2
-[FakeTensor(..., size=(s77,)), 2]
-(FakeTensor(..., size=(s77,)), 2)
-{'foo': FakeTensor(..., size=(s77,))}
-range(1, 3, 1)
+[Tensor(shape=(s77,), dtype=torch.float32), 2]
+(Tensor(shape=(s77,), dtype=torch.float32), 2)
+{'foo': Tensor(shape=(s77,), dtype=torch.float32)}
+range(1, 3)
 Employee(name='foo', id=2)
 UserDefinedListVariable(mylist)
-defaultdict(NestedUserFunctionVariable(), {})
 set()
-{'a','b'}
+{'a', 'b'}
 s77""",
+        )
+
+        FILE = StringIO()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def g(x):
+            comptime_print(collections.defaultdict(lambda: None))
+
+        g(torch.randn(2))
+
+        # it seems different pythons in CI change the
+        # function str repr. Since this doesn't seem that
+        # important, we just be very lenient
+        self.assertIn(
+            "defaultdict",
+            FILE.getvalue().strip(),
         )
 
     def test_print_graph(self):
@@ -117,7 +134,7 @@ def forward(self, L_x_ : torch.Tensor):
 
             return y + 3
 
-        def munge_disas(s):  # noqa: F841
+        def munge_disas(s):
             re.sub(
                 r"^(?: +\d+)?(?: +(-->)) \+\d+ ([A-Za-z0-9_]+)",
                 "\1 \3",
@@ -160,7 +177,7 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-- FakeTensor(..., size=(2,))
+- Tensor(shape=(2,), dtype=torch.float32)
 """,
         )
 
@@ -186,8 +203,8 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-x = FakeTensor(..., size=(2,))
-y = FakeTensor(..., size=(2,))
+x = Tensor(shape=(2,), dtype=torch.float32)
+y = Tensor(shape=(2,), dtype=torch.float32)
 """,
         )
 
@@ -271,7 +288,7 @@ y = FakeTensor(..., size=(2,))
             y = g(y)
             return y + 3
 
-        def munge_filenames(s):  # noqa: F841
+        def munge_filenames(s):
             return re.sub(r'File "[^"]+", line \d+', 'File "X", line X', s)
 
         f(torch.randn(2))

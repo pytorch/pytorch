@@ -9,6 +9,7 @@ bLoads
 bStore
 bStores
 BU
+canonicalizations
 contiguities
 contiguity
 coo
@@ -55,8 +56,11 @@ ser
 serde
 serder
 serdes
+sme
 statics
 strat
+subtile
+subtiles
 supercede
 supercedes
 te

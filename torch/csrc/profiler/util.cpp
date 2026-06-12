@@ -1,4 +1,3 @@
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/util.h>
 
@@ -7,10 +6,13 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <utility>
+
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
 #ifdef USE_DISTRIBUTED
+#include <c10/util/hash.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #endif // USE_DISTRIBUTED
 
@@ -146,7 +148,7 @@ std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs) {
   for (const auto& entry : cs) {
     std::stringstream loc;
     loc << entry.filename << '(' << entry.line << "): " << entry.funcname;
-    cs_str.push_back(loc.str());
+    cs_str.push_back(std::move(loc).str());
   }
   return cs_str;
 }
@@ -316,7 +318,7 @@ std::string ivalueToStr(const c10::IValue& val, bool isString) {
     if (isString) {
       ss << '"';
     }
-    std::string mystr = ss.str();
+    std::string mystr = std::move(ss).str();
 
     // For boolean the values that ivalue gives is "True" and "False" but
     // json only takes "true" and "false" so we convert the string to lower case
@@ -335,6 +337,7 @@ std::string ivalueToStr(const c10::IValue& val, bool isString) {
 
 std::string ivalueListToStr(const std::vector<c10::IValue>& list) {
   std::vector<std::string> concrete_str_inputs;
+  concrete_str_inputs.reserve(list.size());
   std::stringstream ss;
   for (const auto& val : list) {
     if (val.isNone()) {
@@ -342,7 +345,7 @@ std::string ivalueListToStr(const std::vector<c10::IValue>& list) {
     } else {
       ss.str("");
       ss << val;
-      concrete_str_inputs.emplace_back(ss.str());
+      concrete_str_inputs.emplace_back(std::move(ss).str());
     }
   }
   return strListToStr(concrete_str_inputs);
@@ -373,24 +376,24 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 // -- NCCL Metadata -----------------------------------------------------------
 // ----------------------------------------------------------------------------
 
-static constexpr int32_t kTruncatLength = 30;
+static constexpr int32_t kTruncateLength = 30;
 
 template <typename ListLikeType>
 static inline std::string format_list(
     ListLikeType list,
     bool truncate,
     bool with_escaped_quotes = true) {
-  if (truncate && list.size() > kTruncatLength) {
+  if (truncate && list.size() > kTruncateLength) {
     if (with_escaped_quotes == true) {
       auto x = fmt::format(
           "\"[{}, ..., {}]\"",
-          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          fmt::join(list.begin(), list.begin() + kTruncateLength - 1, ", "),
           *std::prev(list.end()));
       return x;
     } else {
       auto x = fmt::format(
           "[{}, ..., {}]",
-          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          fmt::join(list.begin(), list.begin() + kTruncateLength - 1, ", "),
           *std::prev(list.end()));
       return x;
     }
@@ -426,7 +429,7 @@ std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
         responses.push_back(std::get<int>(res));
       }
     }
-    return {true, responses};
+    return {true, std::move(responses)};
   } else if (val.isList()) {
     const auto& val_list = val.toList();
     size_t list_size = val_list.size();
@@ -441,7 +444,7 @@ std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
         responses.push_back(std::get<int>(res));
       }
     }
-    return {true, responses};
+    return {true, std::move(responses)};
   } else {
     // push back an invalid value for indices representing non-tensor inputs
     return {false, -1};
@@ -510,7 +513,24 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
         map.emplace(kP2pSrc, std::to_string(groupRanks[rank]));
       }
     }
+
+    auto seqNum = debugInfo->getSequenceNumber();
+    if (seqNum >= 0) {
+      map.emplace(kSeqNum, std::to_string(seqNum));
+
+      size_t comms_id = c10::get_hash(
+          debugInfo->getProcessGroupName(),
+          seqNum,
+          debugInfo->getIsP2P(),
+          globalRankStart,
+          globalRankStride,
+          debugInfo->getWorldSize());
+      map.emplace(kCommsId, std::to_string(comms_id));
+    }
   }
+
+  map.emplace(
+      kIsAsynchronizedOp, std::to_string(debugInfo->isAsynchronizedOp()));
 
   if (get_record_tensor_addrs_enabled()) {
     std::vector<std::string> addressList;
@@ -605,22 +625,23 @@ static std::vector<c10::IntArrayRef> getInputSizes(
     ss << "Failed to save extra arguments for flops computation of op "
        << op_name << ", min size: " << min_size
        << ", actual size: " << inputs.size();
-    TORCH_WARN(ss.str());
+    TORCH_WARN(std::move(ss).str());
     return {};
   }
   std::vector<c10::IntArrayRef> inputSizes = {};
+  inputSizes.reserve(should_be_tensor.size());
   for (auto index : should_be_tensor) {
     if (!inputs[index].isTensor()) {
       ss << "Failed to save extra arguments for flops computation of op "
          << op_name << ", input[" << index << "] must be a tensor.";
-      TORCH_WARN(ss.str());
+      TORCH_WARN(std::move(ss).str());
       return {};
     }
     at::Tensor t = inputs[index].toTensor();
     if (t.is_nested()) {
       ss << "Failed to save extra arguments for flops computation of op "
          << op_name << " with input[" << index << "] as nested tensor.";
-      TORCH_WARN(ss.str());
+      TORCH_WARN(std::move(ss).str());
       return {};
     }
     inputSizes.emplace_back(t.sizes());

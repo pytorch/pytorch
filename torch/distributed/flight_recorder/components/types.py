@@ -7,12 +7,11 @@
 import math
 import os
 from enum import auto, Enum
-from typing import (  # type: ignore[attr-defined]
-    _eval_type,
+from typing import (
+    _eval_type,  # pyrefly: ignore [missing-module-attribute]
     Any,
     Generic,
     NamedTuple,
-    Optional,
     TypeVar,
 )
 
@@ -87,7 +86,7 @@ class MatchInfo:
     or collective state that caused the mismatch.
     """
 
-    def __init__(self, state: MatchState, culprit: Optional[str] = None) -> None:
+    def __init__(self, state: MatchState, culprit: str | None = None) -> None:
         self._state = state
         self.culprit = culprit
 
@@ -153,18 +152,20 @@ class Collective(NamedTuple):
     expected_ranks: set[int]
     collective_state: str
     collective_frames: list[dict[str, str]]
-    input_numel: Optional[int] = None
-    output_numel: Optional[int] = None
-    missing_ranks: Optional[set[int]] = None
-    mismatch_collectives: Optional[dict[int, "Collective"]] = None
-    type_of_mismatch: Optional[MatchInfo] = None
+    input_numel: int | None = None
+    output_numel: int | None = None
+    missing_ranks: set[int] | None = None
+    mismatch_collectives: dict[int, "Collective"] | None = None
+    type_of_mismatch: MatchInfo | None = None
 
 
 class NCCLCall(NamedTuple):
     id: int
+    # pyrefly: ignore [bad-specialization]
     collective_id: Ref[Collective]
     group_id: str
     global_rank: int  # technically Ref[Process] once we have it
+    # pyrefly: ignore [bad-specialization]
     traceback_id: Ref[Traceback]
     collective_type: str
     sizes: list[list[int]]
@@ -208,16 +209,25 @@ COLLECTIVES = {
     "reduce",
     "_reduce_oop",
     "all_gather",
+    "all_gather_single",
+    "all_gather_v",
     "all_reduce",
     "_all_gather_base",
     "all_gather_into_tensor_coalesced",
     "reduce_scatter",
+    "reduce_scatter_single",
+    "reduce_scatter_v",
     "reduce_scatter_tensor_coalesced",
     "_reduce_scatter_base",
     "gather",
     "scatter",
     "all_to_all",
+    "all_to_all_single",
+    "all_to_all_v_single",
     "all_reduce_barrier",
+    "barrier",
+    "split",
+    "new_window",
     "allreduce_coalesced",
     "ALLGATHER_coalesced",
     "REDUCE_SCATTER_coalesced",
@@ -260,9 +270,9 @@ class EntryState:
         logger: FlightRecorderLogger,
         logger_msg: str,
         frame_formatter: Any,
-        total_numel: Optional[tuple[int, int]] = None,
-        errors: Optional[set[tuple[int, MatchInfo]]] = None,
-        missing_ranks: Optional[set[int]] = None,
+        total_numel: tuple[int, int] | None = None,
+        errors: set[tuple[int, MatchInfo]] | None = None,
+        missing_ranks: set[int] | None = None,
     ) -> None:
         logger.info(
             logger_msg,
@@ -282,7 +292,7 @@ class EntryState:
         logger.info("input sizes: %s", self.input_sizes)
         logger.info("output sizes: %s", self.output_sizes)
         logger.info("world size: %d", len(self.expected_ranks))
-        logger.info("expected ranks: %s", str(self.expected_ranks))
+        logger.info("expected ranks: %s", self.expected_ranks)
         logger.info("collective state: %s", self.collective_state)
         if errors:
             self.errors = errors
@@ -297,9 +307,9 @@ class EntryState:
     def to_collective(
         self,
         id: int,
-        errors: Optional[set[tuple[int, MatchInfo]]] = None,
-        idx_map: Optional[dict[int, int]] = None,
-        all_entries: Optional[dict[int, list[dict[str, Any]]]] = None,
+        errors: set[tuple[int, MatchInfo]] | None = None,
+        idx_map: dict[int, int] | None = None,
+        all_entries: dict[int, list[dict[str, Any]]] | None = None,
     ) -> Collective:
         if not errors:
             return Collective(
@@ -319,8 +329,10 @@ class EntryState:
                 missing_ranks=getattr(self, "missing_ranks", None),
             )
         else:
-            assert idx_map is not None, "idx_map is None"
-            assert all_entries is not None, "all_entries is None"
+            if idx_map is None:
+                raise AssertionError("idx_map is None")
+            if all_entries is None:
+                raise AssertionError("all_entries is None")
             mismatch_collectives = {}
             for rank, error in errors:
                 idx = idx_map[rank]
@@ -406,9 +418,20 @@ class Op:
     ):
         self.profiling_name = event["profiling_name"]
         comm_lib_backend, name = self.profiling_name.split(":")
-        assert comm_lib_backend in ["nccl", "xccl"], (
-            f"name formatting error? {comm_lib_backend} != 'nccl' or 'xccl'"
-        )
+        _SUPPORTED_BACKENDS = {
+            "nccl",
+            "ncclx",
+            "xccl",
+            "gloo",
+            "rccl",
+            "rcclx",
+            "mccl",
+            "hccl",
+        }
+        if comm_lib_backend not in _SUPPORTED_BACKENDS:
+            raise AssertionError(
+                f"name formatting error? {comm_lib_backend} not in {_SUPPORTED_BACKENDS}"
+            )
         parts = name.split(" ")
         type = parts[0]
         meta = parts[1] if len(parts) == 2 else None
@@ -416,16 +439,17 @@ class Op:
         # Store the hashed pg_name for accessing memberships, and original pg info for display
         self.pg_name = pg_name  # This is the hashed version used for memberships lookup
         self.original_pg_name, self.pg_desc = event["process_group"]
-        assert type in COLLECTIVES | P2P | {"coalesced"}, (
-            f"{type} is not a supported operation"
-        )
+        if type not in COLLECTIVES | P2P | {"coalesced"}:
+            raise AssertionError(f"{type} is not a supported operation")
         self.type = type
         if type == "send":
-            assert isinstance(meta, str)
+            if not isinstance(meta, str):
+                raise AssertionError
             s, d = meta.split("->")
             self._src, self._dst = int(s), int(d)
         elif type == "recv":
-            assert isinstance(meta, str)
+            if not isinstance(meta, str):
+                raise AssertionError
             d, s = meta.split("<-")
             self._dst, self._src = int(d), int(s)
         else:
@@ -453,12 +477,14 @@ class Op:
 
     @property
     def src(self) -> int:
-        assert self.type in P2P, "can't get src of non-p2p op"
+        if self.type not in P2P:
+            raise AssertionError("can't get src of non-p2p op")
         return self._src
 
     @property
     def dst(self) -> int:
-        assert self.type in P2P, "can't get dst of non-p2p op"
+        if self.type not in P2P:
+            raise AssertionError("can't get dst of non-p2p op")
         return self._dst
 
     def __repr__(self) -> str:
@@ -501,7 +527,7 @@ class Op:
                 and other.input_sizes[0]
             )
             or (
-                self.type not in ["gather"]
+                self.type != "gather"
                 and set(self.output_dtypes) != set(other.output_dtypes)
                 and self.output_sizes[0]
                 and other.output_sizes[0]

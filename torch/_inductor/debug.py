@@ -12,9 +12,10 @@ import os.path
 import pickle
 import pstats
 import shutil
+import tempfile
 import traceback
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any, IO, Optional, Union
+from typing import Any, IO
 from unittest.mock import patch
 
 import torch
@@ -22,6 +23,7 @@ from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_co
 from torch import fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
+from torch._functorch import config as functorch_config
 from torch._inductor import utils
 from torch._logging import getArtifactLogger
 from torch._logging._internal import trace_structured
@@ -33,7 +35,7 @@ from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
-from . import config, ir  # noqa: F811, this is needed
+from . import config, ir
 from .ir import ExternKernel
 from .scheduler import (
     BaseSchedulerNode,
@@ -48,15 +50,16 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 # Graph execution tracking for debugging
-GRAPH_EXECUTION_ORDER: Optional[list[dict[str, object]]] = None
+GRAPH_EXECUTION_ORDER: list[dict[str, object]] | None = None
 RECORD_GRAPH_EXECUTION: bool = False
-GRAPH_COMPILE_IDS: Optional[dict[int, Optional[str]]] = None
+GRAPH_COMPILE_IDS: dict[int, str | None] | None = None
 
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
+_RAW_DOT_GRAPH_FORMATS = OrderedSet(["dot", "raw"])
 
 
 @functools.cache
@@ -64,15 +67,24 @@ def has_dot() -> bool:
     return shutil.which("dot") is not None
 
 
+def _get_graph_output_format(fname: str | None) -> str:
+    if fname is not None:
+        _, ext = os.path.splitext(fname)
+        if ext:
+            return ext.lstrip(".")
+    return functorch_config.torch_compile_graph_format
+
+
 def draw_buffers(
     nodes: list[BaseSchedulerNode],
     print_graph: bool = False,
-    fname: Optional[str] = None,
+    fname: str | None = None,
 ) -> None:
     """
-    Draw a graph in fname.svg.
+    Draw a graph in fname.
     """
-    if not has_dot():
+    graph_format = _get_graph_output_format(fname)
+    if graph_format not in _RAW_DOT_GRAPH_FORMATS and not has_dot():
         log.warning("draw_buffers() requires `graphviz` package")
         return
 
@@ -90,6 +102,16 @@ def draw_buffers(
                 group = (group[1],)
             else:
                 group = group[1]
+        elif isinstance(group, str):
+            # extern / template / nop nodes store a string like "extern"
+            # as the group instead of a shape tuple.  Extract the real
+            # output shape from the scheduler node's first output buffer.
+            try:
+                snode = node.meta["fusion_meta"].snode
+                size = snode.get_outputs()[0].node.maybe_get_size()
+                group = tuple(size) if size else ()
+            except Exception:
+                group = ()
 
         # gather meta data
         dtype = None
@@ -97,7 +119,7 @@ def draw_buffers(
             dtype = node.data.dtype
 
         metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
-        # pyrefly: ignore [missing-attribute]
+
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
@@ -133,6 +155,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
     outputs = []
     group: Any = None
     # create call_function node for each Buffer and Kernel
+    # pyrefly: ignore [bad-assignment]
     for snode in snodes:
         if snode.is_extern():
             node_type = "extern"
@@ -162,7 +185,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
             kwargs = {"device": snode.get_device()}
         fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)  # type: ignore[arg-type]
 
-        def in_output(snode: Union[BaseSchedulerNode, FusedSchedulerNode]) -> bool:
+        def in_output(snode: BaseSchedulerNode | FusedSchedulerNode) -> bool:
             if isinstance(snode, FusedSchedulerNode):
                 return any(in_output(x) for x in snode.snodes)
             return any(
@@ -210,9 +233,9 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
 
 
 def update_orig_fx_node_name_to_buf_name(
-    nodes: Optional[SchedulerNodeList],
+    nodes: SchedulerNodeList | None,
     node_name_to_buf_name: dict[str, str],
-    parent_buf_name: Optional[str] = None,
+    parent_buf_name: str | None = None,
     n_origins: int = 0,
 ) -> None:
     if nodes is None:
@@ -230,7 +253,10 @@ def update_orig_fx_node_name_to_buf_name(
             continue
         else:
             # pyrefly: ignore [bad-argument-type, unsupported-operation]
-            assert len(children_nodes) == 1 and children_nodes[0] == node
+            if not (len(children_nodes) == 1 and children_nodes[0] == node):
+                raise AssertionError(
+                    "expected a single child node equal to the current node"
+                )
 
         ir_node = node.node
         if ir_node is None or ir_node.origins is None:
@@ -326,7 +352,7 @@ def enable_aot_logging() -> Iterator[None]:
 # _inductor_triton_kernel_to_post_grad_node_info's Debug Context
 _inductor_post_to_pre_grad_nodes: dict[str, dict[str, list[str]]] = {}
 _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
-_pre_grad_graph_id: Optional[int] = None
+_pre_grad_graph_id: int | None = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
 _inductor_kernel_provenance_debug_handle: int = 0
@@ -392,7 +418,7 @@ class DebugContext:
     _counter = itertools.count()
 
     @staticmethod
-    def create_debug_dir(folder_name: str) -> Optional[str]:
+    def create_debug_dir(folder_name: str) -> str | None:
         debug_dir = config.trace.debug_dir or get_debug_dir()
         for n in DebugContext._counter:
             dirname = os.path.join(
@@ -400,9 +426,13 @@ class DebugContext:
                 "torchinductor",
                 f"{folder_name}.{n}",
             )
-            if not os.path.exists(dirname):
-                os.makedirs(dirname)
+            try:
+                os.makedirs(dirname, exist_ok=False)
                 return dirname
+            except FileExistsError:
+                # Another process (e.g. a peer rank with the same debug_dir)
+                # created this counter slot first; advance to the next n.
+                continue
         return None
 
     def __init__(self) -> None:
@@ -413,7 +443,8 @@ class DebugContext:
     def copy(self, new_path: str) -> None:
         if not self._path:
             return
-        assert new_path.endswith(".debug"), new_path
+        if not new_path.endswith(".debug"):
+            raise AssertionError(new_path)
         from filelock import FileLock
 
         try:
@@ -433,7 +464,8 @@ class DebugContext:
         *args: Any,
         **kwargs: Any,
     ) -> IO[Any]:
-        assert self._path
+        if not self._path:
+            raise AssertionError("expected self._path to be set")
         return open(os.path.join(self._path, filename), write_mode, *args, **kwargs)
 
     @contextlib.contextmanager
@@ -444,19 +476,22 @@ class DebugContext:
         *args: Any,
         **kwargs: Any,
     ) -> Iterator[IO[Any]]:
-        assert self._path
+        if not self._path:
+            raise AssertionError("expected self._path to be set")
         with open(os.path.join(self._path, filename), write_mode, *args, **kwargs) as f:
             yield f
 
     def filename(self, suffix: str) -> str:
-        assert self._path
+        if not self._path:
+            raise AssertionError("expected self._path to be set")
         return os.path.join(self._path, suffix)
 
     def upload_tar(self) -> None:
         if config.trace.upload_tar is not None:
             import tarfile
 
-            assert self._path
+            if not self._path:
+                raise AssertionError("expected self._path to be set")
             tar_file = os.path.join(
                 self._path, f"{os.path.basename(self._path)}.tar.gz"
             )
@@ -505,9 +540,9 @@ class DebugContext:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[Any],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any | None,
     ) -> None:
         if self._prof:
             self._prof.disable()
@@ -519,7 +554,8 @@ class DebugContext:
         self._stack.close()
 
     def _save_profile_data(self) -> None:
-        assert self._prof
+        if not self._prof:
+            raise AssertionError("expected self._prof to be set")
         self._prof.dump_stats(self.filename("compile.prof"))
         with self.fopen("compile.stats") as fd:
             stats = pstats.Stats(self._prof, stream=fd)
@@ -529,7 +565,7 @@ class DebugContext:
             stats.sort_stats("tottime")
             stats.print_stats(100)
 
-    def __getattr__(self, name: str) -> Optional[Callable[..., None]]:
+    def __getattr__(self, name: str) -> Callable[..., None] | None:
         if config.trace.enabled and getattr(config.trace, name):
             try:
                 return getattr(DebugFormatter(self), name)
@@ -562,7 +598,7 @@ class DebugFormatter:
                 inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
                 save_dir = os.path.dirname(fd.name)
 
-            # dont try to use stable hash torchinductor compilation if saving real tensors
+            # don't try to use stable hash torchinductor compilation if saving real tensors
             # and avoid recursively trying to save real tensors inside of the inductor compilation
             # regardless
             stable_hash = torch._inductor.config.trace.save_real_tensors
@@ -606,7 +642,10 @@ class DebugFormatter:
         return buf.getvalue()
 
     def graph_diagram(self, nodes: SchedulerNodeList) -> None:
-        draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
+        draw_buffers(
+            nodes,
+            fname=self.filename(f"graph_diagram.{config.trace.graph_diagram_format}"),
+        )
 
     def draw_orig_fx_graph(
         self,
@@ -616,7 +655,9 @@ class DebugFormatter:
         annotate_orig_fx_with_snodes(gm, nodes)
         draw_graph(
             gm,
-            fname=self.filename("orig_fx_graph_diagram.svg"),
+            fname=self.filename(
+                f"orig_fx_graph_diagram.{config.trace.orig_fx_graph_diagram_format}"
+            ),
             clear_meta=False,
             prog=GRAPHVIZ_COMMAND_SCALABLE,
             parse_stack_trace=True,
@@ -633,7 +674,7 @@ class DebugFormatter:
         timings: dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
         elapse: float,
         precompile_elapse: float,
-        prescreening_elapse: Optional[float],
+        prescreening_elapse: float | None,
     ) -> None:
         from .ir import FixedLayout
 
@@ -649,22 +690,14 @@ class DebugFormatter:
             try:
                 layout = node.get_output_spec()
                 if isinstance(layout, FixedLayout):
-                    offset = 0
-                    try:
-                        offset = int(layout.offset)
-                    except Exception:
-                        try:
-                            offset = V.graph.sizevars.size_hint(
-                                layout.offset, fallback=0
-                            )
-                        except Exception:
-                            pass
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=[*V.graph.sizevars.size_hints(layout.size)],
-                        stride=[*V.graph.sizevars.size_hints(layout.stride)],
-                        offset=offset,
+                        size=V.graph.sizevars.optimization_hints(layout.size),
+                        stride=V.graph.sizevars.optimization_hints(layout.stride),
+                        offset=V.graph.sizevars.optimization_hint(
+                            layout.offset, fallback=0
+                        ),
                     )
                     node_info["layout"] = str(static_layout)
                 else:
@@ -681,16 +714,20 @@ class DebugFormatter:
                 pass
             try:
                 node_info["stride"] = str(
-                    V.graph.sizevars.size_hints(node.get_stride())
+                    V.graph.sizevars.optimization_hints(node.get_stride())
                 )
             except Exception:
                 pass
             try:
-                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))  # type: ignore[arg-type]
+                node_info["size"] = str(
+                    V.graph.sizevars.optimization_hints(node.get_size())
+                )  # type: ignore[arg-type]
             except Exception:
                 pass
             try:
-                node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
+                node_info["numel"] = str(
+                    V.graph.sizevars.optimization_hint(node.get_numel())
+                )
             except Exception:
                 pass
             if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
@@ -731,7 +768,7 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
     V.debug.ir_post_fusion(nodes)
 
 
-def _dump_collective_schedule(schedule: list[Union[str, None]]) -> None:
+def _dump_collective_schedule(schedule: list[str | None]) -> None:
     try:
         trace_structured(
             "artifact",
@@ -764,12 +801,12 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
     """Log per-op runtime estimates and output tensor metadata for TLParse."""
 
     try:
-        to_size_hints = V.graph.sizevars.size_hints
+        to_optimization_hints = V.graph.sizevars.optimization_hints
 
-        def to_list(x: Optional[Sequence[Any]]) -> list[Any]:
-            return list(to_size_hints(x)) if x is not None else []
+        def to_list(x: Sequence[Any] | None) -> list[Any]:
+            return list(to_optimization_hints(x)) if x is not None else []
 
-        def dtype_to_str(dtype: Any) -> Optional[str]:
+        def dtype_to_str(dtype: Any) -> str | None:
             if dtype is None:
                 return None
             s = str(dtype)
@@ -863,11 +900,19 @@ class TensorMetadataHolder:
     device: torch.device
 
 
+@dataclasses.dataclass
+class SymExprMetadataHolder:
+    pytype: str
+    expr: Any
+    hint: int | float | bool | None
+    symbol_hints: dict[str, int | float | bool]
+
+
 save_args_cnt = itertools.count()
 
 
 def create_mapping_pre_post_grad_nodes(
-    pre_grad_graph_id: Optional[int],
+    pre_grad_graph_id: int | None,
     post_to_pre_grad_nodes_json: dict[str, Any],
 ) -> dict[str, dict[str, list[str]]]:
     """
@@ -1104,10 +1149,10 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
 
 
 def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     kernel_name: str,
     is_extern: bool = False,
-) -> Optional[int]:
+) -> int | None:
     """
     Set the mapping between `kernel_name` and the post_grad nodes in `node_schedule`.
 
@@ -1128,7 +1173,10 @@ def set_kernel_post_grad_provenance_tracing(
         stack_traces: list[str] = []
         kernel_name = f"{kernel_name}:{_inductor_kernel_provenance_debug_handle}"
         if is_extern:
-            assert isinstance(node_schedule, ExternKernel)
+            if not isinstance(node_schedule, ExternKernel):
+                raise AssertionError(
+                    f"expected ExternKernel, got {type(node_schedule)}"
+                )
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
                 kernel_name, []
             )
@@ -1147,7 +1195,8 @@ def set_kernel_post_grad_provenance_tracing(
                 )
             stack_traces = list(node_schedule.get_stack_traces())
         else:
-            assert isinstance(node_schedule, list)
+            if not isinstance(node_schedule, list):
+                raise AssertionError(f"expected list, got {type(node_schedule)}")
             stack_traces_set: OrderedSet[str] = OrderedSet()
             for snode in node_schedule:
                 if snode not in (EnableReduction, DisableReduction):
@@ -1190,19 +1239,66 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     with the saved arguments using load_args_and_run_compile_fx_inner.
     """
 
-    folder = "/tmp/inductor_saved_args"
+    folder = os.path.join(tempfile.gettempdir(), "inductor_saved_args")
     if not os.path.exists(folder):
         os.mkdir(folder)
 
+    def python_value(value: Any) -> int | float | bool | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value
+        # SymPy numbers expose is_integer as a tri-state property.
+        if getattr(value, "is_integer", None) is False:
+            return float(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return float(value)
+
+    def handle_sym_expr(x: Any, pytype: str) -> SymExprMetadataHolder:
+        node = x.node
+        shape_env = node.shape_env
+        symbol_hints: dict[str, int | float | bool] = {}
+        if shape_env is not None:
+            for symbol in node.expr.free_symbols:
+                hint = shape_env.backed_var_to_val.get(symbol)
+                if hint is not None:
+                    python_hint = python_value(hint)
+                    if python_hint is not None:
+                        symbol_hints[str(symbol)] = python_hint
+        return SymExprMetadataHolder(
+            pytype,
+            node.expr,
+            python_value(node.hint),
+            symbol_hints,
+        )
+
     def handle_tensor(x: Any) -> Any:
         """
-        Pickle FakeTensor will result in error:
+        Pickle FakeTensor/SymInt will result in errors like:
         AttributeError: Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'
 
-        Convert all Tensor to metadata. This may also makes pickle faster.
+        Convert tensors and symbolic values to metadata. This may also make
+        pickle faster.
         """
+        if isinstance(x, GraphModule):
+            gm = copy.deepcopy(x)
+            for node in gm.graph.nodes:
+                node.meta = tree_map(handle_tensor, node.meta)
+            return gm
         if isinstance(x, torch.Tensor):
-            return TensorMetadataHolder(_extract_tensor_metadata(x), x.device)
+            return TensorMetadataHolder(
+                tree_map(handle_tensor, _extract_tensor_metadata(x)), x.device
+            )
+        elif isinstance(x, torch.SymInt):
+            return handle_sym_expr(x, "int")
+        elif isinstance(x, torch.SymFloat):
+            return handle_sym_expr(x, "float")
+        elif isinstance(x, torch.SymBool):
+            return handle_sym_expr(x, "bool")
         else:
             return x
 
@@ -1230,23 +1326,76 @@ load_args_and_run_compile_fx_inner({path!r})
 
 
 def load_args_and_run_compile_fx_inner(path: str) -> Any:
+    from torch._dynamo.source import ConstantSource
     from torch._inductor.compile_fx import compile_fx_inner
+    from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 
     with open(path, "rb") as f:
         args, kwargs = pickle.load(f)
 
+    shape_env = ShapeEnv()
+    symbol_cache: dict[str, Any] = {}
+
+    def restore_sym_expr(x: SymExprMetadataHolder) -> Any:
+        expr = x.expr
+        if isinstance(expr, str):
+            import sympy
+
+            import torch.utils._sympy.functions as sympy_functions
+
+            expr = sympy.sympify(expr, locals=sympy_functions.__dict__)
+        replacements = {}
+        for symbol in expr.free_symbols:
+            symbol_name = str(symbol)
+            if symbol_name not in symbol_cache:
+                hint = x.symbol_hints.get(symbol_name)
+                if hint is None:
+                    if x.hint is not None and expr == symbol:
+                        hint = x.hint
+                    else:
+                        symbol_cache[symbol_name] = shape_env.create_unbacked_symint(
+                            ConstantSource(symbol_name)
+                        ).node.expr
+                        replacements[symbol] = symbol_cache[symbol_name]
+                        continue
+                symbol_cache[symbol_name] = shape_env.create_symbol(
+                    hint,
+                    ConstantSource(symbol_name),
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                    do_not_specialize_zero_one=True,
+                )
+            replacements[symbol] = symbol_cache[symbol_name]
+        expr = expr.xreplace(replacements)
+        if x.pytype == "int":
+            return shape_env.create_symintnode(expr, hint=x.hint)
+        elif x.pytype == "float":
+            return shape_env.create_symfloatnode(expr, hint=x.hint)
+        elif x.pytype == "bool":
+            return shape_env.create_symboolnode(expr)
+        else:
+            raise AssertionError(f"Unexpected symbolic expression type: {x.pytype}")
+
     def handle_tensor(x: Any) -> Any:
-        if isinstance(x, TensorMetadataHolder):
+        if isinstance(x, GraphModule):
+            for node in x.graph.nodes:
+                node.meta = tree_map(handle_tensor, node.meta)
+            return x
+        elif isinstance(x, TensorMetadataHolder):
+            tensor_metadata = tree_map(handle_tensor, x.tensor_metadata)
             return torch._dynamo.testing.rand_strided(
-                x.tensor_metadata.shape,
-                x.tensor_metadata.stride,
-                x.tensor_metadata.dtype,
+                tensor_metadata.shape,
+                tensor_metadata.stride,
+                tensor_metadata.dtype,
                 x.device,
             )
+        elif isinstance(x, SymExprMetadataHolder):
+            return restore_sym_expr(x)
         else:
             return x
 
-    fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+    fake_mode = torch._subclasses.FakeTensorMode(
+        allow_non_fake_inputs=True, shape_env=shape_env
+    )
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)
@@ -1257,7 +1406,7 @@ def aot_inductor_minifier_wrapper(
     exported_program: torch.export.ExportedProgram,
     *,
     inductor_configs: dict[str, Any],
-    package_path: Optional[FileLike] = None,
+    package_path: FileLike | None = None,
 ) -> str:
     from torch._dynamo.debug_utils import AccuracyError
     from torch._dynamo.repro.aoti import dump_to_minify
@@ -1267,7 +1416,8 @@ def aot_inductor_minifier_wrapper(
     use_minifier = config.aot_inductor.dump_aoti_minifier
 
     gm = exported_program.module(check_guards=False)
-    assert isinstance(gm, torch.fx.GraphModule)
+    if not isinstance(gm, torch.fx.GraphModule):
+        raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
 
     args, kwargs = exported_program.example_inputs
 

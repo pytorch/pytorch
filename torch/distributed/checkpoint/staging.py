@@ -4,7 +4,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 from typing_extensions import deprecated, Protocol, runtime_checkable
 
 import torch
@@ -76,7 +76,7 @@ class AsyncStager(Protocol):
 
     def stage(
         self, state_dict: STATE_DICT_TYPE
-    ) -> Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
+    ) -> Future[STATE_DICT_TYPE] | STATE_DICT_TYPE:
         """
         Returns a "staged" copy of `state_dict`. The expectation of the staged copy is that it is
         inoculated from any updates incurred after the stage call is complete.
@@ -154,11 +154,6 @@ class DefaultStager(AsyncStager):
         staged_dict = future.result()
         stager.close()
 
-        # Context manager pattern (recommended)
-        stager = DefaultStager(config)
-        with stager:
-        result = stager.stage(state_dict)
-
     Performance Considerations:
         - Async staging provides best performance when model computation
           can overlap with staging operations
@@ -182,14 +177,12 @@ class DefaultStager(AsyncStager):
         self._staging_executor = None
         self._staging_stream = None
         if self._config.use_async_staging:
-            # pyrefly: ignore [bad-assignment]
             self._staging_executor = ThreadPoolExecutor(max_workers=1)
             if torch.accelerator.is_available():
                 # Note: stream needs to be initialized on the main thread after default cuda
                 # stream is setup/used to avoid the risk of accidentally reusing the main
                 # compute stream or in other cases kernels actually launching from the
                 # main thread.
-                # pyrefly: ignore [bad-assignment]
                 self._staging_stream = torch.Stream()
 
         if self._config.use_non_blocking_copy:
@@ -198,13 +191,13 @@ class DefaultStager(AsyncStager):
                     "Non-blocking copy requires that the current accelerator is available."
                 )
 
-        self._staging_future: Optional[Future[STATE_DICT_TYPE]] = None
+        self._staging_future: Future[STATE_DICT_TYPE] | None = None
 
     def stage(
         self,
         state_dict: STATE_DICT_TYPE,
         **kwargs: Any,
-    ) -> Union[STATE_DICT_TYPE, Future[STATE_DICT_TYPE]]:
+    ) -> STATE_DICT_TYPE | Future[STATE_DICT_TYPE]:
         """
         This function is responsible for staging staging the state_dict.
         See class docstring for more details on staging.
@@ -247,6 +240,7 @@ class DefaultStager(AsyncStager):
             self._staging_stream.synchronize() if self._staging_stream else torch.accelerator.synchronize()
         else:
             state_dict = self._state_dict_stager.stage(state_dict, non_blocking=False)
+
         return state_dict
 
     def close(self) -> None:
@@ -265,6 +259,7 @@ class DefaultStager(AsyncStager):
         """
         if self._staging_executor:
             self._staging_executor.shutdown(wait=True)
+        self._state_dict_stager.close()
 
     def synchronize_staging(self) -> None:
         """
@@ -298,14 +293,14 @@ class BlockingAsyncStager(AsyncStager):
 
         Args:
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
-                at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
+                at the cost of increased memory usage. Additionally, if this parameter is set to True, it's the expectation
                 that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
             type_check: Whether to perform a type check during cpu_offload. Defaults to False.
 
         """
         self.cache_staged_state_dict = cache_staged_state_dict
         self.type_check = type_check
-        self.state_dict_cache: Optional[STATE_DICT_TYPE] = None
+        self.state_dict_cache: STATE_DICT_TYPE | None = None
 
     def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
         """
@@ -351,11 +346,10 @@ class _ReplicationStager(AsyncStager):
         pg: ProcessGroup,
         timeout: timedelta = timedelta(minutes=30),
         device: torch.device = torch.device("cpu"),
-        storage_dir: Optional[str] = None,
+        storage_dir: str | None = None,
     ):
         self._pg = pg
         self._timeout = timeout
-        # pyrefly: ignore [read-only]
         self._device = device
         self._transport = PGTransport(pg, timeout, device, None)
 
@@ -368,7 +362,7 @@ class _ReplicationStager(AsyncStager):
 
     def stage(
         self, state_dict: STATE_DICT_TYPE
-    ) -> Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
+    ) -> Future[STATE_DICT_TYPE] | STATE_DICT_TYPE:
         """
         Stage the state_dict by replicating it across ranks. Returns a state_dict representing
         the received replica.

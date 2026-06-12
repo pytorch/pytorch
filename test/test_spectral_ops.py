@@ -11,17 +11,15 @@ import doctest
 import inspect
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample, TEST_WITH_ROCM,
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, requires_mkl, first_sample, TEST_WITH_ROCM,
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf, toleranceOverride, tol)
+     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, toleranceOverride, tol)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
-from torch.testing._internal.common_cuda import SM53OrLater
 from torch._prims_common import corresponding_complex_dtype
 
-from typing import Optional
 from packaging import version
 
 
@@ -123,8 +121,6 @@ def skip_helper_for_fft(device, dtype):
 
     if device_type == 'cpu':
         raise unittest.SkipTest("half and complex32 are not supported on CPU")
-    if not SM53OrLater:
-        raise unittest.SkipTest("half and complex32 are only supported on CUDA device with SM>53")
 
 
 # Tests of functions related to Fourier analysis in the torch.fft namespace
@@ -225,8 +221,11 @@ class TestFFT(TestCase):
                 }
 
                 y = backward(forward(x, **kwargs), **kwargs)
-                if x.dtype is torch.half and y.dtype is torch.complex32:
-                    # Since type promotion currently doesn't work with complex32
+                if (
+                    (x.dtype is torch.half and y.dtype is torch.complex32) or
+                    (x.dtype is torch.bfloat16 and y.dtype is torch.bcomplex32)
+                ):
+                    # Since type promotion currently doesn't work with [b]complex32
                     # manually promote `x` to complex32
                     x = x.to(torch.complex32)
                 # For real input, ifft(fft(x)) will convert to complex
@@ -329,8 +328,6 @@ class TestFFT(TestCase):
         default_msg = "Unsupported dtype"
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
             err_msg = default_msg
-        elif dtype is torch.half and device_type == 'cuda' and not SM53OrLater:
-            err_msg = "cuFFT doesn't support signals of half type with compute capability less than SM_53"
         else:
             err_msg = default_msg
         with self.assertRaisesRegex(RuntimeError, err_msg):
@@ -449,7 +446,6 @@ class TestFFT(TestCase):
          allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
-        # FIXME: https://github.com/pytorch/pytorch/issues/108205
         errMsg = "dims must be unique"
         with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(0, 1, 0))
@@ -604,7 +600,7 @@ class TestFFT(TestCase):
                 else:
                     numpy_fn = getattr(np.fft, fname)
 
-                def fn(t: torch.Tensor, s: Optional[list[int]], dim: list[int] = (-2, -1), norm: Optional[str] = None):
+                def fn(t: torch.Tensor, s: list[int] | None, dim: list[int] = (-2, -1), norm: str | None = None):
                     return torch_fn(t, s, dim, norm)
 
                 torch_fns = (torch_fn, torch.jit.script(fn))
@@ -1583,7 +1579,7 @@ class TestFFT(TestCase):
         self.assertEqual(i_original.repeat(4, 1), i_multi, atol=1e-6, rtol=0, exact_dtype=True)
 
     @onlyCUDA
-    @skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_stft_window_device(self, device):
         # Test the (i)stft window must be on the same device as the input
         x = torch.randn(1000, dtype=torch.complex64)

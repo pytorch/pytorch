@@ -153,7 +153,7 @@ struct ArgumentSpec {
   bool isPresent(size_t i) const {
     return optional_presence[i];
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -181,7 +181,7 @@ struct TORCH_API ArgumentSpecCreator {
     ENTER_OBJECT, // same as ENTER_TUPLE, but the input is a class
     LEAVE, // pop the top-most list from the stack
     SKIP, // consume an element from the top-most list, and discard
-    SPECIALIZE_OPTIONAL_TENSOR, // consume a optional tensor for the top-most
+    SPECIALIZE_OPTIONAL_TENSOR, // consume an optional tensor for the top-most
                                 // list, and add it to the ArgSpec key being
                                 // created
     SPECIALIZE_TENSOR, // consume a tensor for the top-most
@@ -308,7 +308,7 @@ struct CompleteArgumentSpec {
   size_t size() const {
     return ninputs;
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -488,13 +488,14 @@ struct hash<c10::TensorType> {
 
 template <>
 struct hash<torch::jit::ArgumentSpec> {
-  size_t operator()(const torch::jit::ArgumentSpec& spec) const {
+  size_t operator()(const torch::jit::ArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };
 template <>
 struct hash<torch::jit::CompleteArgumentSpec> {
-  size_t operator()(const torch::jit::CompleteArgumentSpec& spec) const {
+  size_t operator()(
+      const torch::jit::CompleteArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };

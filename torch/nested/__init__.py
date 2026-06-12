@@ -103,9 +103,7 @@ def as_nested_tensor(
         layout = torch.strided
     if layout == torch.strided:
         if isinstance(ts, Tensor):
-            # contiguous() might be necessary to get flattened view.
-            # we could probably be more precise about when to do this as an optimization
-            buffer = ts.contiguous().view(-1).to(device=device, dtype=dtype)
+            buffer = ts.reshape(-1).to(device=device, dtype=dtype)
             nested_sizes = torch.tensor([t.shape for t in ts])
             return torch._nested_view_from_buffer(
                 buffer,
@@ -113,7 +111,10 @@ def as_nested_tensor(
                 *torch._nested_compute_contiguous_strides_offsets(nested_sizes),
             )
         else:
-            assert isinstance(ts, list)
+            if not isinstance(ts, list):
+                raise AssertionError(
+                    f"Expected ts to be a list, but got {type(ts).__name__}"
+                )
             return torch._nested_tensor_from_tensor_list(ts, dtype, None, device, None)
     elif layout == torch.jagged:
         if isinstance(ts, Tensor):
@@ -139,7 +140,10 @@ def as_nested_tensor(
         else:
             from torch.nested._internal.nested_tensor import jagged_from_list
 
-            assert isinstance(ts, list)
+            if not isinstance(ts, list):
+                raise AssertionError(
+                    f"Expected ts to be a list, but got {type(ts).__name__}"
+                )
             nt, _ = jagged_from_list(ts, offsets=None, device=device, dtype=dtype)
             return nt
     else:

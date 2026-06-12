@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -15,7 +14,7 @@ __all__ = ["Kumaraswamy"]
 
 def _moments(a, b, n):
     """
-    Computes nth moment of Kumaraswamy using using torch.lgamma
+    Computes nth moment of Kumaraswamy using torch.lgamma
     """
     arg1 = 1 + n / a
     log_value = torch.lgamma(arg1) + torch.lgamma(b) - torch.lgamma(arg1 + b)
@@ -50,9 +49,9 @@ class Kumaraswamy(TransformedDistribution):
 
     def __init__(
         self,
-        concentration1: Union[Tensor, float],
-        concentration0: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        concentration1: Tensor | float,
+        concentration0: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         self.concentration1, self.concentration0 = broadcast_all(
             concentration1, concentration0

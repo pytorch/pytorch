@@ -5,10 +5,12 @@ import itertools
 import json
 import sys
 import tempfile
+import token
 from pathlib import Path
 from unittest import mock
 
 from tools.linter.adapters._linter.block import _get_decorators
+from tools.linter.adapters._linter.python_file import PythonFile
 from tools.linter.adapters.docstring_linter import (
     DocstringLinter,
     file_summary,
@@ -25,10 +27,13 @@ if _PARENT in _PATH:
 else:
     from .linter_test_case import LinterTestCase
 
-TEST_FILE = Path("tools/test/docstring_linter_testdata/python_code.py.txt")
-TEST_FILE2 = Path("tools/test/docstring_linter_testdata/more_python_code.py.txt")
-TEST_BLOCK_NAMES = Path("tools/test/docstring_linter_testdata/block_names.py.txt")
-ARGS = "--max-class=5", "--max-def=6", "--min-docstring=16"
+ROOT = Path("tools/test/docstring_linter_testdata")
+TEST_FILE = ROOT / "python_code.py.txt"
+TEST_FILE2 = ROOT / "more_python_code.py.txt"
+TEST_BLOCK_NAMES = ROOT / "block_names.py.txt"
+TEST_INTERFACE = ROOT / "interface_example.py.txt"
+
+ARGS = "--max-class=4", "--max-def=5", "--min-docstring=16"
 
 
 class TestDocstringLinter(LinterTestCase):
@@ -65,6 +70,39 @@ class TestDocstringLinter(LinterTestCase):
             # Now there are no failures
             run("after.txt", grandfather)
             run("after.json", grandfather, report)
+
+    def test_interface(self):
+        pf = PythonFile("test", path=TEST_FILE2)
+
+        b = pf.blocks[0]
+        self.assertEqual(b.full_name, "a_very_very_long")
+        self.assertEqual(b.start_line, 1)
+        self.assertEqual(b.end_line, 6)
+        self.assertEqual(b.tokens[b.end].type, token.NAME)
+        self.assertEqual(b.tokens[b.end].string, "pass")
+
+        b = pf.blocks[5]
+        self.assertEqual(b.full_name, "LintInitInit")
+        self.assertEqual(b.start_line, 26)
+        self.assertEqual(b.end_line, 32)
+        self.assertEqual(b.tokens[b.end].string, "pass")
+
+        actual = [b.full_name for b in pf.blocks]
+        expected = [
+            "a_very_very_long",
+            "LintInit",
+            "LintInit.__init__",
+            "LintInitClass",
+            "LintInitClass.__init__",
+            "LintInitInit",
+            "LintInitInit.__init__",
+            "f1",
+            "f2",
+            "TinyInterface",
+            "TinyInterface.__init__",
+        ]
+
+        self.assertEqual(expected, actual)
 
     def test_report(self):
         actual = _dumps(_data())

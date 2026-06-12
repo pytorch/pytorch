@@ -1,14 +1,16 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
+from torch._inductor.kernel.mm_common import load_kernel_template
 
 from .. import config as inductor_config, ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings, make_pointwise, make_reduction, transform_args
+from ..runtime.runtime_utils import get_max_y_grid
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -21,6 +23,7 @@ from ..utils import (
     use_ck_gemm_template,
     use_cpp_bmm_template,
     use_cutlass_template,
+    use_nv_universal_gemm_template,
     use_triton_template,
 )
 from ..virtualized import ops, V
@@ -41,93 +44,47 @@ aten = torch.ops.aten
 
 
 @SymbolicGridFn
-def bmm_grid(b, m, n, meta, *, cdiv):
-    return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), b, 1)
+def bmm_grid(b, m, n, meta, *, cdiv, max):
+    tiles = cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"])
+    # Split batch across grid_y and grid_z to avoid exceeding CUDA grid_y limit.
+    # When b <= max_y_grid, grid_z = 1 and behavior is identical to the original.
+    max_y_grid = get_max_y_grid()
+    grid_z = max(cdiv(b, max_y_grid), 1)
+    grid_y = cdiv(b, grid_z)
+    return (tiles, grid_y, grid_z)
 
 
+# We define each template kernel in a separate file which is the name of the input to load_kernel_template
+# (e.g. triton_bmm for templates/triton_bmm.py.jinja).
+# If you are adding a new template, please follow that pattern and add a new file with your implementation in the templates folder.
 bmm_template = TritonTemplate(
     name="bmm",
     grid=bmm_grid,
-    source=r"""
-{{def_kernel("A", "B")}}
-    M = {{size("A", -2)}}
-    N = {{size("B", -1)}}
-    K = {{size("A", -1)}}
-
-    stride_aq = {{stride("A", 0)}}
-    stride_am = {{stride("A", 1)}}
-    stride_ak = {{stride("A", 2)}}
-
-    stride_bq = {{stride("B", 0)}}
-    stride_bk = {{stride("B", 1)}}
-    stride_bn = {{stride("B", 2)}}
-
-    # based on triton.ops.matmul
-    pid = tl.program_id(0).to(INDEX_DTYPE)
-    grid_m = (M + BLOCK_M - 1) // BLOCK_M
-    grid_n = (N + BLOCK_N - 1) // BLOCK_N
-
-    # re-order program ID for better L2 performance
-    width = GROUP_M * grid_n
-    group_id = pid // width
-    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
-    pid_m = group_id * GROUP_M + (pid % group_size)
-    pid_n = (pid % width) // (group_size)
-    tl.assume(pid_m >= 0)
-    tl.assume(pid_n >= 0)
-
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
-        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    else:
-        ram = rm % M
-    if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
-        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
-    else:
-        rbn = rn % N
-
-    rk = tl.arange(0, BLOCK_K)
-
-    idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
-    A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak + idx_q*stride_aq)
-    B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn + idx_q*stride_bq)
-
-    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for k in range(K, 0, -BLOCK_K):
-        if EVEN_K:
-            a = tl.load(A)
-            b = tl.load(B)
-        else:
-            a = tl.load(A, mask=rk[None, :] < k, other=0.)
-            b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
-        A += BLOCK_K * stride_ak
-        B += BLOCK_K * stride_bk
-
-    # rematerialize rm and rn to save registers
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
-    idx_m = rm[:, None]
-    idx_n = rn[None, :]
-    mask = (idx_m < M) & (idx_n < N)
-
-    # inductor generates a suffix
-    {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
-""",
+    source=load_kernel_template("triton_bmm"),
     cache_codegen_enabled_for_template=True,
 )
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
-    "at::_bmm_out_dtype_cuda",
+    "at::_bmm_out_dtype_xpu" if torch.xpu._is_compiled() else "at::_bmm_out_dtype_cuda",
     name="bmm_dtype",
     op_overload=aten.bmm.dtype_out,
 )
 aten_baddbmm = ExternKernelChoice(
     torch.baddbmm, "at::baddbmm_out", op_overload=aten.baddbmm.out
+)
+
+# This path targets vmapped dot products and similar tiny vector contractions,
+# where extern bmm launch overhead and lost fusion dominate. Keep the threshold
+# conservative so reductions proven to be larger than the threshold continue
+# through the normal bmm machinery.
+_BMM_DOT_K_DECOMPOSE_THRESHOLD = 32
+_BMM_DOT_DECOMPOSE_DTYPES = (
+    torch.float16,
+    torch.bfloat16,
+    torch.float32,
+    torch.float64,
 )
 
 
@@ -136,6 +93,36 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.bmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    sizevars = V.graph.sizevars
+    dtype = mat1.get_dtype()
+    device_type = mat1.get_device().type
+
+    def dim_is_one_or_hint(dim):
+        # The mul+sum decomposition is valid for any M/N. The size-1 hint is
+        # only a profitability signal, so avoid specializing dynamic dims here.
+        return sizevars.optimization_hint(dim, fallback=2) == 1
+
+    def dim_is_not_known_gt(dim, threshold):
+        # Do not use optimization_hint() for K: the same symbolic FX graph can
+        # be code-cache reused across different concrete K values.
+        return not sizevars.statically_known_gt(dim, threshold)
+
+    if (
+        out_dtype is None
+        and device_type in ("cuda", "xpu")
+        and device_type == mat2.get_device().type
+        and dtype == mat2.get_dtype()
+        and dtype in _BMM_DOT_DECOMPOSE_DTYPES
+        and dim_is_one_or_hint(mat1.get_size()[1])
+        and dim_is_one_or_hint(mat2.get_size()[2])
+        and dim_is_not_known_gt(mat1.get_size()[2], _BMM_DOT_K_DECOMPOSE_THRESHOLD)
+    ):
+        # Preserve dot-shaped bmm as pointwise/reduction IR so surrounding
+        # operations can fuse instead of dispatching a tiny extern bmm.
+        mat1 = L.unsqueeze(mat1, -1)
+        mat2 = L.unsqueeze(mat2, 1)
+        return L.sum_(L.mul(mat1, mat2), axis=2)
+
     if all(x.get_device().type == "cpu" for x in [mat1, mat2]):
         # decompose to small ops when memory bound
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
@@ -225,24 +212,22 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     aten_handler: ExternKernelChoice = aten_bmm
     aten_extra_kwargs = {}
     if out_dtype:
-        assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
+        if mat1.get_device().type not in ("cuda", "xpu"):
+            raise AssertionError("out_dtype is only supported for CUDA or XPU")
         aten_handler = aten_bmm_dtype
         aten_extra_kwargs = {"out_dtype": out_dtype}
 
     choices: list[ChoiceCaller] = []
 
     # Collect all templates for unified call
-    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
+    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     kwarg_overrides = {}
 
     if use_aten_gemm_kernels():
         templates_to_use.append(aten_handler)
         kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
-    if use_triton_template(layout, check_max_autotune=False) and (
-        out_dtype is None or out_dtype == mat1.get_dtype()
-    ):
-        # TODO: add out_dtype support for Triton Template
+    if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
 
     # Single unified call for all templates
@@ -262,7 +247,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         and use_cutlass_template(layout, m, n, k)
         and _use_cutlass_for_op(name)
     ):
-        from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
+        from ..codegen.cutlass.gemm_template import CUTLASS3xGemmTemplate
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, kernel_inputs.nodes()
@@ -280,7 +265,13 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2):
+        from ..codegen.nv_universal_gemm import add_nv_universal_gemm_choices
+
+        add_nv_universal_gemm_choices(choices, layout, kernel_inputs)
+
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
 
 
 @L.register_lowering(aten.baddbmm)
@@ -328,7 +319,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     choices: list[ChoiceCaller] = []
 
     # Collect all templates for unified call
-    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
+    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     if use_aten_gemm_kernels():
         templates_to_use.append(aten_baddbmm)
 
@@ -340,4 +331,5 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
     )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node

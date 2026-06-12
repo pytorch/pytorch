@@ -15,6 +15,8 @@ from torch.backends import (
     PropModule,
 )
 
+from . import rnn
+
 
 try:
     from torch._C import _cudnn
@@ -27,7 +29,7 @@ except ImportError:
 #
 # to globally disable CuDNN/MIOpen
 
-__cudnn_version: Optional[int] = None
+__cudnn_version: int | None = None
 
 if _cudnn is not None:
 
@@ -82,6 +84,20 @@ if _cudnn is not None:
                         )
                 else:
                     raise RuntimeError(base_error_msg)
+            # Check if cuDNN version is compatible with available CUDA devices
+            if torch.cuda.is_available() and not torch.version.hip:
+                min_cc = min(
+                    [
+                        torch.cuda.get_device_capability(i)
+                        for i in range(torch.cuda.device_count())
+                    ]
+                )
+                if __cudnn_version >= 91100 and min_cc < (7, 5):
+                    raise RuntimeError(
+                        f"cuDNN version {__cudnn_version} is not compatible with devices with SM < 7.5. "
+                        f"Please install a version of PyTorch with a compatible cuDNN version. "
+                        f"https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix"
+                    )
 
         return True
 
@@ -142,6 +158,7 @@ def set_flags(
     _deterministic=None,
     _allow_tf32=None,
     _fp32_precision="none",
+    _depthwise_kernel=None,
 ):
     orig_flags = (
         torch._C._get_cudnn_enabled(),
@@ -150,6 +167,7 @@ def set_flags(
         torch._C._get_cudnn_deterministic(),
         torch._C._get_cudnn_allow_tf32(),
         torch._C._get_fp32_precision_getter("cuda", "all"),
+        torch._C._get_cudnn_depthwise_kernel(),
     )
     if _enabled is not None:
         torch._C._set_cudnn_enabled(_enabled)
@@ -163,6 +181,8 @@ def set_flags(
         torch._C._set_cudnn_allow_tf32(_allow_tf32)
     if _fp32_precision is not None:
         torch._C._set_fp32_precision_setter("cuda", "all", _fp32_precision)
+    if _depthwise_kernel is not None:
+        torch._C._set_cudnn_depthwise_kernel(_depthwise_kernel)
     return orig_flags
 
 
@@ -174,6 +194,7 @@ def flags(
     deterministic=False,
     allow_tf32=True,
     fp32_precision="none",
+    depthwise_kernel="auto",
 ):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(
@@ -183,6 +204,7 @@ def flags(
             deterministic,
             allow_tf32,
             fp32_precision,
+            depthwise_kernel,
         )
     try:
         yield
@@ -215,10 +237,13 @@ class CudnnModule(PropModule):
         torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32
     )
     conv = _FP32Precision("cuda", "conv")
-    rnn = _FP32Precision("cuda", "rnn")
     fp32_precision = ContextProp(
         _get_fp32_precision_getter("cuda", "all"),
         _set_fp32_precision_setter("cuda", "all"),
+    )
+    depthwise_kernel = ContextProp(
+        torch._C._get_cudnn_depthwise_kernel,
+        torch._C._set_cudnn_depthwise_kernel,
     )
 
 
@@ -231,4 +256,6 @@ enabled: bool
 deterministic: bool
 benchmark: bool
 allow_tf32: bool
+fp32_precision: str
 benchmark_limit: int
+depthwise_kernel: str

@@ -15,5 +15,6 @@ def _prefix_regex() -> list[str]:
     )
 
     path_prefixes = sorted({os.path.abspath(i) for i in raw_paths}, reverse=True)
-    assert all(isinstance(i, str) for i in path_prefixes)
+    if not all(isinstance(i, str) for i in path_prefixes):
+        raise AssertionError("all path_prefixes must be strings")
     return [i + os.sep for i in path_prefixes]

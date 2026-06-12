@@ -1,6 +1,5 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/TensorBase.h>
-#include <c10/core/Layout.h>
 #include <c10/util/irange.h>
 
 namespace at {

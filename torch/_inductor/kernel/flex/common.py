@@ -5,7 +5,7 @@ import math
 from collections.abc import Sequence
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -18,7 +18,7 @@ from torch.utils._pytree import tree_map, tree_map_only
 if TYPE_CHECKING:
     from torch._inductor.codegen.cuda_combined_scheduling import _IntLike
 else:
-    _IntLike = Union[int, sympy.Expr]
+    _IntLike = int | sympy.Expr
 
 
 from ...ir import (
@@ -31,7 +31,6 @@ from ...ir import (
     IRNode,
     MutationLayoutSHOULDREMOVE,
     Scatter,
-    ShapeAsConstantBuffer,
     StorageBox,
     Subgraph,
     TensorBox,
@@ -47,14 +46,49 @@ from ...select_algorithm import realize_inputs
 from ...utils import load_template
 
 
-SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
+SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
+
+
+def _flex_kernel_options_example(kind: str) -> str:
+    match kind:
+        case "backward":
+            return (
+                "kernel_options={'bwd_BLOCK_M1': 32, 'bwd_BLOCK_N1': 32, "
+                "'bwd_BLOCK_M2': 32, 'bwd_BLOCK_N2': 32, "
+                "'bwd_num_stages': 1, 'bwd_num_warps': 4}"
+            )
+        case _:
+            return (
+                "kernel_options={'fwd_BLOCK_M': 32, 'fwd_BLOCK_N': 64, "
+                "'fwd_num_stages': 1, 'fwd_num_warps': 4}"
+            )
+
+
+def _flex_kernel_tuning_options(kind: str) -> str:
+    match kind:
+        case "backward":
+            return (
+                "BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2, num_warps, and "
+                "num_stages; use the bwd_ prefix to set backward-only options"
+            )
+        case "decode":
+            return (
+                "BLOCK_M, BLOCK_N, num_warps, and num_stages; use the fwd_ "
+                "prefix to set decode-only options"
+            )
+        case _:
+            return (
+                "BLOCK_M, BLOCK_N, num_warps, and num_stages; use the fwd_ "
+                "prefix to set forward-only options"
+            )
 
 
 def zeros_and_scatter_lowering(shape: list[int], indices, values):
     """To support backwards on captured buffers we register a specific lowering for our specific custom up"""
     # Always accumulate into fp32 then cast
     grad = _full(0, values.get_device(), torch.float32, shape)
-    assert isinstance(grad, TensorBox)
+    if not isinstance(grad, TensorBox):
+        raise AssertionError(f"Expected TensorBox, got {type(grad)}")
     grad.realize()
     x_size = grad.get_size()
     values = to_dtype(values, grad.get_dtype())
@@ -77,7 +111,8 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
 
     values = expand(values, expected_vals_size)
     device = grad.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError("device must not be None")
     scatter = Scatter(
         device=device,
         dtype=grad.get_dtype(),
@@ -97,23 +132,21 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
 
 def get_fwd_subgraph_outputs(
     subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
-) -> list[Optional[ComputedBuffer]]:
+) -> list[ComputedBuffer | None]:
     subgraph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
     mask_graph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         mask_graph_buffer
         if isinstance(mask_graph_buffer, Sequence)
         else [mask_graph_buffer]
     )
-    # pyrefly: ignore [not-iterable]
+
     return [*subgraph_buffer, *mask_graph_buffer]
 
 
 def build_subgraph_module_buffer(
-    args: list[Union[TensorBox, ShapeAsConstantBuffer]],
+    args: list[TensorBox],
     graph_module: torch.fx.GraphModule,
 ) -> SubgraphResults:
     """This function's goal is to take in the required args and produce the subgraph buffer
@@ -137,22 +170,23 @@ def build_subgraph_module_buffer(
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*args)
 
-    def convert_output_node_to_buffer(output_buffer) -> Optional[ComputedBuffer]:
+    def convert_output_node_to_buffer(output_buffer) -> ComputedBuffer | None:
         if output_buffer is None:
             return None
         if isinstance(output_buffer, ComputedBuffer):
             # These nodes are coming from the output of zeros_and_scatter
             return output_buffer
-        assert isinstance(output_buffer, TensorBox), (
-            "The output node for flex attention's subgraph must be a TensorBox, but got: ",
-            type(output_buffer),
-        )
-        assert isinstance(output_buffer.data, StorageBox), (
-            "The output node for the flex attention subgraph must be a StorageBox, but got: ",
-            type(output_buffer),
-        )
+        if not isinstance(output_buffer, TensorBox):
+            raise AssertionError(
+                f"The output node for flex attention's subgraph must be a TensorBox, but got: {type(output_buffer)}"
+            )
+        if not isinstance(output_buffer.data, StorageBox):
+            raise AssertionError(
+                f"The output node for the flex attention subgraph must be a StorageBox, but got: {type(output_buffer.data)}"
+            )
         device = output_buffer.data.get_device()
-        assert device is not None
+        if device is None:
+            raise AssertionError("device must not be None for output buffer")
         subgraph_buffer = ComputedBuffer(
             name=None,
             layout=FlexibleLayout(
@@ -167,22 +201,92 @@ def build_subgraph_module_buffer(
     return tree_map(convert_output_node_to_buffer, pw_subgraph.graph_outputs)
 
 
-def build_subgraph_buffer(
-    args: list[Union[TensorBox, ShapeAsConstantBuffer]], subgraph: Subgraph
-) -> SubgraphResults:
+def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> SubgraphResults:
     return build_subgraph_module_buffer(args, subgraph.graph_module)
 
 
-def maybe_realize(args: list[Optional[IRNode]]):
+def maybe_realize(args: list[IRNode | None]):
     """Accepts a list of optional IRNodes and returns a list of realized IRNodes"""
     return tree_map(
         lambda x: (
-            realize_inputs(x)
-            if x is not None and not isinstance(x, sympy.Symbol)
-            else x
+            realize_inputs(x) if x is not None and not isinstance(x, sympy.Expr) else x
         ),
         args,
     )
+
+
+def realize_captures_for_cutedsl(buffers):
+    """Realize captured buffers for CuteDSL, preserving views and plain inputs.
+
+    Unlike maybe_realize (used by the Triton path), CuteDSL needs physical
+    tensors passed at runtime. Pointwise/computed captures must be materialized
+    into a fresh buffer whose layout matches the logical shape the subgraph
+    indexes. ReinterpretView captures use unique synthetic inputs so aliased
+    views keep distinct call-site size/stride/offset metadata while the kernel
+    indexes each captured view argument from offset zero.
+
+    Realized captures are registered on V.graph so the CuteDSL template can
+    resolve view nodes without explicit plumbing from callers.
+    """
+    from ...ir import ExternKernel, FixedLayout, InputBuffer, ReinterpretView
+
+    view_captures: dict[str, ReinterpretView] = {}
+
+    def _add_alignment_check_for_input(input_buffer: InputBuffer) -> None:
+        # Preserved captures can be used by vectorized CuteDSL loads, so make
+        # sure the wrapper still emits copy_if_misaligned for graph inputs.
+        # Normal template inputs are already in inputs_to_check; captures need
+        # to be added explicitly because they were not direct template inputs
+        # when alignment-check inputs were selected.
+        name = input_buffer.get_name()
+        graph_input_names = getattr(V.graph, "graph_input_names", [])
+        if name in graph_input_names:
+            idx = graph_input_names.index(name)
+            inputs_to_check = list(V.graph.inputs_to_check or ())
+            if idx not in inputs_to_check:
+                V.graph.inputs_to_check = [*inputs_to_check, idx]
+
+    def _realize(x):
+        if x is None or isinstance(x, sympy.Expr):
+            return x
+        realized = ExternKernel.realize_input(x)
+        if isinstance(realized, StorageBox) and realized.is_input_buffer():
+            # Plain graph inputs are commonly represented as
+            # TensorBox(StorageBox(InputBuffer(...))).  Preserve the underlying
+            # input/view instead of materializing it with ExternKernel.copy_input.
+            realized = realized.data
+        if isinstance(realized, ReinterpretView):
+            layout = realized.get_layout()
+            capture_index = len(V.graph._cutedsl_capture_nodes) + len(view_captures)
+            name = V.graph.qualify_name(f"cutedsl_capture{capture_index}")
+            view_captures[name] = realized
+            # Give each captured view a logical input name so aliasing views do
+            # not collapse to their shared base buffer.
+            return InputBuffer(
+                name=name,
+                layout=FixedLayout(
+                    layout.device,
+                    layout.dtype,
+                    layout.size,
+                    layout.stride,
+                    is_pinned=layout.is_pinned,
+                ),
+            )
+        if isinstance(realized, InputBuffer):
+            _add_alignment_check_for_input(realized)
+            return realized
+        return ExternKernel.copy_input(realized)
+
+    buffers = tree_map(_realize, buffers)
+    freeze_irnodes(buffers)
+
+    for buf in tree_map_only(IRNode, lambda x: x, buffers) if buffers else []:
+        if isinstance(buf, IRNode) and (name := buf.maybe_get_name()):
+            V.graph._cutedsl_capture_nodes[name] = buf
+    # Keep the original view nodes for call-site reinterpret_tensor emission.
+    V.graph._cutedsl_capture_nodes.update(view_captures)
+
+    return buffers
 
 
 def freeze_irnodes(tree: Any) -> Any:
@@ -205,8 +309,8 @@ def create_placeholder(
     name: str,
     dtype: torch.dtype,
     device: torch.device,
-    size: Optional[list[int]] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    size: list[int] | None = None,
+) -> TensorBox:
     """Creates a placeholder input buffers for producing subgraph_output."""
     input_buffer = InputBuffer(
         name=name,
@@ -226,9 +330,8 @@ def construct_strides(
 ) -> Sequence[_IntLike]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
-    assert len(sizes) == len(fill_order), (
-        "Length of sizes must match the length of the fill order"
-    )
+    if len(sizes) != len(fill_order):
+        raise AssertionError("Length of sizes must match the length of the fill order")
     strides: list[_IntLike] = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension
@@ -257,12 +360,23 @@ def infer_dense_strides(
         The behavior of empty_like()
     """
     fill_order = get_fill_order(orig_strides, V.graph.sizevars.shape_env)
-    return construct_strides(size, fill_order)
+    strides = construct_strides(size, fill_order)
+
+    # Attention kernels require stride[-1]=1 for efficient memory access.
+    # Ensure this by moving last dim to front of fill_order if needed.
+    if strides[-1] != 1:
+        last_dim = len(size) - 1
+        fill_order = list(fill_order)
+        fill_order.remove(last_dim)
+        fill_order = [last_dim] + fill_order
+        strides = construct_strides(size, fill_order)
+
+    return strides
 
 
 def create_indices_fake(x) -> torch.Tensor:
     """Create a fake indices that is used for autotuning."""
-    size = [V.graph.sizevars.size_hint(i) for i in x.get_size()]
+    size = V.graph.sizevars.optimization_hints(x.get_size())
     indices = torch.arange(0, size[-1], dtype=x.get_dtype(), device=x.get_device())
     indices = indices.expand(size).contiguous()
     return indices
@@ -284,8 +398,10 @@ def create_num_blocks_fake_generator(sparse_indices):
     """
 
     def create_num_blocks_fake(x) -> torch.Tensor:
-        num_blocks_for_autotuning = V.graph.sizevars.size_hint(sparse_indices.shape[-1])
-        size = [V.graph.sizevars.size_hint(i) for i in x.get_size()]
+        num_blocks_for_autotuning = V.graph.sizevars.optimization_hint(
+            sparse_indices.shape[-1]
+        )
+        size = V.graph.sizevars.optimization_hints(x.get_size())
         return torch.full(
             size,
             num_blocks_for_autotuning,

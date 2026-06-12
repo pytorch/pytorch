@@ -230,14 +230,6 @@ class TORCH_API CppFunction final {
     return makeFromBoxedKernel(c10::BoxedKernel::makeFallthrough());
   }
 
-  /// \private
-  ///
-  /// Creates a function that raises an error saying that named tensors
-  /// are not supported when called.
-  static CppFunction makeNamedNotSupported() {
-    return makeFromBoxedKernel(c10::BoxedKernel::makeNamedNotSupported());
-  }
-
   /// Create a function from a boxed kernel function with signature
   /// `void(const OperatorHandle&, Stack*)`; i.e., they receive a
   /// stack of arguments in a boxed calling convention, rather than
@@ -984,7 +976,7 @@ class TorchLibraryInit final {
   static const torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_##ns( \
       torch::Library::DEF,                                                     \
       &TORCH_LIBRARY_init_##ns,                                                \
-      #ns,                                                                     \
+      C10_STRINGIZE(ns),                                                                     \
       std::nullopt,                                                            \
       __FILE__,                                                                \
       __LINE__);                                                               \
@@ -1014,7 +1006,7 @@ class TorchLibraryInit final {
       TORCH_LIBRARY_FRAGMENT_static_init_##ns##_, uid)(           \
       torch::Library::FRAGMENT,                                   \
       &C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid), \
-      #ns,                                                        \
+      C10_STRINGIZE(ns),                                                        \
       std::nullopt,                                               \
       __FILE__,                                                   \
       __LINE__);                                                  \
@@ -1076,7 +1068,7 @@ class TorchLibraryInit final {
       TORCH_LIBRARY_IMPL_static_init_##ns##_##k##_, uid)(                 \
       torch::Library::IMPL,                                               \
       &C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid),       \
-      #ns,                                                                \
+      C10_STRINGIZE(ns),                                                                \
       std::make_optional(c10::DispatchKey::k),                            \
       __FILE__,                                                           \
       __LINE__);                                                          \

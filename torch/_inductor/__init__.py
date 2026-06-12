@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import dataclasses
 import io
 import logging
 import os
@@ -8,11 +9,12 @@ from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch.fx
 
-from .standalone_compile import CompiledArtifact  # noqa: TC001
+from .standalone_compile import CompiledArtifact, DynamicShapesType  # noqa: TC001
 
 
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
+    from torch._subclasses import FakeTensorMode
     from torch.export import ExportedProgram
     from torch.export.pt2_archive._package import AOTICompiledModel
     from torch.export.pt2_archive._package_weights import Weights
@@ -33,7 +35,7 @@ log = logging.getLogger(__name__)
 def compile(
     gm: torch.fx.GraphModule,
     example_inputs: list[InputType],
-    options: Optional[dict[str, Any]] = None,
+    options: dict[str, Any] | None = None,
 ):
     """
     Compile a given FX graph with TorchInductor.  This allows compiling
@@ -57,8 +59,8 @@ def aoti_compile_and_package(
     _deprecated_unused_args=None,
     _deprecated_unused_kwargs=None,
     *,
-    package_path: Optional[FileLike] = None,
-    inductor_configs: Optional[dict[str, Any]] = None,
+    package_path: FileLike | None = None,
+    inductor_configs: dict[str, Any] | None = None,
 ) -> str:
     """
     Compiles the exported program with AOTInductor, and packages it into a .pt2
@@ -123,7 +125,7 @@ def aoti_compile_and_package(
             "as we can get this information from exported_program.example_inputs."
         )
 
-    assert (
+    if not (
         package_path is None
         or (
             isinstance(package_path, (io.IOBase, IO))
@@ -134,9 +136,10 @@ def aoti_compile_and_package(
             isinstance(package_path, (str, os.PathLike))
             and os.fspath(package_path).endswith(".pt2")
         )
-    ), (
-        f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
-    )
+    ):
+        raise AssertionError(
+            f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
+        )
 
     inductor_configs = inductor_configs or {}
     inductor_configs["aot_inductor.package"] = True
@@ -151,7 +154,6 @@ def aoti_compile_and_package(
     return aot_inductor_minifier_wrapper(
         _aoti_compile_and_package_inner,
         exported_program,
-        # pyrefly: ignore [bad-argument-type]
         package_path=package_path,
         inductor_configs=inductor_configs,
     )
@@ -161,12 +163,12 @@ def _aoti_compile_and_package_inner(
     gm: torch.nn.Module,
     # flat_example_inputs: List[Any],
     args: tuple[Any],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: dict[str, Any] | None = None,
     *,
     load_and_run: bool = False,
-    check_accuracy: Optional[str] = None,
-    package_path: Optional[Union[str, io.BytesIO]] = None,
-    inductor_configs: Optional[dict[str, Any]] = None,
+    check_accuracy: str | None = None,
+    package_path: str | io.BytesIO | None = None,
+    inductor_configs: dict[str, Any] | None = None,
 ):
     """
     See docstring for aoti_compile_and_package.
@@ -182,18 +184,23 @@ def _aoti_compile_and_package_inner(
     """
 
     if check_accuracy:
-        assert kwargs is None or len(kwargs) == 0, (
-            "when checking for accuracy, the inputs must have been flattened and kwargs is None"
-        )
+        if not (kwargs is None or len(kwargs) == 0):
+            raise AssertionError(
+                "when checking for accuracy, the inputs must have been flattened and kwargs is None"
+            )
 
     from .package import package_aoti
 
-    assert isinstance(gm, torch.fx.GraphModule)
+    if not isinstance(gm, torch.fx.GraphModule):
+        raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
 
     kwargs = kwargs or {}
 
     aoti_files = aot_compile(gm, args, kwargs, options=inductor_configs)
-    assert isinstance(aoti_files, list)
+    if not isinstance(aoti_files, list):
+        raise AssertionError(
+            f"expected aoti_files to be a list, got {type(aoti_files)}"
+        )
 
     if package_path is None:
         path = [
@@ -210,7 +217,10 @@ def _aoti_compile_and_package_inner(
         package_path = path[0] + ".pt2"
 
     res = package_aoti(package_path, aoti_files)
-    assert res == package_path
+    if res != package_path:
+        raise AssertionError(
+            f"expected res == package_path, got {res} != {package_path}"
+        )
 
     if load_and_run or check_accuracy:
         compiled_model = aoti_load_package(package_path)
@@ -273,10 +283,10 @@ def aoti_load_package(
 def aot_compile(
     gm: torch.fx.GraphModule,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: dict[str, Any] | None = None,
     *,
-    options: Optional[dict[str, Any]] = None,
-) -> Union[str, list[Union[str, Weights]], torch.fx.GraphModule]:
+    options: dict[str, Any] | None = None,
+) -> str | list[str | Weights] | torch.fx.GraphModule:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 
@@ -335,7 +345,7 @@ lite_mode_options = {
 
 
 def list_mode_options(
-    mode: Optional[str] = None, dynamic: Optional[bool] = None
+    mode: str | None = None, dynamic: bool | None = None
 ) -> dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
@@ -407,11 +417,11 @@ def standalone_compile(
     gm: torch.fx.GraphModule,
     example_inputs: list[InputType],
     *,
-    dynamic_shapes: Literal[
-        "from_example_inputs", "from_tracing_context", "from_graph"
-    ] = "from_graph",
-    options: Optional[dict[str, Any]] = None,
+    dynamic_shapes: DynamicShapesType = "from_graph",
+    options: dict[str, Any] | None = None,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
+    donate_graph_module: bool = False,
+    fake_mode: FakeTensorMode | None = None,
 ) -> CompiledArtifact:
     """
     Precompilation API for inductor.
@@ -435,6 +445,12 @@ def standalone_compile(
             If "from_example_inputs", we will specialize the graph on the
             example_inputs.
         options: Inductor compilation options
+        donate_graph_module: If True, standalone_compile takes ownership of
+            the graph module and may mutate it, avoiding an internal deepcopy.
+            Defaults to False for backwards compatibility.
+        fake_mode: Optional FakeTensorMode to use when
+            dynamic_shapes="from_example_inputs". The mode must have a ShapeEnv.
+            When omitted, a fresh FakeTensorMode is created as before.
 
     Returns:
         CompiledArtifact that can be saved to disk or invoked directly.
@@ -443,5 +459,17 @@ def standalone_compile(
 
     options = options if options else {}
     return standalone_compile(
-        gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options, aot=aot
+        gm,
+        example_inputs,
+        dynamic_shapes=dynamic_shapes,
+        options=options,
+        aot=aot,
+        donate_graph_module=donate_graph_module,
+        fake_mode=fake_mode,
     )
+
+
+@dataclasses.dataclass
+class _CudagraphAnnotation:
+    fwd: bool | None
+    bwd: bool | None

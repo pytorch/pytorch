@@ -17,6 +17,19 @@ aten = torch.ops.aten
 
 
 class TestRegisterSharding(DTensorTestBase):
+    def tearDown(self):
+        super().tearDown()
+        # Clean up any custom ops registered during tests to avoid test pollution
+        # This addresses the concern about proper deregistration of custom ops
+        import torch._custom_op
+
+        keys = list(torch._custom_op.impl.global_registry.keys())
+        for key in keys:
+            if key.startswith("test_dtensor::"):
+                torch._custom_op.impl.global_registry[key]._destroy()
+        if hasattr(torch.ops, "test_dtensor"):
+            delattr(torch.ops, "test_dtensor")
+
     @with_comms
     def test_softmax_fwd(self):
         # After registering the custom softmax sharding strategy,
@@ -143,6 +156,32 @@ class TestRegisterSharding(DTensorTestBase):
         expected_values, expected_indices = torch.min(x, dim=1, keepdim=True)
         self.assertEqual(result[0].full_tensor(), expected_values)
         self.assertEqual(result[1].full_tensor(), expected_indices)
+
+    @with_comms
+    def test_register_sharding_non_tensor_first_arg(self):
+        # Test that get_mesh_from_args works when the first arg is not a DTensor
+        # Regression test for https://github.com/pytorch/pytorch/issues/167915
+        @torch.library.custom_op("test_dtensor::scalar_first_arg", mutates_args=())
+        def scalar_first_arg(name: str, x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @scalar_first_arg.register_fake
+        def _(name, x):
+            return x.clone()
+
+        @register_sharding(torch.ops.test_dtensor.scalar_first_arg.default)
+        def scalar_first_arg_sharding(name, x):
+            return [([Replicate()], [None, Replicate()])]
+
+        mesh = self.build_device_mesh()
+        x = torch.randn(4, 4, device=self.device_type)
+        x_dt = distribute_tensor(x, mesh, [Replicate()])
+
+        # This should not raise "Cannot find device mesh from args"
+        result = torch.ops.test_dtensor.scalar_first_arg("test", x_dt)
+
+        self.assertIsInstance(result, DTensor)
+        self.assertEqual(result.full_tensor(), x)
 
 
 if __name__ == "__main__":

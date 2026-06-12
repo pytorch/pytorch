@@ -3,8 +3,10 @@
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/native/transformers/xpu/sdp_utils.h>
 #include <c10/util/Array.h>
 #include <torch/library.h>
+#include <utility>
 
 namespace {
 bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
@@ -74,11 +76,6 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
   return sdp::check_tensor_dtype(params, supported_dtypes, debug);
 }
 
-bool can_use_flash_attention(sdp::sdp_params const& params, bool debug) {
-  // Currently, XPU fallbacks flash attention to overridable
-  return can_use_overrideable_attention(params, debug);
-}
-
 bool can_use_cudnn_attention(sdp::sdp_params const& params, bool debug) {
   if (debug) {
     TORCH_WARN("XPU don't support SDPA cudnn attention backend.");
@@ -86,11 +83,82 @@ bool can_use_cudnn_attention(sdp::sdp_params const& params, bool debug) {
   return false;
 }
 
-bool can_use_mem_efficien_attention(sdp::sdp_params const& params, bool debug) {
-  if (debug) {
-    TORCH_WARN("XPU don't support SDPA mem efficient attention backend.");
+int64_t minimum_gemm_alignment(sdp::sdp_params const& params) {
+  bool is_half = (params.query.dtype() == at::kHalf) ||
+      (params.query.dtype() == at::kBFloat16);
+  int64_t matmul_alignment_mn = 4;
+  int64_t bits_per_scalar = is_half ? 16 : 32;
+  matmul_alignment_mn = std::max(matmul_alignment_mn, 128 / bits_per_scalar);
+
+  return matmul_alignment_mn;
+}
+
+bool check_head_dim_size_mem_efficient(
+    sdp::sdp_params const& params,
+    bool debug) {
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  const int64_t alignment = minimum_gemm_alignment(params);
+  if (!(query_size_last == params.key.sym_size(-1) &&
+        query_size_last % alignment == 0 && query_size_last > 0 &&
+        value_size_last % alignment == 0 && value_size_last > 0)) {
+    if (debug) {
+      TORCH_WARN(
+          "Mem efficient attention requires last dimension of inputs to be divisible by ",
+          alignment,
+          ". ",
+          "Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          params.key.sym_size(-1),
+          ", Value.size(-1): ",
+          params.value.sym_size(-1),
+          " instead.");
+    }
+    return false;
   }
-  return false;
+  return true;
+}
+
+bool can_use_mem_efficient_attention(
+    sdp::sdp_params const& params,
+    bool debug) {
+  // Define gate functions that determine if a mem efficient can be run
+  constexpr auto general_constraints =
+      c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
+          sdp::check_runtime_disabled_mem_efficient,
+          sdp::check_tensor_shapes,
+          check_head_dim_size_mem_efficient);
+  for (auto& constraint : general_constraints) {
+    if (!constraint(params, debug)) {
+      return false;
+    }
+  }
+  if (has_for_nested_inputs(params)) {
+    constexpr auto nested_constraints =
+        c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
+            sdp::check_requires_grad_and_nested,
+            sdp::check_batch_size_nested,
+            sdp::check_for_seq_len_0_nested_tensor);
+    for (auto& constraint : nested_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+  }
+  if (has_only_dense_inputs(params)) {
+    constexpr auto dense_constraints =
+        c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
+            sdp::check_nonzero_sequence_lengths_dense,
+            sdp::check_last_dim_stride_equals_1_dense<false>,
+            sdp::check_batch_size_and_num_heads_dense<false>);
+    for (auto& constraint : dense_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 bool priority_order_init = false;
@@ -101,8 +169,8 @@ std::array<sdp::SDPBackend, sdp::num_backends> priority_order(
     priority_order_init = true;
     const std::vector<int64_t> priority_order = {
         static_cast<int64_t>(at::SDPBackend::overrideable),
-        static_cast<int64_t>(at::SDPBackend::math),
         static_cast<int64_t>(at::SDPBackend::flash_attention),
+        static_cast<int64_t>(at::SDPBackend::math),
         static_cast<int64_t>(at::SDPBackend::efficient_attention),
         static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
     at::globalContext().setSDPPriorityOrder(priority_order);
@@ -117,7 +185,7 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   auto& ctx = at::globalContext();
   // use overridable linked to onednn as overridable implementation
   if (!ctx.userEnabledMathSDP() && !ctx.userEnabledOverrideableSDP() &&
-      !ctx.userEnabledFlashSDP()) {
+      !ctx.userEnabledFlashSDP() && !ctx.userEnabledMemEfficientSDP()) {
     return sdp::SDPBackend::error;
   }
 
@@ -142,10 +210,8 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
         break;
       case sdp::SDPBackend::flash_attention:
         if (ctx.userEnabledFlashSDP() &&
-            can_use_flash_attention(kernel_params, print_debug)) {
-          TORCH_WARN_ONCE(
-              "SDPA Flash Attention backend is not supported on XPU, falling back to OVERRIDEABLE backend.");
-          return sdp::SDPBackend::overrideable;
+            sdp::can_use_flash_attention(kernel_params, print_debug)) {
+          return sdp::SDPBackend::flash_attention;
         }
         break;
       case sdp::SDPBackend::cudnn_attention:
@@ -156,8 +222,10 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
         break;
       case sdp::SDPBackend::efficient_attention:
         if (ctx.userEnabledMemEfficientSDP() &&
-            can_use_mem_efficien_attention(kernel_params, print_debug)) {
-          TORCH_CHECK(false, "Invalid backend");
+            can_use_mem_efficient_attention(kernel_params, print_debug)) {
+          TORCH_WARN_ONCE(
+              "SDPA Memory Efficient Attention backend is not supported on XPU, falling back to math backend.");
+          return sdp::SDPBackend::math;
         }
         break;
       default:
@@ -172,13 +240,13 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
 
   print_debug = true;
   TORCH_WARN("Flash attention kernel not used because:");
-  can_use_flash_attention(kernel_params, print_debug);
+  sdp::can_use_flash_attention(kernel_params, print_debug);
   TORCH_WARN("Overrideable attention kernel not used because:");
   can_use_overrideable_attention(kernel_params, print_debug);
   TORCH_WARN("CuDNN attention kernel not used because:");
   can_use_cudnn_attention(kernel_params, print_debug);
   TORCH_WARN("Memory Efficient attention kernel not used because:");
-  can_use_mem_efficien_attention(kernel_params, print_debug);
+  can_use_mem_efficient_attention(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel. Aborting execution.")
   return sdp::SDPBackend::error;
 }
@@ -282,15 +350,15 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   auto philox_seed = at::empty({}, at::dtype(at::kLong));
   auto philox_offset = at::empty({}, at::dtype(at::kLong));
   return std::make_tuple(
-      output,
-      logsumexp,
+      std::move(output),
+      std::move(logsumexp),
       /* cum_seq_q */ at::Tensor(),
       /* cum_seq_k */ at::Tensor(),
       seq_len_q,
       seq_len_kv,
-      philox_seed,
-      philox_offset,
-      debug_attn_mask);
+      std::move(philox_seed),
+      std::move(philox_offset),
+      std::move(debug_attn_mask));
 }
 
 REGISTER_XPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_xpu);

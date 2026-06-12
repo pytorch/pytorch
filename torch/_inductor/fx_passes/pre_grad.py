@@ -22,6 +22,7 @@ from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
 from .. import config
+from ..custom_graph_pass import get_custom_graph_passes
 from ..fx_utils import matches_module_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
@@ -42,6 +43,10 @@ GraphTransformObserver = functools.partial(
 )
 
 log = logging.getLogger(__name__)
+
+apply_gumbel_max_trick_pass = PatternMatcherPass(
+    pass_name="apply_gumbel_max_trick_pass"
+)
 
 efficient_conv_bn_eval_pass = PatternMatcherPass(
     pass_name="efficient_conv_bn_eval_pass"
@@ -166,8 +171,12 @@ def use_matmul_fuse_lce_replace_first_LCE(graph):
 
 
 @init_once_fakemode
-def lazy_init():
-    from . import efficient_conv_bn_eval, split_cat  # noqa: F401
+def lazy_init(input_device: torch.device | None = None):
+    from . import (  # noqa: F401  # noqa: F401
+        apply_gumbel_max_trick,
+        efficient_conv_bn_eval,
+        split_cat,
+    )
 
     if config.is_fbcode():
         from . import fb  # type: ignore[attr-defined]  # noqa: F401
@@ -304,14 +313,16 @@ def pre_grad_passes(
         else:
             # We only log the graph with changes to avoid the excessive compilation time
             # https://fb.workplace.com/groups/257735836456307/permalink/633533465543207/
+            numpy_compat_normalization(gm.graph)
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
-            numpy_compat_normalization(gm.graph)
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
                 pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
-            group_batch_fusion_passes(gm.graph, pre_grad=True)
+            GraphTransformObserver(gm, "group_batch_fusion_passes").apply_graph_pass(
+                lambda graph: group_batch_fusion_passes(graph, pre_grad=True)
+            )
             for pass_name in config.pre_grad_fusion_options:
                 # skip all patterns for group batch fusions
                 if pass_name in PRE_GRAD_FUSIONS or pass_name == "normalization_pass":
@@ -336,12 +347,18 @@ def pre_grad_passes(
                         ),
                     )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
-            efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
+            GraphTransformObserver(gm, "efficient_conv_bn_eval_pass").apply_graph_pass(
+                efficient_conv_bn_eval_pass.apply
+            )
+            GraphTransformObserver(gm, "apply_gumbel_max_trick_pass").apply_graph_pass(
+                apply_gumbel_max_trick_pass.apply
+            )
 
-    if config.pre_grad_custom_pass is not None:
+    for pre_grad_custom_pass in get_custom_graph_passes(config.pre_grad_custom_pass):
         GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(
-            config.pre_grad_custom_pass
+            pre_grad_custom_pass
         )
+
     stable_topological_sort(gm.graph)
 
     from .quantization import quant_lift_up
@@ -415,16 +432,23 @@ def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Removes all identity layers from the module.
     """
-
-    class IdentityRemover(torch.fx.Transformer):
-        def call_module(self, target, args, kwargs):
-            if isinstance(self.submodules[target], nn.Identity):
-                assert len(args) == 1
-                return args[0]
-            else:
-                return super().call_module(target, args, kwargs)
-
-    return IdentityRemover(gm).transform()
+    graph = gm.graph
+    work_done = False
+    for module_name, module in gm.named_modules():
+        if type(module) is nn.Identity:
+            for node in list(graph.find_nodes(op="call_module", target=module_name)):
+                if len(node.args) != 1:
+                    raise AssertionError(
+                        f"expected 1 arg for identity node, got {len(node.args)}"
+                    )
+                input_node = node.args[0]
+                node.replace_all_uses_with(input_node)
+                graph.erase_node(node)
+                work_done = True
+    if work_done:
+        graph.lint()
+        gm.recompile()
+    return gm
 
 
 def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModule:
@@ -618,8 +642,12 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
 
 class NormalizedLinearNode:
     def __init__(self, node: torch.fx.Node) -> None:
-        assert node.op == "call_function"
-        assert node.target is torch.nn.functional.linear
+        if node.op != "call_function":
+            raise AssertionError(f"expected call_function node, got {node.op}")
+        if node.target is not torch.nn.functional.linear:
+            raise AssertionError(
+                f"expected torch.nn.functional.linear target, got {node.target}"
+            )
         self.node: torch.fx.Node = node
 
     def get_input(self) -> torch.fx.Node:
@@ -643,8 +671,12 @@ class NormalizedLinearNode:
 
 class NormalizedMatmulNode:
     def __init__(self, node: torch.fx.Node) -> None:
-        assert node.op == "call_function"
-        assert node.target in [torch.bmm, torch.matmul]
+        if node.op != "call_function":
+            raise AssertionError(f"expected call_function node, got {node.op}")
+        if node.target not in [torch.bmm, torch.matmul]:
+            raise AssertionError(
+                f"expected torch.bmm or torch.matmul target, got {node.target}"
+            )
         self.node: torch.fx.Node = node
 
     def get_input(self) -> torch.fx.Node:
@@ -705,11 +737,23 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
 
         if user and is_pointwise_unary(user):
             with g.inserting_before(node):
+                arg_not_provided = object()
 
-                def cat_args(tensors, dim=0):
-                    return tensors, dim
+                def cat_args(
+                    tensors,
+                    dim=arg_not_provided,
+                    axis=arg_not_provided,
+                    out=None,
+                ):
+                    if dim is arg_not_provided:
+                        dim = 0
+                    if axis is not arg_not_provided:
+                        dim = axis
+                    return tensors, dim, out
 
-                tensors, dim = cat_args(*node.args, **node.kwargs)
+                tensors, dim, out = cat_args(*node.args, **node.kwargs)
+                if out is not None or dim is None:
+                    continue
                 new_kwargs = {
                     name: val for name, val in user.kwargs.items() if name != "input"
                 }

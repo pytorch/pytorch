@@ -5,7 +5,6 @@ import functools
 import unittest
 from collections.abc import Callable
 from copy import deepcopy
-from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -32,13 +31,13 @@ from torch.testing._internal.common_distributed import (
     sm_is_or_higher_than,
 )
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_LINUX, run_tests
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 DIM = 2000
 
@@ -90,11 +89,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self,
         *,
         no_sync: bool,
-        setup_func: Optional[Callable] = None,
+        setup_func: Callable | None = None,
         no_inductor: bool = False,
         no_compile_forward: bool = False,
         checkpoint: bool = False,
-        device: Union[str, torch.device],
+        device: str | torch.device,
     ):
         self.create_pg(device)
         torch._dynamo.config.optimize_ddp = "python_reducer"
@@ -179,6 +178,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         )
         dist.destroy_process_group()
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/160597")
     def test_compile_cpu(self):
         # Test the coalesced_op with CPU.
         torch._inductor.config._fuse_ddp_communication_passes = [
@@ -251,6 +251,28 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @skip_if_lt_x_gpu(2)
     def test_compile_backward_only(self):
         self._test_compile(no_sync=False, no_compile_forward=True, device=device_type)
+
+    def test_ddp_optimizer_splits_graph(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        torch._dynamo.config.optimize_ddp = "python_reducer"
+
+        model = Net()
+        compiled_model = torch.compile(replicate(model), fullgraph=False)
+
+        input = torch.randn([1, DIM])
+        loss = compiled_model(input).sum()
+
+        with compiled_autograd._enable(compiler_fn()):
+            loss.backward()
+
+        self.assertGreater(counters["inductor"]["ddp_buckets"], 0)
+
+        dist.destroy_process_group()
 
     def _test_bucketing(self, init_process_group=True, loop=1):
         if init_process_group:
@@ -367,10 +389,10 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
 class DDP_TP_Test(InductorTestCase):
     def setUp(self):
-        # Hmm, why a specific set_device call for rank 0?
+        super().setUp()
         self.rank = 0
         self.world_size = 4
-        torch.get_device_module(device_type).set_device(device_type)
+        torch.get_device_module(device_type).set_device(self.rank)
 
         store = FakeStore()
         dist.init_process_group(

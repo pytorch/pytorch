@@ -42,13 +42,140 @@ def _reload_python_module(
 def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return
-    ptxas = Path(__file__).absolute().parents[2] / "bin" / "ptxas"
+    ptxas = Path(__file__).absolute().parents[1] / "bin" / "ptxas"
     if not ptxas.exists():
         return
     if ptxas.is_file() and os.access(ptxas, os.X_OK):
         os.environ["TRITON_PTXAS_PATH"] = str(ptxas)
     else:
         warnings.warn(f"{ptxas} exists but is not an executable")
+
+
+def _set_triton_libdevice_path() -> None:
+    """
+    Use the CUDA toolkit's libdevice instead of Triton's bundled version.
+    This ensures Triton's libdevice calls match CUDA eager numerics for bitwise
+    precision.  Gated by config.eager_numerics.use_pytorch_libdevice and by
+    config.emulate_precision_casts, which also requests eager-like numerics.
+    """
+    from torch._inductor import config
+
+    if not (
+        config.eager_numerics.use_pytorch_libdevice or config.emulate_precision_casts
+    ):
+        return
+
+    _set_triton_libdevice_path_impl()
+
+
+def _set_triton_libdevice_path_impl() -> None:
+    import torch
+
+    if torch.version.cuda is None:
+        return
+
+    try:
+        from triton import knobs
+    except ImportError:
+        return
+
+    env_path = os.environ.get("TRITON_LIBDEVICE_PATH")
+    if env_path is not None:
+        knobs.nvidia.libdevice_path = env_path
+        return
+
+    if knobs.nvidia.libdevice_path is not None:
+        return
+
+    try:
+        from torch.utils.cpp_extension import CUDA_HOME
+
+        if CUDA_HOME is None:
+            warnings.warn(
+                "CUDA_HOME not set; using Triton's bundled libdevice which may "
+                "cause minor precision differences in pow operations. "
+                "To fix: set TRITON_LIBDEVICE_PATH to your CUDA toolkit's libdevice, "
+                "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/libdevice/libdevice.10.bc",
+                stacklevel=3,
+            )
+            return
+        libdevice = Path(CUDA_HOME) / "nvvm" / "libdevice" / "libdevice.10.bc"
+        if libdevice.is_file():
+            knobs.nvidia.libdevice_path = str(libdevice)
+            # Also set env var so subprocess compile workers inherit it
+            os.environ["TRITON_LIBDEVICE_PATH"] = str(libdevice)
+        else:
+            warnings.warn(
+                f"CUDA libdevice not found at {libdevice}; using Triton's bundled "
+                "libdevice which may cause minor precision differences in pow operations. "
+                "To fix: set TRITON_LIBDEVICE_PATH to your CUDA toolkit's libdevice, "
+                "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/libdevice/libdevice.10.bc",
+                stacklevel=3,
+            )
+    except ImportError:
+        warnings.warn(
+            "torch.utils.cpp_extension not available; using Triton's bundled "
+            "libdevice which may cause minor precision differences in pow operations. "
+            "To fix: set TRITON_LIBDEVICE_PATH to your CUDA toolkit's libdevice, "
+            "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/libdevice/libdevice.10.bc",
+            stacklevel=3,
+        )
+
+
+def _worker_compile_pycodecache_kernel(
+    kernel_name: str,
+    source_code: str,
+    main_suffix: str,
+    extra_env: dict[str, str],
+    precompile_metadata: dict[str, Any] | None = None,
+) -> tuple[str, str, int]:
+    """
+    Subprocess worker for PyCodeCache-based kernel compilation.
+
+    Writes source to PyCodeCache, loads the module, validates the entry point,
+    and optionally triggers real GPU compilation (MLIR -> PTX -> CUBIN) via a
+    _precompile entry point. Compiled artifacts are persisted to disk cache so
+    the parent process can load them without recompilation.
+
+    Used by both CuteDSL and NV Universal GEMM backends.
+    """
+    # No need to restore: this runs in a subprocess worker that exits after returning.
+    os.environ.update(extra_env)
+
+    start_ns = time.time_ns()
+
+    import torch._inductor.codecache as codecache
+
+    key, path = codecache.PyCodeCache.write(source_code)
+    mod = codecache.PyCodeCache.load_by_key_path(key, path)
+
+    main_func_name = f"{kernel_name}_{main_suffix}"
+    if not hasattr(mod, main_func_name):
+        available = [name for name in dir(mod) if callable(getattr(mod, name))]
+        raise RuntimeError(
+            f"Could not find kernel function '{main_func_name}'. "
+            f"Available callables: {available}"
+        )
+
+    if precompile_metadata is not None:
+        precompile_fn_name = f"{kernel_name}_precompile"
+        precompile_fn = getattr(mod, precompile_fn_name, None)
+        if precompile_fn is not None:
+            precompile_fn(**precompile_metadata)
+        else:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Precompile metadata was provided but module has no %s "
+                "— the scheduling layer expected this template to support "
+                "subprocess precompilation. Kernel will compile lazily on "
+                "first call instead.",
+                precompile_fn_name,
+            )
+
+    elapsed_ns = time.time_ns() - start_ns
+    linecache.clearcache()
+    return key, path, elapsed_ns // 1000
 
 
 def _worker_compile_triton(
@@ -58,6 +185,15 @@ def _worker_compile_triton(
 ) -> tuple[CachingAutotuner, int]:
     _set_triton_ptxas_path()
     os.environ.update(extra_env)
+    # Set libdevice path if passed via env from main process
+    libdevice_path = extra_env.get("TRITON_LIBDEVICE_PATH")
+    if libdevice_path:
+        try:
+            from triton import knobs
+
+            knobs.nvidia.libdevice_path = libdevice_path
+        except ImportError:
+            pass
     from torch._inductor import config
 
     with config.patch(extra_config):

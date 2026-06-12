@@ -13,7 +13,7 @@ Global flags for aot autograd
 
 import os
 import sys
-from typing import Literal, Optional, TYPE_CHECKING
+from typing import Literal, TYPE_CHECKING
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -22,6 +22,9 @@ from torch.utils._config_module import Config, install_config_module
 _save_config_ignore = [
     # callable not serializable
     "joint_custom_pass",
+    # callable configs with uuid() for caching, or raw callables
+    "activation_memory_budget_runtime_estimator",
+    "activation_memory_budget_solver",
 ]
 
 
@@ -32,7 +35,7 @@ functionalize_rng_ops = False
 # can be useful for debugging if we are incorrectly creating meta fake tensors
 fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", "1") != "0"
 
-# Enables optional asserts in hotpath code to check for errors.  If
+# Enables optional asserts in hotpath code to check for errors. If
 # you are seeing weird accuracy problems, try turning this on.
 # This is currently off by default as it will harm tracing time,
 # but it is on by default for aot_eager.
@@ -51,6 +54,16 @@ treat_parameters_as_free_to_save = True
 
 # Applies CSE to the graph before partitioning
 cse = True
+
+# When the partitioner's _size_of encounters a (Fake)ScriptObject in node
+# metadata, it has no general way to know the object's true memory footprint:
+# a ScriptObject may hold tensors internally. By default we raise rather than
+# guess. Enabling this flag makes _size_of assume such objects are zero size,
+# which unblocks dynamic-shapes compilation of models containing ScriptObject
+# parameters (e.g. embedding-table configs from FBGEMM) at the cost of
+# soundness. This is a temporary escape hatch until we have a principled way to
+# probe the size of a (Fake)ScriptObject.
+unsafe_treat_script_objects_as_zero_size = False
 
 from torch._environment import is_fbcode
 
@@ -71,12 +84,35 @@ autograd_cache_allow_custom_autograd_functions: bool = Config(
 # need to add env vars or make it configurable
 bundled_autograd_cache: bool = False
 
+bypass_autograd_cache_key: bool = False
+
 # Whether or not to normalize placeholder names in graphs
-# from dynaom in AOTAutogradCache
+# from dynamo in AOTAutogradCache
 autograd_cache_normalize_inputs = not is_fbcode()
 
+# Enable debug mode at first invocation to check if custom ops are valid.
+# When enabled, this checks that custom operators don't violate aliasing constraints.
+#
+# check_custom_op_aliasing: Controls whether to run the custom op aliasing check at all.
+#   - When True: The check runs on first invocation of compiled functions.
+#   - When False: The check is skipped entirely.
+#
+# error_on_custom_op_aliasing: Controls behavior when a violation is detected.
+#   Only has effect when check_custom_op_aliasing is True.
+#   - When True: Raises RuntimeError on aliasing violations.
+#   - When False: Emits UserWarning on aliasing violations.
+#
+# Deprecated: Custom ops returning aliased outputs is deprecated and will
+# become an error in a future version of PyTorch. Currently error_on_custom_op_aliasing
+# is True in CI unless explicitly overridden.
+check_custom_op_aliasing = True
+error_on_custom_op_aliasing: bool = Config(
+    env_name_force="TORCHINDUCTOR_ERROR_ON_CUSTOM_OP_ALIASING",
+    default=bool(os.getenv("CI")),
+)
 
-def remote_autograd_cache_default() -> Optional[bool]:
+
+def remote_autograd_cache_default() -> bool | None:
     if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
         return True
     if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "0":
@@ -118,7 +154,7 @@ view_replay_for_aliased_outputs = not is_fbcode()
 max_dist_from_bw = 1000
 
 
-# Bans recomputation of nodes that are reading from nodes that is far before
+# Bans recomputation of nodes that are reading from nodes that are far before
 # the current node
 ban_recompute_used_far_apart = True
 # Breaks up long chain of fusible ops, as otherwise we can have an arbitrarily
@@ -139,6 +175,17 @@ ban_recompute_reductions = True
 # Prevents the partitioner from ever saving views (i.e. always recompute them).
 # Generally a good idea since views are free to recompute.
 recompute_views = False
+# Set this flag to enable considering non-built-in ops, including triton and custom
+# ops, for recomputation during the knapsack optimization solver.
+is_non_builtin_to_include = False
+
+# Rematerialize AC nodes for graphs with forward+loss+backward in one graph.
+# This optimization minimizes activation checkpoint node lifetimes by computing them
+# just-in-time. For AC nodes only used in backward, they are deferred to backward region
+# instead of being computed and saved in forward. This reduces peak memory usage.
+# Note: This only applies to forward+loss+backward graphs where torch.autograd.grad is allowed
+# in the graph. Joint graphs (standard AOTAutograd) use the partitioner instead.
+remat_using_tags_for_fwd_loss_bwd_graph = True
 
 # By default, the partitioner is purely trying to optimize for runtime (although
 # it should always use less memory than eager)
@@ -162,12 +209,12 @@ activation_memory_budget = 1.0
 activation_memory_budget_runtime_estimator = "flops"
 
 # This controls the solver used for the 0-1 knapsack. By default we use a
-# quantized DP solution ("dp"). The other approaches are a "greedy", a "ilp"
+# quantized DP solution ("dp"). The other approaches are a "greedy", an "ilp"
 # (which has a scipy dependency) and "dp_knapsack_sliding_hirschberg", which
 # used memory-efficient quantized DP solution
 activation_memory_budget_solver = "dp"
 
-# This dumps out a SVG visualization of the expected runtime vs. activation
+# This dumps out an SVG visualization of the expected runtime vs. activation
 # memory tradeoffs for all memory budget values from 0 to 1 in increments of
 # 0.5. See an example here:
 # https://github.com/pytorch/pytorch/pull/126320#discussion_r1625104015
@@ -183,6 +230,22 @@ memory_budget_pareto_dir = os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO_DIR"
 # Generally, this will probably result in some memory improvement, but at the
 # cost of some performance
 aggressive_recomputation = False
+
+# activation offloading enablement (testing purpose)
+enable_activation_offloading = False
+
+# activation offloading with separate CUDA stream
+activation_offload_separate_stream = False
+
+# activation offloading wait sinking when using separate stream (fwd graph)
+activation_offload_sink_wait = False
+
+# activation reloading with prefetching when using separate streams (bwd graph)
+activation_reload_prefetch = False
+
+# CPU ↔ GPU bandwidth in GB/s, used to estimate transfer times for prefetch
+# scheduling. This is hardware-specific and should be set by the user.
+activation_offload_cpu_gpu_bw: float = 50.0
 
 # If FakeTensor.data_ptr() should error.
 # This option is independent of AOTAutograd and torch.compile, but our policy
@@ -246,7 +309,7 @@ fake_tensor_crossref = False
 fake_tensor_propagate_real_tensors = False
 
 # AOTDispatcher traces out a backward graph at the time of the forward pass.
-# This flags controls whether or not that backward graph gets autocast behavior
+# This flag controls whether or not that backward graph gets autocast behavior
 # applied to it.
 #
 # The options are either:
@@ -279,12 +342,13 @@ fake_tensor_propagate_real_tensors = False
 #       z.backward()
 backward_pass_autocast = "same_as_forward"
 
-# This controls whether we collect donated buffer. This flag must be set
+# This controls whether we collect donated buffers. This flag must be set
 # False if a user wants to retain_graph=True for backward.
 donated_buffer = not is_fbcode()
 
-# Controls the default graph output format used by draw_graph
-# Supported formats are defined here https://graphviz.org/docs/outputs/
+# Controls the default graph output format used by draw_graph.
+# Most supported formats are defined here https://graphviz.org/docs/outputs/.
+# The "dot" and "raw" formats write raw DOT text without invoking Graphviz.
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 
 # Valid only if fake_tensor_propagate_real_tensors = True; if a fake-real
@@ -301,9 +365,9 @@ generate_fake_kernels_from_real_mismatches = False
 # compiler to proceed with compilation by choosing the preferred device type
 # for consistency. For example, set to "mtia" to prefer MTIA devices over
 # CPU, or "cuda" to prefer CUDA devices over CPU.
-fake_tensor_prefer_device_type: Optional[str] = None
+fake_tensor_prefer_device_type: str | None = None
 
-# CUDAGraph save run_with_rng functionalization.
+# CUDAGraph safe run_with_rng functionalization.
 # TODO: turn on by default
 graphsafe_rng_functionalization = True
 
@@ -323,7 +387,7 @@ strict_autograd_cache = False
 # Note [Recomputing collectives in the partitioner]
 # The purpose of this config is as follows:
 # - We have many passes in the compiler (min-cut partitioning, DCE, etc)
-#   which can reorder or ,delete duplicate nodes in the graph
+#   which can reorder or delete duplicate nodes in the graph
 # - If any of these passes reorder/delete/duplicate a collective
 #   in a setting where the compiler is being run independently on multiple
 #   ranks, we run the risk that the compiler will make a different decision on
@@ -353,10 +417,11 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 # At runtime non contiguous tangents will be coerced to be contiguous.
 # This config changes this guess for tangents strides to be the same as outputs.
 # TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
-guess_tangent_strides_as_outputs = False
+guess_tangent_strides_as_outputs = not is_fbcode()
+
 
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
-# it will untimately be removed once we share size_hints across ranks through compiler collectives
+# it will ultimately be removed once we share size_hints across ranks through compiler collectives
 _sync_decision_cross_ranks = False
 
 # By default apply inlined saved_tensors_hooks only for "donated" buffers.
@@ -375,6 +440,8 @@ saved_tensors_hooks_filtering_mode = "donated"
 # This callback is invoked on the joint graph before partitioning
 joint_custom_pass: Callable = None  # type: ignore[assignment]
 
+force_autograd_cache = False
+
 # Note [Selective Decomposition]
 # This config allows selective decomposition of certain operators in the graph.
 # When True, it does NOT decompose any nodes, except those nodes that users explicitly
@@ -382,9 +449,16 @@ joint_custom_pass: Callable = None  # type: ignore[assignment]
 # on to explicitly annotate. This is currently only used by inductor lite mode.
 selective_decompose: bool = False
 
+# Complex Support
+# This config disallows decomposition of complex-valued Tensors using
+# `torch._subclasses.complex_tensor.ComplexTensor` by decomposing everything into
+# real-valued operations, passing through the regular pipeline as necessary,
+# then converting back to a regular tensor.
+enable_complex_wrapper: bool = False
+
 
 if TYPE_CHECKING:
-    from torch.utils._config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F403
 
 
 # adds patch, save_config, invalid config checks, etc

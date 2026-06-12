@@ -192,6 +192,7 @@ def _autograd_grad(
     for out, grad_out in zip(outputs, grad_outputs):
         if out is not None and out.requires_grad:
             new_outputs += (out,)
+            # pyrefly: ignore [bad-assignment]
             new_grad_outputs += (grad_out,)
 
     if len(new_outputs) == 0:
@@ -567,7 +568,7 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
                 # batch dimension represents that of the inputs
                 jacobian_input_i_output_j = jac.permute(*range(1, jac.ndim), 0).reshape(
                     (*output_i.shape, *input_j.shape)
-                )  # noqa: C409
+                )
 
                 jacobian_output_i_output.append(jacobian_input_i_output_j)
             jacobian_input_output.append(jacobian_output_i_output)
@@ -837,6 +838,7 @@ def jacobian(
                             raise RuntimeError(msg)
                         jac_i_el.append(torch.zeros_like(inp_el))
 
+            # pyrefly: ignore [bad-assignment]
             jacobian += (
                 tuple(
                     torch.stack(jac_i_el, dim=0).view(

@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import itertools
 import json
 import logging
 import os
@@ -26,12 +27,13 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, NewType, Optional, TYPE_CHECKING
+from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
 from torch._dynamo.graph_utils import _graph_device_type
+from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import get_code_keys
 from .utils import counters, dynamo_timed, increment_frame
@@ -42,6 +44,22 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .guards import GuardManagerWrapper, GuardsState
+
+
+_CODE_CACHE = WeakIdKeyDictionary()
+
+
+def _code_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
+    def _(
+        cls: type[Any], code: Union["SerializedCode", types.CodeType]
+    ) -> Union["SerializedCode", types.CodeType]:
+        if code in _CODE_CACHE:
+            return _CODE_CACHE[code]
+        res = fn(cls, code)
+        _CODE_CACHE[code] = res
+        return res
+
+    return _
 
 
 @dataclasses.dataclass(frozen=True)
@@ -61,13 +79,13 @@ class SerializedCode:
     co_firstlineno: int
     co_cellvars: tuple[str, ...]
     co_freevars: tuple[str, ...]
-    co_linetable: Optional[bytes] = None
-    co_qualname: Optional[str] = None
-    co_exceptiontable: Optional[bytes] = None
-    co_lnotab: Optional[str] = None
+    co_linetable: bytes | None = None
+    co_qualname: str | None = None
+    co_exceptiontable: bytes | None = None
+    co_lnotab: str | None = None
 
     @classmethod
-    @functools.cache
+    @_code_cache
     def from_code_object(cls, code: types.CodeType) -> "SerializedCode":
         kwargs = {key: getattr(code, key) for key in get_code_keys()}
         kwargs["co_consts"] = tuple(
@@ -77,7 +95,7 @@ class SerializedCode:
         return cls(**kwargs)
 
     @classmethod
-    @functools.cache
+    @_code_cache
     def to_code_object(cls, serialized_code: "SerializedCode") -> types.CodeType:
         kwargs = {key: getattr(serialized_code, key) for key in get_code_keys()}
         kwargs["co_consts"] = tuple(
@@ -125,7 +143,6 @@ def load_guard_manager(
         OutputGraphCommon(guards_state.output_graph),
         shape_code_parts=guards_state.shape_code_parts,
         runtime_global_scope=runtime_global_scope,
-        source_get_cache=guards_state.source_get_cache,
     ).guard_manager
 
 
@@ -158,7 +175,11 @@ class SourceInfo:
         sourcelines, firstlineno = inspect.getsourcelines(code)
         lastlineno = firstlineno + len(sourcelines)
         source = "".join(sourcelines)
-        assert source == "".join(_get_sourcelines(module, firstlineno, lastlineno))
+        if source != "".join(_get_sourcelines(module, firstlineno, lastlineno)):
+            raise AssertionError(
+                f"Source mismatch for {module.__name__} "
+                f"(line {firstlineno}-{lastlineno})"
+            )
         self.inlined_sources.add(
             InlinedSource(
                 module=module.__name__,
@@ -184,7 +205,7 @@ class _DynamoCodeCacheEntry:
          multiple function objects pointing to the same code such as recursive functions.
       4. A list of guarded code that eval frame dispatches to.
       5. A list of imported module objects unioned from all compiled branches.
-      6. A list of "backends" (compiled fx graph) unioned from all compield branches.
+      6. A list of "backends" (compiled fx graph) unioned from all compiled branches.
       7. A string path used to access the original code object users defined.
          A code object can be accessed by "{python_module}.{function_name}.{code_source}" .
       8. A boolean flag indicating whether the function is installed to global scope.
@@ -198,14 +219,17 @@ class _DynamoCodeCacheEntry:
     guarded_codes: list[_GuardedCodeCacheEntry]
     import_sources: dict[str, str]
     backend_ids: list[_BackendId]
-    code_source: Optional[str]
+    code_source: str | None
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
-    assert len(entry.function_names) == 1
+    if len(entry.function_names) != 1:
+        raise AssertionError(
+            f"Expected exactly one function name, got {len(entry.function_names)}"
+        )
     fn: Any = sys.modules[entry.python_module]
     parts = entry.function_names[0].split(".")
     for part in parts:
@@ -215,7 +239,14 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
         for part in parts:
             if part.endswith("]"):
                 index_begin = part.rfind("[")
-                assert isinstance(index_begin, int) and index_begin >= 0
+                if not isinstance(index_begin, int):
+                    raise AssertionError(
+                        f"Expected int for index_begin, got {type(index_begin)}"
+                    )
+                if index_begin < 0:
+                    raise AssertionError(
+                        f"Expected non-negative index_begin, got {index_begin}"
+                    )
                 attr = getattr(fn, part[:index_begin], None)
                 if attr is None:
                     raise PackageError(f"Cannot find source for code entry {entry}")
@@ -224,7 +255,10 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
                 fn = getattr(fn, part)
     else:
         raise PackageError(f"Cannot find source for code entry {entry}")
-    assert isinstance(fn, types.CodeType)
+    if not isinstance(fn, types.CodeType):
+        raise AssertionError(
+            f"Expected CodeType, got {type(fn)} for code entry {entry}"
+        )
     return fn
 
 
@@ -258,11 +292,11 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if not hasattr(toplevel, part):
                 _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
-            if inspect.isfunction(toplevel):
+            if inspect.isfunction(toplevel) or inspect.ismethod(toplevel):
                 break
     seen = set()
 
-    def _find_code_source(obj: Any) -> Optional[str]:
+    def _find_code_source(obj: Any) -> str | None:
         nonlocal toplevel
         nonlocal seen
         if obj in seen:
@@ -278,6 +312,11 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                 if (res := _find_code_source(const)) is not None:
                     return f".co_consts[{i}]{res}"
 
+        if inspect.ismethod(obj):
+            if (res := _find_code_source(obj.__func__)) is not None:
+                toplevel = obj
+                return f".__func__{res}"
+
         if inspect.isfunction(obj):
             if (res := _find_code_source(obj.__code__)) is not None:
                 toplevel = obj
@@ -291,6 +330,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                     if not (
                         inspect.isfunction(cell_contents)
                         or inspect.iscode(cell_contents)
+                        or inspect.ismethod(cell_contents)
                     ):
                         continue
                     if (res := _find_code_source(cell_contents)) is not None:
@@ -300,15 +340,26 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
         if sys.version_info < (3, 11):
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
-                    if not (inspect.isfunction(value) or inspect.isclass(value)):
+                    if not (
+                        inspect.isfunction(value)
+                        or inspect.isclass(value)
+                        or inspect.ismethod(value)
+                    ):
                         continue
                     if (res := _find_code_source(value)) is not None:
                         return res
 
             if inspect.isclass(obj):
-                for name, value in obj.__dict__.items():
-                    value = getattr(obj, name)
-                    if not (inspect.isfunction(value) or inspect.isclass(value)):
+                for name in itertools.chain(obj.__dict__.keys(), dir(obj)):
+                    try:
+                        value = getattr(obj, name)
+                    except AttributeError:
+                        continue
+                    if not (
+                        inspect.isfunction(value)
+                        or inspect.isclass(value)
+                        or inspect.ismethod(value)
+                    ):
                         continue
                     if (res := _find_code_source(value)) is not None:
                         if value.__name__ != name:
@@ -319,7 +370,6 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     code_source = _find_code_source(toplevel)
     if code_source is None:
         _raise_resolution_error(code, toplevel)
-    # pyrefly: ignore [missing-attribute]
     return toplevel.__qualname__, code_source.strip(".")
 
 
@@ -333,9 +383,9 @@ class SystemInfo:
 
     python_version: str
     torch_version: str
-    toolkit_version: Optional[str]
-    triton_version: Optional[tuple[int, int]]
-    gpu_name: Optional[str]
+    toolkit_version: str | None
+    triton_version: tuple[int, int] | None
+    gpu_name: str | None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
@@ -410,8 +460,8 @@ class _DynamoCacheEntry:
     source_info: SourceInfo
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
-    fn_name: Optional[str] = None
-    fn_first_lineno: Optional[str] = None
+    fn_name: str | None = None
+    fn_first_lineno: str | None = None
 
     @property
     def backend_ids(self) -> set[_BackendId]:
@@ -423,7 +473,8 @@ class _DynamoCacheEntry:
         self.system_info.check_compatibility(current_system_info, self.device_type)
 
     def debug_info(self) -> dict[str, Any]:
-        assert len(self.codes) > 0
+        if len(self.codes) == 0:
+            raise AssertionError("Expected at least one code entry")
         return {
             "num_codes": str(len(self.codes)),
             "fn_name": self.fn_name,
@@ -436,7 +487,7 @@ class _DynamoCacheEntry:
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 
 
@@ -522,6 +573,7 @@ def _compile_frame_context(
     # under the same cache entry, so we don't have recompile ids
     # i.e. If cold start had 0/0, 0/1, 1/0, 1/1, these would be
     # collapsed into 0/0, 1/0 on warm.
+    # pyrefly: ignore [deprecated]
     @contextlib.contextmanager
     def _ctx() -> Iterator[None]:
         increment_frame()
@@ -562,14 +614,14 @@ class CompilePackage:
 
     def __init__(
         self,
-        fn: Optional[Callable[..., Any]],
-        dynamo: Optional[_DynamoCacheEntry] = None,
+        fn: Callable[..., Any] | None,
+        dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
-        self._current_entry: Optional[_DynamoCodeCacheEntry] = None
+        self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # device_type that model compiled with.
         self._device_type = "cpu"
@@ -590,17 +642,20 @@ class CompilePackage:
     def initialize(
         self,
         fn: Any,
-        dynamo: Optional[_DynamoCacheEntry] = None,
+        dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
     ) -> None:
         from .eval_frame import innermost_fn
 
-        assert not self._initialized
+        if self._initialized:
+            raise AssertionError("CompilePackage is already initialized")
         self._source_info = SourceInfo(inlined_sources=set())
         self._innermost_fn = innermost_fn(fn)  # type: ignore[assignment]
-        assert self._innermost_fn is not None
+        if self._innermost_fn is None:
+            raise AssertionError("innermost_fn returned None")
         if dynamo is not None:
-            assert isinstance(dynamo, _DynamoCacheEntry)
+            if not isinstance(dynamo, _DynamoCacheEntry):
+                raise AssertionError(f"Expected _DynamoCacheEntry, got {type(dynamo)}")
             dynamo.check_versions()
             if not ignore_inlined_sources:
                 for code in dynamo.source_info.inlined_sources:
@@ -611,11 +666,9 @@ class CompilePackage:
                             f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
                         )
 
-                # pyrefly: ignore [bad-assignment]
                 self._source_info = dynamo.source_info
 
             main, *codes = dynamo.codes
-            # pyrefly: ignore [bad-assignment]
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
@@ -623,15 +676,14 @@ class CompilePackage:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
             )
-        # pyrefly: ignore [bad-assignment]
         self._initialized = True
 
     def _add_function(
         self,
         python_code: types.CodeType,
         python_module: str,
-        function_name: Optional[_FunctionId] = None,
-        code_source: Optional[str] = None,
+        function_name: _FunctionId | None = None,
+        code_source: str | None = None,
         install_to_global: bool = False,
     ) -> None:
         if python_code not in self._codes:
@@ -648,9 +700,18 @@ class CompilePackage:
             self._codes[python_code] = code
         else:
             code = self._codes[python_code]
-            assert code.python_module == python_module
-            assert code.install_to_global == install_to_global
-            assert code.code_source == code_source
+            if code.python_module != python_module:
+                raise AssertionError(
+                    f"python_module mismatch: {code.python_module} != {python_module}"
+                )
+            if code.install_to_global != install_to_global:
+                raise AssertionError(
+                    f"install_to_global mismatch: {code.install_to_global} != {install_to_global}"
+                )
+            if code.code_source != code_source:
+                raise AssertionError(
+                    f"code_source mismatch: {code.code_source} != {code_source}"
+                )
 
         if function_name is not None:
             code.function_names.append(function_name)
@@ -661,7 +722,8 @@ class CompilePackage:
 
     @functools.cached_property
     def source_id(self) -> str:
-        assert self._innermost_fn is not None
+        if self._innermost_fn is None:
+            raise AssertionError("_innermost_fn is not set")
         return CompilePackage.source_id_from_fn(self._innermost_fn)
 
     def _add_user_function(self, code: types.CodeType) -> None:
@@ -678,7 +740,8 @@ class CompilePackage:
 
     @contextlib.contextmanager
     def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
-        assert self._current_entry is None
+        if self._current_entry is not None:
+            raise AssertionError("_current_entry is already set in code_context")
 
         # Sometimes user code cannot be inlined in dynamo resulting in extra user code
         # being compiled. We should record these as when they are actually invoked.
@@ -698,7 +761,8 @@ class CompilePackage:
         guards_state: bytes,
         dynamo_code: types.CodeType,
     ) -> None:
-        assert self._current_entry is not None
+        if self._current_entry is None:
+            raise AssertionError("_current_entry is not set in add_guarded_code")
         if self._current_entry.bypassed:
             return
         guarded_code_entry = _GuardedCodeCacheEntry(
@@ -708,7 +772,8 @@ class CompilePackage:
         self._current_entry.guarded_codes.append(guarded_code_entry)
 
     def add_inlined_source(self, sources: list[types.CodeType]) -> None:
-        assert self._current_entry is not None
+        if self._current_entry is None:
+            raise AssertionError("_current_entry is not set in add_inlined_source")
         if self._current_entry.bypassed:
             return
         for code in sources:
@@ -716,44 +781,56 @@ class CompilePackage:
                 continue
             self._source_info.add_code(code)
 
-    def update_device_type(self, graph: Optional[torch.fx.Graph]) -> None:
+    def update_device_type(self, graph: torch.fx.Graph | None) -> None:
         self._device_type = _graph_device_type(graph)
 
     def bypass_current_entry(self) -> None:
-        assert self._current_entry is not None
+        if self._current_entry is None:
+            raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
 
     def add_resume_function(
         self,
         python_code: types.CodeType,
         python_module: str,
-        function_name: Optional[str],
+        function_name: str,
     ) -> None:
         self._add_function(
             python_code,
             python_module,
-            function_name=_FunctionId(function_name) if function_name else None,
+            function_name=_FunctionId(function_name),
             install_to_global=True,
         )
         self._resume_codes.add(python_code)
 
     def add_import_source(self, alias: str, module_name: str) -> None:
-        assert self._current_entry is not None
+        if self._current_entry is None:
+            raise AssertionError("_current_entry is not set in add_import_source")
         self._current_entry.import_sources[alias] = module_name
 
-    def add_backend_id(self, backend_id: str, backend: Optional[Any] = None) -> None:
-        assert self._current_entry is not None
-        assert backend_id.startswith("__compiled_fn_")  # sanity check
+    def add_backend_id(self, backend_id: str, backend: Any | None = None) -> None:
+        if self._current_entry is None:
+            raise AssertionError("_current_entry is not set in add_backend_id")
+        if not backend_id.startswith("__compiled_fn_"):
+            raise AssertionError(
+                f"backend_id must start with '__compiled_fn_', got '{backend_id}'"
+            )
         backend_id = _BackendId(backend_id)
         self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
             self._cached_backends[backend_id] = backend
 
     def validate(self) -> None:
-        assert self._current_entry is None
-        assert self._innermost_fn is not None
-        assert self._initialized
-        assert next(iter(self._codes)) is self._innermost_fn.__code__
+        if self._current_entry is not None:
+            raise AssertionError("_current_entry should be None during validate")
+        if self._innermost_fn is None:
+            raise AssertionError("_innermost_fn is not set during validate")
+        if not self._initialized:
+            raise AssertionError("CompilePackage is not initialized during validate")
+        if next(iter(self._codes)) is not self._innermost_fn.__code__:
+            raise AssertionError(
+                "First code entry does not match _innermost_fn.__code__"
+            )
 
     def _install_global(self, module: types.ModuleType, name: str, value: Any) -> None:
         module.__dict__[name] = value
@@ -762,12 +839,12 @@ class CompilePackage:
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
-        assert self._innermost_fn is not None
+        if self._innermost_fn is None:
+            raise AssertionError("_innermost_fn is not set in uninstall")
         for module, names in self._installed_globals.items():
             for name in names:
                 module.__dict__.pop(name)
 
-        # pyrefly: ignore [bad-assignment]
         self._installed_globals = {}
 
         _reset_precompile_entries(self._innermost_fn.__code__)
@@ -799,8 +876,29 @@ class CompilePackage:
                 target_code = code
                 if entry.install_to_global:
                     for function_name in entry.function_names:
-                        fn = types.FunctionType(code, module.__dict__, function_name)
-                        self._install_global(module, function_name, fn)
+                        if code.co_freevars:
+                            # Resume functions with freevars need a factory
+                            # that takes a closure tuple, matching
+                            # install_resume_function_global in output_graph.py.
+                            f_globals = module.__dict__
+                            fn_name = function_name
+
+                            def _make_fn(
+                                closure: tuple[types.CellType, ...],
+                                _code: types.CodeType = code,
+                                _globals: dict[str, Any] = f_globals,
+                                _name: str = fn_name,
+                            ) -> types.FunctionType:
+                                return types.FunctionType(
+                                    _code, _globals, _name, None, closure
+                                )
+
+                            self._install_global(module, function_name, _make_fn)
+                        else:
+                            fn = types.FunctionType(
+                                code, module.__dict__, function_name
+                            )
+                            self._install_global(module, function_name, fn)
                 if entry.code_source:
                     target_code = _lookup_code(entry)
 
@@ -841,12 +939,19 @@ class CompilePackage:
                     ):
                         builtins_dict = get_builtins_dict(runtime_global_scope)
                         if builtin_dict_name in runtime_global_scope:
-                            assert (
-                                runtime_global_scope[builtin_dict_name] is builtins_dict
-                            )
+                            if (
+                                runtime_global_scope[builtin_dict_name]
+                                is not builtins_dict
+                            ):
+                                raise AssertionError(
+                                    f"Builtins dict mismatch for key '{builtin_dict_name}'"
+                                )
                         else:
                             runtime_global_scope[builtin_dict_name] = builtins_dict
-                    assert isinstance(guards_state, torch._dynamo.guards.GuardsState)
+                    if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
+                        raise AssertionError(
+                            f"Expected GuardsState, got {type(guards_state)}"
+                        )
                     with dynamo_timed("precompile_build_guards"):
                         guard_manager = load_guard_manager(
                             guards_state, target_code, runtime_global_scope
@@ -859,7 +964,8 @@ class CompilePackage:
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
-        assert self._innermost_fn is not None
+        if self._innermost_fn is None:
+            raise AssertionError("_innermost_fn is not set in cache_entry")
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
@@ -948,7 +1054,10 @@ class DynamoStore(abc.ABC):
                 raise RuntimeError(
                     f"Backend {backend_id} is not found in the given backends"
                 )
-            assert isinstance(serialized_backend, BackendCacheArtifact)
+            if not isinstance(serialized_backend, BackendCacheArtifact):
+                raise AssertionError(
+                    f"Expected BackendCacheArtifact, got {type(serialized_backend)}"
+                )
             backend_content[backend_id] = serialized_backend
 
         entry = PrecompileCacheEntry(cache_entry, backend_content)
@@ -984,7 +1093,10 @@ class DynamoStore(abc.ABC):
 
         precompile_entry = self.read(key)
         for backend in precompile_entry.backends.values():
-            assert isinstance(backend, BackendCacheArtifact)
+            if not isinstance(backend, BackendCacheArtifact):
+                raise AssertionError(
+                    f"Expected BackendCacheArtifact, got {type(backend)}"
+                )
             PrecompileContext.record_artifact(backend)
 
         return precompile_entry
@@ -1013,13 +1125,13 @@ class InMemoryDynamoStore(DynamoStore):
 
     def write(
         self,
-        entry: PrecompileCacheEntry,
+        cache_entry: PrecompileCacheEntry,
         path: str,
     ) -> None:
         """
         Store the dynamo cache entry and backends in memory instead of writing to disk.
         """
-        self.packages[path] = entry
+        self.packages[path] = cache_entry
 
     def read(self, path: str) -> PrecompileCacheEntry:
         """
@@ -1036,7 +1148,7 @@ class DiskDynamoStore(DynamoStore):
     A DynamoStore implementation that keeps state about CompilePackages on disk.
     """
 
-    def __init__(self, path_prefix: str = ""):
+    def __init__(self, path_prefix: str = "") -> None:
         """
         Initialize a DiskDynamoStore with a path prefix.
 
@@ -1057,16 +1169,16 @@ class DiskDynamoStore(DynamoStore):
 
     def write(
         self,
-        entry: PrecompileCacheEntry,
+        cache_entry: PrecompileCacheEntry,
         path: str,
     ) -> None:
         """
         Write dynamo cache entry and backends to disk.
         """
         try:
-            pickled_content: bytes = pickle.dumps(entry)
-            CacheArtifactManager.record_artifact(
-                PrecompileCacheArtifact.type(), path, pickled_content
+            pickled_content: bytes = pickle.dumps(cache_entry)
+            CacheArtifactRecorder(PrecompileCacheArtifact.type(), path).record(
+                pickled_content
             )
             self._write_to_local_cache(pickled_content, path)
         except Exception as e:
@@ -1110,7 +1222,7 @@ class DiskDynamoCache(DiskDynamoStore):
         logger.info("Saving CompilePackage for %s", package.source_id)
         super().save_package(package, key)
 
-    def load(self, fn: Callable[..., Any]) -> Optional[PrecompileCacheEntry]:
+    def load(self, fn: Callable[..., Any]) -> PrecompileCacheEntry | None:
         """
         Loads a package from a given path and returns it plus a list of deserialized backends
         """
@@ -1130,9 +1242,7 @@ class DiskDynamoCache(DiskDynamoStore):
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1
         return None
 
-    def load_and_install_package(
-        self, fn: Callable[..., Any]
-    ) -> Optional[CompilePackage]:
+    def load_and_install_package(self, fn: Callable[..., Any]) -> CompilePackage | None:
         """
         Load directly into a package and install backends
         """

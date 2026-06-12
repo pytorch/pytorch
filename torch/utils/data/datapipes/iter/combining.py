@@ -58,6 +58,7 @@ class ConcaterIterDataPipe(IterDataPipe):
             yield from dp
 
     def __len__(self) -> int:
+        # pyrefly: ignore [unsafe-overlap]
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             # pyrefly: ignore [bad-argument-type]
             return sum(len(dp) for dp in self.datapipes)
@@ -114,7 +115,7 @@ class ForkerIterDataPipe(IterDataPipe):
 
 
 class _ContainerTemplate(ABC):
-    r"""Abstract class for container ``DataPipes``. The followings are three required methods."""
+    r"""Abstract class for container ``DataPipes``. The following are three required methods."""
 
     @abstractmethod
     def get_next_element_by_instance(self, instance_id: int): ...
@@ -306,7 +307,7 @@ class _ChildDataPipe(IterDataPipe):
 
     Example:
         >>> # xdoctest: +REQUIRES(module:torchdata)
-        >>> # Singler Iterator per IteraDataPipe Invalidation
+        >>> # Single Iterator per IterDataPipe Invalidation
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> source_dp = IterableWrapper(range(10))
         >>> cdp1, cdp2 = source_dp.fork(num_instances=2)
@@ -328,7 +329,6 @@ class _ChildDataPipe(IterDataPipe):
         if not isinstance(main_datapipe, _ContainerTemplate):
             raise AssertionError("main_datapipe must implement _ContainerTemplate")
 
-        # pyrefly: ignore [bad-assignment]
         self.main_datapipe: IterDataPipe = main_datapipe
         self.instance_id = instance_id
 
@@ -433,7 +433,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
 
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
-        # like throwing Error when classification result is out of o range
+        # like throwing Error when classification result is out of range
         container = _DemultiplexerIterDataPipe(
             datapipe, num_instances, classifier_fn, drop_none, buffer_size
         )  # type: ignore[abstract]
@@ -708,6 +708,7 @@ class ZipperIterDataPipe(IterDataPipe[tuple[_T_co]]):
         yield from zip(*iterators, strict=False)
 
     def __len__(self) -> int:
+        # pyrefly: ignore [unsafe-overlap]
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             # pyrefly: ignore [bad-argument-type]
             return min(len(dp) for dp in self.datapipes)

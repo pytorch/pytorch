@@ -2,7 +2,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, NamedTuple, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
@@ -162,10 +162,11 @@ class FSDPMemTracker(MemTracker):
     def __init__(
         self,
         mod: torch.nn.Module,
-        optm: Optional[torch.optim.Optimizer] = None,
+        optm: torch.optim.Optimizer | None = None,
     ) -> None:
         super().__init__()
-        assert isinstance(mod, FSDPModule), "FSDPMemTracker only supports FSDP modules"
+        if not isinstance(mod, FSDPModule):
+            raise AssertionError("FSDPMemTracker only supports FSDP modules")
         self._root_mod = mod
         self._optm = optm
         self._fsdp_mod_to_saved_methods: WeakIdKeyDictionary = WeakIdKeyDictionary()
@@ -212,7 +213,8 @@ class FSDPMemTracker(MemTracker):
         ) -> tuple[tuple[Unpack[_Ts]], dict[str, Any]]:
             self._fsdp_state = _FSDPState.PRE_FW
             mod_fqn = self._mod_tracker.get_known_fqn(fsdp_mod)
-            assert mod_fqn is not None
+            if mod_fqn is None:
+                raise AssertionError
             if fsdp_mod not in self.memory_tracking:
                 mod_stat = _FSDPModMemStats(mod_fqn)
                 self.memory_tracking[fsdp_mod] = mod_stat
@@ -255,6 +257,7 @@ class FSDPMemTracker(MemTracker):
                 state = _FSDPModState.AFT_PRE_FW
             mod_stat.snapshots.setdefault(state, []).append(self.get_tracker_snapshot())
             self._fsdp_state = _FSDPState.FW
+            # pyrefly: ignore [bad-return]
             return args, kwargs
 
         return inner
@@ -373,7 +376,7 @@ class FSDPMemTracker(MemTracker):
         # get the unique _MultiHandlers/RemoveHandlers and store in dictionary
         # the _MultiHandlers object will only need to be grabbed once.
         unique_handlers: dict[RemovableHandle, bool] = {}
-        # pyrefly: ignore  # missing-attribute
+
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
@@ -385,14 +388,13 @@ class FSDPMemTracker(MemTracker):
         # call remove on the handles once
         for f_hook_handle in unique_handlers:
             f_hook_handle.remove()
-        # pyrefly: ignore  # missing-attribute
+
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
                 if fsdp_param_group := fsdp_state._fsdp_param_group:
                     self._instrument_fsdp_sharded_params_grads(fsdp_param_group)
                     fsdp_state._pre_forward_hook_handle = (
-                        # pyrefly: ignore [missing-attribute]
                         module.register_forward_pre_hook(
                             self._fsdp_state_pre_forward(
                                 module, fsdp_state._pre_forward
@@ -401,7 +403,7 @@ class FSDPMemTracker(MemTracker):
                             with_kwargs=True,
                         )
                     )
-                    # pyrefly: ignore [missing-attribute]
+
                     fsdp_state._post_forward_hook_handle = module.register_forward_hook(
                         self._fsdp_state_post_forward(module, fsdp_state._post_forward),
                         prepend=False,
@@ -420,7 +422,6 @@ class FSDPMemTracker(MemTracker):
                         )
                     )
 
-        # pyrefly: ignore [missing-attribute]
         for buffer in self._root_mod.buffers():
             self._update_and_maybe_create_winfos(
                 buffer,
@@ -495,12 +496,15 @@ class FSDPMemTracker(MemTracker):
         tree_map_only(torch.Tensor, _track_inputs, inputs)
 
     def track_external(
-        self, *external: Union[nn.Module, optim.Optimizer, torch.Tensor]
+        self, *external: nn.Module | optim.Optimizer | torch.Tensor
     ) -> None:
         """This is no-op for ``FSDPMemTracker``"""
 
     def __enter__(self) -> "FSDPMemTracker":
         if self._depth == 0:
+            # None in eager, a FakeTensorMode instance in SAC.  Used in
+            # __torch_dispatch__ to skip DTensor propagation ops.
+            self._fake_mode_on_entry = active_fake_mode()
             self._register_module_and_optimizer_hooks()
             self._track_resize()
             self._peak_mem_snap = self.get_tracker_snapshot()
@@ -538,41 +542,54 @@ class FSDPMemTracker(MemTracker):
             res = args[0]
         else:
             res = func(*args, **kwargs or {})
-        # If we are tracking an optimizer state, we use the optimizer reference type.
-        # If we are in backward region and not in AC region, we use the backward reference type.
-        # Else we use the forward reference type.
-        if self._in_opt:
-            reftype = _FSDPRefType.OPT
-        elif self._mod_tracker.is_bw and not self._in_ac:
-            reftype = _FSDPRefType.TEMP
-        else:
-            reftype = _FSDPRefType.ACT
-        if func is c10d._allgather_base_.default and self._fsdp_state in [
-            _FSDPState.PRE_FW,
-            _FSDPState.PRE_BW,
-        ]:
-            # pyrefly: ignore [unsupported-operation]
-            output_tensor = args[0]
-            self._update_and_maybe_create_winfos(
-                output_tensor,
-                _FSDPRefType.ALL_GATHER,
-                update_existing=True,
-            )
-        if (
-            func is c10d._reduce_scatter_base_.default
-            and self._fsdp_state == _FSDPState.POST_BW
-        ):
-            # pyrefly: ignore [unsupported-operation]
-            input_tensor = args[1]
-            self._update_and_maybe_create_winfos(
-                input_tensor,
-                _FSDPRefType.REDUCE_SCATTER,
-                update_existing=True,
-            )
+        # DTensor sharding propagation may use a nested FakeTensorMode to
+        # compute output metadata (shapes, placements).  The real memory
+        # usage comes from the local op on shard data, which
+        # runs outside DTensor's fake mode.  We use identity comparison
+        # against the fake mode at tracker entry to skip propagation ops
+        # while still tracking local ops in both eager and SAC contexts.
+        #   - Eager (entry mode is None): real ops have no fake mode
+        #     (None is None), DTensor propagation ops are skipped (B is not None).
+        #   - SAC (entry mode is A): SAC ops run under mode A (A is A),
+        #     DTensor propagation ops are skipped (B is not A).
+        if active_fake_mode() is self._fake_mode_on_entry:
+            # If we are tracking an optimizer state, we use the optimizer reference type.
+            # If we are in backward region and not in AC region, we use the backward reference type.
+            # Else we use the forward reference type.
+            if self._in_opt:
+                reftype = _FSDPRefType.OPT
+            elif self._mod_tracker.is_bw and not self._in_ac:
+                reftype = _FSDPRefType.TEMP
+            else:
+                reftype = _FSDPRefType.ACT
+            if func is c10d._allgather_base_.default and self._fsdp_state in [
+                _FSDPState.PRE_FW,
+                _FSDPState.PRE_BW,
+            ]:
+                # pyrefly: ignore [unsupported-operation]
+                output_tensor = args[0]
+                self._update_and_maybe_create_winfos(
+                    output_tensor,
+                    _FSDPRefType.ALL_GATHER,
+                    update_existing=True,
+                )
+            if (
+                func is c10d._reduce_scatter_base_.default
+                and self._fsdp_state == _FSDPState.POST_BW
+            ):
+                # pyrefly: ignore [unsupported-operation]
+                input_tensor = args[1]
+                self._update_and_maybe_create_winfos(
+                    input_tensor,
+                    _FSDPRefType.REDUCE_SCATTER,
+                    update_existing=True,
+                )
 
-        tree_map_only(torch.Tensor, partial(self._track, reftype), res)
-        peak_state = (
-            _FSDPModState.PEAK_BW if self._mod_tracker.is_bw else _FSDPModState.PEAK_FW
-        )
-        self._update_peak_stats(peak_state)
+            tree_map_only(torch.Tensor, partial(self._track, reftype), res)
+            peak_state = (
+                _FSDPModState.PEAK_BW
+                if self._mod_tracker.is_bw
+                else _FSDPModState.PEAK_FW
+            )
+            self._update_peak_stats(peak_state)
         return res

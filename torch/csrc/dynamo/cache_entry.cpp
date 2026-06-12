@@ -34,16 +34,6 @@ CacheEntry::~CacheEntry() {
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
-py::object CacheEntry::next() {
-  NULL_CHECK(this->_owner);
-  auto it = this->_owner_loc;
-  ++it;
-  if (it == this->_owner->cache_entry_list.end()) {
-    return py::none();
-  }
-  return py::cast(*it, py::return_value_policy::reference);
-}
-
 void CacheEntry::invalidate(py::object deleted_guard_manager) {
   // Keep the current pointer alive but make the fields as if no-op
   this->guard_manager.attr("cache_entry") = py::none();
@@ -51,6 +41,7 @@ void CacheEntry::invalidate(py::object deleted_guard_manager) {
   this->code = py::none();
   this->guard_manager = std::move(deleted_guard_manager);
   this->root_mgr = nullptr;
+  this->diff_guard_root_mgr = nullptr;
   this->trace_annotation = "Invalidated";
   this->backend = py::none();
 }

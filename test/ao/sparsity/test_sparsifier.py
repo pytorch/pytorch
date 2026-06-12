@@ -28,23 +28,35 @@ class TestBaseSparsifier(TestCase):
         model = SimpleLinear()
         sparsifier = ImplementedSparsifier(test=3)
         sparsifier.prepare(model, config=None)
-        assert len(sparsifier.groups) == 5
+        if len(sparsifier.groups) != 5:
+            raise AssertionError(f"Expected 5 groups, got {len(sparsifier.groups)}")
         sparsifier.step()
         # Can instantiate the model with configs
         sparsifier = ImplementedSparsifier(test=3)
         sparsifier.prepare(model, [{"tensor_fqn": "linear1.weight"}])
-        assert len(sparsifier.groups) == 1
-        assert sparsifier.groups[0]["tensor_fqn"] == "linear1.weight"
-        assert "test" in sparsifier.groups[0]
-        assert sparsifier.groups[0]["test"] == 3
+        if len(sparsifier.groups) != 1:
+            raise AssertionError(f"Expected 1 group, got {len(sparsifier.groups)}")
+        if sparsifier.groups[0]["tensor_fqn"] != "linear1.weight":
+            raise AssertionError(
+                f"Expected tensor_fqn 'linear1.weight', got {sparsifier.groups[0]['tensor_fqn']}"
+            )
+        if "test" not in sparsifier.groups[0]:
+            raise AssertionError("Expected 'test' key in sparsifier.groups[0]")
+        if sparsifier.groups[0]["test"] != 3:
+            raise AssertionError(
+                f"Expected test value 3, got {sparsifier.groups[0]['test']}"
+            )
 
     def test_prepare_config(self):
         model = SimpleLinear()
         sparsifier = ImplementedSparsifier(test=3)
         # Make sure there are no parametrizations before `prepare`
-        assert not hasattr(model.seq[0], "parametrizations")
-        assert not hasattr(model.linear1, "parametrizations")
-        assert not hasattr(model.linear2, "parametrizations")
+        if hasattr(model.seq[0], "parametrizations"):
+            raise AssertionError("model.seq[0] should not have parametrizations")
+        if hasattr(model.linear1, "parametrizations"):
+            raise AssertionError("model.linear1 should not have parametrizations")
+        if hasattr(model.linear2, "parametrizations"):
+            raise AssertionError("model.linear2 should not have parametrizations")
         sparsifier.prepare(
             model,
             config=[
@@ -53,17 +65,31 @@ class TestBaseSparsifier(TestCase):
                 {"tensor_fqn": "linear2.weight"},
             ],
         )
-        assert len(sparsifier.groups) == 2
+        if len(sparsifier.groups) != 2:
+            raise AssertionError(f"Expected 2 groups, got {len(sparsifier.groups)}")
         # Check if default argument is not assigned if explicit
-        assert sparsifier.groups[0]["tensor_fqn"] == "seq.0.weight"
-        assert sparsifier.groups[0]["test"] == 42
+        if sparsifier.groups[0]["tensor_fqn"] != "seq.0.weight":
+            raise AssertionError(
+                f"Expected tensor_fqn 'seq.0.weight', got {sparsifier.groups[0]['tensor_fqn']}"
+            )
+        if sparsifier.groups[0]["test"] != 42:
+            raise AssertionError(
+                f"Expected test value 42, got {sparsifier.groups[0]['test']}"
+            )
         # Check if FQN and module are pointing to the same location
-        assert sparsifier.groups[1]["tensor_fqn"] == "linear2.weight"
-        assert sparsifier.groups[1]["module"] == model.linear2
+        if sparsifier.groups[1]["tensor_fqn"] != "linear2.weight":
+            raise AssertionError(
+                f"Expected tensor_fqn 'linear2.weight', got {sparsifier.groups[1]['tensor_fqn']}"
+            )
+        if sparsifier.groups[1]["module"] != model.linear2:
+            raise AssertionError("Expected module to be model.linear2")
         # Check if parameterizations are attached
-        assert hasattr(model.seq[0], "parametrizations")
-        assert not hasattr(model.linear1, "parametrizations")
-        assert hasattr(model.linear2, "parametrizations")
+        if not hasattr(model.seq[0], "parametrizations"):
+            raise AssertionError("model.seq[0] should have parametrizations")
+        if hasattr(model.linear1, "parametrizations"):
+            raise AssertionError("model.linear1 should not have parametrizations")
+        if not hasattr(model.linear2, "parametrizations"):
+            raise AssertionError("model.linear2 should have parametrizations")
 
     def test_step(self):
         model = SimpleLinear()
@@ -71,7 +97,8 @@ class TestBaseSparsifier(TestCase):
         sparsifier.enable_mask_update = True
         sparsifier.prepare(model, [{"tensor_fqn": "linear1.weight"}])
         sparsifier.step()
-        assert torch.all(model.linear1.parametrizations.weight[0].mask[0] == 0)
+        if not torch.all(model.linear1.parametrizations.weight[0].mask[0] == 0):
+            raise AssertionError("Expected all mask values in first row to be 0")
 
     def test_state_dict(self):
         step_count = 3
@@ -85,20 +112,34 @@ class TestBaseSparsifier(TestCase):
         state_dict = sparsifier0.state_dict()
 
         # Check the expected keys in the state_dict
-        assert "state" in state_dict
-        assert "step_count" in state_dict["state"]["linear1.weight"]
-        assert state_dict["state"]["linear1.weight"]["step_count"] == 3
-        assert "groups" in state_dict
-        assert "test" in state_dict["groups"][0]
-        assert "tensor_fqn" in state_dict["groups"][0]
-        assert state_dict["groups"][0]["tensor_fqn"] == "linear1.weight"
+        if "state" not in state_dict:
+            raise AssertionError("Expected 'state' key in state_dict")
+        if "step_count" not in state_dict["state"]["linear1.weight"]:
+            raise AssertionError(
+                "Expected 'step_count' in state_dict['state']['linear1.weight']"
+            )
+        if state_dict["state"]["linear1.weight"]["step_count"] != 3:
+            raise AssertionError(
+                f"Expected step_count 3, got {state_dict['state']['linear1.weight']['step_count']}"
+            )
+        if "groups" not in state_dict:
+            raise AssertionError("Expected 'groups' key in state_dict")
+        if "test" not in state_dict["groups"][0]:
+            raise AssertionError("Expected 'test' key in state_dict['groups'][0]")
+        if "tensor_fqn" not in state_dict["groups"][0]:
+            raise AssertionError("Expected 'tensor_fqn' key in state_dict['groups'][0]")
+        if state_dict["groups"][0]["tensor_fqn"] != "linear1.weight":
+            raise AssertionError(
+                f"Expected tensor_fqn 'linear1.weight', got {state_dict['groups'][0]['tensor_fqn']}"
+            )
 
         # Check loading static_dict creates an equivalent model
         model1 = SimpleLinear()
         sparsifier1 = ImplementedSparsifier()
         sparsifier1.prepare(model1, None)
 
-        assert sparsifier0.state != sparsifier1.state
+        if sparsifier0.state == sparsifier1.state:
+            raise AssertionError("Expected sparsifier states to be different")
 
         # Make sure the masks are different in the beginning
         for mg in sparsifier0.groups:
@@ -112,24 +153,34 @@ class TestBaseSparsifier(TestCase):
         sparsifier1.load_state_dict(state_dict)
 
         # Make sure the states are loaded, and are correct
-        assert sparsifier0.state == sparsifier1.state
+        if sparsifier0.state != sparsifier1.state:
+            raise AssertionError("Expected sparsifier states to be equal after loading")
 
         # Make sure the masks (and all dicts) are the same after loading
-        assert len(sparsifier0.groups) == len(sparsifier1.groups)
+        if len(sparsifier0.groups) != len(sparsifier1.groups):
+            raise AssertionError(
+                f"Expected equal group lengths, got {len(sparsifier0.groups)} and {len(sparsifier1.groups)}"
+            )
         for idx in range(len(sparsifier0.groups)):
             mg0 = sparsifier0.groups[idx]
             mg1 = sparsifier1.groups[idx]
             for key in mg0:
-                assert key in mg1
+                if key not in mg1:
+                    raise AssertionError(f"Expected key '{key}' in mg1")
                 if key == "module":
                     # We cannot compare modules as they are different
                     param0 = mg0[key].parametrizations.weight[0]
                     param1 = mg1[key].parametrizations.weight[0]
-                    assert hasattr(param0, "mask")
-                    assert hasattr(param1, "mask")
+                    if not hasattr(param0, "mask"):
+                        raise AssertionError("Expected param0 to have 'mask' attribute")
+                    if not hasattr(param1, "mask"):
+                        raise AssertionError("Expected param1 to have 'mask' attribute")
                     self.assertEqual(param0.__dict__, param1.__dict__)
                 else:
-                    assert mg0[key] == mg1[key]
+                    if mg0[key] != mg1[key]:
+                        raise AssertionError(
+                            f"Expected mg0['{key}'] == mg1['{key}'], got {mg0[key]} != {mg1[key]}"
+                        )
 
     def test_convert(self):
         model = SimpleLinear()
@@ -139,21 +190,39 @@ class TestBaseSparsifier(TestCase):
             model, mapping={nn.Linear: MockSparseLinear}, inplace=False
         )
 
-        assert isinstance(new_model.linear1, MockSparseLinear)
-        assert isinstance(new_model.seq[0], nn.Linear)
-        assert isinstance(new_model.linear2, nn.Linear)
+        if not isinstance(new_model.linear1, MockSparseLinear):
+            raise AssertionError(
+                f"Expected linear1 to be MockSparseLinear, got {type(new_model.linear1)}"
+            )
+        if not isinstance(new_model.seq[0], nn.Linear):
+            raise AssertionError(
+                f"Expected seq[0] to be nn.Linear, got {type(new_model.seq[0])}"
+            )
+        if not isinstance(new_model.linear2, nn.Linear):
+            raise AssertionError(
+                f"Expected linear2 to be nn.Linear, got {type(new_model.linear2)}"
+            )
 
     def test_mask_squash(self):
         model = SimpleLinear()
         sparsifier = ImplementedSparsifier(test=3)
         sparsifier.prepare(model, [{"tensor_fqn": "linear1.weight"}])
-        assert hasattr(model.linear1.parametrizations.weight[0], "mask")
-        assert is_parametrized(model.linear1, "weight")
-        assert not is_parametrized(model.seq[0], "weight")
+        if not hasattr(model.linear1.parametrizations.weight[0], "mask"):
+            raise AssertionError("Expected mask attribute on parametrization")
+        if not is_parametrized(model.linear1, "weight"):
+            raise AssertionError("Expected model.linear1 to be parametrized")
+        if is_parametrized(model.seq[0], "weight"):
+            raise AssertionError("Expected model.seq[0] to not be parametrized")
 
         sparsifier.squash_mask()
-        assert not is_parametrized(model.seq[0], "weight")
-        assert not is_parametrized(model.linear1, "weight")
+        if is_parametrized(model.seq[0], "weight"):
+            raise AssertionError(
+                "Expected model.seq[0] to not be parametrized after squash"
+            )
+        if is_parametrized(model.linear1, "weight"):
+            raise AssertionError(
+                "Expected model.linear1 to not be parametrized after squash"
+            )
 
     def test_mask_squash_with_params1(self):
         model = SimpleLinear()
@@ -164,16 +233,32 @@ class TestBaseSparsifier(TestCase):
         sparsifier.squash_mask(
             params_to_keep_per_layer={"linear1": ("foo", "bar"), "seq.0": ("baz",)}
         )
-        assert not is_parametrized(model.seq[0], "weight")
-        assert not is_parametrized(model.linear1, "weight")
-        assert hasattr(model.seq[0], "sparse_params")
-        assert hasattr(model.linear1, "sparse_params")
-        assert model.seq[0].sparse_params.get("foo", None) is None
-        assert model.seq[0].sparse_params.get("bar", None) is None
-        assert model.seq[0].sparse_params.get("baz", None) == 1
-        assert model.linear1.sparse_params.get("foo", None) == 3
-        assert model.linear1.sparse_params.get("bar", None) == 2
-        assert model.linear1.sparse_params.get("baz", None) is None
+        if is_parametrized(model.seq[0], "weight"):
+            raise AssertionError("Expected model.seq[0] to not be parametrized")
+        if is_parametrized(model.linear1, "weight"):
+            raise AssertionError("Expected model.linear1 to not be parametrized")
+        if not hasattr(model.seq[0], "sparse_params"):
+            raise AssertionError("Expected model.seq[0] to have sparse_params")
+        if not hasattr(model.linear1, "sparse_params"):
+            raise AssertionError("Expected model.linear1 to have sparse_params")
+        if model.seq[0].sparse_params.get("foo", None) is not None:
+            raise AssertionError("Expected seq[0].sparse_params['foo'] to be None")
+        if model.seq[0].sparse_params.get("bar", None) is not None:
+            raise AssertionError("Expected seq[0].sparse_params['bar'] to be None")
+        if model.seq[0].sparse_params.get("baz", None) != 1:
+            raise AssertionError(
+                f"Expected seq[0].sparse_params['baz'] == 1, got {model.seq[0].sparse_params.get('baz', None)}"
+            )
+        if model.linear1.sparse_params.get("foo", None) != 3:
+            raise AssertionError(
+                f"Expected linear1.sparse_params['foo'] == 3, got {model.linear1.sparse_params.get('foo', None)}"
+            )
+        if model.linear1.sparse_params.get("bar", None) != 2:
+            raise AssertionError(
+                f"Expected linear1.sparse_params['bar'] == 2, got {model.linear1.sparse_params.get('bar', None)}"
+            )
+        if model.linear1.sparse_params.get("baz", None) is not None:
+            raise AssertionError("Expected linear1.sparse_params['baz'] to be None")
 
     def test_mask_squash_with_params2(self):
         model = SimpleLinear()
@@ -182,16 +267,34 @@ class TestBaseSparsifier(TestCase):
             model, [{"tensor_fqn": "linear1.weight"}, {"tensor_fqn": "seq.0.weight"}]
         )
         sparsifier.squash_mask(params_to_keep=("foo", "bar"))
-        assert not is_parametrized(model.seq[0], "weight")
-        assert not is_parametrized(model.linear1, "weight")
-        assert hasattr(model.seq[0], "sparse_params")
-        assert hasattr(model.linear1, "sparse_params")
-        assert model.seq[0].sparse_params.get("foo", None) == 3
-        assert model.seq[0].sparse_params.get("bar", None) == 2
-        assert model.seq[0].sparse_params.get("baz", None) is None
-        assert model.linear1.sparse_params.get("foo", None) == 3
-        assert model.linear1.sparse_params.get("bar", None) == 2
-        assert model.linear1.sparse_params.get("baz", None) is None
+        if is_parametrized(model.seq[0], "weight"):
+            raise AssertionError("Expected model.seq[0] to not be parametrized")
+        if is_parametrized(model.linear1, "weight"):
+            raise AssertionError("Expected model.linear1 to not be parametrized")
+        if not hasattr(model.seq[0], "sparse_params"):
+            raise AssertionError("Expected model.seq[0] to have sparse_params")
+        if not hasattr(model.linear1, "sparse_params"):
+            raise AssertionError("Expected model.linear1 to have sparse_params")
+        if model.seq[0].sparse_params.get("foo", None) != 3:
+            raise AssertionError(
+                f"Expected seq[0].sparse_params['foo'] == 3, got {model.seq[0].sparse_params.get('foo', None)}"
+            )
+        if model.seq[0].sparse_params.get("bar", None) != 2:
+            raise AssertionError(
+                f"Expected seq[0].sparse_params['bar'] == 2, got {model.seq[0].sparse_params.get('bar', None)}"
+            )
+        if model.seq[0].sparse_params.get("baz", None) is not None:
+            raise AssertionError("Expected seq[0].sparse_params['baz'] to be None")
+        if model.linear1.sparse_params.get("foo", None) != 3:
+            raise AssertionError(
+                f"Expected linear1.sparse_params['foo'] == 3, got {model.linear1.sparse_params.get('foo', None)}"
+            )
+        if model.linear1.sparse_params.get("bar", None) != 2:
+            raise AssertionError(
+                f"Expected linear1.sparse_params['bar'] == 2, got {model.linear1.sparse_params.get('bar', None)}"
+            )
+        if model.linear1.sparse_params.get("baz", None) is not None:
+            raise AssertionError("Expected linear1.sparse_params['baz'] to be None")
 
     def test_mask_squash_with_params3(self):
         model = SimpleLinear()
@@ -202,16 +305,36 @@ class TestBaseSparsifier(TestCase):
         sparsifier.squash_mask(
             params_to_keep=("foo", "bar"), params_to_keep_per_layer={"seq.0": ("baz",)}
         )
-        assert not is_parametrized(model.seq[0], "weight")
-        assert not is_parametrized(model.linear1, "weight")
-        assert hasattr(model.seq[0], "sparse_params")
-        assert hasattr(model.linear1, "sparse_params")
-        assert model.seq[0].sparse_params.get("foo", None) == 3
-        assert model.seq[0].sparse_params.get("bar", None) == 2
-        assert model.seq[0].sparse_params.get("baz", None) == 1
-        assert model.linear1.sparse_params.get("foo", None) == 3
-        assert model.linear1.sparse_params.get("bar", None) == 2
-        assert model.linear1.sparse_params.get("baz", None) is None
+        if is_parametrized(model.seq[0], "weight"):
+            raise AssertionError("Expected model.seq[0] to not be parametrized")
+        if is_parametrized(model.linear1, "weight"):
+            raise AssertionError("Expected model.linear1 to not be parametrized")
+        if not hasattr(model.seq[0], "sparse_params"):
+            raise AssertionError("Expected model.seq[0] to have sparse_params")
+        if not hasattr(model.linear1, "sparse_params"):
+            raise AssertionError("Expected model.linear1 to have sparse_params")
+        if model.seq[0].sparse_params.get("foo", None) != 3:
+            raise AssertionError(
+                f"Expected seq[0].sparse_params['foo'] == 3, got {model.seq[0].sparse_params.get('foo', None)}"
+            )
+        if model.seq[0].sparse_params.get("bar", None) != 2:
+            raise AssertionError(
+                f"Expected seq[0].sparse_params['bar'] == 2, got {model.seq[0].sparse_params.get('bar', None)}"
+            )
+        if model.seq[0].sparse_params.get("baz", None) != 1:
+            raise AssertionError(
+                f"Expected seq[0].sparse_params['baz'] == 1, got {model.seq[0].sparse_params.get('baz', None)}"
+            )
+        if model.linear1.sparse_params.get("foo", None) != 3:
+            raise AssertionError(
+                f"Expected linear1.sparse_params['foo'] == 3, got {model.linear1.sparse_params.get('foo', None)}"
+            )
+        if model.linear1.sparse_params.get("bar", None) != 2:
+            raise AssertionError(
+                f"Expected linear1.sparse_params['bar'] == 2, got {model.linear1.sparse_params.get('bar', None)}"
+            )
+        if model.linear1.sparse_params.get("baz", None) is not None:
+            raise AssertionError("Expected linear1.sparse_params['baz'] to be None")
 
 
 class TestWeightNormSparsifier(TestCase):
@@ -220,9 +343,11 @@ class TestWeightNormSparsifier(TestCase):
         sparsifier = WeightNormSparsifier()
         sparsifier.prepare(model, config=None)
         for g in sparsifier.groups:
-            assert isinstance(g["module"], nn.Linear)
+            if not isinstance(g["module"], nn.Linear):
+                raise AssertionError(f"Expected nn.Linear, got {type(g['module'])}")
             # The groups are unordered
-            assert g["module_fqn"] in ("seq.0", "seq.1", "seq.2", "linear1", "linear2")
+            if g["module_fqn"] not in ("seq.0", "seq.1", "seq.2", "linear1", "linear2"):
+                raise AssertionError(f"Unexpected module_fqn: {g['module_fqn']}")
 
     def test_step(self):
         model = SimpleLinear()
@@ -231,9 +356,8 @@ class TestWeightNormSparsifier(TestCase):
         for g in sparsifier.groups:
             # Before step
             module = g["module"]
-            assert (
-                1.0 - module.parametrizations["weight"][0].mask.mean()
-            ) == 0  # checking sparsity level is 0
+            if (1.0 - module.parametrizations["weight"][0].mask.mean()) != 0:
+                raise AssertionError("Expected sparsity level to be 0 before step")
         sparsifier.enable_mask_update = True
         sparsifier.step()
         self.assertAlmostEqual(
@@ -244,9 +368,10 @@ class TestWeightNormSparsifier(TestCase):
         for g in sparsifier.groups:
             # After step
             module = g["module"]
-            assert (
-                1.0 - module.parametrizations["weight"][0].mask.mean()
-            ) > 0  # checking sparsity level has increased
+            if (1.0 - module.parametrizations["weight"][0].mask.mean()) <= 0:
+                raise AssertionError(
+                    "Expected sparsity level to have increased after step"
+                )
         # Test if the mask collapses to all zeros if the weights are randomized
         iters_before_collapse = 1000
         for _ in range(iters_before_collapse):
@@ -255,9 +380,8 @@ class TestWeightNormSparsifier(TestCase):
         for g in sparsifier.groups:
             # After step
             module = g["module"]
-            assert (
-                1.0 - module.parametrizations["weight"][0].mask.mean()
-            ) > 0  # checking sparsity level did not collapse
+            if (1.0 - module.parametrizations["weight"][0].mask.mean()) <= 0:
+                raise AssertionError("Expected sparsity level to not collapse")
 
     def test_step_2_of_4(self):
         model = SimpleLinear()
@@ -278,8 +402,12 @@ class TestWeightNormSparsifier(TestCase):
             for idx in range(0, len(row), 4):
                 block = row[idx : idx + 4]
                 block, _ = block.sort()
-                assert (block[:2] == 0).all()
-                assert (block[2:] != 0).all()
+                if not (block[:2] == 0).all():
+                    raise AssertionError("Expected first 2 elements of block to be 0")
+                if not (block[2:] != 0).all():
+                    raise AssertionError(
+                        "Expected last 2 elements of block to be non-zero"
+                    )
 
     def test_prepare(self):
         model = SimpleLinear()
@@ -288,10 +416,15 @@ class TestWeightNormSparsifier(TestCase):
         for g in sparsifier.groups:
             module = g["module"]
             # Check mask exists
-            assert hasattr(module.parametrizations["weight"][0], "mask")
+            if not hasattr(module.parametrizations["weight"][0], "mask"):
+                raise AssertionError("Expected mask attribute on parametrization")
             # Check parametrization exists and is correct
-            assert is_parametrized(module, "weight")
-            assert type(module.parametrizations.weight[0]) is FakeSparsity
+            if not is_parametrized(module, "weight"):
+                raise AssertionError("Expected module to be parametrized")
+            if type(module.parametrizations.weight[0]) is not FakeSparsity:
+                raise AssertionError(
+                    f"Expected FakeSparsity, got {type(module.parametrizations.weight[0])}"
+                )
 
     def test_mask_squash(self):
         model = SimpleLinear()
@@ -300,8 +433,12 @@ class TestWeightNormSparsifier(TestCase):
         sparsifier.squash_mask()
         for g in sparsifier.groups:
             module = g["module"]
-            assert not is_parametrized(module, "weight")
-            assert not hasattr(module, "mask")
+            if is_parametrized(module, "weight"):
+                raise AssertionError(
+                    "Expected module to not be parametrized after squash"
+                )
+            if hasattr(module, "mask"):
+                raise AssertionError("Expected module to not have mask after squash")
 
     def test_sparsity_levels(self):
         sparsity_levels = [-1.0, 0.0, 0.5, 1.0, 2.0]
@@ -350,12 +487,18 @@ class TestWeightNormSparsifier(TestCase):
             # Level of sparsity is achieved
             sparse_mask = (layer.weight == 0).float()
             if zpb == 0:
-                assert sparse_mask.mean() == 0
+                if sparse_mask.mean() != 0:
+                    raise AssertionError(
+                        f"Expected sparse_mask.mean() == 0, got {sparse_mask.mean()}"
+                    )
             else:
                 # Ratio of individual zeros in the tensor
                 true_sl = min(max(sl, 0.0), 1.0)
                 true_sl = true_sl * zpb / sbs[0] / sbs[1]
-                assert sparse_mask.mean() == true_sl
+                if sparse_mask.mean() != true_sl:
+                    raise AssertionError(
+                        f"Expected sparse_mask.mean() == {true_sl}, got {sparse_mask.mean()}"
+                    )
 
 
 class TestNearlyDiagonalSparsifier(TestCase):
@@ -364,9 +507,11 @@ class TestNearlyDiagonalSparsifier(TestCase):
         sparsifier = NearlyDiagonalSparsifier(nearliness=1)
         sparsifier.prepare(model, config=None)
         for g in sparsifier.groups:
-            assert isinstance(g["module"], nn.Linear)
+            if not isinstance(g["module"], nn.Linear):
+                raise AssertionError(f"Expected nn.Linear, got {type(g['module'])}")
             # The groups are unordered
-            assert g["module_fqn"] in ("seq.0", "seq.1", "seq.2", "linear1", "linear2")
+            if g["module_fqn"] not in ("seq.0", "seq.1", "seq.2", "linear1", "linear2"):
+                raise AssertionError(f"Unexpected module_fqn: {g['module_fqn']}")
 
     def test_step(self):
         model = SimpleLinear()
@@ -376,22 +521,23 @@ class TestNearlyDiagonalSparsifier(TestCase):
         for g in sparsifier.groups:
             # Before step
             module = g["module"]
-            assert (
-                1.0 - module.parametrizations["weight"][0].mask.mean()
-            ) == 0  # checking sparsity level is 0
+            if (1.0 - module.parametrizations["weight"][0].mask.mean()) != 0:
+                raise AssertionError("Expected sparsity level to be 0 before step")
 
         sparsifier.enable_mask_update = True
         sparsifier.step()
         mask = module.parametrizations["weight"][0].mask
         height, width = mask.shape
-        assert torch.all(mask == torch.eye(height, width))
+        if not torch.all(mask == torch.eye(height, width)):
+            raise AssertionError("Expected mask to be identity matrix")
 
         for g in sparsifier.groups:
             # After step
             module = g["module"]
-            assert (
-                1.0 - module.parametrizations["weight"][0].mask.mean()
-            ) > 0  # checking sparsity level has increased
+            if (1.0 - module.parametrizations["weight"][0].mask.mean()) <= 0:
+                raise AssertionError(
+                    "Expected sparsity level to have increased after step"
+                )
 
         # Test if the mask collapses to all zeros if the weights are randomized
         iters_before_collapse = 1000
@@ -401,9 +547,8 @@ class TestNearlyDiagonalSparsifier(TestCase):
         for g in sparsifier.groups:
             # After step
             module = g["module"]
-            assert (
-                1.0 - module.parametrizations["weight"][0].mask.mean()
-            ) > 0  # checking sparsity level did not collapse
+            if (1.0 - module.parametrizations["weight"][0].mask.mean()) <= 0:
+                raise AssertionError("Expected sparsity level to not collapse")
 
     def test_prepare(self):
         model = SimpleLinear()
@@ -412,10 +557,15 @@ class TestNearlyDiagonalSparsifier(TestCase):
         for g in sparsifier.groups:
             module = g["module"]
             # Check mask exists
-            assert hasattr(module.parametrizations["weight"][0], "mask")
+            if not hasattr(module.parametrizations["weight"][0], "mask"):
+                raise AssertionError("Expected mask attribute on parametrization")
             # Check parametrization exists and is correct
-            assert is_parametrized(module, "weight")
-            assert type(module.parametrizations.weight[0]) is FakeSparsity
+            if not is_parametrized(module, "weight"):
+                raise AssertionError("Expected module to be parametrized")
+            if type(module.parametrizations.weight[0]) is not FakeSparsity:
+                raise AssertionError(
+                    f"Expected FakeSparsity, got {type(module.parametrizations.weight[0])}"
+                )
 
     def test_mask_squash(self):
         model = SimpleLinear()
@@ -425,13 +575,16 @@ class TestNearlyDiagonalSparsifier(TestCase):
         sparsifier.squash_mask()
         for g in sparsifier.groups:
             module = g["module"]
-            assert not is_parametrized(module, "weight")
-            assert not hasattr(module, "mask")
+            if is_parametrized(module, "weight"):
+                raise AssertionError(
+                    "Expected module to not be parametrized after squash"
+                )
+            if hasattr(module, "mask"):
+                raise AssertionError("Expected module to not have mask after squash")
             weights = module.weight
             height, width = weights.shape
-            assert torch.all(
-                weights == torch.eye(height, width) * weights
-            )  # only diagonal to be present
+            if not torch.all(weights == torch.eye(height, width) * weights):
+                raise AssertionError("Expected only diagonal elements to be present")
 
     def test_sparsity_levels(self):
         nearliness_levels = list(range(-1, 100))
@@ -468,16 +621,25 @@ class TestNearlyDiagonalSparsifier(TestCase):
     # helper function to verify nearliness of a mask
     def _verify_nearliness(self, mask: torch.Tensor, nearliness: int):
         if nearliness <= 0:
-            assert torch.all(mask == torch.zeros(mask.shape[0], mask.shape[1]))
+            if not torch.all(mask == torch.zeros(mask.shape[0], mask.shape[1])):
+                raise AssertionError(
+                    "Expected all mask values to be 0 for nearliness <= 0"
+                )
         else:
             height, width = mask.shape
             dist_to_diagonal = nearliness // 2
             for row in range(height):
                 for col in range(width):
                     if abs(row - col) <= dist_to_diagonal:
-                        assert mask[row, col] == 1
+                        if mask[row, col] != 1:
+                            raise AssertionError(
+                                f"Expected mask[{row}, {col}] == 1 for near-diagonal"
+                            )
                     else:
-                        assert mask[row, col] == 0
+                        if mask[row, col] != 0:
+                            raise AssertionError(
+                                f"Expected mask[{row}, {col}] == 0 for off-diagonal"
+                            )
 
 
 if __name__ == "__main__":

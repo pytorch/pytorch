@@ -38,6 +38,7 @@ enum class C10_API_ENUM ProfilerState {
   KINETO, // use libkineto
   KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
   KINETO_PRIVATEUSE1_FALLBACK, // use PrivateUse1 events
+  KINETO_PRIVATEUSE1, // use Kineto with registered IActivityProfiler
   KINETO_ONDEMAND, // run the profiler in on-demand mode
   NUM_PROFILER_STATES, // must be the last one
 };
@@ -65,7 +66,8 @@ struct TORCH_API ExperimentalConfig {
       bool record_python_gc_info = false,
       bool expose_kineto_event_metadata = false,
       std::string custom_profiler_config = "",
-      bool adjust_timestamps = false);
+      bool adjust_timestamps = false,
+      bool trace_only = false);
   explicit operator bool() const;
 
   std::vector<std::string> profiler_metrics;
@@ -131,6 +133,11 @@ struct TORCH_API ExperimentalConfig {
    * information instead of the original information.
    */
   bool adjust_timestamps;
+
+  // When true, __exit__ skips TransferEvents, build_tree, and
+  // materializeOpEvents. Only export_chrome_trace / save() will work;
+  // accessing events() raises an error.
+  bool trace_only;
 };
 
 struct TORCH_API ProfilerConfig {

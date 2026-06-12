@@ -16,7 +16,6 @@ extern "C" {
 #endif
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-using StableIValue = uint64_t;
 
 // Has the same semantic as aoti_torch_call_dispatcher, but takes an
 // additional argument for the extension build version. This is
@@ -122,9 +121,170 @@ torch_string_c_str(StringHandle handle, const char** data);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_get_current_cuda_blas_handle(void** ret_handle);
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_set_current_cuda_stream(void* stream, int32_t device_index);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cuda_stream_from_pool(
+    bool isHighPriority,
+    int32_t device_index,
+    void** ret_stream);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cuda_stream_synchronize(void* stream, int32_t device_index);
+
+// Wrapper around c10_cuda_check_implementation that captures the error message
+// without propagating the exception. The caller must free error_msg using
+// torch_c10_cuda_free_error_msg if it is non-null.
+AOTI_TORCH_EXPORT AOTITorchError torch_c10_cuda_check_msg(
+    int32_t err,
+    const char* filename,
+    const char* function_name,
+    uint32_t line_number,
+    bool include_device_assertions,
+    char** error_msg);
+
+// Free error message allocated by torch_c10_cuda_check_msg
+AOTI_TORCH_EXPORT void torch_c10_cuda_free_error_msg(char* error_msg);
+
 #endif // USE_CUDA
 
+// Set requires_grad on a tensor
+AOTI_TORCH_EXPORT AOTITorchError
+torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+/**
+ * The beginning of all shims added in 2.11.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+// Shims for a few dtypes not already in
+// torch/csrc/inductor/aoti_torch/c/shim.h
+AOTI_TORCH_EXPORT int32_t torch_dtype_float8_e8m0fnu();
+AOTI_TORCH_EXPORT int32_t torch_dtype_float4_e2m1fn_x2();
+
+// Creates a tensor from an existing data blob with an optional deleter.
+// The deleter receives both the data pointer and a caller-supplied context
+// pointer, which allows passing capturing lambdas across the C ABI boundary
+// by heap-allocating the callable and passing it as deleter_ctx.
+AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret, // returns new reference
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size,
+    void (*deleter)(void* data, void* ctx),
+    void* deleter_ctx);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+/**
+ * The beginning of all shims added in 2.12.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+// Tag getter functions for ABI-stable tag passing.  By hiding these behind
+// functions, the precise enum ordinal is NOT part of the ABI contract.
+AOTI_TORCH_EXPORT int32_t torch_tag_core();
+AOTI_TORCH_EXPORT int32_t torch_tag_cudagraph_unsafe();
+AOTI_TORCH_EXPORT int32_t torch_tag_data_dependent_output();
+AOTI_TORCH_EXPORT int32_t torch_tag_dynamic_output_shape();
+AOTI_TORCH_EXPORT int32_t torch_tag_flexible_layout();
+AOTI_TORCH_EXPORT int32_t torch_tag_generated();
+AOTI_TORCH_EXPORT int32_t torch_tag_inplace_view();
+AOTI_TORCH_EXPORT int32_t torch_tag_maybe_aliasing_or_mutating();
+AOTI_TORCH_EXPORT int32_t torch_tag_needs_contiguous_strides();
+AOTI_TORCH_EXPORT int32_t torch_tag_needs_exact_strides();
+AOTI_TORCH_EXPORT int32_t torch_tag_needs_fixed_stride_order();
+AOTI_TORCH_EXPORT int32_t torch_tag_nondeterministic_bitwise();
+AOTI_TORCH_EXPORT int32_t torch_tag_nondeterministic_seeded();
+AOTI_TORCH_EXPORT int32_t torch_tag_out_variant();
+AOTI_TORCH_EXPORT int32_t torch_tag_pointwise();
+AOTI_TORCH_EXPORT int32_t torch_tag_pt2_compliant_tag();
+AOTI_TORCH_EXPORT int32_t torch_tag_reduction();
+AOTI_TORCH_EXPORT int32_t torch_tag_view_copy();
+
+// Stable corollary to torch::Library method m.def() with tags.
+// Tags are passed as int32_t values obtained from torch_tag_*() getters,
+// not raw enum ordinals, so the ABI is stable across versions.
+AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
+    TorchLibraryHandle self,
+    const char* schema,
+    const int32_t* tags,
+    int32_t num_tags);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+/**
+ * The beginning of all shims added in 2.13.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
+// Stable corollary to torch::Library method m.set_python_module(...).
+AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
+    TorchLibraryHandle self,
+    const char* pymodule,
+    const char* context);
+
+/// Retrieve a pointer to the string that holds the most recent exception's
+/// message and backtrace that occurred in the calling thread. This pointer is a
+/// borrowed pointer and is invalidated when the next exception occurs or the
+/// calling thread is shutdown. This may be the same as the less detailed
+/// torch_exception_get_what_without_backtrace() in case more information is not
+/// available.
+AOTI_TORCH_EXPORT const char* torch_exception_get_what();
+
+/// Retrieve a pointer to the string that holds the most recent exception's
+/// message that occurred in the calling thread. This pointer is a borrowed
+/// pointer and is invalidated when the next exception occurs or the calling
+/// thread is shutdown.
+AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace();
+
+// Allocates an StableIValue on the heap, returns an owning pointer.
+// This allocation must be deleted with torch_delete_stable_ivalue or
+// by passing it to a dispatch call which frees it internally.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_stable_ivalue(StableIValue** ret_value);
+
+// Frees an StableIValue that was created by torch_new_stable_ivalue.
+// Deleting a nullptr is invalid and returns failure, allocations must
+// only be deleted once.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_stable_ivalue(StableIValue* value);
+
+/// Retrieves the underlying Stream's backend-specific non-owning stream handle
+/// (e.g. `cudaStream_t` for CUDA). Returns a void* that can be `static_cast`ed
+/// accordingly.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_stream_native_handle(StreamHandle stream, void** ret_native_handle);
+
+// Returns a new owning AtenGeneratorHandle that shares the underlying RNG state
+// with `self` (the copy bumps the GeneratorImpl refcount). The callee owns the
+// result and must free it with torch_delete_generator.
+AOTI_TORCH_EXPORT AOTITorchError torch_new_generator_handle(
+    AtenGeneratorHandle self,
+    AtenGeneratorHandle* ret_new_generator);
+
+// Frees an owning AtenGeneratorHandle previously returned by
+// torch_new_generator_handle (or otherwise handed off with ownership).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_generator(AtenGeneratorHandle generator);
+
+// Returns the generator's device as (device_type, device_index). device_type
+// uses the same encoding as the aoti_torch_device_type_*() getters.
+AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
+    AtenGeneratorHandle generator,
+    int32_t* ret_device_type,
+    int32_t* ret_device_index);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 #ifdef __cplusplus
 } // extern "C"

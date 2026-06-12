@@ -2,7 +2,7 @@
 import collections
 import functools
 import warnings
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.types import _dtype
@@ -222,9 +222,9 @@ class autocast:
     def __init__(
         self,
         device_type: str,
-        dtype: Optional[_dtype] = None,
+        dtype: _dtype | None = None,
         enabled: bool = True,
-        cache_enabled: Optional[bool] = None,
+        cache_enabled: bool | None = None,
     ):
         if not isinstance(device_type, str):
             raise ValueError(
@@ -236,7 +236,8 @@ class autocast:
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
-            assert self.fast_dtype is not None
+            if self.fast_dtype is None:
+                raise AssertionError("fast_dtype must not be None in scripting mode")
             return
         self.device = device_type
         if not is_autocast_available(self.device):
@@ -256,12 +257,14 @@ class autocast:
             message += "a module by `torch._register_device_module`, and the module must have these funcs: \n"
             message += "`get_amp_supported_dtype() -> List[torch.dtype]`. \n"
 
-            assert hasattr(torch, self.custom_backend_name), message
+            if not hasattr(torch, self.custom_backend_name):
+                raise AssertionError(message)
             self.custom_device_mod = getattr(torch, self.custom_backend_name)
             for func in necessary_funcs:
-                assert hasattr(self.custom_device_mod, func), (
-                    message + f"But the func `{func}` is missing. \n"
-                )
+                if not hasattr(self.custom_device_mod, func):
+                    raise AssertionError(
+                        message + f"But the func `{func}` is missing. \n"
+                    )
             device_supported_dtypes = self.custom_device_mod.get_amp_supported_dtype()
 
         self._cache_enabled = (
@@ -300,23 +303,12 @@ class autocast:
                 )
                 warnings.warn(error_message, stacklevel=2)
                 enabled = False
-                # Special case for MPS bfloat16 support on macOS < 14
-                if (
-                    self.device == "mps"
-                    and self.fast_dtype == torch.bfloat16
-                    and not torch.backends.mps.is_macos_or_newer(14, 0)
-                ):
-                    error_message = (
-                        "In MPS autocast, but the target dtype torch.bfloat16 is not supported "
-                        "on macOS versions below 14. Disabling autocast."
-                    )
-                    warnings.warn(error_message, stacklevel=2)
-                    enabled = False
         self._enabled = enabled
 
     def __enter__(self):
         if torch._jit_internal.is_scripting():
-            assert self.fast_dtype is not None
+            if self.fast_dtype is None:
+                raise AssertionError("fast_dtype must not be None in scripting mode")
             return self
 
         self.prev_cache_enabled = torch.is_autocast_cache_enabled()
@@ -378,7 +370,19 @@ class autocast:
     def __call__(self, func):
         if torch._jit_internal.is_scripting():
             return func
+        if not callable(func):
+            raise TypeError(
+                f"autocast()(func) requires a callable, but got {type(func).__name__}. "
+                f"Did you mean to use autocast as a context manager? For example:\n"
+                f"    with torch.autocast(device_type=...):\n"
+                f"        output = model(input)"
+            )
         return autocast_decorator(self, func)
+
+
+# Subclass to distinguish autocast variables created by _enter_autocast (and not managed by a with statement)
+class _UnmanagedAutocast(autocast):
+    pass
 
 
 # These functions aren't meant for public usage.
@@ -390,7 +394,7 @@ def _enter_autocast(*vals):
         return torch.overrides.handle_torch_function(
             torch.amp._enter_autocast, [], *vals
         )
-    mode = torch.amp.autocast(*vals)
+    mode = _UnmanagedAutocast(*vals)
     mode.__enter__()
     return mode
 
@@ -438,7 +442,7 @@ def custom_fwd(
     fwd=None,
     *,
     device_type: str,
-    cast_inputs: Optional[_dtype] = None,
+    cast_inputs: _dtype | None = None,
 ):
     """
     Create a helper decorator for ``forward`` methods of custom autograd functions.

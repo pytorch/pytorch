@@ -1,9 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 
-#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
-
-#include <c10/util/Logging.h>
 
 namespace torch::jit::tensorexpr {
 
@@ -118,7 +115,6 @@ std::string Dtype::ToCppString() const {
     default:
       throw unsupported_dtype();
   }
-  return "invalid";
 }
 
 } // namespace torch::jit::tensorexpr

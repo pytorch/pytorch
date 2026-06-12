@@ -7,7 +7,6 @@
 import argparse
 import logging
 from collections.abc import Sequence
-from typing import Optional
 
 from torch.distributed.flight_recorder.components.fr_logger import FlightRecorderLogger
 
@@ -89,23 +88,23 @@ class JobConfig:
             help="The number of ranks in 1 torchft replica group. Must be specified if --transform-ft is True",
         )
 
-    def parse_args(
-        self: "JobConfig", args: Optional[Sequence[str]]
-    ) -> argparse.Namespace:
+    def parse_args(self: "JobConfig", args: Sequence[str] | None) -> argparse.Namespace:
         # pyrefly: ignore [bad-assignment]
         args = self.parser.parse_args(args)
         # pyrefly: ignore [missing-attribute]
         if args.selected_ranks is not None:
             # pyrefly: ignore [missing-attribute]
-            assert args.just_print_entries, (
-                "Not support selecting ranks without printing entries"
-            )
+            if not args.just_print_entries:
+                raise AssertionError(
+                    "Not support selecting ranks without printing entries"
+                )
         # pyrefly: ignore [missing-attribute]
         if args.pg_filters is not None:
             # pyrefly: ignore [missing-attribute]
-            assert args.just_print_entries, (
-                "Not support selecting pg filters without printing entries"
-            )
+            if not args.just_print_entries:
+                raise AssertionError(
+                    "Not support selecting pg filters without printing entries"
+                )
         # pyrefly: ignore [missing-attribute]
         if args.verbose:
             logger.set_log_level(logging.DEBUG)

@@ -160,6 +160,13 @@ struct C10_API SourceLocation {
   const char* function;
   const char* file;
   uint32_t line;
+
+  static constexpr SourceLocation current(
+      const char* file = __builtin_FILE(),
+      const char* function = __builtin_FUNCTION(),
+      const std::uint_least32_t line = __builtin_LINE()) noexcept {
+    return {.function = function, .file = file, .line = line};
+  }
 };
 
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
@@ -219,7 +226,7 @@ inline void printQuotedString(std::ostream& stmt, const std::string_view str) {
           s /= 8;
           // NOLINTNEXTLINE(*narrowing-conversions)
           buf[0] += s;
-          stmt << "\\" << buf;
+          stmt << '\\' << buf;
         }
         break;
     }

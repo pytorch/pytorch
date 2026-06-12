@@ -9,44 +9,50 @@ if(NOT __AOTRITON_INCLUDED)
   # Replaces .ci/docker/aotriton_version.txt
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
-  set(__AOTRITON_VER "0.11b")
+  set(__AOTRITON_VER "0.12b")
   set(__AOTRITON_MANYLINUX_LIST
-      "manylinux_2_28"  # rocm6.2
-      "manylinux_2_28"  # rocm6.3
       "manylinux_2_28"  # rocm6.4
       "manylinux_2_28"  # rocm7.0
       "manylinux_2_28"  # rocm7.1
+      "manylinux_2_28"  # rocm7.2
       )
   set(__AOTRITON_ROCM_LIST
-      "rocm6.2"
-      "rocm6.3"
       "rocm6.4"
       "rocm7.0"
       "rocm7.1"
+      "rocm7.2"
       )
-  set(__AOTRITON_CI_COMMIT "972223c501ffc22068bb035ac5d64cf54318d895")
+  if(DEFINED ENV{PYTORCH_AOTRITON_COMMIT})
+    set(__AOTRITON_CI_COMMIT "$ENV{PYTORCH_AOTRITON_COMMIT}")
+  else()
+    set(__AOTRITON_CI_COMMIT "269036897bcee4292f4e928767df1e3dd0e3c8bd")
+  endif()
   set(__AOTRITON_SHA256_LIST
-      "6cae3d5de75ee205d22e088f7dfaab1227056d02ea67f29ccdbc09f2be4e8c8f"  # rocm6.2
-      "72a153549ea20707331e8a1f1e3d1b8de2913f9d5af2b900c56235d578b57efe"  # rocm6.3
-      "c7f319dd7448cbbbab81889dd8a37d47dbc25ebcbd89760f09e6a0904e556393"  # rocm6.4
-      "a2a974e0ad929a5e5827c0f896c59bda4872459cbaf8dd8e0a00407f404491cf"  # rocm7.0
-      "d4eb24c9f1a0cfedb35f9292efb41d16589cf5a4b98c3c0940181bbefc49d722"  # rocm7.1
+      "e57ad080bd87fdaf7fe5bbff49ab80222be3bc8eb56a197d5781bfae8c116c33"  # rocm6.4
+      "f6aba1fe59312004ccd13dfda4d0a9e35457527fec18348d2e75a294a1051ef5"  # rocm7.0
+      "a1d731745929b61598d088eeaad31d8a82a27032aa51e3a7c831e45a99e095c2"  # rocm7.1
+      "5b97e8d041b160c84085961f3d3bd7b9890642b146bacb04c991aa9ad6a8dca8"  # rocm7.2
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
       "amd-gfx942"
       "amd-gfx950"
-      "amd-gfx11xx"
+      "amd-gfx110x"
+      "amd-gfx115x"
       "amd-gfx120x"
      )
   set(__AOTRITON_IMAGE_SHA256_LIST
-     "c19a41c9480510ab32e6fb05e6ed0a3832d6b07634f050b836b760200befa735" # amd-gfx90a
-     "3a06a99971dddb7703a30378f1c5d6b41468d926ea51821156d1b6857b985bc4" # amd-gfx942
-     "27fc21f6761d57987a700436de8cf29cbdd9eeee91318dfed596eeb147d219ad" # amd-gfx950
-     "ec134032087344176695505db659387374d1916adfee16f0db47dee38d9c8603" # amd-gfx11xx
-     "fec05205747ff51649b1e151545267d5aa2037ba9d0338cad286882915b941b0" # amd-gfx120x
+     "bb8bf2237b77fc503bc2967ea0d99d6ca419126c479e951ea42b712737128086" # amd-gfx90a
+     "f08edacf83c9ccf1c4bdcb51f1cab052d1680abea31c9e035f3f9fadb2f13ba4" # amd-gfx942
+     "307a37d729cda3a2120449909e5192cd71c2badccbd37f0222786098e69c7a91" # amd-gfx950
+     "c9cac7cf6f277168e1659ac2f04706f8823580b7c7e3e895f5a5503ed6bdd55f" # amd-gfx110x
+     "3177387a15c678b30057f4584d1fc1b8f8db56163890cb5c98f27450209f5a7b" # amd-gfx115x
+     "68572511ce6487a83f9014bd255bd69c8943f87d0c93bd57b2daac5fbc6c79c1" # amd-gfx120x
      )
-  set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")  # @lint-ignore
+  set(__AOTRITON_BASE_URL "$ENV{PYTORCH_AOTRITON_BASE_URL}")
+  if(NOT __AOTRITON_BASE_URL)
+    set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")  # @lint-ignore
+  endif()
   set(__AOTRITON_Z "gz")
   # Set the default __AOTRITON_LIB path
   if(NOT WIN32)
@@ -274,4 +280,19 @@ if(NOT __AOTRITON_INCLUDED)
   target_link_libraries(__caffe2_aotriton INTERFACE "${__AOTRITON_INSTALL_DIR}/${__AOTRITON_LIB}")
   target_include_directories(__caffe2_aotriton INTERFACE ${__AOTRITON_INSTALL_DIR}/include)
   set(AOTRITON_FOUND TRUE)
+  # Install libaotriton_v2.so into the cmake install tree so it ends up in
+  # site-packages/torch/lib/ when building with scikit-build-core.
+  # aotriton's ExternalProject puts the library directly in the source tree
+  # (${PROJECT_SOURCE_DIR}/torch/lib/) without a cmake install() rule, so it
+  # is absent from the installed wheel and causes link failures in downstream
+  # cmake builds (e.g., custom op builds) that link against installed torch.
+  install(DIRECTORY "${__AOTRITON_INSTALL_DIR}/lib/"
+    DESTINATION "lib"
+    FILES_MATCHING PATTERN "libaotriton_v2*.so*"
+  )
+  # Install aotriton GPU kernel images (compressed ISA blobs) into the wheel.
+  install(DIRECTORY "${__AOTRITON_INSTALL_DIR}/lib/aotriton.images"
+    DESTINATION "lib"
+    OPTIONAL
+  )
 endif() # __AOTRITON_INCLUDED
