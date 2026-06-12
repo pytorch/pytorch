@@ -2577,35 +2577,51 @@ class _AutogradSavedState:
         tensors_saved_no_vc_check = fw_outs[
             self.metadata.tensors_saved_for_backwards_no_vc_check_slice
         ]
-        if not all(isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check):
+        if not all(
+            isinstance(x, torch.Tensor) or x is None
+            for x in tensors_saved_with_vc_check
+        ):
             raise AssertionError(
-                "expected all tensors_saved_with_vc_check to be Tensors, "
+                "expected all tensors_saved_with_vc_check to be Tensors or None, "
                 f"got types: {[type(x) for x in tensors_saved_with_vc_check]}"
             )
-        if not all(isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check):
+        if not all(
+            isinstance(x, torch.Tensor) or x is None for x in tensors_saved_no_vc_check
+        ):
             raise AssertionError(
-                "expected all tensors_saved_no_vc_check to be Tensors, "
+                "expected all tensors_saved_no_vc_check to be Tensors or None, "
                 f"got types: {[type(x) for x in tensors_saved_no_vc_check]}"
             )
 
         # See Note [Detaching saved tensors in AOTAutograd]
+        # save_for_backward natively accepts None
+        # (see torch/autograd/function.py:67).
+        # In C++, None becomes an empty SavedVariable with no version
+        # counter or storage tracking
+        # (torch/csrc/autograd/python_function.cpp:842-894).
+        # On unpack, empty SavedVariable returns None
+        # (python_function.cpp:118-121).
         num_vc_check = len(tensors_saved_with_vc_check)
         tensors_to_save = [
-            x.detach() if x._is_view() else x for x in tensors_saved_with_vc_check
+            x.detach() if x is not None and x._is_view() else x
+            for x in tensors_saved_with_vc_check
         ]
         tensors_no_vc_check = [
-            x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
+            x.detach() if x is not None and x._is_view() else x
+            for x in tensors_saved_no_vc_check
         ]
 
         # dynamic_saved_tensors_idxs has indices relative to all saved tensors
         # (vc_check + no_vc_check combined). Mark dynamics on the detached tensors.
         for idx, dims in self.metadata.dynamic_saved_tensors_idxs.items():
             if idx < num_vc_check:
-                mark_dynamo_propagated_dynamic_indices(tensors_to_save[idx], dims)
+                t = tensors_to_save[idx]
+                if t is not None:
+                    mark_dynamo_propagated_dynamic_indices(t, dims)
             else:
-                mark_dynamo_propagated_dynamic_indices(
-                    tensors_no_vc_check[idx - num_vc_check], dims
-                )
+                t = tensors_no_vc_check[idx - num_vc_check]
+                if t is not None:
+                    mark_dynamo_propagated_dynamic_indices(t, dims)
 
         ctx.save_for_backward(*tensors_to_save)
         ctx._tensors_no_vc_check = tensors_no_vc_check
