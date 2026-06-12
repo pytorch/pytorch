@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import List, Tuple
 
 import torch
 from torch._vmap_internals import _vmap
@@ -55,7 +54,8 @@ def _tuple_postprocess(res, to_unpack):
     # - invert _as_tuple when res should match the inp given to _as_tuple
     # - optionally remove nesting of two tuples created by multiple calls to _as_tuple
     if isinstance(to_unpack, tuple):
-        assert len(to_unpack) == 2
+        if len(to_unpack) != 2:
+            raise AssertionError("Expected to_unpack tuple to have exactly 2 elements")
         if not to_unpack[1]:
             res = tuple(el[0] for el in res)
         if not to_unpack[0]:
@@ -175,17 +175,24 @@ def _autograd_grad(
 ):
     # Version of autograd.grad that accepts `None` in outputs and do not compute gradients for them.
     # This has the extra constraint that inputs has to be a tuple
-    assert isinstance(outputs, tuple)
+    if not isinstance(outputs, tuple):
+        raise AssertionError("Expected outputs to be a tuple")
     if grad_outputs is None:
         grad_outputs = (None,) * len(outputs)
-    assert isinstance(grad_outputs, tuple)
-    assert len(outputs) == len(grad_outputs)
+    if not isinstance(grad_outputs, tuple):
+        raise AssertionError("Expected grad_outputs to be a tuple")
+    if len(outputs) != len(grad_outputs):
+        raise AssertionError(
+            f"Expected outputs and grad_outputs to have the same length, "
+            f"but got {len(outputs)} and {len(grad_outputs)}"
+        )
 
-    new_outputs: Tuple[torch.Tensor, ...] = ()
-    new_grad_outputs: Tuple[torch.Tensor, ...] = ()
+    new_outputs: tuple[torch.Tensor, ...] = ()
+    new_grad_outputs: tuple[torch.Tensor, ...] = ()
     for out, grad_out in zip(outputs, grad_outputs):
         if out is not None and out.requires_grad:
             new_outputs += (out,)
+            # pyrefly: ignore [bad-assignment]
             new_grad_outputs += (grad_out,)
 
     if len(new_outputs) == 0:
@@ -211,7 +218,7 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
     if stage not in ["back", "back_trick", "double_back", "double_back_trick"]:
         raise RuntimeError(f"Invalid stage argument '{stage}' to _fill_in_zeros")
 
-    res: Tuple[torch.Tensor, ...] = ()
+    res: tuple[torch.Tensor, ...] = ()
     for i, grads_i in enumerate(grads):
         if grads_i is None:
             if strict:
@@ -470,8 +477,8 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
 
 
 def _construct_standard_basis_for(
-    tensors: Tuple[torch.Tensor, ...], tensor_numels: Tuple[int, ...]
-) -> Tuple[torch.Tensor, ...]:
+    tensors: tuple[torch.Tensor, ...], tensor_numels: tuple[int, ...]
+) -> tuple[torch.Tensor, ...]:
     # This function:
     # - constructs a N=sum(tensor_numels) standard basis. i.e. an NxN identity matrix.
     # - Splits the identity matrix into chunks with each chunk size determined by `tensor_numels`.
@@ -490,8 +497,13 @@ def _construct_standard_basis_for(
     # See NOTE: [Computing jacobian with vmap and grad for multiple tensors]
     # for context behind this function. All the pre-conditions are guarded for
     # in torch.autograd.functional.jacobian.
-    assert len(tensors) == len(tensor_numels)
-    assert len(tensors) > 0
+    if len(tensors) != len(tensor_numels):
+        raise AssertionError(
+            f"Expected tensors and tensor_numels to have the same length, "
+            f"but got {len(tensors)} and {len(tensor_numels)}"
+        )
+    if len(tensors) == 0:
+        raise AssertionError("Expected at least one tensor")
     total_numel = sum(tensor_numels)
     chunks = tuple(
         tensor.new_zeros(total_numel, tensor_numel)
@@ -556,7 +568,7 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
                 # batch dimension represents that of the inputs
                 jacobian_input_i_output_j = jac.permute(*range(1, jac.ndim), 0).reshape(
                     (*output_i.shape, *input_j.shape)
-                )  # noqa: C409
+                )
 
                 jacobian_output_i_output.append(jacobian_input_i_output_j)
             jacobian_input_output.append(jacobian_output_i_output)
@@ -654,12 +666,23 @@ def jacobian(
                 [0.0000, 3.3963]]),
          tensor([[3., 0.],
                  [0., 3.]]))
+
+        >>> def linear_model(x):
+        ...     W = torch.tensor([[2.0, -1.0], [0.0, 1.0]])
+        ...     b = torch.tensor([1.0, 0.5])
+        ...     return x @ W.T + b
+
+        >>> x = torch.randn(4, 2, requires_grad=True)
+        >>> jac = jacobian(linear_model, x, vectorize=True)
+        >>> jac.shape
+        torch.Size([4, 2, 4, 2])
     """
-    assert strategy in ("forward-mode", "reverse-mode"), (
-        'Expected strategy to be either "forward-mode" or "reverse-mode". Hint: If your '
-        'function has more outputs than inputs, "forward-mode" tends to be more performant. '
-        'Otherwise, prefer to use "reverse-mode".'
-    )
+    if strategy not in ("forward-mode", "reverse-mode"):
+        raise AssertionError(
+            'Expected strategy to be either "forward-mode" or "reverse-mode". Hint: If your '
+            'function has more outputs than inputs, "forward-mode" tends to be more performant. '
+            'Otherwise, prefer to use "reverse-mode".'
+        )
     if strategy == "forward-mode":
         if create_graph:
             raise NotImplementedError(
@@ -780,11 +803,11 @@ def jacobian(
                 jacobian_output_input, (is_outputs_tuple, is_inputs_tuple)
             )
 
-        jacobian: Tuple[torch.Tensor, ...] = ()
+        jacobian: tuple[torch.Tensor, ...] = ()
 
         for i, out in enumerate(outputs):
             # mypy complains that expression and variable have different types due to the empty list
-            jac_i: Tuple[List[torch.Tensor]] = tuple([] for _ in range(len(inputs)))  # type: ignore[assignment]
+            jac_i: tuple[list[torch.Tensor]] = tuple([] for _ in range(len(inputs)))  # type: ignore[assignment]
             for j in range(out.nelement()):
                 vj = _autograd_grad(
                     (out.reshape(-1)[j],),
@@ -815,6 +838,7 @@ def jacobian(
                             raise RuntimeError(msg)
                         jac_i_el.append(torch.zeros_like(inp_el))
 
+            # pyrefly: ignore [bad-assignment]
             jacobian += (
                 tuple(
                     torch.stack(jac_i_el, dim=0).view(
@@ -923,10 +947,13 @@ def hessian(
                   [0., 6.]])))
     """
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "hessian")
-    assert outer_jacobian_strategy in (
+    if outer_jacobian_strategy not in (
         "forward-mode",
         "reverse-mode",
-    ), 'Expected strategy to be either "forward-mode" or "reverse-mode".'
+    ):
+        raise AssertionError(
+            'Expected strategy to be either "forward-mode" or "reverse-mode".'
+        )
 
     def ensure_single_output_function(*inp):
         out = func(*inp)

@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     gradcheck,
     parametrize,
-    skipIfRocm,
 )
 
 
@@ -130,7 +129,7 @@ class TestSegmentReductions(TestCase):
 
         for reduction in reductions:
             for initial in [0, None]:
-                check_backward = True if initial is not None else False
+                check_backward = initial is not None
                 initial_value = initial
                 default_value = get_default_value(initial_value, reduction)
                 if reduction == "max":
@@ -187,7 +186,7 @@ class TestSegmentReductions(TestCase):
 
         for reduction in reductions:
             for initial in [0, None]:
-                check_backward = True if initial is not None else False
+                check_backward = initial is not None
                 initial_value = initial
                 default_value = get_default_value(initial_value, reduction)
                 if reduction == "max":
@@ -231,7 +230,6 @@ class TestSegmentReductions(TestCase):
                             length_type,
                         )
 
-    @skipIfRocm
     @dtypes(
         *product(
             (torch.half, torch.bfloat16, torch.float, torch.double),
@@ -239,14 +237,14 @@ class TestSegmentReductions(TestCase):
         )
     )
     def test_multi_d_simple(self, device, dtypes):
-        val_dtype, length_type = dtypes
+        val_dtype, _ = dtypes
         axis = 0
         lengths = [1, 2, 3, 0]
         data = [[1, 1], [float("nan"), 1], [3, float("nan")], [4, 1], [3, 2], [2, 3]]
 
         for reduction in reductions:
             for initial in [0, None]:
-                check_backward = True if initial is not None else False
+                check_backward = initial is not None
                 initial_value = initial
                 default_value = get_default_value(initial_value, reduction)
                 if reduction == "max":
@@ -489,7 +487,7 @@ class TestSegmentReductions(TestCase):
         )
     )
     def test_multi_d(self, device, dtypes):
-        val_dtype, length_type = dtypes
+        val_dtype, _ = dtypes
         axis = 0
         lengths = [0, 2, 3, 0]
         data = np.arange(50).reshape(5, 2, 5).tolist()
@@ -558,7 +556,7 @@ class TestSegmentReductions(TestCase):
         lengths = torch.tensor([0, 2, 3, 0], device=device, dtype=length_type)
         data = torch.arange(6, dtype=torch.float, device=device)
 
-        # test for error on 1-D lenghts
+        # test for error on 1-D lengths
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch._segment_reduce(data, 'sum', lengths=lengths, axis=0, unsafe=False)
 

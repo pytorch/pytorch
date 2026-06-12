@@ -15,15 +15,18 @@ import torch.cuda
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
+from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    gradcheck, gradgradcheck, set_default_dtype, skipIfTorchDynamo
+    gradcheck, gradgradcheck, set_default_dtype, skipIfTorchDynamo, TEST_WITH_ROCM
 from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Dict, Callable, Tuple, List, Sequence, Union, Any
+from typing import Any
+from collections.abc import Callable
+from collections.abc import Sequence
 
 TemporaryFile = tempfile.TemporaryFile
 PRECISION = 1e-5
@@ -33,7 +36,8 @@ def get_reduction(m):
     result = getattr(m, 'reduction', None)
     if result is None:
         result = _Reduction.legacy_get_string(getattr(m, 'sizeAverage', None), True, emit_warning=False)
-    assert result is not None
+    if result is None:
+        raise AssertionError("Expected result to not be None")
     return result
 
 
@@ -106,7 +110,9 @@ module_tests = [
         input_size=(4, 10),
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
         with_tf32=True,
-        tf32_precision=0.005,
+        # See no_bias variant below for rationale; same K=10 shape, seed-
+        # dependent realization near the AMD XF32 envelope (issue #155216).
+        tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
         default_dtype=torch.double,
     ),
     dict(
@@ -117,7 +123,10 @@ module_tests = [
         desc='no_bias',
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()),
         with_tf32=True,
-        tf32_precision=0.005,
+        # AMD XF32 at K=10 sits right at the 0.005 envelope (ideal 5.2e-3;
+        # ideal NV-TF32 2.3e-3). ROCm tolerance relaxed to cover the
+        # seed-dependent realization; see https://github.com/jeffdaily/tf32_analysis.
+        tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
         default_dtype=torch.double,
     ),
     dict(
@@ -502,7 +511,7 @@ def nllloss_no_reduce_test():
 
 def nllloss_no_reduce_ignore_index_test():
     t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
-    kwargs: Dict[str, Union[int, str]] = {'ignore_index': 2, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 2, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -605,7 +614,7 @@ def nllloss2d_no_reduce_test():
 
 def nllloss2d_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5).mul(3).floor().long())
-    kwargs: Dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss2d_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -662,7 +671,7 @@ def nlllossNd_no_reduce_test():
 
 def nlllossNd_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5, 2, 2).mul(3).floor().long())
-    kwargs: Dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLossNd_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -1076,1638 +1085,1644 @@ def single_batch_reference_fn(input, parameters, module):
         return module(*single_batch_input).squeeze(0)
 
 
-new_module_tests = [
-    poissonnllloss_no_reduce_test(),
-    bceloss_no_reduce_test(),
-    bceloss_weights_no_reduce_test(),
-    bce_with_logistic_legacy_enum_test(),
-    bce_with_logistic_no_reduce_test(),
-    bceloss_no_reduce_scalar_test(),
-    bceloss_weights_no_reduce_scalar_test(),
-    bce_with_logistic_no_reduce_scalar_test(),
-    kldivloss_with_target_no_reduce_test(),
-    kldivloss_no_reduce_test(),
-    kldivloss_no_reduce_scalar_test(),
-    kldivloss_with_log_target_no_reduce_test(),
-    kldivloss_no_reduce_log_target_test(),
-    kldivloss_no_reduce_scalar_log_target_test(),
-    l1loss_no_reduce_test(),
-    l1loss_no_reduce_complex_test(),
-    l1loss_no_reduce_scalar_test(),
-    mseloss_no_reduce_test(),
-    mseloss_no_reduce_scalar_test(),
-    nllloss_no_reduce_test(),
-    nllloss_no_reduce_ignore_index_test(),
-    nllloss_no_reduce_weights_test(),
-    nllloss_no_reduce_weights_ignore_index_test(),
-    nllloss_no_reduce_weights_ignore_index_neg_test(),
-    nllloss2d_no_reduce_test(),
-    nllloss2d_no_reduce_weights_test(),
-    nllloss2d_no_reduce_ignore_index_test(),
-    nlllossNd_no_reduce_test(),
-    nlllossNd_no_reduce_weights_test(),
-    nlllossNd_no_reduce_ignore_index_test(),
-    smoothl1loss_no_reduce_test(),
-    smoothl1loss_no_reduce_scalar_test(),
-    smoothl1loss_beta_test(),
-    smoothl1loss_zero_beta_test(),
-    huberloss_delta_test(),
-    multilabelmarginloss_0d_no_reduce_test(),
-    multilabelmarginloss_1d_no_reduce_test(),
-    multilabelmarginloss_index_neg_test(),
-    multilabelmarginloss_no_reduce_test(),
-    hingeembeddingloss_no_reduce_test(),
-    hingeembeddingloss_margin_no_reduce_test(),
-    softmarginloss_no_reduce_test(),
-    multilabelsoftmarginloss_no_reduce_test(),
-    multilabelsoftmarginloss_weights_no_reduce_test(),
-    multimarginloss_no_reduce_test(),
-    multimarginloss_1d_no_reduce_test(),
-    multimarginloss_1d_input_0d_target_no_reduce_test(),
-    multimarginloss_p_no_reduce_test(),
-    multimarginloss_margin_no_reduce_test(),
-    multimarginloss_weights_no_reduce_test(),
-    dict(
-        module_name='Conv1d',
-        constructor_args=(4, 5, 3),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3)',
-        input_size=(2, 4, 10),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv1d',
-        constructor_args=(4, 5, 3, 2),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).stride(2)',
-        input_size=(2, 4, 10),
-        cudnn=True,
-        desc='stride',
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv1d',
-        constructor_args=(4, 5, 3, 1, 1),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).stride(1).padding(1)',
-        input_size=(2, 4, 10),
-        cudnn=True,
-        desc='pad1',
-        with_tf32=True,
-        tf32_precision=0.01,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv1d',
-        constructor_args=(4, 5, 5, 1, 2),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 5).stride(1).padding(2)',
-        input_size=(2, 4, 10),
-        cudnn=True,
-        desc='pad2',
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv1d',
-        constructor_args=(4, 4, 3, 1, 1),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 4, 3).stride(1).padding(1)',
-        input_size=(1, 4, 1),
-        cudnn=True,
-        desc='pad1size1',
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv1d',
-        constructor_args=(4, 4, 5, 1, 2),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 4, 5).stride(1).padding(2)',
-        input_size=(1, 4, 1),
-        cudnn=True,
-        desc='pad2size1',
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv1d',
-        constructor_args=(4, 5, 3),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3)',
-        input_size=(0, 4, 10),
-        cudnn=True,
-        desc='zero_batch',
-        with_tf32=True,
-        tf32_precision=0.005,
-    ),
-    dict(
-        fullname='Conv1d_dilated',
-        constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).dilation(2)',
-        input_size=(2, 4, 10),
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv1d_groups',
-        constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 6, 3).groups(2)',
-        input_size=(2, 4, 6),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv1d_pad_valid',
-        constructor=lambda: nn.Conv1d(4, 5, 3, padding="valid"),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kValid)',
-        input_size=(2, 4, 10),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv1d_pad_same',
-        constructor=lambda: nn.Conv1d(4, 5, 3, padding="same"),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kSame)',
-        input_size=(2, 4, 10),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv1d_pad_same2',
-        constructor=lambda: nn.Conv1d(4, 5, 4, padding="same"),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 4).padding(torch::kSame)',
-        input_size=(2, 4, 10),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv1d_pad_same_dilated',
-        constructor=lambda: nn.Conv1d(4, 5, 4, padding="same", dilation=2),
-        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kSame).dilation(2)',
-        input_size=(2, 4, 10),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='ConvTranspose1d',
-        constructor=lambda: nn.ConvTranspose1d(3, 4, kernel_size=3, stride=(3,), padding=1, output_padding=(1,)),
-        cpp_constructor_args='torch::nn::ConvTranspose1dOptions(3, 4, 3).stride(3).padding(1).output_padding(1)',
-        cudnn=True,
-        input_size=(1, 3, 7),
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='ConvTranspose1d',
-        constructor_args=(3, 4, 3, 2, 1, 1, 1, False),
-        cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(3, 4, 3)
-                                .stride(2).padding(1).output_padding(1).groups(1).bias(false)''',
-        input_size=(1, 3, 6),
-        cudnn=True,
-        desc='no_bias',
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='ConvTranspose1d',
-        constructor_args=(3, 4, 3, 2, 1, 1, 1, True, 2),
-        cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(3, 4, 3)
-                                .stride(2).padding(1).output_padding(1).groups(1).bias(true).dilation(2)''',
-        input_size=(1, 3, 6),
-        cudnn=True,
-        desc='dilated',
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='ConvTranspose1d_groups',
-        constructor=lambda: nn.ConvTranspose1d(4, 6, 3, stride=(3,), padding=1, output_padding=(1,), groups=2),
-        cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(4, 6, 3)
-                                .stride(3).padding(1).output_padding(1).groups(2)''',
-        cudnn=True,
-        input_size=(2, 4, 7),
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv2d',
-        constructor_args=(3, 4, (3, 2)),
-        cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 2})',
-        input_size=(2, 3, 7, 5),
-        cudnn=True,
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv2d',
-        constructor_args=(3, 4, (3, 3), (2, 2)),
-        cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 3}).stride({2, 2})',
-        input_size=(2, 3, 6, 6),
-        cudnn=True,
-        desc='strided',
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv2d',
-        constructor_args=(3, 4, (3, 3), (2, 2), (1, 1)),
-        cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 3}).stride({2, 2}).padding({1, 1})',
-        input_size=(2, 3, 6, 6),
-        cudnn=True,
-        desc='padding',
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv2d',
-        constructor_args=(3, 2, (3, 3), (2, 2), (1, 1), (2, 2)),
-        cpp_constructor_args='torch::nn::Conv2dOptions(3, 2, {3, 3}).stride({2, 2}).padding({1, 1}).dilation({2, 2})',
-        input_size=(2, 3, 8, 8),
-        cudnn=True,
-        desc='dilated',
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv2d',
-        constructor_args=(3, 4, (3, 2), 1, 0, 1, 1, False),
-        cpp_constructor_args='''torch::nn::Conv2dOptions(3, 4, {3, 2})
-                                .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
-        input_size=(2, 3, 6, 5),
-        cudnn=True,
-        desc='no_bias',
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.015,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv2d',
-        constructor_args=(3, 4, (3, 2)),
-        cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 2})',
-        input_size=(0, 3, 7, 5),
-        cudnn=True,
-        desc='zero_batch',
-        check_with_long_tensor=True,
-        with_tf32=True,
-    ),
-    dict(
-        fullname='Conv2d_groups',
-        constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
-        cpp_constructor_args='torch::nn::Conv2dOptions(4, 6, {3, 2}).groups(2)',
-        input_size=(2, 4, 6, 5),
-        cudnn=True,
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.015,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv2d_groups_thnn',
-        constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
-        cpp_constructor_args='torch::nn::Conv2dOptions(4, 6, {3, 2}).groups(2)',
-        input_size=(2, 4, 6, 5),
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.015,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv2d_pad_valid',
-        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="valid"),
-        cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kValid)',
-        input_size=(2, 2, 6, 5),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv2d_pad_same',
-        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same"),
-        cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kSame)',
-        input_size=(2, 2, 6, 5),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.01,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv2d_pad_same_dilated',
-        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same", dilation=2),
-        cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kSame).dilation(2)',
-        input_size=(2, 2, 6, 5),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.01,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='ConvTranspose2d',
-        constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
-        cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
-                                .stride({3, 2}).padding(1).output_padding({1, 1})''',
-        cudnn=True,
-        input_size=(1, 3, 7, 6),
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.01,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='ConvTranspose2d',
-        constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False, (2, 2)),
-        cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
-                                .stride({2, 3})
-                                .padding(1)
-                                .output_padding({1, 1})
-                                .groups(1)
-                                .bias(false)
-                                .dilation({2, 2})''',
-        input_size=(1, 3, 6, 7),
-        cudnn=True,
-        desc='dilated',
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.01,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='ConvTranspose2d',
-        constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False),
-        cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
-                                .stride({2, 3}).padding(1).output_padding({1, 1}).groups(1).bias(false)''',
-        input_size=(1, 3, 6, 7),
-        cudnn=True,
-        desc='no_bias',
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.01,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='ConvTranspose2d_groups',
-        constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
-        cpp_constructor_args='torch::nn::ConvTranspose2dOptions(2, 4, {2, 3}).groups(2)',
-        input_size=(1, 2, 4, 5),
-        cudnn=True,
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.01,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv2d_depthwise',
-        constructor=lambda: nn.Conv2d(4, 4, (3, 3), groups=4),
-        cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).groups(4)',
-        input_size=(2, 4, 6, 6),
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv2d_depthwise_with_multiplier',
-        constructor=lambda: nn.Conv2d(4, 8, (3, 3), groups=4),
-        cpp_constructor_args='torch::nn::Conv2dOptions(4, 8, {3, 3}).groups(4)',
-        input_size=(2, 4, 6, 6),
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv2d_depthwise_strided',
-        constructor=lambda: nn.Conv2d(4, 4, (3, 3), stride=(2, 2), groups=4),
-        cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).stride({2, 2}).groups(4)',
-        input_size=(2, 4, 6, 6),
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv2d_depthwise_padded',
-        constructor=lambda: nn.Conv2d(4, 4, (3, 3), padding=(1, 1), groups=4),
-        cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).padding({1, 1}).groups(4)',
-        input_size=(2, 4, 6, 6),
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv2d_depthwise_dilated',
-        constructor=lambda: nn.Conv2d(4, 4, (2, 2), dilation=(2, 2), groups=4),
-        cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {2, 2}).dilation({2, 2}).groups(4)',
-        input_size=(2, 4, 5, 5),
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv3d',
-        constructor_args=(2, 3, (2, 3, 2)),
-        cpp_constructor_args='torch::nn::Conv3dOptions(2, 3, {2, 3, 2})',
-        input_size=(1, 2, 4, 5, 4),
-        cudnn=True,
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv3d',
-        constructor_args=(2, 3, (2, 3, 4), 1, 0, 1, 1, False),
-        cpp_constructor_args='''torch::nn::Conv3dOptions(2, 3, {2, 3, 4})
-                                .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
-        input_size=(1, 2, 3, 4, 5),
-        cudnn=True,
-        desc='no_bias',
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv3d',
-        constructor_args=(2, 3, (1, 1, 1), 1, 0, 1, 1, False),
-        cpp_constructor_args='''torch::nn::Conv3dOptions(2, 3, {2, 3, 4})
-                                .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
-        input_size=(1, 2, 3, 4, 5),
-        cudnn=True,
-        desc='1x1x1_no_bias',
-        check_with_long_tensor=False,
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv3d',
-        constructor_args=(3, 4, 2, 2),
-        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).stride(2)',
-        input_size=(2, 3, 5, 5, 5),
-        cudnn=True,
-        desc='stride',
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv3d',
-        constructor_args=(3, 4, 2, 2, 1),
-        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).stride(2).padding(1)',
-        input_size=(2, 3, 5, 5, 5),
-        cudnn=True,
-        desc='stride_padding',
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Conv3d',
-        constructor_args=(3, 4, (2, 3, 4)),
-        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4})',
-        input_size=(0, 3, 3, 4, 5),
-        cudnn=True,
-        check_with_long_tensor=True,
-        desc='zero_batch',
-        with_tf32=True,
-    ),
-    dict(
-        fullname='Conv3d_groups',
-        constructor=lambda: nn.Conv3d(2, 4, kernel_size=3, groups=2),
-        cpp_constructor_args='torch::nn::Conv3dOptions(2, 4, 3).groups(2)',
-        input_size=(1, 2, 4, 5, 4),
-        cudnn=True,
-        check_with_long_tensor=True,
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv3d_dilated',
-        constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2),
-        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2)',
-        input_size=(2, 3, 5, 5, 5),
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv3d_dilated_strided',
-        constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2, stride=2),
-        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2).stride(2)',
-        input_size=(2, 3, 5, 5, 5),
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv3d_pad_valid',
-        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="valid"),
-        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kValid)',
-        input_size=(2, 3, 6, 5, 4),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv3d_pad_same',
-        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same"),
-        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kSame)',
-        input_size=(2, 3, 6, 5, 4),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Conv3d_pad_same_dilated',
-        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same", dilation=2),
-        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kSame).dilation(2)',
-        input_size=(2, 3, 6, 5, 4),
-        cudnn=True,
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='ConvTranspose3d',
-        constructor_args=(2, 3, (2, 3, 2)),
-        cpp_constructor_args='torch::nn::ConvTranspose3dOptions(2, 3, {2, 3, 2})',
-        cudnn=True,
-        input_size=(1, 2, 4, 5, 4),
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='ConvTranspose3d',
-        constructor_args=(2, 3, (2, 3, 2), 1, 0, 0, 1, True, (2, 2, 2)),
-        cpp_constructor_args='''torch::nn::ConvTranspose3dOptions(2, 3, {2, 3, 2})
-                                .stride(1).padding(0).output_padding(0).groups(1).bias(true).dilation({2, 2, 2})''',
-        cudnn=True,
-        input_size=(1, 2, 4, 5, 4),
-        desc='dilated',
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='ReplicationPad3d',
-        constructor_args=((1, 2, 3, 3, 2, 1),),
-        cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
-        input_size=(2, 3, 2, 2, 2),
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='ReplicationPad3d',
-        constructor_args=((1, 2, 3, 3, 2, 1),),
-        cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
-        input_size=(3, 2, 2, 2),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='ReplicationPad3d',
-        constructor_args=((1, 2, 3, 3, 2, 1),),
-        cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
-        input_fn=lambda: torch.rand(2, 3, 2, 2, 2, dtype=torch.complex128, requires_grad=True),
-        skip_half=True,
-        desc='complex'
-    ),
-    dict(
-        module_name='Embedding',
-        constructor_args=(4, 3),
-        cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3)',
-        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
-        check_gradgrad=False,
-        default_dtype=torch.double,
-        decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
-    ),
-    dict(
-        module_name='Embedding',
-        constructor_args=(4, 3),
-        cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3)',
-        input_fn=lambda: torch.empty(1, 512, dtype=torch.long).random_(4).expand(7, 512),
-        check_gradgrad=False,
-        desc='discontiguous',
-        default_dtype=torch.double,
-        decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
-    ),
-    dict(
-        module_name='EmbeddingBag',
-        constructor_args=(4, 3),
-        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3)',
-        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
-        check_gradgrad=False,
-        desc='mean',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='EmbeddingBag',
-        constructor_args=(4, 3),
-        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3)',
-        input_fn=lambda: torch.empty(1, 512, dtype=torch.long).random_(4).expand(7, 512),
-        check_gradgrad=False,
-        desc='discontiguous',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='EmbeddingBag',
-        constructor_args=(4, 3, None, 2., False, 'sum'),
-        cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum)''',
-        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
-        check_gradgrad=False,
-        desc='sum',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='EmbeddingBag',
-        constructor_args=(4, 3, None, 2., False, 'max'),
-        cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax)''',
-        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
-        check_gradgrad=False,
-        desc='max',
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='EmbeddingBag_mean_padding_idx',
-        constructor=lambda: nn.EmbeddingBag(4, 3, padding_idx=1),
-        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).padding_idx(1)',
-        input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
-        check_gradgrad=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='EmbeddingBag_sum_padding_idx',
-        constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'sum', padding_idx=1),
-        cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum).padding_idx(1)''',
-        input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
-        check_gradgrad=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='EmbeddingBag_max_padding_idx',
-        constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'max', padding_idx=1),
-        cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax).padding_idx(1)''',
-        input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
-        check_gradgrad=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='EmbeddingBag_sparse',
-        constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True, dtype=torch.double),
-        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).sparse(true)._weight(torch::rand({4, 3}).to(torch::kFloat64))',
-        input_fn=lambda: torch.randperm(2).repeat(1, 2),
-        check_gradgrad=False,
-        has_sparse_gradients=True,
-    ),
-    dict(
-        constructor=lambda: nn.Embedding(4, 3, dtype=torch.double, sparse=True),
-        cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3).sparse(true)._weight(torch::rand({4, 3}).to(torch::kFloat64))',
-        input_fn=lambda: torch.randperm(2).repeat(1, 2),
-        fullname='Embedding_sparse',
-        check_gradgrad=False,
-        has_sparse_gradients=True,
-    ),
-    dict(
-        module_name='PixelShuffle',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::PixelShuffleOptions(3)',
-        input_size=(1, 9, 4, 4),
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='PixelUnshuffle',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::PixelUnshuffleOptions(3)',
-        input_size=(1, 1, 12, 12),
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
-        input_size=(1, 2, 4),
-        fullname='interpolate_nearest_1d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
-        input_size=(0, 2, 4),
-        fullname='interpolate_nearest_1d_zero_dim',
-        pickle=False,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=(12, ), scale_factor=None, mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
-        input_size=(1, 2, 3),
-        fullname='interpolate_nearest_tuple_1d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt).scale_factor(std::vector<double>({4.})).mode(torch::kNearest)''',
-        input_size=(1, 2, 4),
-        fullname='interpolate_nearest_scale_1d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kLinear)
-                            .align_corners(false)''',
-        input_size=(1, 2, 4),
-        fullname='interpolate_linear_1d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=(4, ), scale_factor=None, mode='linear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({4}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kLinear)
-                            .align_corners(false)''',
-        input_size=(1, 2, 3),
-        fullname='interpolate_linear_tuple_1d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({4.}))
-                            .mode(torch::kLinear)
-                            .align_corners(false)''',
-        input_size=(1, 2, 4),
-        fullname='interpolate_linear_scale_1d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kLinear)
-                            .align_corners(false)''',
-        input_size=(0, 2, 4),
-        fullname='interpolate_linear_1d_zero_dim',
-        pickle=False,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=True),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kLinear)
-                            .align_corners(true)''',
-        input_size=(1, 2, 4),
-        fullname='interpolate_linear_1d_align_corners',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=True),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({4.}))
-                            .mode(torch::kLinear)
-                            .align_corners(true)''',
-        input_size=(1, 2, 4),
-        fullname='interpolate_linear_scale_1d_align_corners',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=2, scale_factor=None, mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({2, 2}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kNearest)''',
-        input_size=(1, 128, 1, 1),
-        fullname='interpolate_nearest_2d_launch_configs',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kNearest)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_nearest_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=(12, 16), scale_factor=None, mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 16}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kNearest)''',
-        input_size=(1, 2, 3, 4),
-        fullname='interpolate_nearest_tuple_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({4., 4.}))
-                            .mode(torch::kNearest)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_nearest_scale_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kNearest)''',
-        input_size=(0, 2, 4, 4),
-        fullname='interpolate_nearest_2d_zero_dim',
-        pickle=False,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kBilinear)
-                            .align_corners(false)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bilinear_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kBilinear)
-                            .align_corners(false)''',
-        input_size=(0, 2, 4, 4),
-        fullname='interpolate_bilinear_2d_zero_dim',
-        pickle=False,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None,
-                                    mode='bilinear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kBilinear)
-                            .align_corners(false)''',
-        input_size=(1, 2, 2, 3),
-        fullname='interpolate_bilinear_tuple_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4.,
-                                    mode='bilinear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({4., 4.}))
-                            .mode(torch::kBilinear)
-                            .align_corners(false)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bilinear_scale_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
-                                    mode='bilinear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({2., 2.}))
-                            .mode(torch::kBilinear)
-                            .align_corners(false)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bilinear_scale_tuple_shared_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
-                                    mode='bilinear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({2., 1.}))
-                            .mode(torch::kBilinear)
-                            .align_corners(false)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bilinear_scale_tuple_skewed_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bilinear', align_corners=True),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kBilinear)
-                            .align_corners(true)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bilinear_tuple_2d_align_corners',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
-                                    mode='bilinear', align_corners=True),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({2., 1.}))
-                            .mode(torch::kBilinear)
-                            .align_corners(true)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bilinear_scale_tuple_skewed_2d_align_corners',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kBicubic)
-                            .align_corners(false)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bicubic_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kBicubic)
-                            .align_corners(false)''',
-        input_size=(0, 2, 4, 4),
-        fullname='interpolate_bicubic_2d_zero_dim',
-        pickle=False,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None,
-                                    mode='bicubic', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kBicubic)
-                            .align_corners(false)''',
-        input_size=(1, 2, 2, 3),
-        fullname='interpolate_bicubic_tuple_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='bicubic', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({4., 4.}))
-                            .mode(torch::kBicubic)
-                            .align_corners(false)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bicubic_scale_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
-                                    mode='bicubic', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({2., 2.}))
-                            .mode(torch::kBicubic)
-                            .align_corners(false)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bicubic_scale_tuple_shared_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
-                                    mode='bicubic', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({2., 1.}))
-                            .mode(torch::kBicubic)
-                            .align_corners(false)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bicubic_scale_tuple_skewed_2d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bicubic', align_corners=True),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kBicubic)
-                            .align_corners(true)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bicubic_tuple_2d_align_corners',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
-                                    mode='bicubic', align_corners=True),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({2., 1.}))
-                            .mode(torch::kBicubic)
-                            .align_corners(true)''',
-        input_size=(1, 2, 4, 4),
-        fullname='interpolate_bicubic_scale_tuple_skewed_2d_align_corners',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kNearest)''',
-        input_size=(1, 2, 4, 4, 4),
-        fullname='interpolate_nearest_3d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kNearest)''',
-        input_size=(0, 2, 4, 4, 4),
-        fullname='interpolate_nearest_3d_zero_dim',
-        pickle=False,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=(12, 16, 16), scale_factor=None, mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 16, 16}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kNearest)''',
-        input_size=(1, 2, 3, 4, 4),
-        fullname='interpolate_nearest_tuple_3d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({4., 4., 4.}))
-                            .mode(torch::kNearest)''',
-        input_size=(1, 2, 4, 4, 4),
-        fullname='interpolate_nearest_scale_3d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kTrilinear)
-                            .align_corners(false)''',
-        input_size=(1, 2, 4, 4, 4),
-        fullname='interpolate_trilinear_3d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kTrilinear)
-                            .align_corners(false)''',
-        input_size=(0, 2, 4, 4, 4),
-        fullname='interpolate_trilinear_3d_zero_dim',
-        pickle=False,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=(4, 6, 6),
-                                    scale_factor=None, mode='trilinear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({4, 6, 6}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kTrilinear)
-                            .align_corners(false)''',
-        input_size=(1, 2, 2, 3, 3),
-        fullname='interpolate_trilinear_tuple_3d',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=False),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({3., 3., 3.}))
-                            .mode(torch::kTrilinear)
-                            .align_corners(false)''',
-        input_size=(1, 2, 3, 4, 5),
-        fullname='interpolate_trilinear_scale_3d',
-        # See https://github.com/pytorch/pytorch/issues/5006
-        precision=3e-4,
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=(4, 6, 6), scale_factor=None,
-                                    mode='trilinear', align_corners=True),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({4, 6, 6}))
-                            .scale_factor(std::nullopt)
-                            .mode(torch::kTrilinear)
-                            .align_corners(true)''',
-        input_size=(1, 2, 2, 3, 3),
-        fullname='interpolate_trilinear_tuple_3d_align_corners',
-        pickle=False,
-        default_dtype=torch.double
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=True),
-        cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::nullopt)
-                            .scale_factor(std::vector<double>({3., 3., 3.}))
-                            .mode(torch::kTrilinear)
-                            .align_corners(true)''',
-        input_size=(1, 2, 3, 4, 4),
-        fullname='interpolate_trilinear_scale_3d_align_corners',
-        # See https://github.com/pytorch/pytorch/issues/5006
-        precision=3e-4,
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.softmax, dim=-1),
-        cpp_options_args='F::SoftmaxFuncOptions(-1)',
-        input_size=(2, 128),  # trigger the last-dim algo in CUDA
-        fullname='softmax_lastdim',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.softmax, dim=1, dtype=torch.float64),
-        cpp_options_args='F::SoftmaxFuncOptions(1).dtype(torch::kFloat64)',
-        input_size=(2, 128),
-        fullname='softmax_lastdim_dtype',
-        pickle=False,
-        test_cuda=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.softmax, dim=1),
-        cpp_options_args='F::SoftmaxFuncOptions(1)',
-        input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
-        fullname='softmax_spatial_special',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.softmax, dim=1),
-        cpp_options_args='F::SoftmaxFuncOptions(1)',
-        input_size=(2, 2, 4, 4),  # regular spatial algorithm
-        fullname='softmax_spatial',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.softmax, dim=1, dtype=torch.float64),
-        cpp_options_args='F::SoftmaxFuncOptions(1).dtype(torch::kFloat64)',
-        input_size=(2, 2, 4, 4),  # regular spatial algorithm
-        fullname='softmax_spatial_dtype',
-        pickle=False,
-        test_cuda=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.softmax, dim=0),
-        cpp_options_args='F::SoftmaxFuncOptions(0)',
-        input_size=(2, 3, 4, 5),
-        fullname='softmax_functional_dim0',
-        test_cuda=False,
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.softmax, dim=3),
-        cpp_options_args='F::SoftmaxFuncOptions(3)',
-        input_size=(2, 3, 4, 5),
-        fullname='softmax_functional_dim3',
-        test_cuda=False,
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.softmax, dim=-1),
-        cpp_options_args='F::SoftmaxFuncOptions(-1)',
-        input_size=(),
-        fullname='softmax_functional_scalar',
-        test_cuda=False,
-        pickle=False,
-    ),
-    dict(
-        constructor=wrap_functional(F.log_softmax, dim=-1),
-        cpp_options_args='F::LogSoftmaxFuncOptions(-1)',
-        input_size=(2, 128),  # trigger the last-dim algo in CUDA
-        fullname='log_softmax_lastdim',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.log_softmax, dim=1),
-        cpp_options_args='F::LogSoftmaxFuncOptions(1)',
-        input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
-        fullname='log_softmax_spatial_special',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.log_softmax, dim=1),
-        cpp_options_args='F::LogSoftmaxFuncOptions(1)',
-        input_size=(2, 2, 4, 4),  # regular spatial algorithm
-        fullname='log_softmax_spatial',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.log_softmax, dim=0),
-        cpp_options_args='F::LogSoftmaxFuncOptions(0)',
-        input_size=(2, 3, 4, 5),
-        fullname='log_softmax_dim0',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.log_softmax, dim=3),
-        cpp_options_args='F::LogSoftmaxFuncOptions(3)',
-        input_size=(2, 3, 4, 5),
-        fullname='log_softmax_dim3',
-        pickle=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        constructor=wrap_functional(F.log_softmax, dim=0),
-        cpp_options_args='F::LogSoftmaxFuncOptions(0)',
-        input_size=(),
-        fullname='log_softmax_scalar',
-        pickle=False,
-    ),
-    dict(
-        fullname='Unfold',
-        constructor=lambda: nn.Unfold((2, 2), (1, 1), (0, 0), (1, 1)),
-        cpp_constructor_args='torch::nn::UnfoldOptions({2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
-        input_size=(2, 4, 3, 3),
-        check_gradgrad=False,
-        test_cuda=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Fold',
-        constructor=lambda: nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1)),
-        cpp_constructor_args='torch::nn::FoldOptions({3, 3}, {2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
-        input_size=(2, 16, 4),
-        check_gradgrad=False,
-        test_cuda=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Fold_no_batch_dim_input',
-        constructor=lambda: nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1)),
-        cpp_constructor_args='torch::nn::FoldOptions({3, 3}, {2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
-        input_size=(16, 4),
-        check_gradgrad=False,
-        ref=single_batch_reference_fn,
-        test_cuda=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Unfold_int_input',
-        constructor=lambda: nn.Unfold(2, 1, 0, 1),
-        cpp_constructor_args='torch::nn::UnfoldOptions(2).dilation(1).padding(0).stride(1)',
-        input_size=(2, 4, 3, 3),
-        check_gradgrad=False,
-        test_cuda=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Fold_int_input',
-        constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
-        cpp_constructor_args='torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1)',
-        input_size=(2, 16, 4),
-        check_gradgrad=False,
-        test_cuda=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='Fold_no_batch_dim_int_input',
-        constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
-        cpp_constructor_args='torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1)',
-        input_size=(16, 4),
-        ref=single_batch_reference_fn,
-        check_gradgrad=False,
-        test_cuda=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='RReLU',
-        constructor_args=(0.1, 0.9),
-        cpp_constructor_args='torch::nn::RReLUOptions().lower(0.1).upper(0.9)',
-        input_size=(),
-        desc='with_up_down_scalar',
-        test_cuda=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='PairwiseDistance',
-        input_fn=lambda: (torch.randn(10, 8), torch.randn(10, 8)),
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='PairwiseDistance',
-        input_fn=lambda: (torch.randn(10, 1), torch.randn(10, 8)),
-        desc='broadcast_lhs',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='PairwiseDistance',
-        input_fn=lambda: (torch.randn(10, 8), torch.randn(1, 8)),
-        desc='broadcast_rhs',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='PairwiseDistance',
-        constructor_args=(1.5, 1e-05, True),
-        cpp_constructor_args='torch::nn::PairwiseDistanceOptions().p(1.5).eps(1e-05).keepdim(true)',
-        input_fn=lambda: (torch.randn(10, 8), torch.randn(10, 8)),
-        desc='with_non_default_args',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='PairwiseDistance',
-        input_fn=lambda: (torch.randn(8), torch.randn(8)),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='TransformerEncoderLayer',
-        constructor_args=(4, 2, 16, 0.0),
-        cpp_constructor_args='''torch::nn::TransformerEncoderLayerOptions(4, 2)
-                                .dim_feedforward(16)
-                                .dropout(0.0)''',
-        input_size=(2, 3, 4),
-        desc='relu_activation',
-        with_tf32=True,
-        tf32_precision=0.1,
-        # TODO(#50743): figure out the error
-        # RuntimeError: The size of tensor a (6) must match the size of tensor b (4)
-        # at non-singleton dimension 2
-        check_batched_grad=False,
-        check_gradgrad=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='TransformerEncoderLayer',
-        constructor_args=(4, 2, 8, 0.0, F.gelu),
-        cpp_constructor_args='''torch::nn::TransformerEncoderLayerOptions(4, 2)
-                                .dim_feedforward(8)
-                                .dropout(0.0)
-                                .activation(torch::kGELU)''',
-        input_size=(2, 3, 4),
-        check_gradgrad=False,
-        desc='gelu_activation',
-        with_tf32=True,
-        tf32_precision=0.08 if SM90OrLater else 0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='TransformerDecoderLayer',
-        constructor_args=(4, 2, 8, 0.0),
-        cpp_constructor_args='''torch::nn::TransformerDecoderLayerOptions(4, 2)
-                                .dim_feedforward(8)
-                                .dropout(0.0)''',
-        input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
-        check_gradgrad=False,
-        desc='relu_activation',
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='TransformerDecoderLayer',
-        constructor_args=(4, 2, 8, 0.0, F.gelu),
-        cpp_constructor_args='''torch::nn::TransformerDecoderLayerOptions(4, 2)
-                                .dim_feedforward(8)
-                                .dropout(0.0)
-                                .activation(torch::kGELU)''',
-        input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
-        check_gradgrad=False,
-        desc='gelu_activation',
-        with_tf32=True,
-        tf32_precision=0.05,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Transformer',
-        constructor_args=(4, 2, 2, 2, 8, 0.0, F.relu),
-        cpp_constructor_args='''torch::nn::TransformerOptions()
-                                .d_model(4)
-                                .nhead(2)
-                                .num_encoder_layers(2)
-                                .num_decoder_layers(2)
-                                .dim_feedforward(8)
-                                .dropout(0.0)
-                                .activation(torch::kReLU)''',
-        input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4), torch.rand(3, 3)),
-        check_gradgrad=False,
-        desc='multilayer_coder',
-        with_tf32=True,
-        tf32_precision=0.05 if SM90OrLater else 0.03,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Linear',
-        constructor_args=(3, 5),
-        cpp_constructor_args='torch::nn::LinearOptions(3, 5)',
-        input_fn=lambda: torch.rand(3),
-        reference_fn=lambda i, p, _: torch.mm(i.view(1, -1), p[0].t()).view(-1) + p[1],
-        desc="no_batch_dim",
-        with_tf32=True,
-        tf32_precision=0.005,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Flatten',
-        cpp_constructor_args='torch::nn::FlattenOptions().start_dim(-3).end_dim(-1)',
-        constructor_args=(-3, -1),
-        input_size=(3, 4, 5),
-        reference_fn=single_batch_reference_fn,
-        desc="no_batch_dim",
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='Unflatten',
-        cpp_constructor_args='torch::nn::UnflattenOptions(-2, {2, 2})',
-        constructor_args=(-2, torch.Size([2, 2])),
-        input_size=(3, 4, 5),
-        reference_fn=single_batch_reference_fn,
-        desc="no_batch_dim",
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='LayerNorm',
-        constructor_args=([56, 56, 56], 1e-5, False),
-        cpp_constructor_args='torch::nn::LayerNormOptions({56, 56, 56}).eps(1e-5).elementwise_affine(false)',
-        input_size=(4, 56, 56, 56),
-        cudnn=True,
-        check_eval=True,
-        gradcheck_fast_mode=True,
-        check_half=True,
-        desc='3d_no_affine_large_feature',
-    ),
-]
+def get_new_module_tests():
+    common_utils.set_rng_seed()
+    new_module_tests = [
+        poissonnllloss_no_reduce_test(),
+        bceloss_no_reduce_test(),
+        bceloss_weights_no_reduce_test(),
+        bce_with_logistic_legacy_enum_test(),
+        bce_with_logistic_no_reduce_test(),
+        bceloss_no_reduce_scalar_test(),
+        bceloss_weights_no_reduce_scalar_test(),
+        bce_with_logistic_no_reduce_scalar_test(),
+        kldivloss_with_target_no_reduce_test(),
+        kldivloss_no_reduce_test(),
+        kldivloss_no_reduce_scalar_test(),
+        kldivloss_with_log_target_no_reduce_test(),
+        kldivloss_no_reduce_log_target_test(),
+        kldivloss_no_reduce_scalar_log_target_test(),
+        l1loss_no_reduce_test(),
+        l1loss_no_reduce_complex_test(),
+        l1loss_no_reduce_scalar_test(),
+        mseloss_no_reduce_test(),
+        mseloss_no_reduce_scalar_test(),
+        nllloss_no_reduce_test(),
+        nllloss_no_reduce_ignore_index_test(),
+        nllloss_no_reduce_weights_test(),
+        nllloss_no_reduce_weights_ignore_index_test(),
+        nllloss_no_reduce_weights_ignore_index_neg_test(),
+        nllloss2d_no_reduce_test(),
+        nllloss2d_no_reduce_weights_test(),
+        nllloss2d_no_reduce_ignore_index_test(),
+        nlllossNd_no_reduce_test(),
+        nlllossNd_no_reduce_weights_test(),
+        nlllossNd_no_reduce_ignore_index_test(),
+        smoothl1loss_no_reduce_test(),
+        smoothl1loss_no_reduce_scalar_test(),
+        smoothl1loss_beta_test(),
+        smoothl1loss_zero_beta_test(),
+        huberloss_delta_test(),
+        multilabelmarginloss_0d_no_reduce_test(),
+        multilabelmarginloss_1d_no_reduce_test(),
+        multilabelmarginloss_index_neg_test(),
+        multilabelmarginloss_no_reduce_test(),
+        hingeembeddingloss_no_reduce_test(),
+        hingeembeddingloss_margin_no_reduce_test(),
+        softmarginloss_no_reduce_test(),
+        multilabelsoftmarginloss_no_reduce_test(),
+        multilabelsoftmarginloss_weights_no_reduce_test(),
+        multimarginloss_no_reduce_test(),
+        multimarginloss_1d_no_reduce_test(),
+        multimarginloss_1d_input_0d_target_no_reduce_test(),
+        multimarginloss_p_no_reduce_test(),
+        multimarginloss_margin_no_reduce_test(),
+        multimarginloss_weights_no_reduce_test(),
+        dict(
+            module_name='Conv1d',
+            constructor_args=(4, 5, 3),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3)',
+            input_size=(2, 4, 10),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv1d',
+            constructor_args=(4, 5, 3, 2),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).stride(2)',
+            input_size=(2, 4, 10),
+            cudnn=True,
+            desc='stride',
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv1d',
+            constructor_args=(4, 5, 3, 1, 1),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).stride(1).padding(1)',
+            input_size=(2, 4, 10),
+            cudnn=True,
+            desc='pad1',
+            with_tf32=True,
+            tf32_precision=0.01,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv1d',
+            constructor_args=(4, 5, 5, 1, 2),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 5).stride(1).padding(2)',
+            input_size=(2, 4, 10),
+            cudnn=True,
+            desc='pad2',
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv1d',
+            constructor_args=(4, 4, 3, 1, 1),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 4, 3).stride(1).padding(1)',
+            input_size=(1, 4, 1),
+            cudnn=True,
+            desc='pad1size1',
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv1d',
+            constructor_args=(4, 4, 5, 1, 2),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 4, 5).stride(1).padding(2)',
+            input_size=(1, 4, 1),
+            cudnn=True,
+            desc='pad2size1',
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv1d',
+            constructor_args=(4, 5, 3),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3)',
+            input_size=(0, 4, 10),
+            cudnn=True,
+            desc='zero_batch',
+            with_tf32=True,
+            tf32_precision=0.005,
+        ),
+        dict(
+            fullname='Conv1d_dilated',
+            constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).dilation(2)',
+            input_size=(2, 4, 10),
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv1d_groups',
+            constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 6, 3).groups(2)',
+            input_size=(2, 4, 6),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv1d_pad_valid',
+            constructor=lambda: nn.Conv1d(4, 5, 3, padding="valid"),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kValid)',
+            input_size=(2, 4, 10),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv1d_pad_same',
+            constructor=lambda: nn.Conv1d(4, 5, 3, padding="same"),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kSame)',
+            input_size=(2, 4, 10),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv1d_pad_same2',
+            constructor=lambda: nn.Conv1d(4, 5, 4, padding="same"),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 4).padding(torch::kSame)',
+            input_size=(2, 4, 10),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv1d_pad_same_dilated',
+            constructor=lambda: nn.Conv1d(4, 5, 4, padding="same", dilation=2),
+            cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kSame).dilation(2)',
+            input_size=(2, 4, 10),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='ConvTranspose1d',
+            constructor=lambda: nn.ConvTranspose1d(3, 4, kernel_size=3, stride=(3,), padding=1, output_padding=(1,)),
+            cpp_constructor_args='torch::nn::ConvTranspose1dOptions(3, 4, 3).stride(3).padding(1).output_padding(1)',
+            cudnn=True,
+            input_size=(1, 3, 7),
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='ConvTranspose1d',
+            constructor_args=(3, 4, 3, 2, 1, 1, 1, False),
+            cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(3, 4, 3)
+                                    .stride(2).padding(1).output_padding(1).groups(1).bias(false)''',
+            input_size=(1, 3, 6),
+            cudnn=True,
+            desc='no_bias',
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='ConvTranspose1d',
+            constructor_args=(3, 4, 3, 2, 1, 1, 1, True, 2),
+            cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(3, 4, 3)
+                                    .stride(2).padding(1).output_padding(1).groups(1).bias(true).dilation(2)''',
+            input_size=(1, 3, 6),
+            cudnn=True,
+            desc='dilated',
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='ConvTranspose1d_groups',
+            constructor=lambda: nn.ConvTranspose1d(4, 6, 3, stride=(3,), padding=1, output_padding=(1,), groups=2),
+            cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(4, 6, 3)
+                                    .stride(3).padding(1).output_padding(1).groups(2)''',
+            cudnn=True,
+            input_size=(2, 4, 7),
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv2d',
+            constructor_args=(3, 4, (3, 2)),
+            cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 2})',
+            input_size=(2, 3, 7, 5),
+            cudnn=True,
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv2d',
+            constructor_args=(3, 4, (3, 3), (2, 2)),
+            cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 3}).stride({2, 2})',
+            input_size=(2, 3, 6, 6),
+            cudnn=True,
+            desc='strided',
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv2d',
+            constructor_args=(3, 4, (3, 3), (2, 2), (1, 1)),
+            cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 3}).stride({2, 2}).padding({1, 1})',
+            input_size=(2, 3, 6, 6),
+            cudnn=True,
+            desc='padding',
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv2d',
+            constructor_args=(3, 2, (3, 3), (2, 2), (1, 1), (2, 2)),
+            cpp_constructor_args='torch::nn::Conv2dOptions(3, 2, {3, 3}).stride({2, 2}).padding({1, 1}).dilation({2, 2})',
+            input_size=(2, 3, 8, 8),
+            cudnn=True,
+            desc='dilated',
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv2d',
+            constructor_args=(3, 4, (3, 2), 1, 0, 1, 1, False),
+            cpp_constructor_args='''torch::nn::Conv2dOptions(3, 4, {3, 2})
+                                    .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
+            input_size=(2, 3, 6, 5),
+            cudnn=True,
+            desc='no_bias',
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.015,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv2d',
+            constructor_args=(3, 4, (3, 2)),
+            cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 2})',
+            input_size=(0, 3, 7, 5),
+            cudnn=True,
+            desc='zero_batch',
+            check_with_long_tensor=True,
+            with_tf32=True,
+        ),
+        dict(
+            fullname='Conv2d_groups',
+            constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
+            cpp_constructor_args='torch::nn::Conv2dOptions(4, 6, {3, 2}).groups(2)',
+            input_size=(2, 4, 6, 5),
+            cudnn=True,
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.015,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv2d_groups_thnn',
+            constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
+            cpp_constructor_args='torch::nn::Conv2dOptions(4, 6, {3, 2}).groups(2)',
+            input_size=(2, 4, 6, 5),
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.015,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv2d_pad_valid',
+            constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="valid"),
+            cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kValid)',
+            input_size=(2, 2, 6, 5),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv2d_pad_same',
+            constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same"),
+            cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kSame)',
+            input_size=(2, 2, 6, 5),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.01,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv2d_pad_same_dilated',
+            constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same", dilation=2),
+            cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kSame).dilation(2)',
+            input_size=(2, 2, 6, 5),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.01,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='ConvTranspose2d',
+            constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
+            cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
+                                    .stride({3, 2}).padding(1).output_padding({1, 1})''',
+            cudnn=True,
+            input_size=(1, 3, 7, 6),
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.01,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='ConvTranspose2d',
+            constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False, (2, 2)),
+            cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
+                                    .stride({2, 3})
+                                    .padding(1)
+                                    .output_padding({1, 1})
+                                    .groups(1)
+                                    .bias(false)
+                                    .dilation({2, 2})''',
+            input_size=(1, 3, 6, 7),
+            cudnn=True,
+            desc='dilated',
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.01,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='ConvTranspose2d',
+            constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False),
+            cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
+                                    .stride({2, 3}).padding(1).output_padding({1, 1}).groups(1).bias(false)''',
+            input_size=(1, 3, 6, 7),
+            cudnn=True,
+            desc='no_bias',
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.01,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='ConvTranspose2d_groups',
+            constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
+            cpp_constructor_args='torch::nn::ConvTranspose2dOptions(2, 4, {2, 3}).groups(2)',
+            input_size=(1, 2, 4, 5),
+            cudnn=True,
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.01,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv2d_depthwise',
+            constructor=lambda: nn.Conv2d(4, 4, (3, 3), groups=4),
+            cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).groups(4)',
+            input_size=(2, 4, 6, 6),
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv2d_depthwise_with_multiplier',
+            constructor=lambda: nn.Conv2d(4, 8, (3, 3), groups=4),
+            cpp_constructor_args='torch::nn::Conv2dOptions(4, 8, {3, 3}).groups(4)',
+            input_size=(2, 4, 6, 6),
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv2d_depthwise_strided',
+            constructor=lambda: nn.Conv2d(4, 4, (3, 3), stride=(2, 2), groups=4),
+            cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).stride({2, 2}).groups(4)',
+            input_size=(2, 4, 6, 6),
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv2d_depthwise_padded',
+            constructor=lambda: nn.Conv2d(4, 4, (3, 3), padding=(1, 1), groups=4),
+            cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).padding({1, 1}).groups(4)',
+            input_size=(2, 4, 6, 6),
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv2d_depthwise_dilated',
+            constructor=lambda: nn.Conv2d(4, 4, (2, 2), dilation=(2, 2), groups=4),
+            cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {2, 2}).dilation({2, 2}).groups(4)',
+            input_size=(2, 4, 5, 5),
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv3d',
+            constructor_args=(2, 3, (2, 3, 2)),
+            cpp_constructor_args='torch::nn::Conv3dOptions(2, 3, {2, 3, 2})',
+            input_size=(1, 2, 4, 5, 4),
+            cudnn=True,
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv3d',
+            constructor_args=(2, 3, (2, 3, 4), 1, 0, 1, 1, False),
+            cpp_constructor_args='''torch::nn::Conv3dOptions(2, 3, {2, 3, 4})
+                                    .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
+            input_size=(1, 2, 3, 4, 5),
+            cudnn=True,
+            desc='no_bias',
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv3d',
+            constructor_args=(2, 3, (1, 1, 1), 1, 0, 1, 1, False),
+            cpp_constructor_args='''torch::nn::Conv3dOptions(2, 3, {2, 3, 4})
+                                    .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
+            input_size=(1, 2, 3, 4, 5),
+            cudnn=True,
+            desc='1x1x1_no_bias',
+            check_with_long_tensor=False,
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv3d',
+            constructor_args=(3, 4, 2, 2),
+            cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).stride(2)',
+            input_size=(2, 3, 5, 5, 5),
+            cudnn=True,
+            desc='stride',
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv3d',
+            constructor_args=(3, 4, 2, 2, 1),
+            cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).stride(2).padding(1)',
+            input_size=(2, 3, 5, 5, 5),
+            cudnn=True,
+            desc='stride_padding',
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Conv3d',
+            constructor_args=(3, 4, (2, 3, 4)),
+            cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4})',
+            input_size=(0, 3, 3, 4, 5),
+            cudnn=True,
+            check_with_long_tensor=True,
+            desc='zero_batch',
+            with_tf32=True,
+        ),
+        dict(
+            fullname='Conv3d_groups',
+            constructor=lambda: nn.Conv3d(2, 4, kernel_size=3, groups=2),
+            cpp_constructor_args='torch::nn::Conv3dOptions(2, 4, 3).groups(2)',
+            input_size=(1, 2, 4, 5, 4),
+            cudnn=True,
+            check_with_long_tensor=True,
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv3d_dilated',
+            constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2),
+            cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2)',
+            input_size=(2, 3, 5, 5, 5),
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv3d_dilated_strided',
+            constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2, stride=2),
+            cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2).stride(2)',
+            input_size=(2, 3, 5, 5, 5),
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv3d_pad_valid',
+            constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="valid"),
+            cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kValid)',
+            input_size=(2, 3, 6, 5, 4),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv3d_pad_same',
+            constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same"),
+            cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kSame)',
+            input_size=(2, 3, 6, 5, 4),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Conv3d_pad_same_dilated',
+            constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same", dilation=2),
+            cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kSame).dilation(2)',
+            input_size=(2, 3, 6, 5, 4),
+            cudnn=True,
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='ConvTranspose3d',
+            constructor_args=(2, 3, (2, 3, 2)),
+            cpp_constructor_args='torch::nn::ConvTranspose3dOptions(2, 3, {2, 3, 2})',
+            cudnn=True,
+            input_size=(1, 2, 4, 5, 4),
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='ConvTranspose3d',
+            constructor_args=(2, 3, (2, 3, 2), 1, 0, 0, 1, True, (2, 2, 2)),
+            cpp_constructor_args='''torch::nn::ConvTranspose3dOptions(2, 3, {2, 3, 2})
+                                    .stride(1).padding(0).output_padding(0).groups(1).bias(true).dilation({2, 2, 2})''',
+            cudnn=True,
+            input_size=(1, 2, 4, 5, 4),
+            desc='dilated',
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='ReplicationPad3d',
+            constructor_args=((1, 2, 3, 3, 2, 1),),
+            cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
+            input_size=(2, 3, 2, 2, 2),
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='ReplicationPad3d',
+            constructor_args=((1, 2, 3, 3, 2, 1),),
+            cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
+            input_size=(3, 2, 2, 2),
+            reference_fn=single_batch_reference_fn,
+            desc='no_batch_dim',
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='ReplicationPad3d',
+            constructor_args=((1, 2, 3, 3, 2, 1),),
+            cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
+            input_fn=lambda: torch.rand(2, 3, 2, 2, 2, dtype=torch.complex128, requires_grad=True),
+            skip_half=True,
+            desc='complex'
+        ),
+        dict(
+            module_name='Embedding',
+            constructor_args=(4, 3),
+            cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3)',
+            input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
+            check_gradgrad=False,
+            default_dtype=torch.double,
+            decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
+        ),
+        dict(
+            module_name='Embedding',
+            constructor_args=(4, 3),
+            cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3)',
+            input_fn=lambda: torch.empty(1, 512, dtype=torch.long).random_(4).expand(7, 512),
+            check_gradgrad=False,
+            desc='discontiguous',
+            default_dtype=torch.double,
+            decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
+        ),
+        dict(
+            module_name='EmbeddingBag',
+            constructor_args=(4, 3),
+            cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3)',
+            input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
+            check_gradgrad=False,
+            desc='mean',
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='EmbeddingBag',
+            constructor_args=(4, 3),
+            cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3)',
+            input_fn=lambda: torch.empty(1, 512, dtype=torch.long).random_(4).expand(7, 512),
+            check_gradgrad=False,
+            desc='discontiguous',
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='EmbeddingBag',
+            constructor_args=(4, 3, None, 2., False, 'sum'),
+            cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                    .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum)''',
+            input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
+            check_gradgrad=False,
+            desc='sum',
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='EmbeddingBag',
+            constructor_args=(4, 3, None, 2., False, 'max'),
+            cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                    .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax)''',
+            input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
+            check_gradgrad=False,
+            desc='max',
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='EmbeddingBag_mean_padding_idx',
+            constructor=lambda: nn.EmbeddingBag(4, 3, padding_idx=1),
+            cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).padding_idx(1)',
+            input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
+            check_gradgrad=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='EmbeddingBag_sum_padding_idx',
+            constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'sum', padding_idx=1),
+            cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                    .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum).padding_idx(1)''',
+            input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
+            check_gradgrad=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='EmbeddingBag_max_padding_idx',
+            constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'max', padding_idx=1),
+            cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                    .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax).padding_idx(1)''',
+            input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
+            check_gradgrad=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='EmbeddingBag_sparse',
+            constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True, dtype=torch.double),
+            cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                    .sparse(true)._weight(torch::rand({4, 3}).to(torch::kFloat64))''',
+            input_fn=lambda: torch.randperm(2).repeat(1, 2),
+            check_gradgrad=False,
+            has_sparse_gradients=True,
+        ),
+        dict(
+            constructor=lambda: nn.Embedding(4, 3, dtype=torch.double, sparse=True),
+            cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3).sparse(true)._weight(torch::rand({4, 3}).to(torch::kFloat64))',
+            input_fn=lambda: torch.randperm(2).repeat(1, 2),
+            fullname='Embedding_sparse',
+            check_gradgrad=False,
+            has_sparse_gradients=True,
+        ),
+        dict(
+            module_name='PixelShuffle',
+            constructor_args=(3,),
+            cpp_constructor_args='torch::nn::PixelShuffleOptions(3)',
+            input_size=(1, 9, 4, 4),
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='PixelUnshuffle',
+            constructor_args=(3,),
+            cpp_constructor_args='torch::nn::PixelUnshuffleOptions(3)',
+            input_size=(1, 1, 12, 12),
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
+            input_size=(1, 2, 4),
+            fullname='interpolate_nearest_1d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
+            input_size=(0, 2, 4),
+            fullname='interpolate_nearest_1d_zero_dim',
+            pickle=False,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=(12, ), scale_factor=None, mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
+            input_size=(1, 2, 3),
+            fullname='interpolate_nearest_tuple_1d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt).scale_factor(std::vector<double>({4.})).mode(torch::kNearest)''',
+            input_size=(1, 2, 4),
+            fullname='interpolate_nearest_scale_1d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kLinear)
+                                .align_corners(false)''',
+            input_size=(1, 2, 4),
+            fullname='interpolate_linear_1d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=(4, ), scale_factor=None, mode='linear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({4}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kLinear)
+                                .align_corners(false)''',
+            input_size=(1, 2, 3),
+            fullname='interpolate_linear_tuple_1d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({4.}))
+                                .mode(torch::kLinear)
+                                .align_corners(false)''',
+            input_size=(1, 2, 4),
+            fullname='interpolate_linear_scale_1d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kLinear)
+                                .align_corners(false)''',
+            input_size=(0, 2, 4),
+            fullname='interpolate_linear_1d_zero_dim',
+            pickle=False,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=True),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kLinear)
+                                .align_corners(true)''',
+            input_size=(1, 2, 4),
+            fullname='interpolate_linear_1d_align_corners',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=True),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({4.}))
+                                .mode(torch::kLinear)
+                                .align_corners(true)''',
+            input_size=(1, 2, 4),
+            fullname='interpolate_linear_scale_1d_align_corners',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=2, scale_factor=None, mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({2, 2}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kNearest)''',
+            input_size=(1, 128, 1, 1),
+            fullname='interpolate_nearest_2d_launch_configs',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kNearest)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_nearest_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=(12, 16), scale_factor=None, mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 16}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kNearest)''',
+            input_size=(1, 2, 3, 4),
+            fullname='interpolate_nearest_tuple_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({4., 4.}))
+                                .mode(torch::kNearest)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_nearest_scale_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kNearest)''',
+            input_size=(0, 2, 4, 4),
+            fullname='interpolate_nearest_2d_zero_dim',
+            pickle=False,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kBilinear)
+                                .align_corners(false)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bilinear_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kBilinear)
+                                .align_corners(false)''',
+            input_size=(0, 2, 4, 4),
+            fullname='interpolate_bilinear_2d_zero_dim',
+            pickle=False,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None,
+                                        mode='bilinear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({4, 6}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kBilinear)
+                                .align_corners(false)''',
+            input_size=(1, 2, 2, 3),
+            fullname='interpolate_bilinear_tuple_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=4.,
+                                        mode='bilinear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({4., 4.}))
+                                .mode(torch::kBilinear)
+                                .align_corners(false)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bilinear_scale_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
+                                        mode='bilinear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({2., 2.}))
+                                .mode(torch::kBilinear)
+                                .align_corners(false)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bilinear_scale_tuple_shared_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
+                                        mode='bilinear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({2., 1.}))
+                                .mode(torch::kBilinear)
+                                .align_corners(false)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bilinear_scale_tuple_skewed_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bilinear', align_corners=True),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({4, 6}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kBilinear)
+                                .align_corners(true)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bilinear_tuple_2d_align_corners',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
+                                        mode='bilinear', align_corners=True),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({2., 1.}))
+                                .mode(torch::kBilinear)
+                                .align_corners(true)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bilinear_scale_tuple_skewed_2d_align_corners',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kBicubic)
+                                .align_corners(false)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bicubic_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kBicubic)
+                                .align_corners(false)''',
+            input_size=(0, 2, 4, 4),
+            fullname='interpolate_bicubic_2d_zero_dim',
+            pickle=False,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None,
+                                        mode='bicubic', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({4, 6}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kBicubic)
+                                .align_corners(false)''',
+            input_size=(1, 2, 2, 3),
+            fullname='interpolate_bicubic_tuple_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='bicubic', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({4., 4.}))
+                                .mode(torch::kBicubic)
+                                .align_corners(false)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bicubic_scale_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
+                                        mode='bicubic', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({2., 2.}))
+                                .mode(torch::kBicubic)
+                                .align_corners(false)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bicubic_scale_tuple_shared_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
+                                        mode='bicubic', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({2., 1.}))
+                                .mode(torch::kBicubic)
+                                .align_corners(false)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bicubic_scale_tuple_skewed_2d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bicubic', align_corners=True),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({4, 6}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kBicubic)
+                                .align_corners(true)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bicubic_tuple_2d_align_corners',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
+                                        mode='bicubic', align_corners=True),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({2., 1.}))
+                                .mode(torch::kBicubic)
+                                .align_corners(true)''',
+            input_size=(1, 2, 4, 4),
+            fullname='interpolate_bicubic_scale_tuple_skewed_2d_align_corners',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 12, 12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kNearest)''',
+            input_size=(1, 2, 4, 4, 4),
+            fullname='interpolate_nearest_3d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 12, 12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kNearest)''',
+            input_size=(0, 2, 4, 4, 4),
+            fullname='interpolate_nearest_3d_zero_dim',
+            pickle=False,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=(12, 16, 16), scale_factor=None, mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 16, 16}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kNearest)''',
+            input_size=(1, 2, 3, 4, 4),
+            fullname='interpolate_nearest_tuple_3d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({4., 4., 4.}))
+                                .mode(torch::kNearest)''',
+            input_size=(1, 2, 4, 4, 4),
+            fullname='interpolate_nearest_scale_3d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 12, 12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kTrilinear)
+                                .align_corners(false)''',
+            input_size=(1, 2, 4, 4, 4),
+            fullname='interpolate_trilinear_3d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({12, 12, 12}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kTrilinear)
+                                .align_corners(false)''',
+            input_size=(0, 2, 4, 4, 4),
+            fullname='interpolate_trilinear_3d_zero_dim',
+            pickle=False,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=(4, 6, 6),
+                                        scale_factor=None, mode='trilinear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({4, 6, 6}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kTrilinear)
+                                .align_corners(false)''',
+            input_size=(1, 2, 2, 3, 3),
+            fullname='interpolate_trilinear_tuple_3d',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=False),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({3., 3., 3.}))
+                                .mode(torch::kTrilinear)
+                                .align_corners(false)''',
+            input_size=(1, 2, 3, 4, 5),
+            fullname='interpolate_trilinear_scale_3d',
+            # See https://github.com/pytorch/pytorch/issues/5006
+            precision=3e-4,
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=(4, 6, 6), scale_factor=None,
+                                        mode='trilinear', align_corners=True),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::vector<int64_t>({4, 6, 6}))
+                                .scale_factor(std::nullopt)
+                                .mode(torch::kTrilinear)
+                                .align_corners(true)''',
+            input_size=(1, 2, 2, 3, 3),
+            fullname='interpolate_trilinear_tuple_3d_align_corners',
+            pickle=False,
+            default_dtype=torch.double
+        ),
+        dict(
+            constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=True),
+            cpp_options_args='''F::InterpolateFuncOptions()
+                                .size(std::nullopt)
+                                .scale_factor(std::vector<double>({3., 3., 3.}))
+                                .mode(torch::kTrilinear)
+                                .align_corners(true)''',
+            input_size=(1, 2, 3, 4, 4),
+            fullname='interpolate_trilinear_scale_3d_align_corners',
+            # See https://github.com/pytorch/pytorch/issues/5006
+            precision=3e-4,
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.softmax, dim=-1),
+            cpp_options_args='F::SoftmaxFuncOptions(-1)',
+            input_size=(2, 128),  # trigger the last-dim algo in CUDA
+            fullname='softmax_lastdim',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.softmax, dim=1, dtype=torch.float64),
+            cpp_options_args='F::SoftmaxFuncOptions(1).dtype(torch::kFloat64)',
+            input_size=(2, 128),
+            fullname='softmax_lastdim_dtype',
+            pickle=False,
+            test_cuda=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.softmax, dim=1),
+            cpp_options_args='F::SoftmaxFuncOptions(1)',
+            input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
+            fullname='softmax_spatial_special',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.softmax, dim=1),
+            cpp_options_args='F::SoftmaxFuncOptions(1)',
+            input_size=(2, 2, 4, 4),  # regular spatial algorithm
+            fullname='softmax_spatial',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.softmax, dim=1, dtype=torch.float64),
+            cpp_options_args='F::SoftmaxFuncOptions(1).dtype(torch::kFloat64)',
+            input_size=(2, 2, 4, 4),  # regular spatial algorithm
+            fullname='softmax_spatial_dtype',
+            pickle=False,
+            test_cuda=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.softmax, dim=0),
+            cpp_options_args='F::SoftmaxFuncOptions(0)',
+            input_size=(2, 3, 4, 5),
+            fullname='softmax_functional_dim0',
+            test_cuda=False,
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.softmax, dim=3),
+            cpp_options_args='F::SoftmaxFuncOptions(3)',
+            input_size=(2, 3, 4, 5),
+            fullname='softmax_functional_dim3',
+            test_cuda=False,
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.softmax, dim=-1),
+            cpp_options_args='F::SoftmaxFuncOptions(-1)',
+            input_size=(),
+            fullname='softmax_functional_scalar',
+            test_cuda=False,
+            pickle=False,
+        ),
+        dict(
+            constructor=wrap_functional(F.log_softmax, dim=-1),
+            cpp_options_args='F::LogSoftmaxFuncOptions(-1)',
+            input_size=(2, 128),  # trigger the last-dim algo in CUDA
+            fullname='log_softmax_lastdim',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.log_softmax, dim=1),
+            cpp_options_args='F::LogSoftmaxFuncOptions(1)',
+            input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
+            fullname='log_softmax_spatial_special',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.log_softmax, dim=1),
+            cpp_options_args='F::LogSoftmaxFuncOptions(1)',
+            input_size=(2, 2, 4, 4),  # regular spatial algorithm
+            fullname='log_softmax_spatial',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.log_softmax, dim=0),
+            cpp_options_args='F::LogSoftmaxFuncOptions(0)',
+            input_size=(2, 3, 4, 5),
+            fullname='log_softmax_dim0',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.log_softmax, dim=3),
+            cpp_options_args='F::LogSoftmaxFuncOptions(3)',
+            input_size=(2, 3, 4, 5),
+            fullname='log_softmax_dim3',
+            pickle=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            constructor=wrap_functional(F.log_softmax, dim=0),
+            cpp_options_args='F::LogSoftmaxFuncOptions(0)',
+            input_size=(),
+            fullname='log_softmax_scalar',
+            pickle=False,
+        ),
+        dict(
+            fullname='Unfold',
+            constructor=lambda: nn.Unfold((2, 2), (1, 1), (0, 0), (1, 1)),
+            cpp_constructor_args='torch::nn::UnfoldOptions({2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
+            input_size=(2, 4, 3, 3),
+            check_gradgrad=False,
+            test_cuda=True,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Fold',
+            constructor=lambda: nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1)),
+            cpp_constructor_args='torch::nn::FoldOptions({3, 3}, {2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
+            input_size=(2, 16, 4),
+            check_gradgrad=False,
+            test_cuda=True,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Fold_no_batch_dim_input',
+            constructor=lambda: nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1)),
+            cpp_constructor_args='torch::nn::FoldOptions({3, 3}, {2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
+            input_size=(16, 4),
+            check_gradgrad=False,
+            ref=single_batch_reference_fn,
+            test_cuda=True,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Unfold_int_input',
+            constructor=lambda: nn.Unfold(2, 1, 0, 1),
+            cpp_constructor_args='torch::nn::UnfoldOptions(2).dilation(1).padding(0).stride(1)',
+            input_size=(2, 4, 3, 3),
+            check_gradgrad=False,
+            test_cuda=True,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Fold_int_input',
+            constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
+            cpp_constructor_args='torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1)',
+            input_size=(2, 16, 4),
+            check_gradgrad=False,
+            test_cuda=True,
+            default_dtype=torch.double,
+        ),
+        dict(
+            fullname='Fold_no_batch_dim_int_input',
+            constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
+            cpp_constructor_args='torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1)',
+            input_size=(16, 4),
+            ref=single_batch_reference_fn,
+            check_gradgrad=False,
+            test_cuda=True,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='RReLU',
+            constructor_args=(0.1, 0.9),
+            cpp_constructor_args='torch::nn::RReLUOptions().lower(0.1).upper(0.9)',
+            input_size=(),
+            desc='with_up_down_scalar',
+            test_cuda=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='PairwiseDistance',
+            input_fn=lambda: (torch.randn(10, 8), torch.randn(10, 8)),
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='PairwiseDistance',
+            input_fn=lambda: (torch.randn(10, 1), torch.randn(10, 8)),
+            desc='broadcast_lhs',
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='PairwiseDistance',
+            input_fn=lambda: (torch.randn(10, 8), torch.randn(1, 8)),
+            desc='broadcast_rhs',
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='PairwiseDistance',
+            constructor_args=(1.5, 1e-05, True),
+            cpp_constructor_args='torch::nn::PairwiseDistanceOptions().p(1.5).eps(1e-05).keepdim(true)',
+            input_fn=lambda: (torch.randn(10, 8), torch.randn(10, 8)),
+            desc='with_non_default_args',
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='PairwiseDistance',
+            input_fn=lambda: (torch.randn(8), torch.randn(8)),
+            reference_fn=single_batch_reference_fn,
+            desc='no_batch_dim',
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='TransformerEncoderLayer',
+            constructor_args=(4, 2, 16, 0.0),
+            cpp_constructor_args='''torch::nn::TransformerEncoderLayerOptions(4, 2)
+                                    .dim_feedforward(16)
+                                    .dropout(0.0)''',
+            input_size=(2, 3, 4),
+            desc='relu_activation',
+            with_tf32=True,
+            tf32_precision=0.1,
+            # TODO(#50743): figure out the error
+            # RuntimeError: The size of tensor a (6) must match the size of tensor b (4)
+            # at non-singleton dimension 2
+            check_batched_grad=False,
+            check_gradgrad=False,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='TransformerEncoderLayer',
+            constructor_args=(4, 2, 8, 0.0, F.gelu),
+            cpp_constructor_args='''torch::nn::TransformerEncoderLayerOptions(4, 2)
+                                    .dim_feedforward(8)
+                                    .dropout(0.0)
+                                    .activation(torch::kGELU)''',
+            input_size=(2, 3, 4),
+            check_gradgrad=False,
+            desc='gelu_activation',
+            with_tf32=True,
+            tf32_precision=0.08 if SM90OrLater else 0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='TransformerDecoderLayer',
+            constructor_args=(4, 2, 8, 0.0),
+            cpp_constructor_args='''torch::nn::TransformerDecoderLayerOptions(4, 2)
+                                    .dim_feedforward(8)
+                                    .dropout(0.0)''',
+            input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
+            check_gradgrad=False,
+            desc='relu_activation',
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='TransformerDecoderLayer',
+            constructor_args=(4, 2, 8, 0.0, F.gelu),
+            cpp_constructor_args='''torch::nn::TransformerDecoderLayerOptions(4, 2)
+                                    .dim_feedforward(8)
+                                    .dropout(0.0)
+                                    .activation(torch::kGELU)''',
+            input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
+            check_gradgrad=False,
+            desc='gelu_activation',
+            with_tf32=True,
+            tf32_precision=0.05,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Transformer',
+            constructor_args=(4, 2, 2, 2, 8, 0.0, F.relu),
+            cpp_constructor_args='''torch::nn::TransformerOptions()
+                                    .d_model(4)
+                                    .nhead(2)
+                                    .num_encoder_layers(2)
+                                    .num_decoder_layers(2)
+                                    .dim_feedforward(8)
+                                    .dropout(0.0)
+                                    .activation(torch::kReLU)''',
+            input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4), torch.rand(3, 3)),
+            check_gradgrad=False,
+            desc='multilayer_coder',
+            with_tf32=True,
+            tf32_precision=0.05 if SM90OrLater else 0.03,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Linear',
+            constructor_args=(3, 5),
+            cpp_constructor_args='torch::nn::LinearOptions(3, 5)',
+            input_fn=lambda: torch.rand(3),
+            reference_fn=lambda i, p, _: torch.mm(i.view(1, -1), p[0].t()).view(-1) + p[1],
+            desc="no_batch_dim",
+            with_tf32=True,
+            tf32_precision=0.005,
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Flatten',
+            cpp_constructor_args='torch::nn::FlattenOptions().start_dim(-3).end_dim(-1)',
+            constructor_args=(-3, -1),
+            input_size=(3, 4, 5),
+            reference_fn=single_batch_reference_fn,
+            desc="no_batch_dim",
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='Unflatten',
+            cpp_constructor_args='torch::nn::UnflattenOptions(-2, {2, 2})',
+            constructor_args=(-2, torch.Size([2, 2])),
+            input_size=(3, 4, 5),
+            reference_fn=single_batch_reference_fn,
+            desc="no_batch_dim",
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='LayerNorm',
+            constructor_args=([56, 56, 56], 1e-5, False),
+            cpp_constructor_args='torch::nn::LayerNormOptions({56, 56, 56}).eps(1e-5).elementwise_affine(false)',
+            input_size=(4, 56, 56, 56),
+            cudnn=True,
+            check_eval=True,
+            gradcheck_fast_mode=True,
+            check_half=True,
+            desc='3d_no_affine_large_feature',
+        ),
+    ]
 
-# add conv padding mode tests:
-for padding_mode, cpp_padding_mode in zip(
-        ['reflect', 'circular', 'replicate', 'zeros'],
-        ['torch::kReflect', 'torch::kCircular', 'torch::kReplicate', 'torch::kZeros']):
-    # conv signature:
-    #     in_channels, out_channels, kernel_size, stride=1,
-    #     padding=0, dilation=1, groups=1,
-    #     bias=True, padding_mode='zeros'
-    for d in (1, 2, 3):
-        if d == 3 and padding_mode == 'reflect':
-            # FIXME: remove after implementing reflection pad 3d
-            #        https://github.com/pytorch/pytorch/issues/27655
-            continue
-        padding = tuple(range(1, d + 1))
-        cpp_padding = '{' + ', '.join(map(str, padding)) + '}'
-        input_size = (2, 2) + (4,) * d
-        output_size = (2, 3) + tuple(p + 1 for p in padding)  # simplified from `(4 + 2 * p - 3) // 2 + 1`
-        new_module_tests.append(
-            dict(
-                module_name=f'Conv{d}d',
-                constructor_args=(2, 3, 3, 2, padding, 1, 1, True, padding_mode),
-                cpp_constructor_args=f'''torch::nn::Conv{d}dOptions(2, 3, 3)
-                                        .stride(2)
-                                        .padding({cpp_padding})
-                                        .dilation(1)
-                                        .groups(1)
-                                        .bias(true)
-                                        .padding_mode({cpp_padding_mode})''',
-                input_size=input_size,
-                output_size=output_size,
-                cudnn=True,
-                desc=f'{padding_mode}_stride2_pad2',
-                with_tf32=True,
-                tf32_precision=0.05,
-                default_dtype=torch.double,
-            ),
+    # add conv padding mode tests:
+    for padding_mode, cpp_padding_mode in zip(
+            ['reflect', 'circular', 'replicate', 'zeros'],
+            ['torch::kReflect', 'torch::kCircular', 'torch::kReplicate', 'torch::kZeros'], strict=True):
+        # conv signature:
+        #     in_channels, out_channels, kernel_size, stride=1,
+        #     padding=0, dilation=1, groups=1,
+        #     bias=True, padding_mode='zeros'
+        for d in (1, 2, 3):
+            if d == 3 and padding_mode == 'reflect':
+                # FIXME: remove after implementing reflection pad 3d
+                #        https://github.com/pytorch/pytorch/issues/27655
+                continue
+            padding = tuple(range(1, d + 1))
+            cpp_padding = '{' + ', '.join(map(str, padding)) + '}'
+            input_size = (2, 2) + (4,) * d
+            output_size = (2, 3) + tuple(p + 1 for p in padding)  # simplified from `(4 + 2 * p - 3) // 2 + 1`
+            new_module_tests.append(
+                dict(
+                    module_name=f'Conv{d}d',
+                    constructor_args=(2, 3, 3, 2, padding, 1, 1, True, padding_mode),
+                    cpp_constructor_args=f'''torch::nn::Conv{d}dOptions(2, 3, 3)
+                                            .stride(2)
+                                            .padding({cpp_padding})
+                                            .dilation(1)
+                                            .groups(1)
+                                            .bias(true)
+                                            .padding_mode({cpp_padding_mode})''',
+                    input_size=input_size,
+                    output_size=output_size,
+                    cudnn=True,
+                    desc=f'{padding_mode}_stride2_pad2',
+                    with_tf32=True,
+                    tf32_precision=0.05,
+                    default_dtype=torch.double,
+                ),
+            )
+
+    # Check that non linear activations work with no batch dimensions
+    non_linear_activations_no_batch = [
+        'ELU', 'Hardshrink', 'Hardsigmoid', 'Hardtanh', 'Hardswish', 'LeakyReLU',
+        'LogSigmoid', 'PReLU', 'ReLU', 'ReLU6', 'RReLU', 'SELU', 'CELU', 'GELU', 'GLU',
+        'Sigmoid', 'SiLU', 'Mish', 'Softplus', 'Softshrink', 'Softsign', 'Tanh',
+        'Tanhshrink', 'Threshold'
+    ]
+    non_linear_activations_extra_info: dict[str, dict] = {
+        'CELU': {'constructor_args': (2.,), 'default_dtype': torch.double},
+        'Threshold': {'constructor_args': (2., 1.)},
+        'Hardsigmoid': {'check_gradgrad': False, 'check_jit': False, 'default_dtype': torch.double},
+        'Hardswish': {'check_gradgrad': False, 'check_jit': False, 'default_dtype': torch.double},
+        # For RRelu, test that compare CPU and GPU results fail because RNG
+        # is different between CPU and GPU
+        'RReLU': {'test_cuda': False, 'default_dtype': torch.double},
+        'ELU': {'default_dtype': torch.double},
+        'GELU': {'default_dtype': torch.double},
+        'GLU': {'default_dtype': torch.double},
+        'Hardshrink': {'default_dtype': torch.double},
+        'Hardtanh': {'default_dtype': torch.double},
+        'LeakyReLU': {'default_dtype': torch.double},
+        'LogSigmoid': {'default_dtype': torch.double},
+        'Mish': {'default_dtype': torch.double},
+        'PReLU': {'default_dtype': torch.double},
+        'ReLU6': {'default_dtype': torch.double},
+        'ReLU': {'default_dtype': torch.double},
+        'SELU': {'default_dtype': torch.double},
+        'SiLU': {'default_dtype': torch.double},
+        'Sigmoid': {'default_dtype': torch.double},
+        'Softplus': {'default_dtype': torch.double},
+        'Softshrink': {'default_dtype': torch.double},
+        'Softsign': {'default_dtype': torch.double},
+        'Tanh': {'default_dtype': torch.double},
+        'Tanhshrink': {'default_dtype': torch.double},
+    }
+    for non_linear_activation in non_linear_activations_no_batch:
+        activation_test_info = dict(
+            module_name=non_linear_activation,
+            input_size=(4,),
+            reference_fn=single_batch_reference_fn,
+            desc='no_batch_dim',
+            test_cpp_api_parity=False,
         )
+        extra_info = non_linear_activations_extra_info.get(non_linear_activation, {})
+        activation_test_info.update(extra_info)
+        new_module_tests.append(activation_test_info)
 
-# Check that non linear activations work with no batch dimensions
-non_linear_activations_no_batch = [
-    'ELU', 'Hardshrink', 'Hardsigmoid', 'Hardtanh', 'Hardswish', 'LeakyReLU',
-    'LogSigmoid', 'PReLU', 'ReLU', 'ReLU6', 'RReLU', 'SELU', 'CELU', 'GELU', 'GLU',
-    'Sigmoid', 'SiLU', 'Mish', 'Softplus', 'Softshrink', 'Softsign', 'Tanh',
-    'Tanhshrink', 'Threshold'
-]
-non_linear_activations_extra_info: Dict[str, dict] = {
-    'CELU': {'constructor_args': (2.,), 'default_dtype': torch.double},
-    'Threshold': {'constructor_args': (2., 1.)},
-    'Hardsigmoid': {'check_gradgrad': False, 'check_jit': False, 'default_dtype': torch.double},
-    'Hardswish': {'check_gradgrad': False, 'check_jit': False, 'default_dtype': torch.double},
-    # For RRelu, test that compare CPU and GPU results fail because RNG
-    # is different between CPU and GPU
-    'RReLU': {'test_cuda': False, 'default_dtype': torch.double},
-    'ELU': {'default_dtype': torch.double},
-    'GELU': {'default_dtype': torch.double},
-    'GLU': {'default_dtype': torch.double},
-    'Hardshrink': {'default_dtype': torch.double},
-    'Hardtanh': {'default_dtype': torch.double},
-    'LeakyReLU': {'default_dtype': torch.double},
-    'LogSigmoid': {'default_dtype': torch.double},
-    'Mish': {'default_dtype': torch.double},
-    'PReLU': {'default_dtype': torch.double},
-    'ReLU6': {'default_dtype': torch.double},
-    'ReLU': {'default_dtype': torch.double},
-    'SELU': {'default_dtype': torch.double},
-    'SiLU': {'default_dtype': torch.double},
-    'Sigmoid': {'default_dtype': torch.double},
-    'Softplus': {'default_dtype': torch.double},
-    'Softshrink': {'default_dtype': torch.double},
-    'Softsign': {'default_dtype': torch.double},
-    'Tanh': {'default_dtype': torch.double},
-    'Tanhshrink': {'default_dtype': torch.double},
-}
-for non_linear_activation in non_linear_activations_no_batch:
-    activation_test_info = dict(
-        module_name=non_linear_activation,
-        input_size=(4,),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-        test_cpp_api_parity=False,
-    )
-    extra_info = non_linear_activations_extra_info.get(non_linear_activation, {})
-    activation_test_info.update(extra_info)
-    new_module_tests.append(activation_test_info)
+
+    return new_module_tests
 
 
 def kldivloss_reference(input, target, reduction='mean', log_target=False):
@@ -2726,7 +2741,8 @@ def kldivloss_reference(input, target, reduction='mean', log_target=False):
 
 def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
                         reduction='mean'):
-    assert input.dim() >= 3
+    if input.dim() < 3:
+        raise AssertionError(f"Expected input.dim() >= 3, got {input.dim()}")
     N = input.size(0)
     C = input.size(1)
     out_size = (N,) + input.size()[2:]
@@ -2752,7 +2768,8 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
 
 def cross_entropy_loss_prob_target_reference(input, target, weight=None, reduction='mean',
                                              label_smoothing=0.0):
-    assert input.dim() >= 2
+    if input.dim() < 2:
+        raise AssertionError(f"Expected input.dim() >= 2, got {input.dim()}")
 
     input = torch.log_softmax(input, 1)
     C = input.size(1)
@@ -2761,7 +2778,8 @@ def cross_entropy_loss_prob_target_reference(input, target, weight=None, reducti
     weight = weight.view(1, C, *(1 for _ in input.shape[2:]))
 
     if label_smoothing > 0.0:
-        assert label_smoothing <= 1.0
+        if label_smoothing > 1.0:
+            raise AssertionError(f"Expected label_smoothing <= 1.0, got {label_smoothing}")
         target = (target * (1 - label_smoothing) + label_smoothing / C)
 
     output = -(input * target * weight).sum(dim=1)
@@ -2785,7 +2803,8 @@ def cross_entropy_loss_indices_target_reference(input, target, weight=None, igno
     if label_smoothing == 0.0:
         return nllloss
 
-    assert 0.0 < label_smoothing <= 1.0
+    if not (0.0 < label_smoothing <= 1.0):
+        raise AssertionError(f"Expected 0.0 < label_smoothing <= 1.0, got {label_smoothing}")
 
     input = torch.log_softmax(input, 1)
     C = input.size(1)
@@ -2828,6 +2847,29 @@ def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, 
         )
 
 
+def linear_cross_entropy_loss_reference(input, linear_weight, target,
+                                        linear_bias=None,
+                                        weight=None,
+                                        ignore_index=None,
+                                        reduction='mean',
+                                        label_smoothing=0.0):
+    num_classes = linear_weight.shape[0]
+    out_features = linear_weight.shape[1:-1]
+    in_features = linear_weight.shape[-1]
+    num_batches = input.shape[:-1]
+    logits = F.linear(
+        input,
+        linear_weight.reshape((-1, in_features)),
+        linear_bias.reshape(-1) if linear_bias is not None else None,
+    ).reshape((*num_batches, num_classes, *out_features))
+    ignore_index = ignore_index if ignore_index is not None else -100
+    return F.cross_entropy(
+        logits, target, weight=weight,
+        reduction=reduction, ignore_index=ignore_index,
+        label_smoothing=label_smoothing
+    )
+
+
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
                       reduction='mean'):
 
@@ -2839,8 +2881,8 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
         return (result, norm)
 
     losses_and_weights = [nll_loss_helper(i, t, weight, ignore_index)
-                          for i, t in zip(input, target)]
-    losses, weights = zip(*losses_and_weights)
+                          for i, t in zip(input, target, strict=True)]
+    losses, weights = zip(*losses_and_weights, strict=True)
     losses_tensor = input.new_tensor(losses)
     if reduction == 'mean':
         return sum(losses_tensor) / sum(weights)
@@ -2887,7 +2929,7 @@ def _multilabelmarginloss_reference(input, target):
 
     sum = 0
     for target_index in targets:
-        for i in range(0, len(input)):
+        for i in range(len(input)):
             if i not in targets:
                 sum += max(0, 1 - input[target_index] + input[i])
 
@@ -2898,14 +2940,15 @@ def multilabelmarginloss_reference(input, target, reduction='mean'):
     # make everything 2-dimensional
     input_dim = input.dim()
     if input.dim() < 2:
-        assert target.dim() < 2
+        if target.dim() >= 2:
+            raise AssertionError(f"Expected target.dim() < 2, got {target.dim()}")
         input = input.unsqueeze(0) if input.dim() == 1 else input.unsqueeze(0).unsqueeze(0)
         target = target.unsqueeze(0) if target.dim() == 1 else target.unsqueeze(0).unsqueeze(0)
 
     n = input.size(0)
     dim = input.size(1)
     output = input.new(n).zero_()
-    for i in range(0, n):
+    for i in range(n):
         output[i] = _multilabelmarginloss_reference(input[i], target[i])
 
     if reduction == 'mean':
@@ -2946,7 +2989,7 @@ def _multimarginloss_reference(input, target_idx, p, margin, weight):
         weight = input.new(len(input)).fill_(1)
 
     output = 0
-    for i in range(0, len(input)):
+    for i in range(len(input)):
         if i != target_idx:
             output += weight[target_idx] * (max(0, (margin - input[target_idx] + input[i])) ** p)
     return output
@@ -2963,7 +3006,7 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reducti
     n = input.size(0)
     dim = input.size(1)
     output = input.new(n)
-    for x in range(0, n):
+    for x in range(n):
         output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
 
     if reduction == 'mean':
@@ -2978,7 +3021,7 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reducti
 def cosineembeddingloss_reference(input1, input2, target, margin=0, reduction='mean'):
     def _cos(a, b):
         cos = a.new(a.size(0))
-        for i in range(0, a.size(0)):
+        for i in range(a.size(0)):
             cos[i] = (a[i] * b[i]).sum() / ((((a[i] * a[i]).sum() + 1e-12) * ((b[i] * b[i]).sum() + 1e-12)) ** 0.5)
         return cos
 
@@ -3054,7 +3097,7 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
     return output
 
 
-loss_reference_fns: Dict['str', Callable] = {
+loss_reference_fns: dict['str', Callable] = {
     'KLDivLoss': kldivloss_reference,
     'KLDivLoss_log_target': partial(kldivloss_reference, log_target=True),
     'NLLLoss': nllloss_reference,
@@ -3069,7 +3112,8 @@ loss_reference_fns: Dict['str', Callable] = {
     'TripletMarginLoss': tripletmarginloss_reference,
     'MarginRankingLoss': marginrankingloss_reference,
     'CTCLoss': ctcloss_reference,
-    'CrossEntropyLoss': cross_entropy_loss_reference
+    'CrossEntropyLoss': cross_entropy_loss_reference,
+    'LinearCrossEntropyLoss': linear_cross_entropy_loss_reference,
 }
 
 
@@ -3168,7 +3212,7 @@ classification_criterion_no_batch = [
     ),
     ('MultiLabelSoftMarginLoss', lambda: torch.randn(9, dtype=torch.double), lambda: torch.randn(9)),
 ]
-classification_criterion_no_batch_extra_info: Dict[str, dict] = {
+classification_criterion_no_batch_extra_info: dict[str, dict] = {
     'MultiLabelMarginLoss': {'check_gradgrad': False},
 }
 # TODO : Fix these discrepancies
@@ -3204,7 +3248,7 @@ class NNTestCase(TestCase):
         raise NotImplementedError
 
     @abstractmethod
-    def _get_parameters(self, module: nn.Module) -> Tuple[List[nn.Parameter], List[nn.Parameter]]:
+    def _get_parameters(self, module: nn.Module) -> tuple[list[nn.Parameter], list[nn.Parameter]]:
         raise NotImplementedError
 
     @abstractmethod
@@ -3214,7 +3258,7 @@ class NNTestCase(TestCase):
     @abstractmethod
     def _backward(self, module: nn.Module,
                   input: _TensorOrTensors, output: torch.Tensor,
-                  grad_output: Union[torch.Tensor, Sequence[torch.Tensor]],
+                  grad_output: torch.Tensor | Sequence[torch.Tensor],
                   create_graph: bool = False):
         raise NotImplementedError
 
@@ -3259,7 +3303,7 @@ class NNTestCase(TestCase):
         for i in range(output_size):
             param, d_param = self._get_parameters(module)
             # make non grad zeros
-            d_param = [torch.zeros_like(p) if d is None else d for (p, d) in zip(param, d_param)]
+            d_param = [torch.zeros_like(p) if d is None else d for (p, d) in zip(param, d_param, strict=True)]
 
             d_out = torch.zeros_like(output)
             flat_d_out = d_out.view(-1)
@@ -3273,12 +3317,12 @@ class NNTestCase(TestCase):
             d_input = self._backward(module, input, output, d_out)
 
             if jacobian_input:
-                for jacobian_x, d_x in zip(flat_jacobian_input, _iter_tensors(d_input)):
-                    jacobian_x[:, i] = d_x.contiguous().view(-1)
+                for jacobian_x, d_x in zip(flat_jacobian_input, _iter_tensors(d_input), strict=True):
+                    jacobian_x[:, i] = d_x.reshape(-1)
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
-        res: Tuple[torch.Tensor, ...] = ()
+        res: tuple[torch.Tensor, ...] = ()
         if jacobian_input:
             res += jacobian_inp,
         if jacobian_parameters:
@@ -3290,7 +3334,7 @@ class NNTestCase(TestCase):
         def fw(*input):
             return self._forward(module, input).detach()
 
-        res: Tuple[torch.Tensor, ...] = ()
+        res: tuple[torch.Tensor, ...] = ()
         if jacobian_input:
             res += _get_numerical_jacobian(fw, input, eps=1e-6),
         if jacobian_parameters:
@@ -3311,7 +3355,7 @@ class NNTestCase(TestCase):
         numerical_t = list(_iter_tensors(numerical))
 
         differences = []
-        for a, n in zip(analytical_t, numerical_t):
+        for a, n in zip(analytical_t, numerical_t, strict=True):
             if a.numel() != 0:
                 differences.append(a.add(n, alpha=-1).abs().max())
             # TODO: compare structure (ensure analytic jacobian has correct shape)
@@ -3363,7 +3407,8 @@ class TestBase:
         return self._get_arg('extra_args', True)
 
     def _get_arg(self, name, unpack):
-        assert name in self._required_arg_names
+        if name not in self._required_arg_names:
+            raise AssertionError(f"Expected name '{name}' to be in required arg names")
 
         if name not in self._arg_cache:
             fn_name = name + '_fn'
@@ -3374,8 +3419,10 @@ class TestBase:
             elif fn_name in self._extra_kwargs:
                 self._arg_cache[name] = self._extra_kwargs[fn_name]()
             else:
-                assert size_name in self._extra_kwargs, \
-                    f"Missing `{name}`, `{size_name}` or `{fn_name}` for {self.get_name()}"
+                if size_name not in self._extra_kwargs:
+                    raise AssertionError(
+                        f"Missing `{name}`, `{size_name}` or `{fn_name}` for {self.get_name()}"
+                    )
 
                 def map_tensor_sizes(sizes):
                     if isinstance(sizes, list):
@@ -3412,7 +3459,7 @@ class ModuleTest(TestBase):
             kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
         self.precision = kwargs.get('precision', 2e-4)
         self.check_forward_only = kwargs.get('check_forward_only', False)
-        self.default_dtype = kwargs.get('default_dtype', None)
+        self.default_dtype = kwargs.get('default_dtype')
         if self.default_dtype is None:
             self.default_dtype = torch.get_default_dtype()
 
@@ -3460,7 +3507,10 @@ class ModuleTest(TestBase):
                 dim = d + 1
                 break
         noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
-        assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
+        if not (noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()):
+            raise AssertionError(
+                f"Expected noncontig to be non-contiguous or have numel <= 1, got numel={noncontig.numel()}"
+            )
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
 
@@ -3519,7 +3569,7 @@ class ModuleTest(TestBase):
             gpu_module = self.constructor(*self.constructor_args).float().cuda()
             cpu_param = test_case._get_parameters(cpu_module)
             gpu_param = test_case._get_parameters(gpu_module)
-            for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
+            for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0], strict=True):
                 gpu_p.data.copy_(cpu_p)
 
             test_case._zero_grad_input(cpu_input_tuple)
@@ -3540,7 +3590,7 @@ class ModuleTest(TestBase):
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
                 gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
                 test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0, exact_dtype=False)
-                for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
+                for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1], strict=True):
                     test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
             # Run double-backwards on CPU and GPU and compare results
@@ -3566,7 +3616,7 @@ class ModuleTest(TestBase):
                     gpu_gradOutput,
                     create_graph=True)
 
-                for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
+                for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs, strict=True):
                     test_case.assertEqual(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0, exact_dtype=False)
 
                 # We mix output into the second backwards computation so that
@@ -3589,7 +3639,7 @@ class ModuleTest(TestBase):
                     gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
                     retain_graph=True)
                 test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0, exact_dtype=False)
-                for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
+                for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg, strict=True):
                     test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0, exact_dtype=False)
 
             self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
@@ -3623,7 +3673,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.test_cpu = kwargs.get('test_cpu', True)
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
-        self.gradcheck_fast_mode = kwargs.get('gradcheck_fast_mode', None)
+        self.gradcheck_fast_mode = kwargs.get('gradcheck_fast_mode')
         self.supports_forward_ad = kwargs.get('supports_forward_ad', False)
         self.supports_fwgrad_bwgrad = kwargs.get('supports_fwgrad_bwgrad', False)
 
@@ -3632,7 +3682,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         num_inputs = len(input_tuple)
 
         def fn_to_gradcheck(*inputs_and_params, **kwargs):
-            assert not kwargs
+            if kwargs:
+                raise AssertionError(f"Expected no kwargs, got {kwargs}")
             return test_case._forward(module, inputs_and_params[:num_inputs])
 
         # gradcheck doesn't support operators that take in dense inputs but
@@ -3640,7 +3691,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         # and nn.EmbeddingBag. Instead, we call `self.check_jacobian`, which
         # is a slightly different version of gradcheck that can handle this.
         if self.has_sparse_gradients:
-            assert num_inputs == 1
+            if num_inputs != 1:
+                raise AssertionError(f"Expected num_inputs == 1, got {num_inputs}")
             test_input_jacobian = torch.is_floating_point(input_tuple[0])
             test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
         else:
@@ -3671,7 +3723,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
 
             # check_inplace doesn't support multiple input tensors, since we don't have any modules
             # that modify the inputs in-place and that accept more than one input
-            assert len(input_tuple) == 1
+            if len(input_tuple) != 1:
+                raise AssertionError(f"Expected len(input_tuple) == 1, got {len(input_tuple)}")
             input = input_tuple[0]
 
             module_ip = self.constructor(*self.constructor_args, inplace=True)
@@ -3827,7 +3880,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         self.with_tf32 = kwargs.get('with_tf32', True)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
-        self.default_dtype = kwargs.get('default_dtype', None)
+        self.default_dtype = kwargs.get('default_dtype')
         if self.default_dtype is None:
             self.default_dtype = torch.get_default_dtype()
 

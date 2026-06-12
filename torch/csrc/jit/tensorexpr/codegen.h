@@ -26,7 +26,15 @@ class TORCH_API CodeGen {
       at::Device device = at::kCPU,
       std::string kernel_func_name = "func");
 
-  virtual ~CodeGen() = default;
+  CodeGen(const CodeGen& rhs);
+
+  CodeGen(CodeGen&& rhs);
+
+  virtual ~CodeGen();
+
+  CodeGen& operator=(const CodeGen& rhs);
+
+  CodeGen& operator=(CodeGen&& rhs);
 
   StmtPtr stmt() const {
     return stmt_;

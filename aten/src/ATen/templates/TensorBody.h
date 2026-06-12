@@ -28,10 +28,10 @@
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/macros/Export.h>
+#include <c10/macros/Macros.h>
 #include <ATen/core/CheckMemoryFormat.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 #include <c10/core/SymInt.h>
 #include <ATen/core/TensorAccessor.h>
@@ -129,6 +129,7 @@ class TORCH_API Tensor: public TensorBase {
       return *this;
     }
 
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
     switch (this->layout()) {
       case at::kSparse:
       case at::kSparseCsr:
@@ -139,9 +140,10 @@ class TORCH_API Tensor: public TensorBase {
       default:
         return this->_conj();
     }
+    C10_DIAGNOSTIC_POP()
   }
 
-  // Aliased by Dimname overloads, so need explicit using
+  // Bring in base class methods
   using TensorBase::size;
   using TensorBase::sym_size;
   using TensorBase::stride;
@@ -158,7 +160,7 @@ class TORCH_API Tensor: public TensorBase {
   // will only lead to trouble and dangling references.
   c10::MaybeOwned<Tensor> expect_contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) && = delete;
 
-  // The following overloads are very intruiging.  Consider the following
+  // The following overloads are very intriguing.  Consider the following
   // program:
   //
   //    x[1] = 3;
@@ -217,6 +219,8 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator=(const Tensor &rhs) && {
     return copy_(rhs);
   }
+
+  // NOLINTNEXTLINE(performance-noexcept-move-constructor)
   Tensor& operator=(Tensor&& rhs) && {
     return copy_(rhs);
   }
@@ -491,7 +495,7 @@ class TORCH_API Tensor: public TensorBase {
         "attribute won't be populated during autograd.backward(). If you indeed want the .grad "
         "field to be populated for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. "
         "If you access the non-leaf Tensor by mistake, make sure you access the leaf Tensor "
-        "instead. See github.com/pytorch/pytorch/pull/30531 for more informations.");
+        "instead. See github.com/pytorch/pytorch/pull/30531 for more information.");
     }
     return maybe_grad;
   }
@@ -582,7 +586,7 @@ class TORCH_API Tensor: public TensorBase {
   template <typename T>
   using hook_return_void_t = std::enable_if_t<std::is_void<typename std::invoke_result_t<T&, Tensor>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::invoke_result_t<T&, Tensor>, Tensor>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename std::invoke_result_t<T&, Tensor>, Tensor>, unsigned>;
 
   /// Registers a backward hook.
   ///

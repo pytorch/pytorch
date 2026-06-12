@@ -1,22 +1,15 @@
-#include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <torch/csrc/jit/passes/frozen_linear_transpose.h>
 #include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
-#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <iostream>
@@ -148,7 +141,7 @@ Module::Module(
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
-thread_local bool inline_everything = false;
+static thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
 }
@@ -596,13 +589,13 @@ std::string Module::dump_to_str(
 
   ss << "module " << type()->name()->qualifiedName() << " {" << '\n';
   ss << "  parameters {" << '\n';
-  ss << torch::jit::jit_log_prefix("    ", parameters_ss.str());
+  ss << torch::jit::jit_log_prefix("    ", std::move(parameters_ss).str());
   ss << "  }" << '\n';
   ss << "  attributes {" << '\n';
-  ss << torch::jit::jit_log_prefix("    ", attributes_ss.str());
+  ss << torch::jit::jit_log_prefix("    ", std::move(attributes_ss).str());
   ss << "  }" << '\n';
   ss << "  methods {" << '\n';
-  ss << torch::jit::jit_log_prefix("  ", methods_ss.str());
+  ss << torch::jit::jit_log_prefix("  ", std::move(methods_ss).str());
   ss << "  }" << '\n';
   ss << "  submodules {" << '\n';
   for (const NameModule& s : named_children()) {
@@ -615,9 +608,9 @@ std::string Module::dump_to_str(
             print_method_bodies, print_attr_values, print_param_values));
   }
   ss << "  }" << '\n';
-  ss << "}" << '\n';
+  ss << '}' << '\n';
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void Module::dump(
