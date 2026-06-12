@@ -27,12 +27,11 @@ import inspect
 import logging
 import textwrap
 import traceback
-import types
 import warnings
 import weakref
 from collections.abc import Generator, MutableMapping
 from types import CellType
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.nn
@@ -1155,80 +1154,6 @@ class SideEffects:
                 if view_backing_id is not None:
                     live_backing_ids.add(view_backing_id)
 
-            if isinstance(
-                var,
-                (
-                    variables.UserDefinedObjectVariable,
-                    variables.UserDefinedClassVariable,
-                    variables.UserFunctionVariable,
-                    variables.PythonModuleVariable,
-                ),
-            ):
-                collect_from_python_backed_vt(var)
-
-        def collect_dict_values(
-            values: dict[Any, Any], skip_names: set[str] | None = None
-        ) -> None:
-            for key, val in values.items():
-                if (
-                    skip_names is not None
-                    and isinstance(key, str)
-                    and key in skip_names
-                ):
-                    continue
-                collect_from_real_value(key)
-                collect_from_real_value(val)
-
-        def collect_instance_slots(value: Any, skip_names: set[str]) -> None:
-            for cls in type(value).__mro__:
-                slots = cls.__dict__.get("__slots__")
-                if slots is None:
-                    continue
-                if isinstance(slots, str):
-                    slots = (slots,)
-                for slot in slots:
-                    if slot in ("__dict__", "__weakref__") or slot in skip_names:
-                        continue
-                    try:
-                        collect_from_real_value(object.__getattribute__(value, slot))
-                    except AttributeError:
-                        pass
-
-        def collect_from_python_backed_vt(var: VariableTracker) -> None:
-            value = var.get_real_python_backed_value()
-            if value is variables.base.NO_SUCH_SUBOBJ:
-                return
-
-            pending_names = set(self.store_attr_mutations.get(var, ()))
-
-            if isinstance(var, variables.UserFunctionVariable):
-                fn = cast(types.FunctionType, value)
-                collect_from_real_value(fn.__defaults__)
-                collect_from_real_value(fn.__kwdefaults__)
-                collect_dict_values(fn.__dict__, pending_names)
-                collect_from_real_value(fn.__closure__)
-                return
-
-            if isinstance(var, variables.PythonModuleVariable):
-                module = cast(types.ModuleType, value)
-                if module is torch or module.__name__.startswith("torch."):
-                    return
-                collect_dict_values(vars(module), pending_names)
-                return
-
-            if isinstance(var, variables.UserDefinedClassVariable):
-                return
-
-            if isinstance(var, variables.UserDefinedObjectVariable):
-                if getattr(var, "dict_vt", None) is None:
-                    try:
-                        instance_dict = object.__getattribute__(value, "__dict__")
-                    except AttributeError:
-                        instance_dict = None
-                    if instance_dict is not None:
-                        collect_dict_values(instance_dict, pending_names)
-                collect_instance_slots(value, pending_names)
-
         def visit_vt(value: Any, cache: dict[int, Any] | None = None) -> None:
             if cache is None:
                 cache = {}
@@ -1291,6 +1216,10 @@ class SideEffects:
                     collect_from_real_value(value)
 
             tx = tx.parent
+
+        for item, attrs in self.store_attr_mutations.items():
+            if not isinstance(item.mutation_type, AttributeMutationNew):
+                visit_vt(attrs)
 
         return backing_id in live_backing_ids
 

@@ -930,6 +930,43 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         finally:
             d.clear()
 
+    def test_unrelated_module_attribute_dict_keys_view_no_graph_break(self):
+        d = {}
+        module = types.ModuleType("test_unrelated_module_attribute_dict_keys_view")
+        module.keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            h = module
+            d["foo"] = 1
+            return t + len(h.__name__)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([46.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_unrelated_instance_attribute_dict_keys_view_no_graph_break(self):
+        class Holder:
+            pass
+
+        d = {}
+        holder = Holder()
+        holder.keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            h = holder
+            d["foo"] = 1
+            return t + len(h.__class__.__name__)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([6.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
     def test_rebound_nonlocal_dict_keys_view_does_not_block_dict_mutation(self):
         d = {}
         keys = d.keys()
@@ -1087,7 +1124,7 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         try:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "Dictionary mutation when a dict view is live",
+                "Dict view loaded after dictionary mutation",
             ):
                 fn(torch.tensor([0.0]))
             self.assertEqual(d, {})
@@ -1109,7 +1146,7 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         try:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "Dictionary mutation when a dict view is live",
+                "Dict view loaded after dictionary mutation",
             ):
                 fn(torch.tensor([0.0]))
             self.assertEqual(d, {})
@@ -1139,7 +1176,7 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         try:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "Dictionary mutation when a dict view is live",
+                "Dict view loaded after dictionary mutation",
             ):
                 fn(torch.tensor([0.0]))
             self.assertEqual(d, {})
@@ -1164,6 +1201,52 @@ class TestIterators(torch._dynamo.test_case.TestCase):
 
         try:
             self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([0.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_pending_attribute_dict_keys_view_blocks_dict_mutation(self):
+        class Holder:
+            pass
+
+        d = {}
+        keys = d.keys()
+        holder = Holder()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            holder.keys = keys
+            d["foo"] = 1
+            return t + (1 if "foo" in holder.keys else 0)
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dictionary mutation when a dict view is live",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+            if hasattr(holder, "keys"):
+                del holder.keys
+
+    def test_dead_new_object_dict_keys_view_does_not_block_mutation(self):
+        class Holder:
+            pass
+
+        d = {}
+        keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            holder = Holder()
+            holder.keys = keys
+            d["foo"] = 1
+            return t + 1
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
             self.assertEqual(d, {"foo": 1})
         finally:
             d.clear()
