@@ -1798,6 +1798,29 @@ def _resolve_descriptor_get(
     return None
 
 
+# BuiltinFunctionType is intentionally excluded: _resolve_descriptor_get
+# does not handle it, so it falls through to _UnhandledDescriptorError
+# and generic_getattr's GetAttrVariable fallback.
+_METHOD_TYPES = (
+    types.FunctionType,
+    types.MethodDescriptorType,
+    types.WrapperDescriptorType,
+)
+
+
+def _is_method_type(type_attr: object) -> bool:
+    return isinstance(type_attr, _METHOD_TYPES)
+
+
+def _has_custom_call_method(obj: VariableTracker) -> bool:
+    for cls in type(obj).__mro__:
+        if cls is VariableTracker:
+            return False
+        if "call_method" in cls.__dict__:
+            return True
+    return False
+
+
 def object_generic_getattr(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
@@ -1820,6 +1843,7 @@ def object_generic_getattr(
       6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
       7. AttributeError
     """
+    from .. import variables
     from ..source import AttrSource
     from .user_defined import is_data_descriptor
 
@@ -1847,6 +1871,14 @@ def object_generic_getattr(
 
     # Step 4: Non-data descriptor with __get__.
     if type_attr is not NO_SUCH_SUBOBJ and hasattr(type(type_attr), "__get__"):
+        # If the VT has custom call_method and this is a method, return a
+        # trampoline that dispatches through call_method instead of inlining
+        # the resolved method directly.  This preserves custom tracing logic
+        # (side effects, graph nodes, suppression) that MRO-based resolution
+        # via UserMethodVariable would bypass.
+        if _is_method_type(type_attr) and _has_custom_call_method(obj):
+            return variables.MethodTrampolineVariable(obj, name)
+
         class_vt = VariableTracker.build(tx, py_type)
         result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
         if result is not None:
