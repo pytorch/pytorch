@@ -1491,6 +1491,25 @@ class TestAutogradFunction(TestCase):
         grad(f)(x)
         self.assertEqual(names, ["FooBarGeneratedBackward"])
 
+    @skipIfTorchDynamo(
+        "set_data inside grad(f) is not traceable; the dispatch-key invariant only matters in eager"
+    )
+    def test_set_data_does_not_propagate_functorch_keys(self, device):
+        # set_data used to copy FuncTorchGradWrapper onto a plain destination,
+        # which then triggered an unchecked TensorWrapper cast. The return is
+        # x*x so functorch does not try to unwrap weight on output.
+        weight = nn.Parameter(torch.randn(8, 8, device=device))
+
+        def f(x):
+            weight.data = x.new_zeros(8, 8) + weight.detach()
+            return (x * x).sum()
+
+        x = torch.randn(8, 8, device=device)
+        grad(f)(x)
+        self.assertFalse(
+            torch._C._dispatch_keys(weight).has(DispatchKey.FuncTorchGradWrapper)
+        )
+
 
 @markDynamoStrictTest
 class TestAutogradFunctionVmapAPI(TestCase):

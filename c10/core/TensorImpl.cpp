@@ -665,9 +665,12 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   // Copying tensor metadata doesn't change the PyObject (maybe
   // it should), which means that we have to preserve whatever the
   // original Python keyset was (as it's associated with the PyObject
-  // being a tensor subclass or not)
-  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
-      (dest_impl->key_set_ & c10::python_ks);
+  // being a tensor subclass or not). Functorch transform keys are
+  // preserved for the same reason: they encode the TensorImpl
+  // subclass (TensorWrapper, BatchedTensorImpl), not tensor data.
+  constexpr auto preserve_ks = c10::python_ks | c10::functorch_transforms_ks;
+  dest_impl->key_set_ =
+      (src_impl->key_set_ - preserve_ks) | (dest_impl->key_set_ & preserve_ks);
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
