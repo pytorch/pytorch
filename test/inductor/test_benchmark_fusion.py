@@ -7,10 +7,16 @@ import torch
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
-from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
+from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.inductor_utils import (
+    get_func_call,
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU_AND_TRITON,
+    IS_BIG_GPU,
+)
 
 
 # Make the helper files in test/ importable
@@ -22,8 +28,9 @@ import unittest
 
 from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     check_model,
-    check_model_cuda,
+    check_model_gpu,
     copy_tests,
+    skip_if_cpp_wrapper,
 )
 from torch._inductor import config
 from torch._inductor.scheduler import Scheduler
@@ -58,7 +65,10 @@ class BenchmarkFusionTestTemplate:
 
     @slowTest
     def test_resnet18(self):
-        import torchvision
+        try:
+            import torchvision
+        except ImportError:
+            self.skipTest("TorchVision not available")
 
         model = torchvision.models.resnet18()
         model.eval()
@@ -87,9 +97,12 @@ class BenchmarkFusionTestTemplate:
 
         # Disable dynamic_scale_rblock to make it easier to trigger register
         # spilling.
-        with unittest.mock.patch.object(
-            Scheduler, "benchmark_fused_nodes", new_benchmark_fn
-        ), config.patch("dynamic_scale_rblock", False):
+        with (
+            unittest.mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", new_benchmark_fn
+            ),
+            config.patch("dynamic_scale_rblock", False),
+        ):
             S = 512
 
             def f(*inputs):
@@ -123,10 +136,13 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (a, b))
 
-    @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    @config.patch(max_autotune_gemm_backends="TRITON")
     def test_avoid_register_spilling(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("CUDA only")
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("GPU only")
 
         from torch.nn.functional import gelu
 
@@ -141,8 +157,8 @@ class BenchmarkFusionTestTemplate:
 
             return curr
 
-        m = torch.nn.Linear(2048, 2048, bias=True).half().cuda()
-        inp = torch.rand([2048, 2048]).half().cuda()
+        m = torch.nn.Linear(2048, 2048, bias=True).half().to(GPU_TYPE)
+        inp = torch.rand([2048, 2048]).half().to(GPU_TYPE)
 
         with torch.no_grad():
             foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
@@ -150,7 +166,7 @@ class BenchmarkFusionTestTemplate:
             _, out_code = run_and_get_code(foo_c, m, inp)
 
             # occasionally, CI will make this one kernel. just skip in this case
-            if not out_code[0].count("def triton_") == 2:
+            if out_code[0].count("def triton_") != 2:
                 return
 
             # should be multiple triton invocations
@@ -158,9 +174,10 @@ class BenchmarkFusionTestTemplate:
                 ".run", 2, exactly=True
             ).run(out_code[0])
 
-        with config.patch(
-            {"benchmark_fusion": False, "epilogue_fusion": False}
-        ), torch.no_grad():
+        with (
+            config.patch({"benchmark_fusion": False, "epilogue_fusion": False}),
+            torch.no_grad(),
+        ):
             torch._dynamo.reset()
 
             foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
@@ -169,7 +186,7 @@ class BenchmarkFusionTestTemplate:
 
         for c in out_code[0], out_code2[0]:
             FileCheck().check("async_compile.wait").check("DeviceGuard").check_count(
-                "empty_strided_cuda", 1, exactly=True
+                f"empty_strided_{GPU_TYPE}", 1, exactly=True
             ).check_regex("buf[0-9]* = buf[0-9]*; del buf[0-9]*").check("return").run(c)
 
     def test_tield_kernel_fusion(self):
@@ -178,49 +195,54 @@ class BenchmarkFusionTestTemplate:
             return y + 1
 
         x = torch.randn(1024, 1024, device=self.device)
-        self.common(f, (x,))
+        # Disable lowp check due to non-deterministic kernel fusion strategies affecting fp16 precision.
+        self.common(f, (x,), check_lowp=False)
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU_AND_TRITON:
 
-    class BenchmarkFusionCudaTest(TestCase):
-        common = check_model_cuda
-        device = "cuda"
+    class BenchmarkFusionGpuTest(TestCase):
+        common = check_model_gpu
+        device = GPU_TYPE
 
-    copy_tests(BenchmarkFusionTestTemplate, BenchmarkFusionCudaTest, "cuda")
+    copy_tests(BenchmarkFusionTestTemplate, BenchmarkFusionGpuTest, GPU_TYPE)
 
     class BenchmarkingTest(TestCase):
         @unittest.skipIf(
-            torch.cuda.device_count() < 2, "The test need at least 2 devices"
+            getattr(torch, GPU_TYPE).device_count() < 2,
+            "The test need at least 2 devices",
         )
+        @skip_if_cpp_wrapper("This tests triton scheduling directly")
         def test_benchmark_on_non_zero_device(self):
             hit_count = 0
-            with torch.cuda.device("cuda:0"):
+            with getattr(torch, GPU_TYPE).device(f"{GPU_TYPE}:0"):
 
                 @torch.compile
                 def relu(x):
                     return realize(x.relu()) + x
 
-                x = torch.randn(int(16e6), device="cuda:1")
+                x = torch.randn(int(16e6), device=f"{GPU_TYPE}:1")
 
-                orig_benchmark_fused_nodes = TritonScheduling.benchmark_fused_nodes
+                orig_benchmark_codegened_module = (
+                    TritonScheduling.benchmark_codegened_module
+                )
 
-                def mock_benchmark_fused_nodes(*args, **kwargs):
+                def benchmark_codegened_module(*args, **kwargs):
                     nonlocal hit_count
                     hit_count += 1
-                    ms, path = orig_benchmark_fused_nodes(*args, **kwargs)
+                    ms, path = orig_benchmark_codegened_module(*args, **kwargs)
                     self.assertTrue(ms > 0)
                     return ms, path
 
                 with unittest.mock.patch.object(
                     TritonScheduling,
-                    "benchmark_fused_nodes",
-                    mock_benchmark_fused_nodes,
+                    "benchmark_codegened_module",
+                    benchmark_codegened_module,
                 ):
                     relu(x)
                 self.assertTrue(hit_count > 0)
 
-    class BenchmarkMultiTemplateFusionCudaTest(InductorTestCase):
+    class BenchmarkMultiTemplateFusionGpuTest(InductorTestCase):
         @classmethod
         def setUpClass(cls):
             super().setUpClass()
@@ -255,16 +277,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
             first_dim = first_dim if first_dim is not None else size
 
-            m = torch.nn.Linear(size, size, bias=True).half().cuda()
-            inp = torch.rand([first_dim, size]).half().cuda()
+            m = torch.nn.Linear(size, size, bias=True).half().to(GPU_TYPE)
+            inp = torch.rand([first_dim, size]).half().to(GPU_TYPE)
 
             with torch.no_grad():
                 res, code = run_and_get_code(foo_c, m, inp)
 
             torch._dynamo.reset()
-            with unittest.mock.patch.object(
-                torch._inductor.config, "benchmark_epilogue_fusion", False
-            ):
+            with config.patch(benchmark_epilogue_fusion=False):
                 foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
                 with torch.no_grad():
                     res2, code2 = run_and_get_code(foo_c, m, inp)
@@ -272,36 +292,35 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(res, res2, atol=1e-4, rtol=1.1)
             return code, code2
 
-        @fresh_inductor_cache()
-        @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
+        @fresh_cache()
+        @config.patch(
+            {
+                "max_autotune_gemm_backends": "TRITON",
+                "benchmark_epilogue_fusion": False,
+            }
+        )
         def test_equivalent_template_code(self):
             code, code2 = self._equivalent_output_code_impl(256)
             for out_code in [code, code2]:
-                FileCheck().check("def call").check_count(
-                    "empty_strided_cuda", 1, exactly=True
-                ).check("triton_tem_fused_addmm_relu_0.run").check_count(
-                    "del", 3, exactly=True
-                ).check(
-                    "return"
-                ).run(
-                    out_code[0]
-                )
+                FileCheck().check(get_func_call()).check_count(
+                    "empty_strided", 1, exactly=True
+                ).check("triton_tem_fused_addmm_relu_t_0").check_count(
+                    ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
+                ).check("" if config.cpp_wrapper else "return").run(out_code[0])
 
-        @fresh_inductor_cache()
-        @torch._inductor.config.patch(max_autotune_gemm_backends="ATEN")
+        @fresh_cache()
+        @config.patch(max_autotune_gemm_backends="ATEN")
         def test_equivalent_extern_code(self):
             torch._dynamo.reset()
 
             code, code2 = self._equivalent_output_code_impl(512, 1, False)
 
             for out_code in [code, code2]:
-                FileCheck().check("def call").check_count(
-                    "empty_strided_cuda", 1, exactly=True
-                ).check("extern_kernels.").check_count("del", 3, exactly=True).check(
-                    "return"
-                ).run(
-                    out_code[0]
-                )
+                FileCheck().check(get_func_call()).check_count(
+                    "empty_strided", 1, exactly=True
+                ).check("" if config.cpp_wrapper else "extern_kernels.").check_count(
+                    ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
+                ).check("" if config.cpp_wrapper else "return").run(out_code[0])
 
         def test_changed_layout(self):
             # cat addmm planning will change layout - make sure propagated
@@ -315,9 +334,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 )
 
             args = [
-                torch.randn(4, 4, device="cuda"),
-                torch.randn(4, 4, device="cuda"),
-                torch.randn(4, 4, device="cuda"),
+                torch.randn(4, 4, device=GPU_TYPE),
+                torch.randn(4, 4, device=GPU_TYPE),
+                torch.randn(4, 4, device=GPU_TYPE),
             ]
 
             expected = fn(*args)
@@ -338,5 +357,5 @@ if HAS_CPU and not torch.backends.mps.is_available():
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU_AND_TRITON:
         run_tests()

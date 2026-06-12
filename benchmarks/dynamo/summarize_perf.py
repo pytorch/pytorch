@@ -8,6 +8,9 @@ import pandas as pd
 from tabulate import tabulate
 
 
+log = logging.getLogger(__name__)
+
+
 def gmean(s):
     return s.product() ** (1 / len(s))
 
@@ -67,7 +70,7 @@ def main(directory, amp, float32, perf_compare):
         try:
             dfs[os.path.basename(f)].append(pd.read_csv(f))
         except Exception:
-            logging.warning("failed parsing %s", f)
+            log.warning("failed parsing %s", f)
             raise
 
     # dtype -> statistic -> benchmark -> compiler -> value
@@ -81,7 +84,8 @@ def main(directory, amp, float32, perf_compare):
         if perf_compare:
             regex = r"training_(torchbench|huggingface|timm_models)\.csv"
             m = re.match(regex, k)
-            assert m is not None, k
+            if m is None:
+                raise AssertionError(f"Failed to match regex for key: {k}")
             compiler = "inductor"
             benchmark = m.group(1)
             dtype = "float32"

@@ -25,7 +25,7 @@ TEST(TestHalf, Arithmetic) {
   ASSERT_EQ(one + one, 2);
 }
 
-TEST(TestHalf, Comparisions) {
+TEST(TestHalf, Comparisons) {
   Half zero = 0;
   Half one = 1;
   ASSERT_LT(zero, one);
@@ -62,7 +62,7 @@ TEST(TestHalf, Construction) {
 static std::string to_string(const Half& h) {
   std::stringstream ss;
   ss << h;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 TEST(TestHalf, Half2String) {

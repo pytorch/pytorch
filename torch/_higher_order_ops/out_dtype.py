@@ -1,13 +1,11 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._higher_order_ops.utils import autograd_not_implemented, register_fake
 from torch._ops import HigherOrderOperator
 from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     maybe_handle_decomp,
@@ -69,6 +67,7 @@ class OutDtypeOperator(HigherOrderOperator):
                 f"out_dtype only allows the following operators: {ALLOWABLE_OPS}."
             )
 
+        # pyrefly: ignore [missing-attribute]
         res = super().__call__(op, output_dtype, *args)
 
         return res
@@ -107,13 +106,13 @@ def out_dtype_dense(op: torch._ops.OpOverload, output_dtype: torch.dtype, *args)
 
 def is_int_mm(op, output_dtype, args):
     return (
-        op == torch.ops.aten.mm.default
+        op is torch.ops.aten.mm.default
         and output_dtype == torch.int32
         and len(args) == 2
         and args[0].dtype == torch.int8
         and args[1].dtype == torch.int8
-        and args[0].is_cuda
-        and args[1].is_cuda
+        and (args[0].is_cuda or args[0].is_xpu)
+        and (args[1].is_cuda or args[1].is_xpu)
     )
 
 
@@ -131,9 +130,7 @@ def out_dtype_fallback(op, output_dtype, *args):
     return res
 
 
-out_dtype.py_impl(DispatchKey.Autograd)(
-    autograd_not_implemented(out_dtype, deferred_error=True)
-)
+out_dtype.py_autograd_impl(autograd_not_implemented(out_dtype, deferred_error=True))
 
 
 @out_dtype.py_impl(ProxyTorchDispatchMode)
@@ -146,15 +143,13 @@ def out_dtype_proxy(
     return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
 
 
-@out_dtype.py_impl(FakeTensorMode)
+@register_fake(out_dtype, skip_cache=True)
 def out_dtype_fake_tensor_mode(
-    mode: FakeTensorMode,
     op: torch._ops.OpOverload,
     output_dtype: torch.dtype,
     *args,
 ):
-    with mode:
-        return out_dtype_dense(op, output_dtype, *args)
+    return out_dtype_dense(op, output_dtype, *args)
 
 
 @out_dtype.py_functionalize_impl

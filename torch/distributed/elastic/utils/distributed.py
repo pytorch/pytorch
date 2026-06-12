@@ -10,7 +10,6 @@ import datetime
 import os
 import socket
 from contextlib import closing
-from typing import Optional
 
 import torch.distributed as dist
 from torch.distributed.elastic.utils.logging import get_logger
@@ -35,7 +34,7 @@ def create_c10d_store(
     timeout: float = (60 * 10),  # 10 min
     wait_for_workers: bool = True,
     retries=3,
-    use_libuv: Optional[bool] = None,
+    use_libuv: bool | None = None,
 ):
     if use_libuv is not None:
         logger.warning(
@@ -142,7 +141,7 @@ def get_free_port():
         >>> get_free_port()
         63976
 
-    ..note:
+    .. note::
         The port returned by :func:`get_free_port` is not reserved and may be
         taken by another process after this function returns.
     """

@@ -5,6 +5,7 @@
 #include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/jit/jit_log.h>
@@ -60,7 +61,7 @@ static std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
 }
 
 template <typename T>
-std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
+static std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
     std::vector<T>& objects,
     int n,
     std::default_random_engine& random_engine) {
@@ -71,14 +72,16 @@ std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
   std::vector<T> selected_objects;
   std::vector<int> selected_indices;
   if (static_cast<int>(indices.size()) < n) {
-    return std::make_tuple(selected_objects, selected_indices);
+    return std::make_tuple(
+        std::move(selected_objects), std::move(selected_indices));
   }
   for (int i = 0; i < n; i++) {
     int index = indices[i];
     selected_indices.push_back(index);
     selected_objects.push_back(objects[index]);
   }
-  return std::make_tuple(selected_objects, selected_indices);
+  return std::make_tuple(
+      std::move(selected_objects), std::move(selected_indices));
 }
 
 static int find_factor(const ForPtr& loop) {
@@ -100,8 +103,8 @@ static void printHistory(int index, std::string message) {
 }
 
 template <typename T>
-std::string join(std::vector<T> indices, char sep = ',') {
-  std::string s = "";
+static std::string join(std::vector<T> indices, char sep = ',') {
+  std::string s;
   for (const auto& index : indices) {
     s += std::to_string(index) + sep;
   }
@@ -111,14 +114,14 @@ std::string join(std::vector<T> indices, char sep = ',') {
 static std::string join(
     const std::vector<std::string>& indices,
     char sep = ',') {
-  std::string s = "";
+  std::string s;
   for (const auto& index : indices) {
     s += index + sep;
   }
   return s;
 }
 template <typename T>
-std::string indexOf(const std::vector<T>& objects, const T& object) {
+static std::string indexOf(const std::vector<T>& objects, const T& object) {
   return std::to_string(std::distance(
       objects.begin(), std::find(objects.begin(), objects.end(), object)));
 }
@@ -141,7 +144,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
   int max_allowed_transformations = 20;
   int n_transforms = randomization_helper::max_transformations(
       std::rand() % max_allowed_transformations);
-  std::string message = "";
+  std::string message;
   // clang-format off
   //   Transformations list:
   //
@@ -369,7 +372,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
           // Find a random number of loops to fuse
           int num_loops_to_fuse =
-              std::max(2, (int)(std::rand() % (int)loops.size()));
+              std::max(2, (std::rand() % (int)loops.size()));
 
           auto [loops_to_fuse, chosen_indices] =
               randomization_helper::select_n_randomly<ForPtr>(
@@ -733,7 +736,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
     }
   } catch (...) {
     std::cout << "EXCEPTION THROWN!\n";
-    std::cout << "SEED: " << seed << "\n";
+    std::cout << "SEED: " << seed << '\n';
     throw std::runtime_error("Random test failed");
   }
   message = "End of transformations;\n";

@@ -131,7 +131,7 @@ std::string get_named_tuple_str_or_default(
           // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
           // it's not inferred type, str() return "Tensor[]" and repr_str()
           // return "Tensor". In cpp, repr_str() will always return "Tensor"
-          // regardless inferred type. When exporing custom type in bytecode,
+          // regardless inferred type. When exporting custom type in bytecode,
           // "Tensor" is the preferred way to deserialize Tensor type
           std::string named_tuple_type_str = it->is_inferred_type()
               ? named_tuple_type->str()
@@ -230,7 +230,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           get_named_tuple_str_or_default(compilation_unit, t, type_str);
       types.emplace_back(named_tuple_str);
       continue;
-    } else if (type_str.find(torch_prefix) == 0) {
+    } else if (type_str.starts_with(torch_prefix)) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
           "__torch__ types other than custom c++ classes (__torch__.torch.classes)"
@@ -547,14 +547,14 @@ void ScriptModuleSerializer::writeArchive(
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
 
   for (const auto& td : data_pickle.tensorData()) {
-    std::string tensor_name = tensor_names[i++];
+    const std::string& tensor_name = tensor_names[i++];
     if (td.is_meta() || skip_tensor_data) {
       writer_.writeRecord(tensor_dir + tensor_name, nullptr, 0);
       continue;
     }
     WriteableTensorData writable_td = getWriteableTensorData(td);
     if (use_storage_context && serialized_tensors.count(tensor_name)) {
-      // storage has been serialzed already, skip
+      // storage has been serialized already, skip
       continue;
     }
     writer_.writeRecord(
@@ -661,10 +661,10 @@ void ScriptModuleSerializer::writeByteCode(
   BackendDebugInfoRecorder debug_info_recorder;
   int64_t version_to_write = caffe2::serialize::kProducedBytecodeVersion;
 
-  elements.emplace_back(static_cast<int64_t>(version_to_write));
+  elements.emplace_back(version_to_write);
   std::vector<c10::IValue> debug_info_elements;
   // Always save debug handles
-  debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
+  debug_info_elements.emplace_back(version_to_write);
 
   mobile::Module mobile_module =
       jitModuleToMobile(module, getOptionsFromGlobal());
@@ -697,11 +697,11 @@ void ScriptModuleSerializer::writeByteCode(
     // Note that stripping off debug map will not strip off
     // debug handles.
     // The reason we save debug handles conditionally is so that
-    // we dont end up with a model that has debug handles but has not
-    // debug map to correlate debug handels with.
+    // we don't end up with a model that has debug handles but has not
+    // debug map to correlate debug handles with.
     // Once we have a model with both handles and debug map, we can
     // strip off debug map and have a lean model served to production.
-    // If exception ocurrs we have a model with debug map that can be
+    // If exception occurs we have a model with debug map that can be
     // used to symbolicate debug handles
     writeArchive(
         debug_info_telements,
@@ -712,7 +712,7 @@ void ScriptModuleSerializer::writeByteCode(
     // For delegated backends get source ranges that are in the debug info
     // map. Since delegated backend replace original module with lowered
     // module we will not serialize original module's code which is what would
-    // have contained source range. Since we dont have that anymore, extract
+    // have contained source range. Since we don't have that anymore, extract
     // source ranges out of delegated module and store in a separate archive.
     // Note that we must do this first because in order to serialize inlined
     // CS appropriate source_range_tags must have been generated.
@@ -872,7 +872,7 @@ void ExportModule(
     } else {
       message << "Error while opening file: " << errno << '\n';
     }
-    TORCH_CHECK(false, message.str());
+    TORCH_CHECK(false, std::move(message).str());
   }
   ExportModule(
       module,
@@ -909,11 +909,10 @@ DetachedBuffer::UniqueDetachedBuffer save_jit_module_to_bytes(
 void save_jit_module_to_write_func(
     const Module& module,
     const ExtraFilesMap& extra_files,
-    bool save_mobile_debug_info,
+    [[maybe_unused]] bool save_mobile_debug_info,
     const std::function<size_t(const void*, size_t)>& writer_func) {
-  (void)save_mobile_debug_info;
   auto buffer = save_jit_module_to_bytes(module, extra_files);
-  writer_func(reinterpret_cast<void*>(buffer->data()), buffer->size());
+  writer_func(buffer->data(), buffer->size());
 }
 
 void ExportModule(
@@ -956,7 +955,7 @@ std::vector<std::string> export_opnames(const script::Module& m) {
 // Thread local flag (only happens in export, i.e. on server side)
 // to control if instructions for bytecode default inputs are emitted
 // or not. It's the major difference between bytecode v5 and v6.
-thread_local bool emitBytecodeDefaultInputs =
+static thread_local bool emitBytecodeDefaultInputs =
     caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
 bool BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() {
   return emitBytecodeDefaultInputs;
@@ -966,7 +965,7 @@ void BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
   emitBytecodeDefaultInputs = enabled;
 }
 
-thread_local bool emitDefautlArgsWithOutArgs =
+static thread_local bool emitDefautlArgsWithOutArgs =
     caffe2::serialize::kProducedBytecodeVersion <= 6 ? false : true;
 bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
   return emitDefautlArgsWithOutArgs;
@@ -975,7 +974,7 @@ void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
   emitDefautlArgsWithOutArgs = enabled;
 }
 
-thread_local bool emitDefaultEmitPromotedOps =
+static thread_local bool emitDefaultEmitPromotedOps =
     caffe2::serialize::kProducedBytecodeVersion <= 7 ? false : true;
 bool BytecodeEmitMode::is_emit_promoted_ops_enabled() {
   return emitDefaultEmitPromotedOps;

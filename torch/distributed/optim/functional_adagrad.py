@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List, Optional
 
 import torch
 import torch.optim._functional as F
@@ -9,7 +8,7 @@ from torch.distributed.optim._deprecation_warning import (
 )
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 # Define a TorchScript compatible Functional Adagrad Optimizer
@@ -25,7 +24,7 @@ __all__: List[str] = []
 class _FunctionalAdagrad:
     def __init__(
         self,
-        params: List[Tensor],
+        params: list[Tensor],
         lr: float = 1e-2,
         lr_decay: float = 0.0,
         weight_decay: float = 0.0,
@@ -53,7 +52,7 @@ class _FunctionalAdagrad:
         self.foreach = foreach
         self.fused = fused
         self.maximize = maximize
-        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
+        self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
@@ -70,12 +69,12 @@ class _FunctionalAdagrad:
                 "step": torch.tensor(0.0),
             }
 
-    def step(self, gradients: List[Optional[Tensor]]):
+    def step(self, gradients: list[Tensor | None]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []
         state_sums = []
-        state_steps: List[Tensor] = []
+        state_steps: list[Tensor] = []
 
         if len(params) != len(gradients):
             raise ValueError(

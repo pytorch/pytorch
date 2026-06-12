@@ -51,6 +51,7 @@ float8_e5m2T = BaseCppType("at", "Float8_e5m2")
 float8_e5m2fnuzT = BaseCppType("at", "Float8_e5m2fnuz")
 float8_e4m3fnT = BaseCppType("at", "Float8_e4m3fn")
 float8_e4m3fnuzT = BaseCppType("at", "Float8_e4m3fnuz")
+float8_e8m0fnuT = BaseCppType("at", "Float8_e8m0fnu")
 stringT = BaseCppType("c10", "string_view")
 generatorT = BaseCppType("at", "Generator")
 scalarTypeT = BaseCppType("at", "ScalarType")
@@ -59,8 +60,6 @@ optionalTensorRefT = BaseCppType("at", "OptionalTensorRef")
 tensorListT = BaseCppType("at", "TensorList")
 iTensorListRefT = BaseCppType("at", "ITensorListRef")
 iOptTensorListRefT = BaseCppType("at", "IOptTensorListRef")
-dimnameT = BaseCppType("at", "Dimname")
-dimnameListT = BaseCppType("at", "DimnameList")
 dimVectorT = BaseCppType("at", "DimVector")
 layoutT = BaseCppType("at", "Layout")
 deviceT = BaseCppType("at", "Device")
@@ -78,6 +77,7 @@ tensorOptionsT = BaseCppType("at", "TensorOptions")
 typeAndSizeT = BaseCppType("torch::autograd::generated", "TypeAndSize")
 tensorGeometryT = BaseCppType("at", "TensorGeometry")
 SymIntT = BaseCppType("c10", "SymInt")
+SymBoolT = BaseCppType("c10", "SymBool")
 symIntArrayRefT = BaseCppType("c10", "SymIntArrayRef")
 
 # Types representing template parameters.  Technically, we probably shouldn't
@@ -102,6 +102,7 @@ ScalarTypeToCppMapping: dict[ScalarType, BaseCppType] = {
     ScalarType.Float8_e5m2fnuz: float8_e5m2fnuzT,
     ScalarType.Float8_e4m3fn: float8_e4m3fnT,
     ScalarType.Float8_e4m3fnuz: float8_e4m3fnuzT,
+    ScalarType.Float8_e8m0fnu: float8_e8m0fnuT,
 }
 
 BaseTypeToCppMapping: dict[BaseTy, BaseCppType] = {
@@ -112,7 +113,6 @@ BaseTypeToCppMapping: dict[BaseTy, BaseCppType] = {
     BaseTy.Generator: generatorT,
     BaseTy.ScalarType: scalarTypeT,
     BaseTy.Tensor: tensorT,
-    BaseTy.Dimname: dimnameT,
     BaseTy.DimVector: dimVectorT,
     BaseTy.Layout: layoutT,
     BaseTy.Device: deviceT,
@@ -123,6 +123,7 @@ BaseTypeToCppMapping: dict[BaseTy, BaseCppType] = {
     BaseTy.Storage: storageT,
     BaseTy.Stream: streamT,
     BaseTy.SymInt: SymIntT,
+    BaseTy.SymBool: SymBoolT,
 }
 
 # CTypes encode C++ type structure as needed for translation.
@@ -136,9 +137,6 @@ class OptionalCType(CType):
         # Do not pass `strip_ref` recursively.
         return f"::std::optional<{self.elem.cpp_type()}>"
 
-    def cpp_type_registration_declarations(self) -> str:
-        return f"::std::optional<{self.elem.cpp_type_registration_declarations()}>"
-
     def remove_const_ref(self) -> CType:
         return OptionalCType(self.elem.remove_const_ref())
 
@@ -151,9 +149,6 @@ class ListCType(CType):
         # Do not pass `strip_ref` recursively.
         return f"c10::List<{self.elem.cpp_type()}>"
 
-    def cpp_type_registration_declarations(self) -> str:
-        return f"c10::List<{self.elem.cpp_type_registration_declarations()}>"
-
     def remove_const_ref(self) -> CType:
         return ListCType(self.elem.remove_const_ref())
 
@@ -165,9 +160,6 @@ class ArrayRefCType(CType):
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
         return f"at::ArrayRef<{self.elem.cpp_type()}>"
-
-    def cpp_type_registration_declarations(self) -> str:
-        return f"ArrayRef<{self.elem.cpp_type_registration_declarations()}>"
 
     def remove_const_ref(self) -> CType:
         return ArrayRefCType(self.elem.remove_const_ref())
@@ -183,9 +175,6 @@ class VectorizedCType(CType):
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         return f"at::vec::Vectorized<{self.elem.cpp_type()}>"
-
-    def cpp_type_registration_declarations(self) -> str:
-        raise NotImplementedError
 
     def remove_const_ref(self) -> CType:
         return self

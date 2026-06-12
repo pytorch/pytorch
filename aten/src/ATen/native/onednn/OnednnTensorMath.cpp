@@ -13,22 +13,22 @@
 
 #if !AT_ONEDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor& mkldnn_zero_(Tensor& self) {
   TORCH_CHECK(false, "mkldnn_zero_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor& mkldnn_zero_(Tensor& self) {
   using Vec = vec::Vectorized<float>;
@@ -48,7 +48,7 @@ Tensor& mkldnn_zero_(Tensor& self) {
   return self;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #endif // AT_ONEDNN_ENABLED

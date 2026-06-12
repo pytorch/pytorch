@@ -10,7 +10,7 @@ import threading
 import time
 from contextlib import contextmanager
 from inspect import getframeinfo, stack
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 
 __all__ = [
@@ -103,7 +103,7 @@ class RequestQueue(abc.ABC):
         """
 
     @abc.abstractmethod
-    def get(self, size: int, timeout: float) -> List[TimerRequest]:
+    def get(self, size: int, timeout: float) -> list[TimerRequest]:
         """
         Gets up to ``size`` number of timer requests in a blocking fashion
         (no more than ``timeout`` seconds).
@@ -130,26 +130,26 @@ class TimerServer(abc.ABC):
         self._request_queue = request_queue
         self._max_interval = max_interval
         self._daemon = daemon
-        self._watchdog_thread: Optional[threading.Thread] = None
+        self._watchdog_thread: threading.Thread | None = None
         self._stop_signaled = False
 
     @abc.abstractmethod
-    def register_timers(self, timer_requests: List[TimerRequest]) -> None:
+    def register_timers(self, timer_requests: list[TimerRequest]) -> None:
         """
         Processes the incoming timer requests and registers them with the server.
-        The timer request can either be a acquire-timer or release-timer request.
+        The timer request can either be an acquire-timer or release-timer request.
         Timer requests with a negative expiration_time should be interpreted
         as a release-timer request.
         """
 
     @abc.abstractmethod
-    def clear_timers(self, worker_ids: Set[Any]) -> None:
+    def clear_timers(self, worker_ids: set[Any]) -> None:
         """
         Clears all timers for the given ``worker_ids``.
         """
 
     @abc.abstractmethod
-    def get_expired_timers(self, deadline: float) -> Dict[str, List[TimerRequest]]:
+    def get_expired_timers(self, deadline: float) -> dict[str, list[TimerRequest]]:
         """
         Returns all expired timers for each worker_id. An expired timer
         is a timer for which the expiration_time is less than or equal to
@@ -194,7 +194,7 @@ class TimerServer(abc.ABC):
         reaped_worker_ids = set()
         for worker_id, expired_timers in self.get_expired_timers(now).items():
             logger.info(
-                "Reaping worker_id=[%s]." " Expired timers: %s",
+                "Reaping worker_id=[%s]. Expired timers: %s",
                 worker_id,
                 self._get_scopes(expired_timers),
             )
@@ -212,7 +212,7 @@ class TimerServer(abc.ABC):
 
     def start(self) -> None:
         logger.info(
-            "Starting %s..." " max_interval=%s," " daemon=%s",
+            "Starting %s... max_interval=%s, daemon=%s",
             type(self).__name__,
             self._max_interval,
             self._daemon,
@@ -234,7 +234,7 @@ class TimerServer(abc.ABC):
             logger.info("No watchdog thread running, doing nothing")
 
 
-_timer_client: Optional[TimerClient] = None
+_timer_client: TimerClient | None = None
 
 
 def configure(timer_client: TimerClient):
@@ -247,9 +247,7 @@ def configure(timer_client: TimerClient):
 
 
 @contextmanager
-def expires(
-    after: float, scope: Optional[str] = None, client: Optional[TimerClient] = None
-):
+def expires(after: float, scope: str | None = None, client: TimerClient | None = None):
     """
     Acquires a countdown timer that expires in ``after`` seconds from now,
     unless the code-block that it wraps is finished within the timeframe.

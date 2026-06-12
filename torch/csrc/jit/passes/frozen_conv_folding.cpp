@@ -1,4 +1,3 @@
-#include <ATen/Utils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
@@ -11,7 +10,6 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/utils/optimization_utils.h>
-#include <torch/csrc/jit/tensorexpr/types.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -36,7 +34,7 @@ bool supportedConvNode(Node* n) {
     case aten::_convolution: {
       auto transposed_conv =
           constant_as<bool>(n->namedInput("transposed")).value_or(true);
-      // dont handle transposed conv yet or not-constant transpose parameter
+      // don't handle transposed conv yet or not-constant transpose parameter
       return !transposed_conv;
     }
     default:
@@ -325,7 +323,7 @@ bool FoldFrozenConvMulOrDiv(Block* b) {
 
       // We've already verified that the second input has numel == 1 or
       // channels-out resize it to the shape that will broadcast to
-      // weight_tensor when the op is run so we dont change weight size
+      // weight_tensor when the op is run so we don't change weight size
       std::vector<int64_t> weight_compatible_size = {out_channels};
       for ([[maybe_unused]] const auto i :
            c10::irange(1, weight_tensor.ndimension())) {

@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import functools
 import importlib
 import itertools
@@ -15,8 +16,8 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_SLOW_GRADCHECK
 
 
 # Make the helper files in test/ importable
@@ -28,12 +29,13 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     copy_tests,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
+from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -261,7 +263,9 @@ class OptimizeForInferenceTemplate(TestCase):
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
-    @torch._inductor.config.patch("cpp.enable_concat_linear", True)
+    @torch._inductor.config.patch(
+        {"cpp.enable_concat_linear": True, "shape_padding": False}
+    )
     def test_mm_concat(self):
         class MM(torch.nn.Module):
             def __init__(self) -> None:
@@ -344,36 +348,43 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod2.b1 = torch.nn.Parameter(torch.rand([15], device=self.device))
                 mod2.b2 = torch.nn.Parameter(torch.rand([20], device=self.device))
 
-            # not fused
-            count = 3 if hasattr(mod2, "t3") else 2
-
+            # fused: weights share same dim 0 (in_features), different dim 1 is OK
             with torch.no_grad():
                 out_eager = mod2(inp)
                 out, code = run_and_get_code(foo, mod2, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
-                    mm_invoke, count=count, exactly=True
+                    mm_invoke, count=1, exactly=True
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 
-    # With inlining of inbuilt nn modules, Dynamo traces the innards of inbuilt
-    # module and does not modify the eager module.
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    def test_error_on_eager(self):
-        mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
+    def test_static_indices_cudagraph(self):
+        if self.device != "cuda":
+            return
 
-        x = torch.rand(3, 3, 32, 32).to(self.device)
+        mod1 = torch.nn.Sequential(
+            torch.nn.Linear(2, 2).to(self.device), torch.nn.Linear(2, 2).to(self.device)
+        )
+        mod2 = copy.deepcopy(mod1)
 
-        @torch.compile()
-        def foo(mod, x):
-            return mod(x)
+        def fn(x, y, mod):
+            x.add_(1)
+            getattr(mod, "0").bias.add_(2)
+            getattr(mod, "1").weight.add_(3)
+            return mod(x) + y
+
+        x1 = torch.randn(2, 2, device=self.device)
+        y1 = torch.randn(2, 2, device=self.device)
+        x2 = x1.clone()
+        y2 = y1.clone()
+
+        opt_fn = torch.compile(fn, mode="reduce-overhead")
 
         with torch.no_grad():
-            foo(mod, x)
-
-        with self.assertRaisesRegex(
-            RuntimeError, "Trying to run Pytorch Eager Module after Dynamo Freezing"
-        ):
-            mod(x)
+            ref = fn(x1, y1, mod1)
+            res = opt_fn(x2, y2, mod2)
+        self.assertEqual(ref, res)
+        self.assertEqual(x1, x2)
+        self.assertEqual(y1, y2)
 
     def test_rng_op(self):
         @torch.compile()
@@ -389,7 +400,7 @@ class OptimizeForInferenceTemplate(TestCase):
         def fn(a):
             return a.cos(), torch.zeros(a.shape[0], a.shape[1])
 
-        fn_opt = torch._dynamo.optimize("inductor", dynamic=True)(fn)
+        fn_opt = torch.compile(fn, backend="inductor", dynamic=True)
         inp = torch.randn(2, 4, 6).to(self.device)
         torch._dynamo.mark_dynamic(inp, 0)
         torch._dynamo.mark_dynamic(inp, 1)
@@ -480,7 +491,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
             # we unfuse the conv bias, but it should only have one constant in the kernel
-            if self.device == GPU_TYPE:
+            if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
                     "frozen_param"
                 ).check_not("frozen_param").check_next("return").run(code[0])
@@ -525,7 +536,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
             # we unfuse the conv bias, but it should only have one constant in the kernel
-            if self.device == GPU_TYPE:
+            if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
                     "frozen_param"
                 ).check_not("frozen_param").check_next("return").run(code[0])
@@ -712,7 +723,7 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
-    @skipIfRocm
+    @torch._inductor.config.patch(layout_optimization=True)
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self, groups):
@@ -754,8 +765,13 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
-    @skipIfXpu
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180128")
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/106557")
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    @unittest.skipIf(
+        TEST_WITH_SLOW_GRADCHECK,
+        "Failing in slow gradcheck on cuda12.8, see https://github.com/pytorch/pytorch/pull/156731 for example",
+    )
     def test_cpp_wrapper(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
@@ -771,6 +787,7 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(foo(mod, x), out_eager)
             self.assertEqual(foo(mod, x), out_eager)
 
+    @tf32_on_and_off(0.001)
     def test_conv_layout_convert_with_view(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -796,7 +813,7 @@ class OptimizeForInferenceTemplate(TestCase):
             mod_eager = mod(x)
             self.assertEqual(foo(mod, x), mod_eager)
 
-    @skipIfRocm
+    @torch._inductor.config.patch(layout_optimization=True)
     def test_conv_weight_layout_convert(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -849,7 +866,7 @@ class OptimizeForInferenceTemplate(TestCase):
         # in the joint graph rather than torch.ops.aten.convolution.default.
         # Currently we only handle aten.convolution.default in layout
         # optimization. That's why the count may be 0 here for CPU.
-        if self.device == GPU_TYPE:
+        if self.device == "cuda":
             self.assertTrue(nconv == 1)
 
     def test_unequal_bias_horizontal_addmm_fusion(self):
@@ -887,7 +904,53 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = func1(x.clone())
             self.assertEqual(out_eager, out_compiled)
 
-    @skipIfRocm
+    @torch._inductor.config.patch(
+        layout_optimization=True, force_layout_optimization=True
+    )
+    def test_as_strided_input_layout_with_symbolic_strides(self):
+        from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                y = x.transpose(1, 2)
+                return torch.as_strided(y, y.size(), y.stride())
+
+        graph_modules = []
+
+        def my_inner_compile(gm, example_inputs, *args, **kwargs):
+            graph_modules.append(gm)
+            return compile_fx_inner(gm, example_inputs, *args, **kwargs)
+
+        mod = Model().eval().to(self.device)
+        inp = torch.randn(2, 3, 4, device=self.device)
+        torch._dynamo.mark_dynamic(inp, 1)
+        torch._dynamo.mark_dynamic(inp, 2)
+
+        with torch.no_grad():
+            expected = mod(inp)
+            opt_mod = torch.compile(
+                mod,
+                backend=functools.partial(compile_fx, inner_compile=my_inner_compile),
+                dynamic=True,
+            )
+            actual = opt_mod(inp)
+            self.assertEqual(expected, actual)
+
+        self.assertTrue(graph_modules)
+        gm = graph_modules[0]
+        nodes = list(gm.graph.nodes)
+        force_stride_node = next(
+            n for n in nodes if n.target == prims.inductor_force_stride_order.default
+        )
+        as_strided_node = next(n for n in nodes if n.target == aten.as_strided.default)
+
+        self.assertLess(nodes.index(force_stride_node), nodes.index(as_strided_node))
+        for stride_arg in force_stride_node.args[1]:
+            if isinstance(stride_arg, torch.fx.Node):
+                self.assertLess(nodes.index(stride_arg), nodes.index(force_stride_node))
+
+    @tf32_on_and_off(0.001)
+    @torch._inductor.config.patch(layout_optimization=True)
     def test_redundant_clone_for_layout_convert(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -930,13 +993,8 @@ class OptimizeForInferenceTemplate(TestCase):
 
         self.assertEqual(len(actual_outputs), len(expected_outputs))
         self.assertEqual(2, len(actual_outputs))
-        for i, actual, expected in zip(
-            itertools.count(), actual_outputs, expected_outputs
-        ):
-            self.assertTrue(
-                torch.allclose(expected, actual, atol=1e-4, rtol=1e-4),
-                f"{i}th output: expected {expected}, actual {actual}",
-            )
+        for actual, expected in zip(actual_outputs, expected_outputs):
+            self.assertEqual(expected, actual)
 
         if self.device == "cpu":
             # CPU use different convolution implementation, skip the checks below
@@ -970,7 +1028,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu")
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_GPU:
 
     class FreezingGpuTests(TestCase):
         common = check_model_gpu

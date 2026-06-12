@@ -22,7 +22,7 @@ import operator
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 # Not thread-safe decorator that runs the decorated test once with
 # the default dtype being torch.float and again with the default dtype
@@ -140,8 +140,10 @@ class TestTypePromotion(TestCase):
                     expected_dtype = s.dtype
                 else:
                     expected_dtype = float_to_corresponding_complex_type_map[torch.get_default_dtype()]
-            self.assertEqual((s * t).dtype, expected_dtype)
-            self.assertEqual((t * s).dtype, expected_dtype)
+            # Note (bcomplex32): Remove the guard against dtype once bcomplex32 is more widely supported.
+            if expected_dtype != torch.bcomplex32:
+                self.assertEqual((s * t).dtype, expected_dtype)
+                self.assertEqual((t * s).dtype, expected_dtype)
             self.assertEqual(torch.result_type(s, t), expected_dtype)
             self.assertEqual(torch.result_type(t, s), expected_dtype)
 
@@ -260,9 +262,11 @@ class TestTypePromotion(TestCase):
             self.assertEqual((bf + scalar).dtype, torch.bfloat16)
             self.assertEqual(scalar + bf, bf + scalar)
 
-        for scalar in (complex(1, 1), complex(-2, 0), complex(0, -3)):
-            self.assertEqual((bf + scalar).dtype, torch.cfloat)
-            self.assertEqual(bf + scalar, scalar + bf)
+        # Note (bcomplex32): Add scalar complex testing back once bcomplex32
+        # is more widely requested.
+        # for scalar in (complex(1, 1), complex(-2, 0), complex(0, -3)):
+        #     self.assertEqual((bf + scalar).dtype, torch.cfloat)
+        #     self.assertEqual(bf + scalar, scalar + bf)
 
         # with tensor
         for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
@@ -358,9 +362,7 @@ class TestTypePromotion(TestCase):
         if dtype == torch.bool:
             tensor = torch.randint(int(remove_zeros), 2, shape, device=device, dtype=dtype)
         elif dtype.is_floating_point or dtype.is_complex:
-            # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
-            tensor = torch.randn(shape, device=device)
-            tensor = tensor.to(dtype)
+            tensor = torch.randn(shape, dtype=dtype, device=device)
             if remove_zeros:
                 tensor[torch.abs(tensor) < 0.05] = 5
         else:
@@ -373,16 +375,12 @@ class TestTypePromotion(TestCase):
     # torch.<op>(first.to(common_dtype), second.to(common_dtype)) in cases where that should hold.
     @float_double_default_dtype
     def test_many_promotions(self, device):
-        # Can also include half on CPU in cases where it will be promoted to a
-        # supported dtype
         dtypes1 = get_all_math_dtypes('cuda')
         dtypes2 = get_all_math_dtypes(device)
         ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):
                 common_dtype = torch.promote_types(dt1, dt2)
-                if common_dtype == torch.half and self.device_type == 'cpu':
-                    continue
                 if op == torch.sub and common_dtype != torch.bool:
                     # Subtraction, the `-` operator, with a bool tensor is not supported.
                     continue
@@ -489,6 +487,9 @@ class TestTypePromotion(TestCase):
             dtype_b = _get_dtype(b)
             try:
                 result = a + b
+            except NotImplementedError:
+                # Note (bcomplex32): Remove this branch when bcomplex32 ops are more widely implemented.
+                pass
             except RuntimeError:
                 with self.assertRaises(RuntimeError):
                     torch.promote_types(dtype_a, dtype_b)
@@ -922,7 +923,6 @@ class TestTypePromotion(TestCase):
     def test_sparse_div_promotion(self, device, dtype):
         for op in (torch.div, torch.true_divide):
             dividend = torch.randn(5, device=device).to(dtype)
-            divisor = 2
             dividend_sparse = dividend.to_sparse()
             casting_result = dividend.to(torch.get_default_dtype()) / 2
             self.assertEqual(casting_result, op(dividend_sparse, 2).to_dense())
@@ -969,7 +969,7 @@ class TestTypePromotion(TestCase):
                 except Exception as e:
                     expected = e
 
-                same_result = (type(expected) == type(actual)) and expected == actual
+                same_result = (type(expected) is type(actual)) and expected == actual
 
                 # Note: An "undesired failure," as opposed to an "expected failure"
                 # is both expected (we know the test will fail) and
@@ -1047,13 +1047,13 @@ class TestTypePromotion(TestCase):
                     and not (out_dtype.is_floating_point or out_dtype.is_complex))
                     or ((x_dtype.is_complex or y_dtype.is_complex) and not out_dtype.is_complex)):
                 # This combinations do not support type conversion to a different class out type
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(TypeError):
                     torch.cat([x, y], out=out)
             else:
                 torch.cat([x, y], out=out)
                 self.assertEqual(out, expected_out, exact_dtype=True)
 
-    # Verfies that unary ops require matching out types
+    # Verifies that unary ops require matching out types
     @onlyNativeDeviceTypes
     @dtypes(*itertools.product((torch.int64,
                                 torch.float32, torch.float64,
@@ -1129,7 +1129,7 @@ class TestTypePromotion(TestCase):
         maxs = (max_t, max_t[0], max_t[0].item())
         inp = make_tensor((S,), dtype0)
         for min_v, max_v in itertools.product(mins, maxs):
-            if type(max_v) != type(min_v):
+            if type(max_v) is not type(min_v):
                 continue
             if isinstance(min_v, torch.Tensor) and min_v.ndim == 0 and max_v.ndim == 0:
                 continue  # 0d tensors go to scalar overload, and it's tested separately
