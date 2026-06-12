@@ -49,6 +49,16 @@ class TORCH_API AOTIModelContainerRunner {
       bool use_inactive,
       bool validate_full_updates,
       bool user_managed = false);
+  // Update constants from CPU tensors. CPU tensors are silently copied to the
+  // model's device.
+  void update_constant_buffer_from_cpu(
+      std::unordered_map<std::string, at::Tensor>& tensor_map,
+      bool use_inactive,
+      bool validate_full_updates);
+  void update_constant_buffer_from_cpu(
+      const TensorConstantMap& const_map,
+      bool use_inactive,
+      bool validate_full_updates);
   void run_const_fold(
       bool use_inactive,
       AOTInductorStreamHandle cuda_stream_handle = nullptr);
@@ -57,6 +67,16 @@ class TORCH_API AOTIModelContainerRunner {
   void update_constant_buffer_from_blob(const std::string& weights_path);
 
   std::vector<std::string> get_call_spec();
+
+  // Returns the torchbind custom-class constants embedded in the loaded
+  // model. The IValue payloads alias the live entries inside the proxy
+  // executor: downcasting to a CustomClassHolder subclass and mutating
+  // its state will affect subsequent run() invocations. Returns empty when
+  // the model has no torchbind constants.
+  std::unordered_map<std::string, c10::IValue> get_custom_objs() const {
+    return proxy_executor_ ? proxy_executor_->get_custom_objs()
+                           : std::unordered_map<std::string, c10::IValue>{};
+  }
 
  protected:
   AOTIModelContainerRunner(
@@ -94,6 +114,8 @@ class TORCH_API AOTIModelContainerRunner {
       update_user_managed_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateConstantBuffer)
       update_constant_buffer_func_{nullptr};
+  decltype(&AOTInductorModelContainerUpdateConstantBufferFromCpu)
+      update_constant_buffer_from_cpu_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateInactiveConstantBuffer)
       update_inactive_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerRunConstantFolding) run_const_fold_func_{
@@ -107,6 +129,7 @@ class TORCH_API AOTIModelContainerRunner {
       get_constants_blob_size_func_{nullptr};
   decltype(&AOTInductorModelUpdateConstantsFromBlob)
       update_constants_from_blob_func_{nullptr};
+  decltype(&AOTInductorGetLastError) get_last_error_func_{nullptr};
 
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 

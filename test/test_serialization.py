@@ -1204,6 +1204,17 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             state = torch.load(f)
 
+
+        gc.collect()
+        if IS_FILESYSTEM_UTF8_ENCODING:
+            with TemporaryDirectoryName(suffix='\u975eASCII\u30d1\u30b9') as dname:
+                with TemporaryFileName(dir=dname) as fname:
+                    # https://github.com/pytorch/pytorch/issues/185098
+                    data = torch.rand(200, 2048, 2048, dtype=torch.float32)  # ~3.13 GiB storage
+                    torch.save(data, fname)
+                    loaded_data = torch.load(fname)
+                    self.assertEqual(loaded_data, data)
+
     @serialTest()
     def test_serialization_4gb_file(self):
         '''
@@ -4912,6 +4923,105 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(state_dict, checkpoint)
         ref2 = sys.getrefcount(storage)
         self.assertEqual(ref1, ref2)
+
+    def test_load_safetensors(self):
+        # Test loading .safetensors files
+        try:
+            import safetensors.torch
+        except ImportError:
+            self.skipTest("safetensors not installed")
+
+        # Create a simple state dict
+        state_dict = {
+            'tensor1': torch.randn(3, 4),
+            'tensor2': torch.randn(5, 6),
+            'tensor3': torch.tensor([1, 2, 3, 4, 5]),
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "state.safetensors")
+            safetensors.torch.save_file(state_dict, path)
+
+            # Test loading with torch.load (no map_location)
+            loaded = torch.load(path)
+            self.assertEqual(len(loaded), len(state_dict))
+            for key in state_dict:
+                self.assertTrue(torch.equal(state_dict[key], loaded[key]))
+
+            # Test loading with map_location as string
+            loaded_cpu = torch.load(path, map_location='cpu')
+            for key in state_dict:
+                self.assertTrue(torch.equal(state_dict[key], loaded_cpu[key]))
+                self.assertEqual(loaded_cpu[key].device.type, 'cpu')
+
+            # Test loading with map_location as torch.device
+            loaded_cpu2 = torch.load(path, map_location=torch.device('cpu'))
+            for key in state_dict:
+                self.assertTrue(torch.equal(state_dict[key], loaded_cpu2[key]))
+
+    def test_rebuild_qtensor_bounds(self):
+        from torch._utils import _rebuild_qtensor
+        from torch.storage import TypedStorage
+
+        def make_storage(nbytes, dtype=torch.quint8):
+            return TypedStorage(
+                wrap_storage=torch.UntypedStorage(nbytes),
+                dtype=dtype,
+                _internal=True,
+            )
+
+        scales = torch.tensor([0.1, 0.2, 0.3], dtype=torch.double)
+        zero_points = torch.tensor([0, 1, 2], dtype=torch.long)
+        per_channel_params = (torch.per_channel_affine, scales, zero_points, 0)
+
+        # _rebuild_qtensor with stride that overruns the storage
+        # The bound check is in C++, so RuntimeError.
+        with self.assertRaisesRegex(RuntimeError, "out of bounds for storage"):
+            _rebuild_qtensor(
+                make_storage(12), 0, (3, 4), (2 ** 17, 1),
+                per_channel_params, False, None,
+            )
+
+        # Direct quantized-tensor set_() with an OOB stride must also be
+        # rejected (TorchScript deserialization and user-issued set_ go
+        # through this path without ever touching _rebuild_qtensor).
+        x = torch.randn(3, 4)
+        qx = torch.quantize_per_channel(
+            x, scales, zero_points, axis=0, dtype=torch.qint8,
+        )
+        with self.assertRaisesRegex(RuntimeError, "out of bounds for storage"):
+            qx.set_(torch.UntypedStorage(12), 0, (3, 4), (2 ** 17, 1))
+
+        # Stride is fine but storage_offset alone pushes the layout out of
+        # the storage — exercises the offset branch of the bounds formula
+        # (storage_offset + max_element_offset) * itemsize > storage.nbytes.
+        with self.assertRaisesRegex(RuntimeError, "out of bounds for storage"):
+            _rebuild_qtensor(
+                make_storage(12), 999, (3, 4), (4, 1),
+                per_channel_params, False, None,
+            )
+
+        # Per-channel axis out of range / scales length mismatch
+        with self.assertRaisesRegex(ValueError, "axis .* out of range"):
+            _rebuild_qtensor(
+                make_storage(12), 0, (3, 4), (4, 1),
+                (torch.per_channel_affine, scales, zero_points, 5),
+                False, None,
+            )
+        with self.assertRaisesRegex(ValueError, "axis .* out of range"):
+            _rebuild_qtensor(
+                make_storage(12), 0, (3, 4), (4, 1),
+                (torch.per_channel_affine, scales, zero_points, -1),
+                False, None,
+            )
+        with self.assertRaisesRegex(ValueError, "scales/zero_points length"):
+            _rebuild_qtensor(
+                make_storage(12), 0, (3, 4), (4, 1),
+                (torch.per_channel_affine,
+                 torch.zeros(99, dtype=torch.double),
+                 torch.zeros(99, dtype=torch.long), 0),
+                False, None,
+            )
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
