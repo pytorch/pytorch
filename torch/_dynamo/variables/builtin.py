@@ -1658,9 +1658,23 @@ class BuiltinVariable(BaseBuiltinVariable):
                         args=list(e.args),
                     )
 
-        if self.fn is object and name == "__init__":
+        if self.fn is object and name == "__init__" and len(args) == 1 and not kwargs:
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
+
+        if self.fn in (BaseException, Exception) and name == "__init__" and args:
+            receiver = args[0]
+            if not issubclass(receiver.python_type(), self.fn):
+                raise_type_error(
+                    tx,
+                    f"descriptor '__init__' requires a '{self.fn.__name__}' object but received a '{receiver.python_type_name()}'",
+                )
+            if isinstance(receiver, variables.UserDefinedExceptionObjectVariable):
+                result = receiver.exc_vt.call_method(tx, "__init__", args[1:], kwargs)
+                receiver.init_args = args[1:]
+                return result
+            if isinstance(receiver, variables.ExceptionVariable):
+                return receiver.call_method(tx, "__init__", args[1:], kwargs)
 
         if self.fn in (set, frozenset, list, tuple):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
@@ -3214,7 +3228,7 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         ):
             if (
                 isinstance(obj, variables.UserDefinedObjectVariable)
-                and issubclass(obj.value.__class__, unittest.TestCase)
+                and issubclass(type(obj.value), unittest.TestCase)
                 and config.enable_trace_unittest
                 and name
                 in (

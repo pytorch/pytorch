@@ -499,6 +499,24 @@ def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | No
         return value
 
 
+def _get_class_init_kind(cls: type[object]) -> str:
+    for base in cls.__mro__:
+        if "__init__" in base.__dict__:
+            init = base.__dict__["__init__"]
+            break
+    else:
+        init = object.__init__
+
+    if isinstance(init, staticmethod):
+        return "staticmethod"
+    if isinstance(init, classmethod):
+        return "classmethod"
+    return "normal"
+
+
+_get_class_init_kind._dynamo_marked_constant = True  # type: ignore[attr-defined]
+
+
 def instantiate_user_defined_class_object(
     cls: type[T], /, *args: Any, **kwargs: Any
 ) -> T:
@@ -510,7 +528,25 @@ def instantiate_user_defined_class_object(
     # for classes with custom __instancecheck__ (e.g. torch.ByteStorage).
     # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
     if issubclass(type(obj), cls):
-        obj.__init__(*args, **kwargs)
+        init = type(obj).__init__
+        if init is object.__init__:
+            return obj
+        if (
+            not args
+            and not kwargs
+            and init in (BaseException.__init__, Exception.__init__)
+        ):
+            if cls.__new__ in (BaseException.__new__, Exception.__new__):
+                return obj
+            # pyrefly: ignore [bad-argument-type]
+            BaseException.__init__(obj)
+            return obj
+
+        init_kind = _get_class_init_kind(type(obj))
+        if init_kind in ("staticmethod", "classmethod"):
+            type(obj).__init__(*args, **kwargs)
+        else:
+            type(obj).__init__(obj, *args, **kwargs)
     return obj
 
 

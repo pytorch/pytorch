@@ -1219,6 +1219,8 @@ class ListVariable(CommonListMethodsVariable):
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             if len(args) == 0:
+                tx.output.side_effects.mutation(self)
+                self.items[:] = []
                 return ConstantVariable.create(None)
             elif len(args) == 1:
                 (arg,) = args

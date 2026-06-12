@@ -549,7 +549,9 @@ class SideEffects:
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
-        return inspect.getattr_static(cls, "__getattribute__", None) in (
+        getattribute = inspect.getattr_static(cls, "__getattribute__", None)
+        # Python-level __getattribute__ can be traced; opaque C overrides cannot.
+        return inspect.isfunction(getattribute) or getattribute in (
             object.__getattribute__,
             dict.__getattribute__,
             set.__getattribute__,

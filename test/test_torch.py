@@ -222,7 +222,15 @@ class TestTorchDeviceType(TestCase):
         b = a.view(2, 5)
         self.assertEqual(torch._C._storage_Use_Count(b.untyped_storage()._cdata), prev_cf + 1)
 
-    @xfailIfTorchDynamo
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: TEST_WITH_TORCHDYNAMO
+        and not (
+            sys.version_info >= (3, 14)
+            and params["device"] == "cpu"
+            and params["dtype"] is torch.bfloat16
+        ),
+    )
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)

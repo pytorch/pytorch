@@ -66,7 +66,6 @@ from ..source import (
 from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
-    identity,
     istype,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -225,8 +224,8 @@ class SuperVariable(VariableTracker):
         # applied if it has one. We currently don't have polyfills for all the
         # relevant `tp_descr_get`, so we explicitly handle the cases we care
         # about here (e.g., note the staticmethod, classmethod cases).
-        if inner_fn is object.__init__:
-            return LambdaVariable(identity)
+        if inner_fn is object.__init__ and not args and not kwargs:
+            return variables.ConstantVariable.create(None)
         elif inner_fn is torch.nn.Module.__init__:
             objvar = self.objvar
             from ..side_effects import AttributeMutationNew
@@ -642,7 +641,17 @@ class ExceptionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__setattr__":
+        if name == "__init__":
+            if kwargs:
+                unimplemented(
+                    gb_type="Keyword args passed to exception __init__",
+                    context=f"{self} with kwargs {kwargs}",
+                    explanation="Dynamo does not know how to handle keyword args passed to exception __init__",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            self.args = args
+            return variables.ConstantVariable.create(None)
+        elif name == "__setattr__":
             name = args[0].as_python_constant()
             val = args[1]
             if name == "__context__":
