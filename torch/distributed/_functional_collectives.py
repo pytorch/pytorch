@@ -1158,7 +1158,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         # we don't wrap the result as it doesn't need to be waited on.
         out = func(*unwrapped_args, **unwrapped_kwargs)
 
-        # View ops dont require a sync, so we should re-wrap the outputs.
+        # View ops don't require a sync, so we should re-wrap the outputs.
         if is_view_op:
             out = tree_map_only(torch.Tensor, wrap, out)
 
