@@ -7417,6 +7417,54 @@ class TestMPS(TestCaseMPS):
         except Exception as e:
             pass
 
+    # Test adaptive avg pool3d - when the input size is a multiple of output size
+    # Not testing for channels last right now
+    def test_adaptive_avg_pool3d_simple(self):
+        def helper(input_shape, out_shape):
+            cpu_x = torch.randn(input_shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            avg_result = torch.nn.AdaptiveAvgPool3d(out_shape)(x)
+            avg_result_cpu = torch.nn.AdaptiveAvgPool3d(out_shape)(cpu_x)
+
+            cpu_grad = torch.randn(avg_result_cpu.shape)
+            grad = cpu_grad.to('mps')
+
+            avg_result.backward(gradient=grad)
+            avg_result_cpu.backward(gradient=cpu_grad)
+
+            self.assertEqual(avg_result, avg_result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        helper((2, 2, 4, 4, 4), (2, 2, 2))
+        helper((2, 2, 9, 9, 9), (3, 3, 3))
+        helper((2, 2, 9, 9, 9), (9, 9, 9))
+        helper((2, 2, 16, 16, 16), (2, 2, 2))
+        helper((2, 2, 16, 16, 16), (2, 4, 16))
+
+        helper((2, 16, 16, 16), (4, 4, 4))
+
+        # Output shape larger than input shape
+        helper((2, 2, 4, 4, 4), (8, 8, 8))
+        helper((2, 2, 2, 2, 2), (4, 4, 4))
+        helper((2, 2, 3, 3, 3), (9, 9, 9))
+        helper((2, 2, 2, 2, 16), (16, 16, 16))
+
+        helper((2, 4, 4, 4), (16, 16, 16))
+
+    def test_adaptive_avg_pool3d_unsupported_output_shapes(self):
+        x = torch.randn((2, 2, 7, 7, 7), device='mps', dtype=torch.float)
+        with self.assertRaisesRegex(RuntimeError, "input sizes must be divisible"):
+            torch.nn.AdaptiveAvgPool3d((3, 3, 3))(x)
+
+        x = torch.randn((2, 2, 3, 3, 3), device='mps', dtype=torch.float)
+        with self.assertRaisesRegex(RuntimeError, "output sizes must be divisible"):
+            torch.nn.AdaptiveAvgPool3d((7, 7, 7))(x)
+
+        x = torch.randn((2, 2, 4, 4, 8), device='mps', dtype=torch.float)
+        with self.assertRaisesRegex(RuntimeError, "Input depth, height and width must all be greater than"):
+            torch.nn.AdaptiveAvgPool3d((2, 8, 8))(x)
+
     # Test max avg pool2d - when the input size is a multiple of output size
     # Not testing for channels last right now
     def test_adaptive_max_pool2d_simple(self):
