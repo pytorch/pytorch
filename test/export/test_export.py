@@ -595,6 +595,27 @@ class TestExport(TestCase):
         #     exported_program.module()(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
         # )
 
+    def test_guards_fn_recovers_from_unparse_recursion_error(self):
+        # Regression test: guards-fn codegen pretty-prints each guard for the
+        # assert error message via ast.unparse(ast.parse(...)), which recurses
+        # once per AST node. A deeply-nested guard (e.g. a sum over thousands of
+        # symbolic sizes) overflowed the recursion limit there, crashing export
+        # even though the pretty-printing is cosmetic and the executed guard
+        # does not depend on it. Codegen must fall back to the raw guard string
+        # instead of propagating the error.
+        #
+        # We inject the overflow via a mocked ast.unparse rather than building a
+        # genuinely deep expression: the test target is ASAN-instrumented, where
+        # deep ast.parse/compile recursion can abort the process before the
+        # pure-Python RecursionError is reached.
+        from torch.export._unlift import _convert_guards_code_to_fn
+
+        guard = "args[0] == 0"
+        with patch("ast.unparse", side_effect=RecursionError):
+            guards_fn = _convert_guards_code_to_fn([guard], [])
+
+        self.assertIsNotNone(guards_fn)
+
     def _check_dynamic_shapes_specs_and_shapes(
         self,
         model,
