@@ -754,16 +754,17 @@ class GraphModule(torch.nn.Module):
                 out_graph,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77]"):
+    def forward(self, L_x_: "f32[s77]", s77: "Sym(s77)"):
         l_x_ = L_x_
 
-        c: "i64[u0, 1]" = l_x_.nonzero()
-        sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
+        wrap_body_1 = self.wrap_body_1
+
+        nonzero: "i64[u0, 1]" = l_x_.nonzero()
+        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
+        ge: "Sym(u0 >= 0)" = sym_size_int >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
 
-        wrap_body_1 = self.wrap_body_1
-        wrap = torch.ops.higher_order.wrap(wrap_body_1, s77, l_x_, sym_size_int_1, c);  wrap_body_1 = s77 = l_x_ = sym_size_int_1 = c = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_1, s77, l_x_, sym_size_int, nonzero);  wrap_body_1 = s77 = l_x_ = sym_size_int = nonzero = None
         getitem: "f32[s77]" = wrap[0]
         getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
         return (getitem, getitem_1)
