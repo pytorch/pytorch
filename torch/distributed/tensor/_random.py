@@ -224,7 +224,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
     def _get_device_state(self) -> torch.Tensor:
         if self._device.type == "hpu":
             self._device_handle.set_rng_ctx("philox")
-        rng_state = self._device_handle.get_rng_state().to(self._device)
+        rng_state = torch.accelerator.get_rng_state().to(self._device)
         if self._device.type == "hpu":
             self._device_handle.unset_rng_ctx("philox")
         return rng_state
@@ -235,7 +235,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         # for now, we just convert back to cpu here to make sure it always works.
         if self._device.type == "hpu":
             self._device_handle.set_rng_ctx("philox")
-        self._device_handle.set_rng_state(state.to("cpu"))
+        torch.accelerator.set_rng_state(state.to("cpu"))
         if self._device.type == "hpu":
             self._device_handle.unset_rng_ctx("philox")
 
@@ -271,7 +271,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             ):
                 if self._device_handle is None:
                     raise AssertionError
-                self._device_handle.set_rng_state(state.state)
+                torch.accelerator.set_rng_state(state.state)
                 try:
                     yield  # execute the region code
                 finally:
