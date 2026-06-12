@@ -13,8 +13,8 @@ namespace torch::jit {
 namespace {
 
 bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
-  // type_equal doesn't distinguish between mkldnn/pytorch cpu tensors,
-  // and we don't want to coalesce mkldnn tensors bc they do layout
+  // type_equal doesn't distinguish between onednn/pytorch cpu tensors,
+  // and we don't want to coalesce onednn tensors bc they do layout
   // transformations based on usage
   if (lhs.is_onednn() || rhs.is_onednn()) {
     return false;

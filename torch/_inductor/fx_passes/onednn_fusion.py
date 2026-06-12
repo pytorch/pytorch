@@ -1223,7 +1223,7 @@ if torch._C._has_mkldnn:
 
     def _is_packable_convolution(match):
         """
-        Check if the node is supported for MKLDNN convolution.
+        Check if the node is supported for ONEDNN convolution.
         """
         conv_node = match.output_node()
         device_type = conv_node.meta.get("val").device.type
@@ -1260,7 +1260,7 @@ if torch._C._has_mkldnn:
                 return False
         is_transposed = conv_node.args[-3]
         if is_transposed:
-            # TODO: Support dynamic shape case for MKLDNN conv transpose.
+            # TODO: Support dynamic shape case for ONEDNN conv transpose.
             if has_free_symbols(input_size):
                 return False
             groups = conv_node.args[-1]
@@ -1280,7 +1280,7 @@ if torch._C._has_mkldnn:
 
     def _is_packable_linear(match):
         """
-        Check if the node is supported for MKLDNN linear.
+        Check if the node is supported for ONEDNN linear.
         """
 
         def is_const_or_cat_by_const(weight):
@@ -1291,7 +1291,7 @@ if torch._C._has_mkldnn:
             return all(arg.op == "get_attr" for arg in weight.args[0])
 
         linear_node = match.output_node()
-        # mkldnn linear only supports beta=1 or 0 and alpha=1
+        # onednn linear only supports beta=1 or 0 and alpha=1
         if linear_node.target is aten.addmm.default:
             alpha = linear_node.kwargs.get("alpha", 1.0)
             beta = linear_node.kwargs.get("beta", 1.0)
@@ -1323,7 +1323,7 @@ if torch._C._has_mkldnn:
         )
         compute_with_lp = is_lp_weight or use_reduced_f32_for_fp32_weight
         # on x86, for fp32, mkl should be enabled.
-        # on aarch64, use mkldnn op for fp32 as well if acl is enabled
+        # on aarch64, use onednn op for fp32 as well if acl is enabled
         if (
             not compute_with_lp
             and not onednn._is_onednn_acl_supported()
