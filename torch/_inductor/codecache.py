@@ -755,7 +755,7 @@ class FxGraphCachePickler(pickle.Pickler):
         """
         from .graph import GraphLowering
 
-        if t.is_mkldnn:
+        if t.is_onednn:
             # TODO: These tensors don't currently pickle, so we can't cache a compiled
             # graph containing them. Just fail now. If mkldnn tensors get pickling
             # support, we can remove this.
@@ -2963,7 +2963,7 @@ end
             def _constant_nbytes(t: torch.Tensor) -> int:
                 if t.numel() == 0:
                     return 0
-                if t.is_mkldnn:
+                if t.is_onednn:
                     return torch.ops.onednn._nbytes(t)
                 return t.untyped_storage().nbytes()
 

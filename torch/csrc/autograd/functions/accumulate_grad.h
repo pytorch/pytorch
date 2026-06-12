@@ -191,7 +191,7 @@ struct TORCH_API AccumulateGrad : public Node {
           impl::is_tensor_stealable(
               new_grad,
               num_expected_refs + at::caching::is_cached_tensor(new_grad)) &&
-          (new_grad.is_mkldnn() ||
+          (new_grad.is_onednn() ||
            !c10::AutogradState::get_tls_state()
                 .get_grad_layout_enforcement_enabled() ||
            utils::obeys_layout_contract(new_grad, variable))) {
@@ -224,8 +224,8 @@ struct TORCH_API AccumulateGrad : public Node {
           // Case 1.3: Cloning sparse/nested new_grad
           update_grad(new_grad.clone());
         } else {
-          if (new_grad.is_mkldnn()) {
-            // Case 1.4: Cloning MKLDNN new_grad
+          if (new_grad.is_onednn()) {
+            // Case 1.4: Cloning OneDNN new_grad
             update_grad(new_grad.clone());
           } else {
             // Case 1.5: Deep copies new_grad according to the "Gradient
