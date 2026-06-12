@@ -1379,9 +1379,14 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
     return "";
   }
   static bool nvml_init [[maybe_unused]] = []() {
-    TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
-    return true;
+    return NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_();
   }();
+  if (!nvml_init) {
+    TORCH_WARN_ONCE(
+        "nvmlInit_v2 failed; omitting per-process memory info from CUDA "
+        "out-of-memory messages.");
+    return "";
+  }
 
   // NOLINTNEXTLINE(*-c-arrays)
   char pci_id[80];
@@ -1394,10 +1399,14 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
       prop.pciDeviceID);
 
   nvmlDevice_t nvml_device = nullptr;
-  TORCH_INTERNAL_ASSERT(
-      NVML_SUCCESS ==
+  if (NVML_SUCCESS !=
       DriverAPI::get()->nvmlDeviceGetHandleByPciBusId_v2_(
-          pci_id, &nvml_device));
+          pci_id, &nvml_device)) {
+    TORCH_WARN_ONCE(
+        "nvmlDeviceGetHandleByPciBusId failed; omitting per-process memory "
+        "info from CUDA out-of-memory messages.");
+    return "";
+  }
 
   std::vector<nvmlProcessInfo_v1_t> procs(8);
   unsigned int size = procs.size();
@@ -1407,9 +1416,15 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
          NVML_ERROR_INSUFFICIENT_SIZE) {
     procs.resize(size);
   }
+  if (NVML_SUCCESS != r) {
+    TORCH_WARN_ONCE(
+        "nvmlDeviceGetComputeRunningProcesses failed; omitting per-process "
+        "memory info from CUDA out-of-memory messages. This is expected on "
+        "platforms with partial NVML support such as Tegra/Jetson.");
+    return "";
+  }
   unsigned int self_pid = getpid();
   std::stringstream ss;
-  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   ss << "";
   for (auto i : c10::irange(size)) {
     auto& proc = procs[i];
