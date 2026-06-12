@@ -456,10 +456,22 @@ class TestBenchmarker(TestCase):
             finally:
                 calls.append("exit")
 
+        class FakeStream:
+            def wait_stream(self, stream):
+                pass
+
+            def synchronize(self):
+                pass
+
+        current_stream = FakeStream()
+
         previous = _bench.set_gpu_benchmark_lock_context(custom_context)
         try:
             with (
                 patch("torch.cuda.synchronize"),
+                patch("torch.cuda.Stream", FakeStream),
+                patch("torch.cuda.current_stream", return_value=current_stream),
+                patch("torch.cuda.stream", return_value=contextlib.nullcontext()),
                 patch("torch.cuda.CUDAGraph", FakeCUDAGraph),
                 patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
             ):
@@ -474,6 +486,7 @@ class TestBenchmarker(TestCase):
             calls,
             [
                 "enter",
+                "call",
                 "call",
                 "call",
                 "enter",
