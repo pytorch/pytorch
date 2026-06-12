@@ -461,8 +461,8 @@ def forward(self, arg0_1):
 def forward(self, L_args_0_ : torch.Tensor):
     l_args_0_ = L_args_0_
     _record_function_enter_new = torch.ops.profiler._record_function_enter_new('my_net', None)
-    a = l_args_0_.sin();  l_args_0_ = None
-    add = a + 2;  a = None
+    sin = l_args_0_.sin();  l_args_0_ = None
+    add = sin + 2;  sin = None
     _record_function_exit__record_function = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new);  _record_function_enter_new = _record_function_exit__record_function = None
     return (add,)""",
         )

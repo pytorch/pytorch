@@ -12,9 +12,13 @@ Provides two passes:
 import collections
 import heapq
 import itertools
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch.fx as fx
+
+
+__all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
 
 
 def rename_nodes_to_canonical(graph: fx.Graph) -> None:
@@ -90,7 +94,11 @@ def canonicalize_graph(
 
     canonical_idx: dict[fx.Node, int] = {}
 
-    # Counter prevents heapq from comparing fx.Node objects (no __lt__).
+    # The counter is a tiebreaker that prevents heapq from comparing
+    # fx.Node objects (which have no __lt__). It only affects nodes with
+    # identical canonical keys -- i.e., structurally equivalent operations
+    # (same target, same input indices). Those are CSE candidates and
+    # genuinely interchangeable, so any ordering between them is canonical.
     counter = 0
     ready: list[tuple[tuple[Any, ...], int, fx.Node]] = []
     for node in graph.nodes:
