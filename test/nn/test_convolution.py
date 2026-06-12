@@ -737,6 +737,17 @@ class TestConvolutionNN(NNTestCase):
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
 
+    def test_ConvTranspose_output_too_small(self):
+        # Transposed conv with large padding relative to kernel can produce
+        # degenerate (< 1) output sizes. Verify this is caught for all dims
+        # regardless of backend (e.g. MKLDNN, slow).
+        for dim in (1, 2, 3):
+            conv_cls = getattr(nn, f"ConvTranspose{dim}d")
+            m = conv_cls(1, 1, kernel_size=(2,) * dim, padding=(1,) * dim)
+            x = torch.randn((1,) * (dim + 2))
+            with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
+                m(x)
+
     def test_ConvTranspose2d_output_size_downsample_upsample(self):
         b, c, hid_c = 2, 3, 2
         for h in range(13, 24):

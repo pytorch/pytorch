@@ -771,11 +771,43 @@ static void check_shape_forward(const at::Tensor& input,
                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
     }
   } else { // transposed
+    std::vector<T> output_shape;
+    bool output_size_correct = true;
     for (const auto i : c10::irange(2, k)) {
       TORCH_CHECK(padding[i-2] <= (std::numeric_limits<T>::max() - padding[i-2]),
                   "Given padding=", padding[i-2], " at dimension ", i-2, " , expected padding to be at most ",
                   (std::numeric_limits<T>::max() / 2));
+      auto output_size = (at::symint::size<T>(input, i) - 1) * params.stride[i-2]
+          - 2 * padding[i-2]
+          + dilation[i-2] * (weight_sizes[i] - 1) + 1
+          + params.output_padding[i-2];
+      output_shape.push_back(output_size);
+      if constexpr (std::is_same_v<T, c10::SymInt>) {
+        if (TORCH_GUARD_OR_FALSE(output_size.sym_lt(1))) {
+          output_size_correct = false;
+        }
+      } else {
+        if (output_size < 1) {
+          output_size_correct = false;
+        }
+      }
     }
+
+    if (!output_size_correct) {
+      std::ostringstream input_ss;
+      std::ostringstream output_ss;
+      std::string separator;
+      for (int i = 0, len = output_shape.size(); i < len; ++i) {
+        input_ss << separator << at::symint::size<T>(input, i + 2);
+        output_ss << separator << output_shape[i];
+        separator = " x ";
+      }
+      TORCH_CHECK(false,
+          "Given input size per channel: (", input_ss.str(), "). "
+          "Calculated output size per channel: (", output_ss.str(), "). "
+          "Output size is too small");
+    }
+
     if constexpr (std::is_same_v<T, c10::SymInt>) {
       TORCH_SYM_CHECK(at::symint::size<T>(input, 1).sym_eq(weight_sizes[0]),
                "Given transposed=", transposed, ", weight of size ", weight_sizes,
