@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional
 
 import torch
 from torch._C import _len_torch_function_stack
@@ -54,6 +53,14 @@ def _device_constructors():
         torch.tensor,
         torch.as_tensor,
         torch.scalar_tensor,
+        # *_like may contain device kwarg, but the user implicitly
+        # expects a specific device even when kwarg unused.
+        # torch.zeros_like,
+        # torch.randint_like,
+        # torch.randn_like,
+        # torch.ones_like,
+        # torch.full_like,
+        # torch.empty_like,
     }
 
 
@@ -61,7 +68,7 @@ def _device_constructors():
 class DeviceContext(TorchFunctionMode):
     def __init__(self, device) -> None:
         self.device = torch.device(device)
-        self.prev_mode: Optional[DeviceContext] = None
+        self.prev_mode: DeviceContext | None = None
 
     def __enter__(self):
         global CURRENT_DEVICE

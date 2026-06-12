@@ -310,6 +310,7 @@ class ResultEncoderFactory(Protocol[_P, _R, _EncodedR]):
     ) -> Callable[_P, Callable[[_R], _EncodedR | DeferredRecording[_R, _EncodedR]]]: ...
 
 
+# pyrefly: ignore [variance-mismatch]
 class ResultDecoderFactory(Protocol[_P, _R, _EncodedR]):
     """Protocol for custom result decoder factories.
 
@@ -1165,7 +1166,8 @@ class PersistentMemoizer(_BaseMemoizer):
         """
         # Always read from memory cache - Memoizer's callback has already inserted it
         cached_hit = self._memoizer._cache.get(cache_key)
-        assert cached_hit, "Cache entry must exist in memory cache"
+        if not cached_hit:
+            raise AssertionError("Cache entry must exist in memory cache")
         cache_entry = cached_hit.value
 
         # Store the full CacheEntry in disk cache for easier debugging

@@ -7,7 +7,7 @@ import textwrap
 import unittest
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor import config
 from torch._inductor.codecache import HalideCodeCache
@@ -56,6 +56,8 @@ def make_halide(cls):
         (config, "halide.scan_kernels", True),
         (config, "cpu_backend", "halide"),
         (config, "cuda_backend", "halide"),
+        (config, "test_configs.runtime_triton_dtype_assert", False),
+        (config, "test_configs.runtime_triton_shape_assert", False),
         xfail_prop="_expected_failure_halide",
     )
 
@@ -130,7 +132,7 @@ class HalideTests(TestCase):
                         out_ptr0.set_estimates([hl.Range(1024, 1024)])
 
                 __name__ == '__main__' and hl.main()
-                """,  # noqa: S101
+                """,
             ),
         )
         a = torch.randn(1024)
@@ -204,7 +206,7 @@ class HalideTests(TestCase):
                         tmp1.compute_inline()
 
                 __name__ == '__main__' and hl.main()
-                """,  # noqa: S101
+                """,
             ),
         )
         a = torch.randn(1024)

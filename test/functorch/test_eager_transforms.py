@@ -76,7 +76,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfTorchDynamo,
 )
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
@@ -93,6 +92,43 @@ except ImportError:
         "`--no-deps` to avoid overwriting the pytorch installation",
         UserWarning,
     )
+
+
+def _assert_functorch_wrapper_repr(test_case, actual, op_list):
+    expected_grad_wrappers = sum(op is grad for op in op_list)
+    expected_batched_wrappers = sum(op is vmap for op in op_list)
+
+    test_case.assertEqual(actual.count("GradTrackingTensor("), expected_grad_wrappers)
+    test_case.assertEqual(actual.count("BatchedTensor("), expected_batched_wrappers)
+    test_case.assertNotIn("FunctionalTensor(", actual)
+    test_case.assertTrue("Tensor(" in actual or "tensor(" in actual, actual)
+
+    wrapper_tokens = []
+    bdim = expected_batched_wrappers
+    for level, op in enumerate(op_list):
+        if op is grad:
+            wrapper_tokens.append(f"GradTrackingTensor(lvl={level + 1}, value=")
+        elif op is vmap:
+            bdim -= 1
+            wrapper_tokens.append(f"BatchedTensor(lvl={level + 1}, bdim={bdim}, value=")
+
+    if not wrapper_tokens:
+        return
+
+    test_case.assertTrue(actual.startswith(wrapper_tokens[-1]), actual)
+    search_from = 0
+    for token in reversed(wrapper_tokens):
+        pos = actual.find(token, search_from)
+        test_case.assertNotEqual(pos, -1, actual)
+        search_from = pos + len(token)
+
+
+def _assert_leaf_tensor_repr(test_case, actual):
+    test_case.assertNotIn("GradTrackingTensor(", actual)
+    test_case.assertNotIn("BatchedTensor(", actual)
+    test_case.assertNotIn("FunctionalTensor(", actual)
+    test_case.assertTrue(actual.startswith(("Tensor(", "tensor(")), actual)
+
 
 # TestCase for _slice_argnums, an important helper function
 
@@ -995,20 +1031,9 @@ class TestGradTransform(TestCase):
                     else:
                         fn = op(fn)
 
-                expected = f"{repr(x)}"
-                for level, op in enumerate(op_list):
-                    if op is grad:
-                        expected = (
-                            f"GradTrackingTensor(lvl={level + 1}, value={expected})"
-                        )
-                    elif op is vmap:
-                        bdim -= 1
-                        expected = f"BatchedTensor(lvl={level + 1}, bdim={bdim}, value={expected})"
-
                 fn(x)
-                buf = buf.replace("\n", "").replace("  ", "")
-                expected = expected.replace("\n", "").replace("  ", "")
-                self.assertEqual(expected, buf)
+                self.assertIsNotNone(buf)
+                _assert_functorch_wrapper_repr(self, buf, op_list)
 
     def test_print_captured_tensor_inside_transform(self, device):
         x = torch.tensor([1.0, 2.0, 3.0], device=device)
@@ -1020,7 +1045,11 @@ class TestGradTransform(TestCase):
             return y
 
         vjp(f, torch.randn(4, device=device))
-        self.assertEqual(out, repr(x))
+        self.assertIsNotNone(out)
+        if TEST_WITH_TORCHDYNAMO:
+            _assert_leaf_tensor_repr(self, out)
+        else:
+            self.assertEqual(out, repr(x))
 
     def test_no_grad_outside(self, device):
         x = torch.randn([], device=device, requires_grad=True)
@@ -1152,6 +1181,104 @@ class TestGradTransform(TestCase):
         (z,) = torch.autograd.grad(y, x)
         self.assertEqual(z, 2)
 
+    @skipIfTorchDynamo("internal API test")
+    def test_pop_dynamic_layer_stack_to_depth_single(self, device):
+        ft = torch._C._functorch
+        ft._grad_increment_nesting()
+        self.assertEqual(ft.get_dynamic_layer_stack_depth(), 1)
+        ft.pop_dynamic_layer_stack_and_undo_to_depth(0)
+        self.assertEqual(ft.get_dynamic_layer_stack_depth(), 0)
+
+    @skipIfTorchDynamo("internal API test")
+    def test_pop_dynamic_layer_stack_to_depth_mixed(self, device):
+        ft = torch._C._functorch
+        ft._vmap_increment_nesting(3, "error")
+        ft._grad_increment_nesting()
+        ft._jvp_increment_nesting()
+        self.assertEqual(ft.get_dynamic_layer_stack_depth(), 3)
+        # Pop only jvp — must remove exactly one layer
+        ft.pop_dynamic_layer_stack_and_undo_to_depth(2)
+        self.assertEqual(ft.get_dynamic_layer_stack_depth(), 2)
+        # Pop remaining
+        ft.pop_dynamic_layer_stack_and_undo_to_depth(0)
+        self.assertEqual(ft.get_dynamic_layer_stack_depth(), 0)
+
+    def test_inference_mode_outside_grad(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            y = grad(lambda x: (x**2).sum())(x)
+        self.assertEqual(y, 2 * x)
+
+    def test_inference_mode_nograd_outside_grad(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            with torch.no_grad():
+                y = grad(lambda x: (x**2).sum())(x)
+        self.assertEqual(y, 2 * x)
+
+    def test_inference_mode_outside_vjp(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            out, vjp_fn = vjp(lambda x: (x**2).sum(), x)
+            (y,) = vjp_fn(torch.tensor(1.0, device=device))
+        self.assertEqual(y, 2 * x)
+
+    def test_inference_mode_outside_jvp(self, device):
+        x = torch.randn(3, device=device)
+        t = torch.ones(3, device=device)
+        with torch.inference_mode():
+            _, y = jvp(lambda x: (x**2).sum(), (x,), (t,))
+        self.assertEqual(y, (2 * x * t).sum())
+
+    def test_inference_mode_outside_jacrev(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            y = jacrev(lambda x: x**2)(x)
+        self.assertEqual(y, torch.diag(2 * x))
+
+    def test_inference_mode_outside_vmap_grad(self, device):
+        xs = torch.randn(5, 3, device=device)
+        with torch.inference_mode():
+            ys = vmap(grad(lambda x: (x**2).sum()))(xs)
+        self.assertEqual(ys, 2 * xs)
+
+    def test_inference_mode_outside_grad_vmap(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            y = grad(lambda x: vmap(lambda x: (x**2).sum())(x).sum())(x)
+        self.assertEqual(y, 2 * x)
+
+    def test_inference_mode_nested_grad(self, device):
+        x = torch.randn([], device=device)
+        with torch.inference_mode():
+            y = grad(grad(lambda x: x**3))(x)
+        self.assertEqual(y, 6 * x)
+
+    def test_inference_mode_jacrev_grad(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            H = jacrev(grad(lambda x: (x**3).sum()))(x)
+        self.assertEqual(H, torch.diag(6 * x))
+
+    def test_inference_mode_inside_grad(self, device):
+        def f(x):
+            with torch.inference_mode():
+                c = x**2
+            return x - c
+
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            y = grad(lambda x: f(x).sum())(x)
+        self.assertEqual(y, torch.ones_like(x))
+
+    def test_inference_mode_restored(self, device):
+        self.assertTrue(not torch.is_inference_mode_enabled())
+        with torch.inference_mode():
+            self.assertTrue(torch.is_inference_mode_enabled())
+            grad(lambda x: (x**2).sum())(torch.randn(3, device=device))
+            self.assertTrue(torch.is_inference_mode_enabled())
+        self.assertTrue(not torch.is_inference_mode_enabled())
+
 
 @markDynamoStrictTest
 class TestAutogradFunction(TestCase):
@@ -1227,7 +1354,7 @@ class TestAutogradFunction(TestCase):
         def fn(x):
             return A.apply(x.clone())
 
-        err_msg = "A input that has been returned as-is"
+        err_msg = "An input that has been returned as-is"
 
         a = torch.tensor(2.0, device=device, requires_grad=inner_requires_grad)
         a_t = torch.tensor(2.0, device=device, requires_grad=inner_requires_grad)
@@ -2417,7 +2544,6 @@ class TestJac(VmapTearDownMixin, TestCase):
         self.assertEqual(actual, expected)
 
     # https://github.com/pytorch/pytorch/issues/127036
-    @xfailIfTorchDynamo
     @parametrize("_preallocate_and_copy", (True, False))
     def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
         # With chunk_size=1, we shouldn't `vmap` and hence not be limited
@@ -3463,6 +3589,7 @@ class TestComposability(TestCase):
         y = grad(grad(torch.sin))(x)
         self.assertEqual(y, -x.sin())
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/179877")
     def test_grad_vmap(self, device):
         def foo(x):
             y = vmap(torch.sin)(x)
@@ -3472,6 +3599,7 @@ class TestComposability(TestCase):
         y = grad(foo)(x)
         self.assertEqual(y, x.cos())
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180894")
     def test_grad_vjp(self, device):
         x = torch.randn(3, device=device)
 
@@ -3538,6 +3666,7 @@ class TestComposability(TestCase):
         y = vjp_fn(x)[0]
         # Honestly IDK what the result here is... but at least it runs
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180300")
     def test_make_fx_vmap(self, device):
         def f(x):
             return torch.sin(x)
@@ -3548,6 +3677,7 @@ class TestComposability(TestCase):
         new_inp = torch.randn(5, 3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/179895")
     def test_make_fx_jacrev(self, device):
         def f(x):
             return x.sin().sum()
@@ -3639,6 +3769,7 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "torch.autograd.functional"):
             grad(f)(x)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/179876")
     def test_autograd_functional_jvp_inside_transform(self, device):
         def f(x):
             t = torch.ones_like(x)
@@ -3668,6 +3799,7 @@ class TestComposability(TestCase):
         ):
             vmap(f)(x)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180591")
     @parametrize(
         "transform",
         [
@@ -3762,6 +3894,7 @@ class TestComposability(TestCase):
         # smoke tests
         jvp(g, (x,), (t,))
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/184862")
     def test_can_use_functionalize_when_key_is_excluded(self, device):
         def f(x):
             y = x.clone()
@@ -3779,6 +3912,7 @@ class TestComposability(TestCase):
             local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
             self.assertTrue(local_exclude_set.has(DispatchKey.Functionalize))
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180592")
     def test_can_use_vmap_when_key_is_excluded(self, device):
         def f(x):
             return x.sum(0)
@@ -3792,6 +3926,7 @@ class TestComposability(TestCase):
             local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
             self.assertTrue(local_exclude_set.has(DispatchKey.FuncTorchBatched))
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/181155")
     def test_can_use_grad_when_key_is_excluded(self, device):
         def f(x):
             return x.sin()
@@ -4586,6 +4721,8 @@ class TestExamplesCorrectness(TestCase):
         self.assertEqual(result_loss, expected_loss)
         self.assertEqual(result_weights, expected_weights)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180336")
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180320")
     @parametrize(
         "dropout_layer",
         [
@@ -5306,6 +5443,113 @@ class TestCompileTransforms(TestCase):
         opt_fn = torch.compile(traceable(fn))
         actual = opt_fn(params_and_buffers, x)
         self.assertEqual(actual, expected)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_dynamic_grad_stride_slice_mha(self, device, backend):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181305
+        linear = nn.Linear(3, 3).to(device).eval()
+
+        def model(x):
+            y = x[:, ::2, :, :]
+            y = y.mean(dim=0)
+            y = linear(y)
+            return y.mean()
+
+        x = torch.randn(4, 8, 2, 3, device=device)
+        expected = grad(model)(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(grad(model), dynamic=True, backend=backend)
+        result = compiled(x)
+        self.assertEqual(result, expected)
+
+    def test_compile_dynamic_grad_vjp_index_select_pytree(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/171537
+        from torch.utils import _pytree as pytree
+
+        class Input:
+            def __init__(self, positions):
+                self.positions = positions
+
+        def flatten(inp):
+            return [inp.positions], None
+
+        def unflatten(children, context):
+            return Input(children[0])
+
+        pytree.register_pytree_node(
+            Input,
+            flatten,
+            unflatten,
+            serialized_type_name="test_compile_dynamic_grad_vjp_index_select_pytree.Input",
+        )
+        try:
+
+            def loss(weight, inp):
+                def energy(input_pc):
+                    idx = torch.arange(5, device=input_pc.positions.device)
+                    vals = input_pc.positions.index_select(0, idx) * weight
+                    return vals.sum(dim=[1], keepdim=True)
+
+                y, vjp_fn = torch.func.vjp(energy, inp)
+                (input_grads,) = vjp_fn(torch.ones_like(y))
+                return y.square().sum() + input_grads.positions.square().sum()
+
+            fn = torch.func.grad_and_value(loss, argnums=0)
+            weight = torch.randn(3, device=device, requires_grad=True)
+            inp = Input(torch.randn(7, 3, device=device, requires_grad=True))
+
+            expected = fn(weight, inp)
+
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True, backend="eager")
+            result = compiled(weight, inp)
+            self.assertEqual(result, expected)
+        finally:
+            pytree._deregister_pytree_node(Input)
+
+    def test_compile_dynamic_grad_vjp_trace_pytree(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/171537
+        from torch.utils import _pytree as pytree
+
+        class Input:
+            def __init__(self, matrix):
+                self.matrix = matrix
+
+        def flatten(inp):
+            return [inp.matrix], None
+
+        def unflatten(children, context):
+            return Input(children[0])
+
+        pytree.register_pytree_node(
+            Input,
+            flatten,
+            unflatten,
+            serialized_type_name="test_compile_dynamic_grad_vjp_trace_pytree.Input",
+        )
+        try:
+
+            def loss(weight, inp):
+                def energy(input_pc):
+                    return torch.trace(input_pc.matrix * weight)
+
+                y, vjp_fn = torch.func.vjp(energy, inp)
+                (input_grads,) = vjp_fn(torch.ones_like(y))
+                return y.square() + input_grads.matrix.square().sum()
+
+            fn = torch.func.grad_and_value(loss, argnums=0)
+            weight = torch.randn(4, 4, device=device, requires_grad=True)
+            inp = Input(torch.randn(4, 4, device=device, requires_grad=True))
+
+            expected = fn(weight, inp)
+
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True, backend="eager")
+            result = compiled(weight, inp)
+            self.assertEqual(result, expected)
+        finally:
+            pytree._deregister_pytree_node(Input)
 
     # torch.compile is not supported on Windows
     @torch._dynamo.config.patch(suppress_errors=False)

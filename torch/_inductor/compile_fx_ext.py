@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING, TypeGuard
 from typing_extensions import final, override, Self
 
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch.fx
 from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
 from torch._inductor.metrics import CachedMetricsDeltas, CachedMetricsHelper
@@ -31,7 +31,6 @@ from . import config
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
 from .debug import DebugContext
 from .graph import GraphLowering
-from .output_code import complex_memory_overlap  # noqa: F401
 from .virtualized import V
 
 
@@ -257,7 +256,8 @@ class _WireProtocolPickledInput:
 
         fake_mode = _current_fake_mode()
         result = GraphPickler.loads(self.value, fake_mode)
-        assert isinstance(result, _WireProtocolInput)
+        if not isinstance(result, _WireProtocolInput):
+            raise AssertionError(f"expected _WireProtocolInput, got {type(result)}")
         return result
 
 
@@ -298,7 +298,8 @@ class _WireProtocolPickledOutput:
 
         fake_mode = _current_fake_mode()
         result = GraphPickler.loads(self.value, fake_mode)
-        assert isinstance(result, _WireProtocolOutput)
+        if not isinstance(result, _WireProtocolOutput):
+            raise AssertionError(f"expected _WireProtocolOutput, got {type(result)}")
         if isinstance(result.graph, CompiledFxGraph):
             result.graph.after_deserialization(constants)
         return result
@@ -353,7 +354,8 @@ class _LoggerState:
                 q.extend(logger.getChildren())
 
     def __enter__(self) -> _CapturedLogs:
-        assert self.captured_logs is None
+        if self.captured_logs is not None:
+            raise AssertionError("captured_logs already set on __enter__")
         self.captured_logs = _CapturedLogs(self)
         self.captured_logs.apply()
         return self.captured_logs
@@ -364,7 +366,8 @@ class _LoggerState:
         exc_value: BaseException | None,
         traceback: types.TracebackType | None,
     ) -> None:
-        assert self.captured_logs is not None
+        if self.captured_logs is None:
+            raise AssertionError("captured_logs not set on __exit__")
         self.captured_logs.remove()
 
 
@@ -387,7 +390,8 @@ class _CapturedLogs:
         self.handlers = None
 
     def finish(self) -> list[logging.LogRecord]:
-        assert self.handlers is None
+        if self.handlers is not None:
+            raise AssertionError("expected handlers to be None in finish")
         logs = []
         try:
             while True:
@@ -397,7 +401,8 @@ class _CapturedLogs:
         return logs
 
     def remove(self) -> None:
-        assert self.handlers is not None
+        if self.handlers is None:
+            raise AssertionError("expected handlers to be set in remove")
         handlers, self.handlers = self.handlers, None
         for name, handler in handlers.items():
             logger = logging.getLogger(name)
@@ -406,7 +411,8 @@ class _CapturedLogs:
     def apply(self) -> None:
         from logging.handlers import QueueHandler
 
-        assert self.handlers is None
+        if self.handlers is not None:
+            raise AssertionError("expected handlers to be None in apply")
         self.handlers = {}
         for name, level in self.state.loggers.items():
             logger = logging.getLogger(name)
@@ -438,12 +444,16 @@ class _SerializedFxCompile(FxCompile):
             gm, example_inputs, inputs_to_check, graph_kwargs
         )
         if not serialized:
-            return _InProcessFxCompile().codegen_and_compile(
+            eager_compile = _InProcessFxCompile()
+            eager_compile.compile_region_name = self.compile_region_name
+            return eager_compile.codegen_and_compile(
                 gm, example_inputs, inputs_to_check, graph_kwargs
             )
 
         inputs, constants = serialized
         output = self._send_to_child(inputs).deserialize(constants)
+        if isinstance(output.graph, CompiledFxGraph):
+            output.graph.compile_region_name = self.compile_region_name
 
         self._postprocess(output)
         self._compile_stats[type(self)].codegen_and_compile += 1
@@ -469,7 +479,7 @@ class _SerializedFxCompile(FxCompile):
             # we can't cache (or serialize)
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
-            log.debug("Skipping %s compile: %s", type(self), e)  # noqa: G200
+            log.debug("Skipping %s compile: %s", type(self), e)
             return None
 
         # Triton kernel wrapper nodes contain references to the kernel_side_table

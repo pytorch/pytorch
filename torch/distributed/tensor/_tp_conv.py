@@ -123,8 +123,6 @@ def tp_convolution(
     weight = cast(torch.Tensor, local_tensor_args[1])
     stride, padding, dilation = local_tensor_args[3:6]
 
-    if not _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation):
-        raise AssertionError
     if not isinstance(padding, list):
         raise AssertionError
 
@@ -132,6 +130,10 @@ def tp_convolution(
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
         return local_results
     else:
+        if not _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation):
+            raise AssertionError(
+                "tp_convolution data exchange requires supported stride/padding/dilation"
+            )
         # step 0 compute the overlap pixels of the input tensor
         d = weight.shape[-1] - 1
         d1 = d // 2
@@ -183,8 +185,6 @@ def tp_convolution_backward(
     weight = cast(torch.Tensor, local_tensor_args[2])
     stride, padding, dilation = local_tensor_args[4:7]
 
-    if not _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation):
-        raise AssertionError
     if not isinstance(padding, list):
         raise AssertionError
 
@@ -192,6 +192,10 @@ def tp_convolution_backward(
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
         return local_results
     else:
+        if not _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation):
+            raise AssertionError(
+                "tp_convolution_backward data exchange requires supported stride/padding/dilation"
+            )
         # step 0 compute the overlap pixels of the input tensor
         d = weight.shape[3] - 1
         d1 = d // 2
@@ -247,7 +251,7 @@ def convolution_handler(
     args: tuple[object, ...],
     kwargs: dict[str, object],
 ) -> object:
-    # extract local tensor and sharding infos to a OpInfo
+    # extract local tensor and sharding infos to an OpInfo
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
 
     # sharding propagation
@@ -286,7 +290,7 @@ def convolution_backward_handler(
     args[0] = args[0].redistribute(args[1].device_mesh, args[1].placements)
     args = tuple(args)
 
-    # extract local tensor and sharding infos to a OpInfo
+    # extract local tensor and sharding infos to an OpInfo
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
 
     # sharding propagation

@@ -1,6 +1,7 @@
 # Owner(s): ["module: codegen"]
 # ruff: noqa: F841
 
+import pickle
 import unittest
 from contextlib import nullcontext
 
@@ -270,7 +271,7 @@ def forward(self, arg0_1):
     detach_copy_1 = torch.ops.aten.detach_copy.default(view_copy_11);  view_copy_11 = None
     return detach_copy_1
     """,
-        )  # noqa: B950
+        )
 
     def test_simple(self):
         def f(x):
@@ -561,7 +562,7 @@ def forward(self, arg0_1):
     getitem_5 = _fused_moving_avg_obs_fq_helper_functional[5];  _fused_moving_avg_obs_fq_helper_functional = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_5);  arg0_1 = getitem_5 = copy_ = None
     return (getitem, getitem_1)
-    """,  # noqa: B950
+    """,
         )
 
     def test_as_strided(self):
@@ -820,7 +821,7 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_copy_1
     """,
-        )  # noqa: B950
+        )
 
         # NB: even with reapply_views=True, we expect to see scatter op
         reinplaced_logs = self.get_logs(
@@ -852,7 +853,7 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_1
     """,
-        )  # noqa: B950
+        )
 
     def test_split_with_sizes(self):
         def f(x):
@@ -892,7 +893,7 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_copy_1
     """,
-        )  # noqa: B950
+        )
 
         # NB: even with reapply_views=True, we expect to see scatter op
         reinplaced_logs = self.get_logs(
@@ -924,7 +925,7 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_1
     """,
-        )  # noqa: B950
+        )
 
     def test_slice(self):
         def f(x):
@@ -955,7 +956,7 @@ def forward(self, arg0_1):
     transpose_copy_4 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0);  transpose_copy_2 = None
     return transpose_copy_4
     """,
-        )  # noqa: B950
+        )
 
         # NB: even with reapply_views=True, we expect to see scatter op
         reinplaced_logs = self.get_logs(
@@ -980,7 +981,7 @@ def forward(self, arg0_1):
     transpose_4 = torch.ops.aten.transpose.int(transpose_2, 1, 0);  transpose_2 = None
     return transpose_4
     """,
-        )  # noqa: B950
+        )
 
     def test_view_inplace(self):
         def f(x):
@@ -1012,7 +1013,7 @@ def forward(self, arg0_1):
     transpose_copy_4 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0);  transpose_copy_2 = None
     return transpose_copy_4
     """,
-        )  # noqa: B950
+        )
 
         # NB: even with reapply_views=True, we expect to see scatter op
         reinplaced_logs = self.get_logs(
@@ -1037,7 +1038,7 @@ def forward(self, arg0_1):
     transpose_4 = torch.ops.aten.transpose.int(transpose_2, 1, 0);  transpose_2 = None
     return transpose_4
     """,
-        )  # noqa: B950
+        )
 
     def test_unbind(self):
         def f(x):
@@ -1073,7 +1074,7 @@ def forward(self, arg0_1):
     transpose_copy_4 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0);  transpose_copy_2 = None
     return transpose_copy_4
     """,
-        )  # noqa: B950
+        )
 
         # NB: even with reapply_views=True, we expect to see scatter op
         reinplaced_logs = self.get_logs(
@@ -1102,7 +1103,7 @@ def forward(self, arg0_1):
     transpose_4 = torch.ops.aten.transpose.int(transpose_2, 1, 0);  transpose_2 = None
     return transpose_4
     """,
-        )  # noqa: B950
+        )
 
     def test_optional_tensor_list(self):
         def f(x):
@@ -1132,7 +1133,7 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, view_copy_1);  arg0_1 = view_copy_1 = copy_ = None
     return view_copy_2
     """,
-        )  # noqa: B950
+        )
 
     def test_scalars(self):
         def f(x):
@@ -1205,7 +1206,7 @@ def forward(self, arg0_1):
     _to_copy = torch.ops.aten._to_copy.default(ge, dtype = torch.float32, layout = torch.strided);  ge = None
     return _to_copy
     """,
-        )  # noqa: B950
+        )
 
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def test_metadata_change_out_op(self):
@@ -1318,7 +1319,7 @@ def forward(self, arg0_1):
     add_2 = torch.ops.aten.add.Tensor(select_copy_1, view_copy_13);  select_copy_1 = view_copy_13 = add_2 = None
     return getitem_2
     """,
-        )  # noqa: B950
+        )
 
         reinplaced_logs = self.get_logs(
             f, torch.ones(4, 2), reapply_views=True, run_reinplace=True
@@ -1535,7 +1536,7 @@ def forward(self, arg0_1):
     diagonal_copy_2 = torch.ops.aten.diagonal_copy.default(diagonal_scatter_1);  diagonal_scatter_1 = None
     return diagonal_copy_2
     """,
-        )  # noqa: B950
+        )
 
         reinplaced_logs = self.get_logs(
             f, torch.ones(2, dtype=torch.long), reapply_views=True, run_reinplace=True
@@ -1555,7 +1556,7 @@ def forward(self, arg0_1):
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
-        )  # noqa: B950
+        )
 
         # Test 4: copy_() with different dtype, different shape
         self.assert_functionalization(f, torch.ones(1, dtype=torch.long))
@@ -1577,7 +1578,7 @@ def forward(self, arg0_1):
     diagonal_copy_2 = torch.ops.aten.diagonal_copy.default(diagonal_scatter_1);  diagonal_scatter_1 = None
     return diagonal_copy_2
     """,
-        )  # noqa: B950
+        )
 
         reinplaced_logs = self.get_logs(
             f, torch.ones(1, dtype=torch.long), reapply_views=True, run_reinplace=True
@@ -1597,7 +1598,7 @@ def forward(self, arg0_1):
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
-        )  # noqa: B950
+        )
 
     def test_expand_symint(self):
         # Once some existing SymInt bugs are ironed out, we should update
@@ -1700,7 +1701,7 @@ def forward(self, arg0_1):
     as_strided_copy_3 = torch.ops.aten.as_strided_copy.default(view_copy_7, [3, 3], [3, 1]);  view_copy_7 = None
     add_2 = torch.ops.aten.add.Tensor(as_strided_copy_3, 1);  as_strided_copy_3 = None
     return add_2
-    """,  # noqa: B950
+    """,
         )
 
         reinplaced_logs = self.get_logs(
@@ -1888,7 +1889,7 @@ def forward(self, arg0_1):
     select_copy_1 = torch.ops.aten.select_copy.int(select_scatter, 0, 5);  select_copy_1 = None
     return select_scatter
     """,
-        )  # noqa: B950
+        )
 
         reinplaced_logs = self.get_logs(
             f, torch.ones(2), reapply_views=True, run_reinplace=True
@@ -1970,7 +1971,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     copy_ = torch.ops.aten.copy_.default(arg1_1, alias_copy_1);  arg1_1 = alias_copy_1 = copy_ = None
     copy__1 = torch.ops.aten.copy_.default(arg2_1, alias_copy_4);  arg2_1 = alias_copy_4 = copy__1 = None
     return view_copy_5
-    """,  # noqa: B950
+    """,
             )
 
             reinplaced_logs = self.get_logs(
@@ -2016,7 +2017,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     copy_ = torch.ops.aten.copy_.default(arg1_1, alias_1);  arg1_1 = alias_1 = copy_ = None
     copy__1 = torch.ops.aten.copy_.default(arg2_1, alias_4);  arg2_1 = alias_4 = copy__1 = None
     return view_5
-    """,  # noqa: B950
+    """,
             )
 
     def test_mutation_overlapping_mem(self):
@@ -2064,7 +2065,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     copy_ = torch.ops.aten.copy_.default(arg1_1, getitem_3);  arg1_1 = getitem_3 = copy_ = None
     copy__1 = torch.ops.aten.copy_.default(arg2_1, getitem_4);  arg2_1 = getitem_4 = copy__1 = None
     return getitem
-    """,  # noqa: B950
+    """,
         )
 
         reinplaced_logs = self.get_logs(
@@ -2092,7 +2093,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     copy_ = torch.ops.aten.copy_.default(arg1_1, getitem_3);  arg1_1 = getitem_3 = copy_ = None
     copy__1 = torch.ops.aten.copy_.default(arg2_1, getitem_4);  arg2_1 = getitem_4 = copy__1 = None
     return getitem
-    """,  # noqa: B950
+    """,
         )
 
     # This tests our python shims around C++ Functionalization: FunctionalTensor and FunctionalTensorMode
@@ -2270,6 +2271,20 @@ def forward(self, arg0_1):
 
         self.assertNotEqual(unlifted.untyped_storage(), lifted.untyped_storage())
 
+    def test_python_functionalization_lift_functional_tensor(self):
+        def f(x):
+            tmp = x + 1
+            return torch.ops.aten.lift.default(tmp)
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(
+            f, reapply_views=True, crossref=False, skip_input_mutations=True
+        )(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
+
     def test_python_functionalization_lift_fresh(self):
         def f(x):
             tmp = torch.tensor([0.0])
@@ -2322,6 +2337,94 @@ def forward(self, arg0_1):
 )
 class TestCrossRefFunctionalization(TestFunctionalization):
     crossref = True
+
+
+class TestViewMetaSerialization(TestCase):
+    # Exercise to_serializable_tuple() via as_tuple() and pickle, covering each
+    # element kind that used to be a dangling reference: std::vector (resize_/
+    # _unsafe_view_), const at::Tensor& (_make_dual), and const
+    # std::optional<at::Tensor>& (_nested_view_from_jagged). Deterministic UAF
+    # under ASAN before the fix; the tensor cases segfault even without ASAN.
+
+    def _make_dual_view_meta(self, tangent, level=0):
+        # _make_dual_ViewMeta's SerializableTuple is (has_symbolic_inputs,
+        # reapply_views, inverse_return_mode, tangent, level); the tangent
+        # element is the `const at::Tensor&` reference that used to dangle.
+        return torch._C._functionalization._make_dual_ViewMeta(
+            (
+                False,
+                True,
+                torch._C._functionalization.InverseReturnMode.AlwaysView,
+                tangent,
+                level,
+            )
+        )
+
+    def _nested_jagged_view_meta(self, offsets, lengths):
+        # _nested_view_from_jagged_ViewMeta's SerializableTuple is
+        # (has_symbolic_inputs, reapply_views, inverse_return_mode, offsets,
+        # dummy, lengths, ragged_idx, min_seqlen, max_seqlen). lengths/min_seqlen/
+        # max_seqlen are `const std::optional<at::Tensor>&` elements; this covers
+        # the optional<Tensor> decay path (min_seqlen/max_seqlen left as None).
+        return torch._C._functionalization._nested_view_from_jagged_ViewMeta(
+            (
+                False,
+                True,
+                torch._C._functionalization.InverseReturnMode.AlwaysView,
+                offsets,
+                torch.zeros(offsets.shape[0] - 1),
+                lengths,
+                1,
+                None,
+                None,
+            )
+        )
+
+    def test_resize_view_meta_as_tuple(self):
+        view_meta = torch._C._functionalization.resize__ViewMeta((True, [3, 4, 5]))
+        reapply_views, size = view_meta.as_tuple()
+        self.assertEqual(reapply_views, True)
+        self.assertEqual(size, [3, 4, 5])
+
+    def test_unsafe_view_meta_as_tuple(self):
+        view_meta = torch._C._functionalization._unsafe_view_ViewMeta((False, [2, 6]))
+        has_symbolic_inputs, size = view_meta.as_tuple()
+        self.assertEqual(has_symbolic_inputs, False)
+        self.assertEqual(size, [2, 6])
+
+    def test_make_dual_view_meta_tensor_element_as_tuple(self):
+        tangent = torch.arange(6.0).reshape(2, 3)
+        view_meta = self._make_dual_view_meta(tangent, level=0)
+        has_symbolic_inputs, reapply_views, _, restored_tangent, level = (
+            view_meta.as_tuple()
+        )
+        self.assertEqual(has_symbolic_inputs, False)
+        self.assertEqual(reapply_views, True)
+        self.assertEqual(level, 0)
+        self.assertEqual(restored_tangent, tangent)
+
+    def test_nested_jagged_view_meta_optional_tensor_elements_as_tuple(self):
+        offsets = torch.tensor([0, 2, 4])
+        lengths = torch.tensor([2, 2])
+        view_meta = self._nested_jagged_view_meta(offsets, lengths)
+        restored = view_meta.as_tuple()
+        self.assertEqual(restored[3], offsets)
+        # present optional<Tensor> round-trips, absent ones stay None
+        self.assertEqual(restored[5], lengths)
+        self.assertEqual(restored[7], None)
+        self.assertEqual(restored[8], None)
+
+    def test_view_meta_pickle_roundtrip(self):
+        for view_meta in (
+            torch._C._functionalization.resize__ViewMeta((True, [3, 4, 5])),
+            torch._C._functionalization._unsafe_view_ViewMeta((False, [2, 6])),
+            self._make_dual_view_meta(torch.arange(6.0).reshape(2, 3)),
+            self._nested_jagged_view_meta(
+                torch.tensor([0, 2, 4]), torch.tensor([2, 2])
+            ),
+        ):
+            restored = pickle.loads(pickle.dumps(view_meta))
+            self.assertEqual(restored.as_tuple(), view_meta.as_tuple())
 
 
 if __name__ == "__main__":

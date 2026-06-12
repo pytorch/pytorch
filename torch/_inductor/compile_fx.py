@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import warnings
 from abc import ABC, abstractmethod
@@ -19,7 +20,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -35,6 +36,7 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
+from torch._dynamo.backends import common as dynamo_common
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
@@ -46,10 +48,11 @@ from torch._dynamo.utils import (
     flatten_graph_inputs,
     get_inputs_devices,
     get_metrics_context,
+    GmWrapper,
     lazy_format_graph_code,
     set_feature_use,
 )
-from torch._functorch import config as functorch_config
+from torch._functorch import aot_autograd, config as functorch_config
 from torch._functorch._aot_autograd.subclass_parametrization import (
     unwrap_tensor_subclass_parameters,
 )
@@ -76,6 +79,7 @@ from torch._inductor.output_code import (
     CompiledAOTI,
     CompiledFxGraph,
     CompiledFxGraphConstantsWithGm,
+    copy_strided_storage_,
     get_expanded_dims,
     index_expanded_dims,
     OutputCode,
@@ -86,6 +90,7 @@ from torch._inductor.utils import (
     count_tangents,
     fresh_cache,
     get_all_devices,
+    get_static_bw_input_idxs,
     InputType,
     is_gpu,
     should_assume_input_aligned,
@@ -102,7 +107,6 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
 
-from .._dynamo.backends.common import aot_autograd
 from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
@@ -117,7 +121,6 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
-from .output_code import complex_memory_overlap  # noqa: F401
 from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
@@ -158,8 +161,6 @@ else:
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 
 if TYPE_CHECKING:
-    import types
-
     from torch._functorch._aot_autograd.schemas import (
         FQN,
         GraphInputName,
@@ -443,7 +444,10 @@ def _unlift_graph(
                 clone_preserve_strides(state_dict[buffer_name])
             )
         else:
-            assert node_name in graph_signature.user_inputs
+            if node_name not in graph_signature.user_inputs:
+                raise AssertionError(
+                    f"Expected {node_name} to be in graph_signature.user_inputs"
+                )
             lifted_inputs.append(None)
 
     from torch.export._unlift import _unlift
@@ -645,7 +649,8 @@ def split_const_gm(
     for node in to_erase_node[::-1]:
         if node.users:
             for n in node.users:
-                assert n.meta[META_TAG] == MODULE_TAG, f"node: {node} user not empty."
+                if n.meta[META_TAG] != MODULE_TAG:
+                    raise AssertionError(f"node: {node} user not empty.")
         else:
             gm.graph.erase_node(node)
     gm.recompile()
@@ -771,6 +776,7 @@ class _CompileFxKwargs(TypedDict, total=False):
     extern_node_serializer: Callable[[list[ExternKernelNode]], Any] | None
     boxed_forward_device_index: BoxedDeviceIndex | None
     fx_wrapper: bool
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]]
 
 
 class _CompileFxCallable(Protocol):
@@ -778,6 +784,7 @@ class _CompileFxCallable(Protocol):
         self,
         gm: GraphModule,
         example_inputs: Sequence[InputType],
+        compile_region_name: str | None = None,
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode: ...
 
@@ -785,6 +792,7 @@ class _CompileFxCallable(Protocol):
 def compile_fx_inner(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
+    compile_region_name: str | None = None,
     **kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     kwargs.setdefault("cudagraphs", None)
@@ -803,6 +811,15 @@ def compile_fx_inner(
     # compile_fx return and we may want to use the _LazyGraphModule for compiling
     # the backward graph as well.
     with contextlib.ExitStack() as stack:
+        # When cpp_wrapper is enabled, ensure the required triton config
+        # (store_cubin, autotune_at_compile_time, etc.) is applied. This is
+        # needed because lazy backward compilation may run after the
+        # config.patch context from compile_fx has already exited.
+        # Suppress cudagraph skip logging here; compile_fx already logged it.
+        if kwargs["cpp_wrapper"]:
+            stack.enter_context(
+                config.patch(get_cpp_wrapper_config(log_cudagraph_skip=False))
+            )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
@@ -824,6 +841,7 @@ def compile_fx_inner(
         return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
             gm,
             example_inputs,
+            compile_region_name=compile_region_name,
             **kwargs,
         )
 
@@ -832,6 +850,7 @@ def compile_fx_inner(
 def _compile_fx_inner(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
+    compile_region_name: str | None = None,
     **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     """
@@ -880,9 +899,10 @@ def _compile_fx_inner(
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
-    assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
-        f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
-    )
+    if not isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)):
+        raise AssertionError(
+            f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
+        )
 
     if graph_kwargs.get("cudagraphs") is None:
         graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
@@ -890,6 +910,7 @@ def _compile_fx_inner(
         save_args_for_compile_fx_inner(
             gm,
             example_inputs,
+            compile_region_name=compile_region_name,
             **graph_kwargs,
         )
 
@@ -977,8 +998,14 @@ def _compile_fx_inner(
                 log.debug("Failed to generate FX cache key")
 
         if torch._functorch.config.bundled_autograd_cache:
-            assert mb_compiled_graph is None
-            assert cache_info is None
+            if mb_compiled_graph is not None:
+                raise AssertionError(
+                    "Expected mb_compiled_graph to be None for bundled_autograd_cache path"
+                )
+            if cache_info is not None:
+                raise AssertionError(
+                    "Expected cache_info to be None for bundled_autograd_cache path"
+                )
             # When using bundled autograd cache, we still want
             # to use the TritonBundler, but we don't want to save
             # the results here. The results will get saved directly
@@ -986,9 +1013,16 @@ def _compile_fx_inner(
             TritonBundler.begin_compile()
             try:
                 mb_compiled_graph = fx_codegen_and_compile(
-                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                    gm,
+                    example_inputs,
+                    inputs_to_check,
+                    compile_region_name=compile_region_name,
+                    **graph_kwargs,
                 )
-                assert mb_compiled_graph is not None
+                if mb_compiled_graph is None:
+                    raise AssertionError(
+                        "fx_codegen_and_compile returned None in bundled_autograd_cache path"
+                    )
                 (
                     triton_bundle,
                     triton_bundler_meta,
@@ -1007,7 +1041,10 @@ def _compile_fx_inner(
         # (this can happen either because cache was disabled, or we
         # determined the input is uncacheable)
         elif cache_info is None or cache_info["cache_state"] == "bypass":
-            assert mb_compiled_graph is None
+            if mb_compiled_graph is not None:
+                raise AssertionError(
+                    "Expected mb_compiled_graph to be None in cache bypass path"
+                )
             log.debug(
                 "FX cache bypass reason: %s",
                 (
@@ -1018,7 +1055,11 @@ def _compile_fx_inner(
             )
             try:
                 mb_compiled_graph = fx_codegen_and_compile(
-                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                    gm,
+                    example_inputs,
+                    inputs_to_check,
+                    compile_region_name=compile_region_name,
+                    **graph_kwargs,
                 )
             except Exception as e:
                 raise InductorError(e, currentframe()).with_traceback(
@@ -1027,15 +1068,26 @@ def _compile_fx_inner(
 
         # CACHE MISS: Compile the graph and save to cache
         elif cache_info["cache_state"] == "miss":
-            assert mb_compiled_graph is None
-            assert key_info is not None
+            if mb_compiled_graph is not None:
+                raise AssertionError(
+                    "Expected mb_compiled_graph to be None in cache miss path"
+                )
+            if key_info is None:
+                raise AssertionError("Expected key_info to be set in cache miss path")
             log.debug("FX cache miss, compiling and saving to cache")
             TritonBundler.begin_compile()
             try:
                 mb_compiled_graph = fx_codegen_and_compile(
-                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                    gm,
+                    example_inputs,
+                    inputs_to_check,
+                    compile_region_name=compile_region_name,
+                    **graph_kwargs,
                 )
-                assert mb_compiled_graph is not None
+                if mb_compiled_graph is None:
+                    raise AssertionError(
+                        "fx_codegen_and_compile returned None in cache miss path"
+                    )
                 mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
                 cache_key, debug_lines = key_info
                 mb_compiled_graph._fx_graph_cache_key = cache_key
@@ -1068,16 +1120,28 @@ def _compile_fx_inner(
         # CACHE HIT: not much to really do, just make sure the cache key
         # is recorded on the graph
         else:
-            assert cache_info["cache_state"] == "hit"
-            assert mb_compiled_graph is not None
-            assert key_info is not None
+            if cache_info["cache_state"] != "hit":
+                raise AssertionError(
+                    f"Expected cache_state to be 'hit', got {cache_info['cache_state']!r}"
+                )
+            if mb_compiled_graph is None:
+                raise AssertionError(
+                    "Expected mb_compiled_graph to be set in cache hit path"
+                )
+            if key_info is None:
+                raise AssertionError("Expected key_info to be set in cache hit path")
             (cache_key, debug_lines) = key_info
             log.debug("FX cache hit with key: %s", cache_key)
             mb_compiled_graph._fx_graph_cache_key = cache_key
             mb_compiled_graph._fx_graph_cache_debug_lines = debug_lines
 
-        assert mb_compiled_graph is not None
+        if mb_compiled_graph is None:
+            raise AssertionError(
+                "Expected mb_compiled_graph to be set after cache handling"
+            )
         compiled_graph = mb_compiled_graph
+        if isinstance(compiled_graph, CompiledFxGraph):
+            compiled_graph.compile_region_name = compile_region_name
 
         # Logging and observability: we log a single chromium event
         # and a tlparse log for every cache action.
@@ -1091,9 +1155,10 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
+        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
-            metadata=cache_info or {},
+            metadata=cache_event_metadata,
             time_ns=start_time,
         )
         # Add event data about cache hits/miss
@@ -1124,6 +1189,10 @@ def _compile_fx_inner(
                 payload_fn=lambda: json.dumps(cache_info),
             )
         compiled_graph.post_compile(example_inputs, constants, graph_kwargs)
+
+        policy = config.cudagraph_policy
+        if policy is not None:
+            compiled_graph = policy.wrap_output(compiled_graph)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
@@ -1192,6 +1261,7 @@ class FxCompile(ABC):
 
     # Some stats for logging/debugging
     _compile_stats: dict[type[FxCompile], _FxCompileStat] = defaultdict(_FxCompileStat)
+    compile_region_name: str | None = None
 
     # TODO: We should probably eventually add some kind of async version of this
     # so we can kick off a compile and then go do other things - but we'll need
@@ -1227,7 +1297,8 @@ class _InProcessFxCompile(FxCompile):
         # TODO: _CompileFxKwargs actually has stronger types than in the
         # signature, need to tighten it up
 
-        assert "cudagraphs" in graph_kwargs and graph_kwargs["cudagraphs"] is not None
+        if "cudagraphs" not in graph_kwargs or graph_kwargs["cudagraphs"] is None:
+            raise AssertionError("Expected 'cudagraphs' to be set in graph_kwargs")
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
         static_input_idxs: Sequence[int] = graph_kwargs.get("static_input_idxs", ())
         is_backward: bool = graph_kwargs.get("is_backward", False)
@@ -1239,7 +1310,9 @@ class _InProcessFxCompile(FxCompile):
         extern_node_serializer: Callable[[list[ExternKernelNode]], Any] | None = (
             graph_kwargs.get("extern_node_serializer", None)
         )
-
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = graph_kwargs.get(
+            "get_decomp_fn", select_decomp_table
+        )
         with (
             _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard(),
             dynamo_utils.preserve_rng_state(),
@@ -1295,7 +1368,7 @@ class _InProcessFxCompile(FxCompile):
             # Convert view to reshape in the graph. This is necessary primarily for
             # layout optimization. Do it unconditionally for uniformity.
             #
-            # It's needed because when we do layout optimization, an contiguous tensor
+            # It's needed because when we do layout optimization, a contiguous tensor
             # in eager mode may becomes a channels last tensor. A view op previously
             # can be applied to the contiguous tensor may not be able to be applied
             # on the channels tensor any more. An error like
@@ -1435,12 +1508,14 @@ class _InProcessFxCompile(FxCompile):
                         is_backward=is_backward,
                         is_const_graph=True,
                         fx_wrapper=fx_wrapper,
+                        get_decomp_fn=get_decomp_fn,
                     )
                     with (
                         V.set_graph_handler(const_graph),
                         V.set_extern_kernel_nodes([]),
                     ):
-                        assert cpp_wrapper, "AOT mode only supports C++ wrapper"
+                        if not cpp_wrapper:
+                            raise AssertionError("AOT mode only supports C++ wrapper")
                         const_graph.run()
                         const_wrapper_code, const_kernel_code = (
                             const_graph.codegen_with_cpp_wrapper()
@@ -1469,6 +1544,7 @@ class _InProcessFxCompile(FxCompile):
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
+                    get_decomp_fn=get_decomp_fn,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -1511,7 +1587,10 @@ class _InProcessFxCompile(FxCompile):
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
                         if graph.aot_mode and graph.fx_wrapper:
-                            assert not graph.cpp_wrapper
+                            if graph.cpp_wrapper:
+                                raise AssertionError(
+                                    "Expected cpp_wrapper to be False for fx_wrapper AOT mode"
+                                )
                             compiled_fn = graph.codegen()[0].gm  # type: ignore[attr-defined]
                             output_code_log.debug(
                                 "Output graph module: \n%s",
@@ -1521,16 +1600,17 @@ class _InProcessFxCompile(FxCompile):
                         elif graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
-                            assert graph.cpp_wrapper, (
-                                "AOT mode only supports C++ wrapper"
-                            )
+                            if not graph.cpp_wrapper:
+                                raise AssertionError(
+                                    "AOT mode only supports C++ wrapper"
+                                )
                             wrapper_code, kernel_code = graph.codegen_with_cpp_wrapper()
                             output_code_log.debug(
-                                "Output wrapper code: \n%s", wrapper_code.value
+                                "AOT wrapper code: \n%s", wrapper_code.value
                             )
                             if kernel_code.value:
                                 output_code_log.debug(
-                                    "Output kernel code:\n%s", kernel_code.value
+                                    "AOT kernel code:\n%s", kernel_code.value
                                 )
 
                             serialized_extern_kernel_nodes = None
@@ -1678,11 +1758,14 @@ class _InProcessFxCompile(FxCompile):
 
                     # pyrefly: ignore [unbound-name]
                     if V.aot_compilation:
-                        assert isinstance(
+                        if not isinstance(
                             compiled_fn,
                             # pyrefly: ignore [unbound-name]
                             (str, list, torch.fx.GraphModule),
-                        ), type(compiled_fn)
+                        ):
+                            raise AssertionError(
+                                f"Expected compiled_fn to be str, list, or GraphModule, got {type(compiled_fn)}"
+                            )
                         return CompiledAOTI(
                             filename=compiled_fn, device_type=graph.device_type
                         )
@@ -1733,6 +1816,7 @@ class _InProcessFxCompile(FxCompile):
                         cudagraphs,
                         example_inputs,
                         static_input_idxs,
+                        self.compile_region_name,
                         graph_kwargs,
                         inputs_to_check,
                         runnable_graph_str,
@@ -1749,6 +1833,7 @@ def fx_codegen_and_compile(
     # This is derivable from the other inputs to this function, but we pass it
     # in explicitly because it's nontrivial to compute
     inputs_to_check: Sequence[int],
+    compile_region_name: str | None = None,
     **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     scheme: FxCompile
@@ -1769,28 +1854,39 @@ def fx_codegen_and_compile(
         from .compile_fx_ext import _OutOfProcessFxCompile
 
         # pyrefly: ignore [unbound-name]
-        assert isinstance(scheme, _OutOfProcessFxCompile), (
-            "async is only valid with an out-of-process compile mode"
-        )
+        if not isinstance(scheme, _OutOfProcessFxCompile):
+            raise AssertionError(
+                "async is only valid with an out-of-process compile mode"
+            )
         # pyrefly: ignore [unbound-name]
         scheme = _AsyncFxCompile(scheme)
+        scheme._compile.compile_region_name = (
+            compile_region_name  # pyrefly: ignore[attr-defined]
+        )
 
     if fx_compile_progressive:
         from .compile_fx_async import _ProgressiveFxCompile
         from .compile_fx_ext import _OutOfProcessFxCompile
 
         # pyrefly: ignore [unbound-name]
-        assert isinstance(scheme, _OutOfProcessFxCompile), (
-            "progressive is only valid with an out-of-process compile mode"
-        )
+        if not isinstance(scheme, _OutOfProcessFxCompile):
+            raise AssertionError(
+                "progressive is only valid with an out-of-process compile mode"
+            )
 
         progression_configs = _get_progression_configs()
 
         # Use in-process compile for the fast version
         fast_scheme = _InProcessFxCompile()
+        fast_scheme.compile_region_name = compile_region_name
 
         # pyrefly: ignore [unbound-name]
         scheme = _ProgressiveFxCompile(fast_scheme, scheme, progression_configs)
+        scheme._optimized_compile.compile_region_name = (
+            compile_region_name  # pyrefly: ignore[attr-defined]
+        )
+
+    scheme.compile_region_name = compile_region_name  # pyrefly: ignore[unbound-name]
 
     # pyrefly: ignore [unbound-name]
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
@@ -1863,13 +1959,14 @@ def cudagraphify(
     else:
         cudagraphify_fn = cudagraphify_impl
 
-    compiled_fn = None
+    thread_local = threading.local()
 
     def run(new_inputs: Sequence[InputType]) -> Any:
-        nonlocal compiled_fn
+        compiled_fn = getattr(thread_local, "compiled_fn", None)
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
+            thread_local.compiled_fn = compiled_fn
         return compiled_fn(new_inputs)  # type: ignore[arg-type]
 
     return run
@@ -1888,9 +1985,15 @@ def index_expanded_dims_and_copy_(
     expanded_dims: list[int],
 ) -> None:
     "Index into expanded dimensions of both dst and src then copy_"
-    dst = index_expanded_dims(dst, expanded_dims)
-    src = index_expanded_dims(src, expanded_dims)
-    dst.copy_(src)
+    indexed_dst = index_expanded_dims(dst, expanded_dims)
+    if torch._debug_has_internal_overlap(indexed_dst) != 0:
+        # dst still self-overlaps after dropping expanded dims (rare). A regular
+        # copy_ would have ambiguous semantics; bytewise-copy the strided extent
+        # instead so dst's overlap pattern is reproduced verbatim.
+        copy_strided_storage_(dst, src)
+        return
+    indexed_src = index_expanded_dims(src, expanded_dims)
+    indexed_dst.copy_(indexed_src)
 
 
 def cudagraphify_impl(
@@ -1908,7 +2011,8 @@ def cudagraphify_impl(
     )
     copy_misaligned_inputs(inputs, check_input_idxs)  # type: ignore[arg-type]
 
-    assert isinstance(inputs, list)
+    if not isinstance(inputs, list):
+        raise AssertionError(f"Expected inputs to be a list, got {type(inputs)}")
 
     inps_expanded_dims = [
         get_expanded_dims(x) if idx not in static_input_idxs else []
@@ -1953,15 +2057,26 @@ def cudagraphify_impl(
     if config.size_asserts:
 
         def run(new_inputs: list[InputType]) -> Callable[[list[InputType]], Any]:
-            assert len(static_inputs) == len(new_inputs)
+            if len(static_inputs) != len(new_inputs):
+                raise AssertionError(
+                    f"Expected static_inputs and new_inputs to have same length, "
+                    f"got {len(static_inputs)} vs {len(new_inputs)}"
+                )
             for idx, (dst, src, expanded_dims) in enumerate(
                 zip(static_inputs, new_inputs, inps_expanded_dims)
             ):
                 if not isinstance(dst, torch.Tensor):
                     continue
-                assert isinstance(src, torch.Tensor)
+                if not isinstance(src, torch.Tensor):
+                    raise AssertionError(
+                        f"Expected src at index {idx} to be a Tensor, got {type(src)}"
+                    )
                 if idx in static_input_idxs:
-                    assert dst.data_ptr() == src.data_ptr()
+                    if dst.data_ptr() != src.data_ptr():
+                        raise AssertionError(
+                            f"Expected static input at index {idx} to have same data_ptr, "
+                            f"got {dst.data_ptr()} vs {src.data_ptr()}"
+                        )
                 else:
                     # TODO - could make one single op of multiple slices
                     # and avoid dispatch.
@@ -1981,7 +2096,10 @@ def cudagraphify_impl(
             for idx in copy_indices:
                 expanded_dims = inps_expanded_dims[idx]
                 src = new_inputs[idx]
-                assert isinstance(src, torch.Tensor)
+                if not isinstance(src, torch.Tensor):
+                    raise AssertionError(
+                        f"Expected src at index {idx} to be a Tensor, got {type(src)}"
+                    )
                 index_expanded_dims_and_copy_(static_inputs[idx], src, expanded_dims)
             new_inputs.clear()
             graph.replay()
@@ -1997,7 +2115,8 @@ def compile_fx_aot(
     inner_compile: _CompileFxCallable = compile_fx_inner,
     config_patches: dict[str, Any] | None = None,
 ) -> list[str | Weights] | str | GraphModule:
-    assert isinstance(model_, GraphModule), model_
+    if not isinstance(model_, GraphModule):
+        raise AssertionError(f"Expected GraphModule, got {type(model_)}: {model_}")
 
     # [See NOTE] Unwrapping subclasses AOT
     unwrap_tensor_subclass_parameters(model_)
@@ -2014,12 +2133,13 @@ def compile_fx_aot(
     )
 
     if output_path:
-        assert not output_path.endswith(".pt2"), (
-            "The output path for aot_compile should not have an extension with .pt2 "
-            "this is for specifying the output path for the .so in AOTInductor. "
-            "If you would like to package the AOTInductor generated files "
-            "into a pt2, please call `torch._inductor.aoti_compile_and_package`."
-        )
+        if output_path.endswith(".pt2"):
+            raise AssertionError(
+                "The output path for aot_compile should not have an extension with .pt2 "
+                "this is for specifying the output path for the .so in AOTInductor. "
+                "If you would like to package the AOTInductor generated files "
+                "into a pt2, please call `torch._inductor.aoti_compile_and_package`."
+            )
     else:
         config_patches = {
             **config_patches,
@@ -2053,7 +2173,10 @@ def compile_fx_aot(
             config_patches=config_patches,
         )
 
-        assert isinstance(compiled_artifacts, CompiledAOTI)
+        if not isinstance(compiled_artifacts, CompiledAOTI):
+            raise AssertionError(
+                f"Expected CompiledAOTI, got {type(compiled_artifacts)}"
+            )
 
         return compiled_artifacts.filename
 
@@ -2067,6 +2190,7 @@ def fw_compiler_freezing(
     dynamo_model: GraphModule,
     num_example_inputs: int,
     inner_compile: Callable[..., Any],
+    # TODO: Take compiler_config_extra instead
     cudagraphs: BoxedBool,
     graph_id: int,
     forward_device: BoxedDeviceIndex,
@@ -2076,7 +2200,8 @@ def fw_compiler_freezing(
     # partition_fn won't be called
     inputs_devices = get_inputs_devices(aot_example_inputs, aot_autograd_model)
     aot_autograd_model = _recursive_joint_graph_passes(
-        aot_autograd_model, input_device=next(iter(inputs_devices))
+        aot_autograd_model,
+        input_device=next(iter(inputs_devices)),
     )
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
@@ -2108,12 +2233,18 @@ def fw_compiler_freezing(
     unwrapped_args_offsets = [0]
     max_offset_idx = 0
     if tracing_context is not None:
-        assert tracing_context.params_flat_unwrap_subclasses is not None
+        if tracing_context.params_flat_unwrap_subclasses is None:
+            raise AssertionError(
+                "Expected tracing_context.params_flat_unwrap_subclasses to be set"
+            )
         params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
         max_offset_idx = max(0, len(params_flat_unwrap) - 1)
         preserved_indices_params_flat = OrderedSet[int]()
         unwrapped_idxs = tracing_context.params_unwrapped_to_flat_index
-        assert unwrapped_idxs is not None
+        if unwrapped_idxs is None:
+            raise AssertionError(
+                "Expected tracing_context.params_unwrapped_to_flat_index to be set"
+            )
         current_offset = 0
         if len(params_flat_unwrap) > 0:
             unwrapped_args_offsets = []
@@ -2128,7 +2259,8 @@ def fw_compiler_freezing(
             unwrapped_args_offsets.append(current_offset)
 
         # Deallocate wrapped params, if all subelements were deallocated
-        assert tracing_context.params_flat is not None
+        if tracing_context.params_flat is None:
+            raise AssertionError("Expected tracing_context.params_flat to be set")
         for i in range(len(tracing_context.params_flat)):
             if i not in preserved_indices_params_flat:
                 tracing_context.params_flat[i] = None
@@ -2166,21 +2298,28 @@ def fw_compiler_freezing(
     return wrapper
 
 
-def get_cpp_wrapper_config() -> dict[str, object]:
-    if config.triton.cudagraphs:
+def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]:
+    if log_cudagraph_skip and config.triton.cudagraphs and config.graph_partition:
         log_cudagraph_skip_and_bump_counter(
-            format_default_skip_message("cpp wrapper enabled")
+            format_default_skip_message(
+                "cpp-wrapper does not support graph partition yet"
+            )
         )
 
+    autotune_at_compile_time = (
+        config.triton.autotune_at_compile_time
+        if config.triton.autotune_at_compile_time is not None
+        # Default to True for AOTI. Subject to change in future.
+        else has_triton() and V.aot_compilation
+    )
     return {
-        # Set autotune_at_compile_time to True as default if the option is not explicitly set
-        "triton.autotune_at_compile_time": (
-            config.triton.autotune_at_compile_time
-            if config.triton.autotune_at_compile_time is not None
-            else has_triton()
+        "triton.autotune_at_compile_time": autotune_at_compile_time,
+        "triton.autotune_cublasLt": not autotune_at_compile_time,
+        "triton.cudagraphs": (
+            config.triton.cudagraphs
+            and not V.aot_compilation
+            and not config.graph_partition
         ),
-        "triton.autotune_cublasLt": False,
-        "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
     }
 
@@ -2206,6 +2345,13 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
 def partition_fn(
     gm: GraphModule,
     joint_inputs: Sequence[object],
+    *,
+    # When set, replaces the default partitioner (`config.custom_partitioner_fn`
+    # or `min_cut_rematerialization_partition`) while still running Inductor's
+    # joint-graph passes first. Used by `_get_partition_fn` so HOP subgraphs
+    # go through the same joint-pass + raw-partitioner pipeline as the outer
+    # Inductor compile.
+    partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
     cuda_context = get_cuda_device_context(gm)
@@ -2215,12 +2361,22 @@ def partition_fn(
         # in partitioning.
         inputs_devices = get_inputs_devices(joint_inputs, gm)
         gm = _recursive_joint_graph_passes(
-            gm, skip_invoke_subgraph=True, input_device=next(iter(inputs_devices))
+            gm,
+            skip_invoke_subgraph=True,
+            input_device=next(iter(inputs_devices)),
         )
 
     static_lifetime_input_indices: list[int] | None = kwargs.pop(  # type: ignore[assignment]
         "static_lifetime_input_indices", None
     )
+
+    if partitioner_fn_override is not None:
+        return partitioner_fn_override(
+            gm,
+            joint_inputs,
+            static_lifetime_input_indices=static_lifetime_input_indices,
+            **kwargs,
+        )
 
     if config.custom_partitioner_fn is None:
         with dynamo_utils.dynamo_timed(
@@ -2235,7 +2391,11 @@ def partition_fn(
                 **kwargs,
             )
     else:
-        assert isinstance(config.custom_partitioner_fn, CustomPartitionerFn)
+        if not isinstance(config.custom_partitioner_fn, CustomPartitionerFn):
+            raise AssertionError(
+                f"Expected custom_partitioner_fn to be CustomPartitionerFn, "
+                f"got {type(config.custom_partitioner_fn)}"
+            )
         with dynamo_utils.dynamo_timed(
             config.custom_partitioner_fn.__class__.__name__,
             log_pt2_compile_event=True,
@@ -2271,12 +2431,15 @@ class CompilerConfigExtra:
     cudagraphs: BoxedBool
     graph_id: int
     forward_device: BoxedDeviceIndex
+    forward_is_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
 
 
 def create_compiler_config_extra(
-    config: types.ModuleType, gm_meta: dict[str, Any] | None = None
+    gm: GraphModule | GmWrapper,
 ) -> CompilerConfigExtra:
+    gm_meta = gm.meta if isinstance(gm, GraphModule) else None
+
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
     # force cudagraphs to be disabled.  This mutable box lets us retrieve
@@ -2320,11 +2483,17 @@ def create_compiler_config_extra(
     # See [Backward Generation Handling]
     forward_device = BoxedDeviceIndex(None)
 
+    # Set by the forward compilation when it is partitioned for CUDA graphs.
+    # The backward reads this to decide whether saved tensors can be assumed
+    # to have fixed addresses.
+    forward_is_partitioned = BoxedBool(False)
+
     return CompilerConfigExtra(
         cudagraphs=cudagraphs,
         graph_id=graph_id,
         forward_device=forward_device,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
+        forward_is_partitioned=forward_is_partitioned,
     )
 
 
@@ -2363,6 +2532,18 @@ def compile_fx_forward(
             ),
         )
 
+        # Snapshot stack traces on the output node before passes run,
+        # as later passes may strip stack_trace from individual nodes.
+        output = output_node(gm)
+        output.meta["output_stack_traces"] = [
+            (
+                arg.meta.get("stack_trace")
+                if isinstance(arg, torch.fx.node.Node)
+                else None
+            )
+            for arg in output.args[0]  # type: ignore[union-attr]
+        ]
+
         inputs_devices = get_inputs_devices(example_inputs, gm)
         gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
 
@@ -2395,7 +2576,11 @@ def compile_fx_forward(
         else:
             original_output_start_index = 0
 
-        assert num_orig_model_outputs <= num_model_outputs
+        if num_orig_model_outputs > num_model_outputs:
+            raise AssertionError(
+                f"Expected num_orig_model_outputs ({num_orig_model_outputs}) "
+                f"<= num_model_outputs ({num_model_outputs})"
+            )
 
         # Note [User Outputs in the inductor graph]
         # We makes the following assumption
@@ -2413,7 +2598,11 @@ def compile_fx_forward(
         orig_output_end_idx = original_output_start_index + num_orig_model_outputs
         # Sanity check: we are about to splice out the "user" outputs from the full set
         # of "graph" outputs. Make sure we're within bounds.
-        assert orig_output_end_idx <= num_model_outputs
+        if orig_output_end_idx > num_model_outputs:
+            raise AssertionError(
+                f"Expected orig_output_end_idx ({orig_output_end_idx}) "
+                f"<= num_model_outputs ({num_model_outputs})"
+            )
 
         model_outputs_node.meta["user_visible_output_idxs"] = [
             idx
@@ -2429,7 +2618,7 @@ def compile_fx_forward(
     _recursive_record_user_visible_output_idxs(gm)
 
     with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
-        return inner_compile(
+        result = inner_compile(
             gm,
             example_inputs,
             static_input_idxs=get_static_input_idxs(fixed),
@@ -2438,6 +2627,16 @@ def compile_fx_forward(
             is_inference=is_inference,
             boxed_forward_device_index=compiler_config_extra.forward_device,
         )
+
+        if (
+            not is_inference
+            and isinstance(result, CompiledFxGraph)
+            and result.partition_maps
+            and len(result.partition_maps) > 1
+        ):
+            compiler_config_extra.forward_is_partitioned.value = True
+
+        return result
 
 
 def compile_fx_backward(
@@ -2476,6 +2675,13 @@ def compile_fx_backward(
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
+        # When the forward was partitioned, saved activations from inline
+        # code between partitions are NOT at fixed addresses. Only mark
+        # primals (params/buffers) as static.
+        if compiler_config_extra.forward_is_partitioned.value:
+            static_input_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
+        else:
+            static_input_idxs = list(range(fixed))
         with (
             (
                 config.patch(get_cpp_wrapper_config())
@@ -2487,7 +2693,7 @@ def compile_fx_backward(
             return inner_compile(
                 gm,
                 example_inputs,
-                static_input_idxs=list(range(fixed)),
+                static_input_idxs=static_input_idxs,
                 cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
@@ -2545,6 +2751,21 @@ def run_pre_grad_passes(
     return model_
 
 
+@dataclass(frozen=True)
+class _ConstantDecompTable(Generic[_P, _T]):
+    """
+    Picklable wrapper around a user-supplied decomposition dict.
+
+    This module-level class is addressable as (module, qualname), so pickle can
+    serialize an instance by reducing its single field.
+    """
+
+    table: dict[OpOverload, Callable[_P, _T]]
+
+    def __call__(self) -> dict[OpOverload, Callable[_P, _T]]:
+        return self.table
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -2552,6 +2773,7 @@ def compile_fx(
     config_patches: dict[str, Any] | None = None,
     decompositions: dict[OpOverload, Callable[..., Any]] | None = None,
     ignore_shape_env: bool = False,
+    compile_region_name: str | None = None,
 ) -> CompileFxOutput:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
@@ -2564,6 +2786,13 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
+    if decompositions is not None:
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = (
+            _ConstantDecompTable(decompositions)
+        )
+    else:
+        get_decomp_fn = select_decomp_table
+
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
 
@@ -2582,7 +2811,14 @@ def compile_fx(
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
                 ignore_shape_env=ignore_shape_env,
+                compile_region_name=compile_region_name,
             )
+
+    # Keep region names out of graph_kwargs so they don't perturb FX cache keys.
+    inner_compile = functools.partial(
+        inner_compile,
+        compile_region_name=compile_region_name,
+    )
 
     # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
     if any(
@@ -2622,16 +2858,18 @@ def compile_fx(
                         cpp_wrapper=cpp_wrapper_config,
                         fx_wrapper=fx_wrapper_config,
                     ),
-                    decompositions=decompositions,
                     ignore_shape_env=ignore_shape_env,
+                    get_decomp_fn=get_decomp_fn,
+                    compile_region_name=compile_region_name,
                 )
 
     return _maybe_wrap_and_compile_fx_main(
         model_,
         example_inputs_,
         inner_compile,
-        decompositions,
         ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
+        compile_region_name=compile_region_name,
     )
 
 
@@ -2654,7 +2892,10 @@ def _extract_inputs_from_exported_gm(
         # Validate devices before switching to fake tensors.
         for idx, fi, i in zip(count(), fake_inputs, example_inputs_):
             if fi is not None and isinstance(fi, torch.Tensor):
-                assert isinstance(i, torch.Tensor)
+                if not isinstance(i, torch.Tensor):
+                    raise AssertionError(
+                        f"Expected example input at position #{idx} to be a Tensor, got {type(i)}"
+                    )
                 if fi.device != i.device:
                     raise ValueError(
                         f"Device mismatch between fake input and example input at position #{idx}: "
@@ -2670,8 +2911,10 @@ def _maybe_wrap_and_compile_fx_main(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode],
-    decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
+    *,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
+    compile_region_name: str | None = None,
 ) -> CompileFxOutput:
     """
     Part of compile_fx, called after patching configs.
@@ -2685,8 +2928,9 @@ def _maybe_wrap_and_compile_fx_main(
     compile_gm = functools.partial(
         _maybe_wrap_and_compile_fx_main,
         inner_compile=inner_compile,
-        decompositions=decompositions,
         ignore_shape_env=ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
+        compile_region_name=compile_region_name,
     )
     if not graph_returns_tuple(model_):
         return make_graph_return_tuple(model_, example_inputs_, compile_gm)
@@ -2707,8 +2951,9 @@ def _maybe_wrap_and_compile_fx_main(
         model_,
         example_inputs_,
         inner_compile,
-        decompositions,
         ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
+        compile_region_name=compile_region_name,
     )
 
 
@@ -2716,8 +2961,10 @@ def _compile_fx_main(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode],
-    decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
+    *,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
+    compile_region_name: str | None = None,
 ) -> CompileFxOutput:
     """
     Main part of compile_fx, called after wrapping is done.
@@ -2739,24 +2986,18 @@ def _compile_fx_main(
         ),
         torch._inductor.debug.reset_provenance_globals(),
     ):
-        # Pre-grad passes cannot be run if we weren't given a GraphModule.
-        # Dynamo will always produce a GraphModule, but this handles cases
-        # where a user directly passes a plain Module with the intention of
-        # having AOTAutograd trace it.
-        # TODO: Get rid of this?
-        if isinstance(model_, GraphModule):
-            model_ = run_pre_grad_passes(model_, example_inputs_)
+        # Note: Pre-grad passes are now run inside aot_module_simplified (via the
+        # pre_grad_passes callback) after the cache lookup.
 
-        assert not config._raise_error_for_testing
+        if config._raise_error_for_testing:
+            raise AssertionError("config._raise_error_for_testing is set")
 
         num_example_inputs = len(example_inputs_)
 
-        gm_meta = model_.meta if isinstance(model_, GraphModule) else None
-        compiler_config_extra = create_compiler_config_extra(config, gm_meta)
+        compiler_config_extra = create_compiler_config_extra(model_)
 
-        decompositions = (
-            decompositions if decompositions is not None else select_decomp_table()
-        )
+        decompositions = get_decomp_fn()
+        inner_compile = functools.partial(inner_compile, get_decomp_fn=get_decomp_fn)
 
         def fw_compiler_base(
             gm: GraphModule,
@@ -2828,6 +3069,12 @@ def _compile_fx_main(
 
             is_valid_aoti_model_name()
 
+            # Pre-grad passes for the aot_autograd path are run inside
+            # aot_module_simplified after the cache lookup.  The
+            # aot_export_module path doesn't use that cache so run them here.
+            if isinstance(model_, GraphModule):
+                model_ = run_pre_grad_passes(model_, example_inputs_)
+
             with functorch_config.patch(
                 unlift_effect_tokens=True,
                 selective_decompose=config.selective_decompose,
@@ -2838,7 +3085,10 @@ def _compile_fx_main(
                     trace_joint=False,
                     decompositions=decompositions,
                 )
-                assert isinstance(gm, GraphModule)
+                if not isinstance(gm, GraphModule):
+                    raise AssertionError(
+                        f"Expected GraphModule from aot_export_module, got {type(gm)}"
+                    )
                 from torch._export.utils import _detect_fake_mode_from_gm
 
                 fake_mode = _detect_fake_mode_from_gm(gm)  # type: ignore[assignment]
@@ -2852,7 +3102,10 @@ def _compile_fx_main(
                     if node.op == "get_attr" and "val" not in node.meta:
                         target = attrgetter(node.target)(gm)
                         if isinstance(target, torch.Tensor):
-                            assert fake_mode is not None
+                            if fake_mode is None:
+                                raise AssertionError(
+                                    "Expected fake_mode to be set for get_attr tensor node"
+                                )
                             node.meta["val"] = fake_mode.from_tensor(
                                 target, static_shapes=True
                             )
@@ -2899,16 +3152,17 @@ def _compile_fx_main(
             ),
         ):
             try:
-                return aot_autograd(
+                return dynamo_common.aot_autograd(
                     fw_compiler=fw_compiler,
                     bw_compiler=bw_compiler,
                     inference_compiler=inference_compiler,
                     decompositions=decompositions,
                     partition_fn=partition_fn,
                     keep_inference_input_mutations=True,
-                    cudagraphs=compiler_config_extra.cudagraphs,
-                    boxed_forward_device_index=compiler_config_extra.forward_device,
+                    compiler_config_extra=compiler_config_extra,
                     ignore_shape_env=ignore_shape_env,
+                    pre_grad_passes=run_pre_grad_passes,
+                    compile_region_name=compile_region_name,
                 )(model_, example_inputs_)
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.
@@ -2949,7 +3203,8 @@ def make_graph_return_tuple(
     with gm.graph.inserting_before(node):
         gm.graph.output(rv)
     gm.graph.erase_node(node)
-    assert graph_returns_tuple(gm)
+    if not graph_returns_tuple(gm):
+        raise AssertionError("Expected graph to return a tuple")
 
     compiled_fn = compile_gm(gm, inputs)
 
@@ -2986,8 +3241,8 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
     def warn_and_skip(device: torch.device | None) -> Never:
         from torch._dynamo.exc import SkipFrame
 
-        assert device is not None
-
+        if device is None:
+            raise AssertionError("Expected device to be set for bf16 support check")
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
         warnings.warn(
@@ -3005,8 +3260,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
             or node.get_dtype() != torch.bfloat16
         ):
             continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
         device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return
@@ -3027,11 +3280,12 @@ def _aoti_flatten_inputs(
     # pyrefly: ignore [missing-module-attribute]
     from .compile_fx import graph_returns_tuple
 
-    assert graph_returns_tuple(gm), (
-        "Graph output must be a tuple(). This is so that we can avoid "
-        "pytree processing of the outputs. Please change the module to "
-        "have tuple outputs."
-    )
+    if not graph_returns_tuple(gm):
+        raise AssertionError(
+            "Graph output must be a tuple(). This is so that we can avoid "
+            "pytree processing of the outputs. Please change the module to "
+            "have tuple outputs."
+        )
 
     # We will serialize the pytree info into the .so as constant strings
     in_spec = None
@@ -3077,7 +3331,7 @@ def _aoti_flatten_inputs(
     ]
 
     if in_spec is not None and received_spec != in_spec:
-        raise ValueError(  # noqa: B904
+        raise ValueError(
             "Trying to flatten user inputs with exported input tree spec: \n"
             f"{in_spec}\n"
             "but actually got inputs with tree spec of: \n"
@@ -3097,3 +3351,73 @@ def _aoti_flatten_inputs(
         }
     )
     return flat_example_inputs, options
+
+
+def autograd_cache_key(
+    graph,
+    example_inputs,
+    ignore_shape_env: bool,
+    decompositions=None,
+):
+    if config.cpp_wrapper or config.fx_wrapper:
+        raise RuntimeError(
+            "autograd_cache_key is not supported with cpp_wrapper or fx_wrapper"
+        )
+
+    decompositions = (
+        decompositions if decompositions is not None else select_decomp_table()
+    )
+    # compile_fx applies these graph transforms before reaching _compile_fx_main.
+    # Neither occurs on the torch.compile/Dynamo path (which always produces
+    # tuple-returning, pre-flattened graphs). Not supported by this API.
+    if isinstance(graph, GraphModule) and not graph_returns_tuple(graph):
+        raise NotImplementedError(
+            "autograd_cache_key does not support graphs that don't return a tuple"
+        )
+    if any(isinstance(x, (list, tuple, dict)) for x in example_inputs):
+        raise NotImplementedError(
+            "autograd_cache_key does not support nested container inputs"
+        )
+
+    compiler_config_extra = create_compiler_config_extra(graph)
+
+    # These context managers replicate the ones that _compile_fx_main sets up
+    # before calling aot_autograd, so that the config snapshot captured by
+    # autograd_cache_key is identical to a real compile_fx run:
+    #   _compile_fx_main outer with-block: _use_lazy_graph_module,
+    #       enable_python_dispatcher, preserve_node_meta,
+    #       reset_provenance_globals
+    #   _compile_fx_main aot_autograd with-block: V.set_fake_mode,
+    #       torch._guards.tracing, compiled_autograd._disable,
+    #       functorch_config.patch
+
+    fake_mode = detect_fake_mode(example_inputs) or torch._subclasses.FakeTensorMode(
+        allow_non_fake_inputs=True
+    )
+    tracing_context = (
+        torch._guards.TracingContext.try_get()
+        or torch._guards.TracingContext(fake_mode)
+    )
+
+    with (
+        functorch_config.patch(
+            unlift_effect_tokens=True, selective_decompose=config.selective_decompose
+        ),
+        _use_lazy_graph_module(dynamo_config.use_lazy_graph_module),
+        enable_python_dispatcher(),
+        torch.fx.traceback.preserve_node_meta(
+            config.trace.provenance_tracking_level == 1
+        ),
+        torch._inductor.debug.reset_provenance_globals(),
+        V.set_fake_mode(fake_mode),
+        torch._guards.tracing(tracing_context),
+        compiled_autograd._disable(),
+    ):
+        return aot_autograd.autograd_cache_key(
+            graph,
+            example_inputs,
+            ignore_shape_env=ignore_shape_env,
+            decompositions=decompositions,
+            compiler_config_extra=compiler_config_extra,
+            keep_inference_input_mutations=True,
+        )

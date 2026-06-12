@@ -10,17 +10,6 @@
 
 #define USE_LINALG_SOLVER
 
-// cusolverDn<T>potrfBatched may have numerical issue before cuda 11.3 release,
-// (which is cusolver version 11101 in the header), so we only use cusolver potrf batched
-// if cuda version is >= 11.3
-constexpr bool use_cusolver_potrf_batched_ = true;
-
-// cusolverDn<T>syevjBatched may have numerical issue before cuda 11.3.1 release,
-// (which is cusolver version 11102 in the header), so we only use cusolver syevj batched
-// if cuda version is >= 11.3.1
-// See https://github.com/pytorch/pytorch/pull/53040#issuecomment-793626268 and https://github.com/cupy/cupy/issues/4847
-constexpr bool use_cusolver_syevj_batched_ = true;
-
 // From cuSOLVER doc: Jacobi method has quadratic convergence, so the accuracy is not proportional to number of sweeps.
 //   To guarantee certain accuracy, the user should configure tolerance only.
 // The current pytorch implementation sets gesvdj tolerance to epsilon of a C++ data type to target the best possible precision.
@@ -59,8 +48,7 @@ void svd_cusolver(const Tensor& A,
 
 // entrance of calculations of `cholesky` using cusolver potrf and potrfBatched
 void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info);
-Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A, bool upper);
-Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor& result, Tensor& infos, bool upper);
+void _cholesky_solve_helper_cuda_cusolver(Tensor& self, const Tensor& A, bool upper);
 
 void geqrf_cusolver(const Tensor& input, const Tensor& tau);
 void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose);

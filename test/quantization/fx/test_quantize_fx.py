@@ -204,7 +204,6 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Optional
 from collections.abc import Callable
 
 class BinaryOp(torch.nn.Module):
@@ -5793,7 +5792,7 @@ class TestQuantizeFx(QuantizationTestCase):
             qconfig: QConfig,
             backend_config: BackendConfig,
             satisfies_constraints: bool,
-            qconfig_name: Optional[str] = None):
+            qconfig_name: str | None = None):
         """
         Helper method to validate whether `qconfig` satisfies the constraints specified in `backend_config`.
         """
@@ -5852,7 +5851,7 @@ class TestQuantizeFx(QuantizationTestCase):
         )
         backend_config = BackendConfig() \
             .set_backend_pattern_config(BackendPatternConfig(torch.nn.Linear)
-                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E128
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)
                 .add_dtype_config(dtype_config)
                 .set_root_module(torch.nn.Linear)
                 .set_reference_quantized_module(nnqr.Linear))
@@ -5904,7 +5903,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         backend_config = BackendConfig() \
             .set_backend_pattern_config(BackendPatternConfig(torch.nn.Linear)
-                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E128
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)
                 .add_dtype_config(dtype_config)
                 .set_root_module(torch.nn.Linear)
                 .set_reference_quantized_module(nnqr.Linear))
@@ -6277,7 +6276,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
             backend_pattern_configs.append(
                 BackendPatternConfig()
-                ._set_pattern_complex_format((torch.reshape, torch.transpose, MatchAllNode))  # noqa: E131
+                ._set_pattern_complex_format((torch.reshape, torch.transpose, MatchAllNode))
                 .set_observation_type(observation_type)
                 .set_dtype_configs(dtype_configs)
                 ._set_root_node_getter(root_node_getter)
@@ -9677,8 +9676,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
                     self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12, mode='sum')
                     self.linear = torch.nn.Linear(12, 1).to(dtype=torch.float)
 
-                def forward(self, input: torch.Tensor, offsets: Optional[torch.Tensor] = None,
-                            per_sample_weights: Optional[torch.Tensor] = None):
+                def forward(self, input: torch.Tensor, offsets: torch.Tensor | None = None,
+                            per_sample_weights: torch.Tensor | None = None):
                     x = self.emb(input, offsets, per_sample_weights)
                     x = self.linear(x)
                     return x

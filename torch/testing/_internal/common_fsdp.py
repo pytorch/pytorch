@@ -115,7 +115,7 @@ class FSDPTestModel(nn.Module, ABC):
 
     @abstractmethod
     def get_input(self, device) -> tuple[torch.Tensor, ...]:
-        """Returns an input for the model as as tuple."""
+        """Returns an input for the model as a tuple."""
         ...
 
     @abstractmethod
@@ -670,7 +670,7 @@ class ModuleWithDelay(FSDPTestModel):
         return loss
 
     def run_backward(self, loss):
-        orig_reduce_scatter = torch.distributed.reduce_scatter_tensor
+        orig_reduce_scatter = torch.distributed.reduce_scatter_single
 
         def _delayed_reduce_scatter(*args, **kwargs):
             if self.delay_before_reduction_ms > 0:
@@ -683,7 +683,7 @@ class ModuleWithDelay(FSDPTestModel):
             return orig_reduce_scatter(*args, **kwargs)
 
         with mock.patch(
-            "torch.distributed.reduce_scatter_tensor", _delayed_reduce_scatter
+            "torch.distributed.reduce_scatter_single", _delayed_reduce_scatter
         ):
             self.module.run_backward(loss)  # type: ignore[operator]
 
@@ -994,14 +994,14 @@ class DoubleLinear(nn.Module):
 # all threads use the patched value inside the context
 @contextlib.contextmanager
 def patch_all_gather(new_all_gather_into_tensor: Callable):
-    orig_all_gather = dist.all_gather_into_tensor
+    orig_all_gather = dist.all_gather_single
     dist.barrier()
-    dist.all_gather_into_tensor = new_all_gather_into_tensor
+    dist.all_gather_single = new_all_gather_into_tensor
     try:
         yield
     finally:
         dist.barrier()
-        dist.all_gather_into_tensor = orig_all_gather
+        dist.all_gather_single = orig_all_gather
 
 
 @contextlib.contextmanager
@@ -1042,14 +1042,14 @@ def patch_foreach_reduce(new_foreach_reduce: Callable):
 
 @contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
-    orig_reduce_scatter = dist.reduce_scatter_tensor
+    orig_reduce_scatter = dist.reduce_scatter_single
     dist.barrier()
-    dist.reduce_scatter_tensor = new_reduce_scatter_tensor
+    dist.reduce_scatter_single = new_reduce_scatter_tensor
     try:
         yield
     finally:
         dist.barrier()
-        dist.reduce_scatter_tensor = orig_reduce_scatter
+        dist.reduce_scatter_single = orig_reduce_scatter
 
 
 @contextlib.contextmanager
@@ -1222,7 +1222,7 @@ class FSDPTestMixin:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
-        # Actual tests will be skipped if there is no enough GPUs.
+        # Actual tests will be skipped if there are not enough GPUs.
         try:
             if fake_pg:
                 store = torch.testing._internal.distributed.fake_pg.FakeStore()
@@ -1565,7 +1565,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
-        # Actual tests will be skipped if there is no enough GPUs.
+        # Actual tests will be skipped if there are not enough GPUs.
         try:
             if fake_pg:
                 store = torch.testing._internal.distributed.fake_pg.FakeStore()
@@ -1687,14 +1687,12 @@ def compiled_fsdp_test(compile_compute_on_module: type | None = None):
                     )
                     continue
                 # barrier to ensure thread reading the same value
-                original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks
                 original_compile_threads = torch._inductor.config.compile_threads
                 torch.distributed.barrier()
 
                 if mode == FullyShardMode.EAGER:
                     fully_shard_patch = original_fully_shard
                 elif mode == FullyShardMode.COMPILED_COMPUTE:
-                    torch._dynamo.config.skip_fsdp_hooks = True
                     torch._inductor.config.compile_threads = 1
                     fully_shard_patch = fully_shard_with_compiled_compute  # type: ignore[assignment]
                 else:
@@ -1709,7 +1707,6 @@ def compiled_fsdp_test(compile_compute_on_module: type | None = None):
                 # other threads use patched func before this thread restores
                 torch.distributed.barrier()
                 func.__globals__[original_fully_shard.__name__] = original_fully_shard
-                torch._dynamo.config.skip_fsdp_hooks = original_skip_fsdp_hooks
                 torch._inductor.config.compile_threads = original_compile_threads
 
         return wrapper

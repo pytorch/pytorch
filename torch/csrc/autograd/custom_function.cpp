@@ -154,7 +154,7 @@ static void _process_forward_mode_AD(
             "forward mode gradients as-is. If the forward is modifying an input inplace, then the jvp "
             "function must modify the gradient inplace and return it as-is.")
       } else {
-        // If that Tensor didn't had gradients already, set the newly returned
+        // If that Tensor didn't have gradients already, set the newly returned
         // one We could also use inputs[inp_idx] here as it is the same as out
         out._set_fw_grad(out_grad, level, /* is_inplace_op */ true);
       }
@@ -259,7 +259,7 @@ static optional_variable_list _process_backward_mode_ad(
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
-    const std::shared_ptr<Node>& cdata,
+    const c10::intrusive_ptr<Node>& cdata,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
     bool pure_view) {
@@ -267,7 +267,7 @@ static optional_variable_list _process_backward_mode_ad(
 
 #ifndef STRIP_ERROR_MESSAGES
   const char* error_msg_input_returned_as_is =
-      "A input that has been returned as-is as output is being saved for backward. "
+      "An input that has been returned as-is as output is being saved for backward. "
       "This is not supported if you override setup_context. You should return and "
       "save a view of the input instead, e.g. with x.view_as(x) or setup ctx inside "
       "the forward function itself.";
@@ -447,7 +447,7 @@ optional_variable_list _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
-    const std::shared_ptr<Node>& cdata,
+    const c10::intrusive_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,

@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum
-from typing import Any, Optional, overload, Union
+from typing import Any, overload
 
 import torch
 from torch import Tensor
@@ -55,6 +55,7 @@ class Reducer:
         skip_all_reduce_unused_params: bool = ...,
         use_python_reducer: bool = ...,
         bucket_bytes_cap_list: list[int] = ...,
+        batched_grad_copy: bool = ...,
     ) -> None: ...
     def prepare_for_forward(self) -> None: ...
     def prepare_for_backward(self, output: list[Tensor]) -> None: ...
@@ -119,6 +120,8 @@ def set_debug_level_from_env() -> None: ...
 class ReduceOp:
     # pyrefly: ignore  # unknown-name
     def __init__(self, op: RedOpType) -> None: ...
+    @property
+    def factor(self) -> float | Tensor: ...
 
     # pyrefly: ignore  # unknown-name
     SUM: RedOpType = ...
@@ -146,7 +149,9 @@ class ReduceOp:
     # stub with zero members. There is a chance this is due to a recent change
     # in the semantics of enum membership. If so, use `member = value` to mark
     # an enum member, instead of `member: type`
-    class RedOpType(Enum): ...  # type: ignore[misc]
+    class RedOpType(Enum):
+        def __call__(self, factor: float | int | Tensor) -> ReduceOp:
+            """Create a PREMUL_SUM ReduceOp with the given factor. Only PREMUL_SUM supports this."""
 
 class BroadcastOptions:
     rootRank: int
@@ -158,7 +163,7 @@ class AllreduceOptions:
     reduceOp: ReduceOp
     timeout: timedelta
     asyncOp: bool
-    sparseIndices: Optional[Tensor]
+    sparseIndices: Tensor | None
 
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
@@ -198,6 +203,57 @@ class AllToAllOptions:
     timeout: timedelta
     asyncOp: bool
 
+class ReconfigureOptions:
+    uuid: int
+    handles: set[str] | list[str]
+    timeout: timedelta | None
+    hints: dict[str, str]
+
+class PutOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class SignalOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class WaitSignalOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class WindowAccessType(Enum):
+    UNIFIED = ...
+    SEPARATE = ...
+
+class WindowAttr:
+    access_type: WindowAccessType
+
+class Window:
+    def tensor_register(self, tensor: Tensor, owning: bool = ...) -> None: ...
+    def tensor_deregister(self) -> None: ...
+    def put(
+        self,
+        tensor: Tensor,
+        dst_rank: int,
+        target_offset_nelems: int,
+        async_op: bool,
+        opts: PutOptions = ...,
+    ) -> Work: ...
+    def map_remote_tensor(self, rank: int) -> Tensor: ...
+    def signal(
+        self,
+        peer_rank: int,
+        async_op: bool,
+        opts: SignalOptions = ...,
+    ) -> Work: ...
+    def wait_signal(
+        self,
+        peer_rank: int,
+        async_op: bool,
+        opts: WaitSignalOptions = ...,
+    ) -> Work: ...
+    def get_attr(self, peer_rank: int) -> WindowAttr: ...
+
 class Store:
     def set(self, key: str, value: str) -> None: ...
     def get(self, key: str) -> bytes: ...
@@ -218,7 +274,7 @@ class Store:
     @overload
     def wait(self, keys: list[str], timeout: timedelta) -> None: ...
     def queue_pop(self, key: str, block: bool = True) -> bytes: ...
-    def queue_push(self, key: str, value: Union[bytes, str]) -> None: ...
+    def queue_push(self, key: str, value: bytes | str) -> None: ...
     def queue_len(self, key: str) -> int: ...
     def list_keys(self) -> list[str]: ...
 
@@ -318,6 +374,8 @@ class Backend:
         def _timeout(self, val: timedelta) -> None: ...
         global_ranks_in_group: list[int]
         group_name: GroupName
+        use_pg_for_symm_mem_rendezvous: bool
+        enable_reconfigure: bool
 
     def __init__(
         self,
@@ -330,6 +388,13 @@ class Backend:
     def supports_coalescing(self) -> bool: ...
     @property
     def supports_time_estimate(self) -> bool: ...
+    @property
+    def supports_reconfigure(self) -> bool: ...
+    def get_reconfigure_handle(self) -> str: ...
+    def reconfigure(self, opts: ReconfigureOptions) -> Work: ...
+    @property
+    def supports_window(self) -> bool: ...
+    def new_window(self, tensor: Tensor | None = None) -> Window: ...
     def set_timeout(self, timeout: timedelta) -> None: ...
     @property
     def options(self) -> Options: ...
@@ -375,22 +440,30 @@ class ProcessGroup:
     def split_group(
         self,
         new_ranks: list[int],
-        timeout: Optional[timedelta] = None,
-        opts: Optional[Backend.Options] = None,
+        timeout: timedelta | None = None,
+        opts: Backend.Options | None = None,
         group_name: GroupName | None = None,
-        group_desc: Optional[str] = None,
-    ) -> Optional[ProcessGroup]: ...
+        group_desc: str | None = None,
+        device_types: list[torch.device] | None = None,
+    ) -> ProcessGroup | None: ...
     def merge_remote_group(
         self,
         store: Store,
         size: int,
         timeout: timedelta,
         group_name: GroupName | None = None,
-        group_desc: Optional[str] = None,
+        group_desc: str | None = None,
     ) -> ProcessGroup: ...
     def abort(self) -> None: ...
     def set_timeout(self, timeout: timedelta) -> None: ...
     def shutdown(self) -> None: ...
+    @property
+    def supports_reconfigure(self) -> bool: ...
+    def get_reconfigure_handle(self) -> str: ...
+    def reconfigure(self, opts: ReconfigureOptions) -> Work: ...
+    @property
+    def supports_window(self) -> bool: ...
+    def new_window(self, tensor: Tensor | None = None) -> Window: ...
     @overload
     def broadcast(
         self,
@@ -429,6 +502,12 @@ class ProcessGroup:
         tensors: list[Tensor],
         opts=...,
     ) -> Work: ...
+    def reduce_scatter_single_coalesced(
+        self,
+        outputTensors: list[Tensor],
+        inputTensors: list[Tensor],
+        opts: ReduceScatterOptions | None = None,
+    ) -> Work: ...
     def reduce_scatter_tensor_coalesced(
         self,
         outputTensors: list[Tensor],
@@ -463,6 +542,12 @@ class ProcessGroup:
         input_tensor: Tensor,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def all_gather_single(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts=...,
+    ) -> Work: ...
     def _allgather_base(
         self,
         output: Tensor,
@@ -472,6 +557,12 @@ class ProcessGroup:
     def allgather_coalesced(
         self,
         output_lists: list[list[Tensor]],
+        input_list: list[Tensor],
+        opts=...,
+    ) -> Work: ...
+    def all_gather_single_coalesced(
+        self,
+        output_lists: list[Tensor],
         input_list: list[Tensor],
         opts=...,
     ) -> Work: ...
@@ -526,11 +617,35 @@ class ProcessGroup:
         op=...,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def reduce_scatter_single(
+        self,
+        outputTensor: Tensor,
+        inputTensor: Tensor,
+        opts: ReduceScatterOptions | None,
+    ) -> Work: ...
     def _reduce_scatter_base(
         self,
         outputTensor: Tensor,
         inputTensor: Tensor,
         opts: ReduceScatterOptions | None,
+    ) -> Work: ...
+    @overload
+    def all_to_all_single(
+        self,
+        output_tensor: Tensor,
+        input_tensor: Tensor,
+        output_split_sizes: list[int],
+        input_split_sizes: list[int],
+        opts=...,
+    ) -> Work: ...
+    @overload
+    def all_to_all_single(
+        self,
+        output: Tensor,
+        input: Tensor,
+        output_split_sizes: list[int],
+        input_split_sizes: list[int],
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def alltoall_base(
@@ -609,6 +724,16 @@ class ProcessGroup:
     @bound_device_id.setter
     def bound_device_id(self, device: torch.device | None) -> None: ...
     @property
+    def use_pg_for_symm_mem_rendezvous(self) -> bool:
+        """When True, symmetric memory rendezvous exchanges metadata via this
+        PG's NCCL allgather instead of TCPStore, which gets overloaded at large
+        rank counts. This will lazily create the NCCL communicator if it doesn't
+        already exist. If this PG is only used for symmetric memory (no regular
+        collectives), consider calling ``abort()`` after rendezvous to release
+        the communicator."""
+    @use_pg_for_symm_mem_rendezvous.setter
+    def use_pg_for_symm_mem_rendezvous(self, value: bool) -> None: ...
+    @property
     def group_name(self) -> GroupName: ...
     @property
     def group_desc(self) -> str: ...
@@ -622,6 +747,15 @@ class FakeWork(Work):
     def __init__(self) -> None: ...
     def wait(self, timeout: timedelta = ...) -> bool: ...
     def getFuture(self) -> Future: ...
+
+class NCCLXStub(Backend):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: ProcessGroupNCCL.Options = ...,
+    ) -> None: ...
 
 class PythonCallbackWork(Work):
     def __init__(self, callback: Callable[[timedelta], bool]) -> None: ...
@@ -643,6 +777,7 @@ class ProcessGroupGloo(Backend):
         rank: int,
         size: int,
         timeout: timedelta,
+        enable_reconfigure: bool = ...,
     ) -> None: ...
     @staticmethod
     def create_device(hostname="", interface="", lazy_init=None) -> Device: ...
@@ -746,7 +881,7 @@ def _verify_params_across_processes(
     params: list[Tensor],
     logger: Logger | None,
 ): ...
-def _make_nccl_premul_sum(factor: float | list[Tensor]) -> ReduceOp: ...
+def _make_nccl_premul_sum(factor: float | Tensor) -> ReduceOp: ...
 def _register_process_group(
     group_name: GroupName,
     process_group: ProcessGroup,
@@ -768,6 +903,10 @@ def _nvshmemx_cumodule_init(module: int) -> None: ...
 
 # Check if NVSHMEM is available on current system.
 def _is_nvshmem_available() -> bool: ...
+def _register_external_nccl_comm(
+    group_name: str, comm_ptr: int, device: torch.device
+) -> None: ...
+def _unregister_external_nccl_comm(group_name: str, device: torch.device) -> None: ...
 
 class _SymmetricMemory:
     @staticmethod
@@ -795,7 +934,9 @@ class _SymmetricMemory:
     @staticmethod
     def set_backend(name: str) -> None: ...
     @staticmethod
-    def get_backend(device: torch.device) -> Optional[str]: ...
+    def get_backend(device: torch.device) -> str | None: ...
+    @staticmethod
+    def is_symm_mem_tensor(tensor: torch.Tensor) -> bool: ...
     @staticmethod
     def get_mempool_allocator(device: torch.device) -> Any: ...
     signal_pad_size: int
@@ -893,3 +1034,5 @@ class _Response:
 def _register_handler(
     name: str, handler: Callable[[_Request, _Response], None]
 ) -> None: ...
+def _set_comm_profiling_name(name: str) -> None: ...
+def _get_comm_profiling_name() -> str: ...

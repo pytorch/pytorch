@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 
+from ...runtime.hints import get_warp_size
 from ..common import (
     DeviceOpOverrides,
     register_device_op_overrides,
@@ -25,6 +26,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
 
     def device_guard(self, device_idx: int) -> str:
         return f"torch.cuda._DeviceGuard({device_idx})"
+
+    def current_stream(self) -> str:
+        return "torch.cuda.current_stream()"
 
     def cpp_device_guard(self) -> str:
         return "at::cuda::CUDAGuard"
@@ -50,6 +54,10 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         return source_codes
 
     def kernel_driver(self) -> str:
+        """Return C++ host-side helpers (loadKernel, launchKernel, CUDA_DRIVER_CHECK)
+        embedded in AOTI-generated wrapper code."""
+        # NVIDIA devices have a warp size of 32, while AMD devices can have a
+        # warp size of 32 or 64 depending on the architecture.
         source_codes = """
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
@@ -72,7 +80,8 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     std::string filePath,
                     const std::string &funcName,
                     uint32_t sharedMemBytes,
-                    const std::optional<std::string> &cubinDir = std::nullopt) {
+                    const std::optional<std::string> &cubinDir = std::nullopt,
+                    std::vector<CUmodule>* loaded_modules = nullptr) {
                 if (cubinDir) {
                     std::filesystem::path p1{*cubinDir};
                     std::filesystem::path p2{filePath};
@@ -82,6 +91,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 CUmodule mod;
                 CUfunction func;
                 CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
                     CUDA_DRIVER_CHECK(cuFuncSetAttribute(
@@ -93,10 +105,17 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 return func;
             }
 
-            static inline CUfunction loadKernel(const void* start, const std::string &funcName, uint32_t sharedMemBytes) {
+            static inline CUfunction loadKernel(
+                    const void* start,
+                    const std::string &funcName,
+                    uint32_t sharedMemBytes,
+                    std::vector<CUmodule>* loaded_modules = nullptr) {
                 CUmodule mod;
                 CUfunction func;
                 CUDA_DRIVER_CHECK(cuModuleLoadData(&mod, start));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
                     CUDA_DRIVER_CHECK(cuFuncSetAttribute(
@@ -118,17 +137,16 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     void* args[],
                     cudaStream_t stream) {
                 CUDA_DRIVER_CHECK(cuLaunchKernel(
-                    func, gridX, gridY, gridZ, 32*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
+                    func, gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
                 ));
             }
         """
-        if torch.version.hip is not None:
-            # Adjusting the warp size to GPU supported wavefront size on AMD GPU
-            prop = torch.cuda.get_device_properties(torch.cuda.current_device())
-            source_codes = source_codes.replace(
-                "32*numWarps", str(prop.warp_size) + "*numWarps"
-            )
-        return source_codes
+        if torch.version.hip is not None and torch.cuda.is_available():
+            device = torch.device("cuda", torch.cuda.current_device())
+            warp_size = get_warp_size(device)
+        else:
+            warp_size = 32
+        return source_codes.replace("__WARP_SIZE__", str(warp_size))
 
     def tma_descriptor_helpers(self) -> str:
         """
@@ -336,7 +354,10 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         prefix = f"{prefix}_" if prefix else ""
         var_name = f"{prefix}scratch_{idx}"
         if workspace.size > 0:
-            size_array = f"int64_t {var_name}_size[] = {{{workspace.size}}};"
+            size_expr = (
+                f"static_cast<int64_t>({workspace.size}) * grid_0 * grid_1 * grid_2"
+            )
+            size_array = f"int64_t {var_name}_size[] = {{{size_expr}}};"
             stride_array = f"int64_t {var_name}_stride[] = {{1}};"
             device_type = "cached_torch_device_type_cuda"
             device_idx = "device_idx_"
