@@ -239,6 +239,76 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
         self.assertEqual(rand3_1.getstate(), rand3_2.getstate())
 
+    def test_random_object_shuffle(self):
+        # shuffle on an explicit Random object is an exact, reproducible,
+        # index-only permutation, so it also works for non-constant (tensor)
+        # elements. The trailing draw checks the RNG state advanced correctly.
+        def fn(x):
+            r = random.Random(42)
+            items = list(range(10))
+            r.shuffle(items)
+            tensors = [x + i for i in range(5)]
+            r.shuffle(tensors)
+            return items, tensors, r.random()
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref_items, ref_tensors, ref_r = fn(x)
+        res_items, res_tensors, res_r = opt_fn(x)
+        self.assertEqual(ref_items, res_items)
+        self.assertEqual(ref_tensors, res_tensors)
+        self.assertEqual(ref_r, res_r)
+
+    def test_random_object_sample(self):
+        # sample selects index positions, so it is exact/reproducible for an
+        # explicit Random object and works over sequence populations (ranges,
+        # strings) as well as non-constant (tensor) elements.
+        def fn(x):
+            r = random.Random(42)
+            from_range = r.sample(range(100), 5)
+            from_str = r.sample("abcdefghij", 3)
+            tensors = [x + i for i in range(8)]
+            from_tensors = r.sample(tensors, 3)
+            return from_range, from_str, from_tensors, r.random()
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+        self.assertEqual(ref[2], res[2])
+        self.assertEqual(ref[3], res[3])
+
+    def test_random_object_sample_raises(self):
+        # A sample larger than the population raises ValueError like eager.
+        def fn():
+            r = random.Random(0)
+            return r.sample([1, 2, 3], 5)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            opt_fn()
+
+    def test_random_module_shuffle_sample(self):
+        # Module-level random.shuffle/random.sample must trace under fullgraph
+        # (exercised by the CPython dict/list tests). Like an explicit Random
+        # object, the global RNG state is snapshotted at compile time, so assert
+        # structural correctness rather than cross-run reproducibility.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            items = list(range(10))
+            random.shuffle(items)
+            picks = random.sample("abcdefghij", 4)
+            return items, picks, x + 1
+
+        random.seed(0)
+        items, picks, _ = fn(torch.zeros(2))
+        self.assertEqual(sorted(items), list(range(10)))
+        self.assertEqual(len(picks), 4)
+        self.assertEqual(len(set(picks)), 4)
+        self.assertTrue(all(p in "abcdefghij" for p in picks))
+
     def test_random_object_overridden_methods(self):
         # these will result in graph breaks, but we shouldn't crash
         def get_rng():
@@ -525,6 +595,26 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         )
         sample_input = torch.tensor([4, 4, 16, 32], dtype=torch.uint8)
         opt_fn(sample_input)
+
+    def test_lshift_scalar_dynamic(self):
+        def shift_left(x: int) -> int:
+            return 1 << x
+
+        opt_fn = torch.compile(
+            shift_left, fullgraph=True, dynamic=True, backend="eager"
+        )
+        self.assertEqual(opt_fn(1), 2)
+        self.assertEqual(opt_fn(5), 32)
+
+    def test_rshift_scalar_dynamic(self):
+        def shift_right(x: int) -> int:
+            return 64 >> x
+
+        opt_fn = torch.compile(
+            shift_right, fullgraph=True, dynamic=True, backend="eager"
+        )
+        self.assertEqual(opt_fn(2), 16)
+        self.assertEqual(opt_fn(4), 4)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_symfloat_to_tensor(self):
@@ -845,12 +935,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             f(torch.randn(80, 100), 80)
 
         out = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
-        self.assertExpectedInline(
-            out,
-            """\
-def forward(self):
-        return ()""",
-        )
+        self.assertEqual(out.count("torch.ops.aten._assert_scalar.default"), 2)
+        self.assertRegex(out, r"l_(y|args_1)_ \+ 5")
+        self.assertRegex(out, r"l_(x|args_0)_\.size\(0\)")
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_split_aot_autograd(self):

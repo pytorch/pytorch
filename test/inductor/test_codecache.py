@@ -14,6 +14,7 @@ import tempfile
 import textwrap
 import types
 import unittest
+import warnings
 from contextlib import contextmanager
 from typing import Any, cast
 from typing_extensions import override
@@ -26,7 +27,7 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
-from torch._inductor import config, metrics
+from torch._inductor import config, config_comms, metrics
 from torch._inductor.cache_key import (
     AUTOTUNE_CACHE_KEY_STRATEGY,
     CacheKeyStrategy,
@@ -335,6 +336,14 @@ if not torch._library.opaque_object.is_opaque_type(_CyclicOpaque):
     torch._library.opaque_object.register_opaque_type(_CyclicOpaque, typ="reference")
 
 
+def _custom_empty(*args: object, **kwargs: object) -> None:
+    return None
+
+
+# Verify factory detection does not match arbitrary functions named like torch.empty.
+_custom_empty.__name__ = "empty"
+
+
 class TestPyCodeCache(TestCase):
     def test_linemaps_empty(self):
         src = """import torch"""
@@ -343,6 +352,34 @@ class TestPyCodeCache(TestCase):
         PyCodeCache.load_by_key_path(key, path, linemap=[])
         stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
         self.assertEqual(stack_frames, None)
+
+    def test_load_by_key_path_can_defer_sys_modules_registration(self):
+        """
+        Benchmark-only modules should not need a global ``sys.modules`` entry,
+        but a later normal runtime load must still be able to publish the same
+        cached module there.
+        """
+        module_name = None
+        try:
+            PyCodeCache.cache_clear()
+            key, path = PyCodeCache.write("value = 1\n")
+
+            module = PyCodeCache.load_by_key_path(
+                key,
+                path,
+                set_sys_modules=False,
+            )
+            module_name = module.__name__
+            self.assertNotIn(module_name, sys.modules)
+
+            registered_module = PyCodeCache.load_by_key_path(key, path)
+            self.assertIs(registered_module, module)
+            self.assertIn(module_name, sys.modules)
+            self.assertIs(sys.modules[module_name], module)
+        finally:
+            if module_name is not None:
+                sys.modules.pop(module_name, None)
+            PyCodeCache.cache_clear()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_editable_cached_wrapper(self):
@@ -503,6 +540,69 @@ class TestFxGraphCache(TestCase):
                 if filename.endswith(binary_ext):
                     found.append(os.path.join(dirpath, filename))
         return found
+
+    def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
+        script = textwrap.dedent(
+            f"""
+            import os
+            import torch
+            import warnings
+            from torch._dynamo.utils import counters
+            from torch._inductor import config
+
+            warnings.filterwarnings("ignore")
+            config.fx_graph_cache = True
+            config.fx_graph_remote_cache = False
+            torch.set_num_threads(int(os.environ["TEST_THREADS"]))
+            torch._dynamo.reset()
+
+            @torch.compile(backend="inductor")
+            def f():
+                return {return_expr}
+
+            f()
+            print(f"threads {{torch.get_num_threads()}}")
+            print(f"fxgraph_cache_hit {{counters['inductor']['fxgraph_cache_hit']}}")
+            print(f"fxgraph_cache_miss {{counters['inductor']['fxgraph_cache_miss']}}")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = os.environ.copy()
+            env["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
+            env["PYTHONPATH"] = os.pathsep.join(
+                x for x in (os.getcwd(), env.get("PYTHONPATH", "")) if x
+            )
+
+            env1 = env.copy()
+            env1["TEST_THREADS"] = "1"
+            out1 = subprocess.check_output(
+                [sys.executable, "-c", script], env=env1
+            ).decode()
+            self.assertIn("threads 1", out1)
+            self.assertIn("fxgraph_cache_hit 0", out1)
+            self.assertIn("fxgraph_cache_miss 1", out1)
+
+            env2 = env.copy()
+            env2["TEST_THREADS"] = "2"
+            out2 = subprocess.check_output(
+                [sys.executable, "-c", script], env=env2
+            ).decode()
+            self.assertIn("threads 2", out2)
+            self.assertIn("fxgraph_cache_hit 0", out2)
+            self.assertIn("fxgraph_cache_miss 1", out2)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_cpu_thread_count_cache_key_no_input_factory(self):
+        self._check_cpu_thread_count_cache_key_no_input(
+            "torch.log(torch.arange(1 << 12, dtype=torch.float32) + 1)"
+        )
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_cpu_thread_count_cache_key_no_input_randperm(self):
+        self._check_cpu_thread_count_cache_key_no_input(
+            "torch.randperm(1 << 12, dtype=torch.float32).log()"
+        )
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -1419,6 +1519,49 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @requires_cuda_and_triton
+    def test_cache_hit_inductor_guard_preserves_source(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        def mask_fn(b, h, q_idx, kv_idx):
+            return (q_idx - kv_idx <= 512) & (kv_idx - q_idx <= 512)
+
+        def run(compiled_fn, seq_len):
+            x = torch.empty((1, 1, seq_len, 1), dtype=torch.float16, device="cuda")
+            torch._dynamo.mark_dynamic(x, 2)
+            result = compiled_fn(
+                mask_fn,
+                B=None,
+                H=None,
+                Q_LEN=x.size(-2),
+                KV_LEN=x.size(-2),
+                device="cuda",
+            )
+            torch.cuda.synchronize()
+            return result
+
+        compiled_fn = torch.compile(create_block_mask, fullgraph=True, dynamic=True)
+        run(compiled_fn, 10_000)
+
+        self.reset()
+        counters.clear()
+
+        compiled_fn = torch.compile(create_block_mask, fullgraph=True, dynamic=True)
+        run(compiled_fn, 10_000)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            with self.assertRaises(torch._dynamo.exc.RecompileError) as cm:
+                run(compiled_fn, 50_000)
+
+        msg = str(cm.exception)
+        self.assertIn("can_use_32bit_indexing", msg)
+        self.assertNotIn("_lookup_graph", msg)
+        self.assertNotIn("autograd_cache.py", msg)
+        self.assertNotIn("<string>:1", msg)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     def test_cache_load_with_guards_static_bounds(self, device, dtype):
@@ -1555,6 +1698,90 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
+    @requires_gpu()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_cache_hit_aligned_and_unaligned_inputs(self):
+        """
+        A function compiled with an aligned GPU input should share a cache
+        entry with the same function called with an unaligned GPU input.
+
+        `inputs_to_check` (derived from the example input's actual alignment)
+        used to feed into the cache key, so an aligned vs. unaligned first
+        call produced different keys and a second cache miss. It is no longer
+        part of the key: codegen still picks the aligned vs. unaligned kernel
+        based on the example, but the compiled artifact carries its own runtime
+        realignment (copy_if_misaligned for the inputs the kernel assumes
+        aligned). The cached graph therefore services both alignments --
+        whichever variant compiled first realigns the other at runtime.
+        """
+        device = GPU_TYPE
+
+        def fn(x):
+            return torch.nn.functional.relu(x) * 2
+
+        # Aligned: storage_offset == 0.
+        aligned = torch.randn(1024, device=device)
+        # Unaligned: storage_offset == 1, so data_ptr is offset by
+        # sizeof(float) and is no longer 16-byte aligned.
+        unaligned = torch.randn(1024 + 16, device=device)[1:-15]
+        self.assertEqual(aligned.data_ptr() % 16, 0)
+        self.assertNotEqual(unaligned.data_ptr() % 16, 0)
+        self.assertEqual(aligned.shape, unaligned.shape)
+
+        compiled_fn = torch.compile(fn)
+
+        # First call with the aligned tensor: cache miss.
+        self.assertEqual(fn(aligned), compiled_fn(aligned))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # Drop in-memory state so the cache lookup is exercised.
+        self.reset()
+
+        # Call with the unaligned tensor: should hit.
+        self.assertEqual(fn(unaligned), compiled_fn(unaligned))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        # And back to aligned: still a hit, same cached graph.
+        self.reset()
+        self.assertEqual(fn(aligned), compiled_fn(aligned))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+
+    @requires_gpu()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_aligned_unaligned_inputs_no_recompile(self):
+        """
+        Alignment is deliberately not guarded (storage_offset guards cause
+        recompiles), so calling a compiled function in-process with an aligned
+        then an unaligned variant of the same input must reuse the same graph
+        without recompiling. The unaligned input is realigned at runtime via
+        copy_if_misaligned.
+        """
+        device = GPU_TYPE
+
+        def fn(x):
+            return torch.nn.functional.relu(x) * 2
+
+        aligned = torch.randn(1024, device=device)
+        unaligned = torch.randn(1024 + 16, device=device)[1:-15]
+        self.assertEqual(aligned.data_ptr() % 16, 0)
+        self.assertNotEqual(unaligned.data_ptr() % 16, 0)
+        self.assertEqual(aligned.shape, unaligned.shape)
+
+        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_fn = torch.compile(fn, backend=backend)
+
+        self.assertEqual(fn(aligned), compiled_fn(aligned))
+        self.assertEqual(backend.frame_count, 1)
+
+        # A differently-aligned input must NOT trigger a recompile.
+        self.assertEqual(fn(unaligned), compiled_fn(unaligned))
+        self.assertEqual(backend.frame_count, 1)
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("variant", ("v1", "v2"))
@@ -1686,6 +1913,70 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_graphsafe_rng_cache_hit(self):
+        """graphsafe_run_with_rng_state must not bypass FxGraphCache.
+
+        Activation checkpointing with preserve_rng_state=True inserts
+        graphsafe_run_with_rng_state into post-partition graphs when the
+        wrapped region contains nondeterministic ops (e.g. SDPA dropout).
+        The sibling RNG HOPs (run_and_save_rng_state, run_with_rng_state,
+        run_dtensor_rng_op) are all cacheable; this one must be too.
+        """
+        import torch.nn.functional as F
+        from torch.utils.checkpoint import checkpoint
+
+        class SDPADrop(torch.nn.Module):
+            def forward(self, q, k, v):
+                return F.scaled_dot_product_attention(q, k, v, dropout_p=0.1)
+
+        inner = SDPADrop()
+        q = torch.randn(2, 4, 16, 16, device=GPU_TYPE, requires_grad=True)
+        k = torch.randn(2, 4, 16, 16, device=GPU_TYPE)
+        v = torch.randn(2, 4, 16, 16, device=GPU_TYPE)
+
+        def model(q, k, v):
+            return checkpoint(
+                inner, q, k, v, use_reentrant=False, preserve_rng_state=True
+            )
+
+        def run(q):
+            torch.manual_seed(99)
+            out = torch.compile(model, fullgraph=True)(q, k, v).sum()
+            out.backward()
+            return out.detach(), q.grad.clone()
+
+        # Cold compile — fwd and bwd graphs each miss once
+        out1, grad1 = run(q)
+        q.grad = None
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+        # Warm compile — fwd and bwd graphs each hit
+        counters.clear()
+        self.reset()
+
+        out2, grad2 = run(q)
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+        self.assertEqual(out1, out2)
+        self.assertEqual(grad1, grad2)
+
+        # Different seed through cached code must produce different output —
+        # proves the cached artifact is parameterized by runtime RNG state
+        q.grad = None
+        torch.manual_seed(0)
+        out3 = torch.compile(model, fullgraph=True)(q, k, v).sum()
+        self.assertFalse(torch.allclose(out1, out3))
 
     @requires_gpu()
     @requires_triton()
@@ -2473,6 +2764,38 @@ class TestStandaloneCompile(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_save_training_artifact_compiles_backward(self) -> None:
+        mod = torch.nn.Linear(4, 3)
+        x = torch.randn(2, 4)
+        eager_out = mod(x).detach()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with fresh_cache():
+                gm, args, kwargs = self.capture(mod)(x)
+                if kwargs:
+                    raise AssertionError
+
+                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                self.assertTrue(compiled_artifact.is_saveable())
+                compiled_artifact.save(path=temp_dir, format="unpacked")
+
+            with fresh_cache():
+                mod.zero_grad(set_to_none=True)
+                loaded = torch._inductor.CompiledArtifact.load(
+                    path=temp_dir, format="unpacked"
+                )
+                compiled_out = loaded(*args)[0]
+                self.assertEqual(eager_out, compiled_out)
+
+                compiled_out.sum().backward()
+                self.assertEqual(
+                    mod.weight.grad, torch.ones_like(eager_out).t().matmul(x)
+                )
+                self.assertEqual(mod.bias.grad, torch.full_like(mod.bias, x.shape[0]))
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     def test_modify_unpacked_file(self, device: str) -> None:
         if device == GPU_TYPE and not HAS_GPU:
@@ -2996,6 +3319,206 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
+    def _fx_graph_cache_key(self, gm, example_inputs):
+        details = FxGraphHashDetails(gm, example_inputs, cast(Any, {}), [])
+        return FxGraphCachePickler(gm).get_key(details)
+
+    def _no_input_factory_graph(self, device=None):
+        graph = torch.fx.Graph()
+        kwargs: dict[str, Any] = {"dtype": torch.float32}
+        if device is not None:
+            kwargs["device"] = torch.device(device)
+        result = graph.call_function(torch.empty, ((4,),), kwargs)
+        graph.output(result)
+        return torch.fx.GraphModule({}, graph)
+
+    def test_cpu_thread_count_affects_cache_key(self):
+        def fn(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(fn)
+        x = torch.ones(4)
+        orig_num_threads = torch.get_num_threads()
+
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [x])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [x])
+                self.assertNotEqual(key_1, key_2)
+
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": True}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [x])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [x])
+                self.assertEqual(key_1, key_2)
+
+            with config.patch({"cpp.threads": 4, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [x])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [x])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_affects_cache_key_for_no_input_cpu_factory(self):
+        gm = self._no_input_factory_graph()
+        orig_num_threads = torch.get_num_threads()
+
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertNotEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_affects_cache_key_for_example_value_metadata(self):
+        graph = torch.fx.Graph()
+        result = graph.call_function(_custom_empty, (), {})
+        with torch._subclasses.FakeTensorMode():
+            result.meta["example_value"] = torch.empty(4)
+        self.assertNotIn("val", result.meta)
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertNotEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_affects_cache_key_for_randperm_factory(self):
+        graph = torch.fx.Graph()
+        result = graph.call_function(
+            torch.ops.aten.randperm.default,
+            (4,),
+            {"dtype": torch.float32},
+        )
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertNotEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_ignored_for_explicit_non_cpu_factory(self):
+        gm = self._no_input_factory_graph(device="cuda")
+        orig_num_threads = torch.get_num_threads()
+
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_ignores_non_device_string_on_factory(self):
+        graph = torch.fx.Graph()
+        result = graph.call_function(
+            torch.empty,
+            ((4,),),
+            {
+                "dtype": torch.float32,
+                "device": torch.device("cuda"),
+                "debug_device": "cpu",
+            },
+        )
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_ignored_for_cuda_like_factory(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        result = graph.call_function(torch.empty_like, (x,), {})
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode():
+            example_input = torch.empty(4, device="cuda")
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [example_input])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [example_input])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_ignored_for_cuda_metadata_device_constructor(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        result = graph.call_function(torch.as_tensor, (x,), {})
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode():
+            example_input = torch.empty(4, device="cuda")
+        x.meta["val"] = example_input
+        result.meta["example_value"] = example_input
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [example_input])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [example_input])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_ignored_for_custom_empty_target(self):
+        graph = torch.fx.Graph()
+        result = graph.call_function(_custom_empty, ("cpu",), {"device": "cpu"})
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_cacheability_validator_checks_mkldnn_constant(self):
         graph = torch.fx.Graph()
@@ -3247,6 +3770,31 @@ class TestFxGraphCacheHashing(TestCase):
             details2 = FxGraphHashDetails(None, [], {}, [])
 
         with config.patch({"max_autotune": True}):
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+
+    def test_hash_config_comms_changes(self):
+        """
+        Test that changes to config_comms settings affect hashes.
+        """
+        with config_comms.patch(
+            {"runtime_estimations_use_nccl_lib_estimations": False}
+        ):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with config_comms.patch({"runtime_estimations_use_nccl_lib_estimations": True}):
             details3 = FxGraphHashDetails(None, [], {}, [])
 
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
@@ -4457,6 +5005,82 @@ class TestUtils(TestCase):
             return layer(inp @ weight)
 
         torch.compile(fn)()
+
+
+class TestVecISACheckBuild(TestCase):
+    # Regression tests for the VecISA.check_build dlopen probe behavior:
+    # the parent must (1) bound the child with a timeout and return
+    # False if it expires, and (2) make libtorch findable in the
+    # child's loader path so the child can dlopen the probe .so
+    # without importing torch.
+    #
+    # These target the small helpers (_probe_load, _build_probe_env)
+    # directly so they don't depend on CppBuilder / CppTorchOptions
+    # succeeding on the host, which would otherwise make the tests
+    # platform-specific (the production path is fine; only the
+    # CppTorchOptions construction is brittle to host compiler probes
+    # when handed an off-arch VecISA like VecAVX2 on aarch64/macOS-arm64).
+
+    def test_probe_load_returns_false_on_timeout(self):
+        from torch._inductor import cpu_vec_isa
+
+        calls: list[Any] = []
+
+        def fake_run(*args, **kwargs):
+            calls.append(kwargs.get("timeout"))
+            raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+
+        fake_subprocess = types.SimpleNamespace(
+            run=fake_run,
+            TimeoutExpired=subprocess.TimeoutExpired,
+            CalledProcessError=subprocess.CalledProcessError,
+            DEVNULL=subprocess.DEVNULL,
+        )
+
+        instance = cpu_vec_isa.VecAVX2()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
+                result = instance._probe_load("/nonexistent/probe.so")
+
+        self.assertFalse(result)
+        self.assertEqual(calls, [60])
+        self.assertTrue(
+            any("hung after 60s" in str(w.message) for w in caught),
+            msg=f"expected timeout warning, got: {[str(w.message) for w in caught]}",
+        )
+
+    def test_probe_load_returns_false_on_called_process_error(self):
+        from torch._inductor import cpu_vec_isa
+
+        def fake_run(*args, **kwargs):
+            raise subprocess.CalledProcessError(returncode=1, cmd=args[0])
+
+        fake_subprocess = types.SimpleNamespace(
+            run=fake_run,
+            TimeoutExpired=subprocess.TimeoutExpired,
+            CalledProcessError=subprocess.CalledProcessError,
+            DEVNULL=subprocess.DEVNULL,
+        )
+
+        instance = cpu_vec_isa.VecAVX2()
+        with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
+            result = instance._probe_load("/nonexistent/probe.so")
+
+        self.assertFalse(result)
+
+    def test_build_probe_env_prepends_torch_lib_dir_to_loader_path(self):
+        from torch._inductor import cpu_vec_isa
+
+        env = cpu_vec_isa.VecISA._build_probe_env()
+
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+        value = env.get("LD_LIBRARY_PATH", "")
+        self.assertEqual(
+            value.split(os.pathsep)[0],
+            torch_lib,
+            msg=f"LD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+        )
 
 
 class TestCompilationEventLogging(TestCase):

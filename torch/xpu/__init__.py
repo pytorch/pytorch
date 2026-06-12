@@ -499,6 +499,7 @@ def get_device_properties(
     - ``memory_bus_width`` (int) maximum bus width between device and memory in bits.
     - ``sub_group_sizes``: (list[int]): a list of supported sub-group sizes.
     - ``local_mem_size`` (int): device local memory capacity that can be allocated per work-group in bytes.
+    - ``last_level_cache_size`` (int): size in bytes of the device's last-level memory cache, shared across all Xe Cores (analogous to CUDA ``L2_cache_size``).
     - ``has_fp16`` (bool): whether float16 dtype is supported.
     - ``has_fp64`` (bool): whether float64 dtype is supported.
     - ``has_atomic64`` (bool): whether 64-bit atomic operations are supported.
@@ -506,6 +507,7 @@ def get_device_properties(
     - ``has_subgroup_matrix_multiply_accumulate`` (bool): whether DPAS (Dot Product Accumulate Systolic) is supported.
     - ``has_subgroup_matrix_multiply_accumulate_tensor_float32`` (bool): whether DPAS with tf32 inputs is supported.
     - ``has_subgroup_2d_block_io`` (bool): whether 2D block I/O for efficient matrix multiplication is supported.
+    - ``is_integrated_gpu`` (bool): whether the device is an integrated GPU (iGPU).
     - ``total_memory`` (int): device global memory in bytes.
     - ``gpu_subslice_count`` (int): number of subslice.
     - ``architecture`` (int): device architecture identifier (experimental).
