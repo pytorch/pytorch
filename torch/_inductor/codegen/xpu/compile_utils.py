@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import logging
 import os
 import shutil
@@ -12,6 +13,16 @@ from ..cuda.compile_utils import _cutlass_include_paths
 
 
 log = logging.getLogger(__name__)
+
+
+@functools.cache
+def icpx_exist() -> bool:
+    """Return True if the SYCL compiler (icpx) is available."""
+    try:
+        _sycl_compiler()
+        return True
+    except RuntimeError:
+        return False
 
 
 def _sycl_compiler() -> str:
@@ -67,10 +78,16 @@ def _sycl_lib_options() -> list[str]:
     return extra_ldflags
 
 
-def _sycl_arch_as_compile_option() -> str:
-    arc_option_map = {"Xe12": "intel_gpu_pvc", "Xe20": "intel_gpu_bmg_g21"}
+def _sycl_arch_as_compile_option() -> str | None:
+    """Return the -fsycl-targets value for the current XPU device.
+
+    Returns None when the specific device variant cannot be reliably mapped to
+    an AOT target. In that case the caller should omit -fsycl-targets entirely
+    and let SYCL JIT-compile the kernel for the running device.
+    """
+    arch_option_map = {"Xe12": "intel_gpu_pvc"}
     arch = get_xpu_arch()
-    return arc_option_map.get(arch, "intel_gpu_pvc")
+    return arch_option_map.get(arch)
 
 
 def _sycl_compiler_options() -> list[str]:
@@ -83,7 +100,11 @@ def _sycl_compiler_options() -> list[str]:
         "-std=c++20",
         "-fPIC",
         "-fsycl",
-        f"-fsycl-targets={_sycl_arch_as_compile_option()}",
+    ]
+    sycl_target = _sycl_arch_as_compile_option()
+    if sycl_target is not None:
+        options.append(f"-fsycl-targets={sycl_target}")
+    options += [
         "-Xspirv-translator",
         "-spirv-ext=+SPV_INTEL_split_barrier,+SPV_INTEL_2d_block_io,+SPV_INTEL_subgroup_matrix_multiply_accumulate",
         "-fno-sycl-instrument-device-code",
