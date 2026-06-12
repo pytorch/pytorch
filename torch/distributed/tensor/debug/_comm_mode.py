@@ -4,7 +4,7 @@ import json
 import re
 import weakref
 from collections import defaultdict
-from typing import Any, Dict
+from typing import Any
 
 import torch
 import torch.nn
@@ -172,7 +172,7 @@ class _CommModeModuleTracker(ModTracker):
                 self._fw_set_module_hook
             )
 
-    def _fw_post_hook(self, mod, input, output):
+    def _fw_post_hook(self, mod, input, output):  # pylint: disable=useless-parent-delegation
         """
         This function is called when the forward pass of a module is called.
         It updates the module tracker and removes the module from parent data
@@ -226,7 +226,7 @@ class CommDebugMode(TorchDispatchMode):
     functional collectives within its context. It does this using a
     ``TorchDispatchMode``.
 
-    .. note: Not all collectives are supported yet.
+    .. note:: Not all collectives are supported yet.
 
     Example usage
 
@@ -240,7 +240,9 @@ class CommDebugMode(TorchDispatchMode):
     """
 
     def __init__(self):
-        self.comm_counts: Dict[Any, int] = defaultdict(int)
+        super().__init__()
+        self.supports_higher_order_operators = True
+        self.comm_counts: dict[Any, int] = defaultdict(int)
         self.comm_module_counts = {}
         self.comm_module_operation_counts = {}
         self.comm_registry = set()
@@ -283,9 +285,9 @@ class CommDebugMode(TorchDispatchMode):
                 "module_type" in self.advanced_module_tracker.module_helper_dict[fqn]
                 and include_module_data
             ):
-                json_dict[
-                    "module_type"
-                ] = self.advanced_module_tracker.module_helper_dict[fqn]["module_type"]
+                json_dict["module_type"] = (
+                    self.advanced_module_tracker.module_helper_dict[fqn]["module_type"]
+                )
 
                 if "parameters" in self.advanced_module_tracker.module_helper_dict[fqn]:
                     for (
@@ -392,10 +394,10 @@ class CommDebugMode(TorchDispatchMode):
 
             return json_dict
 
-        json_dict: Dict[str, Any] = {}
+        json_dict: dict[str, Any] = {}
         add_json_information(json_dict, "Global")
 
-        # converts dictonary into json file
+        # converts dictionary into json file
         with open(file_name, "w") as json_file:
             json.dump(json_dict, json_file, indent=4)
 
@@ -567,7 +569,7 @@ class CommDebugMode(TorchDispatchMode):
     def get_total_counts(self) -> int:
         return sum(self.comm_counts.values())
 
-    def get_comm_counts(self) -> Dict[Any, int]:
+    def get_comm_counts(self) -> dict[Any, int]:
         """Returns the communication counts as a dictionary.
 
         Returns:
@@ -575,10 +577,10 @@ class CommDebugMode(TorchDispatchMode):
         """
         return self.comm_counts
 
-    def get_parameter_info(self) -> Dict[str, Dict[str, Any]]:
+    def get_parameter_info(self) -> dict[str, dict[str, Any]]:
         return self.advanced_module_tracker.module_parameters_dict
 
-    def get_sharding_info(self) -> Dict[str, Dict[str, Any]]:
+    def get_sharding_info(self) -> dict[str, dict[str, Any]]:
         return self.advanced_module_tracker.sharding_dict
 
     def __enter__(self):
@@ -594,6 +596,7 @@ class CommDebugMode(TorchDispatchMode):
         self.advanced_module_tracker.__enter__()
         return self
 
+    # pyrefly: ignore [bad-override]
     def __exit__(self, *args):
         self.advanced_module_tracker.__exit__()
         super().__exit__(*args)
@@ -642,6 +645,12 @@ class CommDebugMode(TorchDispatchMode):
         # Returning NotImplemented here gives us a chance to let DTensor
         # run and desugar into comms ops, before CommDebugMode sees them.
 
+        # Higher-order operators (e.g. run_dtensor_rng_op) don't have
+        # _overloadpacket and aren't collectives — just redispatch.
+        if isinstance(func, torch._ops.HigherOrderOperator):
+            kwargs = kwargs if kwargs else {}
+            return func(*args, **kwargs)
+
         # sets up operation-level collective count
         if self.advanced_module_tracker.name not in self.comm_module_operation_counts:
             # dictionary should hold module input and output shape, operations list and collective counter
@@ -659,9 +668,9 @@ class CommDebugMode(TorchDispatchMode):
         operation_dict["is_bw"] = self.advanced_module_tracker.is_bw
 
         # tracks if the operation is part of activation checkpointing
-        operation_dict[
-            "is_activation_checkpointing"
-        ] = self.advanced_module_tracker.activation_checkpointing
+        operation_dict["is_activation_checkpointing"] = (
+            self.advanced_module_tracker.activation_checkpointing
+        )
 
         if any(t == DTensor for t in types):
             for ele in args:
@@ -733,3 +742,6 @@ class CommDebugMode(TorchDispatchMode):
         ].append(operation_dict)
 
         return out
+
+    def __repr__(self):
+        return f"CommDebugMode(get_total_counts()={self.get_total_counts()})"

@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
-#include <ATen/NamedTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
@@ -26,7 +26,7 @@ DEFINE_DISPATCH(qmean_inner_dim_stub);
 DEFINE_DISPATCH(qstd_inner_dim_stub);
 
 // If mean/std is taken in the innermost dims, the fast path can be used.
-inline bool is_innnermost_dim(
+static inline bool is_innnermost_dim(
     const Tensor& self,
     OptionalIntArrayRef opt_dim) {
   if (!opt_dim.has_value()) {
@@ -43,7 +43,7 @@ inline bool is_innnermost_dim(
   return is_innermost;
 }
 
-inline bool is_mean_inner_dim_fast_path(
+static inline bool is_mean_inner_dim_fast_path(
     const Tensor& self,
     OptionalIntArrayRef opt_dim,
     std::optional<ScalarType> opt_dtype) {
@@ -110,7 +110,7 @@ static Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim, bool keepdim) {
           qnnpack_operator,
           batch_size,
           inH * inW,
-          (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
+          reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()) /* input data */,
           inC,
           (uint8_t*)output.data_ptr<c10::quint8>() /* output data */,
           outC);
@@ -172,7 +172,7 @@ Tensor mean_quantized_cpu(
 }
 
 // qstd
-inline bool is_std_inner_dim_fast_path(
+static inline bool is_std_inner_dim_fast_path(
     const Tensor& self,
     OptionalIntArrayRef dim,
     const std::optional<Scalar>& correction) {

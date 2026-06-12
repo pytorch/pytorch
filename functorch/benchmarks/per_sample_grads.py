@@ -1,8 +1,8 @@
 import time
 
-import torchvision.models as models
 from opacus import PrivacyEngine
 from opacus.utils.module_modification import convert_batchnorm_modules
+from torchvision import models
 
 import torch
 import torch.nn as nn
@@ -47,7 +47,8 @@ model_opacus = convert_batchnorm_modules(models.resnet18(num_classes=10))
 model_opacus = model_opacus.to(device)
 criterion = nn.CrossEntropyLoss()
 for p_f, p_o in zip(model_functorch.parameters(), model_opacus.parameters()):
-    assert torch.allclose(p_f, p_o)  # Sanity check
+    if not torch.allclose(p_f, p_o):  # Sanity check
+        raise AssertionError("Parameters do not match")
 
 privacy_engine = PrivacyEngine(
     model_opacus,

@@ -225,7 +225,7 @@ necessary for pickling a module object.
 `pickle`'s format was chosen due to:
 
 * **user friendliness** - the attributes file can be loaded in Python with `pickle`
-* **size limits** - formats such as Protobuf empose size limits on total
+* **size limits** - formats such as Protobuf impose size limits on total
  message size, whereas pickle limits are on individual values (e.g. strings
  cannot be longer than 4 GB)
 * **standard format** - `pickle` is a standard Python module with a reasonably
@@ -371,7 +371,7 @@ TorchScript class, or a `ScriptModule`. Owns other its attribute types
 **`Object`**: An instance of a particular class. Own the `CompilationUnit`
 that owns its `ClassType`. This is to ensure that if the user passes the
 object around in C++, all its code will stay around and methods will be
-invokable.
+invocable.
 
 **`Module`**: A view over a `ClassType` and the `Object` that holds its state.
 Also responsible for turning unqualified names (e.g. `forward()`) into

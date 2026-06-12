@@ -1,10 +1,86 @@
+/**
+ * ================================================================================
+ * MemoryViz.js - PyTorch Memory Visualization Tool
+ * ================================================================================
+ *
+ * OVERVIEW:
+ * ---------
+ * This file contains the core visualization logic for PyTorch's memory profiler.
+ * It renders memory allocation timelines, stack traces, and provides interactive
+ * exploration of memory snapshots captured during model execution.
+ *
+ * KEY FEATURES:
+ * - Multiple visualization tabs/views for different memory analysis perspectives
+ * - Interactive stack trace display (supports both click and hover modes)
+ * - Zoom and brush controls for navigating large memory timelines
+ * - Support for loading memory snapshot files (.pickle format)
+ *
+ * ================================================================================
+ * TESTING INSTRUCTIONS FOR ENGINEERS & AGENTS
+ * ================================================================================
+ *
+ * 1. LOCAL TESTING SETUP:
+ *    - Create a simple HTML file that references this JS file:
+ *
+ *      <!DOCTYPE html>
+ *      <html>
+ *      <head><title>MemoryViz Test</title></head>
+ *      <body>
+ *        <script type="module" src="MemoryViz.js"></script>
+ *      </body>
+ *      </html>
+ *
+ *    - Serve locally using: python3 -m http.server 8888
+ *    - Open http://localhost:8888 in your browser
+ *
+ * 2. WHAT TO TEST:
+ *    - Ensure ALL tabs/views render correctly and switch properly
+ *    - Verify BOTH interaction modes work:
+ *      * Click mode: stack traces appear on click
+ *      * Hover mode: stack traces appear on mouseover
+ *    - Test zoom and brush controls for timeline navigation
+ *    - Verify memory allocation blocks are rendered and interactive
+ *
+ * 3. TEST DATA REQUIREMENTS:
+ *    - DO NOT just test with small dummy .pickle files
+ *    - Use realistic, decent-sized .pickle files (10-100+ MB range)
+ *    - Large files stress-test rendering performance and memory handling
+ *    - Test with snapshots from real model training/inference runs
+ *
+ * 4. COMMON ISSUES TO WATCH FOR:
+ *    - Performance degradation with large snapshots
+ *    - Stack trace popups not appearing or positioning incorrectly
+ *    - Tab switching not updating the visualization properly
+ *    - Zoom/brush state not persisting across interactions
+ *
+ * ================================================================================
+ */
+
 'use strict';
 
-import * as d3 from "https://cdn.skypack.dev/d3@5";
-import {axisLeft} from "https://cdn.skypack.dev/d3-axis@1";
-import {scaleLinear} from "https://cdn.skypack.dev/d3-scale@1";
-import {zoom, zoomIdentity} from "https://cdn.skypack.dev/d3-zoom@1";
-import {brushX} from "https://cdn.skypack.dev/d3-brush@1";
+import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+import {axisLeft} from "https://cdn.jsdelivr.net/npm/d3-axis@3/+esm";
+import {scaleLinear} from "https://cdn.jsdelivr.net/npm/d3-scale@4/+esm";
+import {zoom, zoomIdentity} from "https://cdn.jsdelivr.net/npm/d3-zoom@3/+esm";
+import {brushX} from "https://cdn.jsdelivr.net/npm/d3-brush@3/+esm";
+import {process_alloc_data, isPrivatePoolId, formatSize, formatAddr,
+        elideRepeats, frameFilter, format_user_metadata,
+        format_forward_frames, format_frames} from "./process_alloc_data.js";
+
+// Global configuration for trace interaction mode
+// 'hover' = show trace on hover (default)
+// 'click' = show trace on click
+let traceInteractionMode = 'hover';
+
+function setTraceInteractionMode(mode) {
+  if (mode === 'click' || mode === 'hover') {
+    traceInteractionMode = mode;
+  }
+}
+
+function getTraceInteractionMode() {
+  return traceInteractionMode;
+}
 
 const schemeTableau10 = [
   '#4e79a7',
@@ -33,12 +109,12 @@ function version_space() {
   };
 }
 
-function Segment(addr, size, stream, frames, version) {
-  return {addr, size, stream, version, frames};
+function Segment(addr, size, stream, frames, version, user_metadata, segment_pool_id) {
+  return {addr, size, stream, version, frames, user_metadata, segment_pool_id};
 }
 
-function Block(addr, size, requested_size, frames, free_requested, version) {
-  return {addr, size, requested_size, frames, free_requested, version};
+function Block(addr, size, requested_size, frames, free_requested, version, user_metadata) {
+  return {addr, size, requested_size, frames, free_requested, version, user_metadata};
 }
 
 function EventSelector(outer, events, stack_info, memory_view) {
@@ -80,13 +156,13 @@ function EventSelector(outer, events, stack_info, memory_view) {
       selected_event_idx = idx;
     },
   };
-  d3.select('body').on('keydown', _e => {
-    const key = d3.event.key;
+  d3.select('body').on('keydown', event => {
+    const key = event.key;
     const actions = {ArrowDown: 1, ArrowUp: -1};
     if (selected_event_idx !== null && key in actions) {
       const new_idx = selected_event_idx + actions[key];
       es.select(Math.max(0, Math.min(new_idx, events.length - 1)));
-      d3.event.preventDefault();
+      event.preventDefault();
     }
   });
 
@@ -100,28 +176,12 @@ function EventSelector(outer, events, stack_info, memory_view) {
   return es;
 }
 
-function formatSize(num) {
-  const orig = num;
-  // https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
-  const units = ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi'];
-  for (const unit of units) {
-    if (Math.abs(num) < 1024.0) {
-      return `${num.toFixed(1)}${unit}B (${orig} bytes)`;
-    }
-    num /= 1024.0;
-  }
-  return `${num.toFixed(1)}YiB`;
-}
-function formatAddr(event) {
-  const prefix = event.action.startsWith('segment') ? 's' : 'b';
-  return `${prefix}${event.addr.toString(16)}_${event.version}`;
-}
 function formatEvent(event) {
   const stream =
     event.stream === null ? '' : `\n              (stream ${event.stream})`;
   switch (event.action) {
     case 'oom':
-      return `OOM (requested ${formatSize(event.size)}, CUDA has ${formatSize(
+      return `OOM (requested ${formatSize(event.size)}, Device has ${formatSize(
         event.device_free,
       )} memory free)${stream}`;
     case 'snapshot':
@@ -140,7 +200,10 @@ function eventStack(e, allocated, reserved) {
       reserved,
     )} reserved)\n${event}`;
   }
-  return event + '\n' + format_frames(e.frames);
+  const user_metadata_str = format_user_metadata(e.user_metadata);
+  const frames_str = format_frames(e.frames);
+  const forward_frames_str = format_forward_frames(e.forward_frames);
+  return event + '\n' + (user_metadata_str ? user_metadata_str + '\n' : '') + frames_str + forward_frames_str;
 }
 
 function hashCode(num) {
@@ -165,26 +228,34 @@ function removeStroke(d) {
 }
 
 function calculate_fragmentation(blocks, sorted_segments) {
-  const sorted_blocks = Object.values(blocks).sort((a, b) => a.addr - b.addr);
+  const sorted_blocks = Object.values(blocks).sort((a, b) => {
+    // See Note [Sort BigInt and Number Safely]
+    if (a.addr === b.addr) return 0;
+    return a.addr < b.addr ? -1 : 1;
+  });
   let block_i = 0;
   let total_size = 0;
   let sum_squared_free = 0;
   for (const seg of sorted_segments) {
     let addr = seg.addr;
     total_size += seg.size;
+    // See Note [BigInt and Number Safe Arithmetic]
+    const seg_end =
+      seg.addr + (typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size);
     while (
       block_i < sorted_blocks.length &&
-      sorted_blocks[block_i].addr < seg.addr + seg.size
+      sorted_blocks[block_i].addr < seg_end
     ) {
       const block = sorted_blocks[block_i];
       if (block.addr > addr) {
-        sum_squared_free += (block.addr - addr) ** 2;
+        sum_squared_free += Number(block.addr - addr) ** 2;
       }
-      addr = block.addr + block.size;
+      addr =
+        block.addr + (typeof block.addr === "bigint" ? BigInt(block.size) : block.size);
       block_i += 1;
     }
-    if (addr < seg.addr + seg.size) {
-      sum_squared_free += (seg.addr + seg.size - addr) ** 2;
+    if (addr < seg_end) {
+      sum_squared_free += Number(seg_end - addr) ** 2;
     }
   }
   console.log(sum_squared_free / total_size ** 2);
@@ -198,8 +269,8 @@ function MemoryView(outer, stack_info, snapshot, device) {
     .attr('preserveAspectRatio', 'xMinYMin meet');
   const g = svg.append('g');
   const seg_zoom = zoom();
-  seg_zoom.on('zoom', () => {
-    g.attr('transform', d3.event.transform);
+  seg_zoom.on('zoom', (event) => {
+    g.attr('transform', event.transform);
   });
   svg.call(seg_zoom);
 
@@ -216,6 +287,8 @@ function MemoryView(outer, stack_info, snapshot, device) {
         seg.stream,
         seg.frames || [],
         seg.version,
+        seg.user_metadata,
+        seg.segment_pool_id,
       ),
     );
     for (const b of seg.blocks) {
@@ -229,10 +302,18 @@ function MemoryView(outer, stack_info, snapshot, device) {
         b.frames,
         b.state === 'active_pending_free',
         b.version,
+        b.user_metadata,
       );
     }
   }
-  sorted_segments.sort((x, y) => x.addr - y.addr);
+  sorted_segments.sort((x, y) => {
+    // Note [Sort BigInt and Number Safely]
+    // x.addr and y.addr may be BigInt, so subtracting them directly can cause
+    // errors. Use explicit comparison instead to safely handle both BigInt and
+    // Number.
+    if (x.addr === y.addr) return 0;
+    return x.addr < y.addr ? -1 : 1;
+  });
 
   function simulate_memory(idx) {
     // create a copy of segments because we edit size properties below
@@ -253,14 +334,19 @@ function MemoryView(outer, stack_info, snapshot, device) {
       l_segments.splice(idx, 0, seg);
       if (idx + 1 < l_segments.length) {
         const next = l_segments[idx + 1];
-        if (seg.addr + seg.size === next.addr && seg.stream === next.stream) {
+        // See Note [BigInt and Number Safe Arithmetic]
+        const seg_end =
+          seg.addr + (typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size);
+        if (seg_end === next.addr && seg.stream === next.stream) {
           seg.size += next.size;
           l_segments.splice(idx + 1, 1);
         }
       }
       if (idx > 0) {
         const prev = l_segments[idx - 1];
-        if (prev.addr + prev.size === seg.addr && prev.stream === seg.stream) {
+        const prev_end =
+          prev.addr + (typeof prev.addr === "bigint" ? BigInt(prev.size) : prev.size);
+        if (prev_end === seg.addr && prev.stream === seg.stream) {
           prev.size += seg.size;
           l_segments.splice(idx, 1);
         }
@@ -274,14 +360,19 @@ function MemoryView(outer, stack_info, snapshot, device) {
         );
         return;
       }
-      const seg_end = seg.addr + seg.size;
-      const idx = l_segments.findIndex(
-        e => e.addr <= seg.addr && seg_end <= e.addr + e.size,
-      );
+      // See Note [BigInt and Number Safe Arithmetic]
+      const seg_end =
+        seg.addr + (typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size);
+      const idx = l_segments.findIndex( e => {
+        const e_end =
+          e.addr + (typeof e.addr === "bigint" ? BigInt(e.size) : e.size);
+        return e.addr <= seg.addr && seg_end <= e_end;
+      });
       const existing = l_segments[idx];
-      const existing_end = existing.addr + existing.size;
+      const existing_end =
+        existing.addr + (typeof existing.addr === "bigint" ? BigInt(existing.size) : existing.size);
       if (existing.addr === seg.addr) {
-        existing.addr += seg.size;
+        existing.addr += typeof existing.addr === "bigint" ? BigInt(seg.size) : seg.size;
         existing.size -= seg.size;
         if (existing.size === 0) {
           l_segments.splice(idx, 1);
@@ -289,9 +380,9 @@ function MemoryView(outer, stack_info, snapshot, device) {
       } else if (existing_end === seg_end) {
         existing.size -= seg.size;
       } else {
-        existing.size = seg.addr - existing.addr;
+        existing.size = Number(seg.addr - existing.addr);
         seg.addr = seg_end;
-        seg.size = existing_end - seg_end;
+        seg.size = Number(existing_end - seg_end);
         l_segments.splice(idx + 1, 0, seg);
       }
     }
@@ -307,6 +398,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
             event.frames,
             false,
             event.version,
+            event.user_metadata,
           );
           break;
         case 'free_requested':
@@ -320,6 +412,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
             event.frames,
             true,
             event.version,
+            event.user_metadata,
           );
           break;
         case 'alloc':
@@ -335,6 +428,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
               event.stream,
               event.frames,
               event.version,
+              event.user_metadata,
             ),
           );
           break;
@@ -348,6 +442,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
               event.stream,
               event.frames,
               event.version,
+              event.user_metadata,
             ),
           );
           break;
@@ -373,11 +468,20 @@ function MemoryView(outer, stack_info, snapshot, device) {
       segment_d.selectAll('rect').remove();
       block_g.selectAll('rect').remove();
       block_r.selectAll('rect').remove();
-      const segments = [...segments_unsorted].sort((x, y) =>
-        x.size === y.size ? x.addr - y.addr : x.size - y.size,
-      );
+      const segments = [...segments_unsorted].sort((x, y) => {
+        // See Note [Sort BigInt and Number Safely].
+        if (x.size > y.size) return 1;
+        if (x.size < y.size) return -1;
+        if (x.addr > y.addr) return 1;
+        if (x.addr < y.addr) return -1;
+        return 0;
+      });
 
-      const segments_by_addr = [...segments].sort((x, y) => x.addr - y.addr);
+      const segments_by_addr = [...segments].sort((x, y) => {
+        // See Note [Sort BigInt and Number Safely]
+        if (x.addr === y.addr) return 0;
+        return x.addr < y.addr ? -1 : 1;
+      });
 
       const max_size = segments.length === 0 ? 0 : segments.at(-1).size;
 
@@ -426,13 +530,23 @@ function MemoryView(outer, stack_info, snapshot, device) {
           if (t.internal_free > 0) {
             internal = ` (${(t.internal_free / free) * 100}% internal)`;
           }
+          const user_metadata_str = format_user_metadata(t.user_metadata);
+          const frames_str = format_frames(t.frames);
+          const forward_frames_str = format_forward_frames(t.forward_frames);
+          let pool_str = '';
+          if (isPrivatePoolId(t.segment_pool_id)) {
+            pool_str = `, pool_id (${t.segment_pool_id[0]}, ${t.segment_pool_id[1]})`;
+          }
           return (
             `s${t.addr.toString(16)}_${t.version}: segment ${formatSize(
               t.size,
             )} allocated, ` +
             `${formatSize(free)} free${internal} (stream ${
               t.stream
-            })\n${format_frames(t.frames)}`
+            }${pool_str})\n` +
+            (user_metadata_str ? user_metadata_str + '\n' : '') +
+            frames_str +
+            forward_frames_str
           );
         },
         d => {
@@ -447,15 +561,16 @@ function MemoryView(outer, stack_info, snapshot, device) {
         let right = segments_by_addr.length - 1;
         while (left <= right) {
           const mid = Math.floor((left + right) / 2);
-          if (addr < segments_by_addr[mid].addr) {
+          const seg = segments_by_addr[mid];
+          // See Note [BigInt and Number Safe Arithmetic]
+          const seg_end =
+            seg.addr + (typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size);
+          if (addr < seg.addr) {
             right = mid - 1;
-          } else if (
-            addr >=
-            segments_by_addr[mid].addr + segments_by_addr[mid].size
-          ) {
+          } else if (addr >= seg_end) {
             left = mid + 1;
           } else {
-            return segments_by_addr[mid];
+            return seg;
           }
         }
         return null;
@@ -472,7 +587,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
         .data(blocks)
         .enter()
         .append('rect')
-        .attr('x', x => xScale(x.segment.offset + (x.addr - x.segment.addr)))
+        .attr('x', x => xScale(x.segment.offset + Number(x.addr - x.segment.addr)))
         .attr('y', x => yScale(x.segment.row))
         .attr('width', x => xScale(x.requested_size))
         .attr('height', yScale(4 / 5))
@@ -493,12 +608,21 @@ function MemoryView(outer, stack_info, snapshot, device) {
           if (t.free_requested) {
             requested = ' (block freed but waiting due to record_stream)';
           }
+          const user_metadata_str = format_user_metadata(t.user_metadata);
+          const frames_str = format_frames(t.frames);
+          const forward_frames_str = format_forward_frames(t.forward_frames);
+          let pool_str = '';
+          if (isPrivatePoolId(t.segment?.segment_pool_id)) {
+            pool_str = `, pool_id (${t.segment.segment_pool_id[0]}, ${t.segment.segment_pool_id[1]})`;
+          }
           return (
             `b${t.addr.toString(16)}_${t.version} ` +
             `${formatSize(t.requested_size)} allocation${requested} (stream ${
               t.segment.stream
-            })\n` +
-            format_frames(t.frames)
+            }${pool_str})\n` +
+            (user_metadata_str ? user_metadata_str + '\n' : '') +
+            frames_str +
+            forward_frames_str
           );
         },
         removeStroke,
@@ -511,7 +635,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
         .append('rect')
         .attr('x', x =>
           xScale(
-            x.segment.offset + (x.addr - x.segment.addr) + x.requested_size,
+            x.segment.offset + Number(x.addr - x.segment.addr) + x.requested_size,
           ),
         )
         .attr('y', x => yScale(x.segment.row))
@@ -524,12 +648,17 @@ function MemoryView(outer, stack_info, snapshot, device) {
         d => {
           addStroke(d);
           const t = d.datum();
+          const user_metadata_str = format_user_metadata(t.user_metadata);
+          const frames_str = format_frames(t.frames);
+          const forward_frames_str = format_forward_frames(t.forward_frames);
           return (
             `Free space lost due to rounding ${formatSize(
               t.size - t.requested_size,
             )}` +
             ` (stream ${t.segment.stream})\n` +
-            format_frames(t.frames)
+            (user_metadata_str ? user_metadata_str + '\n' : '') +
+            frames_str +
+            forward_frames_str
           );
         },
         removeStroke,
@@ -554,23 +683,39 @@ function StackInfo(outer) {
   };
   return {
     register(dom, enter, leave = _e => {}, select = _e => {}) {
-      dom
-        .on('mouseover', _e => {
-          selected.leave();
-          stack_trace.text(enter(d3.select(d3.event.target)));
-        })
-        .on('mousedown', _e => {
-          const obj = d3.select(d3.event.target);
-          selected = {
-            enter: () => stack_trace.text(enter(obj)),
-            leave: () => leave(obj),
-          };
-          select(obj);
-        })
-        .on('mouseleave', _e => {
-          leave(d3.select(d3.event.target));
-          selected.enter();
-        });
+      if (getTraceInteractionMode() === 'hover') {
+        // Hover mode: show on mouseover, pin on click
+        dom
+          .on('mouseover', function (event) {
+            selected.leave();
+            stack_trace.text(enter(d3.select(event.target)));
+          })
+          .on('mousedown', function (event) {
+            const obj = d3.select(event.target);
+            selected = {
+              enter: () => stack_trace.text(enter(obj)),
+              leave: () => leave(obj),
+            };
+            select(obj);
+          })
+          .on('mouseleave', function (event) {
+            leave(d3.select(event.target));
+            selected.enter();
+          });
+      } else {
+        // Click mode: show only on click
+        dom
+          .on('click', function (event) {
+            selected.leave();
+            const obj = d3.select(event.target);
+            selected = {
+              enter: () => stack_trace.text(enter(obj)),
+              leave: () => leave(obj),
+            };
+            stack_trace.text(enter(obj));
+            select(obj);
+          });
+      }
     },
     highlight(enter, leave = () => {}) {
       selected = {enter: () => stack_trace.text(enter()), leave};
@@ -657,14 +802,6 @@ function annotate_snapshot(snapshot) {
     }
   }
   snapshot.device_traces = new_traces;
-  // if every event was on the default stream, we elide stream printing
-  if (next_stream == 1) {
-    for (const device_trace of snapshot.device_traces) {
-      for (const t of device_trace) {
-        t.stream = null;
-      }
-    }
-  }
 
   for (const seg of snapshot.segments) {
     seg.stream = stream_name(seg.stream);
@@ -684,7 +821,12 @@ function annotate_snapshot(snapshot) {
         }
       }
       b.version = snapshot.block_version(b.addr, false);
-      addr += b.size;
+      b.segment_pool_id = seg.segment_pool_id;
+      // Note [BigInt and Number Safe Arithmetic]
+      // Device pointer addresses may be represented as either Number or BigInt.
+      // Use explicit conversions to perform arithmetic safely and avoid mixing
+      // BigInt and Number types, which would otherwise trigger JS type errors.
+      addr += typeof addr === "bigint" ? BigInt(b.size) : b.size;
     }
   }
 
@@ -694,306 +836,6 @@ function annotate_snapshot(snapshot) {
   ) {
     snapshot.categores.push('unknown');
   }
-}
-
-function elideRepeats(frames) {
-  const result = [];
-  const length = frames.length;
-  for (let i = 0; i < length; ) {
-    let j = i + 1;
-    const f = frames[i];
-    while (j < length && f === frames[j]) {
-      j++;
-    }
-    switch (j - i) {
-      case 1:
-        result.push(f);
-        break;
-      case 2:
-        result.push(f, f);
-        break;
-      default:
-        result.push(f, `<repeats ${j - i - 1} times>`);
-        break;
-    }
-    i = j;
-  }
-  return result;
-}
-function frameFilter({name, filename}) {
-  const omitFunctions = [
-    'unwind::unwind',
-    'CapturedTraceback::gather',
-    'gather_with_cpp',
-    '_start',
-    '__libc_start_main',
-    'PyEval_',
-    'PyObject_',
-    'PyFunction_',
-  ];
-
-  const omitFilenames = [
-    'core/boxing',
-    '/Register',
-    '/Redispatch',
-    'pythonrun.c',
-    'Modules/main.c',
-    'Objects/call.c',
-    'Objects/methodobject.c',
-    'pycore_ceval.h',
-    'ceval.c',
-    'cpython/abstract.h',
-  ];
-
-  for (const of of omitFunctions) {
-    if (name.includes(of)) {
-      return false;
-    }
-  }
-
-  for (const of of omitFilenames) {
-    if (filename.includes(of)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function format_frames(frames) {
-  if (frames.length === 0) {
-    return (
-      `This block has no frames. Potential causes:\n` +
-      `1) This block was allocated before _record_memory_history was enabled.\n` +
-      `2) The context or stacks passed to _record_memory_history does not include this block. Consider changing context to 'state', 'alloc', or 'all', or changing stacks to 'all'.\n` +
-      `3) This event occurred during backward, which has no python frames, and memory history did not include C++ frames. Use stacks='all' to record both C++ and python frames.`
-    );
-  }
-  const frame_strings = frames
-    .filter(frameFilter)
-    .map(f => `${f.filename}:${f.line}:${f.name}`);
-  return elideRepeats(frame_strings).join('\n');
-}
-
-function process_alloc_data(snapshot, device, plot_segments, max_entries) {
-  const elements = [];
-  const initially_allocated = [];
-  const actions = [];
-  const addr_to_alloc = {};
-
-  const alloc = plot_segments ? 'segment_alloc' : 'alloc';
-  const [free, free_completed] = plot_segments
-    ? ['segment_free', 'segment_free']
-    : ['free', 'free_completed'];
-  for (const e of snapshot.device_traces[device]) {
-    switch (e.action) {
-      case alloc:
-        elements.push(e);
-        addr_to_alloc[e.addr] = elements.length - 1;
-        actions.push(elements.length - 1);
-        break;
-      case free:
-      case free_completed:
-        if (e.addr in addr_to_alloc) {
-          actions.push(addr_to_alloc[e.addr]);
-          delete addr_to_alloc[e.addr];
-        } else {
-          elements.push(e);
-          initially_allocated.push(elements.length - 1);
-          actions.push(elements.length - 1);
-        }
-        break;
-      default:
-        break;
-    }
-  }
-  for (const seg of snapshot.segments) {
-    if (seg.device !== device) {
-      continue;
-    }
-    if (plot_segments) {
-      if (!(seg.address in addr_to_alloc)) {
-        const element = {
-          action: 'alloc',
-          addr: seg.address,
-          size: seg.total_size,
-          frames: [],
-          stream: seg.stream,
-          version: seg.version,
-        };
-        elements.push(element);
-        initially_allocated.push(elements.length - 1);
-      }
-    } else {
-      for (const b of seg.blocks) {
-        if (b.state === 'active_allocated' && !(b.addr in addr_to_alloc)) {
-          const element = {
-            action: 'alloc',
-            addr: b.addr,
-            size: b.requested_size,
-            frames: b.frames,
-            stream: seg.stream,
-            version: b.version,
-          };
-          elements.push(element);
-          initially_allocated.push(elements.length - 1);
-        }
-      }
-    }
-  }
-  initially_allocated.reverse();
-  // if there are no actions, the graph will be blank,
-  // but if there are existing allocations we do not want to hide them
-  // by having just one allocate action it will show a flat graph with all segments
-  if (actions.length === 0 && initially_allocated.length > 0) {
-    actions.push(initially_allocated.pop());
-  }
-
-  const current = [];
-  const current_data = [];
-  const data = [];
-  let max_size = 0;
-
-  let total_mem = 0;
-  let total_summarized_mem = 0;
-  let timestep = 0;
-
-  const max_at_time = [];
-
-  const summarized_mem = {
-    elem: 'summarized',
-    timesteps: [],
-    offsets: [total_mem],
-    size: [],
-    color: 0,
-  };
-  const summarized_elems = {};
-
-  function advance(n) {
-    summarized_mem.timesteps.push(timestep);
-    summarized_mem.offsets.push(total_mem);
-    summarized_mem.size.push(total_summarized_mem);
-    timestep += n;
-    for (let i = 0; i < n; i++) {
-      max_at_time.push(total_mem + total_summarized_mem);
-    }
-  }
-
-  const sizes = elements
-    .map((x, i) => [x.size, i])
-    .sort(([x, _xi], [y, _yi]) => y - x);
-
-  const draw_elem = {};
-  for (const [_s, e] of sizes.slice(0, max_entries)) {
-    draw_elem[e] = true;
-  }
-
-  function add_allocation(elem) {
-    const element_obj = elements[elem];
-    const size = element_obj.size;
-    current.push(elem);
-    let color = elem;
-    if (snapshot.categories.length > 0) {
-      color = snapshot.categories.indexOf(element_obj.category || 'unknown');
-    }
-    const e = {
-      elem,
-      timesteps: [timestep],
-      offsets: [total_mem],
-      size,
-      color,
-    };
-    current_data.push(e);
-    data.push(e);
-    total_mem += size;
-    element_obj.max_allocated_mem = total_mem + total_summarized_mem;
-  }
-
-  for (const elem of initially_allocated) {
-    if (elem in draw_elem) {
-      add_allocation(elem);
-    } else {
-      total_summarized_mem += elements[elem].size;
-      summarized_elems[elem] = true;
-    }
-  }
-
-  for (const elem of actions) {
-    const size = elements[elem].size;
-    if (!(elem in draw_elem)) {
-      if (elem in summarized_elems) {
-        advance(1);
-        total_summarized_mem -= size;
-        summarized_elems[elem] = null;
-      } else {
-        total_summarized_mem += size;
-        summarized_elems[elem] = true;
-        advance(1);
-      }
-      continue;
-    }
-    const idx = current.findLastIndex(x => x === elem);
-    // first time we see an action we add it
-    // second time we remove it
-    if (idx === -1) {
-      add_allocation(elem);
-      advance(1);
-    } else {
-      advance(1);
-      const removed = current_data[idx];
-      removed.timesteps.push(timestep);
-      removed.offsets.push(removed.offsets.at(-1));
-      current.splice(idx, 1);
-      current_data.splice(idx, 1);
-
-      if (idx < current.length) {
-        for (let j = idx; j < current.length; j++) {
-          const e = current_data[j];
-          e.timesteps.push(timestep);
-          e.offsets.push(e.offsets.at(-1));
-          e.timesteps.push(timestep + 3);
-          e.offsets.push(e.offsets.at(-1) - size);
-        }
-        advance(3);
-      }
-      total_mem -= size;
-    }
-    max_size = Math.max(total_mem + total_summarized_mem, max_size);
-  }
-
-  for (const elem of current_data) {
-    elem.timesteps.push(timestep);
-    elem.offsets.push(elem.offsets.at(-1));
-  }
-  data.push(summarized_mem);
-
-  return {
-    max_size,
-    allocations_over_time: data,
-    max_at_time,
-    summarized_mem,
-    elements_length: elements.length,
-    context_for_id: id => {
-      const elem = elements[id];
-      let text = `Addr: ${formatAddr(elem)}`;
-      text = `${text}, Size: ${formatSize(elem.size)} allocation`;
-      text = `${text}, Total memory used after allocation: ${formatSize(
-        elem.max_allocated_mem,
-      )}`;
-      if (elem.stream !== null) {
-        text = `${text}, stream ${elem.stream}`;
-      }
-      if (elem.timestamp !== null) {
-        var d = new Date(elem.time_us / 1000);
-        text = `${text}, timestamp ${d}`;
-      }
-      if (!elem.action.includes('alloc')) {
-        text = `${text}\nalloc not recorded, stack trace for free:`;
-      }
-      text = `${text}\n${format_frames(elem.frames)}`;
-      return text;
-    },
-  };
 }
 
 function MemoryPlot(
@@ -1024,7 +866,8 @@ function MemoryPlot(
   const plot_height = height;
 
   const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-  const yaxis = axisLeft(yscale).tickFormat(d3.format('.3s'));
+  // Use formatSize with showBytes=false for clean axis labels
+  const yaxis = axisLeft(yscale).tickFormat(d => formatSize(d, false));
   const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
   const plot_coordinate_space = svg
     .append('g')
@@ -1056,14 +899,18 @@ function MemoryPlot(
     .enter()
     .append('polygon')
     .attr('points', format_points)
-    .attr('fill', d => colors[d.color % colors.length]);
+    .attr('fill', d => colors[d.color % colors.length])
+    .attr('opacity', d => d.opacity ?? 1)
+    .attr('stroke', d => typeof d.elem === 'string' && d.elem.startsWith('pool:') ? 'black' : null)
+    .attr('stroke-width', d => typeof d.elem === 'string' && d.elem.startsWith('pool:') ? 3 : null)
+    .attr('vector-effect', d => typeof d.elem === 'string' && d.elem.startsWith('pool:') ? 'non-scaling-stroke' : null);
 
   const axis = plot_coordinate_space.append('g').call(yaxis);
 
-  function handleZoom() {
-    const t = d3.event.transform;
+  function handleZoom(event) {
+    const t = event.transform;
     zoom_group.attr('transform', t);
-    axis.call(yaxis.scale(d3.event.transform.rescaleY(yscale)));
+    axis.call(yaxis.scale(event.transform.rescaleY(yscale)));
   }
 
   const thezoom = zoom().on('zoom', handleZoom);
@@ -1088,16 +935,26 @@ function MemoryPlot(
       );
     },
     set_delegate: delegate => {
-      plot
-        .on('mouseover', function (_e, _d) {
-          delegate.set_selected(d3.select(this));
-        })
-        .on('mousedown', function (_e, _d) {
-          delegate.default_selected = d3.select(this);
-        })
-        .on('mouseleave', function (_e, _d) {
-          delegate.set_selected(delegate.default_selected);
-        });
+      if (getTraceInteractionMode() === 'hover') {
+        // Hover mode: show on mouseover, pin on click
+        plot
+          .on('mouseover', function (_e, _d) {
+            delegate.set_selected(d3.select(this));
+          })
+          .on('mousedown', function (_e, _d) {
+            delegate.default_selected = d3.select(this);
+          })
+          .on('mouseleave', function (_e, _d) {
+            delegate.set_selected(delegate.default_selected);
+          });
+      } else {
+        // Click mode: show only on click
+        plot
+          .on('click', function (_e, _d) {
+            delegate.default_selected = d3.select(this);
+            delegate.set_selected(d3.select(this));
+          });
+      }
     },
   };
 }
@@ -1105,11 +962,40 @@ function MemoryPlot(
 function ContextViewer(text, data) {
   let current_selected = null;
 
+  function restore_search_highlight(d) {
+    if (!d) return;
+    const addr = d.attr('data-search-match') === 'true';
+    const frame = d.attr('data-frame-match') === 'true';
+    if (addr && frame) {
+      d.attr('stroke', '#ff00ff')
+        .attr('stroke-width', 3)
+        .attr('stroke-dasharray', '6,3')
+        .attr('vector-effect', 'non-scaling-stroke');
+    } else if (addr) {
+      d.attr('stroke', 'red')
+        .attr('stroke-width', 2)
+        .attr('stroke-dasharray', null)
+        .attr('vector-effect', 'non-scaling-stroke');
+    } else if (frame) {
+      d.attr('stroke', '#2196F3')
+        .attr('stroke-width', 2)
+        .attr('stroke-dasharray', null)
+        .attr('vector-effect', 'non-scaling-stroke');
+    }
+  }
+
   return {
     default_selected: null,
     set_selected: d => {
       if (current_selected !== null) {
-        current_selected.attr('stroke', null).attr('stroke-width', null);
+        const prev = current_selected.datum();
+        const is_pool = prev && typeof prev.elem === 'string' && prev.elem.startsWith('pool:');
+        current_selected
+          .attr('stroke', is_pool ? 'black' : null)
+          .attr('stroke-width', is_pool ? 3 : null)
+          .attr('stroke-dasharray', null)
+          .attr('vector-effect', is_pool ? 'non-scaling-stroke' : null);
+        restore_search_highlight(current_selected);
       }
       if (d === null) {
         text.text('');
@@ -1120,11 +1006,16 @@ function ContextViewer(text, data) {
             'Small tensors that were not plotted to cutdown on render time.\n' +
               'Use detail slider to see smaller allocations.',
           );
+        } else if (typeof dd.elem === 'string' && dd.elem.startsWith('pool:')) {
+          const pool_key = dd.elem.slice(5);
+          const capacity = Array.isArray(dd.size) ? dd.size.at(-1) : dd.size;
+          text.text(`Private Pool (${pool_key}): capacity ${formatSize(capacity)}`);
         } else {
           text.text(`${dd.elem} ${data.context_for_id(dd.elem)}`);
         }
+        const is_pool_sel = typeof dd.elem === 'string' && dd.elem.startsWith('pool:');
         d.attr('stroke', 'black')
-          .attr('stroke-width', 1)
+          .attr('stroke-width', is_pool_sel ? 5 : 1)
           .attr('vector-effect', 'non-scaling-stroke');
       }
       current_selected = d;
@@ -1171,8 +1062,8 @@ function MiniMap(mini_svg, plot, data, left_pad, width, height = 70) {
     [left_pad, 0],
     [width, height],
   ]);
-  brush.on('brush', function () {
-    const [begin, end] = d3.event.selection.map(x => x - left_pad);
+  brush.on('brush', function (event) {
+    const [begin, end] = event.selection.map(x => x - left_pad);
 
     const stepbegin = Math.floor(xscale.invert(begin));
     const stepend = Math.floor(xscale.invert(end));
@@ -1220,12 +1111,20 @@ function create_trace_view(
   device,
   plot_segments = false,
   max_entries = 15000,
+  include_private_inactive = false,
 ) {
   const left_pad = 70;
-  const data = process_alloc_data(snapshot, device, plot_segments, max_entries);
+  const data = process_alloc_data(snapshot, device, plot_segments, max_entries, include_private_inactive);
   dst.selectAll('svg').remove();
   dst.selectAll('div').remove();
 
+  max_entries = Math.min(max_entries, data.elements_length);
+  if (include_private_inactive) {
+    dst.append('div')
+      .attr('style', 'padding: 4px 8px; background: #fff3cd; border: 1px solid #ffc107; font-size: 13px; margin-bottom: 4px;')
+      .text('Note: Private pool memory (the gray bar) is shown as allocated until the pool\'s segment is freed. '
+          + 'This view requires that MemPools are not deleted before torch.cuda.memory._snapshot() is called.');
+  }
   const d = dst.append('div');
   d.append('input')
     .attr('type', 'range')
@@ -1233,15 +1132,33 @@ function create_trace_view(
     .attr('max', data.elements_length)
     .attr('value', max_entries)
     .on('change', function () {
-      create_trace_view(dst, snapshot, device, plot_segments, this.value);
+      create_trace_view(dst, snapshot, device, plot_segments, this.value, include_private_inactive);
     });
-  d.append('label').text('Detail');
+  d.append('label').text(
+    `Detail: ${max_entries} of ${data.elements_length} entries`,
+  );
+
+  d.append('span').text('  |  ');
+  const search_input = d.append('input')
+    .attr('type', 'text')
+    .attr('placeholder', 'Search address (hex)...')
+    .attr('style', 'width: 180px; margin-left: 4px; font-family: monospace;');
+  const search_label = d.append('label')
+    .attr('style', 'margin-left: 4px;');
+
+  d.append('span').text('  |  ');
+  const frame_input = d.append('input')
+    .attr('type', 'text')
+    .attr('placeholder', 'Search stack frame...')
+    .attr('style', 'width: 200px; margin-left: 4px; font-family: monospace;');
+  const frame_label = d.append('label')
+    .attr('style', 'margin-left: 4px;');
 
   const grid_container = dst
     .append('div')
     .attr(
       'style',
-      'display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; height: 100%; gap: 10px',
+      'display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; flex: 1; min-height: 0; gap: 10px',
     );
 
   const plot_svg = grid_container
@@ -1269,17 +1186,72 @@ function create_trace_view(
     .append('div')
     .attr(
       'style',
-      'grid-column: 1; grid-row: 3; width: 100%; height: 100%; overflow: auto;',
+      'grid-column: 1; grid-row: 3; width: 100%; height: 100%; min-height: 0; overflow: auto;',
     );
   const delegate = ContextViewer(context_div.append('pre').text('none'), data);
   plot.set_delegate(delegate);
+
+  function apply_search_highlights() {
+    const addr_query = search_input.node().value.toLowerCase().trim();
+    const frame_query = frame_input.node().value.toLowerCase().trim();
+    const polygons = plot_svg.selectAll('polygon');
+    let addr_matches = 0;
+    let frame_matches = 0;
+    polygons.each(function () {
+      const dd = d3.select(this).datum();
+      if (!dd || typeof dd.elem !== 'number') {
+        d3.select(this)
+          .attr('data-search-match', null)
+          .attr('data-frame-match', null);
+        return;
+      }
+      const ctx = data.context_for_id(dd.elem);
+      const ctx_lower = ctx.toLowerCase();
+      const addr_hit = addr_query && ctx_lower.includes(addr_query);
+      const frame_hit = frame_query && ctx_lower.includes(frame_query);
+      d3.select(this)
+        .attr('data-search-match', addr_hit ? 'true' : null)
+        .attr('data-frame-match', frame_hit ? 'true' : null);
+      if (addr_hit && frame_hit) {
+        d3.select(this)
+          .attr('stroke', '#ff00ff')
+          .attr('stroke-width', 3)
+          .attr('stroke-dasharray', '6,3')
+          .attr('vector-effect', 'non-scaling-stroke');
+      } else if (addr_hit) {
+        d3.select(this)
+          .attr('stroke', 'red')
+          .attr('stroke-width', 2)
+          .attr('stroke-dasharray', null)
+          .attr('vector-effect', 'non-scaling-stroke');
+      } else if (frame_hit) {
+        d3.select(this)
+          .attr('stroke', '#2196F3')
+          .attr('stroke-width', 2)
+          .attr('stroke-dasharray', null)
+          .attr('vector-effect', 'non-scaling-stroke');
+      } else {
+        d3.select(this)
+          .attr('stroke', null)
+          .attr('stroke-width', null)
+          .attr('stroke-dasharray', null);
+      }
+      if (addr_hit) addr_matches++;
+      if (frame_hit) frame_matches++;
+    });
+    search_label.text(addr_query ? `${addr_matches} match${addr_matches !== 1 ? 'es' : ''}` : '');
+    frame_label.text(frame_query ? `${frame_matches} match${frame_matches !== 1 ? 'es' : ''}` : '');
+  }
+
+  search_input.on('input', apply_search_highlights);
+  frame_input.on('input', apply_search_highlights);
 }
 
 function create_settings_view(dst, snapshot, device) {
   dst.selectAll('svg').remove();
   dst.selectAll('div').remove();
   const settings_div = dst.append('div');
-  settings_div.append('p').text('CUDA Caching Allocator Settings:');
+  settings_div.append('p').text('Caching Allocator Settings:');
 
   // Check if allocator_settings exists in snapshot
   if ('allocator_settings' in snapshot) {
@@ -1292,6 +1264,19 @@ function create_settings_view(dst, snapshot, device) {
 }
 
 function unpickle(buffer) {
+  try {
+    const decoder = new TextDecoder();
+    const jsonString = decoder.decode(new Uint8Array(buffer));
+    const data = JSON.parse(jsonString);
+
+    return data;
+  } catch (e) {
+    console.log('Failed to decode the data as JSON, fall back to pickle', e);
+  }
+  return unpickleData(buffer);
+}
+
+function unpickleData(buffer) {
   const bytebuffer = new Uint8Array(buffer);
   const decoder = new TextDecoder();
 
@@ -1334,6 +1319,9 @@ function unpickle(buffer) {
   const LIST = 'l'.charCodeAt(0);
   const DICT = 'd'.charCodeAt(0);
   const SETITEM = 's'.charCodeAt(0);
+  const BYTEARRAY8 = 0x96;
+  const NEXT_BUFFER = 0x97;
+  const READONLY_BUFFER = 0x98;
 
   const scratch_buffer = new ArrayBuffer(8);
   const scratch_bytes = new Uint8Array(scratch_buffer);
@@ -1349,6 +1337,15 @@ function unpickle(buffer) {
     offset += 4;
     return n;
   }
+  function read_uint64() {
+    const lo = read_uint4();
+    const hi = read_uint4();
+    const n = lo + hi * 0x100000000;
+    if (!Number.isSafeInteger(n)) {
+      throw new Error('Pickle length exceeds safe integer range');
+    }
+    return n;
+  }
   function setitems(d, mark) {
     for (let i = mark; i < stack.length; i += 2) {
       d[stack[i]] = stack[i + 1];
@@ -1362,7 +1359,7 @@ function unpickle(buffer) {
       case PROTO:
         {
           const version = bytebuffer[offset++];
-          if (version < 2 || version > 4) {
+          if (version < 2 || version > 5) {
             throw new Error(`Unhandled version ${version}`);
           }
         }
@@ -1542,6 +1539,16 @@ function unpickle(buffer) {
         }
         stack.push(float64[0]);
         break;
+      case BYTEARRAY8:
+        {
+          const n = read_uint64();
+          stack.push(new Uint8Array(buffer.slice(offset, offset + n)));
+          offset += n;
+        }
+        break;
+      case NEXT_BUFFER:
+      case READONLY_BUFFER:
+        throw new Error('Out-of-band buffer opcodes are not supported');
       default:
         throw new Error(`UNKNOWN OPCODE: ${opcode}`);
     }
@@ -1581,6 +1588,8 @@ function decode_base64(input) {
 
 const kinds = {
   'Active Memory Timeline': create_trace_view,
+  'Allocated Memory (incl. Private Pools)': (dst, snapshot, device) =>
+    create_trace_view(dst, snapshot, device, false, 15000, true),
   'Allocator State History': create_segment_view,
   'Active Cached Segment Timeline': (dst, snapshot, device) =>
     create_trace_view(dst, snapshot, device, true),
@@ -1598,18 +1607,42 @@ pre {
 }
 html, body {
   height: 100%;
+  margin: 0;
   overflow: clip;
+}
+body {
+  display: flex;
+  flex-direction: column;
 }`;
 
 const head = d3.select('head');
 head.append('style').text(style);
 const body = d3.select('body');
-const snapshot_select = body.append('select');
-const view = body.append('select');
+const controls = body.append('div');
+const snapshot_select = controls.append('select');
+const view = controls.append('select');
 for (const x in kinds) {
   view.append('option').text(x);
 }
-const gpu = body.append('select');
+const gpu = controls.append('select');
+
+// Add interaction mode toggle (hover vs click)
+const interactionLabel = body.append('label')
+  .attr('style', 'margin-left: 15px; cursor: pointer;');
+const interactionCheckbox = interactionLabel.append('input')
+  .attr('type', 'checkbox')
+  .attr('id', 'interaction-mode-toggle')
+  .attr('style', 'cursor: pointer; margin-right: 5px;');
+interactionLabel.append('span').text('Require click to show trace (applies on file load)');
+
+interactionCheckbox.on('change', function() {
+  const mode = this.checked ? 'click' : 'hover';
+  setTraceInteractionMode(mode);
+  // Only refresh the view if a snapshot is already loaded
+  if (snapshot_select.node().value) {
+    selected_change();
+  }
+});
 
 function unpickle_and_annotate(data) {
   data = unpickle(data);
@@ -1620,6 +1653,7 @@ function unpickle_and_annotate(data) {
 
 function snapshot_change(f) {
   const view_value = view.node().value;
+  let no_starting_gpu = gpu.node().value == '';
   let device = Number(gpu.node().value);
   const snapshot = snapshot_cache[f];
   gpu.selectAll('option').remove();
@@ -1628,9 +1662,15 @@ function snapshot_change(f) {
     has_segments[s.device] = true;
   }
   let device_valid = false;
+  let maxTraceLength = -1;
+  let defaultDevice = null;
   for (const [i, trace] of snapshot.device_traces.entries()) {
     if (trace.length > 0 || i in has_segments) {
       gpu.append('option').text(i);
+      if (trace.length > maxTraceLength) {
+        maxTraceLength = trace.length;
+        defaultDevice = i;
+      }
       if (i === device) {
         device_valid = true;
         gpu.node().selectedIndex = gpu.node().children.length - 1;
@@ -1640,6 +1680,12 @@ function snapshot_change(f) {
   if (!device_valid) {
     device = Number(gpu.node().value);
   }
+
+  if (no_starting_gpu) {
+    device = defaultDevice;
+    gpu.node().value = device;
+  }
+
   const key = [f, view_value, device];
   if (!(key in selection_to_div)) {
     selection_to_div[key] = d3.select('body').append('div');
@@ -1647,12 +1693,12 @@ function snapshot_change(f) {
   }
   const selected_div = selection_to_div[key];
 
-  selected_div.attr('style', 'display: float; height: 100%');
+  selected_div.attr('style', 'display: flex; flex-direction: column; flex: 1; min-height: 0');
 }
 
 function selected_change() {
   for (const d of Object.values(selection_to_div)) {
-    d.attr('style', 'display: none; height: 100%');
+    d.attr('style', 'display: none; flex-direction: column; flex: 1; min-height: 0');
   }
   const f = snapshot_select.node().value;
   if (f === '') {
@@ -1693,8 +1739,27 @@ body.on('drop', () => {
 selection_to_div[''] = body
   .append('div')
   .text(
-    'Drag and drop a file to load a local snapshot. No data from the snapshot is uploaded.',
+    'Drag and drop or select a file to load a local snapshot. No data from the snapshot is uploaded.',
   );
+
+const fileInput = body.append('input')
+  .attr('type', 'file')
+  .attr('multiple', true)    // allow several snapshots at once
+  .style('margin-left', '8px')
+  .on('change', function () {
+    Array.from(this.files).forEach(file => {
+      add_snapshot(file.name, unique_name => {
+        const reader = new FileReader();
+        reader.onload = e =>
+          finished_loading(unique_name, e.target.result);
+        reader.readAsArrayBuffer(file);
+      });
+    });
+    this.value = null;                       // reset so the same file can be picked again
+    snapshot_select.node().selectedIndex =
+      snapshot_select.node().options.length - 1;
+    selected_change();                       // refresh the UI
+  });
 
 let next_unique_n = 1;
 function add_snapshot(name, loader) {
@@ -1735,3 +1800,6 @@ export function add_local_files(files, view_value) {
     selected_change();
   }
 }
+
+// Export configuration functions for external use
+export { setTraceInteractionMode, getTraceInteractionMode };

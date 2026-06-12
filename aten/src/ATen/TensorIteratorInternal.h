@@ -41,7 +41,7 @@ inline void serial_for_each(
     IntArrayRef strides,
     char** base_ptrs,
     size_t ntensors,
-    typename TensorIteratorBase::loop2d_t loop,
+    TensorIteratorBase::loop2d_t loop,
     Range range) {
   const auto ndim = shape.size();
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(

@@ -45,7 +45,7 @@ Mode 2: similar to data parallelism, run the same model for different inputs
 on different threads at the same time. In this case, run
 `PrepareForStaticRuntime` to prepare the graph for Static Runtime. You
 should have one InferenceModule instance per model, and one Static Runtime instance
-per running thread. To avoiding creating StaticRuntime on the fly, use a
+per running thread. To avoid creating StaticRuntime on the fly, use a
 synchronized stack (i.e. `boost::lockfree::stack`) to cache all the Static
 Runtime instances in your code.
 ```
@@ -71,7 +71,7 @@ Runtime instances in your code.
 Static runtime's memory planner does two things:
 
 1) Coalesces internal allocations for tensor storage
-2) Does static analysis to figure out how to efficiently re-use memory.
+2) Does static analysis to figure out how to efficiently reuse memory.
 
 ### Standard Resizing
 Static runtime will record the space required for each intermediate managed tensor it sees

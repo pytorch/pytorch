@@ -1,38 +1,51 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
 import torch
 
-from ..common import DeviceOpOverrides, register_device_op_overrides
+from ...runtime.hints import get_warp_size
+from ..common import (
+    DeviceOpOverrides,
+    register_device_op_overrides,
+    TritonScratchWorkspace,
+)
 
 
 class CUDADeviceOpOverrides(DeviceOpOverrides):
-    def import_get_raw_stream_as(self, name):
+    """
+    CUDA-specific codegen functions, see DeviceOpOverrides for details
+    """
+
+    def import_get_raw_stream_as(self, name: str) -> str:
         return f"from torch._C import _cuda_getCurrentRawStream as {name}"
 
-    def set_device(self, device_idx):
+    def set_device(self, device_idx: int) -> str:
         return f"torch.cuda.set_device({device_idx})"
 
-    def synchronize(self):
+    def synchronize(self) -> str:
         return "torch.cuda.synchronize()"
 
-    def device_guard(self, device_idx):
+    def device_guard(self, device_idx: int) -> str:
         return f"torch.cuda._DeviceGuard({device_idx})"
 
-    def cpp_device_guard(self):
+    def current_stream(self) -> str:
+        return "torch.cuda.current_stream()"
+
+    def cpp_device_guard(self) -> str:
         return "at::cuda::CUDAGuard"
 
-    def cpp_aoti_device_guard(self):
+    def cpp_aoti_device_guard(self) -> str:
         return "AOTICudaGuard"
 
-    def cpp_stream_guard(self):
+    def cpp_stream_guard(self) -> str:
         return "at::cuda::CUDAStreamGuard"
 
-    def cpp_aoti_stream_guard(self):
+    def cpp_aoti_stream_guard(self) -> str:
         return "AOTICudaStreamGuard"
 
-    def cpp_getStreamFromExternal(self):
+    def cpp_getStreamFromExternal(self) -> str:
         return "at::cuda::getStreamFromExternal"
 
-    def kernel_header(self):
+    def kernel_header(self) -> str:
         source_codes = """
         #include <c10/cuda/CUDAGuard.h>
         #include <c10/cuda/CUDAStream.h>
@@ -40,7 +53,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         """
         return source_codes
 
-    def kernel_driver(self):
+    def kernel_driver(self) -> str:
+        """Return C++ host-side helpers (loadKernel, launchKernel, CUDA_DRIVER_CHECK)
+        embedded in AOTI-generated wrapper code."""
         source_codes = """
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
@@ -59,27 +74,12 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 }                                              \\
             } while (0);
 
-            namespace {
-
-            struct Grid {
-                Grid(uint32_t x, uint32_t y, uint32_t z)
-                  : grid_x(x), grid_y(y), grid_z(z) {}
-                uint32_t grid_x;
-                uint32_t grid_y;
-                uint32_t grid_z;
-
-                bool is_non_zero() {
-                    return grid_x > 0 && grid_y > 0 && grid_z > 0;
-                }
-            };
-
-            }  // anonymous namespace
-
             static inline CUfunction loadKernel(
                     std::string filePath,
                     const std::string &funcName,
                     uint32_t sharedMemBytes,
-                    const std::optional<std::string> &cubinDir = std::nullopt) {
+                    const std::optional<std::string> &cubinDir = std::nullopt,
+                    std::vector<CUmodule>* loaded_modules = nullptr) {
                 if (cubinDir) {
                     std::filesystem::path p1{*cubinDir};
                     std::filesystem::path p2{filePath};
@@ -89,6 +89,31 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 CUmodule mod;
                 CUfunction func;
                 CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
+                CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                if (sharedMemBytes > 0) {
+                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                        func,
+                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                        sharedMemBytes
+                    ))
+                }
+                return func;
+            }
+
+            static inline CUfunction loadKernel(
+                    const void* start,
+                    const std::string &funcName,
+                    uint32_t sharedMemBytes,
+                    std::vector<CUmodule>* loaded_modules = nullptr) {
+                CUmodule mod;
+                CUfunction func;
+                CUDA_DRIVER_CHECK(cuModuleLoadData(&mod, start));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
                     CUDA_DRIVER_CHECK(cuFuncSetAttribute(
@@ -116,18 +141,23 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         """
         if torch.version.hip is not None:
             # Adjusting the warp size to GPU supported wavefront size on AMD GPU
-            prop = torch.cuda.get_device_properties(torch.cuda.current_device())
-            source_codes = source_codes.replace(
-                "32*numWarps", str(prop.warp_size) + "*numWarps"
-            )
+            device = torch.device("cuda", torch.cuda.current_device())
+            warp_size = get_warp_size(device)
+            source_codes = source_codes.replace("32*numWarps", f"{warp_size}*numWarps")
         return source_codes
 
-    def tma_descriptor_helpers(self):
+    def tma_descriptor_helpers(self) -> str:
+        """
+        CUDA helper functions for initializing TMA Descriptors on host side
+        """
         if torch.version.hip is not None:
             raise RuntimeError("Host-side TMA descriptors not supported on HIP.")
 
         # helper functions for initializing 1D and 2D TMA descriptors in C++. borrowed from the Triton code here:
+        # Old APIs (fill(1|2)DTMADescriptor):
         # https://github.com/triton-lang/triton/blob/6af4f88591c85de079d8a36a4d7dba67918e2b39/third_party/nvidia/backend/driver.c#L283
+        # New APIs (fillTMADescriptor):
+        # https://github.com/triton-lang/triton/blob/main/third_party/nvidia/backend/driver.c#L283
         return """
             #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
             [[maybe_unused]] static void init1DTMADescriptor(
@@ -222,23 +252,130 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     swizzle, CU_TENSOR_MAP_L2_PROMOTION_L2_128B,
                     CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE));
             }
+
+            [[maybe_unused]] static void initTMADescriptor(
+                CUtensorMap* m,
+                void* globalAddress,
+                int elemSize,
+                int rank,
+                uint32_t* blockSize,
+                uint64_t* shape,
+                uint64_t* stride
+            ) {
+                uint32_t elementStrides[5] = {1, 1, 1, 1, 1};
+                uint32_t blockSizeInt[5];
+                uint64_t shapeInt[5];
+                uint64_t stridesLL[5];
+
+                // Reorder blockSize (reverse the order)
+                for (int i = 0; i < rank; ++i) {
+                    blockSizeInt[rank - i - 1] = blockSize[i];
+                }
+
+                // Reorder shape (reverse the order)
+                for (int i = 0; i < rank; ++i) {
+                    shapeInt[rank - i - 1] = shape[i];
+                }
+
+                // Reorder and calculate strides
+                for (int i = 0; i + 1 < rank; ++i) {
+                    stridesLL[rank - i - 2] = elemSize * stride[i];
+                }
+                stridesLL[rank - 1] =
+                    shapeInt[rank - 1] * (rank == 1 ? elemSize : stridesLL[rank - 2]);
+
+                CUtensorMapDataType type;
+                // In Triton this is computed ahead of time; but for simplicity
+                // in the PyTorch version we copied this code from the old
+                // TMA API handling (i.e. init2DTMADescriptor)
+                switch (elemSize) {
+                case 1:
+                    type = CU_TENSOR_MAP_DATA_TYPE_UINT8;
+                    break;
+                case 2:
+                    type = CU_TENSOR_MAP_DATA_TYPE_UINT16;
+                    break;
+                case 4:
+                    type = CU_TENSOR_MAP_DATA_TYPE_UINT32;
+                    break;
+                default:
+                    throw std::runtime_error("elemSize must be 1, 2, or 4");
+                }
+
+                // Calculate the size of the most contiguous dimension in bytes
+                CUtensorMapSwizzle swizzle = CU_TENSOR_MAP_SWIZZLE_128B;
+                uint32_t contigDimSizeInByte = elemSize * blockSizeInt[0];
+                if (rank == 1) {
+                    // rank 1 should not be swizzled
+                    swizzle = CU_TENSOR_MAP_SWIZZLE_NONE;
+                } else if (contigDimSizeInByte >= 128) {
+                    swizzle = CU_TENSOR_MAP_SWIZZLE_128B;
+                } else if (contigDimSizeInByte >= 64) {
+                    swizzle = CU_TENSOR_MAP_SWIZZLE_64B;
+                } else if (contigDimSizeInByte >= 32) {
+                    swizzle = CU_TENSOR_MAP_SWIZZLE_32B;
+                } else {
+                    throw std::runtime_error("block size too small");
+                }
+
+                CUDA_DRIVER_CHECK(cuTensorMapEncodeTiled(
+                    m, type, rank, globalAddress,
+                    shapeInt, stridesLL, blockSizeInt, elementStrides,
+                    CU_TENSOR_MAP_INTERLEAVE_NONE, (CUtensorMapSwizzle)swizzle,
+                    CU_TENSOR_MAP_L2_PROMOTION_L2_128B, CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE));
+            }
+
+            struct StableTMADescriptor {
+                CUtensorMap m;
+                uint32_t block_shape[5];
+                uint64_t global_shape[5];
+                uint64_t strides[5];
+            };
             #endif
         """
 
-    def abi_compatible_header(self):
-        return "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
-
-    def cpp_stream_type(self):
+    def cpp_stream_type(self) -> str:
         return "cudaStream_t"
 
-    def aoti_get_stream(self):
+    def aoti_get_stream(self) -> str:
         return "aoti_torch_get_current_cuda_stream"
 
-    def cpp_kernel_type(self):
+    def cpp_kernel_type(self) -> str:
         return "CUfunction"
 
-    def cpp_device_ptr(self):
+    def cpp_device_ptr(self) -> str:
         return "CUdeviceptr"
+
+    def cpp_scratch(
+        self, idx: int, workspace: TritonScratchWorkspace, prefix: str | None = None
+    ) -> tuple[list[str], str] | None:
+        prefix = f"{prefix}_" if prefix else ""
+        var_name = f"{prefix}scratch_{idx}"
+        if workspace.size > 0:
+            size_expr = (
+                f"static_cast<int64_t>({workspace.size}) * grid_0 * grid_1 * grid_2"
+            )
+            size_array = f"int64_t {var_name}_size[] = {{{size_expr}}};"
+            stride_array = f"int64_t {var_name}_stride[] = {{1}};"
+            device_type = "cached_torch_device_type_cuda"
+            device_idx = "device_idx_"
+
+            return (
+                [
+                    f"{size_array}",
+                    f"{stride_array}",
+                    f"AtenTensorHandle {var_name}_handle;",
+                    (
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(1, {var_name}_size, {var_name}_stride, "
+                        f"{workspace.generate_dtype_str()}, {device_type}, {device_idx}, &{var_name}_handle));"
+                    ),
+                    f"RAIIAtenTensorHandle {var_name}_tensor({var_name}_handle);",
+                    f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({var_name}_tensor.data_ptr());",
+                ],
+                var_name,
+            )
+        else:
+            return [f"CUdeviceptr {var_name} = 0;"], var_name
 
 
 register_device_op_overrides("cuda", CUDADeviceOpOverrides())

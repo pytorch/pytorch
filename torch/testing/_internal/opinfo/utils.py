@@ -2,8 +2,8 @@
 
 import collections
 import warnings
+from collections.abc import Sequence
 from functools import partial, wraps
-from typing import Sequence
 
 import numpy as np
 import numpy.typing as npt
@@ -59,10 +59,14 @@ class _dynamic_dispatch_dtypes(_dispatch_dtypes):
 
 def get_supported_dtypes(op, sample_inputs_fn, device_type):
     # Returns the supported dtypes for the given operator and device_type pair.
-    assert device_type in ["cpu", "cuda"]
+    if device_type not in ["cpu", "cuda"]:
+        raise AssertionError(
+            f"Expected device_type in ['cpu', 'cuda'], got {device_type!r}"
+        )
     if not TEST_CUDA and device_type == "cuda":
         warnings.warn(
-            "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!"
+            "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!",
+            stacklevel=2,
         )
         return _dynamic_dispatch_dtypes(())
 
@@ -76,7 +80,8 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
             # We raise a warning, so that user knows that this was the case
             # and can investigate if there was an issue with the `sample_inputs_fn`.
             warnings.warn(
-                f"WARNING: Unable to generate sample for device:{device_type} and dtype:{dtype}"
+                f"WARNING: Unable to generate sample for device:{device_type} and dtype:{dtype}",
+                stacklevel=2,
             )
             continue
 
@@ -156,7 +161,7 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
     #   unary ufunc when given an integer input.
-    #   This mimicks PyTorch's integer->floating point
+    #   This mimics PyTorch's integer->floating point
     #   type promotion.
     #
     # This is necessary when NumPy promotes
@@ -230,7 +235,10 @@ def reference_reduction_numpy(f, supports_keepdims=True):
         if "mask" in keys:
             mask = kwargs.pop("mask")
             if mask is not None:
-                assert mask.layout == torch.strided
+                if mask.layout != torch.strided:
+                    raise AssertionError(
+                        f"Expected mask.layout == torch.strided, got {mask.layout}"
+                    )
                 kwargs["where"] = mask.cpu().numpy()
 
         if "identity" in keys:
@@ -257,7 +265,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
 def prod_numpy(a, *args, **kwargs):
     """
     The function will call np.prod with type as np.int64 if the input type
-    is int or uint64 if is uint. This is necessary because windows np.prod uses by default
+    is int or uint64 if it is uint. This is necessary because windows np.prod uses by default
     int32 while on linux it uses int64.
     This is for fixing integer overflow https://github.com/pytorch/pytorch/issues/77320
 

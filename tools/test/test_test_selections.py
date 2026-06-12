@@ -8,7 +8,7 @@ from collections import defaultdict
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
@@ -374,7 +374,7 @@ class TestCalculateShards(unittest.TestCase):
             expected_shards,
             calculate_shards(
                 2,
-                [TestRun(t) for t in test_times.keys()],
+                [TestRun(t) for t in test_times],
                 test_times,
                 gen_class_times(test_times),
             ),
@@ -404,7 +404,7 @@ class TestCalculateShards(unittest.TestCase):
             expected_shards,
             calculate_shards(
                 2,
-                [TestRun(t) for t in test_times.keys()],
+                [TestRun(t) for t in test_times],
                 test_times,
                 gen_class_times(test_times),
             ),
@@ -422,7 +422,7 @@ class TestCalculateShards(unittest.TestCase):
             expected_shards,
             calculate_shards(
                 2,
-                [TestRun(t) for t in test_times.keys()],
+                [TestRun(t) for t in test_times],
                 test_times,
                 gen_class_times(test_times),
             ),

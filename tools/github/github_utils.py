@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Callable, cast, Dict
+from typing import Any, cast, TYPE_CHECKING
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def gh_fetch_url_and_headers(
@@ -33,10 +37,10 @@ def gh_fetch_url_and_headers(
         ):
             print(
                 f"""Rate limit exceeded:
-                Used: {err.headers['X-RateLimit-Used']}
-                Limit: {err.headers['X-RateLimit-Limit']}
-                Remaining: {err.headers['X-RateLimit-Remaining']}
-                Resets at: {err.headers['x-RateLimit-Reset']}"""
+                Used: {err.headers["X-RateLimit-Used"]}
+                Limit: {err.headers["X-RateLimit-Limit"]}
+                Remaining: {err.headers["X-RateLimit-Remaining"]}
+                Resets at: {err.headers["x-RateLimit-Reset"]}"""
             )
         raise
 
@@ -72,7 +76,7 @@ def gh_fetch_json_dict(
     params: dict[str, Any] | None = None,
     data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return cast(Dict[str, Any], _gh_fetch_json_any(url, params, data))
+    return cast(dict[str, Any], _gh_fetch_json_any(url, params, data))
 
 
 def gh_fetch_commit(org: str, repo: str, sha: str) -> dict[str, Any]:

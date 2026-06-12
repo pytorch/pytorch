@@ -1,4 +1,4 @@
-import torchvision.models as models
+from torchvision import models
 
 import torch
 import torch.autograd.profiler as profiler

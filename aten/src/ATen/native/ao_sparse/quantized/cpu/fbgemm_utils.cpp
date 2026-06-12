@@ -10,7 +10,7 @@
 
 namespace ao::sparse {
 int register_linear_params() {
-  static auto register_linear_params =
+  [[maybe_unused]] static auto register_linear_params =
       torch::selective_class_<LinearPackedParamsBase>(
           "sparse", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
           .def_pickle(
@@ -39,6 +39,6 @@ int register_linear_params() {
 }
 
 namespace {
-[[maybe_unused]] static auto linear_params = register_linear_params();
+[[maybe_unused]] auto linear_params = register_linear_params();
 } // namespace
 }  // namespace ao::sparse

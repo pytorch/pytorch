@@ -10,6 +10,8 @@ functionalities in `torch.jit`.
 """
 
 import os
+import sys
+import warnings
 
 import torch
 from torch._jit_internal import _get_model_id
@@ -18,7 +20,7 @@ from torch.jit._recursive import wrap_cpp_module
 from torch.serialization import validate_cuda_device
 
 
-def save(m, f, _extra_files=None):
+def save(m, f, _extra_files=None) -> None:
     r"""
     Save an offline version of this module for use in a separate process.
 
@@ -77,6 +79,17 @@ def save(m, f, _extra_files=None):
         extra_files = {'foo.txt': b'bar'}
         torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
+    if sys.version_info >= (3, 14):
+        warnings.warn(
+            "`torch.jit.save` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.export`.",
+            DeprecationWarning,
+        )
+    else:
+        warnings.warn(
+            "`torch.jit.save` is deprecated. Please switch to `torch.export`.",
+            DeprecationWarning,
+        )
     log_torchscript_usage("save", model_id=_get_model_id(m))
     if _extra_files is None:
         _extra_files = {}
@@ -109,6 +122,11 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
 
     Returns:
         A :class:`ScriptModule` object.
+
+    .. warning::
+        It is possible to construct malicious pickle data which will execute arbitrary code
+        during :func:`torch.jit.load`. Never load data that could have come from an untrusted
+        source, or that could have been tampered with. **Only load data you trust**.
 
     Example:
     .. testcode::
@@ -148,6 +166,17 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
         import os
         os.remove("scriptmodule.pt")
     """
+    if sys.version_info >= (3, 14):
+        warnings.warn(
+            "`torch.jit.load` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.export`.",
+            DeprecationWarning,
+        )
+    else:
+        warnings.warn(
+            "`torch.jit.load` is deprecated. Please switch to `torch.export`.",
+            DeprecationWarning,
+        )
     if isinstance(f, (str, os.PathLike)):
         if not os.path.exists(f):
             raise ValueError(f"The provided filename {f} does not exist")
@@ -160,10 +189,22 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
 
     cu = torch._C.CompilationUnit()
     if isinstance(f, (str, os.PathLike)):
-        cpp_module = torch._C.import_ir_module(cu, os.fspath(f), map_location, _extra_files, _restore_shapes)  # type: ignore[call-arg]
+        cpp_module = torch._C.import_ir_module(
+            cu,
+            os.fspath(f),
+            map_location,
+            _extra_files,
+            # pyrefly: ignore [bad-argument-count]
+            _restore_shapes,
+        )  # type: ignore[call-arg]
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(
-            cu, f.read(), map_location, _extra_files, _restore_shapes
+            cu,
+            f.read(),
+            map_location,
+            _extra_files,
+            # pyrefly: ignore [bad-argument-count]
+            _restore_shapes,
         )  # type: ignore[call-arg]
 
     # TODO: Pretty sure this approach loses ConstSequential status and such
@@ -195,7 +236,7 @@ def jit_module_from_flatbuffer(f):
         return wrap_cpp_module(torch._C._load_jit_module_from_bytes(f.read()))
 
 
-def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
+def save_jit_module_to_flatbuffer(m, f, _extra_files=None) -> None:
     r"""
     Save an offline version of this module for use in a separate process.
 

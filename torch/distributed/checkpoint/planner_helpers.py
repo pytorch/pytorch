@@ -1,6 +1,9 @@
 # mypy: allow-untyped-defs
 import io
-from typing import Any, Callable, cast, Dict, List
+import itertools
+from bisect import bisect_right, insort
+from collections.abc import Callable
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -33,7 +36,109 @@ from .resharding import (
 )
 
 
-__all__: List[str] = ["create_read_items_for_chunk_list"]
+__all__: list[str] = ["create_read_items_for_chunk_list"]
+
+
+def _compare_save_plans(plan: SavePlan, other_plan: SavePlan) -> bool:
+    """
+    Compare the two Save plans and return True if they are equal.
+
+    Args:
+        plan (SavePlan): First SavePlan to compare.
+        other_plan (SavePlan): Second SavePlan to compare.
+
+    Returns:
+       True if the two plans are equal, False otherwise.
+    """
+    if plan.usable != other_plan.usable:
+        return False
+
+    # Both the plans should have the same number of items
+    if len(plan.items) != len(other_plan.items):
+        return False
+
+    # Both the plans should have the same write items.
+    for plan_item, other_plan_item in zip(plan.items, other_plan.items):
+        # Write item type should be same
+        if plan_item.type != other_plan_item.type:
+            return False
+
+        plan_metadata_index = plan_item.index
+        other_plan_metadata_index = other_plan_item.index
+
+        # Write item metadata_index should be same
+        if (
+            plan_metadata_index.fqn != other_plan_metadata_index.fqn
+            or plan_metadata_index.offset != other_plan_metadata_index.offset
+            or plan_metadata_index.index != other_plan_metadata_index.index
+        ):
+            return False
+
+        # Write item tensor_data should be present in both the write items plans, if it exists in either of them.
+        tensor_data = plan_item.tensor_data
+        other_tensor_data = other_plan_item.tensor_data
+        if (tensor_data and not other_tensor_data) or (
+            not tensor_data and other_tensor_data
+        ):
+            return False
+
+        if tensor_data and other_tensor_data:
+            # Write item tensor_data size should be same
+            if tensor_data.size != other_tensor_data.size:
+                return False
+
+            # Write item tensor_data chunk should be present in both the write items, if it exists in either of them.
+            chunk = tensor_data.chunk
+            other_chunk = other_tensor_data.chunk
+            if (chunk and not other_chunk) or (not chunk and other_chunk):
+                return False
+
+            # Write item tensor_data chunk offsets and sizes should be same
+            if chunk and other_chunk:
+                if (
+                    chunk.offsets != other_chunk.offsets
+                    or chunk.sizes != other_chunk.sizes
+                ):
+                    return False
+
+    return True
+
+
+def _contains_usable_plan(delta_plans: list[SavePlan]) -> bool:
+    """
+    Check if any delta plan is usable, indicating the plan has changed.
+
+    Args:
+        delta_plans (List[SavePlan]): A list of delta plans to check.
+    Returns:
+        True if any delta plan is usable, False otherwise.
+    """
+    return any(delta_plan and delta_plan.usable for delta_plan in delta_plans)
+
+
+def _merge_delta_local_plans(
+    cached_plans: list[SavePlan],
+    delta_plans: list[SavePlan],
+) -> list[SavePlan]:
+    """
+    Merge a list of delta plans into a single plan.
+
+    Args:
+        cached_plans (List[SavePlan]): A list of cached plans.
+        delta_plans (List[SavePlan]): A list of delta plans to merge. It can contain empty plans
+
+    Returns:
+        A single merged plan. If a delta plan is not usable, use the cached plan. Otherwise, use the delta plan.
+    """
+    merged_plans = []
+
+    for cached_plan, delta_plan in zip(cached_plans, delta_plans):
+        if delta_plan and not delta_plan.usable:
+            merged_plans.append(cached_plan)
+        else:
+            merged_plans.append(delta_plan)
+
+    return merged_plans
 
 
 def _create_chunk_from_tensor(tensor: torch.Tensor) -> ChunkStorageMetadata:
@@ -149,8 +254,8 @@ def _create_read_item_for_tensor(
 def create_read_items_for_chunk_list(
     fqn: str,
     checkpoint_md: TensorStorageMetadata,
-    local_chunks: List[ChunkStorageMetadata],
-) -> List[ReadItem]:
+    local_chunks: list[ChunkStorageMetadata],
+) -> list[ReadItem]:
     """
     Create a list of ``ReadItem`` based on the checkpoint and local chunks.
 
@@ -167,11 +272,77 @@ def create_read_items_for_chunk_list(
     Returns:
         A list of ``ReadItem`` that will satisfy all input chunks.
     """
-    read_items = []
-    # this is a naive quadratic algo that can be optimized later
-    for idx, shard in enumerate(local_chunks):
-        for storage_idx, storage_md in enumerate(checkpoint_md.chunks):
-            if not _check_shard_metadata_pair_overlap(shard, storage_md):
+    read_items: list[ReadItem] = []
+    saved_chunks = checkpoint_md.chunks
+
+    if not local_chunks or not saved_chunks:
+        return read_items
+
+    num_dims = len(local_chunks[0].offsets)
+
+    # Find sweep dimension (dimension with largest extent for better pruning)
+    sweep_dim = 0
+    if num_dims > 1:
+        max_size = 0
+        for dim in range(num_dims):
+            dim_size = max(
+                chunk.offsets[dim] + chunk.sizes[dim]
+                for chunk in itertools.chain(local_chunks, saved_chunks)
+            )
+            if dim_size > max_size:
+                max_size = dim_size
+                sweep_dim = dim
+
+    # Pre-compute bounds: (start, end) for each chunk in sweep dimension
+    # For 0-d tensors, use (0, 1) so all chunks overlap in the sweep line
+    if num_dims == 0:
+        saved_bounds = [(0, 1)] * len(saved_chunks)
+        local_bounds = [(0, 1)] * len(local_chunks)
+    else:
+        saved_bounds = [
+            (c.offsets[sweep_dim], c.offsets[sweep_dim] + c.sizes[sweep_dim])
+            for c in saved_chunks
+        ]
+        local_bounds = [
+            (c.offsets[sweep_dim], c.offsets[sweep_dim] + c.sizes[sweep_dim])
+            for c in local_chunks
+        ]
+
+    saved_sorted_indices = sorted(
+        range(len(saved_chunks)),
+        key=lambda idx: saved_bounds[idx][0],
+    )
+    local_sorted_indices = sorted(
+        range(len(local_chunks)),
+        key=lambda idx: local_bounds[idx][0],
+    )
+
+    active_saved: list[tuple[int, int]] = []
+    saved_ptr = 0
+    num_saved = len(saved_sorted_indices)
+
+    for local_idx in local_sorted_indices:
+        local_chunk = local_chunks[local_idx]
+        local_start, local_end = local_bounds[local_idx]
+
+        cutoff = bisect_right(active_saved, (local_start, -1))
+        if cutoff:
+            del active_saved[:cutoff]
+
+        while saved_ptr < num_saved:
+            storage_idx = saved_sorted_indices[saved_ptr]
+            storage_chunk = saved_chunks[storage_idx]
+            saved_start, saved_end = saved_bounds[storage_idx]
+
+            if saved_start >= local_end:
+                break
+
+            insort(active_saved, (saved_end, storage_idx))
+            saved_ptr += 1
+
+        for _, storage_idx in active_saved:
+            storage_chunk = saved_chunks[storage_idx]
+            if not _check_shard_metadata_pair_overlap(local_chunk, storage_chunk):
                 continue
 
             storage_offsets = []
@@ -183,7 +354,7 @@ def create_read_items_for_chunk_list(
                 offset_for_current_tensor,
                 length,
             ) in _shards_get_overlap_region_wrt_saved_tensor(
-                saved_shard=storage_md, current_shard=shard
+                saved_shard=storage_chunk, current_shard=local_chunk
             ):
                 storage_offsets.append(offset_for_saved_tensor)
                 dest_offsets.append(offset_for_current_tensor)
@@ -191,9 +362,11 @@ def create_read_items_for_chunk_list(
 
             read_items.append(
                 _create_read_item_for_tensor(
-                    dest_index=MetadataIndex(fqn, shard.offsets, idx),
+                    dest_index=MetadataIndex(fqn, local_chunk.offsets, local_idx),
                     dest_offsets=dest_offsets,
-                    storage_index=MetadataIndex(fqn, storage_md.offsets, storage_idx),
+                    storage_index=MetadataIndex(
+                        fqn, storage_chunk.offsets, storage_idx
+                    ),
                     storage_offsets=storage_offsets,
                     lengths=lengths,
                 )
@@ -218,7 +391,7 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
     return SavePlan(requests)
 
 
-def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
+def _create_write_items(fqn: str, object: Any) -> list[WriteItem]:
     if hasattr(object, "__create_write_items__"):
         # DTensor implements _Checkpointable
         return object.__create_write_items__(fqn, object)
@@ -244,7 +417,7 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
     )
 
 
-def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
+def _create_chunk_list(tensor: torch.Tensor) -> list[ChunkStorageMetadata]:
     if hasattr(tensor, "__create_chunk_list__"):
         # DTensor implements _Checkpointable
         local_chunks = tensor.__create_chunk_list__()  # type: ignore[attr-defined]
@@ -263,7 +436,7 @@ def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
     return local_chunks
 
 
-def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
+def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> list[ReadItem]:
     if not isinstance(md, BytesStorageMetadata):
         try:
             local_chunks = _create_chunk_list(obj)
@@ -286,7 +459,7 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
         ]
 
 
-def _init_state_dict(state_dict: Dict[str, Any]) -> Any:
+def _init_state_dict(state_dict: dict[str, Any]) -> Any:
     """
     Initializes meta tensor if the meta tensor is DTensor or torch.Tensor.
     """

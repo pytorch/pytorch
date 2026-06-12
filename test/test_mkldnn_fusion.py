@@ -1,7 +1,7 @@
 # Owner(s): ["module: mkldnn"]
 import itertools
 import unittest
-from typing import NamedTuple, List
+from typing import NamedTuple
 
 import torch
 from torch import nn
@@ -16,7 +16,7 @@ FUSION_GROUP = 'prim::TensorExprGroup'
 class PointwisePostOp(NamedTuple):
     attr : str
     pointwise_module : nn.Module
-    scalars : List = []
+    scalars : list = []
     algorithm : str = ""
 
 CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -259,6 +259,31 @@ class TestOnednnFusion(JitTestCase):
                             mod.conv.groups, attr, scalars, algorithm
                         )
                     self.assertEqual(ref, fused)
+
+    def test_conv_unary_fusion_none_attr_reported_shape(self):
+        for memory_format in [torch.contiguous_format, torch.channels_last]:
+            x = torch.randn(5, 1, 28, 28, dtype=torch.float32).to(
+                memory_format=memory_format
+            )
+            weight = torch.randn(64, 1, 3, 3, dtype=torch.float32).to(
+                memory_format=memory_format
+            )
+            bias = torch.randn(64, dtype=torch.float32)
+            with torch.no_grad():
+                ref = torch.nn.functional.conv2d(x, weight, bias)
+                fused = torch.ops.mkldnn._convolution_pointwise(
+                    x,
+                    weight,
+                    bias,
+                    [0, 0],
+                    [1, 1],
+                    [1, 1],
+                    1,
+                    "none",
+                    [],
+                    None,
+                )
+            self.assertEqual(ref, fused)
 
 
     def test_conv_binary_fusion_ops(self):

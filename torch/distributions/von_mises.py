@@ -3,6 +3,7 @@ import math
 
 import torch
 import torch.jit
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, lazy_property
@@ -69,7 +70,8 @@ def _log_modified_bessel_fn(x, order=0):
     Returns ``log(I_order(x))`` for ``x > 0``,
     where `order` is either 0 or 1.
     """
-    assert order == 0 or order == 1
+    if order != 0 and order != 1:
+        raise AssertionError(f"order must be 0 or 1, got {order}")
 
     # compute small solution
     y = x / 3.75
@@ -90,6 +92,7 @@ def _log_modified_bessel_fn(x, order=0):
 @torch.jit.script_if_tracing
 def _rejection_sample(loc, concentration, proposal_r, x):
     done = torch.zeros(x.shape, dtype=torch.bool, device=loc.device)
+    # pyrefly: ignore [bad-assignment, missing-attribute]
     while not done.all():
         u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device)
         u1, u2, u3 = u.unbind()
@@ -98,6 +101,7 @@ def _rejection_sample(loc, concentration, proposal_r, x):
         c = concentration * (proposal_r - f)
         accept = ((c * (2 - c) - u2) > 0) | ((c / u2).log() + 1 - c >= 0)
         if accept.any():
+            # pyrefly: ignore [no-matching-overload]
             x = torch.where(accept, (u3 - 0.5).sign() * f.acos(), x)
             done = done | accept
     return (x + math.pi + loc) % (2 * math.pi) - math.pi
@@ -121,11 +125,17 @@ class VonMises(Distribution):
     :param torch.Tensor concentration: concentration parameter
     """
 
+    # pyrefly: ignore [bad-override]
     arg_constraints = {"loc": constraints.real, "concentration": constraints.positive}
     support = constraints.real
     has_rsample = False
 
-    def __init__(self, loc, concentration, validate_args=None):
+    def __init__(
+        self,
+        loc: Tensor,
+        concentration: Tensor,
+        validate_args: bool | None = None,
+    ) -> None:
         self.loc, self.concentration = broadcast_all(loc, concentration)
         batch_shape = self.loc.shape
         event_shape = torch.Size()
@@ -143,15 +153,15 @@ class VonMises(Distribution):
         return log_prob
 
     @lazy_property
-    def _loc(self):
+    def _loc(self) -> Tensor:
         return self.loc.to(torch.double)
 
     @lazy_property
-    def _concentration(self):
+    def _concentration(self) -> Tensor:
         return self.concentration.to(torch.double)
 
     @lazy_property
-    def _proposal_r(self):
+    def _proposal_r(self) -> Tensor:
         kappa = self._concentration
         tau = 1 + (1 + 4 * kappa**2).sqrt()
         rho = (tau - (2 * tau).sqrt()) / (2 * kappa)
@@ -187,18 +197,18 @@ class VonMises(Distribution):
             return type(self)(loc, concentration, validate_args=validate_args)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         """
         The provided mean is the circular one.
         """
         return self.loc
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @lazy_property
-    def variance(self):
+    def variance(self) -> Tensor:  # type: ignore[override]
         """
         The provided variance is the circular one.
         """
