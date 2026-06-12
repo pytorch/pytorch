@@ -108,10 +108,6 @@ def a_non_torch_leaf(a, b):
     return a + b
 
 
-def multi_boxed_call(left, passthrough, right):
-    return left[0] + left[1] + passthrough + right[0]
-
-
 # Used for test_autowrap_function. Autowrapped functions need to be global
 def fx_int(x: float) -> int:
     return int(x)
@@ -356,6 +352,9 @@ class TestFX(JitTestCase):
         self.assertEqual(torch.sin(x + y), gm(x, y))
 
     def test_boxed_call_arg_indices_codegen(self):
+        def multi_boxed_call(left, passthrough, right):
+            return left[0] + left[1] + passthrough + right[0]
+
         graph = torch.fx.Graph()
         a = graph.placeholder("a")
         b = graph.placeholder("b")

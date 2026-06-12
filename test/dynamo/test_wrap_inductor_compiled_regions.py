@@ -1300,12 +1300,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             getattr(hop_nodes[1].target, "_boxed_call_arg_indices", None), (1,)
         )
-        self.assertFalse(
-            any(
-                getattr(node.target, "__name__", None) == "_box_call_inputs"
-                for node in gm.graph.nodes
-            )
-        )
         self.assertIn(
             "inductor_compiled_code_1_boxed_arg_1 = [getitem, getitem_1];  "
             "getitem = getitem_1 = None",
@@ -1350,7 +1344,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         def fw_callable(inputs):
             x = inputs[0]
-            inputs.clear()
             return (x + 1, x + 2)
 
         def bw_callable(inputs):

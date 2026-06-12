@@ -910,20 +910,18 @@ class CodeGen:
                         f"{repr(node)}{maybe_type_annotation} = {_format_target(_get_repr(node.args[0]), node.args[1])}"
                     )
                     return
-                boxed_call_arg_indices = node.meta.get(
-                    "boxed_call_arg_indices",
-                    getattr(node.target, "_boxed_call_arg_indices", ()),
-                )
-                boxed_arg_names: dict[int, str] = {}
-                if boxed_call_arg_indices:
-                    boxed_arg_names = {
-                        i: namespace.create_name(f"{node.name}_boxed_arg_{i}", None)
-                        for i in boxed_call_arg_indices
-                    }
+                boxed_arg_names = {
+                    i: namespace.create_name(f"{node.name}_boxed_arg_{i}", None)
+                    for i in node.meta.get(
+                        "boxed_call_arg_indices",
+                        getattr(node.target, "_boxed_call_arg_indices", ()),
+                    )
+                }
+                if boxed_arg_names:
                     boxed_nodes: set[Node] = set()
                     unboxed_nodes: set[Node] = set()
                     map_arg(
-                        tuple(node.args[i] for i in boxed_call_arg_indices),
+                        tuple(node.args[i] for i in boxed_arg_names),
                         boxed_nodes.add,
                     )
                     map_arg(
