@@ -1085,7 +1085,7 @@ class UccProcessGroupWithDispatchedCollectivesTests(
         device = "cuda"
         tensor = torch.ones(10, 10, device=torch.device(device))
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
-        dist.all_gather_into_tensor(output_tensor, tensor)
+        dist.all_gather_single(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
 
 

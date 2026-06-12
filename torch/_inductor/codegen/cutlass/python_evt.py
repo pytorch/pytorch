@@ -194,7 +194,10 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         with virtualized.V.set_ops_handler(handler):
             for s_node in epilogue_nodes:
                 node = s_node.node
-                assert isinstance(node, ComputedBuffer)
+                if not isinstance(node, ComputedBuffer):
+                    raise AssertionError(
+                        f"expected node to be a ComputedBuffer, got {type(node)}"
+                    )
                 with codegen.set_cur_node(node):
                     index_vars = CutlassEVTCodegen.get_index_vars(node)
                     node.get_store_function()(index_vars)
@@ -263,23 +266,24 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         if name not in self.removed_buffers:
             if index:
                 self._check_indexing(name, index)
-            assert value.value != _ACCUMULATOR_ARG_NAME, (
-                "Cannot store accumulator arg name"
-            )
+            if value.value == _ACCUMULATOR_ARG_NAME:
+                raise AssertionError("Cannot store accumulator arg name")
             self.var_name_to_buffer_name[value.value] = name
             self.store_name_to_value[name] = value
             self.last_stored_var_name = value.value
         return None
 
     def _get_cur_node(self) -> ComputedBuffer:
-        assert self.cur_node
+        if not self.cur_node:
+            raise AssertionError("expected cur_node to be set")
         return self.cur_node
 
     @staticmethod
     def get_index_vars(node: ComputedBuffer) -> Sequence[sympy.Expr]:
         data = node.data
         # TODO mlazos: relax this, cutlass supports reductions and other ops
-        assert isinstance(data, Pointwise)
+        if not isinstance(data, Pointwise):
+            raise AssertionError(f"expected data to be Pointwise, got {type(data)}")
         return data._index(data.ranges)
 
     def _get_current_index_vars(self) -> Sequence[sympy.Expr]:
@@ -304,9 +308,43 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
     def _stride_compatible(
         self, left: Iterable[sympy.Expr], right: Iterable[sympy.Expr]
     ) -> bool:
+        def _provably_equal_or_zero(a: sympy.Expr, b: sympy.Expr) -> bool:
+            # sympy.Eq can return an unevaluated Equality object; only accept
+            # cases sympy can prove true.
+            if a == b:
+                return True
+            if V.graph.sizevars.statically_known_equals(a, b):
+                return True
+            if V.graph.sizevars.statically_known_equals(a, 0):
+                return True
+            if V.graph.sizevars.statically_known_equals(b, 0):
+                return True
+            return (
+                sympy.Eq(a, b) is sympy.true
+                or sympy.Eq(a, 0) is sympy.true
+                or sympy.Eq(b, 0) is sympy.true
+            )
+
+        left_list = list(left)
+        right_list = list(right)
+        # Same length: direct comparison
+        if len(left_list) == len(right_list):
+            return all(
+                _provably_equal_or_zero(l, r) for l, r in zip(left_list, right_list)
+            )
+        # Different lengths: allow compatible reshapes where trailing strides match.
+        # This handles view/reshape between template output and consumer, e.g.,
+        # buffer strides [3072, 1] vs index strides [1572864, 3072, 1]
+        shorter, longer = (
+            (left_list, right_list)
+            if len(left_list) <= len(right_list)
+            else (right_list, left_list)
+        )
+        n = len(shorter)
+        # Check that the trailing strides match
         return all(
-            sympy.Eq(l, r) or sympy.Eq(l, 0) or sympy.Eq(r, 0)
-            for l, r in (zip(left, right))
+            _provably_equal_or_zero(shorter[-(i + 1)], longer[-(i + 1)])
+            for i in range(n)
         )
 
     def _render_input_signature(self) -> str:
@@ -320,7 +358,8 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         return_vars = OrderedSet(
             op_v.value for op_v in self.store_name_to_value.values()
         )
-        assert "D" in return_vars
+        if "D" not in return_vars:
+            raise AssertionError(f"expected 'D' in return_vars, got {return_vars}")
         return f"return {', '.join(return_vars)}"
 
     def _tmp_var(self) -> str:
