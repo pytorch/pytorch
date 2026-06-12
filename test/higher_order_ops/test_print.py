@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.config
 from torch._dynamo.testing import AotEagerAndRecordGraphs, InductorAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
@@ -31,6 +32,15 @@ else:
 
 @instantiate_parametrized_tests
 class TestHopPrint(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        torch._dynamo.config.canonicalize_output_graph_node_order = True
+
+    @classmethod
+    def tearDownClass(cls):
+        torch._dynamo.config.canonicalize_output_graph_node_order = False
+        super().tearDownClass()
     def test_base_print(self):
         def f(x):
             x = x + x
@@ -611,9 +621,9 @@ x = add_1, y = add_2);  getitem = None
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     print_1 = torch.ops.higher_order.print('moo {x} {y}', x = 1, y = 2);  print_1 = None
-    res = l_x_ + l_x_;  l_x_ = None
-    print_2 = torch.ops.higher_order.print('values {} {}', 3, res);  print_2 = None
-    return (res,)""",
+    add = l_x_ + l_x_;  l_x_ = None
+    print_2 = torch.ops.higher_order.print('values {} {}', 3, add);  print_2 = None
+    return (add,)""",
             )
 
         # Check forward graph - should have with_effects wrapping print
