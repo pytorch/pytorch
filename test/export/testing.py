@@ -204,6 +204,12 @@ def _make_fn_with_mocked_export(fn, mocked_export_fn):
     return _fn
 
 
+# Controls tests generated in test/export/test_export_with_dynamic_spec_conversion.py
+def expectedFailureDynamicSpecConversion(fn):
+    fn._expected_failure_dynamic_spec_conversion = True
+    return fn
+
+
 # Controls tests generated in test/export/test_export_training_ir_to_run_decomp.py
 def expectedFailureTrainingIRToRunDecomp(fn):
     fn._expected_failure_training_ir_to_run_decomp = True
