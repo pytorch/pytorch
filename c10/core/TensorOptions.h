@@ -623,7 +623,7 @@ inline TensorOptions dtype() {
 inline std::string toString(const TensorOptions& options) {
   std::ostringstream stream;
   stream << options;
-  return std::move(stream).str();
+  return stream.str();
 }
 
 // This is intended to be a centralized location by which we can determine
