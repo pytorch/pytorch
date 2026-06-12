@@ -2029,6 +2029,23 @@ class BuiltinVariable(BaseBuiltinVariable):
         elif self._dynamic_args(*args):
             args = tuple(VariableTracker.build(tx, guard_if_dyn(arg)) for arg in args)
             return variables.RangeVariable(list(args))
+        # CPython range() applies PyNumber_Index (__index__) to each argument.
+        # Coerce objects exposing __index__ and retry the constant/symint path;
+        # nb_index_impl propagates a raising __index__ and the non-int TypeError.
+        if any(isinstance(a, variables.UserDefinedObjectVariable) for a in args):
+            coerced = tuple(
+                a.nb_index_impl(tx)
+                if isinstance(a, variables.UserDefinedObjectVariable)
+                else a
+                for a in args
+            )
+            if check_unspec_or_constant_args(coerced, {}):
+                return variables.RangeVariable(list(coerced))
+            elif self._dynamic_args(*coerced):
+                coerced = tuple(
+                    VariableTracker.build(tx, guard_if_dyn(a)) for a in coerced
+                )
+                return variables.RangeVariable(list(coerced))
         # None no-ops this handler and lets the driving function proceed
         return None
 

@@ -333,7 +333,26 @@ def validate_sequence_index(
     ref: https://github.com/python/cpython/blob/v3.13.3/Include/internal/pycore_abstract.h (_PyIndex_Check)
     """
     key_type = maybe_get_python_type(key)
-    if key_type not in (int, bool, slice):
+    from .lists import SliceVariable
+
+    if isinstance(key, SliceVariable):
+        # CPython applies __index__ to each non-None slice member
+        # (PySlice_Unpack -> evaluate_slice_index).
+        new_items = []
+        changed = False
+        for member in key.items:
+            member_type = maybe_get_python_type(member)
+            if member_type not in (
+                int,
+                bool,
+                type(None),
+            ) and type_implements_nb_index(member_type):
+                member = member.nb_index_impl(tx)
+                changed = True
+            new_items.append(member)
+        if changed:
+            key = SliceVariable(new_items, tx)
+    elif key_type not in (int, bool):
         if not type_implements_nb_index(key_type):
             raise_observed_exception(
                 TypeError,
