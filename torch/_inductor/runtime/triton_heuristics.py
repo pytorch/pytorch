@@ -145,6 +145,29 @@ log = logging.getLogger(__name__)
 triton_name_sub = re.compile(r"^def [^(]+\(")
 
 
+def _strip_pointer_range(config):
+    """Strip tt.pointer_range attributes from a Triton config.
+
+    Returns (stripped_config, had_pointer_range). On Triton 3.5+, the config
+    is a dict mapping arg-index tuples to attribute lists. On older versions,
+    pointer_range_32 is silently ignored so stripping is a no-op.
+    """
+    if isinstance(config, dict):
+        had = any(
+            any(attr[0] == "tt.pointer_range" for attr in attrs)
+            for attrs in config.values()
+        )
+        if not had:
+            return config, False
+        stripped = {}
+        for key, attrs in config.items():
+            new_attrs = [a for a in attrs if a[0] != "tt.pointer_range"]
+            if new_attrs:
+                stripped[key] = new_attrs
+        return stripped, True
+    return config, False
+
+
 def generate_lookup_hash_from_source_code(size_hints_str: str, source_code: str) -> str:
     # Name agnostic + strip white space
     fn_strip_name = re.sub(triton_name_sub, "(", source_code.strip(), count=1)
@@ -1166,13 +1189,33 @@ class CachingAutotuner(KernelInterface):
         try:
             binary = triton.compile(*compile_args, **compile_kwargs)
         except Exception:
-            log.exception(
-                "Triton compilation failed: %s\n%s\nmetadata: %s",
-                self.inductor_meta.get("kernel_name", "triton_"),
-                self.fn.src,
-                compile_meta,
-            )
-            raise
+            # If pointer_range_32 was set, retry without it — some kernels
+            # have pointer patterns that CanonicalizePointers can't handle.
+            original_config = compile_meta["configs"][0]
+            stripped, had_pointer_range = _strip_pointer_range(original_config)
+            if had_pointer_range:
+                log.warning(
+                    "Triton compilation failed with pointer_range_32, "
+                    "retrying without: %s",
+                    self.inductor_meta.get("kernel_name", "triton_"),
+                )
+                compile_args = (
+                    ASTSource(
+                        self.fn,
+                        compile_meta["signature"],
+                        compile_meta["constants"],
+                        stripped,
+                    ),
+                )
+                binary = triton.compile(*compile_args, **compile_kwargs)
+            else:
+                log.exception(
+                    "Triton compilation failed: %s\n%s\nmetadata: %s",
+                    self.inductor_meta.get("kernel_name", "triton_"),
+                    self.fn.src,
+                    compile_meta,
+                )
+                raise
 
         # Simulate JIT Hook call
         if (
