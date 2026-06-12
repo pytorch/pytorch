@@ -8,7 +8,7 @@ import torch
 
 
 def bf32_is_not_fp32():
-    if not torch.backends.mkldnn.is_available():
+    if not torch.backends.onednn.is_available():
         return False
     if not torch.ops.onednn._is_onednn_bf16_supported():
         return False
