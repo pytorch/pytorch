@@ -1142,6 +1142,78 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(), self._compile(fn))
 
+    def test_tuple_constructor_preserves_exact_tuple_identity(self):
+        def fn(x):
+            items = (x, x + 1)
+            return tuple(items) is items
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_tuple_constructor_converts_torch_size_to_tuple(self):
+        def fn():
+            size = torch.Size([2, 3])
+            result = tuple(size)
+            return type(result) is tuple and result == (2, 3) and result is not size
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_tuple_constructor_rejects_next_only(self):
+        class IterNextOnly:
+            def __init__(self, items):
+                self.items = items
+                self.index = 0
+
+            def __next__(self):
+                if self.index >= len(self.items):
+                    raise StopIteration
+                item = self.items[self.index]
+                self.index += 1
+                return item
+
+        def fn():
+            try:
+                tuple(IterNextOnly([1, 2, 3]))
+            except TypeError as exc:
+                return "object is not iterable" in str(exc)
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_tuple_constructor_rejects_iter_without_next(self):
+        class IterNoNext:
+            def __iter__(self):
+                return self
+
+        def fn():
+            try:
+                tuple(IterNoNext())
+            except TypeError as exc:
+                return str(exc) == "iter() returned non-iterator of type 'IterNoNext'"
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_tuple_constructor_rejects_keywords(self):
+        def fn():
+            try:
+                tuple(unsupported_arg=[])
+            except TypeError as exc:
+                return "tuple() takes no keyword" in str(exc)
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_tuple_constructor_rejects_too_many_args(self):
+        def fn():
+            try:
+                tuple([], [])
+            except TypeError as exc:
+                return "expected at most 1 argument" in str(exc)
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
+
     def test_tuple_seqonly(self):
         """tuple(SeqOnly) → generic_getiter → sequence_iterator → __getitem__."""
 
