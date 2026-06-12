@@ -3825,6 +3825,8 @@ def triton_config_tiled_reduction(
     y,
     r,
     num_stages=1,
+    num_warps=None,
+    min_num_warps=2,
     register_intensive=False,
     waves_per_eu=None,
     *,
@@ -3859,10 +3861,14 @@ def triton_config_tiled_reduction(
         y *= 2
 
     cfg = _get_config({"x": x, "y": y, **rnumels})
-    num_warps = _num_warps(total_numel() // 256, min_num_warps=1, warp_size=warp_size)
+    if num_warps is None:
+        num_warps = _num_warps(
+            total_numel() // 256, min_num_warps=1, warp_size=warp_size
+        )
     num_warps = _num_warps(
         num_warps,
         max_num_warps=16,
+        min_num_warps=min_num_warps,
         register_intensive=register_intensive,
         warp_size=warp_size,
     )
@@ -4446,7 +4452,10 @@ def match_target_block_product(
 
     # Scale up dimensions by their relative scores until we reach the target
     while curr_block_product < target_block_product and relative_scores:
-        dim, score = max(relative_scores.items(), key=lambda item: item[1])
+        dim, score = max(
+            relative_scores.items(),
+            key=lambda item: (item[1], tiling_scores[item[0]]),
+        )
 
         # Check if we've hit the max for this dimension
         if (
@@ -4797,19 +4806,30 @@ def _persistent_reduction_configs(
         configs = []
         tiling_scores = _get_tiling_scores(inductor_meta, size_hints)
         x_y_scores = {dim: tiling_scores[dim] for dim in ("x", "y")}
-        for target_block_size in xblock_vals:
+        target_block_sizes = xblock_vals
+        small_inner_reduction = reduction_hint == ReductionHint.INNER and rnumel <= 64
+        small_inner_cuda_reduction = not torch.version.hip and small_inner_reduction
+        if small_inner_cuda_reduction:
+            target_block_sizes = [1, 8, 32, 64, 128]
+
+        for target_block_size in target_block_sizes:
             if target_block_size * rnumel > MAX_PERSISTENT_BLOCK_NUMEL:
                 continue
 
             block_sizes = match_target_block_product(
                 size_hints, x_y_scores, target_block_size
             )
+            # Small inner reductions do not have enough reduction work to
+            # amortize extra warps once the pointwise tile is split.
+            num_warps = 1 if small_inner_cuda_reduction else None
             configs.append(
                 triton_config_tiled_reduction(
                     size_hints,
                     block_sizes["x"],
                     block_sizes["y"],
                     rnumel,
+                    num_warps=num_warps,
+                    min_num_warps=1 if num_warps is not None else 2,
                     warp_size=warp_size,
                 )
             )
