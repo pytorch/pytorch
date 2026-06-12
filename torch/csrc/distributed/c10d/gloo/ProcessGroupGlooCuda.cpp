@@ -1,6 +1,6 @@
 #ifdef USE_C10D_GLOO
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.hpp>
+#include <torch/csrc/distributed/c10d/gloo/ProcessGroupGlooDetail.hpp>
 #include <utility>
 
 #include <gloo/cuda_allreduce_ring_chunked.h>

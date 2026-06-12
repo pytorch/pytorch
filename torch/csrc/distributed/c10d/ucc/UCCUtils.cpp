@@ -1,8 +1,8 @@
 #ifdef USE_C10D_UCC
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
-#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCCTracing.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCCUtils.hpp>
 #include <cctype>
 #include <string>
 #include <unordered_map>

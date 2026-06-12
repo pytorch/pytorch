@@ -2,8 +2,8 @@
 
 #include <c10/util/FileSystem.h>
 #include <c10/util/env.h>
-#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
-#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCCTracing.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCCUtils.hpp>
 
 #include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
