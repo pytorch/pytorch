@@ -14,7 +14,6 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/mkldnn_convolution_native.h>
 #include <ATen/ops/onednn_rnn_layer_backward_native.h>
 #include <ATen/ops/onednn_rnn_layer_native.h>
 #endif

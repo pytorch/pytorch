@@ -63,7 +63,7 @@ class _OnednnConvNd(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        return torch.mkldnn_convolution(
+        return torch.onednn_convolution(
             x,
             self.weight,
             self.bias,
