@@ -279,6 +279,20 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     python -m build --wheel --no-isolation
   fi
   pip_install_whl "$(echo dist/*.whl)"
+
+  # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
+  # still emit a debug-rebuild plan with a -g compile and the libtorch_python
+  # relink. This guards against build-system changes (e.g. a new
+  # CONFIGURE_DEPENDS glob scheme) silently breaking the tool, which only works
+  # on a from-source build that test jobs don't have. --dry-run reads the tree
+  # without rebuilding, so it leaves the checkout clean (assert_git_not_dirty).
+  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && grep -q "csrc/Module.cpp" build/compile_commands.json; then
+    debinfo_plan="$(python tools/build_with_debinfo.py --dry-run torch/csrc/Module.cpp)"
+    echo "${debinfo_plan}"
+    grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
+    grep -q 'libtorch_python' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no libtorch_python link command"; exit 1; }
+  fi
+
   if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
     # Regression test for https://github.com/pytorch/pytorch/issues/164297
     # Torch should be importable and that's about it

@@ -11,6 +11,7 @@ import torch
 import torch._inductor.kernel.flex.flex_flash_attention as flex_flash_attention_module
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 from torch._inductor.kernel.flex.flex_flash_attention import (
+    _flash_attention_unavailable_message,
     _hierarchical_indexer_cute,
     ensure_flash_available,
     HierarchicalIndex,
@@ -32,7 +33,6 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     xfailIfSM120OrLater,
     xfailIfSM12X,
-    xfailIfSM90,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -907,10 +907,6 @@ GQA_MQA_BLOCK_MASK_CASES = [
 class TestFlexFlash(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM120OrLater
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: params["case"].requires_grad and IS_SM90,
-    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_score_mod_cases(self, device, dtype, case):
@@ -2469,14 +2465,12 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             self._flash_triton_dynamic(q, k, v)
 
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_backward(self):
         """Test backward with dynamic sequence lengths."""
         self._run_dynamic_test(seq_lens=[128, 256, 512], requires_grad=True)
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_backward_with_score_mod(self):
         """Test backward with score_mod and dynamic sequence lengths."""
 
@@ -2714,7 +2708,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self.assertEqual(out.shape, q.shape)
 
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_captured_buffer_varying_heads(self):
         """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
         torch._dynamo.reset()
@@ -2777,6 +2770,11 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
 
 class TestHierarchicalIndex(InductorTestCase):
+    def test_flash_attention_unavailable_message_has_install_link(self):
+        message = _flash_attention_unavailable_message()
+        self.assertIn("pip install --pre flash-attn-4", message)
+        self.assertIn("https://pypi.org/project/flash-attn-4/", message)
+
     def test_hierarchical_index_preserves_args(self):
         from sympy import Symbol
 
