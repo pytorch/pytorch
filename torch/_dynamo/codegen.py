@@ -529,24 +529,11 @@ class PyCodegen:
         #
         # The bare LIST_APPEND opcode does not lock the list and so requires
         # the target be uniquely owned (refcnt == 1) on free-threaded builds.
-        # When appending to a shared list (e.g. a list nested inside another
-        # list, refcnt > 1) we must instead use the locked list.append()
-        # method call, otherwise CPython's ensure_shared_on_resize assertion
-        # fires (or, in a release build, a data race occurs).
-        self.tx.output.update_co_names("append")
+        # Dynamo can't enforce this, so instead use LIST_EXTEND, which does
+        # lock
         return [
-            # stack: list, value
-            *create_copy(2),
-            # stack: list, value, list
-            create_load_method("append"),
-            # stack: list, value, append, self
-            *create_copy(3),
-            # stack: list, value, append, self, value
-            *create_call_method(1),
-            # stack: list, value, None
-            create_instruction("POP_TOP"),
-            create_instruction("POP_TOP"),
-            # stack: list
+            create_instruction("BUILD_LIST", arg=1),
+            create_instruction("LIST_EXTEND", arg=1),
         ]
 
     def create_load_attr(self, name: str) -> Instruction:
