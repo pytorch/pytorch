@@ -2,56 +2,134 @@
 from __future__ import annotations
 
 import os
-from typing import NamedTuple
+from dataclasses import fields
+from typing import Any, TypeAlias
 
 import sympy
 
 import torch
+import torch._vendor.quack.gemm_config as quack_gemm_config
+from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch.utils._ordered_set import OrderedSet
 
 
-class GemmConfigKey(NamedTuple):
-    tile_m: int
-    tile_n: int
-    tile_k: int | None
-    num_warps: int | None
-    pingpong: bool
-    is_dynamic_persistent: bool
-    cluster_m: int
-    cluster_n: int
-    cluster_k: int
-    swap_ab: bool
-    max_swizzle_size: int
-    device_capacity: int
-    use_tma_gather: bool
+GemmConfigKey: TypeAlias = tuple[tuple[str, Any], ...]
 
 
-_QUACK_DEFAULT_CONFIG_KEY = GemmConfigKey(
-    128, 256, None, None, False, True, 2, 1, 1, False, 8, 10, False
+def gemm_config_key(config: quack_gemm_config.GemmConfig) -> GemmConfigKey:
+    """Project a QuACK GEMM config using the dataclass schema as the contract."""
+    return tuple(
+        (field.name, getattr(config, field.name))
+        for field in fields(quack_gemm_config.GemmConfig)
+    )
+
+
+_QUACK_DENSE_CONFIG_PRIORITY_CONFIGS = (
+    quack_gemm_config.GemmConfig(
+        tile_m=128,
+        tile_n=256,
+        pingpong=False,
+        is_dynamic_persistent=True,
+        cluster_m=2,
+        device_capacity=10,
+    ),
+    quack_gemm_config.GemmConfig(
+        tile_m=128,
+        tile_n=192,
+        pingpong=False,
+        is_dynamic_persistent=True,
+        cluster_m=2,
+        device_capacity=10,
+    ),
+    quack_gemm_config.GemmConfig(
+        tile_m=256,
+        tile_n=256,
+        pingpong=False,
+        is_dynamic_persistent=True,
+        cluster_m=2,
+        device_capacity=10,
+    ),
+    quack_gemm_config.GemmConfig(
+        tile_m=256,
+        tile_n=256,
+        pingpong=False,
+        is_dynamic_persistent=True,
+        cluster_m=2,
+        cluster_n=2,
+        device_capacity=10,
+    ),
+    quack_gemm_config.GemmConfig(
+        tile_m=256,
+        tile_n=192,
+        pingpong=False,
+        is_dynamic_persistent=True,
+        cluster_m=2,
+        device_capacity=10,
+    ),
+    quack_gemm_config.GemmConfig(
+        tile_m=128,
+        tile_n=128,
+        pingpong=False,
+        is_dynamic_persistent=False,
+        cluster_m=1,
+        device_capacity=10,
+    ),
+    quack_gemm_config.GemmConfig(
+        tile_m=128,
+        tile_n=256,
+        pingpong=False,
+        is_dynamic_persistent=True,
+        cluster_m=1,
+        device_capacity=10,
+    ),
+    quack_gemm_config.GemmConfig(
+        tile_m=128,
+        tile_n=256,
+        pingpong=False,
+        is_dynamic_persistent=False,
+        cluster_m=1,
+        device_capacity=10,
+    ),
+    quack_gemm_config.GemmConfig(
+        tile_m=128,
+        tile_n=128,
+        pingpong=False,
+        is_dynamic_persistent=True,
+        cluster_m=2,
+        device_capacity=10,
+    ),
+    quack_gemm_config.GemmConfig(
+        tile_m=256,
+        tile_n=128,
+        pingpong=False,
+        is_dynamic_persistent=True,
+        cluster_m=2,
+        device_capacity=10,
+    ),
+    quack_gemm_config.GemmConfig(
+        tile_m=128,
+        tile_n=224,
+        pingpong=False,
+        is_dynamic_persistent=True,
+        cluster_m=1,
+        device_capacity=10,
+    ),
+    quack_gemm_config.GemmConfig(
+        tile_m=128,
+        tile_n=160,
+        pingpong=False,
+        is_dynamic_persistent=True,
+        cluster_m=1,
+        device_capacity=10,
+    ),
 )
-_QUACK_SKINNY_CONFIG_KEY = GemmConfigKey(
-    128, 192, None, None, False, True, 2, 1, 1, False, 8, 10, False
+_QUACK_DENSE_CONFIG_PRIORITY_KEYS = tuple(
+    gemm_config_key(config) for config in _QUACK_DENSE_CONFIG_PRIORITY_CONFIGS
 )
-_QUACK_LARGE_CONFIG_KEY = GemmConfigKey(
-    256, 256, None, None, False, True, 2, 2, 1, False, 8, 10, False
-)
-_QUACK_LARGE_RECT_CONFIG_KEY = GemmConfigKey(
-    256, 256, None, None, False, True, 2, 1, 1, False, 8, 10, False
-)
-_QUACK_DENSE_CONFIG_PRIORITY_KEYS = (
-    _QUACK_DEFAULT_CONFIG_KEY,
-    _QUACK_SKINNY_CONFIG_KEY,
-    _QUACK_LARGE_RECT_CONFIG_KEY,
-    _QUACK_LARGE_CONFIG_KEY,
-    GemmConfigKey(256, 192, None, None, False, True, 2, 1, 1, False, 8, 10, False),
-    GemmConfigKey(128, 128, None, None, False, False, 1, 1, 1, False, 8, 10, False),
-    GemmConfigKey(128, 256, None, None, False, True, 1, 1, 1, False, 8, 10, False),
-    GemmConfigKey(128, 256, None, None, False, False, 1, 1, 1, False, 8, 10, False),
-    GemmConfigKey(128, 128, None, None, False, True, 2, 1, 1, False, 8, 10, False),
-    GemmConfigKey(256, 128, None, None, False, True, 2, 1, 1, False, 8, 10, False),
-    GemmConfigKey(128, 224, None, None, False, True, 1, 1, 1, False, 8, 10, False),
-    GemmConfigKey(128, 160, None, None, False, True, 1, 1, 1, False, 8, 10, False),
-)
+_QUACK_DEFAULT_CONFIG_KEY = _QUACK_DENSE_CONFIG_PRIORITY_KEYS[0]
+_QUACK_SKINNY_CONFIG_KEY = _QUACK_DENSE_CONFIG_PRIORITY_KEYS[1]
+_QUACK_LARGE_RECT_CONFIG_KEY = _QUACK_DENSE_CONFIG_PRIORITY_KEYS[2]
+_QUACK_LARGE_CONFIG_KEY = _QUACK_DENSE_CONFIG_PRIORITY_KEYS[3]
 _QUACK_DENSE_CONFIG_PRIORITY = {
     key: priority for priority, key in enumerate(_QUACK_DENSE_CONFIG_PRIORITY_KEYS)
 }
@@ -59,8 +137,6 @@ _QUACK_DENSE_CONFIG_PRIORITY = {
 
 def inductor_quack_cache_dir() -> str:
     """Return the Inductor-owned QuACK cache root for generated FlexGEMM."""
-    from torch._inductor.runtime.cache_dir_utils import cache_dir
-
     return os.path.join(cache_dir(), "quack")
 
 
@@ -169,25 +245,6 @@ def split_epilogue_args(
     return tuple(row_args), tuple(col_args), tuple(tile_args)
 
 
-def gemm_config_key(config) -> GemmConfigKey:
-    """Project a QuACK GEMM config to a lossless generated-code key."""
-    return GemmConfigKey(
-        config.tile_m,
-        config.tile_n,
-        config.tile_k,
-        config.num_warps,
-        config.pingpong,
-        config.is_dynamic_persistent,
-        config.cluster_m,
-        config.cluster_n,
-        config.cluster_k,
-        config.swap_ab,
-        config.max_swizzle_size,
-        config.device_capacity,
-        config.use_tma_gather,
-    )
-
-
 def gemm_config_order(config) -> tuple[int, int, int, int, int, int]:
     """Rank QuACK configs by measured preference before stable tie-breakers."""
     config_key = gemm_config_key(config)
@@ -234,15 +291,13 @@ def preferred_gemm_config_keys_from_dims(m, n) -> tuple[GemmConfigKey, ...]:
 
 def candidate_gemm_configs_for_device(device: torch.device):
     """Return all device-compatible QuACK configs before shape-specific ranking."""
-    from torch._vendor.quack.gemm_config import get_all_configs
-
     device_capacity = torch.cuda.get_device_capability(device)[0]
     if device_capacity == 11:
         device_capacity = 10
     configs = sorted(
         (
             config
-            for config in get_all_configs()
+            for config in quack_gemm_config.get_all_configs()
             if config.device_capacity == device_capacity
             and not config.swap_ab
             and config.cluster_k == 1
@@ -268,17 +323,6 @@ def default_gemm_config_key(device: torch.device, m, n) -> GemmConfigKey:
     return gemm_config_key(configs[0])
 
 
-def gemm_config_from_key(config_key: GemmConfigKey):
-    """Resolve a generated-code key to an exact QuACK config without CUDA queries."""
-    from torch._vendor.quack.gemm_config import get_all_configs
-
-    config_key = GemmConfigKey(*config_key)
-    for config in get_all_configs():
-        if gemm_config_key(config) == config_key:
-            return config
-    raise RuntimeError(f"FlexGEMM found no QuACK config for key {config_key}")
-
-
 def dispatch_gemm_act(
     a: torch.Tensor,
     b: torch.Tensor,
@@ -300,11 +344,11 @@ def dispatch_gemm_act(
     gemm_act_dispatch(
         a.unsqueeze(0),
         b.mT.unsqueeze(0),
-        None,
+        None,  # D
         None if C is None else C.unsqueeze(0),
         out.unsqueeze(0),
-        None,
-        None,
+        None,  # tile_count_semaphore
+        None,  # cu_seqlens_m
         config.tile_m,
         config.tile_n,
         config.cluster_m,
@@ -314,7 +358,6 @@ def dispatch_gemm_act(
         persistent=True,
         is_dynamic_persistent=config.is_dynamic_persistent,
         tensor_epilogue_key=epilogue_key,
-        tensor_epilogue_uses_c=bool(epilogue_arg_kinds),
         tensor_epilogue_arg_kinds=epilogue_arg_kinds,
         tensor_epilogue_rowvec_biases=row_args,
         tensor_epilogue_colvec_biases=col_args,
@@ -433,7 +476,7 @@ def gemm_epilogue(
             alpha,
             beta,
             config=(
-                gemm_config_from_key(config_key)
+                quack_gemm_config.GemmConfig(**dict(config_key))
                 if config_key is not None
                 else candidate_gemm_configs_for_device(a.device)[0]
             ),

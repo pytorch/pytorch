@@ -9,7 +9,7 @@ from unittest import mock
 
 import torch
 from torch._higher_order_ops import flex_gemm
-from torch._higher_order_ops.flex_gemm import supported_flex_gemm_op_names
+from torch._higher_order_ops.flex_gemm import _SUPPORTED_FLEX_GEMM_OP_NAMES
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM100OrLater, TEST_CUDA
@@ -55,6 +55,7 @@ class TestFlexGemmRuntimeImport(TestCase):
 class TestFlexGemmRuntimeHelpers(TestCase):
     def test_dense_config_selection_is_explicit_and_sm110_reuses_sm100(self):
         from torch._inductor.kernel.flex_gemm import runtime
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         def config(tile_m, tile_n, cluster_m, cluster_n, dynamic, **kwargs):
             values = {
@@ -73,7 +74,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 "max_swizzle_size": 8,
             }
             values.update(kwargs)
-            return SimpleNamespace(**values)
+            return GemmConfig(**values)
 
         default = config(128, 256, 2, 1, True)
         skinny = config(128, 192, 2, 1, True)
@@ -118,9 +119,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 runtime.candidate_gemm_configs_for_device(torch.device("cuda")),
                 [default, skinny, large_rect, large],
             )
-            self.assertIs(
-                runtime.gemm_config_from_key(runtime.gemm_config_key(large)), large
-            )
+            self.assertEqual(GemmConfig(**dict(runtime.gemm_config_key(large))), large)
 
         sm120_pingpong = config(
             128,
@@ -453,7 +452,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         file_check.check_not("from quack").check_not("import quack").run(code)
 
     def test_supported_op_names_match_pr2b_scope(self):
-        self.assertEqual(supported_flex_gemm_op_names(), "mm/addmm")
+        self.assertEqual(_SUPPORTED_FLEX_GEMM_OP_NAMES, "mm/addmm")
 
     def test_default_backend_eager_matches_reference(self):
         a = torch.randn(8, 16)

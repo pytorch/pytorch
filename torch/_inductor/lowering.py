@@ -31,7 +31,7 @@ from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.flex_gemm import (
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
     flex_gemm_hop,
-    FLEX_GEMM_OP_INPUT_INDICES,
+    FLEX_GEMM_OP_SPECS,
 )
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
@@ -8688,7 +8688,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Lower FlexGEMM to the regular subgraph path or the QUACK template."""
     if kernel_options.get("backend", "TRITON") != "QUACK":
         return process_subgraph_nodes(subgraph.graph_module, list(args))
-    if gemm_op not in FLEX_GEMM_OP_INPUT_INDICES:
+    if gemm_op not in FLEX_GEMM_OP_SPECS:
         raise NotImplementedError(
             f"FlexGEMM QUACK backend currently supports only aten.{_SUPPORTED_FLEX_GEMM_OP_NAMES}"
         )
@@ -8704,10 +8704,14 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         materialize_flex_gemm_epilogue,
         output_node as flex_gemm_output_node,
     )
-    from torch._inductor.kernel.flex_gemm.template import flex_gemm_epilogue_template
+    from torch._inductor.kernel.flex_gemm.template import (
+        flex_gemm_epilogue_template,
+        FlexGemmEpilogueConfig,
+    )
     from torch._inductor.select_algorithm import autotune_select_algorithm
 
-    mat1_index, mat2_index = FLEX_GEMM_OP_INPUT_INDICES[gemm_op]
+    op_spec = FLEX_GEMM_OP_SPECS[gemm_op]
+    mat1_index, mat2_index = op_spec.mat1_index, op_spec.mat2_index
     unsupported_gemm_kwargs = OrderedSet(gemm_kwargs) - OrderedSet(["alpha", "beta"])
     if unsupported_gemm_kwargs:
         raise NotImplementedError(
@@ -8769,10 +8773,10 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             choices,
             input_nodes=input_nodes,
             layout=layout,
-            config=ir.FlexGemmEpilogueConfig(
+            config=FlexGemmEpilogueConfig(
                 epilogue_name=epilogue_name,
                 epilogue_source=epilogue_source,
-                gemm_op=gemm_op.name().removeprefix("aten::"),
+                gemm_op=op_spec,
                 alpha=float(alpha),
                 beta=float(beta),
                 out_dtype=output_meta.dtype,

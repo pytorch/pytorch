@@ -1,3 +1,12 @@
+# Scope the vendored QuACK object cache to Inductor and make compile-only safe.
+#
+# PyTorch needs generated FlexGEMM precompile workers and runtime execution to
+# share an Inductor-owned cache without redirecting unrelated QuACK callers. This
+# patch adds a context-local cache-dir override, renames user-visible cache log
+# messages for the vendored package, and keeps cache fingerprinting rooted in
+# torch._vendor.quack.
+#
+
 --- a/cache/__init__.py
 +++ b/cache/__init__.py
 @@ -72,8 +72,9 @@

@@ -652,11 +652,7 @@ class AsyncCompile:
         is_parallel = self.use_process_pool()
 
         if is_parallel:
-            env_vars = [
-                "TORCHINDUCTOR_CACHE_DIR",
-                "TORCHINDUCTOR_CUTLASS_DIR",
-                "QUACK_CACHE_DIR",
-            ]
+            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
 
             subprocess_task = self.process_pool().submit(

@@ -1,7 +1,10 @@
 # mypy: allow-untyped-defs
+import dataclasses
+from typing import Any
 from typing_extensions import override
 
 import torch
+from torch._higher_order_ops.flex_gemm import FlexGemmOpSpec
 from torch._inductor.codegen.common import IndentedBuffer
 from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLTemplateKernel
 from torch._inductor.codegen.cutedsl.cutedsl_template import (
@@ -11,6 +14,25 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
 from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
 from torch._inductor.select_algorithm import PartialRender
 from torch.utils._ordered_set import OrderedSet
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmEpilogueConfig:
+    """Metadata needed to render one Inductor-owned QuACK GEMM epilogue choice.
+
+    The epilogue fields identify the generated CuTeDSL callable, ``gemm_op``
+    describes how to map the original aten op's operands into QuACK's dense GEMM
+    adapter, and ``quack_config_key`` pins the exact QuACK config selected by
+    Inductor autotuning or default selection.
+    """
+
+    epilogue_name: str
+    epilogue_source: str
+    gemm_op: FlexGemmOpSpec
+    alpha: float
+    beta: float
+    out_dtype: Any | None = None
+    quack_config_key: tuple[Any, ...] | None = None
 
 
 class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
@@ -55,15 +77,9 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             call_kwargs += f", config_key={tuple(config.quack_config_key)!r}"
 
         output_name = self.get_output()
-        precompile_call_params = [arg_name for arg_name, _ in self._template_input_args]
-        precompile_call_params.extend(
-            param
-            for param in params
-            if param not in precompile_call_params
-            and param
-            not in ("stream", "device_capacity_override=None", quack_cache_dir_param)
-        )
-        precompile_call_params.extend(("None", "device_capability", "quack_cache_dir"))
+        template_input_arg_names = [
+            arg_name for arg_name, _ in self._template_input_args
+        ]
 
         code = IndentedBuffer()
         code.splice(
@@ -110,23 +126,29 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                     "tuple(precompile_strides['output']), device=device, "
                     "dtype=getattr(torch, precompile_dtypes['output']))"
                 )
-                code.writeline(
-                    f"{self.kernel_name}_main({', '.join(precompile_call_params)})"
-                )
+                code.writeline(f"{self.kernel_name}_main(")
+                with code.indent():
+                    for arg_name in template_input_arg_names:
+                        code.writeline(f"{arg_name},")
+                    code.writeline(f"{output_name}={output_name},")
+                    code.writeline("stream=None,")
+                    code.writeline("device_capacity_override=device_capability,")
+                    code.writeline("quack_cache_dir=quack_cache_dir,")
+                code.writeline(")")
         return PartialRender(code.getvalue(), self.render_hooks)
 
     def _gemm_call_args(self, input_args, config):
         out_dtype = (
             "" if config.out_dtype is None else f", out_dtype={config.out_dtype!r}"
         )
-        if config.gemm_op == "mm":
-            return [input_args[0], input_args[1]], out_dtype
-        if config.gemm_op == "addmm":
-            return [input_args[1], input_args[2]], (
-                f", C={input_args[0]}, alpha={config.alpha!r}, beta={config.beta!r}"
-                f"{out_dtype}"
-            )
-        raise NotImplementedError(f"unsupported FlexGEMM op: {config.gemm_op}")
+        op = config.gemm_op
+        call_args = [input_args[op.mat1_index], input_args[op.mat2_index]]
+        if op.bias_index is None:
+            return call_args, out_dtype
+        return call_args, (
+            f", C={input_args[op.bias_index]}, alpha={config.alpha!r}, beta={config.beta!r}"
+            f"{out_dtype}"
+        )
 
 
 class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):

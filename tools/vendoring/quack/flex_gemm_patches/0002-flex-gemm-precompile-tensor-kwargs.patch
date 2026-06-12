@@ -1,3 +1,11 @@
+# Teach QuACK's compile worker to accept nested tensor metadata kwargs.
+#
+# FlexGEMM precompile runs inside Inductor subprocesses without real runtime
+# tensors. PyTorch serializes tensor shape/stride/dtype metadata instead, and
+# this patch rehydrates those values as fake CUDA tensors before calling the
+# QuACK precompile entrypoint.
+#
+
 diff --git a/_compile_worker.py b/_compile_worker.py
 index 7034d24afe8..59932d3c238 100644
 --- a/_compile_worker.py
