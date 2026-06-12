@@ -668,18 +668,12 @@ class Vectorized<c10::complex<float>> {
     if (count == size())
       return _mm512_loadu_ps(reinterpret_cast<const float*>(ptr));
 
-    __at_align__ float tmp_values[2 * size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(2 * size())) {
-      tmp_values[i] = 0.0;
-    }
+    // Zero tail past `count`.
+    __at_align__ float tmp_values[2 * size()] = {};
     std::memcpy(
         tmp_values,
         reinterpret_cast<const float*>(ptr),
-        count * sizeof(c10::complex<float>));
+        std::min<int64_t>(count, size()) * sizeof(c10::complex<float>));
     return _mm512_load_ps(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -688,7 +682,10 @@ class Vectorized<c10::complex<float>> {
     } else if (count > 0) {
       float tmp_values[2 * size()];
       _mm512_storeu_ps(reinterpret_cast<float*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(c10::complex<float>));
+      std::memcpy(
+          ptr,
+          tmp_values,
+          std::min<int64_t>(count, size()) * sizeof(c10::complex<float>));
     }
   }
   // AVX512 doesn't have horizontal add & horizontal sub instructions.

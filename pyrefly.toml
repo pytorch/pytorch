@@ -43,6 +43,7 @@ project-excludes = [
   "*/.*",
   "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**",
   "torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py",
+  "torch/_vendor/quack/**",
 ]
 ignore-missing-imports = [
     # XPU memory symbols not present for builds without XPU support
@@ -130,6 +131,7 @@ errors.deprecated = false # re-enable after we've fix import formatting
 permissive-ignores = true
 replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*", "networkx.*"]
 search-path = ["tools/experimental"]
+enable-fallback-search-path = true
 
 # Dynamo sub-config - note, we experiment with stricter typing here
 [[sub-config]]

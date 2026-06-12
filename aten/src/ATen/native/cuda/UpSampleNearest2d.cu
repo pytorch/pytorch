@@ -281,12 +281,11 @@ static void upsample_nearest2d_out_cuda_template(
 
     // upsample_nearest2d meta call makes sure input/output tensor is not empty;
     int block_x = std::min<int>(
-        maxThreadsDim[0], std::min<int>(lastPow2(output_width), max_threads));
+        {maxThreadsDim[0], lastPow2(output_width), max_threads});
     int block_y = std::min<int>(
-        maxThreadsDim[1],
-        std::min<int>(lastPow2(output_height), max_threads / block_x));
+        {maxThreadsDim[1], lastPow2(output_height), max_threads / block_x});
     int block_z = std::min<int>(
-        maxThreadsDim[2], std::min<int>(nc, max_threads / block_x / block_y));
+        {maxThreadsDim[2], static_cast<int>(nc), max_threads / block_x / block_y});
     const dim3 block(block_x, block_y, block_z);
 
     int grid_x = ceil_div(output_width, block_x);

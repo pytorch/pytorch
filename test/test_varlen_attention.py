@@ -25,6 +25,8 @@ from torch.testing._internal.common_utils import (
     decorateIf,
     parametrize,
     run_tests,
+    setSdpaBackendsToDefaultFinally,
+    skipIfRocm,
     TEST_WITH_ROCM,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -292,6 +294,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
         "sdpa_backend",
@@ -370,6 +373,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
         ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
@@ -451,6 +455,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
         ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
@@ -521,6 +526,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
         ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
@@ -701,6 +707,7 @@ class TestVarlenAttention(NNTestCase):
 
             start_idx = end_idx
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -830,12 +837,12 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support seqused_k")
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["backend"] != "fa2"
         and any(kv_len < 128 for kv_len in params["actual_kv_lens"]),
     )
+    @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
         ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
@@ -856,6 +863,8 @@ class TestVarlenAttention(NNTestCase):
         self, device, dtype, actual_kv_lens, backend, sdpa_backend=None
     ):
         if TEST_WITH_ROCM:
+            if sdpa_backend == "ck":
+                self.skipTest("CK backend does not support seqused_k")
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
 
         torch.manual_seed(42)
@@ -960,7 +969,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support seqused_k")
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support block_table")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("page_size", [32, 64, 128, 256])
     @parametrize("compile", [False, True])
