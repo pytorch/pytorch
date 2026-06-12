@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: Upload test stats
 
 on:
@@ -5,10 +6,11 @@ on:
     workflows:
       - pull
       - trunk
-      - trunk-rocm-mi300
+      - trunk-rocm-sandbox
       - periodic
       - periodic-rocm-mi200
       - periodic-rocm-mi300
+      - periodic-rocm-mi350
       - inductor
       - unstable
       - slow
@@ -17,15 +19,18 @@ on:
       - inductor-periodic
       - rocm-mi200
       - rocm-mi300
-      - rocm-mi355
+      - rocm-mi350
       - rocm-navi31
+      - rocm-nightly
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124
       - inductor-rocm-mi200
       - inductor-rocm-mi300
+      - inductor-rocm-mi350
+      - inductor-perf-nightly-rocm-mi300
+      - inductor-perf-nightly-rocm-mi350
       - mac-mps
-      - linux-aarch64
     types:
       - completed
 

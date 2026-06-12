@@ -27,10 +27,10 @@ const int SHUTDOWN_TIMEOUT = 2000; // 2s
 #endif
 
 struct ClientSession {
-  ClientSession(ManagerSocket s) : socket(std::move(s)), pid(0) {}
+  ClientSession(ManagerSocket s) : socket(std::move(s)) {}
 
   ManagerSocket socket;
-  pid_t pid;
+  pid_t pid{0};
 };
 
 static std::vector<struct pollfd> pollfds;
@@ -46,12 +46,7 @@ static void register_fd(int fd) {
 }
 
 static void unregister_fd(int fd) {
-  pollfds.erase(
-      std::remove_if(
-          pollfds.begin(),
-          pollfds.end(),
-          [fd](const struct pollfd& pfd) { return pfd.fd == fd; }),
-      pollfds.end());
+  std::erase_if(pollfds, [fd](const struct pollfd& pfd) { return pfd.fd == fd; });
   client_sessions.erase(fd);
 }
 

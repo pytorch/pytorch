@@ -1,10 +1,6 @@
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 
-#include <torch/csrc/distributed/c10d/Utils.hpp>
-
 #ifdef USE_C10D_GLOO
-
-#include <cstdlib>
 
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
@@ -23,6 +19,7 @@
 
 #if GLOO_HAVE_TRANSPORT_IBVERBS
 #include <gloo/transport/ibverbs/device.h>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #endif
 
 // On Linux, check that the tcp transport is available.
@@ -199,22 +196,25 @@ std::shared_ptr<::gloo::transport::Device> makeGlooDevice(
         transportName.value(), interfaceName, hostName, lazyInit);
   }
 
-#ifdef __linux__
+#if defined(__linux__)
+
   return GlooDeviceRegistry()->Create(
       "LINUX", interfaceName, hostName, lazyInit);
-#endif
 
-#ifdef __APPLE__
+#elif defined(__APPLE__)
+
   return GlooDeviceRegistry()->Create(
       "APPLE", interfaceName, hostName, lazyInit);
-#endif
 
-#ifdef _WIN32
+#elif defined(_WIN32)
+
   return GlooDeviceRegistry()->Create(
       "WIN32", interfaceName, hostName, lazyInit);
-#endif
+#else
 
   return nullptr;
+
+#endif
 }
 } // anonymous namespace
 

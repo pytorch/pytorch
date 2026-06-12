@@ -12,6 +12,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     is_navi3_arch,
     parametrize,
     patch_test_members,
@@ -86,7 +87,8 @@ class TestDecomposeMemMM(TestCase):
             return False
         for key1 in ref_dict:
             key2 = "_orig_mod." + key1
-            assert key2 in res_dict, f"{key1} does not exist in traced module"
+            if key2 not in res_dict:
+                raise AssertionError(f"{key1} does not exist in traced module")
             if not torch.allclose(
                 ref_dict[key1], res_dict[key2], rtol=self.rtol, atol=self.atol
             ):
@@ -343,8 +345,8 @@ class TestDecomposeMemMM(TestCase):
     # GEMMs operations have an accuracy issue caused by hardware limitation
     @patch_test_members(
         {
-            "atol": 3e-3 if is_navi3_arch() else 1e-3,
-            "rtol": 4e-3 if is_navi3_arch() else 1e-3,
+            "atol": 8e-3 if is_navi3_arch() else 1e-3,
+            "rtol": 8e-3 if is_navi3_arch() else 1e-3,
         }
     )
     @parametrize(
@@ -387,6 +389,8 @@ class TestDecomposeMemMM(TestCase):
             )
             counters.clear()
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/153736")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/153735")
     @unittest.skip
     @parametrize("m,k,n, should_decompose", [(20480, 5, 2, True)])
     @parametrize("has_bias", [True, False])

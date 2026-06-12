@@ -4,7 +4,8 @@ import dataclasses
 import logging
 import textwrap
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
+from unittest.mock import patch
 
 import sympy
 
@@ -15,15 +16,25 @@ from torch._inductor.codegen.common import (
     CSEVariable,
     IndentedBuffer,
     Kernel,
+    PythonPrinter,
     ValueRanges,
 )
-from torch._inductor.ir import Buffer, ComputedBuffer, InputBuffer
+from torch._inductor.ir import (
+    BaseView,
+    Buffer,
+    ComputedBuffer,
+    ExternKernel,
+    InputBuffer,
+    MutableBox,
+    ReinterpretView,
+)
 from torch._inductor.ops_handler import StoreMode
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
 from ...utils import sympy_index_symbol
-from .cutedsl_op_overrides import CuteDSLOpOverrides
+from .cutedsl_op_overrides import CuteDSLCSEVariable, CuteDSLOpOverrides
+from .lane_analysis import classify_lane_expr
 
 
 # TODO setting the 'main' kernel w/ this suffix. We have 3 should probably just auto generate this
@@ -32,14 +43,13 @@ MAIN_SUFFIX = "main"
 
 log = logging.getLogger(__name__)
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
+cutedsl_pexpr = PythonPrinter().doprint
 
 
 class CuteDSLKernelWrapper:
     """Wrapper to provide .run() interface for CuteDSL kernels"""
 
-    def __init__(
-        self, kernel_fn: Callable[..., Any], kernel_path: Optional[str] = None
-    ):
+    def __init__(self, kernel_fn: Callable[..., Any], kernel_path: str | None = None):
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
         kernel_code_log.info("CuteDSL kernel path: %s", kernel_path)
@@ -59,14 +69,58 @@ class CuteDSLKernelWrapper:
         return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class CuteDSLVectorLoadConfig:
+    vec_size: int
+    index: sympy.Symbol
+    dim: int
+
+    @staticmethod
+    def from_fixed_inputs(
+        fixed_inputs: dict[str, Any],
+    ) -> "CuteDSLVectorLoadConfig | None":
+        vec_size = fixed_inputs.pop("vector_load_vec_size", None)
+        index = fixed_inputs.pop("vector_load_index", None)
+        dim = fixed_inputs.pop("vector_load_dim", None)
+        if vec_size is None or index is None or dim is None:
+            return None
+        return CuteDSLVectorLoadConfig(
+            vec_size=int(vec_size),
+            index=sympy_index_symbol(str(index)),
+            dim=int(dim),
+        )
+
+    def normalized_dim(self, ndim: int) -> int:
+        return self.dim + ndim if self.dim < 0 else self.dim
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CuteDSLIndexFragment:
+    """Generated index expression metadata for CuteDSL tensor loads.
+
+    Attributes:
+        code: Python source expression for the index or index fragment.
+        is_static_int: True when code is an inline integer index, not a fragment.
+        is_lane_uniform: True when every vector lane has the same index.
+        is_contiguous: True when code is aligned and contiguous for the full
+            requested vector width.
+    """
+
+    code: str
+    is_static_int: bool
+    is_lane_uniform: bool = False
+    is_contiguous: bool = False
+    contiguous_width: int | None = None
+
+
 @dataclasses.dataclass
 class CuteDSLSubgraphInfo:
     """Minimal subgraph info for CuteDSL kernels."""
 
     body: IndentedBuffer
-    template_mask: Optional[str] = None
-    template_out: Optional[str] = None
-    cse: Optional[CSE[Any]] = None
+    template_mask: str | None = None
+    template_out: str | None = None
+    cse: CSE[Any] | None = None
 
     def __post_init__(self):
         self.only_copy_if_non_none_fields = ("cse",)
@@ -89,7 +143,7 @@ class CuteDSLTemplateKernel(Kernel):
         kernel_name: str,
         input_nodes: list[Buffer],
         output_node: Buffer,
-        subgraphs: Optional[list[Buffer]] = None,
+        subgraphs: list[Buffer] | None = None,
     ) -> None:
         # Call parent Kernel constructor
         super().__init__()
@@ -101,9 +155,9 @@ class CuteDSLTemplateKernel(Kernel):
 
         # Template attributes
         self.body: IndentedBuffer = IndentedBuffer()
-        self.template_mask: Optional[str] = None
-        self.template_out: Optional[str] = None
-        self.template_indices: Optional[list[Any]] = None
+        self.template_mask: str | None = None
+        self.template_out: str | None = None
+        self.template_indices: list[Any] | None = None
         self.render_hooks: dict[str, Any] = {}
 
         # TODO Additional attributes needed by template system
@@ -121,9 +175,39 @@ class CuteDSLTemplateKernel(Kernel):
         # Track all tensor buffers added during modification processing
         self.collected_tensor_buffers: list[str] = []
 
+        # Captured IR nodes keyed by buffer name. Used by call_kernel to emit
+        # reinterpret_tensor for view captures in the python_argdefs loop.
+        self._capture_input_nodes: dict[str, Any] = {}
+
+    def set_capture_input_nodes(self, nodes_by_name: dict[str, Any]) -> None:
+        """Set captured inputs collected while rendering the CuteDSL template."""
+        self._capture_input_nodes = nodes_by_name
+
+    def _get_capture_input_node(self, name: str) -> Any | None:
+        """Return the IR node for a captured input name, if known."""
+        graph_captures = getattr(V.graph, "_cutedsl_capture_nodes", {})
+        return self._capture_input_nodes.get(name, graph_captures.get(name))
+
+    @contextlib.contextmanager
+    def _patch_get_dtype_for_captures(self):
+        """Teach python_argdefs to resolve synthetic captured input names."""
+        original_get_dtype = V.graph.get_dtype
+
+        def get_dtype(name: str) -> torch.dtype:
+            capture = self._get_capture_input_node(name)
+            if capture is not None:
+                return capture.get_dtype()
+            return original_get_dtype(name)
+
+        with patch.object(V.graph, "get_dtype", get_dtype):
+            yield
+
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
-        return str(expr)
+        return cutedsl_pexpr(expr)
+
+    def create_cse_var(self, *args, **kwargs):
+        return CuteDSLCSEVariable(*args, **kwargs)
 
     def gen_imports(self) -> str:
         """Generate common imports for CuteDSL templates."""
@@ -137,7 +221,7 @@ class CuteDSLTemplateKernel(Kernel):
             import cuda.bindings.driver as cuda
             from cutlass._mlir.dialects import math as mlir_math
             import operator
-            from torch._inductor.codegen.cutedsl._cutedsl_utils import ssa_to_indexable, result_to_ssa
+            from torch._inductor.codegen.cutedsl._cutedsl_utils import result_to_ssa, ssa_to_fragment, ssa_to_indexable
             """
         )
         return imports.getvalue()
@@ -153,14 +237,18 @@ class CuteDSLTemplateKernel(Kernel):
         from torch._inductor.select_algorithm import PartialRender
 
         """Render the kernel using the template, returning PartialRender object with hooks."""
+        self._template_kwargs = dict(kwargs)
+
         # Available {{}} hooks for jinja rendering
         template_env = {
             "def_kernel": self.def_kernel,
             "gen_defines": lambda: self.gen_defines(**kwargs),
             "get_output": self.get_output,
             "get_tensor_buffers": self.get_tensor_buffers,
+            "add_tensor_inputs": self.add_tensor_inputs,
             "unpack_buffers": self.unpack_buffers,
             "modification": self.modification,
+            "set_cute_hash": self.set_cute_hash,
         }
 
         # Render the template with the environment and provided kwargs
@@ -181,10 +269,13 @@ class CuteDSLTemplateKernel(Kernel):
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
         """Set the active subgraph body for template processing."""
-        assert all(
+        if not all(
             hasattr(self, field.name)
             for field in dataclasses.fields(CuteDSLSubgraphInfo)
-        )
+        ):
+            raise AssertionError(
+                "expected all CuteDSLSubgraphInfo fields to be set on self"
+            )
         old_state = {
             key.name: getattr(self, key.name)
             for key in dataclasses.fields(CuteDSLSubgraphInfo)
@@ -223,9 +314,8 @@ class CuteDSLTemplateKernel(Kernel):
     @contextlib.contextmanager
     def create_subgraph_body(self, body_name: str, *, clear_cse: bool = False):
         """Create a new subgraph body for template processing."""
-        assert body_name not in self.subgraph_bodies, (
-            f"Subgraph body '{body_name}' already exists"
-        )
+        if body_name in self.subgraph_bodies:
+            raise AssertionError(f"Subgraph body '{body_name}' already exists")
         new_cse = self.cse.clone() if clear_cse else None
         self.subgraph_bodies[body_name] = CuteDSLSubgraphInfo(
             body=IndentedBuffer(),
@@ -236,31 +326,59 @@ class CuteDSLTemplateKernel(Kernel):
         with self.set_subgraph_body(body_name):
             yield
 
+    def _get_reinterpret_view(self, node) -> ReinterpretView | None:
+        """Extract or convert to ReinterpretView from a node, handling all views."""
+        while isinstance(node, MutableBox):
+            node = node.data
+        if isinstance(node, BaseView):
+            return ExternKernel.convert_to_reinterpret_view(node)
+        return None
+
     def def_kernel(self, *argnames):
-        """Define kernel function signature for CuteDSL templates."""
+        """Define kernel function signature for CuteDSL templates.
+
+        When inputs are ReinterpretViews of the same underlying buffer (e.g., Q/K/V
+        from fused QKV projection), we generate separate arguments for each input
+        even though they share the same underlying buffer.
+        """
         renames = IndentedBuffer(initial_indent=1)
+
+        # Track template input args - each input gets its own arg even if buffers are shared
+        self._template_input_args: list[tuple[str, Buffer]] = []
+        self._seen_input_args: OrderedSet[str] = OrderedSet()
 
         for i, input_node in enumerate(self.input_nodes):
             buf_name = input_node.get_name()
+            # Register with args system (may deduplicate, but we track separately)
             self.args.input(buf_name)
 
-            # Template aliasing: converts template variables (e.g., "input_a") to function args (e.g., "arg_input_a")
-            # and generates rename statements so template code can use the original names
             if i < len(argnames):
                 template_name = argnames[i]
                 arg_name = f"arg_{template_name}"
                 self.args.input_buffers[buf_name] = arg_name
                 renames.writeline(f"{template_name} = {arg_name}")
+                self._template_input_args.append((arg_name, input_node))
+                self._seen_input_args.add(arg_name)
 
         if self.output_node:
             self.args.output(self.output_node.get_name())
 
         def hook():
-            # Deferred execution: arg definitions must be collected after template processing adds all args
-            arg_defs, *_ = self.args.python_argdefs()
+            # Generate signature with template input args plus additional args (output, sizevars)
             code = IndentedBuffer()
             code.writeline(f"# Kernel function signature: {self.kernel_name}")
-            params = [x.full_name() for x in arg_defs] + ["stream"]
+
+            # Start with template input args
+            params = [arg_name for arg_name, _ in self._template_input_args]
+
+            # Get additional args from python_argdefs (output, sizevars, etc.)
+            with self._patch_get_dtype_for_captures():
+                arg_defs, _, _, _ = self.args.python_argdefs()
+            for arg_def in arg_defs:
+                if arg_def.full_name() not in self._seen_input_args:
+                    params.append(arg_def.full_name())
+
+            params.append("stream")
             code.writeline(
                 f"def {self.kernel_name}_{MAIN_SUFFIX}({', '.join(params)}):"
             )
@@ -268,23 +386,48 @@ class CuteDSLTemplateKernel(Kernel):
                 code.splice(renames.getvalue())
             return code.getvalue()
 
-        assert "<DEF_KERNEL>" not in self.render_hooks
+        if "<DEF_KERNEL>" in self.render_hooks:
+            raise AssertionError("<DEF_KERNEL> hook already registered")
         # Placeholder-based rendering: hook will be called when template encounters "<DEF_KERNEL>"
         self.render_hooks["<DEF_KERNEL>"] = hook
         return "<DEF_KERNEL>"
 
     def get_output(self):
         """Get the actual argument name for the output buffer."""
-        assert self.output_node, "Output node must exist to get output buffer name"
+        if not self.output_node:
+            raise AssertionError("Output node must exist to get output buffer name")
         buf_name = self.output_node.get_name()
         output = self.args.output_buffers.get(buf_name, None)
         if output is None:
             raise ValueError(f"Output buffer '{buf_name}' not found in args")
         return output
 
+    def set_cute_hash(self, func_name: str, suffix: str = ""):
+        """Generate code to set __cute_hash__ on a codegen function.
+
+        This allows hash_callable in flash_attn to skip expensive runtime hashing
+        for Inductor-generated functions. The hash is based on the kernel name
+        which already contains a unique hash suffix.
+        """
+        hash_value = f"{self.kernel_name}_{suffix}" if suffix else self.kernel_name
+        return f'{func_name}.__cute_hash__ = "{hash_value}"'
+
     def get_tensor_buffers(self):
         """Get list of tensor buffer names that were collected during modifications."""
         return self.collected_tensor_buffers
+
+    def add_tensor_inputs(self, buffers):
+        """Register extra tensor buffers and return their rendered input names."""
+        buffer_names = []
+        for buffer in buffers:
+            if isinstance(buffer, sympy.Expr):
+                # Symbolic size/index expressions are not kernel tensor inputs yet.
+                continue
+            remapped_name = self.args.input(buffer.get_name())
+            if remapped_name not in self.collected_tensor_buffers:
+                self.collected_tensor_buffers.append(remapped_name)
+            buffer_names.append(remapped_name)
+        return buffer_names
 
     def unpack_buffers(self, buffer_list_name: str, *, indent_width: int = 4):
         """Generate buffer unpacking code via render hook."""
@@ -311,29 +454,70 @@ class CuteDSLTemplateKernel(Kernel):
         return placeholder
 
     def call_kernel(self, name: str, node=None):
-        """Call the kernel function. Simplified version of TritonTemplateKernel.call_kernel."""
+        """Call the kernel function. Simplified version of TritonTemplateKernel.call_kernel.
+
+        For inputs that are ReinterpretViews (e.g., Q/K/V slices from fused QKV),
+        we generate reinterpret_tensor() calls to properly handle the views.
+        """
         wrapper = V.graph.wrapper_code
-        _, call_args, _, arg_types = self.args.python_argdefs()
-        # TODO triton should really be swapped w/ `python`
+
+        # Build call args matching the signature generated in `def_kernel`
+        call_args = []
+        arg_types = []
+
+        for _, input_node in self._template_input_args:
+            reinterpret_view = self._get_reinterpret_view(input_node)
+            if reinterpret_view is not None:
+                call_args.append(reinterpret_view.codegen_reference())
+            else:
+                call_args.append(input_node.get_name())
+            arg_types.append(V.graph.get_dtype(input_node.get_name()))
+
+        # Add additional args from python_argdefs (output, sizevars, ..)
+        with self._patch_get_dtype_for_captures():
+            orig_arg_defs, orig_call_args, _, orig_arg_types = (
+                self.args.python_argdefs()
+            )
+        for arg_def, call_arg, arg_type in zip(
+            orig_arg_defs, orig_call_args, orig_arg_types
+        ):
+            if arg_def.full_name() in self._seen_input_args:
+                continue
+            capture = self._get_capture_input_node(call_arg)
+            if isinstance(capture, ReinterpretView):
+                # Pass the original view expression so stride/offset metadata is
+                # preserved at the kernel call site.
+                call_args.append(capture.codegen_reference())
+            else:
+                call_args.append(call_arg)
+            arg_types.append(arg_type)
+
+        # TODO this karg really should not be called `triton`
         wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)
 
     def _get_subgraph(self, subgraph_number: int):
         """Get subgraph by number for modification processing."""
-        assert isinstance(subgraph_number, int)
-        assert isinstance(self.subgraphs, list)
-        assert subgraph_number < len(self.subgraphs), (
-            f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
-        )
-        assert self.body.getvalue() == "", (
-            "Body should be clear before adding a modification"
-        )
+        if not isinstance(subgraph_number, int):
+            raise AssertionError(
+                f"expected subgraph_number to be int, got {type(subgraph_number)}"
+            )
+        if not isinstance(self.subgraphs, list):
+            raise AssertionError(
+                f"expected self.subgraphs to be list, got {type(self.subgraphs)}"
+            )
+        if subgraph_number >= len(self.subgraphs):
+            raise AssertionError(
+                f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
+            )
+        if self.body.getvalue() != "":
+            raise AssertionError("Body should be clear before adding a modification")
         return self.subgraphs[subgraph_number]
 
     def modification(
         self,
         subgraph_number: int,
-        output_name: Optional[str],
-        mask: Optional[str] = None,
+        output_name: str | None,
+        mask: str | None = None,
         **fixed_inputs,
     ) -> str:
         """Generate CuteDSL code for a subgraph modification."""
@@ -348,9 +532,10 @@ class CuteDSLTemplateKernel(Kernel):
                 self, subgraph_number, fixed_inputs, mask
             )
             with V.set_kernel_handler(self), V.set_ops_handler(modification_handler):
-                assert isinstance(subgraph, (ComputedBuffer, list)), (
-                    f"Expected ComputedBuffer or List[ComputedBuffer], got {type(subgraph)}"
-                )
+                if not isinstance(subgraph, (ComputedBuffer, list)):
+                    raise AssertionError(
+                        f"Expected ComputedBuffer or List[ComputedBuffer], got {type(subgraph)}"
+                    )
 
                 if isinstance(subgraph, list):
                     raise NotImplementedError(
@@ -365,9 +550,10 @@ class CuteDSLTemplateKernel(Kernel):
                     out = subgraph.data.inner_fn(())
 
             if output_name is not None:
-                assert out is not None, (
-                    f"Expected computation result for named output {output_name}"
-                )
+                if out is None:
+                    raise AssertionError(
+                        f"Expected computation result for named output {output_name}"
+                    )
                 self.body.writeline(f"{output_name} = {out.value}")
             else:
                 # Side-effect only: no output assignment (currently only for scatter operations)
@@ -397,16 +583,22 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         kernel,
         subgraph_number: int,
         fixed_inputs: dict[str, Any],
-        mask: Optional[str],
+        mask: str | None,
     ):
         cutedsl_ops = CuteDSLOpOverrides()
         super().__init__(cutedsl_ops)
         self.name = f"CuteDSLPlaceholderSubstitution_{subgraph_number}"
         self.kernel = kernel
-        self.fixed_inputs = fixed_inputs
+        self.fixed_inputs = dict(fixed_inputs)
+        self.vector_load_config = CuteDSLVectorLoadConfig.from_fixed_inputs(
+            self.fixed_inputs
+        )
         self.mask = mask
         # Track tensor buffers that get added during modification processing
         self.tensor_buffers: list[str] = []
+        # Maps generated CSE names back to their original index expressions so
+        # vector-load analysis can reason about the source indexing semantics.
+        self._semantic_index_replacements: dict[sympy.Symbol, sympy.Expr] = {}
 
     def _get_input_dtype(self, name: str) -> torch.dtype:
         """Get the dtype for an input from the kernel's named_input_nodes."""
@@ -417,27 +609,34 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed(template args) input for CuteDSL."""
+        from torch._inductor.kernel.flex.flex_flash_attention import HierarchicalIndex
+
         if name not in self.fixed_inputs:
             var = self._add_kernel_input(name)
-            buffer = V.graph.get_buffer(name)
+            buffer = self.kernel._get_capture_input_node(name)
+            if buffer is None:
+                buffer = V.graph.get_buffer(name)
             var_dtype = buffer.dtype
 
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
                 var_dtype, "cutlass.Float32"
             )
-            renamed_index = self.kernel.rename_indexing(index)
-
-            idx_var = self._emit_scalar_fragment(
-                self.kernel.kexpr(renamed_index), "cutlass.Int32", torch.int32
+            dim_indices = (
+                index.args if isinstance(index, HierarchicalIndex) else (index,)
             )
+            dim_sizes = buffer.get_size()
+            if len(dim_sizes) == 0:
+                dim_indices = ()
+            idx_vars = [
+                self._emit_index_fragment(
+                    dim_index, dim_size, "cutlass.Int32", torch.int32
+                )
+                for dim_index, dim_size in zip(dim_indices, dim_sizes, strict=True)
+            ]
 
-            val_frag = self.kernel.cse.newvar(dtype=var_dtype)
-            self.kernel.body.writeline(
-                f"{val_frag} = cute.make_fragment(1, {cute_dtype})"
+            val_frag = self._emit_tensor_load_fragment(
+                var, idx_vars, cute_dtype, var_dtype, buffer
             )
-
-            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[{idx_var}])")
-
             final_expr = f"{val_frag}.load()"
 
             if (
@@ -452,34 +651,359 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 final_expr,
                 dtype=var_dtype,
                 bounds=ValueRanges.unknown(),
+                shape=(1,),
             )
             return out
 
         value = self.fixed_inputs[name]
         dtype = self._get_input_dtype(name)
 
-        return self.kernel.cse.generate(
+        result = self.kernel.cse.generate(
             self.kernel.body, value, bounds=ValueRanges.unknown(), dtype=dtype
         )
+        if (
+            isinstance(result, CuteDSLCSEVariable)
+            and isinstance(value, str)
+            and dtype in (torch.int32, torch.int64)
+        ):
+            result.index_expr = sympy_index_symbol(value)
+        return result
 
-    def _emit_scalar_fragment(
-        self, expr_str: str, cute_dtype: str, torch_dtype: torch.dtype
+    def _emit_tensor_load_fragment(
+        self,
+        var: str,
+        idx_vars: list[CuteDSLIndexFragment],
+        cute_dtype: str,
+        var_dtype: torch.dtype,
+        buffer: Any,
     ) -> str:
         """
-        Convert SSA expression to indexable scalar for tensor loads.
+        Emit a register fragment load from a captured tensor.
 
-        Workaround for lack of gather support: SSA values cannot be used directly
-        as indices. This generates code to convert SSA → indexable scalar.
+        Static integer indices can be emitted directly as scalar tensor indices.
+        Dynamic indices are SSA vectors, which must first be materialized into
+        register fragments so each lane can be used for scalar gather loads.  If
+        all indices are static, emit a single-element fragment; otherwise size
+        the value fragment to match the dynamic index lanes.
         """
+        dynamic_index_fragment = next(
+            (idx for idx in idx_vars if not idx.is_static_int), None
+        )
+        # Dynamic index fragments all carry the same vector width, so one
+        # representative fragment is enough to size the loaded value fragment.
+        val_frag = self.kernel.cse.newvar(dtype=var_dtype)
+        if len(buffer.get_size()) == 0:
+            self.kernel.body.writeline(
+                f"{val_frag} = cute.make_rmem_tensor(1, {cute_dtype})"
+            )
+            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[()])")
+            return str(val_frag)
+        if dynamic_index_fragment is None:
+            self.kernel.body.writeline(
+                f"{val_frag} = cute.make_rmem_tensor(1, {cute_dtype})"
+            )
+            self.kernel.body.writeline(
+                f"{val_frag}[0] = ({var}[{', '.join(idx.code for idx in idx_vars)}])"
+            )
+            return str(val_frag)
+
+        self.kernel.body.writeline(
+            f"{val_frag} = cute.make_rmem_tensor("
+            f"cute.size({dynamic_index_fragment.code}.shape), {cute_dtype})"
+        )
+        if self.vector_load_config is None:
+            vector_dim = len(idx_vars) - 1
+        else:
+            vector_dim = self.vector_load_config.normalized_dim(len(idx_vars))
+        if self._can_emit_contiguous_dim_load(idx_vars, buffer, var_dtype, vector_dim):
+            self._emit_contiguous_dim_load(
+                var, idx_vars, val_frag, cute_dtype, var_dtype, vector_dim
+            )
+        elif self._can_emit_uniform_load(idx_vars):
+            self._emit_uniform_load(var, idx_vars, val_frag)
+        else:
+            self._emit_per_lane_gather_load(var, idx_vars, val_frag)
+        return str(val_frag)
+
+    def _can_emit_contiguous_dim_load(
+        self,
+        idx_vars: list[CuteDSLIndexFragment],
+        buffer: Any,
+        var_dtype: torch.dtype,
+        vector_dim: int,
+    ) -> bool:
+        """Return true when vector lanes form a safe contiguous tensor tile.
+
+        This is stricter than lane-contiguity analysis: CuTe autovec also needs
+        a real byte-addressable copy type, uniform non-vector dimensions, unit
+        vector stride, and a statically aligned full-width tile.
+        """
+        if var_dtype is torch.bool:
+            return False
+        if not idx_vars or not idx_vars[vector_dim].is_contiguous:
+            return False
+        if any(
+            not (idx.is_static_int or idx.is_lane_uniform)
+            for dim, idx in enumerate(idx_vars)
+            if dim != vector_dim
+        ):
+            return False
+        sizes = buffer.get_size()
+        strides = buffer.get_stride()
+        vector_size = (
+            1 if self.vector_load_config is None else self.vector_load_config.vec_size
+        )
+        contiguous_width = idx_vars[vector_dim].contiguous_width
+        has_vector_width = vector_size > 1
+        has_unit_stride = V.graph.sizevars.statically_known_equals(
+            strides[vector_dim], 1
+        )
+        has_full_width_contiguity = (
+            contiguous_width is not None and contiguous_width >= vector_size
+        )
+        is_size_aligned = V.graph.sizevars.statically_known_multiple_of(
+            sizes[vector_dim], vector_size
+        )
+        is_offset_aligned = V.graph.sizevars.statically_known_multiple_of(
+            buffer.get_layout().offset, vector_size
+        )
+        are_non_vector_strides_aligned = all(
+            V.graph.sizevars.statically_known_multiple_of(stride, vector_size)
+            for dim, stride in enumerate(strides)
+            if dim != vector_dim
+        )
+        return (
+            has_vector_width
+            and has_unit_stride
+            and has_full_width_contiguity
+            and is_size_aligned
+            and is_offset_aligned
+            and are_non_vector_strides_aligned
+        )
+
+    def _emit_contiguous_dim_load(
+        self,
+        var: str,
+        idx_vars: list[CuteDSLIndexFragment],
+        val_frag: str,
+        cute_dtype: str,
+        var_dtype: torch.dtype,
+        vector_dim: int,
+    ) -> None:
+        """Emit an autovec load for lanes contiguous in one tensor dimension."""
+        scalar_indices = [
+            idx.code if idx.is_static_int else f"{idx.code}[0]" for idx in idx_vars
+        ]
+        vec_size = f"cute.size({val_frag}.shape)"
+        aligned_idx = self.kernel.cse.newvar(dtype=torch.int32)
+        source_tile = self.kernel.cse.newvar(dtype=var_dtype)
+        aligned_ptr = self.kernel.cse.newvar(dtype=var_dtype)
+        aligned_source = self.kernel.cse.newvar(dtype=var_dtype)
+
+        vector_idx = idx_vars[vector_dim].code
+        tiler_items = ["1"] * len(idx_vars)
+        tiler_items[vector_dim] = vec_size
+        coord_items = scalar_indices
+        coord_items[vector_dim] = f"{aligned_idx} // {vec_size}"
+        source_view_items = ["0"] * len(idx_vars)
+        source_view_items[vector_dim] = "None"
+        source_view = (
+            str(aligned_source)
+            if len(idx_vars) == 1
+            else f"{aligned_source}[{', '.join(source_view_items)}]"
+        )
+        tiler = (
+            f"({tiler_items[0]},)"
+            if len(tiler_items) == 1
+            else f"({', '.join(tiler_items)})"
+        )
+        coord = (
+            f"({coord_items[0]},)"
+            if len(coord_items) == 1
+            else f"({', '.join(coord_items)})"
+        )
+        self.kernel.body.splice(
+            f"""
+            {aligned_idx} = cute.assume({vector_idx}[0], divby={vec_size})
+            {source_tile} = cute.local_tile({var}, {tiler}, {coord})
+            {aligned_ptr} = cute.make_ptr({cute_dtype}, {source_tile}.iterator.toint(), {source_tile}.iterator.memspace, assumed_align=min(16, {vec_size} * {var_dtype.itemsize}))
+            {aligned_source} = cute.make_tensor({aligned_ptr}, {source_tile}.layout)
+            cute.autovec_copy({source_view}, {val_frag})
+            """
+        )
+
+    @staticmethod
+    def _can_emit_uniform_load(idx_vars: list[CuteDSLIndexFragment]) -> bool:
+        """Return true when every vector lane reads the same tensor element."""
+        return all(idx.is_static_int or idx.is_lane_uniform for idx in idx_vars)
+
+    def _emit_uniform_load(
+        self, var: str, idx_vars: list[CuteDSLIndexFragment], val_frag: str
+    ) -> None:
+        """Emit one scalar load and broadcast it across the value fragment."""
+        scalar_value = self.kernel.cse.newvar(dtype=None)
+        scalar_indices = [
+            idx.code if idx.is_static_int else f"{idx.code}[0]" for idx in idx_vars
+        ]
+        self.kernel.body.writeline(
+            f"{scalar_value} = ({var}[{', '.join(scalar_indices)}])"
+        )
+        self.kernel.body.writeline(
+            f"for load_idx in cutlass.range(cute.size({val_frag}.shape), unroll_full=True):"
+        )
+        with self.kernel.body.indent():
+            self.kernel.body.writeline(f"{val_frag}[load_idx] = {scalar_value}")
+
+    def _emit_per_lane_gather_load(
+        self, var: str, idx_vars: list[CuteDSLIndexFragment], val_frag: str
+    ) -> None:
+        """Emit scalar per-lane loads for non-contiguous gather indices."""
+        self.kernel.body.writeline(
+            f"for load_idx in cutlass.range(cute.size({val_frag}.shape), unroll_full=True):"
+        )
+        with self.kernel.body.indent():
+            load_indices = [
+                idx.code if idx.is_static_int else f"{idx.code}[load_idx]"
+                for idx in idx_vars
+            ]
+            self.kernel.body.writeline(
+                f"{val_frag}[load_idx] = ({var}[{', '.join(load_indices)}])"
+            )
+
+    def _emit_index_fragment(
+        self,
+        expr: sympy.Expr,
+        dim_size: sympy.Expr,
+        cute_dtype: str,
+        torch_dtype: torch.dtype,
+    ) -> CuteDSLIndexFragment:
+        """Materialize an index and preserve enough metadata for load selection."""
+        static_expr = self._static_integer_expr(expr)
+        if static_expr is not None:
+            return CuteDSLIndexFragment(
+                self.kernel.kexpr(self._wrap_static_index(static_expr, dim_size)),
+                is_static_int=True,
+            )
+
+        expr = self.kernel.rename_indexing(expr)
+        static_expr = self._static_integer_expr(expr)
+        if static_expr is not None:
+            return CuteDSLIndexFragment(
+                self.kernel.kexpr(self._wrap_static_index(static_expr, dim_size)),
+                is_static_int=True,
+            )
+
+        is_lane_uniform, is_contiguous, contiguous_width = self._analyze_index_fragment(
+            self._semantic_index_expr(expr)
+        )
         result = self.kernel.cse.newvar(dtype=torch_dtype)
         self.kernel.body.writeline(
-            f"{result} = ssa_to_indexable({expr_str}, {cute_dtype})"
+            f"{result} = ssa_to_fragment({self.kernel.kexpr(expr)}, {cute_dtype})"
         )
-        return str(result)
+        return CuteDSLIndexFragment(
+            str(result),
+            is_static_int=False,
+            is_lane_uniform=is_lane_uniform,
+            is_contiguous=is_contiguous,
+            contiguous_width=contiguous_width,
+        )
+
+    def _analyze_index_fragment(
+        self, semantic_expr: sympy.Expr
+    ) -> tuple[bool, bool, int | None]:
+        if self.vector_load_config is None:
+            return False, False, None
+        if self.vector_load_config.vec_size <= 1:
+            return True, False, None
+
+        lane_info = classify_lane_expr(
+            semantic_expr,
+            self.vector_load_config.index,
+            max_width=self.vector_load_config.vec_size,
+            uniform_symbols=self._lane_uniform_symbols(),
+        )
+        return (
+            lane_info.is_uniform,
+            lane_info.is_contiguous,
+            lane_info.contiguous_width,
+        )
+
+    @staticmethod
+    def _static_integer_expr(expr: object) -> int | sympy.Integer | None:
+        if isinstance(expr, int | sympy.Integer):
+            return expr
+        if isinstance(expr, sympy.Symbol) and expr.name.lstrip("-").isdigit():
+            return int(expr.name)
+        if isinstance(expr, sympy.Expr):
+            expr = V.graph.sizevars.simplify(expr)
+            if expr.is_Integer:
+                return expr
+        return None
+
+    @staticmethod
+    def _wrap_static_index(
+        index: int | sympy.Integer, dim_size: sympy.Expr
+    ) -> int | sympy.Expr:
+        if int(index) < 0:
+            return V.graph.sizevars.simplify(sympy.Integer(index) + dim_size)
+        return index
+
+    def _semantic_index_expr(self, expr: sympy.Expr) -> sympy.Expr:
+        """Recover the original index meaning from generated CSE names."""
+        replacements: dict[sympy.Symbol, sympy.Expr] = dict(
+            self._semantic_index_replacements
+        )
+        for var in self.kernel.cse._cache.values():
+            if isinstance(var, CuteDSLCSEVariable) and var.index_expr is not None:
+                replacements[sympy_index_symbol(var.name)] = var.index_expr
+        return V.graph.sizevars.simplify(expr.xreplace(replacements))
+
+    def _lane_uniform_symbols(self) -> OrderedSet[sympy.Symbol]:
+        """Return generated CSE source symbols that are uniform across lanes."""
+        vector_index_name = (
+            None
+            if self.vector_load_config is None
+            else self.vector_load_config.index.name
+        )
+        return OrderedSet(
+            [
+                sympy_index_symbol(source_expr)
+                for source_expr in self.kernel.cse._cache
+                if isinstance(source_expr, str) and source_expr != vector_index_name
+            ]
+        )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
-        return sympy_index_symbol(str(index_var))
+        if isinstance(index_var, int | sympy.Integer):
+            if wrap_neg and index_var < 0:
+                return V.graph.sizevars.simplify(sympy.Integer(index_var) + size)
+            return sympy.Integer(index_var)
+        if (
+            wrap_neg
+            and isinstance(index_var, CuteDSLCSEVariable)
+            and index_var.index_expr is not None
+            and not V.graph.sizevars.statically_known_geq(index_var.index_expr, 0)
+        ):
+            wrapped = self.kernel.cse.newvar(dtype=index_var.dtype)
+            size_expr = self.kernel.kexpr(size)
+            self.kernel.body.writeline(
+                f"{wrapped} = cute.where("
+                f"{index_var} < 0, {index_var} + {size_expr}, {index_var})"
+            )
+            return sympy_index_symbol(str(wrapped))
+        source_name = None
+        for expr, var in self.kernel.cse._cache.items():
+            if var is index_var:
+                source_name = expr if isinstance(expr, str) else None
+                break
+        symbol = sympy_index_symbol(source_name or str(index_var))
+        if (
+            isinstance(index_var, CuteDSLCSEVariable)
+            and index_var.index_expr is not None
+        ):
+            self._semantic_index_replacements[symbol] = index_var.index_expr
+        return symbol
 
     # pyrefly: ignore [bad-override]
     def store(

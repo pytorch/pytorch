@@ -1,9 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/EmptyTensor.h>
-#include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/detail/XPUHooksInterface.h>
 #include <ATen/Context.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/safe_numerics.h>
 
@@ -56,6 +53,9 @@ inline void raise_warning_for_complex_half(ScalarType dtype) {
   if (dtype == kComplexHalf) {
     TORCH_WARN_ONCE(
         "ComplexHalf support is experimental and many operators don't support it yet.");
+  } else if (dtype == kBComplex32) {
+    TORCH_WARN_ONCE(
+        "BComplex32 support is experimental and many operators don't support it yet.");
   }
 }
 

@@ -682,7 +682,7 @@ static void ConstantFoldONNX(
     node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
     // Next we remove the current node that has been replaced by
     // an initializer. But before we start de-wiring this node,
-    // we check if any parents of this nodes were onnx::Constant
+    // we check if any parents of this node were onnx::Constant
     // and remove them first, and then remove the current node.
     // If the parent was an initializer (not onnx::Constant) then
     // they are all removed by the eraseUnusedBlockInputs() call

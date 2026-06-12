@@ -148,7 +148,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return;
   }
 
-  virtual bool isAvailable() const override;
+  bool isAvailable() const override;
 
   /* MTIAGraph related APIs */
   virtual int64_t mtiagraphCreate(bool keep_graph = false) const {
@@ -187,11 +187,24 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
   virtual MempoolId_t graphPoolHandle() const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
+
+  const Generator& getDefaultGenerator(DeviceIndex /*device_index*/) const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    static Generator dummy_generator;
+    return dummy_generator;
+  }
+
+  Generator getNewGenerator(DeviceIndex /*device_index*/) const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    static Generator dummy_generator;
+    return dummy_generator;
+  }
 };
 
+// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API MTIAHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs);
+TORCH_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface);
 #define REGISTER_MTIA_HOOKS(clsname) C10_REGISTER_CLASS(MTIAHooksRegistry, clsname, clsname)
 
 namespace detail {

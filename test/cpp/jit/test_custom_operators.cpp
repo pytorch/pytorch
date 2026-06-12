@@ -15,7 +15,7 @@ namespace jit {
 TEST(CustomOperatorTest, InferredSchema) {
   torch::RegisterOperators reg(
       "foo::bar", [](double a, at::Tensor b) { return a + b; });
-  auto ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
+  auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
   ASSERT_EQ(ops.size(), 1);
 
   auto& op = ops.front();
@@ -43,7 +43,8 @@ TEST(CustomOperatorTest, ExplicitSchema) {
       "foo::bar_with_schema(float a, Tensor b) -> Tensor",
       [](double a, at::Tensor b) { return a + b; });
 
-  auto ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar_with_schema"));
+  auto& ops =
+      getAllOperatorsFor(Symbol::fromQualString("foo::bar_with_schema"));
   ASSERT_EQ(ops.size(), 1);
 
   auto& op = ops.front();
@@ -76,7 +77,7 @@ TEST(CustomOperatorTest, ListParameters) {
          torch::List<c10::complex<double>> complexdoubles,
          torch::List<at::Tensor> tensors) { return floats; });
 
-  auto ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
+  auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
   ASSERT_EQ(ops.size(), 1);
 
   auto& op = ops.front();
@@ -122,7 +123,7 @@ TEST(CustomOperatorTest, ListParameters2) {
       "foo::lists2(Tensor[] tensors) -> Tensor[]",
       [](torch::List<at::Tensor> tensors) { return tensors; });
 
-  auto ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists2"));
+  auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists2"));
   ASSERT_EQ(ops.size(), 1);
 
   auto& op = ops.front();
@@ -204,15 +205,12 @@ TEST(TestCustomOperator, OperatorGeneratorUndeclared) {
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::not_exist(float a, Tensor b) -> Tensor"),
       [](Stack& stack) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        double a;
-        at::Tensor b;
-        pop(stack, a, b);
+        auto [a, b] = pop<double, at::Tensor>(stack);
         push(stack, a + b);
       },
       aliasAnalysisFromSchema())});
 
-  auto ops = getAllOperatorsFor(Symbol::fromQualString("foofoo::not_exist"));
+  auto& ops = getAllOperatorsFor(Symbol::fromQualString("foofoo::not_exist"));
   ASSERT_EQ(ops.size(), 0);
 }
 
@@ -223,15 +221,12 @@ TEST(TestCustomOperator, OperatorGeneratorBasic) {
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::bar.template(float a, Tensor b) -> Tensor"),
       [](Stack& stack) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        double a;
-        at::Tensor b;
-        pop(stack, a, b);
+        auto [a, b] = pop<double, at::Tensor>(stack);
         push(stack, a + b);
       },
       aliasAnalysisFromSchema())});
 
-  auto ops = getAllOperatorsFor(Symbol::fromQualString("foofoo::bar"));
+  auto& ops = getAllOperatorsFor(Symbol::fromQualString("foofoo::bar"));
   ASSERT_EQ(ops.size(), 1);
 
   auto& op = ops.front();

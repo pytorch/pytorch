@@ -204,7 +204,7 @@ def get_class_properties(cls, self_name):
         here refers to the subclass of TreeView.
     """
     props = inspect.getmembers(cls, predicate=lambda m: isinstance(m, property))
-    # Any property that should not compiled must be in this list on the Module.
+    # Any property that should not be compiled must be in this list on the Module.
     unused_properties = getattr(cls, "__jit_unused_properties__", [])
 
     # Create Property TreeView objects from inspected property objects.
@@ -277,7 +277,10 @@ def get_jit_class_def(cls, self_name):
     py_ast = ast.parse(dedent_src)
 
     class_ast = py_ast.body[0]
-    assert isinstance(class_ast, ast.ClassDef)
+    if not isinstance(class_ast, ast.ClassDef):
+        raise AssertionError(
+            f"Expected class definition, got {type(class_ast).__name__}"
+        )
 
     # Special case for dataclasses. In general we need access to the source code for
     # an object in order to JIT compile it. But the dataclasses module dynamically synthesizes
@@ -1035,6 +1038,7 @@ class ExprBuilder(Builder):
     def build_Compare(ctx, expr):
         operands = [build_expr(ctx, e) for e in [expr.left] + list(expr.comparators)]
         result = None
+        # pyrefly: ignore [bad-assignment]
         for lhs, op_, rhs in zip(operands, expr.ops, operands[1:]):
             op = type(op_)
             op_token = ExprBuilder.cmpop_map.get(op)

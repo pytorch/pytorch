@@ -132,7 +132,7 @@ class _Orthogonal(Module):
             Q = Q.mT
             n, k = k, n
 
-        # We always make sure to always copy Q in every path
+        # We always make sure to copy Q in every path
         if not hasattr(self, "base"):
             # Note [right_inverse expm cayley]
             # If we do not have use_trivialization=True, we just implement the inverse of the forward
@@ -440,7 +440,10 @@ class _SpectralNorm(Module):
 
     def _reshape_weight_to_matrix(self, weight: torch.Tensor) -> torch.Tensor:
         # Precondition
-        assert weight.ndim > 1
+        if weight.ndim <= 1:
+            raise AssertionError(
+                f"Expected weight to have more than 1 dimension, got {weight.ndim}"
+            )
 
         if self.dim != 0:
             # permute dim to front
@@ -478,13 +481,16 @@ class _SpectralNorm(Module):
         #
         #    However, after we update `u` and `v` in-place, we need to **clone**
         #    them before using them to normalize the weight. This is to support
-        #    backproping through two forward passes, e.g., the common pattern in
+        #    backpropagating through two forward passes, e.g., the common pattern in
         #    GAN training: loss = D(real) - D(fake). Otherwise, engine will
         #    complain that variables needed to do backward for the first forward
         #    (i.e., the `u` and `v` vectors) are changed in the second forward.
 
         # Precondition
-        assert weight_mat.ndim > 1
+        if weight_mat.ndim <= 1:
+            raise AssertionError(
+                f"Expected weight_mat to have more than 1 dimension, got {weight_mat.ndim}"
+            )
 
         for _ in range(n_power_iterations):
             # Spectral norm of weight equals to `u^T W v`, where `u` and `v`

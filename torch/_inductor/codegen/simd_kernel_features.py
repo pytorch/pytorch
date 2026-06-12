@@ -5,14 +5,14 @@ import dataclasses
 import functools
 import itertools
 import typing
-from typing import Any, Optional, Union
+from typing import Any
 
 import sympy
 
 import torch
 
 from ...utils._ordered_set import OrderedSet
-from ...utils._sympy.functions import FloorDiv, ModularIndexing
+from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
@@ -39,7 +39,7 @@ class NodeScheduleMarker:
         return False
 
 
-NodeScheduleEntry = Union[SchedulerNode, type[NodeScheduleMarker]]
+NodeScheduleEntry = SchedulerNode | type[NodeScheduleMarker]
 
 
 class DisableReduction(NodeScheduleMarker):
@@ -82,7 +82,7 @@ class SIMDKernelFeatures:
         node_schedule: list[NodeScheduleEntry],
         numel: sympy.Expr,
         reduction_numel: sympy.Expr = sympy.S.One,
-        coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
+        coalesce_analysis: CoalesceVarAnalysis | None = None,
     ):
         self.node_schedule = node_schedule
         # numel excludes reduction_numel
@@ -149,8 +149,9 @@ class SIMDKernelFeatures:
             return torch.int32
         return torch.int64
 
-    @cache_on_self
-    def get_reduction_hint(self) -> ReductionHint:
+    def get_reduction_hint(
+        self, tiling_scores: dict[str, int] | None = None
+    ) -> ReductionHint:
         reductions = self.reduction_nodes()
         if len(reductions) > 0:
             hints = [self.reduction_hint(n) for n in reductions]
@@ -164,6 +165,22 @@ class SIMDKernelFeatures:
                 and self.has_non_contiguous_pw_in_reduction_kernel()
             ):
                 reduction_hint_val = ReductionHint.DEFAULT
+
+            # Upgrade DEFAULT to INNER for inner reductions based on tiling scores
+            if (
+                reduction_hint_val == ReductionHint.DEFAULT
+                and tiling_scores is not None
+                and "x" in tiling_scores
+                and "r0_" in tiling_scores
+            ):
+                # If reduction dimension has much better coalescing than non-reduction dimensions,
+                # this is an inner reduction
+                from ..codegen.triton import INNER_REDUCTION_RATIO_THRESHOLD
+
+                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
+                if contiguous_red:
+                    reduction_hint_val = ReductionHint.INNER
         else:
             reduction_hint_val = ReductionHint.DEFAULT
         return reduction_hint_val
@@ -203,7 +220,8 @@ class SIMDKernelFeatures:
 
     @staticmethod
     def reduction_hint(node: Any) -> ReductionHint:
-        assert node.is_reduction()
+        if not node.is_reduction():
+            raise AssertionError("expected node to be a reduction")
         if node.node.data.reduction_hint != ReductionHint.INNER and all(
             dep.is_contiguous()
             for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)
@@ -213,7 +231,7 @@ class SIMDKernelFeatures:
             return node.node.data.reduction_hint
 
     def memory_stats(
-        self, groups_dict: Optional[dict[str, sympy.Expr]] = None
+        self, groups_dict: dict[str, sympy.Expr] | None = None
     ) -> MemoryStats:
         """Analysis to generate features that can be used in heuristics"""
         if groups_dict is None:
@@ -280,7 +298,8 @@ class MemoryEstimator:
                 self.kernel_sizes = kernel_size_inside_loop
                 self.loops.append(MemoryEstimate())
                 continue
-            assert isinstance(node, SchedulerNode)
+            if not isinstance(node, SchedulerNode):
+                raise AssertionError(f"expected SchedulerNode, got {type(node)}")
             rw = extract_loop_body_with_args(
                 node._body,
                 SIMDKernel.map_kernel_groups_to_node_sizes(
@@ -352,7 +371,11 @@ class MemoryEstimator:
         return False
 
     def set_ranges(self, *lengths: list[list[sympy.Expr]]) -> list[list[sympy.Expr]]:
-        assert len(self.kernel_sizes) == len(lengths)
+        if len(self.kernel_sizes) != len(lengths):
+            raise AssertionError(
+                f"expected len(kernel_sizes) == len(lengths), got "
+                f"{len(self.kernel_sizes)} != {len(lengths)}"
+            )
         return [
             self.make_flat_range(sym, numel, length)
             for sym, numel, length in zip(self.symbols, self.kernel_sizes, lengths)
@@ -491,8 +514,16 @@ class StatsForReadsOrWrites:
     bytes_non_contiguous: sympy.Expr = sympy.S.Zero
 
     def __add__(self, other: typing.Self) -> StatsForReadsOrWrites:
-        assert len(self.dim) == len(other.dim)
-        assert len(self.loop) == len(other.loop)
+        if len(self.dim) != len(other.dim):
+            raise AssertionError(
+                f"expected len(self.dim) == len(other.dim), got "
+                f"{len(self.dim)} != {len(other.dim)}"
+            )
+        if len(self.loop) != len(other.loop):
+            raise AssertionError(
+                f"expected len(self.loop) == len(other.loop), got "
+                f"{len(self.loop)} != {len(other.loop)}"
+            )
         return StatsForReadsOrWrites(
             dim=[a + b for a, b in zip(self.dim, other.dim)],
             loop=[a + b for a, b in zip(self.loop, other.loop)],
@@ -524,7 +555,8 @@ class StatsForReadsOrWrites:
         for dep_group in loop_deps:
             result.loop.append(loop_stats := StatsForLoop())
             for name, deps in dep_group.items():
-                assert deps
+                if not deps:
+                    raise AssertionError(f"expected non-empty deps for {name}")
                 contiguous_or_broadcast = [True] * ndim
                 numel = sympy.S.Zero
                 itemsize = V.graph.get_dtype(name).itemsize
@@ -551,7 +583,7 @@ class StatsForReadsOrWrites:
                     numel += dep.get_numel()
                 if len(deps) > 1:
                     # can't read more elements than exist in the buffer
-                    numel = sympy.Min(numel, V.graph.get_numel(name))
+                    numel = Min(numel, V.graph.get_numel(name))
                 nbytes = numel * itemsize
                 for i in range(ndim):
                     if contiguous_or_broadcast[i]:

@@ -16,6 +16,7 @@
 #include <iostream>
 #include <list>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 
@@ -195,14 +196,10 @@ static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
 
 #if defined(__linux__)
 struct DumpPipe {
-  DumpPipe(int rank) {
-    std::string fileStem =
-        getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
-    if (fileStem.empty() ||
-        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
+  DumpPipe(int rank, const std::string& fileStem, int traceBufferSize) {
+    if (fileStem.empty() || traceBufferSize <= 0) {
       return;
     }
-    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_PIPE_FILE is empty");
     std::string filename = c10::str(fileStem, rank, ".pipe");
     TORCH_CHECK(
         unlink(filename.c_str()) != -1 || errno == ENOENT,
@@ -515,6 +512,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
     explicit Options(bool is_high_priority_stream = false);
+    Options(const Options&) = default;
+    Options(Options&&) noexcept = default;
+    Options& operator=(const Options&) = delete;
+    Options& operator=(Options&&) noexcept = delete;
+    ~Options() override = default;
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
@@ -525,10 +527,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
 
-#ifdef NCCL_HAS_CONFIG
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-#endif
 
     // Optional "parent" backend and color to create communicators from
     // via `ncclCommSplit`
@@ -544,14 +544,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // must be within the numerical range of C++ int. Otherwise, Python will
     // raise a RuntimeError saying type is incompatible. See also
     // `_process_group_color` in `distributed_c10d.py`.
-#ifdef NCCL_HAS_COMM_SPLIT
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
-#else
-    // [Note 3]: for older NCCL versions, NCCL_SPLIT_NOCOLOR is not defined. But
-    // `split_color` is pybinded to Python, so we need to define it. So we use
-    // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
-    int split_color{-2};
-#endif
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -1050,6 +1043,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void setEnableNanCheck(bool enableNanCheck);
 
+  // APIs related to memory offload (require NCCL 2.29.7+ at runtime)
+  void suspend() override;
+
+  void resume() override;
+
+  std::unordered_map<std::string, uint64_t> getMemoryStats() override;
+
  protected:
   uint64_t getWatchdogHeartbt() const;
 
@@ -1092,7 +1092,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
 
-  // Ensure thaht if record is True, the work obj will be enqueued via
+  // Ensure that if record is True, the work obj will be enqueued via
   // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
@@ -1350,6 +1350,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Size of ring buffer where we store NCCL Traces for debugging.
   int traceBufferSize_;
 
+  // Stores TORCH_NCCL_DEBUG_INFO_PIPE_FILE
+  std::string debugInfoPipeFile_;
+
   // We gate the cudaEventCache so that we can roll it out gradually.
   std::atomic<bool> cudaEventCacheEnabled_;
 
@@ -1391,7 +1394,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList_;
 
   // Add Work Pointer to workVector
-  void workEnqueue(const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>&);
+  void workEnqueue(
+      const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& /*work*/);
 
   // The CUDA streams used by NCCL kernels
   std::unordered_map<std::string, at::cuda::CUDAStream> ncclStreams_;

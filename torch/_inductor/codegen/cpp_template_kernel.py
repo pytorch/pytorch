@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Callable, Iterable
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import patch
 
 import sympy
@@ -34,7 +34,7 @@ def parse_expr_with_index_symbols(expr):
         return expr.subs(int_symbols)
 
 
-def wrap_with_tensorbox(node) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
+def wrap_with_tensorbox(node) -> ir.TensorBox:
     return (
         ir.TensorBox.create(node) if isinstance(node, ir.Buffer) else ir.TensorBox(node)
     )
@@ -56,9 +56,9 @@ class CppTemplateKernel(CppKernel):
         self,
         inputs: dict[str, ir.Buffer],
         outputs: dict[str, ir.Buffer],
-        aliases: Optional[dict[str, str]] = None,
+        aliases: dict[str, str] | None = None,
         function_name: str = "",
-        extra_sizevars: Optional[list[sympy.Expr]] = None,
+        extra_sizevars: list[sympy.Expr] | None = None,
         placeholder: str = "<DEF_KERNEL>",
     ) -> str:
         if len(function_name) == 0:
@@ -113,7 +113,8 @@ class CppTemplateKernel(CppKernel):
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
             return f"void {function_name}({', '.join(cpp_argdefs)})"
 
-        assert placeholder not in self.render_hooks
+        if placeholder in self.render_hooks:
+            raise AssertionError(f"placeholder already registered: {placeholder}")
         self.render_hooks[placeholder] = hook
         return placeholder
 
@@ -154,16 +155,20 @@ class CppTemplateKernel(CppKernel):
         Slice the given node with a list of ranges (start and end) corresponding to its dims.
         The dim is not sliced if the corresponding range is empty.
         """
-        assert len(ranges) == len(node.get_size()), f"{ranges=}, {node=}"
+        if len(ranges) != len(node.get_size()):
+            raise AssertionError(f"{ranges=}, {node=}")
         sliced = wrap_with_tensorbox(node)
         for dim, _range in enumerate(ranges):
             if len(_range) == 0:
                 continue
-            assert len(_range) == 2
+            if len(_range) != 2:
+                raise AssertionError(f"expected range of length 2, got {len(_range)}")
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
-        assert isinstance(sliced, ir.TensorBox)
-        assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
+        if not isinstance(sliced, ir.TensorBox):
+            raise AssertionError(f"expected ir.TensorBox, got {type(sliced)}")
+        if not isinstance(sliced.data, ir.ReinterpretView):
+            raise AssertionError(sliced.data)
         return sliced.data
 
     def select(self, node, dim: int, idx: int) -> ir.ReinterpretView:
@@ -172,7 +177,8 @@ class CppTemplateKernel(CppKernel):
         node = wrap_with_tensorbox(node)
         idx = ir.View.handle_negative_index(idx, node.get_size()[dim])
         sliced = L.squeeze(L.slice_(node, dim, idx, idx + 1, clamp=False), dim)
-        assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
+        if not isinstance(sliced.data, ir.ReinterpretView):
+            raise AssertionError(sliced.data)
         return sliced.data
 
     def view(self, node, sizes: list[Any]) -> ir.IRNode:
@@ -183,13 +189,16 @@ class CppTemplateKernel(CppKernel):
     def permute(self, node, dims):
         node = wrap_with_tensorbox(node)
         permuted = L.permute(node, dims).data
-        assert isinstance(permuted, ir.ReinterpretView)
+        if not isinstance(permuted, ir.ReinterpretView):
+            raise AssertionError(f"expected ir.ReinterpretView, got {type(permuted)}")
         return permuted
 
-    def maybe_codegen_profile(self) -> str:
+    def maybe_codegen_profile(self, prefix_kernel_name: str | None = None) -> str:
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
             prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
+            if prefix and prefix_kernel_name:
+                prefix += prefix_kernel_name + "_"
             handle_str = (
                 "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
                 f'record_{prefix}{self.kernel_name}_("{prefix}{self.kernel_name}", nullptr);'
@@ -230,7 +239,8 @@ class CppTemplateKernel(CppKernel):
 
     def reinit_buffer_if_null(self, name):
         """Reinit the previously defined local buffer if it is null"""
-        assert name in self.local_buffers
+        if name not in self.local_buffers:
+            raise AssertionError(f"unknown local buffer: {name}")
         buf = self.local_buffers[name]
         ctype = f"{DTYPE_TO_CPP[buf.layout.dtype]}"
         numel = f"{cexpr_index(buf.get_numel())}"
@@ -238,15 +248,16 @@ class CppTemplateKernel(CppKernel):
 
     def release_buffer(self, name):
         """Codegen the code to release the ownership of a local buffer to others"""
-        assert name in self.local_buffers
+        if name not in self.local_buffers:
+            raise AssertionError(f"unknown local buffer: {name}")
         return f"_{name}.release()"
 
     def store_pointwise_nodes(
         self,
         dst: ir.Buffer,
         nodes: list[ir.IRNode],
-        offsets: Optional[list[sympy.Expr]] = None,
-        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
+        offsets: list[sympy.Expr] | None = None,
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
     ) -> str:
         var_sizes = (tuple(dst.get_size()), ())
         var_ranges = {
@@ -257,7 +268,10 @@ class CppTemplateKernel(CppKernel):
             offsets = [sympy.S.Zero] * len(var_sizes[0])
         if not reindexers:
             reindexers = [None] * len(nodes)
-        assert len(offsets) == len(var_sizes[0])
+        if len(offsets) != len(var_sizes[0]):
+            raise AssertionError(
+                f"expected {len(var_sizes[0])} offsets, got {len(offsets)}"
+            )
         output_index = dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
@@ -267,12 +281,20 @@ class CppTemplateKernel(CppKernel):
         for i, node in enumerate(nodes):
             output_name = node.get_name() if i < len(nodes) - 1 else dst.get_name()
             node = node.data if isinstance(node, ir.ComputedBuffer) else node
-            assert isinstance(node, ir.Pointwise), node
+            if not isinstance(node, ir.Pointwise):
+                raise AssertionError(node)
 
             def fn(*args):
-                assert len(args) == 2
-                assert len(args[0]) == len(var_sizes[0])
-                assert len(args[1]) == 0
+                if len(args) != 2:
+                    raise AssertionError(f"expected 2 args, got {len(args)}")
+                if len(args[0]) != len(var_sizes[0]):
+                    raise AssertionError(
+                        f"expected {len(var_sizes[0])} indices, got {len(args[0])}"
+                    )
+                if len(args[1]) != 0:
+                    raise AssertionError(
+                        f"expected no reduction vars, got {len(args[1])}"
+                    )
                 new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
@@ -309,7 +331,7 @@ class CppTemplateKernel(CppKernel):
         dst: tuple[ir.Buffer],
         nodes: list[ir.IRNode],
         offsets: list[sympy.Expr],
-        reindexers: list[Optional[Callable[[list[Any]], list[Any]]]],
+        reindexers: list[Callable[[list[Any]], list[Any]] | None],
         output_names: list[str],
     ) -> str:
         ref_dst = dst[0]
@@ -318,8 +340,10 @@ class CppTemplateKernel(CppKernel):
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
             for i, sz in enumerate(var_sizes[0])
         }
-        assert offsets, "offsets should be set outside"
-        assert all(len(offset) == len(var_sizes[0]) for offset in offsets)
+        if not offsets:
+            raise AssertionError("offsets should be set outside")
+        if not all(len(offset) == len(var_sizes[0]) for offset in offsets):
+            raise AssertionError(f"expected all offsets of length {len(var_sizes[0])}")
         output_index = ref_dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
@@ -329,12 +353,20 @@ class CppTemplateKernel(CppKernel):
         for i, node in enumerate(nodes):
             output_name = output_names[i]
             node = node.data if isinstance(node, ir.ComputedBuffer) else node
-            assert isinstance(node, ir.Pointwise), node
+            if not isinstance(node, ir.Pointwise):
+                raise AssertionError(node)
 
             def fn(*args):
-                assert len(args) == 2
-                assert len(args[0]) == len(var_sizes[0])
-                assert len(args[1]) == 0
+                if len(args) != 2:
+                    raise AssertionError(f"expected 2 args, got {len(args)}")
+                if len(args[0]) != len(var_sizes[0]):
+                    raise AssertionError(
+                        f"expected {len(var_sizes[0])} indices, got {len(args[0])}"
+                    )
+                if len(args[1]) != 0:
+                    raise AssertionError(
+                        f"expected no reduction vars, got {len(args[1])}"
+                    )
                 new_args = [arg + offset for arg, offset in zip(args[0], offsets[i])]  # type: ignore[arg-type]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
@@ -370,10 +402,10 @@ class CppTemplateKernel(CppKernel):
         self,
         dst: ir.Buffer,
         src: ir.Buffer,
-        orig_src: Optional[ir.Buffer] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
-        offsets: Optional[list[Any]] = None,
-        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
+        orig_src: ir.Buffer | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
+        offsets: list[Any] | None = None,
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
     ):
         """
         Store the `src` buffer to the `dst` buffer. The size of `src` and `dst` should match.
@@ -384,7 +416,7 @@ class CppTemplateKernel(CppKernel):
         1. `src` and `dst` buffer could be the same buffer in which case we are doing in-place compute
            and stores. In case `epilogue_nodes` are not provided, we do nothing.
         2. The `epilogue_nodes`, if exist, have computations on `src` before storing to `dst` but since
-           they come form the original Inductor IR, they might need to be adjusted before working with
+           they come from the original Inductor IR, they might need to be adjusted before working with
            `src` and `dst` as outlined below:
            a) `src` or `dst` buffer could be a sub-slice of the ranges the `epilogue_nodes`work on.
               In this case, the `offsets` could be provided to adjust the indices passed to
@@ -395,13 +427,18 @@ class CppTemplateKernel(CppKernel):
            c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
               in `epilogue_nodes` with `src`.
         """
-        assert isinstance(dst, (ir.Buffer, ir.ReinterpretView))
-        assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
+        if not isinstance(dst, (ir.Buffer, ir.ReinterpretView)):
+            raise AssertionError(
+                f"expected ir.Buffer or ir.ReinterpretView, got {type(dst)}"
+            )
+        if dst.get_size() != src.get_size():
+            raise AssertionError(f"{dst=}, {src=}")
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
             with LocalBufferContext(self.args) as scope:
-                assert orig_src is not None
+                if orig_src is None:
+                    raise AssertionError("orig_src must not be None")
                 if orig_src.get_name() != src.get_name():
                     scope.add_local_buffer(
                         src,
@@ -411,7 +448,6 @@ class CppTemplateKernel(CppKernel):
                     )
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
-                    # pyrefly: ignore [bad-argument-type]
                     dst,
                     epilogue_nodes,  # type: ignore[arg-type]
                     offsets,
@@ -423,24 +459,27 @@ class CppTemplateKernel(CppKernel):
                 copy = L.copy(dst, src).data.data
                 with LocalBufferContext(self.args) as scope:
                     scope.add_local_buffer(src)
-                    # pyrefly: ignore [bad-argument-type]
+
                     return self.store_pointwise_nodes(dst, [copy])
             else:
-                assert dst.layout == src.layout, f"{dst=}, {src=}"
+                if dst.layout != src.layout:
+                    raise AssertionError(f"{dst=}, {src=}")
                 return ""
 
     def store_outputs(
         self,
         dst: tuple[ir.Buffer],
         src: tuple[ir.IRNode],
-        orig_src: Optional[tuple[ir.IRNode]] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
-        offsets: Optional[list[Any]] = None,
-        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
-        multi_output_buffers: Optional[tuple[ir.MultiOutput]] = None,
+        orig_src: tuple[ir.IRNode] | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
+        offsets: list[Any] | None = None,
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
+        multi_output_buffers: tuple[ir.MultiOutput, ...] | None = None,
     ):
-        assert isinstance(dst, Iterable)
-        assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
+        if not isinstance(dst, Iterable):
+            raise AssertionError(f"expected Iterable, got {type(dst)}")
+        if not all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst)):
+            raise AssertionError("src and dst sizes must match")
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         gemm_num = len(src)
@@ -450,7 +489,8 @@ class CppTemplateKernel(CppKernel):
             if not reindexers:
                 reindexers = [None] * len(epilogue_nodes)
             with LocalBufferContext(self.args) as scope:
-                assert orig_src is not None
+                if orig_src is None:
+                    raise AssertionError("orig_src must not be None")
                 localize_epilogue_nodes = []
                 all_read_names = []
                 for epilogue in epilogue_nodes:
@@ -532,13 +572,15 @@ class CppTemplateKernel(CppKernel):
                         output_names=output_names,
                     )
             else:
-                assert all(
+                if not all(
                     _src.get_name() == _dst.get_name() for _src, _dst in zip(src, dst)
-                )
-                assert all(
+                ):
+                    raise AssertionError("src and dst names must match")
+                if not all(
                     _src.get_layout() == _dst.get_layout()
                     for _src, _dst in zip(src, dst)
-                )
+                ):
+                    raise AssertionError("src and dst layouts must match")
                 return ""
 
     def check_bounds(self, expr, size, lower, upper):
@@ -568,15 +610,14 @@ class CppTemplateCaller(ir.ChoiceCaller):
             [
                 ir.CppTemplateBuffer,
                 bool,
-                Optional[list[ir.IRNode]],
+                list[ir.IRNode] | None,
             ],
             str,
         ],
         bmreq: CppBenchmarkRequest,
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821
-        info_kwargs: Optional[
-            dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]
-        ] = None,
+        info_kwargs: dict[str, ir.PrimitiveInfoType | list[ir.PrimitiveInfoType]]
+        | None = None,
     ):
         super().__init__(name, input_nodes, layout, description="")
         self.category = category
@@ -586,11 +627,13 @@ class CppTemplateCaller(ir.ChoiceCaller):
         self.info_kwargs = info_kwargs
 
     def precompile(self) -> None:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("bmreq must not be None")
         self.bmreq.precompile()
 
     def benchmark(self, *args, out) -> float:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("bmreq must not be None")
         if config.profile_bandwidth_with_do_bench_using_profiling:
             algo = self.bmreq.make_run_fn(*args, out=out)
             return do_bench_using_profiling(algo)
@@ -606,16 +649,18 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def info_dict(
         self,
-    ) -> dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]:
+    ) -> dict[str, ir.PrimitiveInfoType | list[ir.PrimitiveInfoType]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
-    def output_node(self) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
-        return ir.TensorBox.create(
-            ir.CppTemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                template=self.template,
-                choice=self,
-            )
+    def output_node(self) -> ir.TensorBox:
+        buffer = ir.CppTemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            template=self.template,
+            choice=self,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return ir.TensorBox.create(buffer)

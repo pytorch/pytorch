@@ -8,6 +8,7 @@ in `./_utils/worker.py`.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import itertools
 import logging
@@ -16,6 +17,7 @@ import os
 import queue
 import threading
 import warnings
+import weakref
 from collections.abc import Callable
 from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import Self
@@ -72,6 +74,12 @@ default_convert = _utils.collate.default_convert
 get_worker_info = _utils.worker.get_worker_info
 
 logger = logging.getLogger(__name__)
+
+_persistent_workers_atexit_lock = threading.Lock()
+_persistent_workers_atexit_registered = False
+_persistent_workers_atexit: weakref.WeakSet[_MultiProcessingDataLoaderIter] = (
+    weakref.WeakSet()
+)
 
 
 class _DatasetKind:
@@ -323,9 +331,9 @@ class DataLoader(Generic[_T_co]):
             # finite `__len__` because in multi-process data loading, naive
             # settings will return duplicated data (which may be desired), and
             # thus using a sampler with length matching that of dataset will
-            # cause data lost (you may have duplicates of the first couple
+            # cause data loss (you may have duplicates of the first couple
             # batches, but never see anything afterwards). Therefore,
-            # `Iterabledataset` always uses an infinite sampler, an instance of
+            # `IterableDataset` always uses an infinite sampler, an instance of
             # `_InfiniteConstantSampler` defined above.
             #
             # A custom `batch_sampler` essentially only controls the batch size.
@@ -421,8 +429,6 @@ class DataLoader(Generic[_T_co]):
         self._iterator = None
 
         self.check_worker_number_rationality()
-
-        torch.set_vital("Dataloader", "enabled", "True")  # type: ignore[attr-defined]
 
     def _get_iterator(self) -> _BaseDataLoaderIter:
         if self.num_workers == 0:
@@ -605,31 +611,10 @@ class DataLoader(Generic[_T_co]):
             return
 
         # try to compute a suggested max number of worker based on system's resource
-        max_num_worker_suggest = None
-        cpuset_checked = False
-        if hasattr(os, "sched_getaffinity"):
-            try:
-                max_num_worker_suggest = len(os.sched_getaffinity(0))
-                cpuset_checked = True
-            except Exception:
-                pass
-        if max_num_worker_suggest is None:
-            # os.cpu_count() could return Optional[int]
-            # get cpu count first and check None in order to satisfy mypy check
-            cpu_count = os.cpu_count()
-            if cpu_count is not None:
-                max_num_worker_suggest = cpu_count
+        max_num_worker_suggest = torch._utils.cpu_count()
+        cpuset_checked = hasattr(os, "sched_getaffinity")
 
-        if max_num_worker_suggest is None:
-            warnings.warn(
-                _create_warning_msg(
-                    max_num_worker_suggest, self.num_workers, cpuset_checked
-                ),
-                stacklevel=2,
-            )
-            return
-
-        if self.num_workers > max_num_worker_suggest:
+        if max_num_worker_suggest is None or self.num_workers > max_num_worker_suggest:
             warnings.warn(
                 _create_warning_msg(
                     max_num_worker_suggest, self.num_workers, cpuset_checked
@@ -1234,10 +1219,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # atexit is used to shutdown thread and child processes in the
         # right sequence before main process exits
         if self._persistent_workers and self._pin_memory:
-            import atexit
-
-            for w in self._workers:
-                atexit.register(_MultiProcessingDataLoaderIter._clean_up_worker, w)
+            self._register_persistent_workers_atexit()
 
         # .pid can be None only before process is spawned (not the case, so ignore)
         _utils.signal_handling._set_worker_pids(
@@ -1334,7 +1316,11 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 # test.
                 # See NOTE [ DataLoader on Linux and open files limit ]
                 fds_limit_margin = 10
-                [tempfile.NamedTemporaryFile() for _ in range(fds_limit_margin)]  # noqa: SIM115
+                with contextlib.ExitStack() as stack:
+                    for _ in range(fds_limit_margin):
+                        stack.enter_context(
+                            tempfile.NamedTemporaryFile()  # pyrefly: ignore [bad-argument-type]
+                        )
             except OSError as e:
                 if e.errno == errno.EMFILE:
                     raise RuntimeError(
@@ -1623,7 +1609,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # the logic of this function.
         if (
             _utils is None
+            # pyrefly: ignore [unnecessary-comparison]
             or _utils.python_exit_status is True
+            # pyrefly: ignore [unnecessary-comparison]
             or _utils.python_exit_status is None
         ):
             # See (2) of the note. If Python is shutting down, do no-op.
@@ -1688,15 +1676,29 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
                         # we kill the worker.
                         w.terminate()
+                        w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
 
-    # staticmethod is used to remove reference to `_MultiProcessingDataLoaderIter`
     @staticmethod
-    def _clean_up_worker(w) -> None:
-        try:
-            w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-        finally:
-            if w.is_alive():
-                w.terminate()
+    def _clean_up_persistent_workers_atexit() -> None:
+        # This callback is registered after `_utils._set_python_exit_flag`,
+        # so it runs while `_shutdown_workers()` can still use multiprocessing.
+        with _persistent_workers_atexit_lock:
+            iterators = tuple(_persistent_workers_atexit)
+        for iterator in iterators:
+            iterator._shutdown_workers()
+
+    def _register_persistent_workers_atexit(self) -> None:
+        import atexit
+
+        global _persistent_workers_atexit_registered
+        with _persistent_workers_atexit_lock:
+            _persistent_workers_atexit.add(self)
+            if _persistent_workers_atexit_registered:
+                return
+            atexit.register(
+                _MultiProcessingDataLoaderIter._clean_up_persistent_workers_atexit
+            )
+            _persistent_workers_atexit_registered = True
 
     def __del__(self) -> None:
         self._shutdown_workers()

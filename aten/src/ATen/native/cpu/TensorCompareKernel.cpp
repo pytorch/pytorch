@@ -24,6 +24,7 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
 #endif
 
 namespace at::native { namespace {
@@ -214,14 +215,13 @@ void aminmax_kernel(
 
 void where_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_V2(
-    iter.dtype(), "where_cpu", [&] {
-      cpu_kernel(
+    opaqueScalarType(iter.dtype()), "where_cpu", [&] {
+      cpu_kernel_opaque(
         iter,
         [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
-  },
-  kComplexHalf, kHalf, kBFloat16, kBool, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES));
+  }, AT_EXPAND(AT_OPAQUE_TYPES));
 }
 
 void isposinf_kernel_impl(TensorIteratorBase& iter) {
@@ -315,7 +315,7 @@ void isin_default_kernel_cpu(
     const Tensor& out) {
   // Since test elements is not an input of the TensorIterator, type promotion
   // must be done manually.
-  ScalarType common_type = at::result_type(elements, test_elements);
+  ScalarType common_type = at::native::result_type(elements, test_elements);
   Tensor promoted_elements = elements.to(common_type);
   Tensor test_elements_flat = test_elements.to(common_type).view(-1);
   auto test_elements_stride = test_elements_flat.stride(0);

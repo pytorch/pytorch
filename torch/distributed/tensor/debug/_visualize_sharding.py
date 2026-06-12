@@ -189,7 +189,7 @@ def visualize_sharding(dtensor, header="", use_rich: bool = False):
         device_index: _compute_local_shape_and_global_offset(
             dtensor.shape,
             dtensor.device_mesh.shape,
-            device_coords[device_index],
+            lambda i: device_coords[device_index][i],
             dtensor.placements,
         )
         for device_index in device_coords

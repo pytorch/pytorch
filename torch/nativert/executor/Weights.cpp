@@ -3,7 +3,6 @@
 #include <utility>
 
 #include <torch/csrc/export/pt2_archive_constants.h>
-#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/nativert/executor/Weights.h>
@@ -59,10 +58,12 @@ Weights::Weights(
     std::function<bool(const std::string&)> skipDtypeCheck,
     std::shared_ptr<std::unordered_map<
         std::string,
-        std::shared_ptr<torch::nativert::TensorMeta>>> maybeNewWeightsMeta)
+        std::shared_ptr<torch::nativert::TensorMeta>>> maybeNewWeightsMeta,
+    const std::unordered_map<std::string, at::Tensor>* cachedWeights)
     : graph_(graph),
       weightsMeta_(graph->weightsMeta()),
       version_(globalVersion_++),
+      hasCachedWeights_(cachedWeights != nullptr),
       skipSizeCheck_(std::move(skipSizeCheck)),
       skipDtypeCheck_(std::move(skipDtypeCheck)) {
   auto loadAndInsert = [&](const std::string& tensorName,
@@ -74,6 +75,15 @@ Weights::Weights(
                                std::string,
                                std::shared_ptr<torch::nativert::TensorMeta>>>
                                maybeNewWeightsMeta) {
+    if (cachedWeights) {
+      auto cacheIt = cachedWeights->find(tensorName);
+      if (cacheIt != cachedWeights->end()) {
+        VLOG(1) << "Using cached weight for: " << tensorName;
+        allValues_[tensorName] = cacheIt->second;
+        return;
+      }
+    }
+
     auto pathIt = tensorPaths.find(tensorName);
     TORCH_CHECK(
         pathIt != tensorPaths.end(),
@@ -466,7 +476,7 @@ std::string Weights::toString() const {
     ss << name << ", ";
   }
   ss << ']';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void Weights::validateAllWeightsLoaded() {

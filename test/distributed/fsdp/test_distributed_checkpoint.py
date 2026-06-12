@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 
 import torch
 from torch import distributed as dist
@@ -10,11 +11,13 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataP
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, SkipModel
+from torch.testing._internal.common_fsdp import FSDPTestContinuous, SkipModel
 from torch.testing._internal.common_utils import (
+    IS_LINUX,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
@@ -39,7 +42,7 @@ _DISTRIBUTED_STATE_DICT_IMPLS = (
 )
 
 
-class TestDistributedCheckpoint(FSDPTest):
+class TestDistributedCheckpoint(FSDPTestContinuous):
     @property
     def world_size(self):
         if torch.accelerator.is_available():
@@ -48,6 +51,18 @@ class TestDistributedCheckpoint(FSDPTest):
                 return gpu_cnt
         return 2
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/144918"
+    )
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/113936"
+    )
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/145807"
+    )
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/113937"
+    )
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
     @parametrize("state_dict_type", _DISTRIBUTED_STATE_DICT_IMPLS)

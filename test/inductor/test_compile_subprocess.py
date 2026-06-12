@@ -18,7 +18,15 @@ import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
+    isRocmArchAnyOf,
+    MI350_ARCH,
+    skipIfRocm,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     IS_BIG_GPU,
@@ -57,14 +65,28 @@ importlib.import_module("filelock")
 test_failures = {
     # TypeError: cannot pickle 'generator' object
     "test_layer_norm": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_remove_noop_slice": TestFailure(("xpu"), is_skip=True),
+    "test_remove_noop_slice": TestFailure(
+        ("xpu", "cuda"),
+        is_skip=(TEST_WITH_ROCM and isRocmArchAnyOf(MI350_ARCH)) or not TEST_WITH_ROCM,
+    ),
     "test_remove_noop_slice1": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_slice_scatter": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_default": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
     # can not pickle ParametrizedConv2d
     "test_weight_norm_conv2d": TestFailure(("cpu", "cuda"), is_skip=True),
+    # This manually constructs an FX graph with an OpOverloadPacket target to
+    # cover a legacy lowering table entry, which is outside the subprocess
+    # compile serialization path this file exercises.
+    "test_split_overload_packet_lowering": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
 }
+
+if TEST_WITH_ROCM and not torch.cuda.has_magma:
+    test_failures["test_linalg_eig_stride_consistency"] = TestFailure(
+        ("cuda",), is_skip=True
+    )
 
 
 class TestSubprocess(TestCase):
@@ -94,6 +116,8 @@ class TestSubprocess(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157788")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157724")
     @requires_gpu()
     @requires_triton()
     @unittest.skipIf(
@@ -106,8 +130,8 @@ class TestSubprocess(TestCase):
 
         torch._inductor.compile_fx.fx_compile_progressive = True
 
-        x = torch.randn(1152, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
-        y = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        x = torch.randn(1152, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn(4096, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
 
         @torch.compile(fullgraph=True, backend="inductor")
         def optimized(x, y):
@@ -122,7 +146,8 @@ class TestSubprocess(TestCase):
 
         with contextlib.ExitStack() as stack:
             # When this bug is fixed, remove the cache disabling below
-            assert torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC
+            if not torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC:
+                raise AssertionError
             stack.enter_context(
                 torch._inductor.config.patch(
                     autotune_local_cache=False, fx_graph_cache=False
@@ -191,7 +216,8 @@ class TestSubprocess(TestCase):
         _AsyncFxCompile._reset_stats()
 
         with contextlib.ExitStack() as stack:
-            assert torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC
+            if not torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC:
+                raise AssertionError
             stack.enter_context(
                 torch._inductor.config.patch(
                     autotune_local_cache=False, fx_graph_cache=False

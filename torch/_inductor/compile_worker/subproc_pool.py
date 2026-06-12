@@ -15,7 +15,7 @@ from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum, IntEnum
-from typing import Any, IO, Optional, TypeVar
+from typing import Any, IO, TypeVar
 from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
@@ -131,7 +131,7 @@ class SubprocPool:
     def __init__(
         self,
         nprocs: int,
-        pickler: Optional[SubprocPickler] = None,
+        pickler: SubprocPickler | None = None,
         kind: SubprocKind = SubprocKind.FORK,
         quiesce: bool = False,
     ) -> None:
@@ -209,17 +209,17 @@ class SubprocPool:
         self.running_waitcounter.__enter__()
 
         # The quiesce waitcounter indicates when the job is in a quiesced state.
-        self.quiesce_waitcounter: Optional[_WaitCounterTracker] = None
+        self.quiesce_waitcounter: _WaitCounterTracker | None = None
 
         # Firstjob is used to capture the time from when the firstjob is queued, to when the first job is done.
         self.firstjob = True
-        self.firstjob_id: Optional[int] = None
+        self.firstjob_id: int | None = None
         self.firstjob_waitcounter = _WaitCounter(
             "pytorch.wait_counter.subproc_pool.first_job"
         ).guard()
 
         if quiesce:
-            self.timer: Optional[Timer] = Timer(
+            self.timer: Timer | None = Timer(
                 config.quiesce_async_compile_time, self.quiesce
             )
         else:
@@ -369,7 +369,8 @@ class SubprocMain:
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
         self.nprocs = nprocs
-        self.pool: Optional[ProcessPoolExecutor] = None
+        self.pool: ProcessPoolExecutor | None = None
+        self.pool_finalizer: Any | None = None
         self.running = True
 
     def main(self) -> None:
@@ -385,9 +386,7 @@ class SubprocMain:
                 return self._shutdown()
 
     def _quiesce(self) -> None:
-        if self.pool is not None:
-            self.pool.shutdown(wait=False)
-            self.pool = None
+        self._shutdown_pool(terminate_workers=False)
 
     def _shutdown(self) -> None:
         with self.write_lock:
@@ -398,7 +397,26 @@ class SubprocMain:
             except BrokenPipeError:
                 pass  # parent process already shutdown
             self.read_pipe.close()
-        self._quiesce()
+        self._shutdown_pool(terminate_workers=True)
+
+    def _shutdown_pool(self, *, terminate_workers: bool) -> None:
+        if self.pool is None:
+            return
+
+        pool = self.pool
+        self.pool = None
+
+        if self.pool_finalizer is not None:
+            if terminate_workers:
+                self.pool_finalizer.cancel()
+            self.pool_finalizer = None
+
+        if terminate_workers:
+            # The sidecar is exiting, so do not let ProcessPoolExecutor's
+            # interpreter finalization wait for running compiler workers.
+            _terminate_process_pool(pool)
+        else:
+            pool.shutdown(wait=False)
 
     def submit(self, job_id: int, data: bytes) -> None:
         while self.running:
@@ -420,14 +438,16 @@ class SubprocMain:
             except Exception as e:
                 log.exception("Error in subprocess")
                 result = self.pickler.dumps(e)
-            assert isinstance(result, bytes)
+            if not isinstance(result, bytes):
+                raise AssertionError(f"Expected bytes result, got {type(result)}")
             with self.write_lock:
                 if self.running:
                     _send_msg(self.write_pipe, MsgHeader.JOB, job_id, result)
             return
 
         self._start_pool()
-        assert self.pool is not None
+        if self.pool is None:
+            raise AssertionError("pool must be initialized before submitting jobs")
 
         future = self.pool.submit(
             functools.partial(SubprocMain.do_job, self.pickler, data)
@@ -443,7 +463,7 @@ class SubprocMain:
             mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
-        multiprocessing.util.Finalize(
+        self.pool_finalizer = multiprocessing.util.Finalize(
             None, self.pool.shutdown, exitpriority=sys.maxsize
         )
         _warm_process_pool(self.pool, self.nprocs)
@@ -460,7 +480,35 @@ class SubprocMain:
         return pickler.dumps(result)
 
 
-AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
+AnyPool = ProcessPoolExecutor | SubprocPool
+
+
+def _get_process_pool_processes(pool: ProcessPoolExecutor) -> list[Any]:
+    processes = getattr(pool, "_processes", None)
+    if processes is not None:
+        return list(processes.values())
+
+    manager_thread = getattr(pool, "_executor_manager_thread", None)
+    manager_processes = getattr(manager_thread, "processes", None)
+    if manager_processes is not None:
+        return list(manager_processes.values())
+
+    return []
+
+
+def _terminate_process_pool(pool: ProcessPoolExecutor) -> None:
+    processes = _get_process_pool_processes(pool)
+    for process in processes:
+        try:
+            if process.is_alive():
+                process.terminate()
+        except (OSError, ValueError):
+            log.warning("Ignored error terminating compile worker", exc_info=True)
+
+    try:
+        pool.shutdown(wait=True, cancel_futures=True)
+    except Exception:
+        log.warning("Ignored error shutting down compile worker pool", exc_info=True)
 
 
 def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:

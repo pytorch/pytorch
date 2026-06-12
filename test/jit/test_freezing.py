@@ -11,15 +11,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.jit._recursive import wrap_cpp_module
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, tf32_on_and_off
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_LINUX,
     raise_on_run_directly,
     set_default_dtype,
     skipCUDAMemoryLeakCheckIf,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
+    xfailIf,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils import mkldnn as mkldnn_utils
@@ -32,8 +35,6 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
-
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
 
 
 def removeExceptions(graph):
@@ -1052,8 +1053,8 @@ class TestFreezing(JitTestCase):
             m_f = torch._C._freeze_module(m_s._c)
 
     def test_freeze_module_inlining(self):
-        @torch.jit.script  # noqa: B903
-        class Obj:  # noqa: B903
+        @torch.jit.script
+        class Obj:
             def __init__(self, x: int, y: int):
                 self.x = x
                 self.y = y
@@ -1435,6 +1436,8 @@ class TestFreezing(JitTestCase):
         self.assertTrue(fm.sub._has_method("method_a"))
         self.assertFalse(fm.sub._has_method("method_b"))
 
+    @xfailIf(IS_ARM64)
+    # see https://github.com/pytorch/pytorch/issues/177258
     @skipIfNoFBGEMM
     def test_module_with_shared_type_instances(self):
         class Child(nn.Module):
@@ -2966,6 +2969,7 @@ class TestFrozenOptimizations(JitTestCase):
             inp = torch.rand([4, 3, 4, 4])
             self.assertEqual(frozen(inp), mod(inp))
 
+    @tf32_on_and_off(0.005)
     @unittest.skipIf(not (TEST_CUDNN or TEST_WITH_ROCM), "requires CUDNN")
     def test_freeze_conv_relu_fusion(self):
         with set_default_dtype(torch.float):
@@ -3377,6 +3381,7 @@ class TestMKLDNNReinplacing(JitTestCase):
         inp = self.getInput()
         self.assertEqual(mod1(inp), mod2(inp))
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91489")
     def test_successful(self):
         # simple conv-relu
 
@@ -3387,6 +3392,7 @@ class TestMKLDNNReinplacing(JitTestCase):
         ).check_next("aten::relu_").run(mod.graph)
         self.checkResults(mod_eager, mod)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91481")
     def test_merge_liveness(self):
         class Mod(nn.Module):
             def __init__(self, tensor):
@@ -3405,6 +3411,7 @@ class TestMKLDNNReinplacing(JitTestCase):
         FileCheck().check("aten::mul_").check_not("aten::add_").run(mod.graph)
         self.checkResults(mod_eager, mod)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91486")
     def test_always_alive_values(self):
         class Mod(nn.Module):
             def __init__(self, tensor):
@@ -3440,6 +3447,7 @@ class TestMKLDNNReinplacing(JitTestCase):
         # in the torch.add(x, x) call
         FileCheck().check_not("aten::add_").run(mod.graph)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91488")
     def test_switch_inputs_to_inplace(self):
         class Mod(nn.Module):
             def __init__(self, tensor):

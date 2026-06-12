@@ -11,7 +11,7 @@ from torch.onnx._internal.exporter import _analysis, _registration, _verificatio
 if TYPE_CHECKING:
     import os
 
-    from onnxscript import ir
+    import onnx_ir as ir  # type: ignore[import-untyped]
 
     import torch
 
@@ -113,8 +113,8 @@ def format_decomp_comparison(
     """Format the decomposition comparison result.
 
     Args:
-        unique_ops_in_a: The unique ops in the first program.
-        unique_ops_in_b: The unique ops in the second program.
+        pre_decomp_unique_ops: The unique ops in the first program.
+        post_decomp_unique_ops: The unique ops in the second program.
 
     Returns:
         The formatted comparison result.

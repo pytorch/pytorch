@@ -36,7 +36,7 @@ static void cudaCheck(cudaError_t result, const char* file, int line) {
     } else {
       ss << cudaGetErrorString(result);
     }
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
 }
 #define TORCH_CUDA_CHECK(result) cudaCheck(result, __FILE__, __LINE__);
@@ -64,8 +64,8 @@ struct CUDAMethods : public ProfilerStubs {
   float elapsed(
       const ProfilerVoidEventStub* event_,
       const ProfilerVoidEventStub* event2_) const override {
-    auto event = (const ProfilerEventStub*)(event_);
-    auto event2 = (const ProfilerEventStub*)(event2_);
+    auto event = (const ProfilerEventStub*)event_;
+    auto event2 = (const ProfilerEventStub*)event2_;
     TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
     float ms = 0;

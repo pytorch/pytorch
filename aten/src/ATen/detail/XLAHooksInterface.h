@@ -44,7 +44,7 @@ struct TORCH_API XLAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot get XLA generator without torch_xla library. ", XLA_HELP);
   }
 
-  virtual DeviceIndex getCurrentDevice() const override {
+  DeviceIndex getCurrentDevice() const override {
     TORCH_CHECK(false, "Cannot get current XLA device without torch_xla library. ", XLA_HELP);
   }
 
@@ -66,9 +66,10 @@ struct TORCH_API XLAHooksInterface : AcceleratorHooksInterface {
 
 };
 
+// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API XLAHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(XLAHooksRegistry, XLAHooksInterface, XLAHooksArgs);
+TORCH_DECLARE_REGISTRY(XLAHooksRegistry, XLAHooksInterface);
 #define REGISTER_XLA_HOOKS(clsname) \
   C10_REGISTER_CLASS(XLAHooksRegistry, clsname, clsname)
 

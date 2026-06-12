@@ -10,7 +10,8 @@ import unittest
 from subprocess import CalledProcessError
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
+import torch._inductor.config as config
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.codegen.common import (
     get_custom_backend_config_for_device,
@@ -22,7 +23,7 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.compile_fx import shape_env_from_inputs
-from torch._inductor.custom_graph_pass import CustomGraphModulePass
+from torch._inductor.custom_graph_pass import CustomGraphModulePass, CustomGraphPass
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import (
     get_gpu_shared_memory,
@@ -34,7 +35,7 @@ from torch._inductor.utils import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._helion import has_helion
-from torch.utils._pallas import has_pallas, has_tpu_pallas
+from torch.utils._pallas import has_pallas_package, has_tpu_pallas
 from torch.utils._triton import has_triton
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
@@ -42,11 +43,12 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     IS_CI,
-    IS_FBCODE,
     IS_WINDOWS,
     LazyVal,
     TestCase,
 )
+
+from collections.abc import Callable
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -54,7 +56,7 @@ log: logging.Logger = logging.getLogger(__name__)
 def test_cpu():
     try:
         CppCodeCache.load("")
-        return not IS_FBCODE
+        return True
     except (
         CalledProcessError,
         OSError,
@@ -68,7 +70,7 @@ HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
 
-HAS_PALLAS = has_pallas()
+HAS_PALLAS = has_pallas_package()
 
 HAS_HELION = has_helion()
 
@@ -106,6 +108,12 @@ RUN_CPU = HAS_CPU and any(
 )
 
 HAS_TPU = has_tpu_pallas()
+# TPU is a privateuse1 backend that isn't in _desired_test_bases (it requires
+# runtime initialization before the test base is registered). Check the env var
+# directly, matching the same semantics as RUN_CPU/RUN_GPU: when the env var is
+# unset, run if the hardware is available; when set, only run if "tpu" is listed.
+_only_for = os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "")
+RUN_TPU = HAS_TPU and ("tpu" in _only_for.split(",") if _only_for else True)
 
 
 def _check_has_dynamic_shape(
@@ -173,14 +181,19 @@ requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires t
 requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
 
 
-def requires_cuda_with_enough_memory(min_mem_required):
+def requires_gpu_with_enough_memory(min_mem_required):
     def inner(fn):
+        total_memory = sys.maxsize
+        if torch.xpu.is_available():
+            total_memory = torch.xpu.get_device_properties().total_memory
+        elif torch.cuda.is_available():
+            total_memory = torch.cuda.get_device_properties().total_memory
         if (
-            not torch.cuda.is_available()
-            or torch.cuda.get_device_properties().total_memory < min_mem_required
+            not (torch.cuda.is_available() or torch.xpu.is_available())
+            or total_memory < min_mem_required
         ):
             return unittest.skip(
-                f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
+                f"Only if the GPU device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
             )(fn)
         else:
             return fn
@@ -380,9 +393,20 @@ class MockGraphHandler(GraphLowering):
         self.constants = {}
         self.scheduler = None
 
-    def get_dtype(self, buffer_name: str) -> torch.dtype:  # noqa: ARG002
+    def try_get_buffer(self, buffer_name: str):
+        return self.name_to_buffer.get(buffer_name)
+
+    def get_buffer(self, buffer_name: str):
+        return self.name_to_buffer[buffer_name]
+
+    def get_dtype(self, buffer_name: str) -> torch.dtype:
         """Return default dtype for any buffer (for testing)."""
         return torch.float32
+
+
+def has_cpp_wrapper_for_device(device: str) -> bool:
+    init_backend_registration()
+    return get_wrapper_codegen_for_device(device, cpp_wrapper=True) is not None
 
 
 @contextlib.contextmanager
@@ -437,3 +461,21 @@ def patch_inductor_backend(
             original_custom_pass,
             original_custom_backend_config,
         )
+
+def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
+    """
+    Create a custom pass which falls back based on the provided predicate. For example,
+    we could provide a predicate which returns True for all aten.add.default nodes.
+    Returns a context activating the pass.
+    """
+    class Pass(CustomGraphPass):
+        def __call__(self, graph: torch.fx.Graph):
+            for node in graph.nodes:
+                if predicate(node):
+                    node.meta["should_fallback"] = True
+
+        def uuid(self):
+            return None
+
+
+    return config.patch(post_grad_custom_pre_pass=Pass())

@@ -16,21 +16,20 @@ The underlying handler would just see:
     ops.load("buf0", x * 2)
 
 This is limited by the set of operators handled in the sympy expression
-printers. So simple operations like minimum and maximum cannot be translated to
-SymPy expressions yet, despite sympy.Min and sympy.Max existing.
+printers.
 
 """
 
 import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, overload, TypeAlias, Union
+from typing import Any, Literal, overload, TypeAlias
 
 import sympy
 
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
+from torch.utils._sympy.functions import FloorDiv, Max, Min, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .ops_handler import DefaultHandler
@@ -39,7 +38,7 @@ from .utils import generate_assert
 from .virtualized import V
 
 
-_ExprType = Union[sympy.Expr, float, int, bool]
+_ExprType = sympy.Expr | float | int | bool
 
 
 def _is_constant(val: _ExprType):
@@ -91,18 +90,22 @@ class SymPyOps:
         return value
 
     @staticmethod
-    def constant(value: Union[int, float, bool], dtype: torch.dtype) -> TypedExpr:
+    def constant(value: int | float | bool, dtype: torch.dtype) -> TypedExpr:
         return TypedExpr(value, dtype)
 
     @staticmethod
-    def index_expr(value: Union[sympy.Expr, int], dtype: torch.dtype) -> TypedExpr:
+    def index_expr(value: sympy.Expr | int, dtype: torch.dtype) -> TypedExpr:
+        return TypedExpr(value, dtype)
+
+    @staticmethod
+    def value_expr(value: sympy.Expr | int, dtype: torch.dtype) -> TypedExpr:
         return TypedExpr(value, dtype)
 
     @staticmethod
     def to_dtype(
         value: TypedExpr,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types: bool = False,
     ) -> TypedExpr:
         return TypedExpr(value.expr, dtype)
@@ -143,7 +146,7 @@ class SymPyOps:
         return TypedExpr(FloorDiv(x.expr, y.expr), result_type)
 
     @staticmethod
-    def mod(x: TypedExpr, y: TypedExpr) -> Optional[TypedExpr]:
+    def mod(x: TypedExpr, y: TypedExpr) -> TypedExpr | None:
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
             return NotImplemented
@@ -152,7 +155,7 @@ class SymPyOps:
         return TypedExpr(result_expr, result_type)
 
     @staticmethod
-    def remainder(x: TypedExpr, y: TypedExpr) -> Optional[TypedExpr]:
+    def remainder(x: TypedExpr, y: TypedExpr) -> TypedExpr | None:
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
             return NotImplemented
@@ -172,12 +175,12 @@ class SymPyOps:
     @staticmethod
     def minimum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
-        return TypedExpr(sympy.Min(x.expr, y.expr), result_type)
+        return TypedExpr(Min(x.expr, y.expr), result_type)
 
     @staticmethod
     def maximum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
-        return TypedExpr(sympy.Max(x.expr, y.expr), result_type)
+        return TypedExpr(Max(x.expr, y.expr), result_type)
 
 
 @dataclass
@@ -190,12 +193,11 @@ class IndexPropVar:
         return IndexPropVar(expr, is_symbolic=True)
 
     def __post_init__(self):
-        assert not self.is_symbolic or isinstance(self.value, TypedExpr), (
-            "Symbolic IndexPropVar must contain a TypedExpr"
-        )
+        if not (not self.is_symbolic or isinstance(self.value, TypedExpr)):
+            raise AssertionError("Symbolic IndexPropVar must contain a TypedExpr")
 
 
-IndexPropResult: TypeAlias = Union[IndexPropVar, tuple["IndexPropResult", ...]]
+IndexPropResult: TypeAlias = IndexPropVar | tuple["IndexPropResult", ...]
 
 
 class IndexPropagation(DefaultHandler):
@@ -238,7 +240,10 @@ class IndexPropagation(DefaultHandler):
             return self._inner.constant(val, dtype)
         return self._inner.index_expr(expr, dtype)
 
-    def unwrap(self, a: Union[Any, IndexPropVar]) -> Any:
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> IndexPropResult:
+        return self.wrap(self._inner.value_expr(expr, dtype))
+
+    def unwrap(self, a: Any | IndexPropVar) -> Any:
         if isinstance(a, (list, tuple)):
             return tuple(self.unwrap(v) for v in a)
 
@@ -281,7 +286,7 @@ class IndexPropagation(DefaultHandler):
         self, name: str, args: Sequence[Any], kwargs: dict[str, Any]
     ) -> IndexPropResult:
         # Build a new SymPy expression from this ops call
-        def unwrap(a: Union[Any, IndexPropVar]) -> Any:
+        def unwrap(a: Any | IndexPropVar) -> Any:
             if not isinstance(a, IndexPropVar):
                 return a
             return a.value
@@ -337,7 +342,7 @@ class IndexPropagation(DefaultHandler):
 
     def indirect_indexing(
         self,
-        index: Union[Any, IndexPropVar],
+        index: Any | IndexPropVar,
         size: Any,
         check: bool = True,
         wrap_neg=True,
@@ -360,9 +365,9 @@ class IndexPropagation(DefaultHandler):
                 else:
                     return Where(expr < 0, expr + size, expr)
 
-            # Sometimes it's easier to prove 0 <= expr than the weaker -size <= expr
-            can_prove_lower = self.statically_true(0 <= expr) or self.statically_true(
-                -size <= expr
+            # -size <= expr only proves the lower bound after negative wrapping.
+            can_prove_lower = self.statically_true(0 <= expr) or (
+                wrap_neg and self.statically_true(-size <= expr)
             )
             can_prove_upper = self.statically_true(expr < size)
             if wrap_neg:

@@ -1,12 +1,13 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import contextlib
 import inspect
 import os
 import warnings
 from concurrent.futures import Future
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, Optional, TYPE_CHECKING, Union
+from typing import cast, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -63,10 +64,10 @@ class AsyncCheckpointerType(Enum):
 def save_state_dict(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
-    process_group: Optional[dist.ProcessGroup] = None,
+    process_group: dist.ProcessGroup | None = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[SavePlanner] = None,
+    planner: SavePlanner | None = None,
 ) -> Metadata:
     """This method is deprecated. Please switch to 'save'."""
     storage_writer.reset()
@@ -88,10 +89,10 @@ def save_state_dict(
 def save(
     state_dict: STATE_DICT_TYPE,
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
-    storage_writer: Optional[StorageWriter] = None,
-    planner: Optional[SavePlanner] = None,
-    process_group: Optional[dist.ProcessGroup] = None,
+    checkpoint_id: str | os.PathLike | None = None,
+    storage_writer: StorageWriter | None = None,
+    planner: SavePlanner | None = None,
+    process_group: dist.ProcessGroup | None = None,
     no_dist: bool = False,
     use_collectives: bool = True,
 ) -> Metadata:
@@ -105,7 +106,7 @@ def save(
     save will call ``state_dict`` before serialization.
 
     .. warning::
-        There is no guarantees of Backwards Compatibility across PyTorch versions
+        There are no guarantees of Backwards Compatibility across PyTorch versions
         for saved state_dicts.
 
     .. warning::
@@ -220,21 +221,23 @@ class AsyncSaveResponse:
 def async_save(
     state_dict: STATE_DICT_TYPE,
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
-    storage_writer: Optional[StorageWriter] = None,
-    planner: Optional[SavePlanner] = None,
-    process_group: Optional[dist.ProcessGroup] = None,
+    checkpoint_id: str | os.PathLike | None = None,
+    storage_writer: StorageWriter | None = None,
+    planner: SavePlanner | None = None,
+    process_group: dist.ProcessGroup | None = None,
     async_checkpointer_type: AsyncCheckpointerType = AsyncCheckpointerType.THREAD,
-    async_stager: Optional[AsyncStager] = None,
+    async_stager: AsyncStager | None = None,
     no_dist: bool = False,
     use_collectives: bool = True,
-) -> Union[Future, AsyncSaveResponse]:
+) -> Future | AsyncSaveResponse:
     """Asynchronous version of ``save``. This code first de-stages the state_dict on to the
     staging storage (defaults to CPU memory), and then calls the `save` in a separate thread.
 
     .. warning::
         This feature is experimental and subject to change.
-        MUST CALL CLOSE AFTER LAST CHECKPOINT IS SAVED
+        If you provide an ``async_stager``, call ``close()`` after the last
+        checkpoint is saved. Internally created default stagers are closed
+        automatically.
 
     Args:
         state_dict (Dict[str, Any]): The state_dict to save.
@@ -258,8 +261,10 @@ def async_save(
             whether to do checkpoint in separate thread or process
             (Default: ``AsyncCheckpointerType.THREAD``)
         async_stager (AsyncStager):
-            provides staging implementation. If storage_writer implements AsyncStager
-            and async_stager is provided, async_stager will be used for staging
+            provides staging implementation. If ``storage_writer`` implements
+            ``AsyncStager`` and ``async_stager`` is not provided, ``storage_writer``
+            will be used for staging. User-provided stagers remain owned by the
+            caller and should be closed after the last checkpoint is saved.
         no_dist (bool):
             If ``True``, this function will assume the intent is to save
             a checkpoint on a single rank/process.
@@ -299,6 +304,7 @@ def async_save(
                 "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
             )
 
+    owned_async_stager: AsyncStager | None = None
     if async_stager is None:
         if storage_writer is not None and isinstance(storage_writer, AsyncStager):
             # bwc with old storage_writers
@@ -312,31 +318,48 @@ def async_save(
                     False,
                 )
             )
+            owned_async_stager = async_stager
 
     state_dict = _stateful_to_state_dict(state_dict)
 
+    owned_async_stager_closed = False
+
+    def maybe_close_owned_async_stager() -> None:
+        nonlocal owned_async_stager_closed
+        if owned_async_stager is not None and not owned_async_stager_closed:
+            owned_async_stager_closed = True
+            owned_async_stager.close()
+
     @_dcp_method_logger(log_exceptions=True)
-    def stage_state_dict() -> Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
+    def stage_state_dict() -> Future[STATE_DICT_TYPE] | STATE_DICT_TYPE:
         return async_stager.stage(state_dict)
 
-    staging_future_or_state_dict = stage_state_dict()
+    with contextlib.ExitStack() as stack:
+        if owned_async_stager is not None:
+            stack.callback(maybe_close_owned_async_stager)
 
-    upload_executor: _AsyncCheckpointExecutor = (
-        _ProcessBasedAsyncCheckpointExecutor()
-        if async_checkpointer_type == AsyncCheckpointerType.PROCESS
-        else _ThreadBasedAsyncCheckpointExecutor()
-    )
+        staging_future_or_state_dict = stage_state_dict()
 
-    upload_future: Future = upload_executor.execute_save(
-        staging_future_or_state_dict,
-        checkpoint_id=checkpoint_id,
-        # pyrefly: ignore [bad-argument-type]
-        storage_writer=storage_writer,
-        planner=planner,
-        process_group=process_group,
-        no_dist=no_dist,
-        use_collectives=use_collectives,
-    )
+        upload_executor: _AsyncCheckpointExecutor = (
+            _ProcessBasedAsyncCheckpointExecutor()
+            if async_checkpointer_type == AsyncCheckpointerType.PROCESS
+            else _ThreadBasedAsyncCheckpointExecutor()
+        )
+
+        upload_future: Future = upload_executor.execute_save(
+            staging_future_or_state_dict,
+            checkpoint_id=checkpoint_id,
+            storage_writer=storage_writer,
+            planner=planner,
+            process_group=process_group,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
+        )
+
+        if owned_async_stager is not None:
+            upload_future.add_done_callback(lambda _: maybe_close_owned_async_stager())
+            # in the success path transfer cleanup ownership to the upload future
+            stack.pop_all()
 
     if isinstance(staging_future_or_state_dict, Future):
         staging_future = staging_future_or_state_dict
@@ -377,19 +400,25 @@ def _stateful_to_state_dict(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     """Creates a shallow copy of `state_dict` where `state_dict` is called for each Stateful object."""
     stateful_state_dict = {}
     for key, elem in state_dict.items():
-        stateful_state_dict[key] = (
-            elem.state_dict() if isinstance(elem, Stateful) else elem
-        )
+        # Apply _dcp_method_logger to each state_dict() call
+        def _elem_to_state_dict(elem):
+            return elem.state_dict() if isinstance(elem, Stateful) else elem
+
+        _elem_to_state_dict.__name__ = f"_stateful_to_state_dict.{key}"
+
+        stateful_state_dict[key] = _dcp_method_logger(log_exceptions=True)(
+            _elem_to_state_dict
+        )(elem)
     return stateful_state_dict
 
 
 def _save_state_dict(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
-    process_group: Optional[dist.ProcessGroup] = None,
+    process_group: dist.ProcessGroup | None = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[SavePlanner] = None,
+    planner: SavePlanner | None = None,
     use_collectives: bool = True,
 ) -> Metadata:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
@@ -453,7 +482,7 @@ def _save_state_dict(
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
         return all_local_plans
 
-    central_plan: Optional[SavePlan] = None
+    central_plan: SavePlan | None = None
     if use_collectives:
         central_plan = distW.reduce_scatter("plan", local_step, global_step)
     else:

@@ -267,7 +267,7 @@ def forward(self, a__1):
     select_int = torch.ops.aten.select.int(as_strided, 0, 0)
     copy__default = torch.ops.aten.copy_.default(select_int, add);  select_int = add = copy__default = None
     return as_strided
-    """)  # noqa: B950
+    """)
 
     def test_reinplace_scatter_twice_with_different_view_op_invalid2(self):
         def f(a_):
@@ -299,7 +299,7 @@ def forward(self, a__1):
     select_int = torch.ops.aten.select.int(as_strided, 0, 1)
     copy__default = torch.ops.aten.copy_.default(select_int, add);  select_int = add = copy__default = None
     return as_strided
-    """)  # noqa: B950
+    """)
 
 
     def test_out_node_updated(self):
@@ -366,7 +366,7 @@ def forward(self):
         index = 2
         shape_env = ShapeEnv()
         symbol = shape_env.create_symbol(index, source=ConstantSource(
-            f"__testing_only{len(shape_env.var_to_val)}"))
+            f"__testing_only{len(shape_env.backed_var_to_val)}"))
         sym_index = torch.SymInt(SymNode(symbol, shape_env, int, hint=index))
 
         inpt = [x, sym_index]

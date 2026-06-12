@@ -132,7 +132,7 @@ def log_ndtr(a: TensorLikeType) -> TensorLikeType:
     type_promoting_args=("self",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
-def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
+def logit(self: TensorLikeType, eps: float | None = None) -> TensorLikeType:
     if eps is None:
         eps = -1.0
     lo = eps
@@ -147,7 +147,7 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
-def xlog1py(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
+def xlog1py(a: TensorLikeType | NumberType, b: TensorLikeType | NumberType):
     torch._check(
         isinstance(a, TensorLike) or isinstance(b, TensorLike),
         lambda: 'Expected either argument a or b to be a Tensor"',
@@ -162,8 +162,10 @@ def xlog1py(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, Numbe
         a = refs.scalar_tensor(a, dtype=b.dtype, device=b.device)
 
     # mypy: expected "Tensor"
-    assert isinstance(a, TensorLike)
-    assert isinstance(b, TensorLike)
+    if not isinstance(a, TensorLike):
+        raise AssertionError(f"a must be TensorLike, got {type(a)}")
+    if not isinstance(b, TensorLike):
+        raise AssertionError(f"b must be TensorLike, got {type(b)}")
     rhs = torch.where(torch.eq(a, 0), 0, torch.mul(a, torch.log1p(b)))
     return torch.where(torch.isnan(b), float("nan"), rhs)
 
@@ -208,7 +210,7 @@ def ndtri(a: TensorLikeType) -> TensorLikeType:
 def log_softmax(
     a: TensorLikeType,
     dim: int,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> TensorLikeType:
     return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
@@ -218,7 +220,7 @@ def log_softmax(
 def softmax(
     a: TensorLikeType,
     dim: int,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> TensorLikeType:
     return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 

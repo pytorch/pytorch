@@ -9,7 +9,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
@@ -17,8 +16,8 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/ceil_div.h>
 
-#ifdef USE_FBGEMM_GENAI
-#include <fbgemm_gpu/torch_ops.h>
+#ifdef USE_MSLK
+#include <mslk/gemm/gemm_torch.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -59,6 +58,9 @@ enum class ScaledGemmImplementation {
   NONE = 0,
   TENSORWISE_TENSORWISE = 1,
   ROWWISE_ROWWISE = 2,
+  BLOCK_128x128_1x128 = 3,
+  BLOCK_1x128_128x128 = 4,
+  BLOCK_1x128_1x128 = 5,
 };
 
 /**
@@ -85,6 +87,16 @@ bool check_tensorwise_recipe(
     ArrayRef<Tensor>&);
 
 bool check_rowwise_recipe(
+    c10::ScalarType,
+    std::vector<ScalingType>&,
+    ArrayRef<Tensor>&,
+    c10::ScalarType,
+    std::vector<ScalingType>&,
+    ArrayRef<Tensor>&);
+
+bool check_deepseek_recipe(
+    ScalingType,
+    ScalingType,
     c10::ScalarType,
     std::vector<ScalingType>&,
     ArrayRef<Tensor>&,

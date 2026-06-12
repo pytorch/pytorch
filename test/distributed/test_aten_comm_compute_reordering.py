@@ -1,4 +1,3 @@
-# flake8: noqa: B950
 # Owner(s): ["module: inductor"]
 import unittest
 from unittest.mock import patch
@@ -12,14 +11,21 @@ import torch._dynamo.test_case
 import torch.distributed._functional_collectives as _functional_collectives
 import torch.fx as fx
 from torch._C import FileCheck
-from torch._dynamo.utils import counters, same
+from torch._dynamo.utils import counters, detect_fake_mode, same
+from torch._functorch._aot_autograd.utils import make_boxed_func
+from torch._inductor import compile_fx
+from torch._inductor.compile_fx import _recursive_post_grad_passes
+from torch._inductor.fx_utils import get_fake
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+from torch._inductor.virtualized import V
+from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     at_least_x_gpu,
     DynamoDistributedMultiProcTestCase,
     requires_accelerator_dist_backend,
 )
+from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
@@ -40,7 +46,7 @@ def estimate_aten_runtime(fx_node, override_size=None, compute_multiplier=1.0):
         return None
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 
 def apply_reordering_and_get_graph(graph, out_li) -> None:
@@ -56,6 +62,11 @@ def apply_reordering_and_get_graph(graph, out_li) -> None:
         "custom_runtime_estimation",
         "insert_overlap_deps",
         "collective_estimator",
+        "bucket_exposed_first",
+        "bucket_only_internode_comms",
+        "bucket_mode",
+        "pre_bucketing_fsdp_collectives",
+        "pre_bucketing_fsdp_collectives_bucket_cap_mb",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key)) is not None:
@@ -280,7 +291,10 @@ graph():
         schedulable = {"wait_tensor_default", "wait_tensor_default_1"}
         for node in list(graph.nodes):
             expected = node.name in schedulable
-            assert _schedulable_wait_node(node) is expected
+            if _schedulable_wait_node(node) is not expected:
+                raise AssertionError(
+                    f"Expected _schedulable_wait_node({node.name}) is {expected}"
+                )
 
     @torch._inductor.config.patch(get_patches())
     def test_reorder_compute_for_overlap_mul(self):
@@ -444,6 +458,78 @@ graph():
                 self.assertTrue(same(out, correct))
                 self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_overlap_scheduling_flex_attention_backward(self):
+        def func(q, k, v, bias):
+            ar = _functional_collectives.all_reduce(bias, "sum", "0")
+
+            def score_mod(score, b, h, q_idx, kv_idx):
+                return score + ar[q_idx, kv_idx]
+
+            return flex_attention(q, k, v, score_mod=score_mod).sum()
+
+        patches = {
+            **get_patches(),
+            "aten_distributed_optimizations.enable_overlap_scheduling": True,
+            "aten_distributed_optimizations.insert_overlap_deps": True,
+            "aten_distributed_optimizations.pre_bucketing_fsdp_collectives": False,
+        }
+        compiled_graphs = []
+
+        def materialize_output(gm):
+            output = gm.graph.output_node().args[0]
+            fake_output = pytree.tree_map(lambda x: get_fake(x, gm), output)
+
+            def materialize(x):
+                if isinstance(x, torch.Tensor):
+                    return torch.zeros(tuple(x.shape), device=x.device, dtype=x.dtype)
+                return x
+
+            return pytree.tree_map(materialize, fake_output)
+
+        def compile_fx_inner(gm, example_inputs, *args, **kwargs):
+            fake_mode = detect_fake_mode(example_inputs)
+            if fake_mode is None:
+                raise AssertionError("expected fake mode from example inputs")
+            with V.set_fake_mode(fake_mode):
+                _recursive_post_grad_passes(
+                    gm, is_inference=kwargs.get("is_inference", False)
+                )
+            compiled_graphs.append(gm)
+            output = materialize_output(gm)
+            return make_boxed_func(lambda *args: output)
+
+        backend = functools.partial(
+            compile_fx.compile_fx, inner_compile=compile_fx_inner
+        )
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            q = torch.randn(1, 1, 128, 16, device=device_type, requires_grad=True)
+            k = torch.randn(1, 1, 128, 16, device=device_type, requires_grad=True)
+            v = torch.randn(1, 1, 128, 16, device=device_type, requires_grad=True)
+            bias = torch.randn(128, 128, device=device_type, requires_grad=True)
+
+            with torch._inductor.config.patch(patches):
+                loss = torch.compile(func, backend=backend, fullgraph=True)(
+                    q, k, v, bias
+                )
+                loss.backward()
+
+            self.assertEqual(len(compiled_graphs), 2)
+            self.assertTrue(
+                any("flex_attention_backward" in gm.code for gm in compiled_graphs)
+            )
+            self.assertTrue(any("control_deps" in gm.code for gm in compiled_graphs))
+            self.assertIsNotNone(q.grad)
+            self.assertIsNotNone(k.grad)
+            self.assertIsNotNone(v.grad)
+            self.assertIsNotNone(bias.grad)
+
     @torch._inductor.config.patch(get_patches())
     def test_custom_estimator_for_non_compute_nodes(self):
         """Test that non-compute nodes with custom runtime estimates can trigger collective prefetching."""
@@ -508,6 +594,8 @@ def get_bucket_patches(compute_multiplier=1.0):
     return {
         "aten_distributed_optimizations.custom_runtime_estimation": estimate_aten_runtime_part,
         "aten_distributed_optimizations.collective_bucketing": True,
+        "aten_distributed_optimizations.bucket_exposed_first": False,
+        "aten_distributed_optimizations.bucket_only_internode_comms": False,
         "reorder_for_locality": False,
         "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],
@@ -517,6 +605,8 @@ def get_bucket_patches(compute_multiplier=1.0):
         "aten_distributed_optimizations.insert_overlap_deps": False,
         # interferes with testing, / custom estimation
         "test_configs.assume_bucketing_reduces_latency": False,
+        # these tests verify overlap scheduling bucketing, not pre-bucketing
+        "aten_distributed_optimizations.pre_bucketing_fsdp_collectives": False,
     }
 
 
@@ -528,9 +618,9 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
         def func(a, b, c, *, ranks):
             # Three independent all_gathers that should be bucketed
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks) + 3
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks) + 4
-            ag3 = _functional_collectives.all_gather_tensor(c, 0, ranks) + 5
+            ag1 = _functional_collectives.all_gather_single(a, 0, ranks) + 3
+            ag2 = _functional_collectives.all_gather_single(b, 0, ranks) + 4
+            ag3 = _functional_collectives.all_gather_single(c, 0, ranks) + 5
             return ag1 + ag2 + ag3
 
         with _dynamo_dist_per_rank_init(
@@ -566,9 +656,9 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
         """Test bucketing of reduce_scatter operations."""
 
         def func(a, b, c):
-            rs1 = _functional_collectives.reduce_scatter_tensor(a, "sum", 0, "0")
-            rs2 = _functional_collectives.reduce_scatter_tensor(b, "sum", 0, "0")
-            rs3 = _functional_collectives.reduce_scatter_tensor(c, "sum", 0, "0")
+            rs1 = _functional_collectives.reduce_scatter_single(a, "sum", 0, "0")
+            rs2 = _functional_collectives.reduce_scatter_single(b, "sum", 0, "0")
+            rs3 = _functional_collectives.reduce_scatter_single(c, "sum", 0, "0")
             return torch.cat([rs1, rs2, rs3])
 
         with _dynamo_dist_per_rank_init(
@@ -601,14 +691,14 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
         def func(a, b, *, ranks):
             # ag1 could be hidden by mm1
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            ag1 = _functional_collectives.all_gather_single(a, 0, ranks)
             mm1 = torch.matmul(a, a)
 
             # ag2 can be hidden by mm2, but mm2 depends on ag1's result
             # ag2 start
             mm2 = torch.matmul(ag1[:4], b)
             # ag2 end
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
+            ag2 = _functional_collectives.all_gather_single(b, 0, ranks)
 
             return ag1.sum() * ag2.sum() * mm1 * mm2
 
@@ -642,12 +732,12 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
         def func(a, *, ranks):
             # ag1 hidden by mm1
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            ag1 = _functional_collectives.all_gather_single(a, 0, ranks)
             mm1 = torch.matmul(a, a)
 
             # ag2 depends on mm1 (which hides ag1)
             b = mm1 * 2
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
+            ag2 = _functional_collectives.all_gather_single(b, 0, ranks)
 
             return ag1.sum() * ag2.sum() * mm1
 
@@ -679,10 +769,10 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
         def func(a, b, c, d, *, ranks):
             # All 4 all-gathers are independent - COULD be bucketed together
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
-            ag3 = _functional_collectives.all_gather_tensor(c[:4], 0, ranks)
-            ag4 = _functional_collectives.all_gather_tensor(d[:4], 0, ranks)
+            ag1 = _functional_collectives.all_gather_single(a, 0, ranks)
+            ag2 = _functional_collectives.all_gather_single(b, 0, ranks)
+            ag3 = _functional_collectives.all_gather_single(c[:4], 0, ranks)
+            ag4 = _functional_collectives.all_gather_single(d[:4], 0, ranks)
 
             # First compute - can hide ag1 and ag2
             e = a * 5
@@ -732,75 +822,15 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches(2.0))
-    def test_bucketing_split_for_overlap_blocking_no_deps(self):
-        """Test that 4 independent all-gathers split into 2+2 buckets for better overlap with compute."""
-
-        def func(a, b, c, d, *, ranks):
-            # All 4 all-gathers are independent - COULD be bucketed together
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
-            ag3 = _functional_collectives.all_gather_tensor(c[:4], 0, ranks)
-            ag4 = _functional_collectives.all_gather_tensor(d[:4], 0, ranks)
-
-            # First compute - can hide ag1 and ag2
-            e = a * 5  # Use a to avoid fusion
-            mm1 = torch.matmul(e, e.T)
-
-            # Force ag1/ag2 to complete before mm2 (but ag3/ag4 can still be deferred)
-            # Use first 8x8 elements to match mm1's shape
-            intermediate = ag1[:8, :8] + ag2[:8, :8]
-
-            # Second compute - depends on ag1/ag2 through intermediate, can hide ag3/ag4
-            mm2 = torch.matmul(mm1 + intermediate, c[:8])
-
-            # Use all results
-            result = (
-                ag1.sum() * 1.1
-                + ag2.sum() * 1.2
-                + ag3.sum() * 1.3
-                + ag4.sum() * 1.4
-                + mm1.sum()
-                + mm2.sum()
-            )
-            return result
-
-        with _dynamo_dist_per_rank_init(
-            self.rank,
-            self.world_size,
-            self.backend(device_type),
-            fake_pg=not at_least_x_gpu(2),
-        ):
-            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
-            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
-            c = torch.ones(8, 8, dtype=torch.float, device=device_type) * 3
-            d = torch.ones(8, 8, dtype=torch.float, device=device_type) * 4
-            ranks = list(range(self.world_size))
-
-            func_c = functools.partial(func, ranks=ranks)
-            compiled = torch.compile(func_c)
-            out, aten_graph_str = run_and_get_aten_graph(compiled, a, b, c, d)
-
-            # The 4 all gathers can be bucketed, and the wait should be sunk below the mms
-            FileCheck().check_count(
-                "_c10d_functional.all_gather_into_tensor", 1, exactly=True
-            ).check_count("ops.aten.mm", 2, exactly=True).check_count(
-                "_c10d_functional.wait_tensor", 1, exactly=True
-            ).run(aten_graph_str)
-
-            correct = func(a, b, c, d, ranks=ranks)
-            self.assertTrue(same(out, correct))
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(get_bucket_patches(2.0))
     def test_bucketing_split_for_overlap(self):
         """Test that 4 independent all-gathers split into 2+2 buckets for better overlap with compute."""
 
         def func(a, b, c, d, *, ranks):
             # All 4 all-gathers are independent - COULD be bucketed together
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
-            ag3 = _functional_collectives.all_gather_tensor(c[:4], 0, ranks)
-            ag4 = _functional_collectives.all_gather_tensor(d[:4], 0, ranks)
+            ag1 = _functional_collectives.all_gather_single(a, 0, ranks)
+            ag2 = _functional_collectives.all_gather_single(b, 0, ranks)
+            ag3 = _functional_collectives.all_gather_single(c[:4], 0, ranks)
+            ag4 = _functional_collectives.all_gather_single(d[:4], 0, ranks)
 
             # First compute - can hide ag1 and ag2
             e = a * 5  # Use a to avoid fusion
@@ -866,11 +896,11 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
         def func(a, b, c, *, ranks):
             # ag1 will be hidden by mm1
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            ag1 = _functional_collectives.all_gather_single(a, 0, ranks)
 
             # ag2 and ag3 are exposed (no compute to hide them)
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
-            ag3 = _functional_collectives.all_gather_tensor(c, 0, ranks)
+            ag2 = _functional_collectives.all_gather_single(b, 0, ranks)
+            ag3 = _functional_collectives.all_gather_single(c, 0, ranks)
 
             # can only hide one collective
             mm1 = torch.matmul(a[:2], a[:2].T)  # 2x2 matmul, hides only ag1
@@ -918,10 +948,10 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
         def func(a, b, c, d, *, ranks):
             # All 4 all-gathers are independent - COULD be bucketed together
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
-            ag3 = _functional_collectives.all_gather_tensor(c[:4], 0, ranks)
-            ag4 = _functional_collectives.all_gather_tensor(d[:4], 0, ranks)
+            ag1 = _functional_collectives.all_gather_single(a, 0, ranks)
+            ag2 = _functional_collectives.all_gather_single(b, 0, ranks)
+            ag3 = _functional_collectives.all_gather_single(c[:4], 0, ranks)
+            ag4 = _functional_collectives.all_gather_single(d[:4], 0, ranks)
 
             # First compute - can hide ag1 and ag2
             e = a * 5  # Use a to avoid fusion
@@ -1000,7 +1030,8 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             with FakeTensorMode():
                 nonlocal estimation_calls
                 estimation_calls += 1
-                assert isinstance(torch.rand([20]), torch._subclasses.FakeTensor)
+                if not isinstance(torch.rand([20]), torch._subclasses.FakeTensor):
+                    raise AssertionError("Expected FakeTensor")
 
             return 1.0
 
@@ -1011,8 +1042,8 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
         def func(a, b, *, ranks):
             # Two independent all_gathers that should be bucketed
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
+            ag1 = _functional_collectives.all_gather_single(a, 0, ranks)
+            ag2 = _functional_collectives.all_gather_single(b, 0, ranks)
 
             # Matmul that can hide the collectives
             mm1 = torch.matmul(a, a)
@@ -1051,10 +1082,10 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
         def func(a):
             # Test all three collective types with 8x8 (power of 2 size = 256 elements = 1024 bytes for fp32)
             ar = _functional_collectives.all_reduce(a, "sum", "0")
-            ag = _functional_collectives.all_gather_tensor(
+            ag = _functional_collectives.all_gather_single(
                 a, 0, list(range(self.world_size))
             )
-            rs = _functional_collectives.reduce_scatter_tensor(a, "sum", 0, "0")
+            rs = _functional_collectives.reduce_scatter_single(a, "sum", 0, "0")
 
             b = torch.matmul(a, a)
             c = torch.matmul(ar, b)
@@ -1089,15 +1120,20 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(get_bucket_patches())
+    @torch._inductor.config.patch(
+        {
+            **get_bucket_patches(),
+            "aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype",
+        }
+    )
     def test_multidtype_bucketing(self):
         """Test that all_gathers with different dtypes get bucketed together."""
 
         def func(a, b, c, *, ranks):
             # Three all_gathers with different dtypes
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)  # float32
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)  # float16
-            ag3 = _functional_collectives.all_gather_tensor(c, 0, ranks)  # float16
+            ag1 = _functional_collectives.all_gather_single(a, 0, ranks)  # float32
+            ag2 = _functional_collectives.all_gather_single(b, 0, ranks)  # float16
+            ag3 = _functional_collectives.all_gather_single(c, 0, ranks)  # float16
 
             # Use all results
             return ag1.sum() + ag2.sum() + ag3.sum()
@@ -1172,8 +1208,8 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
         def func(a, b, *, ranks):
             # Two all_gathers that will be hidden by multiple compute operations
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
+            ag1 = _functional_collectives.all_gather_single(a, 0, ranks)
+            ag2 = _functional_collectives.all_gather_single(b, 0, ranks)
 
             # Multiple compute operations that can hide the collectives
             # With 0.5 multiplier: mm1 and mm2 together hide ag1, mm2 and mm3 together hide ag2
@@ -1219,7 +1255,12 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(get_bucket_patches())
+    @torch._inductor.config.patch(
+        {
+            **get_bucket_patches(),
+            "aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype",
+        }
+    )
     def test_bucketing_with_convert_dtype(self):
         """Test that all_gathers with dtype conversion get bucketed and produce correct results."""
 
@@ -1227,14 +1268,15 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             # Convert inputs to float16 before all_gather
             a_fp16 = a.to(torch.float16)
             b_fp16 = b.to(torch.float16)
+            d_fp16 = d.to(torch.float16)
 
             # Two all_gathers with converted dtypes
-            ag1 = _functional_collectives.all_gather_tensor(a_fp16, 0, ranks)
-            ag2 = _functional_collectives.all_gather_tensor(b_fp16, 0, ranks)
+            ag1 = _functional_collectives.all_gather_single(a_fp16, 0, ranks)
+            ag2 = _functional_collectives.all_gather_single(b_fp16, 0, ranks)
 
             # same dtype
-            ag3 = _functional_collectives.all_gather_tensor(c, 0, ranks)
-            ag4 = _functional_collectives.all_gather_tensor(d, 0, ranks)
+            ag3 = _functional_collectives.all_gather_single(c, 0, ranks)
+            ag4 = _functional_collectives.all_gather_single(d_fp16, 0, ranks)
 
             return ag1, ag2, ag3, ag4
 
@@ -1268,6 +1310,116 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(out, correct))
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {
+            **get_bucket_patches(),
+            "aten_distributed_optimizations.enable_overlap_scheduling": True,
+        }
+    )
+    def test_uneven_sharding_spmd_graphs(self):
+        """Test that uneven DTensor sharding produces SPMD graphs across ranks.
+
+        When a tensor dimension is not divisible by world_size, DTensor pads
+        before all_gather and unpads after. The no-op pad/unpad on ranks with
+        full-size shards must not be eliminated by remove_noop_ops, so all
+        ranks produce identical FX graphs with matching op counts.
+        """
+
+        def func(a, *, ranks):
+            # Simulate DTensor's pad-before-all_gather for uneven shards.
+            # rank 0: a is (4, 8), pad_size=0 → no-op pad
+            # rank 1: a is (3, 8), pad_size=1 → real pad to (4, 8)
+            full_chunk = (7 + len(ranks) - 1) // len(ranks)
+            pad_size = full_chunk - a.size(0)
+            a_padded = torch.nn.functional.pad(a, [0, 0, 0, pad_size])
+            ag = _functional_collectives.all_gather_single(a_padded, 0, ranks)
+            # Unpad after all_gather: narrow to original logical size
+            result = ag.narrow(0, 0, 7)
+            return result + 1
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            import torch.distributed as dist
+            from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+            world_size = self.world_size
+            # 7 is not divisible by 2: rank 0 gets 4 rows, rank 1 gets 3
+            full_chunk = (7 + world_size - 1) // world_size
+            local_size = full_chunk if self.rank == 0 else 7 - full_chunk
+            a = torch.randn(local_size, 8, device=device_type)
+            ranks = list(range(world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+            compiled = torch.compile(func_c)
+            out, aten_graph_str = run_and_get_aten_graph(compiled, a)
+
+            # Build structural fingerprint: sorted list of call_function targets.
+            # Node names differ across ranks, but targets and op counts must match.
+            targets_r = sorted(
+                str(n_line.split("target=")[1].split("]")[0])
+                for n_line in aten_graph_str.split("\n")
+                if "call_function" in n_line and "target=" in n_line
+            )
+
+            with unset_fake_temporarily():
+                all_targets: list[list[str] | None] = [None] * world_size
+                dist.all_gather_object(all_targets, targets_r)
+
+            self.assertEqual(
+                all_targets[0],
+                all_targets[1],
+                "FX graph op targets differ across ranks — not SPMD. "
+                "No-op pad/slice may have been eliminated by remove_noop_ops.",
+            )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {
+            **get_bucket_patches(),
+            "aten_distributed_optimizations.enable_overlap_scheduling": True,
+            "aten_distributed_optimizations.spmd_check": True,
+            "aten_distributed_optimizations.spmd_mismatch": "error",
+        }
+    )
+    def test_spmd_verify_crashes_on_mismatch(self):
+        """Test that spmd_mismatch="error" raises on non-SPMD graphs."""
+
+        def func(a, *, ranks):
+            # rank 0 gets (4, 8), rank 1 gets (3, 8) — different node counts
+            # if pad is eliminated on rank 0 but not rank 1
+            full_chunk = (7 + len(ranks) - 1) // len(ranks)
+            pad_size = full_chunk - a.size(0)
+            # Only rank 1 will have a real pad op here
+            if pad_size > 0:
+                a = torch.nn.functional.pad(a, [0, 0, 0, pad_size])
+            ag = _functional_collectives.all_gather_single(a, 0, ranks)
+            return ag + 1
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            world_size = self.world_size
+            full_chunk = (7 + world_size - 1) // world_size
+            local_size = full_chunk if self.rank == 0 else 7 - full_chunk
+            a = torch.randn(local_size, 8, device=device_type)
+            ranks = list(range(world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+            compiled = torch.compile(func_c)
+
+            # The graph will differ: rank 0 has no pad, rank 1 has pad.
+            # With spmd_check_crash_on_mismatch=True, this should raise.
+            with self.assertRaises(RuntimeError, msg="SPMD graph verification"):
+                compiled(a)
+
 
 def get_toy_model(device_type: str):
     """
@@ -1300,41 +1452,57 @@ def get_toy_model(device_type: str):
     return model
 
 
-def apply_manual_reordering_and_get_graph(graph, module_bucket_plans, out_li) -> None:
+def apply_manual_reordering_and_get_graph(
+    graph, module_bucket_plans, out_li, custom_module_stack_fn=None
+) -> None:
     gm = graph.owning_module
+    from torch._inductor.config import aten_distributed_optimizations as dist_opts
     from torch._inductor.fx_passes.overlap_manual_scheduling import (
         ManualOverlapScheduler,
     )
 
     for node in list(gm.graph.nodes):
-        if (
-            node.name == "all_gather_into_tensor"
-            or node.name == "all_gather_into_tensor_1"
-            or node.name == "wait_tensor"
-            or node.name == "wait_tensor_1"
+        # Handle both all-gather and reduce-scatter nodes for module_1
+        if node.name in (
+            "all_gather_into_tensor",
+            "all_gather_into_tensor_1",
+            "reduce_scatter_tensor",
+            "reduce_scatter_tensor_1",
+            "wait_tensor",
+            "wait_tensor_1",
         ):
             node.meta["nn_module_stack"] = {"test": ["module_1", ""]}
-        if (
-            node.name == "all_gather_into_tensor_2"
-            or node.name == "all_gather_into_tensor_3"
-            or node.name == "wait_tensor_2"
-            or node.name == "wait_tensor_3"
+        # Handle both all-gather and reduce-scatter nodes for module_2
+        if node.name in (
+            "all_gather_into_tensor_2",
+            "all_gather_into_tensor_3",
+            "reduce_scatter_tensor_2",
+            "reduce_scatter_tensor_3",
+            "wait_tensor_2",
+            "wait_tensor_3",
         ):
             node.meta["nn_module_stack"] = {"test": ["module_2", ""]}
 
     overlapped_gm = ManualOverlapScheduler(
-        gm, module_bucket_plans, insert_overlap_deps=False
+        gm,
+        module_bucket_plans,
+        insert_overlap_deps=False,
+        module_stack_fn=custom_module_stack_fn,
+        bucket_mode=dist_opts.bucket_mode,
     ).run()
     overlapped_gm.graph.lint()
     out_li.append(overlapped_gm.graph)
 
 
-def run_and_get_manual_aten_graph(fn, module_bucket_plans, *inputs):
+def run_and_get_manual_aten_graph(
+    fn, module_bucket_plans, *inputs, custom_module_stack_fn=None
+):
     li = []
     apply = functools.partial(
         apply_manual_reordering_and_get_graph,
         module_bucket_plans=module_bucket_plans,
         out_li=li,
+        custom_module_stack_fn=custom_module_stack_fn,
     )
     with torch._inductor.config.patch(post_grad_custom_post_pass=apply):
         out = fn(*inputs)
@@ -1346,6 +1514,108 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
     """
     Tests for manual overlap scheduling and subgraph utilities.
     """
+
+    def _get_all_gather_test_func(self):
+        """Return the all-gather test function used by bucketing tests."""
+
+        def func(a, b, c, d, *, ranks):
+            # All 4 all-gathers are independent - COULD be bucketed together
+            ag1 = _functional_collectives.all_gather_single(a, 0, ranks)
+            ag2 = _functional_collectives.all_gather_single(b, 0, ranks)
+            ag3 = _functional_collectives.all_gather_single(c[:4], 0, ranks)
+            ag4 = _functional_collectives.all_gather_single(d[:4], 0, ranks)
+
+            # First compute - can hide ag1 and ag2
+            e = a * 5  # Use a to avoid fusion
+            mm1 = torch.matmul(e, e.T)
+
+            # Force ag1/ag2 to complete before mm2 (but ag3/ag4 can still be deferred)
+            # Use first 8x8 elements to match mm1's shape
+            intermediate = ag1[:8, :8] + ag2[:8, :8]
+
+            # Second compute - depends on ag1/ag2 through intermediate, can hide ag3/ag4
+            mm2 = torch.matmul(mm1 + intermediate, c[:8])
+
+            # Use all results
+            result = (
+                ag1.sum() * 1.1
+                + ag2.sum() * 1.2
+                + ag3.sum() * 1.3
+                + ag4.sum() * 1.4
+                + mm1.sum()
+                + mm2.sum()
+            )
+            return result
+
+        return func
+
+    def _get_reduce_scatter_test_func(self):
+        """Return the reduce-scatter test function used by bucketing tests.
+
+        For reduce-scatter to be bucketed by ManualOverlapScheduler, the wait nodes
+        must be directly returned as output (FSDP gradient pattern).
+        """
+
+        def func(a, b, c, d):
+            # All 4 reduce-scatters are independent - COULD be bucketed together
+            rs1 = _functional_collectives.reduce_scatter_single(a, "sum", 0, "0")
+            rs2 = _functional_collectives.reduce_scatter_single(b, "sum", 0, "0")
+            rs3 = _functional_collectives.reduce_scatter_single(c, "sum", 0, "0")
+            rs4 = _functional_collectives.reduce_scatter_single(d, "sum", 0, "0")
+
+            # Return reduce-scatter results directly as outputs (FSDP gradient pattern)
+            return rs1, rs2, rs3, rs4
+
+        return func
+
+    def _run_manual_bucketing_test(
+        self,
+        collective_type,
+        module_bucket_plans,
+        expected_checks,
+    ):
+        """Common test logic for manual bucketing tests.
+
+        Args:
+            collective_type: Either "all_gather" or "reduce_scatter"
+            module_bucket_plans: The bucket plans to use
+            expected_checks: List of strings to check in the aten graph (in order)
+        """
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
+            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
+            c = torch.ones(8, 8, dtype=torch.float, device=device_type) * 3
+            d = torch.ones(8, 8, dtype=torch.float, device=device_type) * 4
+
+            if collective_type == "all_gather":
+                func = self._get_all_gather_test_func()
+                ranks = list(range(self.world_size))
+                func_c = functools.partial(func, ranks=ranks)
+                compiled = torch.compile(func_c)
+                out, aten_graph = run_and_get_manual_aten_graph(
+                    compiled, module_bucket_plans, a, b, c, d
+                )
+                correct = func(a, b, c, d, ranks=ranks)
+            else:  # reduce_scatter
+                func = self._get_reduce_scatter_test_func()
+                compiled = torch.compile(func)
+                out, aten_graph = run_and_get_manual_aten_graph(
+                    compiled, module_bucket_plans, a, b, c, d
+                )
+                correct = func(a, b, c, d)
+
+            # Run expected checks in order
+            fc = FileCheck()
+            for check in expected_checks:
+                fc.check(check)
+            fc.run(str(aten_graph))
+
+            self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_make_graph_view_and_get_subgraph_by_path(self):
@@ -1378,15 +1648,150 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
         self.assertEqual([n.name for n in mixed_nodes], ["layers_0_wq"])
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_manual_reordering_bucketing_pass_separate_buckets(
+    def test_make_graph_view_and_get_subgraph_by_path_custom_module_stack_fn(self):
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+        from torch._inductor.fx_passes.graph_view import (
+            get_subgraph_by_path,
+            make_graph_view,
+        )
+
+        model = get_toy_model(device_type)
+
+        module_path_key = "module_path"
+        # Add annotation to node.meta["custom"]
+        for name, m in model.named_modules():
+            m.forward = torch.fx.traceback.annotate_fn({module_path_key: name})(
+                m.forward
+            )
+
+        def module_stack_fn(node):
+            module_stack = node.meta.get("custom", {}).get(module_path_key, "")
+            return [(module_stack, torch.nn.Module)]
+
+        gm = dynamo_graph_capture_for_export(model)(torch.randn(2, 4).to(device_type))
+
+        # delete "nn_module_stack" to make sure the graph view is only constructed from annotation
+        for n in gm.graph.nodes:
+            if "nn_module_stack" in n.meta:
+                del n.meta["nn_module_stack"]
+
+        graph_view = make_graph_view(gm.graph, module_stack_fn=module_stack_fn)
+        # Fetch subgraph for first transformer layer
+        sub_nodes = get_subgraph_by_path(graph_view, "layers.0.wq")
+        self.assertEqual(
+            [n.name for n in sub_nodes],
+            [
+                "l_func_self_modules_layers_modules_0_modules_wq_parameters_weight_",
+                "l_func_self_modules_layers_modules_0_modules_wq_parameters_bias_",
+                "l_args_0_",
+                "linear",
+            ],
+        )
+
+        # Fetch multiple paths at once
+        multi_nodes = get_subgraph_by_path(graph_view, ["layers.0.wq", "layers.0.proj"])
+        self.assertEqual(
+            [n.name for n in multi_nodes],
+            [
+                "l_func_self_modules_layers_modules_0_modules_wq_parameters_weight_",
+                "l_func_self_modules_layers_modules_0_modules_wq_parameters_bias_",
+                "l_args_0_",
+                "linear",
+                "l_func_self_modules_layers_modules_0_modules_proj_parameters_weight_",
+                "l_func_self_modules_layers_modules_0_modules_proj_parameters_bias_",
+                "x",
+            ],
+        )
+
+        # Fetch non existing paths
+        non_exist_nodes = get_subgraph_by_path(graph_view, "nonexistent.module.path")
+        self.assertEqual(non_exist_nodes, [])
+
+        # Fetch mixed of existing and non existing paths
+        mixed_nodes = get_subgraph_by_path(
+            graph_view, ["layers.0.wq", "nonexistent.module.path"]
+        )
+        self.assertEqual(
+            [n.name for n in mixed_nodes],
+            [
+                "l_func_self_modules_layers_modules_0_modules_wq_parameters_weight_",
+                "l_func_self_modules_layers_modules_0_modules_wq_parameters_bias_",
+                "l_args_0_",
+                "linear",
+            ],
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
+    )
+    def test_manual_reordering_bucketing_pass_all_gather_separate_buckets(self):
+        self._run_manual_bucketing_test(
+            collective_type="all_gather",
+            module_bucket_plans=["module_1", "module_2"],
+            expected_checks=[
+                "_pre_bucket_all_gather",
+                "all_gather_into_tensor_out",
+                "_pre_bucket_all_gather_1",
+                "all_gather_into_tensor_out_1",
+                "wait_tensor_4",
+                "wait_tensor_5",
+            ],
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_manual_bucketing_reordering_pass_all_gather_no_bucket(self):
+        self._run_manual_bucketing_test(
+            collective_type="all_gather",
+            module_bucket_plans=[],
+            expected_checks=[
+                "all_gather_into_tensor",
+                "all_gather_into_tensor_1",
+                "all_gather_into_tensor_2",
+                "all_gather_into_tensor_3",
+                "wait_tensor",
+                "wait_tensor_1",
+                "wait_tensor_2",
+                "wait_tensor_3",
+            ],
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
+    )
+    def test_manual_bucketing_reordering_pass_all_gather_single_bucket(self):
+        self._run_manual_bucketing_test(
+            collective_type="all_gather",
+            module_bucket_plans=[["module_1", "module_2"]],
+            expected_checks=[
+                "_pre_bucket_all_gather",
+                "all_gather_into_tensor_out",
+                "wait_tensor_4",
+            ],
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
+    )
+    def test_bucketing_reordering_pass_all_gather_single_bucket_custom_module_stack_fn(
         self,
     ):
+        module_path_key = "module_path"
+
+        def module_stack_fn(node):
+            module_stack = node.meta.get("custom", {}).get(module_path_key, "")
+            return [(module_stack, torch.nn.Module)]
+
         def func(a, b, c, d, *, ranks):
             # All 4 all-gathers are independent - COULD be bucketed together
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
-            ag3 = _functional_collectives.all_gather_tensor(c[:4], 0, ranks)
-            ag4 = _functional_collectives.all_gather_tensor(d[:4], 0, ranks)
+            with torch.fx.traceback.annotate({module_path_key: "my_module_1"}):
+                ag1 = _functional_collectives.all_gather_single(a, 0, ranks)
+                ag2 = _functional_collectives.all_gather_single(b, 0, ranks)
+            with torch.fx.traceback.annotate({module_path_key: "my_module_2"}):
+                ag3 = _functional_collectives.all_gather_single(c[:4], 0, ranks)
+                ag4 = _functional_collectives.all_gather_single(d[:4], 0, ranks)
 
             # First compute - can hide ag1 and ag2
             e = a * 5  # Use a to avoid fusion
@@ -1425,55 +1830,135 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             func_c = functools.partial(func, ranks=ranks)
             compiled = torch.compile(func_c)
             out, aten_graph = run_and_get_manual_aten_graph(
-                compiled, ["module_1", "module_2"], a, b, c, d
+                compiled,
+                [["my_module_1", "my_module_2"]],
+                a,
+                b,
+                c,
+                d,
+                custom_module_stack_fn=module_stack_fn,
             )
 
             (
                 FileCheck()
                 .check("_pre_bucket_all_gather")
                 .check("all_gather_into_tensor_out")
-                .check("_pre_bucket_all_gather_1")
-                .check("all_gather_into_tensor_out_1")
                 .check("wait_tensor_4")
-                .check("wait_tensor_5")
                 .run(str(aten_graph))
             )
 
             correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_bucketing_reordering_pass_no_bucket(
-        self,
-    ):
-        def func(a, b, c, d, *, ranks):
-            # All 4 all-gathers are independent - COULD be bucketed together
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
-            ag3 = _functional_collectives.all_gather_tensor(c[:4], 0, ranks)
-            ag4 = _functional_collectives.all_gather_tensor(d[:4], 0, ranks)
+            # Add metadata to the collective nodes to test preservation
+            test_metadata = {
+                "nn_module_stack": {
+                    "test": ("module_1", ""),
+                },
+                "custom": {
+                    "module_path": "my_module_1",
+                },
+            }
 
-            # First compute - can hide ag1 and ag2
-            e = a * 5  # Use a to avoid fusion
-            mm1 = torch.matmul(e, e.T)
-
-            # Force ag1/ag2 to complete before mm2 (but ag3/ag4 can still be deferred)
-            # Use first 8x8 elements to match mm1's shape
-            intermediate = ag1[:8, :8] + ag2[:8, :8]
-
-            # Second compute - depends on ag1/ag2 through intermediate, can hide ag3/ag4
-            mm2 = torch.matmul(mm1 + intermediate, c[:8])
-
-            # Use all results
-            result = (
-                ag1.sum() * 1.1
-                + ag2.sum() * 1.2
-                + ag3.sum() * 1.3
-                + ag4.sum() * 1.4
-                + mm1.sum()
-                + mm2.sum()
+            # Verify metadata preservation: new bucketed nodes should have the metadata
+            new_ag_nodes = aten_graph.find_nodes(
+                op="call_function",
+                target=torch.ops.bucketing._pre_bucket_all_gather.default,
             )
-            return result
+            new_wait_nodes = aten_graph.find_nodes(
+                op="call_function",
+                target=torch.ops._c10d_functional.wait_tensor.default,
+            )
+
+            all_new_nodes = list(new_ag_nodes) + list(new_wait_nodes)
+            self.assertGreater(len(all_new_nodes), 0, "Should have created new nodes")
+
+            for node in all_new_nodes:
+                self.assertEqual(
+                    node.meta.get("nn_module_stack"), test_metadata["nn_module_stack"]
+                )
+                self.assertEqual(node.meta.get("custom"), test_metadata["custom"])
+                self.assertTrue(node.meta.get("stack_trace", None) is not None)
+                self.assertTrue(
+                    node.meta.get("bucketing_stack_trace_sources", None) is not None
+                )
+                self.assertTrue(
+                    node.meta.get("bucketing_custom_sources", None) is not None
+                )
+                self.assertTrue(
+                    node.meta.get("bucketing_nn_module_stack_sources", None) is not None
+                )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
+    )
+    def test_manual_bucketing_reordering_pass_reduce_scatter_separate_buckets(self):
+        self._run_manual_bucketing_test(
+            collective_type="reduce_scatter",
+            module_bucket_plans=["module_1", "module_2"],
+            expected_checks=[
+                "_pre_bucket_reduce_scatter",
+                "reduce_scatter_tensor_4",
+                "_pre_bucket_reduce_scatter_1",
+                "reduce_scatter_tensor_5",
+                "wait_tensor_4",
+                "wait_tensor_5",
+            ],
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
+    )
+    def test_manual_bucketing_reordering_pass_reduce_scatter_single_bucket(self):
+        self._run_manual_bucketing_test(
+            collective_type="reduce_scatter",
+            module_bucket_plans=[["module_1", "module_2"]],
+            expected_checks=[
+                "_pre_bucket_reduce_scatter",
+                "reduce_scatter_tensor_4",
+                "wait_tensor_4",
+            ],
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_manual_bucketing_reordering_pass_reduce_scatter_no_bucket(self):
+        self._run_manual_bucketing_test(
+            collective_type="reduce_scatter",
+            module_bucket_plans=[],
+            expected_checks=[
+                "reduce_scatter_tensor",
+                "reduce_scatter_tensor_1",
+                "reduce_scatter_tensor_2",
+                "reduce_scatter_tensor_3",
+                "wait_tensor",
+                "wait_tensor_1",
+                "wait_tensor_2",
+                "wait_tensor_3",
+            ],
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "default"}
+    )
+    def test_manual_bucketing_ag_with_intermediate_deps(self):
+        module_path_key = "module_path"
+
+        def module_stack_fn(node):
+            module_stack = node.meta.get("custom", {}).get(module_path_key, "")
+            return [(module_stack, torch.nn.Module)]
+
+        def func(a, b, c, *, ranks):
+            with torch.fx.traceback.annotate({module_path_key: "mod1"}):
+                ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            b_prepared = b[:4] + 1.0
+            c_prepared = c[:4] * 2.0
+            with torch.fx.traceback.annotate({module_path_key: "mod2"}):
+                ag2 = _functional_collectives.all_gather_tensor(b_prepared, 0, ranks)
+                ag3 = _functional_collectives.all_gather_tensor(c_prepared, 0, ranks)
+            return ag1.sum() + ag2.sum() + ag3.sum()
 
         with _dynamo_dist_per_rank_init(
             self.rank,
@@ -1484,61 +1969,117 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
             c = torch.ones(8, 8, dtype=torch.float, device=device_type) * 3
-            d = torch.ones(8, 8, dtype=torch.float, device=device_type) * 4
             ranks = list(range(self.world_size))
 
             func_c = functools.partial(func, ranks=ranks)
             compiled = torch.compile(func_c)
-            out, aten_graph = run_and_get_manual_aten_graph(compiled, [], a, b, c, d)
+            out, aten_graph = run_and_get_manual_aten_graph(
+                compiled,
+                [["mod1", "mod2"]],
+                a,
+                b,
+                c,
+                custom_module_stack_fn=module_stack_fn,
+            )
 
+            graph_str = str(aten_graph)
             (
                 FileCheck()
                 .check("all_gather_into_tensor")
-                .check("all_gather_into_tensor_1")
-                .check("all_gather_into_tensor_2")
-                .check("all_gather_into_tensor_3")
                 .check("wait_tensor")
-                .check("wait_tensor_1")
-                .check("wait_tensor_2")
-                .check("wait_tensor_3")
-                .run(str(aten_graph))
+                .run(graph_str)
             )
 
-            correct = func(a, b, c, d, ranks=ranks)
+            correct = func(a, b, c, ranks=ranks)
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_bucketing_reordering_pass_single_bucket(
-        self,
-    ):
-        def func(a, b, c, d, *, ranks):
-            # All 4 all-gathers are independent - COULD be bucketed together
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
-            ag3 = _functional_collectives.all_gather_tensor(c[:4], 0, ranks)
-            ag4 = _functional_collectives.all_gather_tensor(d[:4], 0, ranks)
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "default"}
+    )
+    def test_manual_bucketing_rs_with_intermediate_deps(self):
+        module_path_key = "module_path"
 
-            # First compute - can hide ag1 and ag2
-            e = a * 5  # Use a to avoid fusion
-            mm1 = torch.matmul(e, e.T)
+        def module_stack_fn(node):
+            module_stack = node.meta.get("custom", {}).get(module_path_key, "")
+            return [(module_stack, torch.nn.Module)]
 
-            # Force ag1/ag2 to complete before mm2 (but ag3/ag4 can still be deferred)
-            # Use first 8x8 elements to match mm1's shape
-            intermediate = ag1[:8, :8] + ag2[:8, :8]
+        def func(a, b, c):
+            with torch.fx.traceback.annotate({module_path_key: "mod1"}):
+                rs1 = _functional_collectives.reduce_scatter_tensor(a, "sum", 0, "0")
+            c_grad = c * 2.0 + 1.0
+            with torch.fx.traceback.annotate({module_path_key: "mod2"}):
+                rs2 = _functional_collectives.reduce_scatter_tensor(b, "sum", 0, "0")
+                rs3 = _functional_collectives.reduce_scatter_tensor(
+                    c_grad, "sum", 0, "0"
+                )
+            return rs1, rs2, rs3
 
-            # Second compute - depends on ag1/ag2 through intermediate, can hide ag3/ag4
-            mm2 = torch.matmul(mm1 + intermediate, c[:8])
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
+            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
+            c = torch.ones(8, 8, dtype=torch.float, device=device_type) * 3
 
-            # Use all results
-            result = (
-                ag1.sum() * 1.1
-                + ag2.sum() * 1.2
-                + ag3.sum() * 1.3
-                + ag4.sum() * 1.4
-                + mm1.sum()
-                + mm2.sum()
+            compiled = torch.compile(func)
+            out, aten_graph = run_and_get_manual_aten_graph(
+                compiled,
+                [["mod1", "mod2"]],
+                a,
+                b,
+                c,
+                custom_module_stack_fn=module_stack_fn,
             )
-            return result
+
+            graph_str = str(aten_graph)
+            (
+                FileCheck()
+                .check("reduce_scatter_tensor")
+                .check("wait_tensor")
+                .run(graph_str)
+            )
+
+            correct = func(a, b, c)
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops"}
+    )
+    def test_manual_bucketing_ag_forward_and_backward(self):
+        """Simulate reshard-after-forward: forward all-gathers and backward
+        all-gathers for the same modules. Verifies graph stays topologically valid after
+        bucketing and overlap reordering with _move_overlap_nodes."""
+        module_path_key = "module_path"
+
+        def module_stack_fn(node):
+            module_stack = node.meta.get("custom", {}).get(module_path_key, "")
+            return [(module_stack, torch.nn.Module)]
+
+        def func(a, b, c, d, *, ranks):
+            # Forward all-gathers (mod1 then mod2)
+            with torch.fx.traceback.annotate({module_path_key: "mod1"}):
+                fwd_ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            with torch.fx.traceback.annotate({module_path_key: "mod2"}):
+                fwd_ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
+
+            # Forward compute
+            mm1 = torch.matmul(fwd_ag1[:8, :8], fwd_ag2[:8, :8])
+
+            # Backward all-gathers (mod2 then mod1, reverse order)
+            with torch.fx.traceback.annotate({module_path_key: "mod2"}):
+                bwd_ag2 = _functional_collectives.all_gather_tensor(c, 0, ranks)
+            with torch.fx.traceback.annotate({module_path_key: "mod1"}):
+                bwd_ag1 = _functional_collectives.all_gather_tensor(d, 0, ranks)
+
+            # Backward compute
+            mm2 = torch.matmul(bwd_ag2[:8, :8], bwd_ag1[:8, :8])
+
+            return mm1.sum() + mm2.sum()
 
         with _dynamo_dist_per_rank_init(
             self.rank,
@@ -1555,16 +2096,16 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             func_c = functools.partial(func, ranks=ranks)
             compiled = torch.compile(func_c)
             out, aten_graph = run_and_get_manual_aten_graph(
-                compiled, [["module_1", "module_2"]], a, b, c, d
+                compiled,
+                [["mod1", "mod2"]],
+                a,
+                b,
+                c,
+                d,
+                custom_module_stack_fn=module_stack_fn,
             )
 
-            (
-                FileCheck()
-                .check("_pre_bucket_all_gather")
-                .check("all_gather_into_tensor_out")
-                .check("wait_tensor_4")
-                .run(str(aten_graph))
-            )
+            aten_graph.lint()
 
             correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(out, correct))

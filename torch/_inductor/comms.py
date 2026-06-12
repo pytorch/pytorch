@@ -6,16 +6,13 @@ import heapq
 import importlib
 import itertools
 import logging
-import operator
 import sys
-import time
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._logging import trace_structured
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, config_comms, ir
@@ -26,21 +23,12 @@ if TYPE_CHECKING:
     from .ir import IRNode, Operation
 
 from .memory import (
-    estimate_peak_memory,
     estimate_peak_memory_allocfree,
     FreeableInputBuffer,
     get_freeable_input_buf,
     SNodeMemory,
 )
-from .utils import (
-    contains_collective,
-    contains_wait,
-    find_recursive_deps_of_node,
-    find_recursive_users_of_node,
-    is_collective,
-    is_fallback_op,
-    is_wait,
-)
+from .utils import contains_collective, contains_wait, is_fallback_op, is_wait
 from .virtualized import V
 
 
@@ -54,9 +42,8 @@ if TYPE_CHECKING:
 def align_runtime_estimations_across_all_distributed_ranks(
     snodes: list[BaseSchedulerNode],
 ):
-    runtime_estimations = {}
-    for snode in snodes:
-        runtime_estimations[snode] = snode.get_estimated_runtime()
+    runtime_estimations = [snode.get_estimated_runtime() for snode in snodes]
+
     import torch.distributed as dist
     from torch.distributed.distributed_c10d import _get_default_group
 
@@ -64,13 +51,28 @@ def align_runtime_estimations_across_all_distributed_ranks(
     pg = _get_default_group()
     gathered_runtime_estimations: list[list[float]] = [[] for _ in range(world_size)]
     dist.all_gather_object(
-        gathered_runtime_estimations, list(runtime_estimations.values()), pg
+        gathered_runtime_estimations,
+        runtime_estimations,
+        pg,
     )
+
+    lengths = OrderedSet([len(e) for e in gathered_runtime_estimations])
+    if len(lengths) != 1:
+        log.warning(
+            "Different ranks have different numbers of scheduler nodes (%s), "
+            "skipping runtime estimation alignment",
+            [len(e) for e in gathered_runtime_estimations],
+        )
+        for idx, snode in enumerate(snodes):
+            snode.override_estimated_runtime = runtime_estimations[idx]
+        return
+
     median_runtime_estimations = torch.median(
         torch.tensor(gathered_runtime_estimations), dim=0
     ).values.tolist()
-    for i in range(len(snodes)):
-        snodes[i].override_estimated_runtime = median_runtime_estimations[i]
+
+    for idx, snode in enumerate(snodes):
+        snode.override_estimated_runtime = median_runtime_estimations[idx]
 
 
 def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
@@ -169,7 +171,7 @@ class ReorderInfo:
         return self.initial_exposed - self.final_exposed
 
 
-def is_gemm_like(node: Optional[Union[IRNode, Operation]]) -> bool:
+def is_gemm_like(node: IRNode | Operation | None) -> bool:
     if node is None:
         return False
 
@@ -205,126 +207,6 @@ def _temp_group_visit_leaves(snode: BaseSchedulerNode, fn):
         fn(snode)
 
 
-def wait_exposed_communication_time(
-    snodes_to_wait: list[BaseSchedulerNode], runtimes: dict[BaseSchedulerNode, float]
-) -> tuple[float, float, str]:
-    """
-    Calculate exposed communication time for a wait operation by finding its corresponding
-    collective and accumulating overlapping compute time between them.
-
-    The Wait node must be the last in snodes_to_wait.
-    Compute time between corresponding Collective and Wait is accumulated.
-    If there is another pair of Collective and Wait inside,
-    Only compute before first such Wait' is considered as overlapping.
-
-    Multiple process groups are not modeled so far.
-    """
-    wait_snode = snodes_to_wait[-1]
-    assert is_wait(wait_snode.node)
-    assert len(snodes_to_wait) > 1
-    idx = len(snodes_to_wait) - 2
-    comm_time = 0.0
-    comp_time = 0.0
-    overlap_info = ""
-    waits_found = []
-    for i in range(idx, -1, -1):
-        c = snodes_to_wait[i]
-        if contains_wait(c):
-            waits_found.append(c)
-        if contains_collective(c):
-            if is_corresponding_collective_wait(c, wait_snode):
-                comm_time = runtimes[c]
-                overlap_info += f"->C[{c.get_name()}]"
-                break
-
-            if not contains_async_collective(c):
-                # Sync Collective
-                comp_time = 0.0
-                continue
-            else:
-                for w in waits_found:
-                    if is_corresponding_collective_wait(c, w):
-                        # Similar to Sync Collective
-                        # If after our Collective exist another Collective-Wait,
-                        # All compute after it will not be overlapping
-                        comp_time = 0.0
-                        continue
-
-        comp_time_before = comp_time
-
-        def accumulate_time(_snode: BaseSchedulerNode) -> None:
-            nonlocal comp_time
-            comp_time += runtimes[_snode]
-
-        _temp_group_visit_leaves(c, accumulate_time)
-        comp_time_after = comp_time
-        overlap_info += f"+{c.get_name()}[{comp_time_after - comp_time_before}]"
-
-    return comm_time, comp_time, overlap_info
-
-
-def coll_exposed_communication_time(
-    snodes: list[BaseSchedulerNode],
-    runtimes: dict[BaseSchedulerNode, float],
-) -> tuple[float, float, str]:
-    """
-    Calculate exposed communication time for a collective operation by finding its corresponding
-    wait and accumulating compute time that can overlap with communication.
-
-    The Collective node must be the first in snodes.
-    Compute time between corresponding Collective and Wait is accumulated.
-    If there is another pair of Collective and Wait inside,
-    Only compute before first such Wait' is considered as overlapping.
-
-    Multiple process groups are not modeled so far.
-    """
-    collective_snode = snodes[0]
-    comm_time = runtimes[collective_snode]
-    comp_time = 0.0
-    collective_outs: OrderedSet[str] = OrderedSet(
-        o.get_name() for o in collective_snode.get_outputs()
-    )
-    overlap_info = ""
-    collectives_found: list[BaseSchedulerNode] = []
-    for snode in snodes[1:]:
-        # We may have some ops without Wait,
-        # e.g. DTensor torch.ops._dtensor.shard_dim_alltoall
-        unmet_deps = OrderedSet(
-            d.name for d in snode.unmet_dependencies if not _is_fake_dep(d)
-        )
-
-        if unmet_deps & collective_outs:
-            overlap_info += f"->W[{snode.get_name()}]"
-            break
-
-        if contains_collective(snode):
-            if not contains_async_collective(snode):
-                break
-            else:
-                collectives_found.append(snode)
-                continue
-        if contains_wait(snode):
-            has_wait_for_collectives_found = False
-            for _coll in collectives_found:
-                if is_corresponding_collective_wait(collective_snode, snode):
-                    has_wait_for_collectives_found = True
-                    break
-            if has_wait_for_collectives_found:
-                # Any compute after not overlapping original Collective
-                break
-
-        comp_time_before = comp_time
-
-        def accumulate_time(_snode: BaseSchedulerNode) -> None:
-            nonlocal comp_time
-            comp_time += runtimes[_snode]
-
-        _temp_group_visit_leaves(snode, accumulate_time)
-        comp_time_after = comp_time
-        overlap_info += f"+{snode.get_name()}[{comp_time_after - comp_time_before}]"
-    return comm_time, comp_time, overlap_info
-
-
 def _group_name(snode, with_bufs=False) -> str:
     ret = ""
     for n in snode.snodes:
@@ -353,21 +235,27 @@ def _initialize_memory_tracking(snodes, graph_inputs, graph_outputs):
         )
     )
     _curr_memory = dict(zip(snodes, snodes_curr_memory))
+    # pyrefly: ignore [unsupported-operation]
     _curr_memory[None] = (0, 0)
+
+    # Build candidate buffer map for optimization
+    candidate_buffer_map = _build_candidate_buffer_map(buf_to_snode_last_use)
+
     return (
         peak_memory,
         _curr_memory,
         snodes_allocfree,
         buf_to_snode_last_use,
         name_to_freeable_input_buf,
+        candidate_buffer_map,
     )
 
 
 def _initialize_double_linked_list(
     snodes: list[BaseSchedulerNode],
 ) -> tuple[
-    dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
-    dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
+    dict[BaseSchedulerNode, BaseSchedulerNode | None],
+    dict[BaseSchedulerNode, BaseSchedulerNode | None],
     BaseSchedulerNode,
 ]:
     """Create double-linked list structure from snodes"""
@@ -380,16 +268,45 @@ def _initialize_double_linked_list(
     return _prev, _next, _head
 
 
-def is_corresponding_collective_wait(
-    collective_snode: BaseSchedulerNode, wait_snode: BaseSchedulerNode
-) -> bool:
+def _build_candidate_buffer_map(
+    buf_to_snode_last_use: dict,
+) -> dict[BaseSchedulerNode, OrderedSet]:
     """
-    Check if a wait node corresponds to a given collective node by verifying if the wait
-    depends on outputs from the collective.
+    Build inverted index: node -> set of buffers where node appears in successors.
+
+    This optimization reduces buffer iteration from O(total_buffers) to O(buffers_per_node).
+    Since buffer successors are immutable during reordering, this map doesn't need updates.
+
+    Returns:
+        dict mapping each node to the set of buffers that have this node in their successors
     """
-    collective_outs = OrderedSet(o.get_name() for o in collective_snode.get_outputs())
-    unmet_deps = OrderedSet(d.name for d in wait_snode.unmet_dependencies)
-    return bool(unmet_deps & collective_outs)
+    node_to_candidate_bufs: dict[BaseSchedulerNode, OrderedSet] = defaultdict(
+        OrderedSet
+    )
+
+    for buf in buf_to_snode_last_use:
+        # Add to every successor node's buffer set
+        for succ_node in buf.mpi_buffer.succ_nodes:
+            node_to_candidate_bufs[succ_node].add(buf)
+
+    return dict(node_to_candidate_bufs)
+
+
+def _precompute_node_output_sets(
+    snodes: list[BaseSchedulerNode],
+) -> dict[BaseSchedulerNode, OrderedSet[str]]:
+    """
+    Pre-compute output name sets for all nodes.
+
+    This optimization avoids creating OrderedSet objects repeatedly during
+    exposed time calculations.
+
+    Returns:
+        dict mapping each node to a set of its output names
+    """
+    return {
+        snode: OrderedSet(o.get_name() for o in snode.get_outputs()) for snode in snodes
+    }
 
 
 def _op_runtime_estimate_mult(snode):
@@ -419,9 +336,9 @@ def contains_async_collective(snode):
 
 
 def _group_nodes_from_linked_list(
-    head: Optional[BaseSchedulerNode],
-    tail: Optional[BaseSchedulerNode],
-    next_dict: dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
+    head: BaseSchedulerNode | None,
+    tail: BaseSchedulerNode | None,
+    next_dict: dict[BaseSchedulerNode, BaseSchedulerNode | None],
 ) -> list[BaseSchedulerNode]:
     """
     Traverse doubly-linked list from head to tail and return nodes as a list.
@@ -445,12 +362,147 @@ def _group_nodes_from_linked_list(
     return ret
 
 
+def _is_corresponding_collective_wait(
+    collective_snode: BaseSchedulerNode,
+    wait_snode: BaseSchedulerNode,
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]],
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]],
+) -> bool:
+    """
+    Check if a wait node corresponds to a given collective node.
+    Uses pre-computed sets for O(1) lookup.
+    """
+    collective_outs = node_output_sets[collective_snode]
+    unmet_deps = node_dep_sets[wait_snode]
+    return bool(unmet_deps & collective_outs)
+
+
+def _coll_exposed_communication_time(
+    collective_snode: BaseSchedulerNode,
+    next_dict: dict[BaseSchedulerNode, BaseSchedulerNode | None],
+    runtimes: dict[BaseSchedulerNode, float],
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]],
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]],
+) -> tuple[float, float, str]:
+    """
+    Calculate exposed communication time by iterating directly over linked list.
+    Avoids O(N) list construction for each call.
+
+    The collective_snode is the starting point, iteration continues via next_dict.
+    """
+    comm_time = runtimes[collective_snode]
+    comp_time = 0.0
+    collective_outs = node_output_sets[collective_snode]
+    overlap_info = ""
+    collectives_found: list[BaseSchedulerNode] = []
+
+    snode = next_dict[collective_snode]
+    while snode is not None:
+        unmet_deps = node_dep_sets[snode]
+
+        if unmet_deps & collective_outs:
+            overlap_info += f"->W[{snode.get_name()}]"
+            break
+
+        if contains_collective(snode):
+            if not contains_async_collective(snode):
+                break
+            else:
+                collectives_found.append(snode)
+                snode = next_dict[snode]
+                continue
+        if contains_wait(snode):
+            has_wait_for_collectives_found = False
+            for _coll in collectives_found:
+                if _is_corresponding_collective_wait(
+                    collective_snode, snode, node_output_sets, node_dep_sets
+                ):
+                    has_wait_for_collectives_found = True
+                    break
+            if has_wait_for_collectives_found:
+                break
+
+        comp_time_before = comp_time
+
+        def accumulate_time(_snode: BaseSchedulerNode) -> None:
+            nonlocal comp_time
+            comp_time += runtimes[_snode]
+
+        _temp_group_visit_leaves(snode, accumulate_time)
+        comp_time_after = comp_time
+        overlap_info += f"+{snode.get_name()}[{comp_time_after - comp_time_before}]"
+
+        snode = next_dict[snode]
+
+    return comm_time, comp_time, overlap_info
+
+
+def _wait_exposed_communication_time(
+    wait_snode: BaseSchedulerNode,
+    head: BaseSchedulerNode,
+    prev_dict: dict[BaseSchedulerNode, BaseSchedulerNode | None],
+    runtimes: dict[BaseSchedulerNode, float],
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]],
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]],
+) -> tuple[float, float, str]:
+    """
+    Calculate exposed communication time for a wait operation by iterating
+    directly over linked list backwards. Avoids O(N) list construction.
+
+    Iterates from wait_snode backwards using prev_dict to find corresponding collective.
+    """
+    comm_time = 0.0
+    comp_time = 0.0
+    overlap_info = ""
+    waits_found: list[BaseSchedulerNode] = []
+
+    snode = prev_dict[wait_snode]
+    while snode is not None:
+        if contains_wait(snode):
+            waits_found.append(snode)
+        if contains_collective(snode):
+            if _is_corresponding_collective_wait(
+                snode, wait_snode, node_output_sets, node_dep_sets
+            ):
+                comm_time = runtimes[snode]
+                overlap_info += f"->C[{snode.get_name()}]"
+                break
+
+            if not contains_async_collective(snode):
+                comp_time = 0.0
+                snode = prev_dict[snode]
+                continue
+            else:
+                for w in waits_found:
+                    if _is_corresponding_collective_wait(
+                        snode, w, node_output_sets, node_dep_sets
+                    ):
+                        comp_time = 0.0
+                        break  # inner loop break
+                snode = prev_dict[snode]
+                continue
+
+        comp_time_before = comp_time
+
+        def accumulate_time(_snode: BaseSchedulerNode) -> None:
+            nonlocal comp_time
+            comp_time += runtimes[_snode]
+
+        _temp_group_visit_leaves(snode, accumulate_time)
+        comp_time_after = comp_time
+        overlap_info += f"+{snode.get_name()}[{comp_time_after - comp_time_before}]"
+
+        snode = prev_dict[snode]
+
+    return comm_time, comp_time, overlap_info
+
+
 def _perform_double_linked_list_swap(
     candidate: BaseSchedulerNode,
     group_head: BaseSchedulerNode,
     group_tail: BaseSchedulerNode,
-    prev_dict: dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
-    next_dict: dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
+    prev_dict: dict[BaseSchedulerNode, BaseSchedulerNode | None],
+    next_dict: dict[BaseSchedulerNode, BaseSchedulerNode | None],
     head: BaseSchedulerNode,
 ) -> BaseSchedulerNode:
     """
@@ -642,7 +694,8 @@ def _find_buffers_with_changed_last_use(
     candidate: BaseSchedulerNode,
     gns: list[BaseSchedulerNode],
     buf_to_snode_last_use: dict,
-) -> dict[BaseSchedulerNode, list[Union[FreeableInputBuffer, Any]]]:
+    candidate_buffer_map: dict[BaseSchedulerNode, OrderedSet],
+) -> dict[BaseSchedulerNode, list[FreeableInputBuffer | Any]]:
     """
     Find buffers whose last use will change after swapping candidate with group.
 
@@ -654,32 +707,31 @@ def _find_buffers_with_changed_last_use(
         candidate: The node being moved
         gns: Group nodes being swapped with candidate
         buf_to_snode_last_use: Mapping of buffers to their current last-use nodes
+        candidate_buffer_map: Pre-computed map of node -> buffers using that node
 
     Returns:
         Dict mapping group nodes to buffers that will change their last-use node
     """
     group_n_to_bufs_after_swap_dealloc_by_candidate: dict[
-        BaseSchedulerNode, list[Union[FreeableInputBuffer, Any]]
+        BaseSchedulerNode, list[FreeableInputBuffer | Any]
     ] = defaultdict(list)
-    for (
-        buf,
-        snode_last_use,
-    ) in buf_to_snode_last_use.items():
-        succ_nodes = buf.mpi_buffer.succ_nodes
-        if candidate not in succ_nodes:
-            continue
 
-        if not any(gn == snode_last_use for gn in gns):
-            continue
+    # Optimization: only check buffers where candidate is a successor
+    # Reduces from O(all_buffers) to O(buffers_per_candidate)
+    candidate_bufs = candidate_buffer_map.get(candidate, OrderedSet())
+    gns_set = OrderedSet(gns)  # O(1) membership testing
 
-        group_n_to_bufs_after_swap_dealloc_by_candidate[snode_last_use].append(buf)
+    for buf in candidate_bufs:
+        snode_last_use = buf_to_snode_last_use[buf]
+        if snode_last_use in gns_set:
+            group_n_to_bufs_after_swap_dealloc_by_candidate[snode_last_use].append(buf)
 
     return group_n_to_bufs_after_swap_dealloc_by_candidate
 
 
 def _is_node_groupable_for_reorder(
     candidate: BaseSchedulerNode,
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """
     Check if a candidate node can be grouped with collective during reordering.
 
@@ -710,7 +762,7 @@ def _is_node_groupable_for_reorder(
 def _format_and_log_reordering_stats(
     stats: dict[BaseSchedulerNode, ReorderInfo],
     head: BaseSchedulerNode,
-    next_dict: dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
+    next_dict: dict[BaseSchedulerNode, BaseSchedulerNode | None],
     original_snodes_num: int,
     peak_memory: int,
     name_to_freeable_input_buf: dict,
@@ -774,7 +826,6 @@ def _format_and_log_reordering_stats(
         for snode, node_info in node_stats.items()
     ]
     if importlib.util.find_spec("tabulate"):
-        # pyrefly: ignore[import-error]
         from tabulate import tabulate
 
         reorder_log_str += tabulate(
@@ -789,7 +840,10 @@ def _format_and_log_reordering_stats(
         reorder_log_str += "\n".join(map(str, rows))
 
     new_snodes = _group_nodes_from_linked_list(head, None, next_dict)
-    assert len(new_snodes) == original_snodes_num
+    if len(new_snodes) != original_snodes_num:
+        raise AssertionError(
+            f"expected {original_snodes_num} nodes, got {len(new_snodes)}"
+        )
     new_peak_memory, _, _, _ = estimate_peak_memory_allocfree(
         new_snodes, name_to_freeable_input_buf, graph_outputs
     )
@@ -826,8 +880,6 @@ def _reorder_communication_preserving_peak_memory_internal(
     if not has_collectives:
         return snodes, {}
 
-    from torch._inductor.scheduler import GroupedSchedulerNode
-
     original_snodes_num = len(snodes)
     # heuristic to avoid degenerating to quadratic time
     graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
@@ -838,12 +890,25 @@ def _reorder_communication_preserving_peak_memory_internal(
         snodes_allocfree,
         buf_to_snode_last_use,
         name_to_freeable_input_buf,
+        candidate_buffer_map,
     ) = _initialize_memory_tracking(snodes, graph_inputs, graph_outputs)
 
     runtimes: dict[BaseSchedulerNode, float] = {
         snode: estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
         for snode in snodes
     }
+
+    # Pre-compute output and dependency sets for O(1) lookup instead of O(N) creation per iteration
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(o.get_name() for o in snode.get_outputs()) for snode in snodes
+    }
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(
+            d.name for d in snode.unmet_dependencies if not _is_fake_dep(d)
+        )
+        for snode in snodes
+    }
+
     # debug stats
     stats: dict[BaseSchedulerNode, ReorderInfo] = {}
 
@@ -851,12 +916,12 @@ def _reorder_communication_preserving_peak_memory_internal(
 
     _prev, _next, _head = _initialize_double_linked_list(snodes)
 
-    debug_num_collectives_to_reorder: Optional[int] = (
+    debug_num_collectives_to_reorder: int | None = (
         config_comms.reorder_iterative_debug_limit_to_reorder
     )
 
     num_processed_collectives: int = 0
-    curr: Optional[BaseSchedulerNode] = _head
+    curr: BaseSchedulerNode | None = _head
     debug_iterative_memory_recompute = (
         config_comms.reorder_iterative_debug_memory_recompute
     )
@@ -866,7 +931,7 @@ def _reorder_communication_preserving_peak_memory_internal(
         _next_curr = _next[curr]
         if iterative_recompute_error:
             break
-        # pyrefly: ignore [bad-argument-type]
+
         if not contains_async_collective(curr):
             curr = _next_curr
             continue
@@ -878,8 +943,8 @@ def _reorder_communication_preserving_peak_memory_internal(
         num_processed_collectives += 1
 
         info = stats[curr] = ReorderInfo()
-        comm_time, comp_time, overlap_info = coll_exposed_communication_time(
-            _group_nodes_from_linked_list(curr, None, _next), runtimes
+        comm_time, comp_time, overlap_info = _coll_exposed_communication_time(
+            curr, _next, runtimes, node_output_sets, node_dep_sets
         )
         info.comm_time = comm_time
         info.comp_time = comp_time
@@ -892,6 +957,10 @@ def _reorder_communication_preserving_peak_memory_internal(
         group_waits = {}
         group_runtime = 0.0
         group_peak_memory = _curr_memory[curr][0]  # post_alloc memory
+
+        # Track group dependencies incrementally - initialize from pre-computed sets
+        group_unmet_deps_names = OrderedSet(node_dep_sets[curr])
+        group_output_names = OrderedSet(node_output_sets[curr])
 
         while candidate is not None:
             if config_comms.reorder_iterative_use_runtime_estimations and (
@@ -909,41 +978,36 @@ def _reorder_communication_preserving_peak_memory_internal(
                 info.limiting_factor = "collective ordering"
                 break
 
-            gns: list[BaseSchedulerNode] = _group_nodes_from_linked_list(
-                group_head, group_tail, _next
-            )
-            group = GroupedSchedulerNode(
-                curr.scheduler,
-                gns,
-                temp_grouping=True,
-            )
+            # Early exit: if group has no unmet dependencies, candidate can't have data dependency
+            data_deps_names = group_unmet_deps_names - group_output_names
+            if not data_deps_names:
+                data_dep = False
+            else:
+                # Calculate effective dependencies (not satisfied within group)
+                # Use pre-computed set for O(1) lookup
+                candidate_out_names = node_output_sets[candidate]
+                data_dep = bool(candidate_out_names & data_deps_names)
 
-            # We can have multiple deps with the same name.
-            # As we ignore WeakDep(is_fake=True) =>
-            # filter them out first to avoid overwriting  of real dep.
-            data_deps = {
-                d.name: d for d in group.unmet_dependencies if not _is_fake_dep(d)
-            }
-
-            candidate_outs = candidate.get_outputs()
-            data_dep = None
-            for o in candidate_outs:
-                if d := data_deps.get(o.get_name(), None):
-                    data_dep = d
-                    break
-
-            if data_dep is not None:
+            if data_dep:
                 is_groupable_result, grouping_reason = _is_node_groupable_for_reorder(
                     candidate
                 )
                 if is_groupable_result:
                     group_head = candidate
-                    # pyrefly: ignore[unbound-name]
+
+                    # Update incremental dependency tracking using pre-computed sets
+                    group_unmet_deps_names.update(node_dep_sets[candidate])
+                    group_output_names.update(node_output_sets[candidate])
+
                     if config_comms.reorder_iterative_use_runtime_estimations:
                         if contains_wait(candidate):
-                            comm_time, comp_time, _ = wait_exposed_communication_time(
-                                _group_nodes_from_linked_list(_head, candidate, _next),
+                            comm_time, comp_time, _ = _wait_exposed_communication_time(
+                                candidate,
+                                _head,
+                                _prev,
                                 runtimes,
+                                node_output_sets,
+                                node_dep_sets,
                             )
                             group_waits[candidate] = comm_time, comp_time
                         if not contains_async_collective(candidate):
@@ -953,20 +1017,17 @@ def _reorder_communication_preserving_peak_memory_internal(
                         group_peak_memory, _curr_memory[candidate][0]
                     )
                     info.grouped += 1
-                    info.grouped_info = _group_names(gns)
                     candidate = _prev[candidate]
                     continue
                 else:
                     msg = (
-                        f"data dependency {data_dep}(dep_names:{list(data_deps.keys())})"
-                        f"\n candidate:{candidate.get_name()}(outs:{[candidate.get_buffer_names()]})"
-                        f"dep on {_group_names(gns)}"
+                        f"data dependency detected"
+                        f"\n candidate:{candidate.get_name()}(outs:{[o.get_name() for o in candidate.get_outputs()]})"
                         f"\n non_group_reason:{grouping_reason}"
                     )
                     info.limiting_factor = msg
                     break
 
-            # pyrefly: ignore[unbound-name]
             if config_comms.reorder_iterative_use_runtime_estimations:
                 # Check if candidate has sync runtime
                 if not contains_async_collective(candidate):
@@ -981,7 +1042,9 @@ def _reorder_communication_preserving_peak_memory_internal(
                         )
                         exposed_delta = exposed_after - exposed_before
                         for gw_comm_time, gw_comp_time in group_waits.values():
+                            # pyrefly: ignore [no-matching-overload]
                             gw_exposed_before = max(0, gw_comm_time - gw_comp_time)
+                            # pyrefly: ignore [no-matching-overload]
                             gw_exposed_after = max(
                                 0, gw_comm_time - gw_comp_time + c_runtime
                             )
@@ -1011,9 +1074,8 @@ def _reorder_communication_preserving_peak_memory_internal(
                     # Cj -> [...group_runtime..., Ci] -> Wj
                     # Checking that we are not increasing exposed time of Cj
                     if group_runtime > 0:
-                        comm_time, comp_time, _ = coll_exposed_communication_time(
-                            _group_nodes_from_linked_list(candidate, None, _next),
-                            runtimes,
+                        comm_time, comp_time, _ = _coll_exposed_communication_time(
+                            candidate, _next, runtimes, node_output_sets, node_dep_sets
                         )
                         # pyrefly: ignore[no-matching-overload]
                         exposed_before = max(0, comm_time - comp_time)
@@ -1027,6 +1089,11 @@ def _reorder_communication_preserving_peak_memory_internal(
                                 f" exposed_delta:{exposed_delta} c_comm_time:{comm_time} c_comp_time:{comp_time}"
                             )
                             break
+
+            # Create group nodes list once for swap operations
+            gns: list[BaseSchedulerNode] = _group_nodes_from_linked_list(
+                group_head, group_tail, _next
+            )
 
             candidate_allocfree: SNodeMemory = snodes_allocfree[candidate]
             candidate_delta_mem: int = (
@@ -1046,7 +1113,7 @@ def _reorder_communication_preserving_peak_memory_internal(
             # while before it was deallocated by group node.
             group_n_to_bufs_after_swap_dealloc_by_candidate = (
                 _find_buffers_with_changed_last_use(
-                    candidate, gns, buf_to_snode_last_use
+                    candidate, gns, buf_to_snode_last_use, candidate_buffer_map
                 )
             )
 
@@ -1065,7 +1132,6 @@ def _reorder_communication_preserving_peak_memory_internal(
 
             if (
                 potential_peak - peak_memory
-                # pyrefly: ignore[unbound-name]
                 > peak_memory * config_comms.reorder_iterative_peak_memory_budget
             ):
                 info.limiting_factor = (
@@ -1079,8 +1145,8 @@ def _reorder_communication_preserving_peak_memory_internal(
                 candidate, group_head, group_tail, _prev, _next, _head
             )
 
-            comm_time, comp_time, overlap_info = coll_exposed_communication_time(
-                _group_nodes_from_linked_list(curr, None, _next), runtimes
+            comm_time, comp_time, overlap_info = _coll_exposed_communication_time(
+                curr, _next, runtimes, node_output_sets, node_dep_sets
             )
             info.comm_time = comm_time
             info.comp_time = comp_time
@@ -1123,6 +1189,10 @@ def _reorder_communication_preserving_peak_memory_internal(
                     break
             candidate = _prev[group_head]
         curr = _next_curr
+
+    if not config_comms.reorder_sink_verbose_logging:
+        new_snodes = _group_nodes_from_linked_list(_head, None, _next)
+        return new_snodes, stats
 
     new_snodes = _format_and_log_reordering_stats(
         stats,
@@ -1264,7 +1334,8 @@ def _schedule_for_comm(
         to overlap with it. The strategy is described in the comment of
         `reorder_compute_for_overlap`.
         """
-        assert contains_collective(snode)
+        if not contains_collective(snode):
+            raise AssertionError("expected snode to contain a collective")
         schedule(snode)
 
         collective_cost = snode_to_cost[snode]
@@ -1287,9 +1358,10 @@ def _schedule_for_comm(
             schedule(snode)
 
     for deps in unmet_deps.values():
-        assert len(deps) == 0, (
-            f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
-        )
+        if len(deps) != 0:
+            raise AssertionError(
+                f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
+            )
     return scheduled
 
 
@@ -1337,7 +1409,7 @@ class SinkWaitInfo:
 
 def _is_node_groupable_for_sink_waits(
     candidate: BaseSchedulerNode,
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """
     Check if a candidate node can be grouped during sink_waits pass.
 
@@ -1360,7 +1432,6 @@ def _is_node_groupable_for_sink_waits(
             f"candidate contains_async_collective {candidate.get_name()}",
         )
 
-    # pyrefly: ignore[unbound-name]
     if not config_comms.sink_iterative_use_runtime_estimations:
         # Heuristics pre-use_runtime_estimations:
         # TODO(ivankobzarev): Remove them after confirming,
@@ -1506,8 +1577,8 @@ def _perform_double_linked_list_swap_sink_waits(
     candidate: BaseSchedulerNode,
     group_head: BaseSchedulerNode,
     group_tail: BaseSchedulerNode,
-    prev_dict: dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
-    next_dict: dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
+    prev_dict: dict[BaseSchedulerNode, BaseSchedulerNode | None],
+    next_dict: dict[BaseSchedulerNode, BaseSchedulerNode | None],
     head: BaseSchedulerNode,
 ) -> BaseSchedulerNode:
     """
@@ -1554,7 +1625,7 @@ def _perform_double_linked_list_swap_sink_waits(
 def _format_and_log_sink_waits_stats(
     stats: dict[BaseSchedulerNode, SinkWaitInfo],
     head: BaseSchedulerNode,
-    next_dict: dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
+    next_dict: dict[BaseSchedulerNode, BaseSchedulerNode | None],
     original_snodes_num: int,
     peak_memory: int,
     name_to_freeable_input_buf: dict,
@@ -1612,7 +1683,6 @@ def _format_and_log_sink_waits_stats(
     ]
     log_str = ""
     if importlib.util.find_spec("tabulate"):
-        # pyrefly: ignore[import-error]
         from tabulate import tabulate
 
         log_str += tabulate(
@@ -1625,7 +1695,10 @@ def _format_and_log_sink_waits_stats(
         log_str += "\n".join(map(str, rows))
     overlap_log.info(log_str)
     new_snodes = _group_nodes_from_linked_list(head, None, next_dict)
-    assert len(new_snodes) == original_snodes_num
+    if len(new_snodes) != original_snodes_num:
+        raise AssertionError(
+            f"expected {original_snodes_num} nodes, got {len(new_snodes)}"
+        )
     new_peak_memory, _, _, _ = estimate_peak_memory_allocfree(
         new_snodes, name_to_freeable_input_buf, graph_outputs
     )
@@ -1646,7 +1719,8 @@ def _find_buffers_with_changed_last_use_sink_waits(
     candidate: BaseSchedulerNode,
     gns: list[BaseSchedulerNode],
     buf_to_snode_last_use: dict,
-) -> dict[BaseSchedulerNode, list[Union[FreeableInputBuffer, Any]]]:
+    candidate_buffer_map: dict[BaseSchedulerNode, OrderedSet],
+) -> dict[BaseSchedulerNode, list[FreeableInputBuffer | Any]]:
     """
     Find buffers whose last use will change after swapping in sink_waits pass.
 
@@ -1658,25 +1732,32 @@ def _find_buffers_with_changed_last_use_sink_waits(
         candidate: The node being moved (currently last use)
         gns: Group nodes being swapped with candidate
         buf_to_snode_last_use: Mapping of buffers to their current last-use nodes
+        candidate_buffer_map: Pre-computed map of node -> buffers using that node
 
     Returns:
         Dict mapping group nodes to buffers that will change their last-use node
     """
     group_n_to_bufs_after_swap_dealloc_instead_of_candidate: dict[
-        BaseSchedulerNode, list[Union[FreeableInputBuffer, Any]]
+        BaseSchedulerNode, list[FreeableInputBuffer | Any]
     ] = defaultdict(list)
-    for (
-        buf,
-        snode_last_use,
-    ) in buf_to_snode_last_use.items():
-        succ_nodes = buf.mpi_buffer.succ_nodes
-        if snode_last_use != candidate:  # noqa: E711
+
+    # Optimization: only check buffers where candidate is a successor
+    # Reduces from O(all_buffers) to O(buffers_per_candidate)
+    candidate_bufs = candidate_buffer_map.get(candidate, OrderedSet())
+
+    for buf in candidate_bufs:
+        snode_last_use = buf_to_snode_last_use[buf]
+        if snode_last_use != candidate:
             continue
+
         # candidate is last use of buf
+        # Find last group node in successors (maintains order)
+        succ_nodes = buf.mpi_buffer.succ_nodes
         last_succ_gn = None
         for gn in gns:
             if gn in succ_nodes:
                 last_succ_gn = gn
+
         if last_succ_gn is None:
             continue
 
@@ -1692,8 +1773,6 @@ def _find_buffers_with_changed_last_use_sink_waits(
 def _sink_waits_iterative_internal(
     snodes: list[BaseSchedulerNode],
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, SinkWaitInfo]]:
-    from torch._inductor.scheduler import GroupedSchedulerNode
-
     original_snodes_num = len(snodes)
     if original_snodes_num == 0:
         return snodes, {}
@@ -1705,6 +1784,7 @@ def _sink_waits_iterative_internal(
         snodes_allocfree,
         buf_to_snode_last_use,
         name_to_freeable_input_buf,
+        candidate_buffer_map,
     ) = _initialize_memory_tracking(snodes, graph_inputs, graph_outputs)
 
     _prev, _next, _head = _initialize_double_linked_list(snodes)
@@ -1716,13 +1796,24 @@ def _sink_waits_iterative_internal(
         for snode in snodes
     }
 
-    curr: Optional[BaseSchedulerNode] = snodes[-1]
+    # Pre-compute output and dependency sets for O(1) lookup instead of O(N) creation per iteration
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(o.get_name() for o in snode.get_outputs()) for snode in snodes
+    }
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(
+            d.name for d in snode.unmet_dependencies if not _is_fake_dep(d)
+        )
+        for snode in snodes
+    }
+
+    curr: BaseSchedulerNode | None = snodes[-1]
 
     processed_waits = OrderedSet()  # type: ignore[var-annotated]
     debug_iterative_memory_recompute = (
         config_comms.reorder_iterative_debug_memory_recompute
     )
-    debug_num_sink_waits_to_reorder: Optional[int] = (
+    debug_num_sink_waits_to_reorder: int | None = (
         config_comms.sink_waits_iterative_debug_limit_to_sink
     )
 
@@ -1737,15 +1828,14 @@ def _sink_waits_iterative_internal(
         ):
             break
 
-        # pyrefly: ignore [bad-argument-type]
         if not (contains_wait(curr) and curr not in processed_waits):
             curr = _prev_curr
             continue
 
         processed_waits.add(curr)
         info = stats[curr] = SinkWaitInfo()
-        comm_time, comp_time, overlap_info = wait_exposed_communication_time(
-            _group_nodes_from_linked_list(_head, curr, _next), runtimes
+        comm_time, comp_time, overlap_info = _wait_exposed_communication_time(
+            curr, _head, _prev, runtimes, node_output_sets, node_dep_sets
         )
         info.initial_exposed = info.final_exposed = comm_time - comp_time
         info.comm_time = comm_time
@@ -1753,12 +1843,15 @@ def _sink_waits_iterative_internal(
         info.overlap_info = overlap_info
 
         candidate = _next[curr]
-        wait_snode = curr
         group_head = curr
         group_tail = curr
         group_colls = {}
         group_runtime = 0.0
         group_peak_memory = _curr_memory[curr][0]
+
+        # Track group outputs and check collective status incrementally - initialize from pre-computed set
+        group_output_names = OrderedSet(node_output_sets[curr])
+        group_contains_collective = contains_collective(curr)
 
         while candidate is not None:
             if config_comms.sink_iterative_use_runtime_estimations and (
@@ -1768,32 +1861,18 @@ def _sink_waits_iterative_internal(
                 info.limiting_factor = "unexposed by runtime estimations"
                 break
 
-            gns: list[BaseSchedulerNode] = _group_nodes_from_linked_list(
-                group_head, group_tail, _next
-            )
-            group = GroupedSchedulerNode(
-                wait_snode.scheduler,
-                gns,
-                temp_grouping=True,
-            )
+            # Early exit: if group has no outputs, candidate can't depend on it
+            if not group_output_names:
+                data_dep = False
+            else:
+                # Calculate candidate dependencies using pre-computed set
+                candidate_dep_names = node_dep_sets[candidate]
+                data_dep = bool(candidate_dep_names & group_output_names)
 
-            # We can have multiple deps with the same name.
-            # As we ignore WeakDep(is_fake=True) =>
-            # filter them out first to avoid overwriting  of real dep.
-            data_deps = {
-                d.name: d for d in candidate.unmet_dependencies if not _is_fake_dep(d)
-            }
-
-            group_outs = group.get_outputs()
-            data_dep = None
-            for o in group_outs:
-                if d := data_deps.get(o.get_name(), None):
-                    data_dep = d
-                    break
             # Conservative sink wait, limiting by space before next collective.
             # The global strategy is that bucketing should create space.
             # For 2D we can experiment with allowing to sink Wait beyond non current group collective.
-            # pyrefly: ignore[unbound-name]
+
             if not config_comms.sink_waits_iterative_swap_with_collectives:
                 if contains_async_collective(candidate):
                     info.limiting_factor = (
@@ -1803,24 +1882,28 @@ def _sink_waits_iterative_internal(
 
             # 1. If we have data_dep - we can not swap => trying to group
             # 2. If swap candidate and current node both contain collectives => trying to group
-            if data_dep is not None or (
-                both_contain_comms := (
-                    contains_collective(group) and contains_collective(candidate)
-                )
-            ):
+            both_contain_comms = group_contains_collective and contains_collective(
+                candidate
+            )
+            if data_dep or both_contain_comms:
                 _is_groupable, groupable_reason = _is_node_groupable_for_sink_waits(
                     candidate
                 )
                 if _is_groupable:
                     group_tail = candidate
+
+                    # Update incremental tracking using pre-computed set
+                    group_output_names.update(node_output_sets[candidate])
+                    group_contains_collective = (
+                        group_contains_collective or contains_collective(candidate)
+                    )
+
                     if (
-                        # pyrefly: ignore[unbound-name]
                         config_comms.sink_iterative_use_runtime_estimations
                         and contains_collective(candidate)
                     ):
-                        comm_time, comp_time, _ = coll_exposed_communication_time(
-                            _group_nodes_from_linked_list(candidate, None, _next),
-                            runtimes,
+                        comm_time, comp_time, _ = _coll_exposed_communication_time(
+                            candidate, _next, runtimes, node_output_sets, node_dep_sets
                         )
                         group_colls[candidate] = (comm_time, comp_time)
                         if not contains_async_collective(candidate):
@@ -1830,37 +1913,37 @@ def _sink_waits_iterative_internal(
                         group_peak_memory, _curr_memory[candidate][0]
                     )
                     info.grouped += 1
-                    info.grouped_info = _group_names(gns)
                     candidate = _next[candidate]
                     continue
-                elif data_dep is None:
+                elif not data_dep:
                     if (
-                        # pyrefly: ignore[unbound-name]
                         not config_comms.sink_waits_iterative_unsafe_collectives_reorder
                         and both_contain_comms
                     ):
                         info.limiting_factor = (
-                            f"collective ordering {_group_names(gns)}"
+                            f"collective ordering"
                             f"\n with candidate:{candidate.get_name()}"
                         )
                         break
                 else:
                     info.limiting_factor = (
-                        f"data dependency {data_dep}(dep_names:{list(data_deps.keys())})"
-                        f"\n candidate:{candidate.get_name()}(os:{[candidate.get_buffer_names()]})"
-                        f"\n dep on {_group_names(gns)}"
-                        f"\n outs:{[o.get_name() for o in group_outs]}"
+                        f"data dependency detected"
+                        f"\n candidate:{candidate.get_name()}"
                         f"\n non_group_reason:{groupable_reason}"
                     )
                     break
 
-            # pyrefly: ignore[unbound-name]
             if config_comms.sink_iterative_use_runtime_estimations:
                 if is_wait(candidate.node):
                     # Corresponding collective is before the group,
                     # Swap can increase exposed time of corresponding collective
-                    comm_time, comp_time, _ = wait_exposed_communication_time(
-                        _group_nodes_from_linked_list(_head, candidate, _next), runtimes
+                    comm_time, comp_time, _ = _wait_exposed_communication_time(
+                        candidate,
+                        _head,
+                        _prev,
+                        runtimes,
+                        node_output_sets,
+                        node_dep_sets,
                     )
                     # pyrefly: ignore[no-matching-overload]
                     exposed_before = max(0, comm_time - comp_time)
@@ -1883,18 +1966,21 @@ def _sink_waits_iterative_internal(
                     c_runtime = runtimes[candidate]
 
                     if c_runtime > 0 and len(group_colls) > 0:
-                        # Advantage for current Wait to do the Swap
                         # pyrefly: ignore[no-matching-overload]
-                        exposed_delta = max(
-                            0,
-                            info.comm_time - info.comp_time,
+                        exposed_before = max(0, info.comm_time - info.comp_time)
+                        # pyrefly: ignore[no-matching-overload]
+                        exposed_after = max(
+                            0, info.comm_time - info.comp_time - c_runtime
                         )
-                        # pyrefly: ignore[no-matching-overload]
-                        -max(0, info.comm_time - info.comp_time - c_runtime)
+                        exposed_delta = exposed_after - exposed_before
                         for gc_comm_time, gc_comp_time in group_colls.values():
-                            exposed_delta += max(0, gc_comm_time - gc_comp_time) - max(
+                            # pyrefly: ignore [no-matching-overload]
+                            gc_exposed_before = max(0, gc_comm_time - gc_comp_time)
+                            # pyrefly: ignore [no-matching-overload]
+                            gc_exposed_after = max(
                                 0, gc_comm_time - gc_comp_time + c_runtime
                             )
+                            exposed_delta += gc_exposed_after - gc_exposed_before
                         if exposed_delta > 0:
                             info.limiting_factor = (
                                 f"candidate has compute {c_runtime}, group contains collectives,"
@@ -1912,6 +1998,11 @@ def _sink_waits_iterative_internal(
                                     gc_comp_time - c_runtime,
                                 )
 
+            # Create group nodes list once for swap operations
+            gns: list[BaseSchedulerNode] = _group_nodes_from_linked_list(
+                group_head, group_tail, _next
+            )
+
             candidate_allocfree: SNodeMemory = snodes_allocfree[candidate]
             candidate_delta_mem = (
                 candidate_allocfree.size_alloc - candidate_allocfree.size_free
@@ -1924,7 +2015,7 @@ def _sink_waits_iterative_internal(
             # but after swap it will be deallocated by group node.
             group_n_to_bufs_after_swap_dealloc_instead_of_candidate = (
                 _find_buffers_with_changed_last_use_sink_waits(
-                    candidate, gns, buf_to_snode_last_use
+                    candidate, gns, buf_to_snode_last_use, candidate_buffer_map
                 )
             )
 
@@ -1943,7 +2034,6 @@ def _sink_waits_iterative_internal(
             )
             if (
                 potential_peak - peak_memory
-                # pyrefly: ignore[unbound-name]
                 > peak_memory * config_comms.sink_iterative_peak_memory_budget
             ):
                 info.limiting_factor = (
@@ -1958,8 +2048,8 @@ def _sink_waits_iterative_internal(
                 candidate, group_head, group_tail, _prev, _next, _head
             )
 
-            comm_time, comp_time, overlap_info = wait_exposed_communication_time(
-                _group_nodes_from_linked_list(_head, curr, _next), runtimes
+            comm_time, comp_time, overlap_info = _wait_exposed_communication_time(
+                curr, _head, _prev, runtimes, node_output_sets, node_dep_sets
             )
             info.comm_time = comm_time
             info.comp_time = comp_time
@@ -1999,6 +2089,10 @@ def _sink_waits_iterative_internal(
 
             candidate = _next[group_tail]
         curr = _prev_curr
+
+    if not config_comms.reorder_sink_verbose_logging:
+        new_snodes = _group_nodes_from_linked_list(_head, None, _next)
+        return new_snodes, stats
 
     new_snodes = _format_and_log_sink_waits_stats(
         stats,
@@ -2046,7 +2140,8 @@ def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
     if config.estimate_op_runtime == "default":
         runtime = snode.get_estimated_runtime()
     else:
-        assert callable(config.estimate_op_runtime)
+        if not callable(config.estimate_op_runtime):
+            raise AssertionError("expected config.estimate_op_runtime to be callable")
         runtime = config.estimate_op_runtime(snode)
     return runtime
 
@@ -2090,7 +2185,7 @@ def visualize_overlap(order):
     cur_comm_node = None
 
     def step_log(step, msg):
-        overlap_log.debug(f"{step:>6}: {msg}")  # noqa: G004
+        overlap_log.debug(f"{step:>6}: {msg}")
 
     for step, snode in enumerate(order):
         if cur_comm_node is None:
@@ -2109,544 +2204,27 @@ def visualize_overlap(order):
             if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
-                step_log(step, f"{node_summary(snode)}")  # noqa: G004
+                step_log(step, f"{node_summary(snode)}")
             elif is_wait(snode.node):  # end of this comm op
                 step_log(step, f"{node_summary(snode)}")
                 cur_comm_node = None
             else:  # overlapped compute op
                 step_log(step, f"| {node_summary(snode)}")
-    overlap_log.debug(
-        f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}"  # noqa: G004
-    )
+    overlap_log.debug(f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}")
 
 
 def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
 ) -> list[BaseSchedulerNode]:
     order = snodes
-    graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
-    graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+    # pyrefly: ignore [bad-assignment]
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
-        assert callable(p), (
-            f"Invalid reorder_compute_and_comm_for_overlap pass: {p} is not callable"
-        )
-        peak_memory, _ = estimate_peak_memory(
-            snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
-        )
-        if torch.distributed.get_rank() == 0:
-            overlap_log.debug(
-                f"==== Visualize overlap before reordering pass {p}, {peak_memory=} ===="  # noqa: G004
+        if not callable(p):
+            raise AssertionError(
+                f"Invalid reorder_compute_and_comm_for_overlap pass: {p} is not callable"
             )
-            try:
-                visualize_overlap(order)
-            except Exception as e:
-                overlap_log.debug("", exc_info=e)
-        t0 = time.time()
         order = p(order)  # type: ignore[operator]
-        t = time.time() - t0
-        if torch.distributed.get_rank() == 0:
-            overlap_log.debug(
-                f"==== Visualize overlap after reordering pass {p} (ran in {t} sec)===="  # noqa: G004
-            )
-            try:
-                visualize_overlap(order)
-            except Exception as e:
-                overlap_log.debug("", exc_info=e)
-        peak_memory, _ = estimate_peak_memory(
-            snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
-        )
-        print(f"final {peak_memory=}")
     # pyrefly: ignore [bad-return]
     return order
-
-
-def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
-    """
-    This FX graph pass replaces uses of FSDP2 unsharded params with their corresponding
-    graph intermediates that were fsdp.copy_ into the unsharded params in the original graph.
-
-    NOTE: Can only apply this pass to any of the FSDP2 unsharded params that have this pattern
-    (or repetition of): `resize_(full) -> copy_ -> resize_(0)`. Because of this, for partial-graph case
-    where `resize_(full) -> copy_` is in one graph and `resize_(0)` is in another graph, we can't
-    remove these resize and copy ops and thus we will have worse performance there.
-
-    In other words, "do we try to remove all the resize_(full) -> copy_ -> resize_(0) nodes for this unsharded param"
-    is actually a per-unsharded-param decision, since for each unsharded param, we look at its resize sequence pattern
-    (in `check_resize_pattern()`) to determine if its set of resize and copy nodes can be removed.
-    """
-    node_list = list(graph.nodes)
-
-    # Find all graph inputs and their resize counts
-    graph_input_to_resized_to_full_node_idxes = defaultdict(list)
-    graph_input_to_resized_to_0_node_idxes = defaultdict(list)
-    for idx, node in enumerate(node_list):
-        if (
-            node.op == "call_function"
-            and node.target is torch.ops.inductor.resize_storage_bytes_.default
-        ):
-            assert node.args[0].op == "placeholder", f"""\
-Resize can only operate on graph inputs, but got {node} which is resizing non-graph-input {node.args[0]}
-"""
-            graph_input = node.args[0]
-            new_size = node.args[1]
-            if new_size > 0:
-                graph_input_to_resized_to_full_node_idxes[graph_input].append(idx)
-            else:
-                graph_input_to_resized_to_0_node_idxes[graph_input].append(idx)
-
-    def check_resize_pattern(graph_input):
-        # Check the number of resize-to-full and resize-to-0 nodes are equal,
-        # and that for each (resize-to-full, resize-to-0) pair, the resize-to-full node
-        # always happens before the resize-to-0 node.
-        # This is the precondition for being able to remove all the resize and copy nodes
-        # for this specific unsharded param.
-        resized_to_full_idxes = graph_input_to_resized_to_full_node_idxes.get(
-            graph_input, []
-        )
-        resized_to_0_idxes = graph_input_to_resized_to_0_node_idxes.get(graph_input, [])
-
-        if len(resized_to_full_idxes) != len(resized_to_0_idxes):
-            log.warning(
-                f"""
-Unequal number of resize-to-full and resize-to-0 nodes for graph input {graph_input}:
-{len(resized_to_full_idxes)} vs. {len(resized_to_0_idxes)}.
-Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass.
-"""  # noqa: G004
-            )
-            return False
-
-        # Check the sequence: (resize_to_full -> resize_to_0)+
-        for resize_to_full_idx, resize_to_0_idx in zip(
-            resized_to_full_idxes, resized_to_0_idxes
-        ):
-            if resize_to_full_idx >= resize_to_0_idx:
-                log.warning(
-                    f"""
-For graph input {graph_input}: resize-to-full node {node_list[resize_to_full_idx]} at index {resize_to_full_idx}
-happens after resize-to-0 node {node_list[resize_to_0_idx]} at index {resize_to_0_idx}.
-Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for that unsharded param.
-"""  # noqa: G004
-                )
-                return False
-        return True
-
-    # Find all eligible unsharded params and their corresponding graph intermediates.
-    unsharded_param_to_fsdp_copy_node_idxes = defaultdict(list)
-    for idx, node in enumerate(node_list):
-        if node.op == "call_function" and node.target is torch.ops.fsdp.copy_.default:
-            fsdp_copy_node = node
-            unsharded_param = node.args[0]
-            assert unsharded_param.op == "placeholder", f"""
-Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!
-Offending node: {unsharded_param}. Graph: {graph}
-"""
-            if check_resize_pattern(unsharded_param):
-                unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
-
-    def is_allowed_mutation(node):
-        return (
-            node.target is torch.ops.fsdp.copy_.default
-            or node.target is torch.ops.inductor.resize_storage_bytes_.default
-        )
-
-    def is_node_mutating_unsharded_param_or_its_alias(node, unsharded_params):
-        # Check whether the node is mutating any of the unsharded params or their aliases.
-        mutated_arg_idxes = (
-            [
-                i
-                for i, x in enumerate(node.target._schema.arguments)
-                if x.alias_info is not None and x.alias_info.is_write
-            ]
-            if isinstance(node.target, torch._ops.OpOverload)
-            else []
-        )
-        mutated_node_arg_storages = OrderedSet(
-            [
-                StorageWeakRef(node.args[i].meta["val"].untyped_storage())
-                for i in mutated_arg_idxes
-            ]
-        )
-        storages_of_unsharded_params = OrderedSet(
-            [
-                StorageWeakRef(unsharded_param.meta["val"].untyped_storage())
-                for unsharded_param in unsharded_params
-            ]
-        )
-        return len(mutated_node_arg_storages & storages_of_unsharded_params) > 0
-
-    # Check no user mutation on any unsharded_param
-    for node in node_list:
-        if (
-            node.op == "call_function"
-            and isinstance(node.target, torch._ops.OpOverload)
-            and node.target._schema.is_mutable
-            and not is_allowed_mutation(node)
-        ):
-            assert not is_node_mutating_unsharded_param_or_its_alias(
-                node, unsharded_param_to_fsdp_copy_node_idxes.keys()
-            ), f"""\
-User mutation on FSDP2 unsharded param is not allowed when Traceable FSDP2 is used. Violating node: {node}
-"""
-
-    # For each `fsdp.copy_(unsharded_param, Y)`, replace downstream usage of `unsharded_param` with `Y`.
-    #
-    # NOTE: Because of "layer reuse" use case, there could be multiple `fsdp.copy_` to the same `unsharded_param` graph input.
-    # e.g.
-    # ```
-    #     fsdp_copy_1 = fsdp.copy_(unsharded_param_1, Y1)
-    #     ... (use of unsharded_param_1)                     -> Subgraph 1
-    #     fsdp_copy_2 = fsdp.copy_(unsharded_param_1, Y2)
-    #     ... (use of unsharded_param_1)                     -> Subgraph 2
-    #     fsdp_copy_3 = fsdp.copy_(unsharded_param_1, Y3)
-    #     ... (use of unsharded_param_1)                     -> Subgraph 3
-    # ```
-    # We must do the replacement only within each subgraph.
-    for (
-        unsharded_param,
-        fsdp_copy_node_idxes,
-    ) in unsharded_param_to_fsdp_copy_node_idxes.items():
-        for i, fsdp_copy_node_idx in enumerate(fsdp_copy_node_idxes):
-            fsdp_copy_node = node_list[fsdp_copy_node_idx]
-            assert fsdp_copy_node.args[0] is unsharded_param
-            _, replacement = fsdp_copy_node.args
-            # subgraph_start_idx is exclusive
-            subgraph_start_idx = fsdp_copy_node_idx + 1
-            # subgraph_end_idx is exclusive (also intentionally don't replace args in return op)
-            subgraph_end_idx = (
-                fsdp_copy_node_idxes[i + 1]
-                if i < len(fsdp_copy_node_idxes) - 1
-                else len(node_list) - 1
-            )
-            subgraph_nodes = node_list[subgraph_start_idx:subgraph_end_idx]
-            assert not any(
-                is_node_mutating_unsharded_param_or_its_alias(node, [unsharded_param])
-                for node in subgraph_nodes
-            ), f"""\
-Assumed no ops mutating unsharded param {unsharded_param} in subgraph {subgraph_nodes}, but it's not true!
-Graph: {graph}
-"""
-            for node in subgraph_nodes:
-                if (
-                    node.op == "call_function"
-                    and unsharded_param in node.args
-                    and node.target != torch.ops.inductor.resize_storage_bytes_.default
-                ):  # TODO(yf225): implement replacement in kwargs
-                    new_args = tuple(
-                        replacement if arg is unsharded_param else arg
-                        for arg in node.args
-                    )
-                    node.args = new_args
-
-    # Delete `fsdp.copy_(unsharded_param, Y)` nodes
-    for fsdp_copy_node_idxes in unsharded_param_to_fsdp_copy_node_idxes.values():
-        for fsdp_copy_node_idx in fsdp_copy_node_idxes:
-            fsdp_copy_node = node_list[fsdp_copy_node_idx]
-            graph.erase_node(fsdp_copy_node)
-
-    # Delete `resize_(unsharded_param, ...)` nodes
-    for node in node_list:
-        if (
-            node.op == "call_function"
-            and node.target is torch.ops.inductor.resize_storage_bytes_.default
-            and node.args[0] in unsharded_param_to_fsdp_copy_node_idxes
-        ):
-            graph.erase_node(node)
-
-
-def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
-    try:
-        import torch.distributed.fsdp._fully_shard._fsdp_collectives
-
-        assert torch.distributed.is_available()
-        # Assert existence of these ops
-        assert (
-            torch.ops._c10d_functional.all_gather_into_tensor
-            and torch.ops._c10d_functional.all_gather_into_tensor_out
-        )
-    except (ImportError, AttributeError, AssertionError):
-        return
-
-    from .pattern_matcher import (
-        CallFunction,
-        KeywordArg,
-        Match,
-        PatternMatcherPass,
-        register_graph_pattern,
-    )
-
-    """
-    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(...);
-    getitem = all_gather_copy_in[0];
-    (getitem_1 = all_gather_copy_in[1];)  # optional
-
-    all_gather_into_tensor = torch.ops._c10d_functional.all_gather_into_tensor.default(getitem, ...);
-
-    ->
-
-    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(...);
-    getitem = all_gather_copy_in[0];
-    getitem_1 = all_gather_copy_in[1];
-
-    all_gather_into_tensor = torch.ops._c10d_functional.all_gather_into_tensor_out.default(getitem, ..., out=getitem_1);
-    """
-
-    def remove_unused_getitem(g):
-        # Remove `getitem_X = all_gather_copy_in[1]` which is never used.
-        node_list = list(g.nodes)
-        for n in node_list:
-            if (
-                n.target is operator.getitem
-                and n.args[0].target is torch.ops.fsdp.all_gather_copy_in.default
-                and n.args[1] == 1
-            ):
-                g.erase_node(n)
-
-    graph_pass = PatternMatcherPass()
-
-    @register_graph_pattern(
-        CallFunction(
-            torch.ops._c10d_functional.all_gather_into_tensor.default,
-            CallFunction(
-                operator.getitem,
-                CallFunction(
-                    torch.ops.fsdp.all_gather_copy_in.default,
-                    KeywordArg("all_gather_inputs"),
-                    KeywordArg("all_gather_output"),
-                    KeywordArg("inp_split_sizes"),
-                    KeywordArg("all_gather_input_numel"),
-                    KeywordArg("rank"),
-                ),
-                KeywordArg("item_idx"),
-            ),
-            KeywordArg("group_size"),
-            KeywordArg("group_name"),
-        ),
-        # pyrefly: ignore [bad-argument-type]
-        pass_dict=graph_pass,
-        extra_check=lambda match: match.kwargs["item_idx"] == 0,
-    )
-    def reinplace_all_gather(match: Match, *args, **kwargs):
-        def repl(
-            *args,
-        ):
-            copy_in_args = args[:-2]
-            group_size = args[-2]
-            group_name = args[-1]
-            all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(
-                *copy_in_args
-            )
-            getitem = all_gather_copy_in[0]
-            getitem_1 = all_gather_copy_in[1]
-            all_gather_into_tensor = (
-                torch.ops._c10d_functional.all_gather_into_tensor_out.default(
-                    getitem, group_size, group_name, out=getitem_1
-                )
-            )
-            return all_gather_into_tensor
-
-        match.replace_by_example(
-            # pyrefly: ignore [bad-argument-type]
-            repl,
-            [
-                kwargs["all_gather_inputs"],
-                kwargs["all_gather_output"],
-                kwargs["inp_split_sizes"],
-                kwargs["all_gather_input_numel"],
-                kwargs["rank"],
-                kwargs["group_size"],
-                kwargs["group_name"],
-            ],
-        )
-
-    remove_unused_getitem(graph)
-    graph_pass.apply(graph)  # type: ignore[arg-type]
-
-
-def get_op_idx(snode):
-    assert not isinstance(
-        snode,
-        (
-            torch._inductor.scheduler.FusedSchedulerNode,
-            torch._inductor.scheduler.GroupedSchedulerNode,
-        ),
-    )
-    return int(snode.get_name()[2:])
-
-
-def enforce_comm_ordering_for_fsdp(
-    snodes: list[torch._inductor.scheduler.BaseSchedulerNode],
-    name_to_buf: dict[str, torch._inductor.scheduler.SchedulerBuffer],
-    name_to_fused_node: dict[str, BaseSchedulerNode],
-) -> list[torch._inductor.scheduler.BaseSchedulerNode]:
-    from . import scheduler
-
-    new_order: list[BaseSchedulerNode] = []
-    scheduled = OrderedSet[Any]()
-    ag_exists = False
-    rs_exists = False
-    ag_grouped_node_to_wait_grouped_node = {}
-    rs_grouped_node_to_wait_grouped_node = {}
-    snode_name_to_final_snode = {}
-
-    def _create_group_node(snodes_to_group):
-        group_node = scheduler.GroupedSchedulerNode.create(snodes_to_group)
-        for snode in snodes_to_group:
-            snode_name_to_final_snode[snode.get_name()] = group_node
-        snode_name_to_final_snode[group_node.get_name()] = group_node
-        return group_node
-
-    # Create grouped nodes for specific sets of ops
-    for snode in snodes:
-        # Case 1: Handle AllGather
-        if is_collective(
-            snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor_out.default
-        ) and any(
-            is_fallback_op(
-                name_to_fused_node[x].node, torch.ops.fsdp.all_gather_copy_in.default
-            )
-            for x in snode.ancestors
-        ):
-            ag_exists = True
-            ag_snode = snode
-            ag_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
-
-            # Find the "cast + copy_in + getitem + all_gather" code block
-            find_recursive_deps_of_node(
-                ag_snode,
-                ag_related_snode_set,
-                name_to_buf,
-                name_to_fused_node,
-            )
-
-            # Find the "all_gather + all_gather_wait_tensor + copy_out" code block
-            allowed_ops = OrderedSet(
-                [
-                    torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-                    torch.ops._c10d_functional.wait_tensor.default,
-                    torch.ops.fsdp.split_with_sizes_copy.default,
-                ]
-            )
-            find_recursive_users_of_node(
-                ag_snode,
-                ag_related_snode_set,
-                name_to_buf,
-                name_to_fused_node,
-                criteria_cb=lambda x: not (
-                    isinstance(x, scheduler.NopKernelSchedulerNode)
-                    or (
-                        isinstance(x, scheduler.ExternKernelSchedulerNode)
-                        and x.node.op_overload in allowed_ops  # type: ignore[union-attr]
-                    )
-                ),
-            )
-
-            # sort nodes by original operation order
-            ag_related_snodes = sorted(
-                ag_related_snode_set, key=lambda x: get_op_idx(x)
-            )
-
-            # In the "reuse layer" case, some ops in the 2nd all-gather code block could also
-            # depend on ops in the 1st all-gather code block, and we don't want to group them together.
-            end_idx_of_current_ag_block = len(ag_related_snodes)
-            copy_out_count = 0
-            for i in range(len(ag_related_snodes)):
-                cur_snode = ag_related_snodes[i]
-                if is_fallback_op(
-                    cur_snode.node, torch.ops.fsdp.split_with_sizes_copy.default
-                ):
-                    copy_out_count += 1
-                if copy_out_count > 1:
-                    end_idx_of_current_ag_block = i
-                    break
-
-            ag_related_snodes = ag_related_snodes[:end_idx_of_current_ag_block]
-
-            # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
-            wait_node_idx = None
-            for i in range(len(ag_related_snodes) - 1):
-                if isinstance(ag_related_snodes[i + 1].node, ir._WaitKernel):
-                    wait_node_idx = i + 1
-                    break
-            assert wait_node_idx is not None
-            ag_group_node = _create_group_node(ag_related_snodes[:wait_node_idx])
-
-            # Group "all_gather_wait_tensor + copy_out" into one GroupedSchedulerNode
-            ag_wait_group_node = _create_group_node(ag_related_snodes[wait_node_idx:])
-
-            ag_grouped_node_to_wait_grouped_node[ag_group_node] = ag_wait_group_node
-
-        # Case 2: Handle ReduceScatter
-        elif is_fallback_op(snode.node, torch.ops.fsdp.chunk_cat.default):
-            rs_exists = True
-            rs_snode = snode
-
-            # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
-            rs_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
-            find_recursive_users_of_node(
-                rs_snode,
-                rs_related_snode_set,
-                name_to_buf,
-                name_to_fused_node,
-            )
-
-            # sort nodes by original operation order
-            rs_related_snodes = sorted(
-                rs_related_snode_set, key=lambda x: get_op_idx(x)
-            )
-
-            # Group "reduce_scatter copy-in + reduce_scatter comm" into one GroupedSchedulerNode
-            wait_node_idx = None
-            for i in range(len(rs_related_snodes) - 1):
-                if isinstance(rs_related_snodes[i + 1].node, ir._WaitKernel):
-                    wait_node_idx = i + 1
-                    break
-            assert wait_node_idx is not None
-            rs_group_node = _create_group_node(rs_related_snodes[:wait_node_idx])
-
-            # Group "reduce_scatter wait + related output nodes" into one GroupedSchedulerNode
-            rs_wait_group_node = _create_group_node(rs_related_snodes[wait_node_idx:])
-
-            rs_grouped_node_to_wait_grouped_node[rs_group_node] = rs_wait_group_node
-
-    assert len(snode_name_to_final_snode) > 0
-    if ag_exists:
-        assert len(ag_grouped_node_to_wait_grouped_node) > 0
-    if rs_exists:
-        assert len(rs_grouped_node_to_wait_grouped_node) > 0
-
-    # Build the new node schedule, taking GroupedSchedulerNode into account
-    for snode in snodes:
-        if snode.get_name() in snode_name_to_final_snode:
-            snode = snode_name_to_final_snode[snode.get_name()]
-        if snode in scheduled:
-            continue
-        new_order.append(snode)
-        scheduled.add(snode)
-
-    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
-    # before next AllGather's "copy_in then AG" group node
-    prev_ag_wait = None
-    for ag_group_node, wait_group_node in ag_grouped_node_to_wait_grouped_node.items():
-        if prev_ag_wait is not None:
-            mutating_buf = next(iter(ag_group_node.get_buffer_names()))
-            for o in prev_ag_wait.get_outputs():
-                ag_group_node.add_fake_dep(
-                    WeakDep(o.get_name(), mutating_buf=mutating_buf, is_fake=True)
-                )
-        prev_ag_wait = wait_group_node
-
-    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
-    # before next ReduceScatter's "copy_in then RS" group node
-    prev_rs_wait = None
-    for rs_group_node, wait_group_node in rs_grouped_node_to_wait_grouped_node.items():
-        if prev_rs_wait is not None:
-            mutating_buf = next(iter(rs_group_node.get_buffer_names()))
-            for o in prev_rs_wait.get_outputs():
-                rs_group_node.add_fake_dep(
-                    WeakDep(o.get_name(), mutating_buf=mutating_buf, is_fake=True)
-                )
-        prev_rs_wait = wait_group_node
-
-    return new_order  # type: ignore[return-value]

@@ -39,7 +39,8 @@ def _convert_to_int(val):
 
 
 def _convert_range_to_int(range: ValueRanges):
-    assert isinstance(range, ValueRanges)
+    if not isinstance(range, ValueRanges):
+        raise AssertionError(f"expected ValueRanges, got {type(range)}")
     min_val = _convert_to_int(range.lower)
     max_val = _convert_to_int(range.upper)
     return min_val, max_val
@@ -147,10 +148,8 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(PassBase):
 
                                 def sym_size_cb(node, assert_msg, dim):
                                     with node.graph.inserting_after(node):
-                                        dim_node = module.graph.call_function(
-                                            torch.ops.aten.sym_size.int,
-                                            (node, dim),
-                                            {},
+                                        dim_node = module.graph.create_size_node(  # type: ignore[union-attr]
+                                            node, dim
                                         )
                                     cb(node=dim_node, assert_msg=assert_msg)
 

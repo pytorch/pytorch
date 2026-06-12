@@ -14,6 +14,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/copy_utils.h>
 
+#include <c10/util/ScopeExit.h>
 #include <c10/util/intrusive_ptr.h>
 #include <fmt/format.h>
 
@@ -102,8 +103,7 @@ static PyObject* THPStorage_copy_(
 
   at::storage_copy(self_, src, non_blocking);
 
-  Py_INCREF(self);
-  return self;
+  return Py_NewRef(self);
 
   END_HANDLE_TH_ERRORS
 }
@@ -162,6 +162,62 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
   } else {
     at::native::resize_bytes_nocuda(storage, newsize);
   }
+  return Py_NewRef(self);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_resize_with_addr_(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+  const auto& storage = THPStorage_Unpack(self);
+  // See Note [Invalid Python Storages]
+  auto invalid = storage.data() == nullptr &&
+      storage.device_type() != c10::DeviceType::Meta &&
+      storage.sym_nbytes() != 0;
+  TORCH_CHECK(
+      !invalid,
+      "Attempted to call _resize_with_addr_() on an invalid python storage.")
+  Py_ssize_t nargs = PyTuple_GET_SIZE(args);
+  TORCH_CHECK(
+      nargs == 2, "_resize_with_addr_ expects 2 arguments, got ", nargs);
+  PyObject* number_arg = PyTuple_GET_ITEM(args, 0);
+  TORCH_CHECK(
+      THPUtils_checkLong(number_arg),
+      "_resize_with_addr_ expects an int size, "
+      "but got ",
+      THPUtils_typename(number_arg));
+  c10::DeviceType device_type = storage.device_type();
+  if (device_type == at::kCUDA) {
+#ifdef USE_CUDA
+    int64_t newsize = THPUtils_unpackLong(number_arg);
+    PyObject* addr_arg = PyTuple_GET_ITEM(args, 1);
+    TORCH_CHECK(
+        THPUtils_checkLong(addr_arg),
+        "_resize_with_addr_ expects an int addr, "
+        "but got ",
+        THPUtils_typename(addr_arg));
+    void* addr = PyLong_AsVoidPtr(addr_arg);
+    if (addr == nullptr && PyErr_Occurred()) {
+      throw python_error();
+    }
+    ptrdiff_t size_bytes_i = newsize;
+    TORCH_CHECK(
+        !c10::overflows<size_t>(size_bytes_i),
+        "Requested storage size (",
+        size_bytes_i,
+        ") cannot be represented as a size_t");
+    const auto size_bytes = static_cast<size_t>(size_bytes_i);
+    at::native::resize_bytes_cuda_with_addr(
+        storage.unsafeGetStorageImpl(), size_bytes, addr);
+#else
+    TORCH_CHECK(false, "built without USE_CUDA");
+#endif
+  } else {
+    TORCH_CHECK(
+        false,
+        "_resize_with_addr_ is only supported on CUDA storage, got ",
+        storage.device_type());
+  }
   Py_INCREF(self);
   return self;
   END_HANDLE_TH_ERRORS
@@ -183,8 +239,7 @@ static PyObject* THPStorage_fill_(PyObject* self, PyObject* number_arg) {
       "but got ",
       THPUtils_typename(number_arg));
   storage_fill(storage, THPByteUtils_unpackReal(number_arg));
-  Py_INCREF(self);
-  return self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -267,6 +322,8 @@ static PyObject* THPStorage_fromBuffer(
 
   if (PyObject_GetBuffer(obj, &buffer, PyBUF_SIMPLE) < 0)
     return nullptr;
+  auto buffer_guard =
+      c10::make_scope_exit([&buffer]() { PyBuffer_Release(&buffer); });
 
   if (offset < 0 || offset > buffer.len) {
     PyErr_SetString(
@@ -275,7 +332,6 @@ static PyObject* THPStorage_fromBuffer(
             "offset must be non-negative and no greater than buffer length ({}) , but got {}",
             offset,
             buffer.len));
-    PyBuffer_Release(&buffer);
     return nullptr;
   }
 
@@ -288,7 +344,6 @@ static PyObject* THPStorage_fromBuffer(
               "buffer size ({}) must be a multiple of element size ({})",
               buffer.len,
               element_size));
-      PyBuffer_Release(&buffer);
       return nullptr;
     }
     size_bytes = buffer.len - offset;
@@ -305,7 +360,6 @@ static PyObject* THPStorage_fromBuffer(
             buffer.len - offset,
             offset,
             count));
-    PyBuffer_Release(&buffer);
     return nullptr;
   }
 
@@ -349,7 +403,6 @@ static PyObject* THPStorage_fromBuffer(
     }
   }
 
-  PyBuffer_Release(&buffer);
   return THPStorage_Wrap(storage);
   END_HANDLE_TH_ERRORS
 }
@@ -405,12 +458,13 @@ static PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   TORCH_CHECK(
       !invalid, "Attempted to call _write_file() on an invalid python storage.")
   PyObject* file = PyTuple_GetItem(args, 0);
-  bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
-  bool save_size = PyTuple_GetItem(args, 2) == Py_True;
+  bool is_real_file = Py_IsTrue(PyTuple_GetItem(args, 1));
+  bool save_size = Py_IsTrue(PyTuple_GetItem(args, 2));
   PyObject* element_size_obj = PyTuple_GET_ITEM(args, 3);
 
   TORCH_CHECK(
-      element_size_obj != Py_None, "_write_file: need to specify element size");
+      !Py_IsNone(element_size_obj),
+      "_write_file: need to specify element size");
   uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
 
   if (!is_real_file) {
@@ -441,7 +495,7 @@ static PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
       "descriptor from given object");
   PyObject* element_size_obj = PyTuple_GET_ITEM(args, 1);
   TORCH_CHECK(
-      element_size_obj != Py_None,
+      !Py_IsNone(element_size_obj),
       "_new_with_file: need to specify element size");
   uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
 
@@ -458,12 +512,12 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   const auto& storage = THPStorage_Unpack(self);
   PyObject* file = PyTuple_GET_ITEM(args, 0);
   PyObject* offset = PyTuple_GET_ITEM(args, 1);
-  bool is_real_file = PyTuple_GET_ITEM(args, 2) == Py_True;
+  bool is_real_file = Py_IsTrue(PyTuple_GET_ITEM(args, 2));
 
   PyObject* element_size_obj = PyTuple_GET_ITEM(args, 3);
 
   TORCH_CHECK(
-      element_size_obj != Py_None,
+      !Py_IsNone(element_size_obj),
       "_set_from_file: need to specify element size");
   uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
 
@@ -471,7 +525,7 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
     // offset can be implemented with a call to the Python object's seek()
     // but it is currently unnecessary to support this.
     TORCH_CHECK(
-        offset == Py_None,
+        Py_IsNone(offset),
         "_set_from_file: offset is NYI for filelike objects");
 
     auto self_storage_impl = c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(
@@ -481,14 +535,13 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
     if (!storage_impl.defined()) {
       return nullptr;
     }
-    Py_INCREF(self);
-    return self;
+    return Py_NewRef(self);
   }
 
   // file is backed by a fd
   const int fd = PyObject_AsFileDescriptor(file);
   const auto fd_original_pos = LSEEK(fd, 0, SEEK_CUR);
-  if (offset != Py_None) {
+  if (!Py_IsNone(offset)) {
     LSEEK(fd, THPUtils_unpackLong(offset), SEEK_SET);
   }
   TORCH_CHECK(
@@ -501,21 +554,48 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
       THPStorage_readFileRaw<int>(fd, self_storage_impl, element_size);
   if (!storage_impl.defined())
     return nullptr;
-  Py_INCREF(self);
 
   // the file descriptor is returned to original position and
   // the file handle at python call-site needs updating to the
   // advanced position
-  const auto fd_current_pos = LSEEK(fd, 0, SEEK_CUR);
+  const long long fd_current_pos = LSEEK(fd, 0, SEEK_CUR);
   LSEEK(fd, fd_original_pos, SEEK_SET);
-  const auto seek_return = PyObject_CallMethod(
-      file, "seek", "Li", static_cast<long long>(fd_current_pos), 0);
+  THPObjectPtr seek_return(
+      PyObject_CallMethod(file, "seek", "Li", fd_current_pos, 0));
   if (seek_return == nullptr) {
     return nullptr;
   }
-  Py_DECREF(seek_return);
 
-  return self;
+  return Py_NewRef(self);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_swapDataPtr(PyObject* self, PyObject* other) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+  TORCH_CHECK(
+      THPStorage_Check(other),
+      "_swap_data_ptr_ expects an UntypedStorage, but got ",
+      THPUtils_typename(other));
+  THPStorage_assertNotNull(other);
+  auto& self_storage = THPStorage_Unpack(self);
+  auto& other_storage = THPStorage_Unpack(other);
+  TORCH_CHECK(
+      self_storage.device() == other_storage.device(),
+      "_swap_data_ptr_: storages must be on the same device, got ",
+      self_storage.device(),
+      " and ",
+      other_storage.device());
+  size_t self_nbytes = self_storage.nbytes();
+  size_t other_nbytes = other_storage.nbytes();
+  TORCH_CHECK(
+      self_nbytes == other_nbytes || self_nbytes == 0 || other_nbytes == 0,
+      "_swap_data_ptr_: storages must have the same nbytes or one must have 0, got ",
+      self_nbytes,
+      " and ",
+      other_nbytes);
+  self_storage.swap_data_ptr(const_cast<c10::Storage&>(other_storage));
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -531,8 +611,7 @@ static PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
       static_cast<c10::StorageImpl*>(PyLong_AsVoidPtr(new_cdata));
   self->cdata =
       c10::Storage(c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(ptr));
-  Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -613,6 +692,7 @@ static PyMethodDef THPStorage_methods[] = {
     {"fill_", THPStorage_fill_, METH_O, nullptr},
     {"new", THPStorage_new, METH_NOARGS, nullptr},
     {"resize_", THPStorage_resize_, METH_O, nullptr},
+    {"_resize_with_addr_", THPStorage_resize_with_addr_, METH_VARARGS, nullptr},
     {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
     {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
     {"resizable", THPStorage_resizable, METH_NOARGS, nullptr},
@@ -630,6 +710,7 @@ static PyMethodDef THPStorage_methods[] = {
      castPyCFunctionWithKeywords(THPStorage_fromFile),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
+    {"_swap_data_ptr_", THPStorage_swapDataPtr, METH_O, nullptr},
     {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},
     {"_byteswap", THPStorage_byteswap, METH_VARARGS, nullptr},
     {"_fix_weakref", THPStorage_fix_weakref, METH_NOARGS, nullptr},

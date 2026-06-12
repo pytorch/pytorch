@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -50,9 +49,9 @@ class Geometric(Distribution):
 
     def __init__(
         self,
-        probs: Optional[Union[Tensor, Number]] = None,
-        logits: Optional[Union[Tensor, Number]] = None,
-        validate_args: Optional[bool] = None,
+        probs: Tensor | Number | None = None,
+        logits: Tensor | Number | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
@@ -62,14 +61,16 @@ class Geometric(Distribution):
             # pyrefly: ignore [read-only]
             (self.probs,) = broadcast_all(probs)
         else:
-            assert logits is not None  # helps mypy
+            if logits is None:
+                raise AssertionError("logits is unexpectedly None")
             # pyrefly: ignore [read-only]
             (self.logits,) = broadcast_all(logits)
         probs_or_logits = probs if probs is not None else logits
         if isinstance(probs_or_logits, _Number):
             batch_shape = torch.Size()
         else:
-            assert probs_or_logits is not None  # helps mypy
+            if probs_or_logits is None:
+                raise AssertionError("probs_or_logits is unexpectedly None")
             batch_shape = probs_or_logits.size()
         super().__init__(batch_shape, validate_args=validate_args)
         if self._validate_args and probs is not None:

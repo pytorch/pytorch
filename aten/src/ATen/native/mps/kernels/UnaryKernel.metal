@@ -28,9 +28,17 @@ inline T exp_(const T x) {
 
 template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
 inline T exp_(const T x) {
+  auto ex = precise::exp(x.x);
+  // y == 0: avoid inf*0 / nan*0 = NaN in imag (matches C99 cexp).
+  if (x.y == 0) {
+    return T(ex, 0);
+  }
+  // Metal lacks a half sincos; do it in float (free for float complex, more
+  // accurate for half complex).
+  float c;
+  float s = precise::sincos(static_cast<float>(x.y), c);
   return T(
-      precise::exp(x.x) * precise::cos(x.y),
-      precise::exp(x.x) * precise::sin(x.y));
+      ex * static_cast<decltype(ex)>(c), ex * static_cast<decltype(ex)>(s));
 }
 
 struct exp_functor {
@@ -59,10 +67,17 @@ struct expm1_functor {
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
+    // y == 0: same rationale as exp_ short-circuit above.
+    if (x.y == 0) {
+      return T(c10::metal::expm1f(x.x), 0);
+    }
     if (::precise::sqrt(dot(x, x)) < 1e-2) {
+      float c;
+      float s = precise::sincos(static_cast<float>(x.y), c);
+      using elem_t = decltype(x.x + x.x); // unwrapped value type
       return T(
-          c10::metal::expm1f(x.x + ::precise::log(precise::cos(x.y))),
-          exp_(x.x) * precise::sin(x.y));
+          c10::metal::expm1f(x.x + ::precise::log(static_cast<elem_t>(c))),
+          exp_(x.x) * static_cast<elem_t>(s));
     } else {
       return exp_(x) - T(1.0f, 0.0f);
     }
@@ -91,7 +106,8 @@ struct abs_functor {
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
-    return T(::precise::sqrt(dot(x, x)), 0);
+    const auto abs_2 = ::precise::abs(float2(x));
+    return T(c10::metal::hypot(abs_2.x, abs_2.y));
   }
 };
 
@@ -106,12 +122,13 @@ struct sin_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // sin(x+yi)=sin(x)cosh(y)+icos(x)sinh(y);
-    auto sin_x = precise::sin(x.x);
-    auto cosh_y = precise::cosh(x.y);
-    auto cos_x = precise::cos(x.x);
-    auto sinh_y = precise::sinh(x.y);
-    return T(sin_x * cosh_y, cos_x * sinh_y);
+    // sin(x+yi)=sin(x)cosh(y)+icos(x)sinh(y); float sincos covers half too.
+    float cos_x;
+    float sin_x = precise::sincos(static_cast<float>(x.x), cos_x);
+    using elem_t = decltype(x.x + x.x);
+    return T(
+        static_cast<elem_t>(sin_x) * precise::cosh(x.y),
+        static_cast<elem_t>(cos_x) * precise::sinh(x.y));
   }
 };
 
@@ -126,12 +143,13 @@ struct cos_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // cos(x+yi)=cos(x)cosh(y)-isin(x)sinh(y);
-    auto sin_x = precise::sin(x.x);
-    auto cosh_y = precise::cosh(x.y);
-    auto cos_x = precise::cos(x.x);
-    auto sinh_y = precise::sinh(x.y);
-    return T(cos_x * cosh_y, -1 * sin_x * sinh_y);
+    // cos(x+yi)=cos(x)cosh(y)-isin(x)sinh(y); float sincos covers half too.
+    float cos_x;
+    float sin_x = precise::sincos(static_cast<float>(x.x), cos_x);
+    using elem_t = decltype(x.x + x.x);
+    return T(
+        static_cast<elem_t>(cos_x) * precise::cosh(x.y),
+        -static_cast<elem_t>(sin_x) * precise::sinh(x.y));
   }
 };
 
@@ -164,14 +182,8 @@ struct sinh_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // sinh(x) = (e^x - e^(-x)) / 2
-    auto exp_1 =
-        T(precise::exp(x.x) * precise::cos(x.y),
-          precise::exp(x.x) * precise::sin(x.y));
-    auto exp_2 =
-        T(precise::exp(-x.x) * precise::cos(-x.y),
-          precise::exp(-x.x) * precise::sin(-x.y));
-    return div(exp_1 - exp_2, T(2, 0));
+    // sinh(x) = (e^x - e^(-x)) / 2; delegate to exp_ to inherit y==0 fix.
+    return div(exp_(x) - exp_(T(-x.x, -x.y)), T(2, 0));
   }
 };
 
@@ -186,14 +198,8 @@ struct cosh_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // cosh(x+iy)=(e^x + e^(-x)) / 2
-    auto exp_1 =
-        T(precise::exp(x.x) * precise::cos(x.y),
-          precise::exp(x.x) * precise::sin(x.y));
-    auto exp_2 =
-        T(precise::exp(-x.x) * precise::cos(-x.y),
-          precise::exp(-x.x) * precise::sin(-x.y));
-    return div(exp_1 + exp_2, T(2, 0));
+    // cosh(x+iy) = (e^x + e^(-x)) / 2; delegate to exp_ to inherit y==0 fix.
+    return div(exp_(x) + exp_(T(-x.x, -x.y)), T(2, 0));
   }
 };
 
@@ -367,9 +373,10 @@ struct log10_functor {
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // Base 10 complex log = ln(x+yi)/ln(10)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return div(T(real, imag), T(::precise::log(10), 0));
+    auto real = ::precise::log10(magnitude);
+    auto imag =
+        (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG10E_F;
+    return T(real, imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -394,7 +401,7 @@ struct log1p_functor {
     return T(real, imag);
   }
   inline float operator()(const bool x) {
-    return x ? ::precise::log(2.0) : 0;
+    return x ? M_LN2_F : 0;
   }
 };
 
@@ -409,14 +416,75 @@ struct log2_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // Base 10 complex log = ln(x+yi)/ln(2)
+    // Base 2 complex log = ln(x+yi)/ln(2)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return div(T(real, imag), T(::precise::log(2), 0));
+    auto real = ::precise::log2(magnitude);
+    auto imag =
+        (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG2E_F;
+    return T(real, imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
+  }
+};
+
+struct lgamma_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return static_cast<T>(c10::metal::log_gamma(static_cast<float>(x)));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return c10::metal::log_gamma(static_cast<float>(x));
+  }
+  inline float operator()(const bool x) {
+    return x ? 0 : INFINITY;
+  }
+};
+
+struct digamma_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return static_cast<T>(c10::metal::digamma(static_cast<float>(x)));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return c10::metal::digamma(static_cast<float>(x));
+  }
+  inline float operator()(const bool x) {
+    return c10::metal::digamma(static_cast<float>(x));
+  }
+};
+
+struct trigamma_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return static_cast<T>(c10::metal::trigamma(static_cast<float>(x)));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return c10::metal::trigamma(static_cast<float>(x));
+  }
+  inline float operator()(const bool x) {
+    return c10::metal::trigamma(static_cast<float>(x));
+  }
+};
+
+struct polygamma_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(
+      const T x,
+      const int order) {
+    return static_cast<T>(c10::metal::polygamma(order, static_cast<float>(x)));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(
+      const T x,
+      const int order) {
+    return c10::metal::polygamma(order, static_cast<float>(x));
+  }
+  inline float operator()(const bool x, const int order) {
+    return c10::metal::polygamma(order, static_cast<float>(x));
   }
 };
 
@@ -432,11 +500,16 @@ struct exp2_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // based on https://mathworld.wolfram.com/ComplexExponentiation.html
-    auto coef = ::precise::pow(4, x.x / 2);
-    auto ln = ::precise::log(4);
-    auto real = ::precise::cos(0.5 * x.y * ln);
-    auto imag = ::precise::sin(0.5 * x.y * ln);
-    return T(coef * real, coef * imag);
+    auto coef = ::precise::pow(2, x.x);
+    // y == 0: same rationale as exp_ short-circuit (avoid coef*0 = NaN).
+    if (x.y == 0) {
+      return T(coef, 0);
+    }
+    float real;
+    float imag = ::precise::sincos(static_cast<float>(x.y) * M_LN2_F, real);
+    using elem_t = decltype(x.x + x.x);
+    return T(
+        coef * static_cast<elem_t>(real), coef * static_cast<elem_t>(imag));
   }
 };
 
@@ -459,6 +532,28 @@ struct sqrt_functor {
     auto imag_part = copysign(
         static_cast<decltype(x.y)>(precise::sqrt((m - x.x) * .5)), x.y);
     return T(real_part, imag_part);
+  }
+};
+
+struct sqr_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    return c10::metal::mul(x, x);
+  }
+};
+
+struct reciprocal_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(1.0 / float(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return 1.0 / float(x);
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return c10::metal::div(T(1, 0), x);
   }
 };
 
@@ -513,6 +608,13 @@ struct round_decimals_functor {
   }
 };
 
+struct pow_scalar_functor {
+  template <typename T, typename U>
+  inline T operator()(const T x, const U y) {
+    return static_cast<T>(::c10::metal::pow(x, y));
+  }
+};
+
 struct round_functor {
   template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
@@ -526,6 +628,7 @@ struct round_functor {
 
 DEFINE_UNARY_FLOATING_FUNCTOR(erf);
 DEFINE_UNARY_FLOATING_FUNCTOR(erfc);
+DEFINE_UNARY_FLOATING_FUNCTOR(erfcx);
 DEFINE_UNARY_FLOATING_FUNCTOR(erfinv);
 DEFINE_UNARY_FLOATING_FUNCTOR(sinc);
 
@@ -543,6 +646,17 @@ REGISTER_UNARY_OP(round, char, char);
 REGISTER_UNARY_OP(round, uchar, uchar);
 REGISTER_UNARY_OP(round, float, float);
 REGISTER_UNARY_OP(round, half, half);
+
+REGISTER_UNARY_OP(sqr, char, char);
+REGISTER_UNARY_OP(sqr, uchar, uchar);
+REGISTER_UNARY_OP(sqr, short, short);
+REGISTER_UNARY_OP(sqr, int, int);
+REGISTER_UNARY_OP(sqr, long, long);
+REGISTER_UNARY_OP(sqr, float, float);
+REGISTER_UNARY_OP(sqr, bfloat, bfloat);
+REGISTER_UNARY_OP(sqr, half, half);
+REGISTER_UNARY_OP(sqr, float2, float2);
+REGISTER_UNARY_OP(sqr, half2, half2);
 
 REGISTER_UNARY_OP(bitwise_not, int, int);
 REGISTER_UNARY_OP(bitwise_not, long, long);
@@ -563,6 +677,7 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(angle, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(erf, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(erfc, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(erfcx, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
   REGISTER_UNARY_OP(exp, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(expm1, DTYPE1, DTYPE0);        \
@@ -572,8 +687,12 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(log10, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(log1p, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(log2, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(lgamma, DTYPE1, DTYPE0);       \
+  REGISTER_UNARY_OP(digamma, DTYPE1, DTYPE0);      \
+  REGISTER_UNARY_OP(trigamma, DTYPE1, DTYPE0);     \
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(reciprocal, DTYPE1, DTYPE0);   \
   REGISTER_UNARY_OP(rsqrt, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(sinh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(cosh, DTYPE1, DTYPE0);         \
@@ -598,30 +717,31 @@ INSTANTIATE_UNARY_KERNELS2(float, short);
 INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
 
-#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)     \
-  REGISTER_UNARY_OP(angle, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(expm1, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(sigmoid, DTYPE##2, DTYPE##2); \
-  REGISTER_UNARY_OP(abs, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(log, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(log1p, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(sinh, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(cosh, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2);   \
-                                                  \
-  REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(asin, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(acos, DTYPE##2, DTYPE##2);    \
+#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)        \
+  REGISTER_UNARY_OP(angle, DTYPE##2, DTYPE##2);      \
+  REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(expm1, DTYPE##2, DTYPE##2);      \
+  REGISTER_UNARY_OP(sigmoid, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(abs, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(log, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2);      \
+  REGISTER_UNARY_OP(log1p, DTYPE##2, DTYPE##2);      \
+  REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(sinh, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(cosh, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(reciprocal, DTYPE##2, DTYPE##2); \
+  REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2);      \
+                                                     \
+  REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(asin, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(acos, DTYPE##2, DTYPE##2);       \
   REGISTER_UNARY_OP(atan, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);
@@ -630,3 +750,24 @@ INSTANTIATE_UNARY_KERNELS_VEC2(float);
 REGISTER_UNARY_ALPHA_OP(round_decimals, float, long, float);
 REGISTER_UNARY_ALPHA_OP(round_decimals, half, long, half);
 REGISTER_UNARY_ALPHA_OP(round_decimals, bfloat, long, bfloat);
+
+REGISTER_UNARY_ALPHA_OP(pow_scalar, float2, float2, float2);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, half2, float2, half2);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, float, float, float);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, half, float, half);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, bfloat, float, bfloat);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, uchar, int, uchar);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, char, int, char);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, short, int, short);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, int, int, int);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, long, int, long);
+
+REGISTER_UNARY_ALPHA_OP(polygamma, bfloat, int, bfloat);
+REGISTER_UNARY_ALPHA_OP(polygamma, half, int, half);
+REGISTER_UNARY_ALPHA_OP(polygamma, float, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, bool, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, uchar, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, char, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, short, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, int, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, long, int, float);

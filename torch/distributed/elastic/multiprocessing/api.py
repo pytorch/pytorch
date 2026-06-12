@@ -38,7 +38,7 @@ from torch.distributed.elastic.multiprocessing.subprocess_handler import (
     SubprocessHandler,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
-from torch.numa.binding import maybe_wrap_with_numa_binding, NumaOptions
+from torch.numa.binding import _maybe_wrap_with_numa_binding, NumaOptions
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -89,7 +89,7 @@ def _terminate_process_handler(signum: int, frame: FrameType | None) -> None:
 def _get_kill_signal() -> signal.Signals:
     """Get the kill signal. SIGKILL for unix, CTRL_C_EVENT for windows."""
     if IS_WINDOWS:
-        return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
+        return signal.CTRL_C_EVENT  # type: ignore[attr-defined]
     else:
         return signal.SIGKILL
 
@@ -97,7 +97,7 @@ def _get_kill_signal() -> signal.Signals:
 def _get_default_signal() -> signal.Signals:
     """Get the default termination signal. SIGTERM for unix, CTRL_C_EVENT for windows."""
     if IS_WINDOWS:
-        return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
+        return signal.CTRL_C_EVENT  # type: ignore[attr-defined]
     else:
         return signal.SIGTERM
 
@@ -382,6 +382,7 @@ class DefaultLogsSpecs(LogsSpecs):
                         stderrs[local_rank] = os.devnull
 
                 error_file = os.path.join(clogdir, "error.json")
+                # pyrefly: ignore [unsupported-operation]
                 error_files[local_rank] = error_file
                 logger.info(
                     "Setting worker%s reply file to: %s", local_rank, error_file
@@ -393,6 +394,7 @@ class DefaultLogsSpecs(LogsSpecs):
             stderrs,
             tee_stdouts,
             tee_stderrs,
+            # pyrefly: ignore [bad-argument-type]
             error_files,
             os.path.join(attempt_log_dir, "filtered_stdout.log"),
             os.path.join(attempt_log_dir, "filtered_stderr.log"),
@@ -698,7 +700,7 @@ def _wrap(
         os.environ[k] = v
 
     with stdout_cm, stderr_cm:
-        fn = maybe_wrap_with_numa_binding(
+        fn = _maybe_wrap_with_numa_binding(
             fn, gpu_index=local_rank, numa_options=numa_options
         )
         ret = record(fn)(*args_)
@@ -777,7 +779,8 @@ class MultiprocessContext(PContext):
         return len(self._return_values) == self.nprocs
 
     def _poll(self) -> RunProcsResult | None:
-        assert self._pc is not None  # assertion for mypy type checker
+        if self._pc is None:
+            raise AssertionError  # assertion for mypy type checker
 
         try:
             # torch.mp.ProcessContext Throws an Exception if some/all of
@@ -836,7 +839,7 @@ class MultiprocessContext(PContext):
                 " of fn: %s (start_method: %s)",
                 failed_proc.exitcode,
                 failed_local_rank,
-                e.pid,
+                e.error_pid,
                 fn_name,
                 self.start_method,
             )
@@ -846,7 +849,7 @@ class MultiprocessContext(PContext):
                 failures={
                     failed_local_rank: ProcessFailure(
                         local_rank=failed_local_rank,
-                        pid=e.pid,
+                        pid=e.error_pid,
                         exitcode=failed_proc.exitcode,
                         error_file=error_filepath,
                     )
@@ -856,7 +859,8 @@ class MultiprocessContext(PContext):
             )
 
     def pids(self) -> dict[int, int]:
-        assert self._pc is not None  # assertion for mypy type checking
+        if self._pc is None:
+            raise AssertionError  # assertion for mypy type checking
         return dict(enumerate(self._pc.pids()))
 
     def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
@@ -893,7 +897,21 @@ class MultiprocessContext(PContext):
                     # If the process exited because of some reason,
                     # `ProcessLookupError` will be raised, it is safe to ignore it.
                     pass
-            proc.join()
+            # Bounded join: a process stuck in uninterruptible kernel sleep
+            # (Linux D-state, common with hung NCCL/GPU collectives) cannot
+            # be reaped by SIGKILL. Without a timeout the agent itself would
+            # wedge here and the supervising launcher could never exit.
+            proc.join(timeout)
+            if proc.is_alive():
+                logger.error(
+                    "Process %s did not exit after %s within %ss;"
+                    " abandoning and continuing teardown."
+                    " Worker may be in uninterruptible kernel sleep"
+                    " (e.g. wedged on GPU/NIC); host may need to be recycled.",
+                    proc.pid,
+                    _get_kill_signal().name,
+                    timeout,
+                )
 
 
 class SubprocessContext(PContext):
@@ -1033,4 +1051,20 @@ class SubprocessContext(PContext):
                     _get_kill_signal(),
                 )
                 handler.close(death_sig=_get_kill_signal())
-                handler.proc.wait()
+                # Bounded wait: a process stuck in uninterruptible kernel sleep
+                # (Linux D-state, common with hung NCCL/GPU collectives) cannot
+                # be reaped by SIGKILL. Without a timeout the agent itself would
+                # wedge here and the supervising launcher could never exit.
+                try:
+                    handler.proc.wait(timeout)
+                except subprocess.TimeoutExpired:
+                    logger.error(
+                        "Process %s did not exit after %s within %ss;"
+                        " abandoning and continuing teardown."
+                        " Worker may be in uninterruptible kernel sleep"
+                        " (e.g. wedged on GPU/NIC);"
+                        " host may need to be recycled.",
+                        handler.proc.pid,
+                        _get_kill_signal().name,
+                        timeout,
+                    )

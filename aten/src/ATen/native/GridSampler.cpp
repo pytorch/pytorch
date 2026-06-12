@@ -28,6 +28,8 @@
 #include <ATen/ops/grid_sampler_3d_native.h>
 #include <ATen/ops/grid_sampler_native.h>
 #include <ATen/ops/zeros_like.h>
+
+#include <algorithm>
 #endif
 
 namespace at::native {
@@ -224,7 +226,7 @@ namespace {
     auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     if (grid.numel() == 0 || input.numel() == 0) {
       grad_grid.zero_();
-      return std::make_tuple(grad_input, grad_grid);
+      return std::make_tuple(std::move(grad_input), std::move(grad_grid));
     }
     // If interpolation mode is Nearest, then grad_grid is not filled in the
     // loop below.
@@ -438,7 +440,7 @@ namespace {
         }
       }
     });
-    return std::make_tuple(grad_input, grad_grid);
+    return std::make_tuple(std::move(grad_input), std::move(grad_grid));
   }
 
 }  // namespace
@@ -727,7 +729,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (grid.numel() == 0 || input.numel() == 0) {
     grad_grid.zero_();
-    return std::make_tuple(grad_input, grad_grid);
+    return std::make_tuple(std::move(grad_input), std::move(grad_grid));
   }
   // If interpolation mode is Nearest, then grad_grid is not filled in the
   // loop below.
@@ -912,7 +914,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
       }
     }
   });
-  return std::make_tuple(grad_input, grad_grid);
+  return std::make_tuple(std::move(grad_input), std::move(grad_grid));
 }
 
 Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
@@ -991,10 +993,10 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
     const auto grid_sW = grid.strides()[2];
     // NOTE: Gather offsets are only used for the height and width dimensions
     auto max_gather_offset = std::max(
-      std::max(
+      {
         (isizes[2] - 1) * istrides[2] + (isizes[3] - 1) * istrides[3],
-        (gsizes[2] - 1) * gstrides[2] + (gsizes[3] - 1) * gstrides[3]),
-      grid_sW * (vec::Vectorized<float>::size() - 1));
+        (gsizes[2] - 1) * gstrides[2] + (gsizes[3] - 1) * gstrides[3],
+      grid_sW * (vec::Vectorized<float>::size() - 1)});
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return native::_grid_sampler_2d_cpu_fallback_backward(

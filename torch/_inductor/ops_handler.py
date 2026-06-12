@@ -6,16 +6,7 @@ import itertools
 import re
 import warnings
 from io import StringIO
-from typing import (
-    Any,
-    Generic,
-    Literal,
-    NamedTuple,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Generic, Literal, NamedTuple, TYPE_CHECKING, TypeVar
 from unittest.mock import patch
 
 import sympy
@@ -32,10 +23,24 @@ if TYPE_CHECKING:
 
 
 T = TypeVar("T")
-StoreMode = Optional[Literal["atomic_add", "tma"]]
+AtomicMode = Literal[
+    "atomic_add",
+    "atomic_max",
+    "atomic_min",
+    "atomic_and",
+    "atomic_or",
+    "atomic_xor",
+    "atomic_cas",
+    "atomic_xchg",
+]
+StoreMode = AtomicMode | Literal["tma"] | None
 ReductionType = Literal[
     "argmax",
     "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
     "welford_reduce",
     "welford_combine",
     "any",
@@ -85,7 +90,7 @@ class OpsHandler(Generic[T]):
     all the metaprogramming has run.
     """
 
-    def constant(self, value: Union[bool, float, int], dtype: torch.dtype) -> T:
+    def constant(self, value: bool | float | int, dtype: torch.dtype) -> T:
         """Produces a scalar constant of type dtype."""
         raise NotImplementedError
 
@@ -95,6 +100,12 @@ class OpsHandler(Generic[T]):
 
     def rand(self, seed: T, offset: T) -> T:
         """Computes inductor_prims.random with mode="rand".  offset has dtype int32."""
+        raise NotImplementedError
+
+    def rand_eager(
+        self, seed: T, base_offset: T, threads_per_round: T, tid: T, vec: T
+    ) -> T:
+        """Computes inductor_prims.random with mode="rand_eager".  offset has dtype int32."""
         raise NotImplementedError
 
     def randn(self, seed: T, offset: T) -> T:
@@ -127,9 +138,21 @@ class OpsHandler(Generic[T]):
 
     def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
         """
-        Converts a sympy expression into a scalar of type dtype.  expr is typically
-        an indexing expression, thus the name; however, it can also be used in
-        non-indexing situations.
+        Converts a sympy expression into a scalar suitable for indexing memory.
+        The kernel decides the actual computation dtype (typically int32) — the
+        ``dtype`` argument is advisory and is not honored when it would conflict
+        with the kernel's indexing dtype. For values that must respect the
+        requested dtype, use ``value_expr`` instead.
+        """
+        raise NotImplementedError
+
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
+        """
+        Converts a sympy expression into a scalar of type ``dtype`` that
+        participates in tensor value computation. Unlike ``index_expr``, the
+        result dtype is respected, so this is the right op when the user
+        explicitly requested the dtype (e.g. ``arange(dtype=torch.int64)``
+        whose result is added to a tensor rather than used as an index).
         """
         raise NotImplementedError
 
@@ -137,7 +160,7 @@ class OpsHandler(Generic[T]):
         self,
         x: T,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,
     ) -> T:
         """
@@ -241,7 +264,7 @@ class OpsHandler(Generic[T]):
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
         value: T,
-    ) -> Union[T, tuple[T, ...]]:
+    ) -> T | tuple[T, ...]:
         """
         Perform a 'reduction_type' reduction on 'value' of dtype 'src_dtype',
         using 'dtype' as the accumulation dtype for the reduction.  The result
@@ -295,8 +318,8 @@ class OpsHandler(Generic[T]):
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
-        sorter_indices: Optional[T] = None,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: T | None = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
         raise NotImplementedError
@@ -396,6 +419,9 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     def log2(self, x0: T) -> T:
+        raise NotImplementedError
+
+    def ldexp(self, x0: T, n: T) -> T:
         raise NotImplementedError
 
     def nextafter(self, x0: T, x1: T) -> T:
@@ -563,6 +589,10 @@ class OpsHandler(Generic[T]):
     def fma(self, x: T, y: T, z: T) -> T:
         raise NotImplementedError
 
+    def mul_rn(self, x: T, y: T) -> T:
+        """Multiplication with round-to-nearest, preventing fusion with subsequent ops."""
+        raise NotImplementedError
+
     def igamma(self, x: T, y: T) -> T:
         raise NotImplementedError
 
@@ -682,6 +712,11 @@ class OpsHandler(Generic[T]):
         do Python-style (int, int) -> float division, use int_truediv"""
         raise NotImplementedError
 
+    def div_rn(self, x0: T, x1: T) -> T:
+        """Division with round-to-nearest rounding mode.  Used for matching
+        eager CUDA semantics where division uses IEEE round-to-nearest."""
+        raise NotImplementedError
+
     def int_truediv(self, x0: T, x1: T) -> T:
         """True division between integers.  This is NOT the same as promoting
         to float and doing integer division, there is a bespoke algorithm for
@@ -718,10 +753,11 @@ class OpsHandler(Generic[T]):
         self,
         *inputs: T,
         asm: str,
-        constraints: Optional[str] = None,
+        constraints: str | None = None,
         dtype: torch.dtype = torch.float32,
         is_pure: bool = True,
         pack: int = 1,
+        input_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> T:
         raise NotImplementedError
 
@@ -800,7 +836,10 @@ class DefaultHandler(OpsHandler[Any]):
                 for p in sig.parameters.values()
             ):
                 self_arg, *args = sig.parameters.keys()
-                assert self_arg == "self"
+                if self_arg != "self":
+                    raise AssertionError(
+                        f"expected first parameter 'self', got {self_arg!r}"
+                    )
                 code.write(
                     f"""
                     def {target}(self, {", ".join(args)}):
@@ -833,6 +872,7 @@ class NoopHandler(DefaultHandler):
         return None
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x) -> tuple[None, None]:
         return (None, None)
 
@@ -845,6 +885,7 @@ class NoopHandler(DefaultHandler):
         return (None,) * len(values)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy.S.Zero
 
@@ -942,6 +983,7 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x):
         return (f"ops.frexp({x})[0]", f"ops.frexp({x})[1]")
 
@@ -960,6 +1002,7 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
 
@@ -1017,8 +1060,8 @@ class KernelFormatterHandler(DefaultHandler):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[str, tuple[str, ...]],
-    ) -> Union[str, tuple[str, ...]]:
+        value: str | tuple[str, ...],
+    ) -> str | tuple[str, ...]:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
@@ -1106,8 +1149,8 @@ class OpCounterCSE(DefaultHandler):
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
-        sorter_indices: Optional[T] = None,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: T | None = None,
     ) -> T:
         """
         See [Note: Inductor bucketize op]
@@ -1135,7 +1178,7 @@ class OpCounterCSE(DefaultHandler):
 
 
 class ExtractConstantsHandler(NoopHandler):
-    def __init__(self, device: Optional[torch.device]):
+    def __init__(self, device: torch.device | None):
         self.device = device
 
     def constant(self, value: Any, dtype: torch.dtype) -> torch._inductor.ir.Constant:
@@ -1155,7 +1198,7 @@ class SimpleCSEHandler(WrapperHandler):
 
     def __init__(self, inner: Any):
         super().__init__(inner)
-        self.cse_cache: dict[str, Union[Any, tuple[Any, ...]]] = {}
+        self.cse_cache: dict[str, Any | tuple[Any, ...]] = {}
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:

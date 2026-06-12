@@ -71,8 +71,7 @@
 //  - Things that happen in TensorArg
 //    - Check arguments (type, GPU, shape)
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // ---------------------------------------------------------------------
 //
@@ -633,7 +632,8 @@ std::tuple<at::Tensor, at::Tensor> cudnn_convolution_backward(
     }
   }
 
-  return std::tuple<Tensor, Tensor>{grad_input, grad_weight};
+  return std::tuple<Tensor, Tensor>{
+      std::move(grad_input), std::move(grad_weight)};
 }
 
 Tensor cudnn_convolution_transpose_backward_weight(
@@ -703,7 +703,8 @@ std::tuple<at::Tensor, at::Tensor> cudnn_convolution_transpose_backward(
         allow_tf32);
   }
 
-  return std::tuple<Tensor, Tensor>{grad_input, grad_weight};
+  return std::tuple<Tensor, Tensor>{
+      std::move(grad_input), std::move(grad_weight)};
 }
 
 Tensor cudnn_convolution_relu(
@@ -825,7 +826,6 @@ REGISTER_CUDA_DISPATCH(
     cudnn_convolution_transpose_backward_stub,
     &cudnn_convolution_transpose_backward)
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED

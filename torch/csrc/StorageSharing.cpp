@@ -20,6 +20,7 @@
 #include <torch/csrc/StorageSharing.h>
 
 #ifdef USE_CUDA
+#include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -43,8 +44,7 @@ static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
       ctx->decref();
     }
   }
-  Py_INCREF(self);
-  return self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -297,17 +297,13 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   at::DeviceGuard device_guard(storage.device());
   THPObjectPtr tuple(PyTuple_New(8));
   THPObjectPtr device(THPUtils_packInt32(storage.device().index()));
-  THPObjectPtr _handle(Py_None);
-  Py_INCREF(Py_None);
+  THPObjectPtr _handle(Py_NewRef(Py_None));
   THPObjectPtr size_bytes(THPUtils_packUInt64(storage.nbytes()));
   THPObjectPtr _offset_bytes(THPUtils_packInt32(0));
-  THPObjectPtr _ref_counter(Py_None);
-  Py_INCREF(Py_None);
+  THPObjectPtr _ref_counter(Py_NewRef(Py_None));
   THPObjectPtr _ref_counter_offset(THPUtils_packInt32(0));
-  THPObjectPtr _event_handle(Py_None);
-  Py_INCREF(Py_None);
-  THPObjectPtr _event_sync_required(Py_None);
-  Py_INCREF(Py_None);
+  THPObjectPtr _event_handle(Py_NewRef(Py_None));
+  THPObjectPtr _event_sync_required(Py_NewRef(Py_None));
   if (storage.data()) {
     auto shandle =
         c10::cuda::CUDACachingAllocator::shareIpcHandle(storage.mutable_data());
@@ -397,7 +393,7 @@ static PyObject* THPStorage_releaseIPCCounter(
         sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
         nullptr);
     *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
-  } catch (c10::Error& err) {
+  } catch (c10::Error&) {
     // Already warned inside of producer process
   }
   Py_RETURN_NONE;
@@ -463,10 +459,8 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     }
     auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
         s_ipc_event_handle.c_str());
-    cudaEvent_t event = nullptr;
-    C10_CUDA_CHECK(cudaIpcOpenEventHandle(&event, *ipc_event_handle));
-    C10_CUDA_CHECK(
-        cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
+    at::cuda::CUDAEvent event(device, ipc_event_handle);
+    event.block(c10::cuda::getCurrentCUDAStream(device));
   }
 
   std::string s_handle = THPStorage_bytesAsHandleString(_handle);
@@ -538,7 +532,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
               sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
               nullptr);
           *(static_cast<int64_t*>(sptr.get()) + ctx->ref_counter_offset) -= 1;
-        } catch (c10::Error& err) {
+        } catch (c10::Error&) {
           // Already warned inside of producer process
         }
       },
@@ -589,7 +583,7 @@ static PyObject* THPStorage_newWithWeakPtr(PyObject* _unused, PyObject* arg) {
 
 static PyObject* THPStorage_freeWeakRef(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (arg == Py_None) {
+  if (Py_IsNone(arg)) {
     Py_RETURN_NONE;
   }
   TORCH_CHECK(
@@ -628,7 +622,7 @@ static PyObject* THPStorage_sharedFd(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
   const auto& storage = THPStorage_Unpack(self);
-  if (storage.device_type() == at::kCUDA) {
+  if (storage.device_type() != at::kCPU && storage.device_type() != at::kMeta) {
     Py_RETURN_TRUE;
   }
   if (at::MapAllocator::fromDataPtr(storage.data_ptr()) ||

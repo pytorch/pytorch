@@ -173,7 +173,7 @@ std::shared_ptr<Graph> ToONNX(
         operator_export_type,
         env,
         values_in_env);
-  } catch (std::runtime_error& ex) {
+  } catch (std::runtime_error&) {
     ONNX_LOG(
         "ONNX graph being constructed during exception:\n",
         new_graph->toString());
@@ -431,7 +431,7 @@ void NodeToONNX(
   auto processSymbolicOutput = [&](const std::string& op_name,
                                    Node* n,
                                    const py::object& raw_output) {
-    if (raw_output.ptr() == Py_None) {
+    if (Py_IsNone(raw_output.ptr())) {
       cloneNode(n);
       return;
     }
@@ -443,7 +443,7 @@ void NodeToONNX(
       } else {
         outputs = py::cast<std::vector<Value*>>(raw_output);
       }
-    } catch (const std::exception& ex) {
+    } catch (const std::exception&) {
       std::ostringstream ss;
       ss << "Error casting results of symbolic for " << op_name
          << ": expected to return list of op nodes, instead received type ''"

@@ -227,6 +227,202 @@ kernel, the decorator will search your system paths for the NVSHMEM device
 library. If it is available, Triton will include the necessary device assembly
 to use the NVSHMEM functions.
 
+## Using Memory Pool
+
+Memory pool allows PyTorch SymmMem to cache memory allocations that have been
+rendezvoused, saving time when creating new tensors.  For convenience, PyTorch
+SymmMem has added a `get_mem_pool` API to return a symmetric memory pool. Users
+can use the returned MemPool with the `torch.cuda.use_mem_pool` context manager.
+In the example below, tensor `x` will be created from symmetric memory:
+
+```python
+    import torch.distributed._symmetric_memory as symm_mem
+
+    mempool = symm_mem.get_mem_pool(device)
+
+    with torch.cuda.use_mem_pool(mempool):
+        x = torch.arange(128, device=device)
+
+    torch.ops.symm_mem.one_shot_all_reduce(x, "sum", group_name)
+```
+
+Similarly, you can put a compute operation under the MemPool context, and the
+result tensor will be created from symmetric memory too.
+
+```python
+    dim = 1024
+    w = torch.ones(dim, dim, device=device)
+    x = torch.ones(1, dim, device=device)
+
+    mempool = symm_mem.get_mem_pool(device)
+    with torch.cuda.use_mem_pool(mempool):
+        # y will be in symmetric memory
+        y = torch.mm(x, w)
+```
+
+As of torch 2.11, the `CUDA` and `NVSHMEM` backends support MemPool. MemPool
+support of the `NCCL` backend is in progress.
+
+(copy-engine-collectives)=
+
+## Copy Engine Collectives
+
+:::{note}
+Copy Engine Collectives require NCCL 2.28 or later, and GPUs with peer-to-peer (P2P) access.
+:::
+
+Copy Engine (CE) Collectives are an optimization for NCCL collective operations that offload
+data movement to the GPU's copy engines (DMA engines) instead of using CUDA streaming
+multiprocessors (SMs). This frees up SMs for compute work, enabling better overlap of
+communication and computation during distributed training.
+
+To use CE collectives, you need to:
+
+1. Configure the NCCL process group with the zero-CTA policy
+2. Set up symmetric memory with the NCCL backend
+3. Allocate tensors using symmetric memory
+4. Register the tensors with symmetric memory via rendezvous
+
+Once set up, standard collective functions like {func}`all_gather_single` and
+{func}`all_to_all_single` will automatically use the copy engines when operating
+on symmetric memory tensors.
+
+**Example**
+
+```
+import torch
+import torch.distributed as dist
+import torch.distributed._symmetric_memory as symm_mem
+
+# Initialize process group with zero-CTA policy for CE collectives
+opts = dist.ProcessGroupNCCL.Options()
+opts.config.cta_policy = dist.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
+device = torch.device("cuda", rank)
+dist.init_process_group(backend="nccl", pg_options=opts, device_id=device)
+
+# Set up symmetric memory with NCCL backend
+symm_mem.set_backend("NCCL")
+group_name = dist.group.WORLD.group_name
+
+# Allocate tensors using symmetric memory
+numel = 1024 * 1024
+inp = symm_mem.empty(numel, device=device)
+out = symm_mem.empty(numel * world_size, device=device)
+
+# Register tensors for symmetric memory operations
+symm_mem.rendezvous(inp, group=group_name)
+symm_mem.rendezvous(out, group=group_name)
+
+# Perform collective operation using copy engines
+# This now runs on DMA engines instead of SMs
+work = dist.all_gather_single(out, inp, async_op=True)
+work.wait()
+```
+
+**Benefits**
+
+- **SM offloading**: Communication runs on copy engines, leaving SMs free for computation
+- **Better overlap**: Enables more efficient computation/communication overlap
+- **Transparent API**: Uses the same collective API, just with symmetric memory tensors
+
+**Requirements and Limitations**
+
+- NCCL version 2.28 or later
+- GPUs must have peer-to-peer (P2P) access enabled
+- Tensors must be allocated using {func}`torch.distributed._symmetric_memory` and rendezvoused
+- The NCCL process group must be configured with `NCCL_CTA_POLICY_ZERO` or the
+environment variable `NCCL_CTA_POLICY` be set to 2
+- As of NCCL 2.28, CE collectives cannot run with the default stream, so you
+would need to use the `async_op=True` flag to activate the internal stream of
+`ProcessGroupNCCL` or create a side stream yourself
+
+(higher-precision-reduction)=
+
+## Higher-Precision Reduction
+
+When tensors are allocated with symmetric memory, NCCL's symmetric kernel
+implementation enables internal reduction with higher precision. For example, with
+BF16 inputs, NCCL will automatically accumulate in FP32 internally before producing
+BF16 outputs (BF16 in → FP32 accumulate → BF16 out). This improves numerical
+accuracy of reduction operations without changing the collective call.
+
+**Scope**
+
+- **Applicable operations**: ``reduce_scatter`` and ``all_reduce`` only
+- **Domain**: Within the NVLink domain as of torch 2.9 (NCCL 2.27);
+  NVLink + network for ``reduce_scatter`` as of torch 2.11 (NCCL 2.29)
+- **Precision**: BF16/FP16 in → FP32 internal accumulation → BF16/FP16 out
+
+**Example**
+
+```python
+import torch.distributed as dist
+import torch.distributed._symmetric_memory as symm_mem
+
+# Allocate tensors using NCCL symmetric memory
+symm_mem.set_backend("NCCL")
+inp = symm_mem.empty(1024, 1024, device=device, dtype=torch.bfloat16)
+symm_mem.rendezvous(inp, group_name)
+
+# reduce_scatter and all_reduce on symmetric memory tensors
+# automatically benefit from FP32 internal accumulation
+dist.all_reduce(inp)
+```
+
+:::{note}
+This higher-precision accumulation is enabled transparently by NCCL when
+using symmetric memory tensors. No additional configuration is required
+beyond the symmetric tensor creation and rendezvous described above. This
+currently applies to ``reduce_scatter`` and ``all_reduce`` within the
+supported domains only; other collectives (e.g., ``all_gather``) and
+inter-node communication are not affected.
+:::
+
+## Rendezvous at Scale
+
+By default, `rendezvous` exchanges metadata via the TCPStore. Each rank in the
+symmetric memory group issues one store set and N-1 store gets (where N is the
+group size, typically 8–72 for NVLink domains). At large world sizes the
+TCPStore (~200k QPS capacity) becomes a bottleneck: for example, with 72-rank
+NVLink groups at 10k total ranks, a single rendezvous takes ~3.6s via TCPStore;
+at 100k ranks this grows to ~36s.
+
+To use the process group's NCCL allgather instead, set
+`use_pg_for_symm_mem_rendezvous` in the process group options:
+
+```python
+opts = dist.ProcessGroupNCCL.Options()
+opts.use_pg_for_symm_mem_rendezvous = True
+pg = dist.new_group(ranks, pg_options=opts)
+
+t = symm_mem.empty(size, device=device)
+hdl = symm_mem.rendezvous(t, group=pg)
+```
+
+If the process group is only used for symmetric memory and won't be used for
+regular collectives afterwards (e.g., an expert-parallelism group), you can
+release the NCCL communicator after rendezvous via ``abort()``. The symmetric
+memory handle remains usable since it only depends on the mapped memory, not the
+communicator:
+
+```python
+opts = dist.ProcessGroupNCCL.Options()
+opts.use_pg_for_symm_mem_rendezvous = True
+ep_pg = dist.new_group(ep_ranks, pg_options=opts)
+
+t = symm_mem.empty(size, device=device)
+hdl = symm_mem.rendezvous(t, group=ep_pg)
+
+# Release the NCCL communicator since ep_pg won't be used for collectives.
+# The symm_mem handle is still usable — it only needs the mapped memory.
+ep_pg.abort()
+```
+
+:::{note}
+Enabling `use_pg_for_symm_mem_rendezvous` will lazily create the NCCL
+communicator for the process group if it doesn't already exist.
+:::
+
 ## API Reference
 
 ```{eval-rst}
@@ -253,11 +449,35 @@ to use the NVSHMEM functions.
 .. autofunction:: get_backend
 ```
 
+```{eval-rst}
+.. autofunction:: get_mem_pool
+```
+
+```{eval-rst}
+.. autofunction:: is_symm_mem_tensor
+```
+
+```{eval-rst}
+.. autofunction:: set_signal_pad_size
+```
+
+```{eval-rst}
+.. autofunction:: get_signal_pad_size
+```
+
 ## Op Reference
 :::{note}
 The following ops are hosted in the `torch.ops.symm_mem` namespace. You can call
 them directly via `torch.ops.symm_mem.<op_name>`.
 :::
+
+```{eval-rst}
+.. currentmodule:: torch.distributed._symmetric_memory
+```
+
+```{eval-rst}
+.. autofunction:: reduce_scatter_offset
+```
 
 ```{eval-rst}
 .. currentmodule:: torch.ops.symm_mem
@@ -376,5 +596,54 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     :param Tensor in_splits_offsets: Tensor containing the splits and offsets of data to send to each expert. Must be symmetric. Must be of size (2, group_size * ne), where `ne` is the number of experts. The rows are (in order): input splits and input offsets. The splits are in the unit of elements in the 1st dimension.
     :param Tensor out_splits_offsets: Tensor containing the splits and offsets of data received from each peer. Must be symmetric. Must be of size (2, group_size * ne). The rows are (in order): output splits and output offsets.
     :param str group_name: Name of the group to perform all-to-all on.
+
+
+.. py:function:: tile_reduce(in_tile: Tensor, out_tile: Tensor, root: int, group_name: str, [reduce_op: str = 'sum']) -> None
+
+    Reduces a 2D tile from all ranks to a specified root rank within a process group.
+
+    :param Tensor in_tile: Input 2D tensor to be reduced. Must be symmetrically allocated.
+    :param Tensor out_tile: Output 2D tensor to contain the result of the reduction. Must be symmetric and have the same shape, dtype, and device as `in_tile`.
+    :param int root: The rank of the process in the specified group that will receive the reduced result.
+    :param str group_name: The name of the symmetric memory process group to perform the reduction in.
+    :param str reduce_op: The reduction operation to perform. Currently, only ``"sum"`` is supported. Defaults to ``"sum"``.
+
+    This function reduces `in_tile` tensors from all members of the group, writing the result to `out_tile` at the root rank. All ranks must participate and provide the same `group_name` and tensor shapes.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> # Reduce the bottom-right quadrant of a tensor
+        >>> tile_size = full_size // 2
+        >>> full_inp = symm_mem.empty(full_size, full_size)
+        >>> full_out = symm_mem.empty(full_size, full_size)
+        >>> s = slice(tile_size, 2 * tile_size)
+        >>> in_tile = full_inp[s, s]
+        >>> out_tile = full_out[s, s]
+        >>> torch.ops.symm_mem.tile_reduce(in_tile, out_tile, root=0, group_name)
+
+
+.. py:function:: multi_root_tile_reduce(in_tiles: list[Tensor], out_tile: Tensor, roots: list[int], group_name: str, [reduce_op: str = 'sum']) -> None
+
+    Perform multiple tile reductions concurrently, with each tile reduced to a separate root.
+
+    : param list[Tensor] in_tiles: A list of input tensors.
+    : param Tensor out_tile: Output tensor to contain the reduced tile.
+    : param list[int] roots: A list of root ranks each corresponding to an input tile in `in_tiles`, in the same order. A rank cannot be a root more than once.
+    : param str group_name: Name of the group to use for the collective operation.
+    : param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> # Reduce four quadrants of a tensor, each to a different root
+        >>> tile_size = full_size // 2
+        >>> full_inp = symm_mem.empty(full_size, full_size)
+        >>> s0 = slice(0, tile_size)
+        >>> s1 = slice(tile_size, 2 * tile_size)
+        >>> in_tiles = [ full_inp[s0, s0], full_inp[s0, s1], full_inp[s1, s0], full_inp[s1, s1] ]
+        >>> out_tile = symm_mem.empty(tile_size, tile_size)
+        >>> roots = [0, 1, 2, 3]
+        >>> torch.ops.symm_mem.multi_root_tile_reduce(in_tiles, out_tile, roots, group_name)
 
 ```

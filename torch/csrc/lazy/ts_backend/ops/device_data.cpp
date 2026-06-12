@@ -1,6 +1,5 @@
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 
-#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
 
 #include <sstream>
@@ -18,7 +17,7 @@ DeviceData::DeviceData(std::shared_ptr<BackendData> data)
 std::string DeviceData::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", device=" << data_->device();
-  return ss.str();
+  return std::move(ss).str();
 }
 
 const DeviceData* DeviceData::Cast(const Node* node) {

@@ -4,7 +4,7 @@ import os
 import tempfile
 import textwrap
 from functools import lru_cache
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from torch._dynamo.exc import BackendCompilerFailed, ShortenTraceback
 
@@ -62,11 +62,17 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
 class LoweringException(OperatorIssue):
     def __init__(
-        self, exc: Exception, target: Any, args: list[Any], kwargs: dict[str, Any]
+        self,
+        exc: Exception,
+        target: Any,
+        args: list[Any],
+        kwargs: dict[str, Any],
+        stack_trace: str | None = None,
     ) -> None:
-        super().__init__(
-            f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
-        )
+        msg = f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
+        if stack_trace:
+            msg += f"{msg}\nFound from : \n {stack_trace}"
+        super().__init__(msg)
 
 
 class SubgraphLoweringException(RuntimeError):
@@ -74,12 +80,17 @@ class SubgraphLoweringException(RuntimeError):
 
 
 class InvalidCxxCompiler(RuntimeError):
-    def __init__(self) -> None:
+    def __init__(self, compiler: str | None = None) -> None:
         from . import config
 
-        super().__init__(
-            f"No working C++ compiler found in {config.__name__}.cpp.cxx: {config.cpp.cxx}"
-        )
+        if compiler is None:
+            msg = (
+                f"No working C++ compiler found in {config.__name__}.cpp.cxx: "
+                f"{config.cpp.cxx}"
+            )
+        else:
+            msg = f"Compiler: {compiler} is not found."
+        super().__init__(msg)
 
 
 class CppWrapperCodegenError(RuntimeError):
@@ -120,7 +131,7 @@ class CUDACompileError(CppCompileError):
 
 
 class TritonMissing(ShortenTraceback):
-    def __init__(self, first_useful_frame: Optional[types.FrameType]) -> None:
+    def __init__(self, first_useful_frame: types.FrameType | None) -> None:
         super().__init__(
             "Cannot find a working triton installation. "
             "Either the package is not installed or it is too old. "
@@ -134,7 +145,7 @@ class GPUTooOldForTriton(ShortenTraceback):
         self,
         # pyrefly: ignore [not-a-type]
         device_props: _CudaDeviceProperties,
-        first_useful_frame: Optional[types.FrameType],
+        first_useful_frame: types.FrameType | None,
     ) -> None:
         super().__init__(
             f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, "
@@ -150,7 +161,7 @@ class InductorError(BackendCompilerFailed):
     def __init__(
         self,
         inner_exception: Exception,
-        first_useful_frame: Optional[types.FrameType],
+        first_useful_frame: types.FrameType | None,
     ) -> None:
         self.inner_exception = inner_exception
         ShortenTraceback.__init__(

@@ -6,17 +6,17 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import FakeWork, ProcessGroup
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._functional_collectives import (
-    all_gather_into_tensor_coalesced,
-    all_gather_tensor,
-    all_gather_tensor_autograd,
+    all_gather_single,
+    all_gather_single_autograd,
+    all_gather_single_coalesced,
     all_reduce,
     all_reduce_coalesced,
     all_to_all_single,
     all_to_all_single_autograd,
     broadcast,
-    reduce_scatter_tensor,
-    reduce_scatter_tensor_autograd,
-    reduce_scatter_tensor_coalesced,
+    reduce_scatter_single,
+    reduce_scatter_single_autograd,
+    reduce_scatter_single_coalesced,
     wait_tensor,
 )
 from torch.distributed._tools.fake_collectives import (
@@ -25,7 +25,7 @@ from torch.distributed._tools.fake_collectives import (
     non_functional_collectives,
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -43,7 +43,6 @@ class TestFakeCollectives(TestCase):
         dist.init_process_group("fake", rank=0, world_size=world_size, store=store)
         torch.cuda.set_device(torch.cuda.current_device())
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_collectives(self):
         try:
@@ -63,10 +62,10 @@ class TestFakeCollectives(TestCase):
                 dist.recv(test_tensor, src=1)
                 dist.all_gather(test_tensor_list, test_tensor)
                 dist.reduce_scatter(test_tensor, test_tensor_list)
-                dist.reduce_scatter_tensor(test_tensor, test_tensor2)
+                dist.reduce_scatter_single(test_tensor, test_tensor2)
                 dist.scatter(test_tensor, scatter_list=test_tensor_list, src=0)
                 dist.gather(test_tensor, gather_list=test_tensor_list, dst=0)
-                dist.all_gather_into_tensor(test_tensor2, test_tensor)
+                dist.all_gather_single(test_tensor2, test_tensor)
                 dist.all_to_all(test_tensor_list, test_tensor_list)
                 dist.all_to_all_single(test_tensor2, test_tensor2)
                 dist.barrier()
@@ -75,14 +74,14 @@ class TestFakeCollectives(TestCase):
                 wait_tensor(test_tensor)
                 broadcast(test_tensor, src=0, group=dist.group.WORLD)
                 all_reduce(test_tensor, reduceOp="avg", group=dist.group.WORLD)
-                all_gather_tensor(test_tensor, gather_dim=0, group=dist.group.WORLD)
-                all_gather_tensor_autograd(
+                all_gather_single(test_tensor, gather_dim=0, group=dist.group.WORLD)
+                all_gather_single_autograd(
                     test_tensor, gather_dim=0, group=dist.group.WORLD
                 )
-                reduce_scatter_tensor(
+                reduce_scatter_single(
                     test_tensor2, scatter_dim=0, reduceOp="sum", group=dist.group.WORLD
                 )
-                reduce_scatter_tensor_autograd(
+                reduce_scatter_single_autograd(
                     test_tensor2, scatter_dim=0, reduceOp="sum", group=dist.group.WORLD
                 )
                 all_to_all_single(
@@ -94,10 +93,8 @@ class TestFakeCollectives(TestCase):
                 all_reduce_coalesced(
                     test_tensor_list, reduceOp="avg", group=dist.group.WORLD
                 )
-                all_gather_into_tensor_coalesced(
-                    test_tensor_list, group=dist.group.WORLD
-                )
-                reduce_scatter_tensor_coalesced(
+                all_gather_single_coalesced(test_tensor_list, group=dist.group.WORLD)
+                reduce_scatter_single_coalesced(
                     test_tensor_list_2,
                     scatter_dim=[0] * 4,
                     reduceOp="sum",

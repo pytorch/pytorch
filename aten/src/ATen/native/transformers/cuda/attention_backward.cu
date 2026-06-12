@@ -27,6 +27,7 @@
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/empty_permuted.h>
 #include <ATen/ops/_cudnn_attention_backward.h>
 #include <ATen/ops/_cudnn_attention_backward_native.h>
 #include <ATen/ops/_flash_attention_backward.h>
@@ -91,10 +92,20 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
 
-#ifndef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
-  const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
-  const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
+#ifdef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
+#ifdef DISABLE_AOTRITON  // CK backend, Passing window_size as it is
+  const auto window_left = window_size_left;
+  const auto window_right = window_size_right;
+#else  // AOTriton implements "generalized" SWA and negative size means negative shifting.
+  // aotriton_adapter::parse_window_size tries to match the behavior of CUTLASS backend
+  using sdp::aotriton_adapter::parse_window_size;
+  const auto [window_left, window_right] = parse_window_size(window_size_left,
+                                                             window_size_right);
 #endif
+#else  // USE_ROCM
+  const int window_left = window_size_left.value_or(-1);
+  const int window_right = window_size_right.value_or(-1);
+#endif  // USE_ROCM
 
   std::optional<at::Tensor> dq{std::nullopt};
   std::optional<at::Tensor> dk{std::nullopt};
@@ -142,13 +153,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         softmax_scale,
         false /*zero_tensors*/,
         is_causal,
-#ifdef USE_ROCM
-        window_size_left,
-        window_size_right,
-#else
-        non_null_window_left,
-        non_null_window_right,
-#endif
+        window_left,
+        window_right,
         softcap,
         deterministic,
         philox_seed,
@@ -170,13 +176,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dropout_p,
         softmax_scale,
         is_causal,
-#ifdef USE_ROCM
-        window_size_left,
-        window_size_right,
-#else
-        non_null_window_left,
-        non_null_window_right,
-#endif
+        window_left,
+        window_right,
         softcap,
         deterministic,
         philox_seed,
@@ -464,6 +465,9 @@ _efficient_attention_backward(
   }
 
   if (bias_requires_grad) {
+    TORCH_CHECK(
+        bias.has_value(),
+        "bias_requires_grad is true but no bias was provided");
     // force alignment for the last dim
     std::vector<int64_t> sz = bias->sizes().vec();
     int64_t lastDim = sz[sz.size() - 1];
@@ -544,6 +548,17 @@ _efficient_attention_backward(
                 "[AOTriton] Accelerated SDPA only supports MI200/MI300X/7900XTX/9070XT GPUs"
                 " (gfx90a/gfx942/gfx1100/gfx1201)")
     }
+    bool deterministic{false};
+    auto& ctx = at::globalContext();
+    if (ctx.deterministicAlgorithms()) {
+      if (ctx.deterministicAlgorithmsWarnOnly()) {
+        TORCH_WARN_ONCE(
+            "Memory Efficient attention defaults to a non-deterministic algorithm. ",
+            "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
+      } else {
+        deterministic = true;
+      }
+    }
     const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     bool is_causal;
     if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
@@ -566,139 +581,60 @@ _efficient_attention_backward(
     at::Tensor dout_t = grad_out.permute({0,2,1,3});
     at::Tensor softmax_lse = logsumexp.view({B * nH, max_seqlen_q});
     hipError_t err;
-    using aotriton::v2::flash::attn_bwd;
-    using aotriton::v2::flash::attn_bwd_fused;
-    using aotriton::v2::flash::attn_bwd_compact_varlen;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::cast_dtype;
     aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
-    if constexpr (AOTRITON_ALWAYS_V3_API) {  // Better readability than nesting ifdef
-#if AOTRITON_V3_API  // if constexpr does not stop errors from undefined functions
-      using aotriton::v3::flash::CausalType;
-      using aotriton::v3::flash::VarlenType;
-      using aotriton::v3::flash::WindowValue;
-      aotriton::v3::flash::attn_bwd_params params;
-      params.Q = mk_aotensor(q_t, "q");
-      params.K = mk_aotensor(k_t, "k");
-      params.V = mk_aotensor(v_t, "v");
-      params.B = bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4;
-      params.Sm_scale = softmax_scale;
-      params.Out = mk_aotensor(out_t, "out");
-      params.DO = mk_aotensor(dout_t, "dout");
-      params.DK = mk_aotensor(dk_t, "dk");
-      params.DV = mk_aotensor(dv_t, "dv");
-      params.DQ = mk_aotensor(dq_t, "dq");
-      params.DB = bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4;
-      params.L = mk_aotensor<2>(softmax_lse, "L");
-      params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
-      params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
-      params.dropout_p = float(dropout_p);
-      params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
-      params.philox_offset1 = mk_aoscalartensor(philox_offset);
-      params.philox_offset2 = 0;
-      params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
-      if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
-        params.window_left = WindowValue::TopLeftAligned;
-        params.window_right = WindowValue::TopLeftAligned;
-      } else if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
-        params.window_left = WindowValue::BottomRightAligned;
-        params.window_right = WindowValue::BottomRightAligned;
-      }
-#if AOTRITON_ALWAYS_V3_API
-      using sdp::aotriton_adapter::mklazy_empty_like;
-      using sdp::aotriton_adapter::mklazy_fp32zeros;
-      using sdp::aotriton_adapter::LazyTensorContext;
-      LazyTensorContext lazy_delta { .like_tensor = softmax_lse, .tensor_name = "delta" };
-      LazyTensorContext lazy_dq_acc { .like_tensor = dq_t, .tensor_name = "dq_acc" };
-      params.D = mklazy_empty_like<2>(&lazy_delta);
-      params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
-#else
-      at::Tensor delta = at::empty_like(softmax_lse).contiguous();
-      params.D = mk_aotensor<2>(delta, "delta");
-#endif
-      if (cu_seqlens_q.has_value()) {
-        params.varlen_type = VarlenType::CompactVarlen;
-        params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q");
-        params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k");
-      } else {
-        params.varlen_type = VarlenType::None;
-      }
-      err = aotriton::v3::flash::attn_bwd(params,
-                                          aotriton::v3::flash::attn_bwd_params::kVersion,
-                                          stream);
-#endif  // AOTRITON_V3_API
-    } else if (cu_seqlens_q.has_value()) {
-      at::Tensor delta = at::empty_like(softmax_lse).contiguous();
-      // varlen aka Nested tensor
-      err = attn_bwd_compact_varlen(mk_aotensor(q_t, "q"),
-                                    mk_aotensor(k_t, "k"),
-                                    mk_aotensor(v_t, "v"),
-                                    mk_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q"),
-                                    mk_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k"),
-                                    max_seqlen_q,
-                                    max_seqlen_k,
-                                    bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
-                                    softmax_scale,
-                                    mk_aotensor(out_t, "out"),
-                                    mk_aotensor(dout_t, "dout"),
-                                    mk_aotensor(dq_t, "dq"),
-                                    mk_aotensor(dk_t, "dk"),
-                                    mk_aotensor(dv_t, "dv"),
-                                    bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
-                                    mk_aotensor<2>(softmax_lse, "L"),
-                                    mk_aotensor<2>(delta, "delta"),
-                                    float(dropout_p),
-                                    mk_aoscalartensor(philox_seed),
-                                    mk_aoscalartensor(philox_offset),
-                                    0,
-                                    is_causal,
-                                    stream);
-    } else { // cu_seqlens.has_value
-      auto d_head = Kv;
-      bool use_fused_bwd = d_head <= 192 && d_head * max_seqlen_q < 64 * 512;
-      if (use_fused_bwd) {
-        err = attn_bwd_fused(mk_aotensor(q_t, "q"),
-                             mk_aotensor(k_t, "k"),
-                             mk_aotensor(v_t, "v"),
-                             bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
-                             softmax_scale,
-                             mk_aotensor(out_t, "out"),
-                             mk_aotensor(dout_t, "dout"),
-                             mk_aotensor(dq_t, "dq"),
-                             mk_aotensor(dk_t, "dk"),
-                             mk_aotensor(dv_t, "dv"),
-                             bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
-                             mk_aotensor<2>(softmax_lse, "L"),
-                             float(dropout_p),
-                             mk_aoscalartensor(philox_seed),
-                             mk_aoscalartensor(philox_offset),
-                             0,
-                             is_causal,
-                             stream);
-      } else {
-        at::Tensor delta = at::empty_like(softmax_lse).contiguous();
-        err = attn_bwd(mk_aotensor(q_t, "q"),
-                     mk_aotensor(k_t, "k"),
-                     mk_aotensor(v_t, "v"),
-                     bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
-                     softmax_scale,
-                     mk_aotensor(out_t, "out"),
-                     mk_aotensor(dout_t, "dout"),
-                     mk_aotensor(dq_t, "dq"),
-                     mk_aotensor(dk_t, "dk"),
-                     mk_aotensor(dv_t, "dv"),
-                     bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
-                     mk_aotensor<2>(softmax_lse, "L"),
-                     mk_aotensor<2>(delta, "delta"),
-                     float(dropout_p),
-                     mk_aoscalartensor(philox_seed),
-                     mk_aoscalartensor(philox_offset),
-                     0,
-                     is_causal,
-                     stream);
-      } //used_fused_bwd
-    } // cuseqlen.has_value
+    using aotriton::v3::flash::CausalType;
+    using aotriton::v3::flash::VarlenType;
+    using aotriton::v3::flash::WindowValue;
+    aotriton::v3::flash::attn_bwd_params params;
+    params.Q = mk_aotensor(q_t, "q");
+    params.K = mk_aotensor(k_t, "k");
+    params.V = mk_aotensor(v_t, "v");
+    params.B = bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4;
+    params.Sm_scale = softmax_scale;
+    params.Out = mk_aotensor(out_t, "out");
+    params.DO = mk_aotensor(dout_t, "dout");
+    params.DK = mk_aotensor(dk_t, "dk");
+    params.DV = mk_aotensor(dv_t, "dv");
+    params.DQ = mk_aotensor(dq_t, "dq");
+    params.DB = bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4;
+    params.L = mk_aotensor<2>(softmax_lse, "L");
+    params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
+    params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
+    params.dropout_p = float(dropout_p);
+    params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
+    params.philox_offset1 = mk_aoscalartensor(philox_offset);
+    params.philox_offset2 = 0;
+    params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
+    if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
+      params.window_left = WindowValue::TopLeftAligned;
+      params.window_right = WindowValue::TopLeftAligned;
+    } else if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
+      params.window_left = WindowValue::BottomRightAligned;
+      params.window_right = WindowValue::BottomRightAligned;
+    }
+    using sdp::aotriton_adapter::mklazy_empty_like;
+    using sdp::aotriton_adapter::mklazy_fp32zeros;
+    using sdp::aotriton_adapter::LazyTensorContext;
+    LazyTensorContext lazy_delta { .like_tensor = softmax_lse, .tensor_name = "delta" };
+    LazyTensorContext lazy_dq_acc { .like_tensor = dq_t, .tensor_name = "dq_acc" };
+    params.D = mklazy_empty_like<2>(&lazy_delta);
+    params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
+    if (cu_seqlens_q.has_value()) {
+      params.varlen_type = VarlenType::CompactVarlen;
+      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q");
+      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k");
+    } else {
+      params.varlen_type = VarlenType::None;
+    }
+    aotriton::v3::flash::attn_options opts;
+    opts.deterministic = deterministic;
+    err = aotriton::v3::flash::attn_bwd(params,
+                                        aotriton::v3::flash::attn_bwd_params::kVersion,
+                                        stream,
+                                        &opts);
 #else  // DISABLE_AOTRITON
     TORCH_CHECK(false, "Attempting to use aotriton mem_eff_backward backend in a build that has not built AOTriton");
 #endif
@@ -1106,30 +1042,27 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   if (batch_size > MAX_BATCH_SIZE) {
     Tensor final_grad_q, final_grad_k, final_grad_v, final_grad_bias;
 
-    auto create_strided_output = [batch_size](const Tensor& tensor) -> Tensor {
+    auto create_permuted_output = [batch_size](const Tensor& tensor) -> Tensor {
       if (!tensor.defined()) {
         return Tensor{};
       }
-      int dim = tensor.dim();
-      std::vector<int64_t> sizes;
-      sizes.reserve(dim);
-      sizes.push_back(batch_size);
-      for (int i = 1; i < dim; i++) {
-        sizes.push_back(tensor.size(i));
-      }
-      return at::empty_strided(std::move(sizes), tensor.strides(), tensor.options());
+      TORCH_INTERNAL_ASSERT(tensor.dim() == 4);
+      return at::empty_permuted(
+          {batch_size, tensor.size(1), tensor.size(2), tensor.size(3)},
+          {0, 2, 1, 3},
+          tensor.options());
     };
 
     if (grad_input_mask[0]) {
-      final_grad_q = create_strided_output(query);
+      final_grad_q = create_permuted_output(query);
     }
 
     if (grad_input_mask[1]) {
-      final_grad_k = create_strided_output(key);
+      final_grad_k = create_permuted_output(key);
     }
 
     if (grad_input_mask[2]) {
-      final_grad_v = create_strided_output(value);
+      final_grad_v = create_permuted_output(value);
     }
     if (grad_input_mask[3] && attn_bias.defined()) {
       final_grad_bias = at::zeros_like(attn_bias);

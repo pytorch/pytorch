@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import unittest
 from typing import Any
 
 import sympy
@@ -13,7 +12,6 @@ from torch._inductor.codegen.triton import FixedTritonConfig, TritonKernel
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import assert_close
-from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -21,7 +19,93 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
-class TestingHeuristics(InductorChoices):
+class TestVarianceReductionHeuristic(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def _skip_if_not_cuda(self):
+        if GPU_TYPE != "cuda":
+            self.skipTest("CUDA-specific variance heuristic")
+
+    def _dtypes(self):
+        dtypes = [torch.float16]
+        if torch.cuda.is_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        return dtypes
+
+    def test_var_mean_uses_two_step_for_non_split_reductions(self):
+        self._skip_if_not_cuda()
+
+        def fn(x):
+            return torch.var_mean(x, dim=-1, correction=0)
+
+        for dtype in self._dtypes():
+            x = torch.randn([4, 4096], device=GPU_TYPE, dtype=dtype)
+            expected = fn(x)
+            result, (source_code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x
+            )
+
+            self.assertEqual(result, expected)
+            self.assertIn("tl.sum", source_code)
+            self.assertNotIn("welford_reduce", source_code)
+
+    def test_var_mean_keeps_welford_for_float32_reductions(self):
+        self._skip_if_not_cuda()
+
+        def fn(x):
+            return torch.var_mean(x, dim=-1, correction=0)
+
+        x = torch.randn([4, 4096], device=GPU_TYPE, dtype=torch.float32)
+        expected = fn(x)
+        result, (source_code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+
+        self.assertEqual(result, expected)
+        self.assertIn("welford_", source_code)
+
+    @config.patch("triton.force_cooperative_reductions", True)
+    def test_var_mean_keeps_welford_for_small_reductions(self):
+        self._skip_if_not_cuda()
+
+        def fn(x):
+            return torch.var_mean(x, dim=-1, correction=0)
+
+        for dtype in self._dtypes():
+            x = torch.randn([4, 512], device=GPU_TYPE, dtype=dtype)
+            expected = fn(x)
+            result, (source_code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x
+            )
+
+            self.assertEqual(result, expected)
+            self.assertIn("welford_", source_code)
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.use_two_step_variance_threshold": 2_000_000,
+        }
+    )
+    def test_var_mean_keeps_welford_for_split_reductions(self):
+        self._skip_if_not_cuda()
+
+        def fn(x):
+            return torch.var_mean(x, dim=-1, correction=0)
+
+        for dtype in self._dtypes():
+            x = torch.randn([2, 1024 * 1024], device=GPU_TYPE, dtype=dtype)
+            expected = fn(x)
+            result, (source_code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x
+            )
+
+            self.assertEqual(result, expected)
+            self.assertIn("welford_", source_code)
+
+
+class _TestingHeuristics(InductorChoices):
     def __init__(self, *, cooperative: bool, persistent: bool, cfg: dict[str, int]):
         super().__init__()
         self.cooperative = cooperative
@@ -146,6 +230,8 @@ class CooperativeReductionTests(TestCase):
             self.assertIn("cooperative_reduction_grid", source_code)
         else:
             self.assertIn("@triton_heuristics.cooperative_reduction", source_code)
+        if GPU_TYPE == "cuda":
+            self.assertIn("'launch_cooperative_grid': True", source_code)
         if "async_compile.multi_kernel" not in source_code:
             self.assertEqual(
                 torch._inductor.metrics.generated_kernel_count, expect_kernel_count
@@ -169,9 +255,6 @@ class CooperativeReductionTests(TestCase):
     )
     @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
     def test_reduction_fns(self, name, dtype):
-        if IS_SM89 and dtype == torch.float64 and name in ["std", "var_mean"]:
-            raise unittest.SkipTest("Timeouts on SM89")
-
         def fn(x, y):
             return reduction_fn(x + y, dim=-1)
 
@@ -220,8 +303,7 @@ class CooperativeReductionTests(TestCase):
 
         # With online softmax, the computation of max and sum are done
         # jointly and they share a single barrier call.
-        # XPU doesn't support online softmax yet.
-        expected_num_barrier = 8 if config.online_softmax and GPU_TYPE != "xpu" else 16
+        expected_num_barrier = 8 if config.online_softmax else 16
         self.assertEqual(
             source_code.count("triton_helpers.x_grid_barrier"), expected_num_barrier
         )
@@ -259,7 +341,7 @@ class MultiKernelCooperativeReductionTests(CooperativeReductionTests):
 class TestFixedConfigs(TestCase):
     def _check(self, fn, args, *, persistent=False, cooperative=True, cfg):
         expected = fn(*args)
-        heuristic = TestingHeuristics(
+        heuristic = _TestingHeuristics(
             persistent=persistent, cooperative=cooperative, cfg=cfg
         )
         with torch._inductor.virtualized.V.set_choices_handler(heuristic):

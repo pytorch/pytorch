@@ -24,7 +24,6 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/ExclusivelyOwnedTensorTraits.h>
@@ -32,7 +31,6 @@
 #include <optional>
 #include <c10/util/intrusive_ptr.h>
 
-#include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/StorageUtils.h>
@@ -263,14 +261,6 @@ class TORCH_API TensorBase {
   IntArrayRef strides() const {
     return impl_->strides();
   }
-  // See impl::get_opt_names in ATen/NamedTensor.h for docs.
-  std::optional<DimnameList> opt_names() const {
-    return impl::get_opt_names(unsafeGetTensorImpl());
-  }
-  // See impl::get_names in ATen/NamedTensor.h for docs.
-  DimnameList names() const {
-    return impl::get_names(unsafeGetTensorImpl());
-  }
   int64_t ndimension() const {
     return dim();
   }
@@ -341,7 +331,7 @@ class TORCH_API TensorBase {
                 "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
                 "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
                 "equivalent dense tensor, multiply numel() by element_size()");
-    return impl_->sym_numel() * impl_->itemsize();
+    return impl_->sym_numel() * c10::SymInt(impl_->itemsize());
   }
 
   int64_t numel() const {
@@ -571,6 +561,10 @@ class TORCH_API TensorBase {
     return impl_->is_meta();
   }
 
+  bool is_fake() const {
+    return impl_->is_fake();
+  }
+
   /// Returns if a `Tensor` is an inference tensor.
   bool is_inference() const {
     return impl_->is_inference();
@@ -584,25 +578,6 @@ class TORCH_API TensorBase {
   /// If a tensor is a quantized tensor, returns its quantizer
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
   QuantizerPtr quantizer() const;
-
-  /// Returns if a `Tensor` has any dimension names
-  bool has_names() const {
-    // If a user is using unnamed tensors, then we can short-circuit right here.
-    // Otherwise, impl::has_names attempts to retrieve names.
-    if (!impl_->has_named_tensor_meta()) {
-      return false;
-    }
-    return impl::has_names(unsafeGetTensorImpl());
-  }
-
-  /// Returns a `Tensor`'s dimension names data structure
-  const NamedTensorMeta* get_named_tensor_meta() const {
-    return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
-  }
-
-  NamedTensorMeta* get_named_tensor_meta() {
-    return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
-  }
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
@@ -628,11 +603,9 @@ class TORCH_API TensorBase {
     return mutable_data_ptr();
   }
 
-  template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
+  // Implemented in aten/src/ATen/templates/TensorMethods.cpp
+  template <typename T>
   const T* const_data_ptr() const;
-
-  template <typename T, std::enable_if_t<std::is_const_v<T>, int> = 0>
-  const std::remove_const_t<T>* const_data_ptr() const;
 
   template <typename T>
   T* mutable_data_ptr() const;
@@ -859,7 +832,7 @@ class TORCH_API TensorBase {
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
   /// re-create the grad_fn to express the up-to-date view relationship between
   /// this and the base Variable.
-  const std::shared_ptr<torch::autograd::Node>& grad_fn() const;
+  const c10::intrusive_ptr<torch::autograd::Node>& grad_fn() const;
 
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

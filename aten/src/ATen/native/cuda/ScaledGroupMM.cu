@@ -15,8 +15,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
 // https://github.com/NVIDIA/cutlass/issues/1571
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
-    CUDA_VERSION >= 12000
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION)
 
 #define BUILD_ROWWISE_FP8_KERNEL
 #endif
@@ -193,7 +192,7 @@ void f8f8bf16_grouped_gemm_impl_sm90(
           cutlass::epilogue::collective::EpilogueTileAuto,
           DtypeAccum,
           DtypeAccum,
-          DtypeOutput,
+          void, // Indicate there is no beta scaling to save register
           LayoutOutput*,
           AlignmentOutput,
           DtypeOutput,
@@ -391,7 +390,7 @@ void f8f8bf16_grouped_gemm_impl_sm90(
        (const DtypeB**)inputB_ptrs,
        stride_B},
       {{{{inputB_scale_ptrs}, {{inputA_scale_ptrs}, {}, {}}, {}}, {}},
-       (const DtypeOutput**)output_ptrs,
+       nullptr,
        stride_output,
        output_ptrs,
        stride_output}};

@@ -118,24 +118,20 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
 def get_custom_module_class_keys(
     custom_module_mapping: dict[QuantType, dict[type, type]],
 ) -> list[Any]:
-    r"""Get all the unique custom module keys in the custom config dict
-    e.g.
-    Input:
-    {
-        QuantType.STATIC: {
-            CustomModule1: ObservedCustomModule
-        },
-        QuantType.DYNAMIC: {
-            CustomModule2: DynamicObservedCustomModule
-        },
-        QuantType.WEIGHT_ONLY: {
-            CustomModule3: WeightOnlyObservedCustomModule
-        },
-    }
+    r"""Get all the unique custom module keys in the custom config dict.
 
-    Output:
-    # extract the keys across all inner STATIC, DYNAMIC, and WEIGHT_ONLY dicts
-    [CustomModule1, CustomModule2, CustomModule3]
+    Example input::
+
+        {
+            QuantType.STATIC: {CustomModule1: ObservedCustomModule},
+            QuantType.DYNAMIC: {CustomModule2: DynamicObservedCustomModule},
+            QuantType.WEIGHT_ONLY: {CustomModule3: WeightOnlyObservedCustomModule},
+        }
+
+    Example output::
+
+        # extract the keys across all inner STATIC, DYNAMIC, and WEIGHT_ONLY dicts
+        [CustomModule1, CustomModule2, CustomModule3]
     """
     # using set to dedup
     float_custom_module_classes: set[Any] = set()
@@ -719,6 +715,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
         If there is a match, return the last matched node, or None otherwise.
         """
         a = arg
+        # pyrefly: ignore [bad-assignment]
         for i, match in enumerate(match_pattern):
             if not match(a):
                 return None

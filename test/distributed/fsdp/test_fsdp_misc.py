@@ -3,6 +3,7 @@
 import functools
 import os
 import sys
+import unittest
 import warnings
 from collections import namedtuple
 from contextlib import nullcontext
@@ -35,7 +36,7 @@ from torch.testing._internal.common_fsdp import (
     _assert_module_states,
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     NestedWrappedModule,
@@ -43,6 +44,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -75,7 +77,7 @@ class MyModel(nn.Module):
         return self.b(self.a(x + y))
 
 
-class TestFSDPMiscMultiProcess(FSDPTest):
+class TestFSDPMiscMultiProcess(FSDPTestContinuous):
     @property
     def world_size(self):
         return 2
@@ -108,7 +110,10 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             devices = {
                 p.device for p in module.parameters() if isinstance(p, FlatParameter)
             }
-            assert len(devices) > 0
+            if not (len(devices) > 0):
+                raise AssertionError(
+                    f"Expected at least one device, but got {len(devices)}"
+                )
             self.assertEqual(1, len(devices))
             found_device = devices.pop()
             if use_index and not isinstance(device_id, torch.device):
@@ -219,8 +224,14 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                 opt.step()
                 grads.append(x.grad)
                 opt.zero_grad()
-            assert torch.allclose(losses[0], losses[1])
-            assert torch.allclose(grads[0], grads[1])
+            if not torch.allclose(losses[0], losses[1]):
+                raise AssertionError(
+                    f"Expected losses to be close: {losses[0]} vs {losses[1]}"
+                )
+            if not torch.allclose(grads[0], grads[1]):
+                raise AssertionError(
+                    f"Expected grads to be close: {grads[0]} vs {grads[1]}"
+                )
             losses.clear()
             grads.clear()
 
@@ -232,7 +243,10 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                 y = torch.randint(low=0, high=9, size=(8,), device=device_type)
                 fsdp_loss = fsdp_model(x, y)
                 ddp_loss = ddp_model(x, y)
-                assert torch.allclose(fsdp_loss, ddp_loss)
+                if not torch.allclose(fsdp_loss, ddp_loss):
+                    raise AssertionError(
+                        f"Expected fsdp_loss and ddp_loss to be close: {fsdp_loss} vs {ddp_loss}"
+                    )
 
         fsdp_model.train()
         ddp_model.train()
@@ -249,8 +263,14 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                 opt.step()
                 grads.append(x.grad)
                 opt.zero_grad()
-            assert torch.allclose(losses[0], losses[1])
-            assert torch.allclose(grads[0], grads[1])
+            if not torch.allclose(losses[0], losses[1]):
+                raise AssertionError(
+                    f"Expected losses to be close: {losses[0]} vs {losses[1]}"
+                )
+            if not torch.allclose(grads[0], grads[1]):
+                raise AssertionError(
+                    f"Expected grads to be close: {grads[0]} vs {grads[1]}"
+                )
             losses.clear()
             grads.clear()
 
@@ -437,7 +457,10 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                 register_hook=False,
             )
             for p in fsdp_overlap.parameters():
-                assert hasattr(p, "_in_backward_optimizers")
+                if not hasattr(p, "_in_backward_optimizers"):
+                    raise AssertionError(
+                        "Expected parameter to have '_in_backward_optimizers' attribute"
+                    )
             optim = optim_cls(fsdp.parameters(), **optim_kwargs)
 
             # Verify params initially equal
@@ -934,6 +957,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
             )
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/105024")
     @skip_if_lt_x_gpu(2)
     def test_homogeneous_attributes(self):
         """
@@ -986,6 +1010,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             inp = fsdp_model.module.get_input(torch.device(device_type))
             fsdp_model(*inp)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/137948")
     @skip_if_lt_x_gpu(2)
     def test_fsdp_unsupported_module_cls(self):
         regex = r"FSDP will not all-gather parameters for containers that do not implement forward"

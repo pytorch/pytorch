@@ -32,7 +32,6 @@
 #include <ATen/core/CheckMemoryFormat.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 #include <c10/core/SymInt.h>
 #include <ATen/core/TensorAccessor.h>
@@ -144,7 +143,7 @@ class TORCH_API Tensor: public TensorBase {
     C10_DIAGNOSTIC_POP()
   }
 
-  // Aliased by Dimname overloads, so need explicit using
+  // Bring in base class methods
   using TensorBase::size;
   using TensorBase::sym_size;
   using TensorBase::stride;
@@ -220,6 +219,8 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator=(const Tensor &rhs) && {
     return copy_(rhs);
   }
+
+  // NOLINTNEXTLINE(performance-noexcept-move-constructor)
   Tensor& operator=(Tensor&& rhs) && {
     return copy_(rhs);
   }

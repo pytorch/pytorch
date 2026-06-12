@@ -1,11 +1,8 @@
 #include <torch/optim/lbfgs.h>
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/serialize/archive.h>
 #include <torch/utils.h>
 
-#include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>
@@ -182,7 +179,7 @@ std::tuple<double, Tensor> LBFGS::_directional_evaluate(
   }
   auto flat_grad = _gather_flat_grad();
   _set_param(x);
-  return std::make_tuple(loss, flat_grad);
+  return std::make_tuple(loss, std::move(flat_grad));
 }
 
 static double _cubic_interpolate(

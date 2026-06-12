@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <c10/cuda/CUDAFunctions.h>
@@ -1281,7 +1280,7 @@ void CudaCodeGen::CompileToNVRTC(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
 #if defined(USE_ROCM)
-  std::vector<const char*> args = {"--std=c++17"};
+  std::vector<const char*> args = {"--std=c++20"};
   args.push_back("-hip-pch");
 #else
   const std::string compute = std::string("--gpu-architecture=") +
@@ -1299,7 +1298,7 @@ void CudaCodeGen::CompileToNVRTC(
 #endif
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
-      "--std=c++17", compute.c_str(), "-default-device"};
+      "--std=c++20", compute.c_str(), "-default-device"};
 #endif
 
   auto result = nvrtc().nvrtcCompileProgram(
@@ -1313,7 +1312,7 @@ void CudaCodeGen::CompileToNVRTC(
     cu << log.data() << '\n';
     cu << "nvrtc compilation failed: " << '\n';
     cu << code << '\n';
-    throw std::runtime_error(cu.str());
+    throw std::runtime_error(std::move(cu).str());
   }
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });

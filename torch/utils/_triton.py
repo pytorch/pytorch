@@ -1,6 +1,36 @@
 import functools
 import hashlib
+import os
 from typing import Any
+
+
+_FAILED_TO_MAP_SEGMENT_FROM_SHARED_OBJECT = "failed to map segment from shared object"
+
+
+def _triton_cache_dir_for_error_message() -> str | None:
+    if triton_cache_dir := os.environ.get("TRITON_CACHE_DIR"):
+        return triton_cache_dir
+
+    try:
+        from triton.runtime.cache import knobs
+
+        return knobs.cache.dir
+    except (AttributeError, ImportError):
+        return None
+
+
+def _raise_triton_cache_load_error(exc: BaseException) -> None:
+    cache_dir = _triton_cache_dir_for_error_message()
+    if "TRITON_CACHE_DIR" in os.environ:
+        cache_dir_msg = f" (TRITON_CACHE_DIR={cache_dir})"
+    else:
+        cache_dir_msg = f" ({cache_dir})" if cache_dir else ""
+    raise ImportError(
+        f"{exc}. This usually means Triton's cache directory{cache_dir_msg} is on "
+        "a filesystem mounted with noexec, so the dynamic loader cannot map "
+        "generated shared objects. Set TRITON_CACHE_DIR to a directory on an "
+        "executable filesystem."
+    ) from exc
 
 
 @functools.cache
@@ -189,8 +219,31 @@ def triton_backend() -> Any:
     from triton.compiler.compiler import make_backend
     from triton.runtime.driver import driver
 
-    target = driver.active.get_current_target()
-    return make_backend(target)
+    try:
+        target = driver.active.get_current_target()
+        return make_backend(target)
+    except (ImportError, OSError) as e:
+        if _FAILED_TO_MAP_SEGMENT_FROM_SHARED_OBJECT in str(e):
+            _raise_triton_cache_load_error(e)
+        raise
+
+
+def _extern_libs_key(backend: Any) -> str:
+    """Return a cache key fragment for extern libs (e.g. libdevice.10.bc).
+
+    These files affect codegen but are not covered by triton_key() (Python
+    sources only) or backend.hash() (ptxas version and arch only).
+    """
+    opts = backend.parse_options({})
+    extern_libs = getattr(opts, "extern_libs", None)
+    if not extern_libs:
+        return ""
+    parts = []
+    for name, path in sorted(extern_libs):
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                parts.append(f"{name}-{hashlib.sha256(f.read()).hexdigest()}")
+    return "-".join(parts)
 
 
 @functools.cache

@@ -4,6 +4,7 @@ import random
 import sys
 import threading
 import time
+import unittest
 from datetime import timedelta
 from enum import Enum
 
@@ -74,11 +75,13 @@ def _compare_owner_value(context_id, rref, grad):
     grads = dist_autograd.get_gradients(context_id)
     x = grads[rref.local_value()]
     if x.is_sparse:
-        assert grad.is_sparse
+        if not grad.is_sparse:
+            raise AssertionError("Expected grad to be sparse")
         x = x.to_dense()
         grad = grad.to_dense()
     else:
-        assert not grad.is_sparse
+        if grad.is_sparse:
+            raise AssertionError("Expected grad to not be sparse")
     return torch.equal(x, grad)
 
 
@@ -167,7 +170,7 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
     return success
 
 
-# This function creates a dis autograd context, run rpc_sync on the given ps,
+# This function creates a dist autograd context, run rpc_sync on the given ps,
 # and then blocks until the ps has verified the grads are correctly accumulated.
 def _run_trainer(rref_t1, t2, ps, rank_diff, sparse):
     with dist_autograd.context() as context_id:
@@ -976,7 +979,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
         send_functions = ctx._send_functions()
         self.assertEqual(2, len(send_functions))
 
-        # For send function when making nest rpc call,
+        # For send function when making nested rpc call,
         # next functions of the send function are two recv functions
         # for received two tensors from previous call
         next_funcs = next(iter(send_functions.values())).next_functions
@@ -1941,7 +1944,10 @@ class DistAutogradTest(CommonDistAutogradTest):
         @staticmethod
         @once_differentiable
         def backward(ctx, input):
-            assert DistAutogradTest._test_clean_context_backward_context_id is not None
+            if DistAutogradTest._test_clean_context_backward_context_id is None:
+                raise AssertionError(
+                    "Expected _test_clean_context_backward_context_id to not be None"
+                )
 
             # Release the context to simulate error (use barrier before releasing
             # context to ensure all nodes execute the backward function).
@@ -1951,7 +1957,8 @@ class DistAutogradTest(CommonDistAutogradTest):
             )
 
             # Verify all contexts are cleaned up.
-            assert _all_contexts_cleaned_up()
+            if not _all_contexts_cleaned_up():
+                raise AssertionError("Expected all contexts to be cleaned up")
 
             return input
 
@@ -2051,13 +2058,17 @@ class DistAutogradTest(CommonDistAutogradTest):
         @once_differentiable
         def backward(ctx, input):
             debug_info = dist_autograd._get_debug_info()
-            assert debug_info is not None
+            if debug_info is None:
+                raise AssertionError("Expected debug_info to not be None")
             backward_passes = int(debug_info["num_current_backward_passes"])
 
             # Hard to validate exact numbers because of the distributed nature.
             # We can't use a barrier() here since that would block the single
             # CPU thread available for autograd and can cause deadlocks.
-            assert backward_passes >= 1 and backward_passes <= 4
+            if not (1 <= backward_passes <= 4):
+                raise AssertionError(
+                    f"Expected 1 <= backward_passes <= 4, got {backward_passes}"
+                )
             return input
 
     @dist_init
@@ -2107,7 +2118,8 @@ class DistAutogradTest(CommonDistAutogradTest):
 
         # Validate information
         debug_info = dist_autograd._get_debug_info()
-        assert debug_info is not None
+        if debug_info is None:
+            raise AssertionError("Expected debug_info to not be None")
         self.assertEqual(0, int(debug_info["num_current_backward_passes"]))
         # only have `num_current_backward_passes` and `num_autograd contexts`
         self.assertTrue(len(debug_info) == 2)
@@ -2506,6 +2518,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
 
 class CudaDistAutogradTest(CommonDistAutogradTest):
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/70753")
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_gpu_simple(self):

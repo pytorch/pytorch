@@ -13,9 +13,8 @@ from torch._higher_order_ops.flat_apply import (
     to_graphable,
 )
 from torch._higher_order_ops.strict_mode import strict_mode
-from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._higher_order_ops.utils import autograd_not_implemented, register_fake
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     PreDispatchTorchFunctionMode,
     ProxyTorchDispatchMode,
@@ -30,6 +29,7 @@ class ExportTracepoint(HigherOrderOperator):
         super().__init__("_export_tracepoint")
 
     def __call__(self, *args, **kwargs):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
 
 
@@ -45,10 +45,9 @@ def export_tracepoint_dispatch_mode(mode, *args, **kwargs):
     return track_tensor_tree(args, proxy, constant=None, tracer=mode.tracer)
 
 
-@_export_tracepoint.py_impl(FakeTensorMode)
-def export_tracepoint_fake_tensor_mode(mode, *args, **kwargs):
-    with mode:
-        return args
+@register_fake(_export_tracepoint, skip_cache=True)
+def export_tracepoint_fake_tensor_mode(*args, **kwargs):
+    return args
 
 
 @_export_tracepoint.py_functionalize_impl
@@ -72,14 +71,22 @@ def export_tracepoint_cpu(*args, **kwargs):
 
 
 def _wrap_submodule(mod, path, module_call_specs):
-    assert isinstance(mod, torch.nn.Module)
-    assert path != ""
+    if not isinstance(mod, torch.nn.Module):
+        raise AssertionError(f"expected torch.nn.Module, got {type(mod)}")
+    if path == "":
+        raise AssertionError("path must not be empty")
     submodule = torch.fx.graph_module._get_attr(mod, path)
 
     def update_module_call_signatures(path, in_spec, out_spec):
         if path in module_call_specs:
-            assert module_call_specs[path]["in_spec"] == in_spec
-            assert module_call_specs[path]["out_spec"] == out_spec
+            if module_call_specs[path]["in_spec"] != in_spec:
+                raise AssertionError(
+                    f"in_spec mismatch for {path}: {module_call_specs[path]['in_spec']} != {in_spec}"
+                )
+            if module_call_specs[path]["out_spec"] != out_spec:
+                raise AssertionError(
+                    f"out_spec mismatch for {path}: {module_call_specs[path]['out_spec']} != {out_spec}"
+                )
         module_call_specs[path] = {"in_spec": in_spec, "out_spec": out_spec}
 
     def check_flattened(flat_args):
@@ -139,7 +146,8 @@ def _register_func_spec_proxy_in_tracer(tracer, name, spec):
     """
     fx_name = name + "0"
     if hasattr(tracer.root, fx_name):
-        assert getattr(tracer.root, fx_name) == spec
+        if getattr(tracer.root, fx_name) != spec:
+            raise AssertionError(f"spec mismatch for {fx_name}")
         return tracer.create_proxy("get_attr", fx_name, (), {})
 
     qualname = tracer.get_fresh_qualname(name)
@@ -185,7 +193,7 @@ def _is_init(fn):
 def mark_subclass_constructor_exportable_experimental(constructor_subclass):
     """
     Experimental decorator that makes subclass to be traceable in export
-    with pre-dispatch IR. To make your subclass traceble in export, you need to:
+    with pre-dispatch IR. To make your subclass traceable in export, you need to:
         1. Implement __init__ method for your subclass (Look at DTensor implementation)
         2. Decorate your __init__ method with _mark_constructor_exportable_experimental
         3. Put torch._dynamo_disable decorator to prevent dynamo from peeking into its' impl
@@ -217,7 +225,10 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
             return
 
         if not is_traceable_wrapper_subclass_type(type(args[0])):
-            assert constructor_subclass.__qualname__.endswith("__init__")
+            if not constructor_subclass.__qualname__.endswith("__init__"):
+                raise AssertionError(
+                    f"expected __qualname__ to end with '__init__', got {constructor_subclass.__qualname__}"
+                )
             obj_name = constructor_subclass.__qualname__[: -len("__init__")]
             raise RuntimeError(
                 f"Can't intercept {obj_name} in export because this object is not a traceable "
@@ -228,7 +239,10 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
         if mode is None:
             return
 
-        assert isinstance(mode, PreDispatchTorchFunctionMode)
+        if not isinstance(mode, PreDispatchTorchFunctionMode):
+            raise AssertionError(
+                f"expected PreDispatchTorchFunctionMode, got {type(mode)}"
+            )
 
         tracer = mode.tracer
         subclass = args[0]
@@ -310,7 +324,8 @@ def allow_in_pre_dispatch_graph(func):
         with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
             out = func(*args, **kwargs)
 
-        assert mode.pre_dispatch, "Should only do this in predispatch"
+        if not mode.pre_dispatch:
+            raise AssertionError("Should only do this in predispatch")
         tracer = mode.tracer
 
         function_cls_name = f"{args[0].__module__}.{args[0].__qualname__}"

@@ -9,6 +9,7 @@
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/macros/Macros.h>
 #include <curand_kernel.h>
+#include <utility>
 
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -41,9 +42,7 @@ template <
     int ADims,
     int VEC,
     typename mask_t>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(256, 4)
-#endif
 __global__ void
 fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType> a,
                          at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
@@ -60,7 +59,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
 
   // Helps align the total number of times curand_uniform4 is called by each thread for the same totalElements
   // in the vec=2 and vec=4 cases.
-  bool gridxvec_loop_state = 0;
+  bool gridxvec_loop_state = false;
   accscalar_t scale = 1.0 / p;
 
   constexpr int RAND_SIZE = (VEC + 4 - 1) / 4;
@@ -139,9 +138,7 @@ template <
     int ADims,
     int BDims = ADims,
     typename mask_t>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(256, 4)
-#endif
 __global__ void
 fused_dropout_kernel(cuda::detail::TensorInfo<const scalar_t, IndexType> a,
                      cuda::detail::TensorInfo<scalar_t, IndexType> b,
@@ -428,7 +425,7 @@ native_dropout_cuda(const Tensor& self, double p, std::optional<bool> train){
     // dependency from output to input for autograd
     auto ret = at::zeros_like(self);
     auto mask = at::zeros_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value));
-    return std::tuple<Tensor,Tensor>(ret, mask);
+    return std::tuple<Tensor,Tensor>(std::move(ret), std::move(mask));
   }
 
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(std::nullopt, cuda::detail::getDefaultCUDAGenerator());

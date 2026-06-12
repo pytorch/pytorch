@@ -1,11 +1,8 @@
 #include <torch/nativert/executor/AOTInductorDelegateExecutor.h>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
-#include <c10/util/Logging.h>
 
 #include <torch/csrc/export/pt2_archive_constants.h>
-#include <torch/csrc/utils/generated_serialization_types.h>
 #include <torch/nativert/executor/Weights.h>
 
 namespace torch::nativert {

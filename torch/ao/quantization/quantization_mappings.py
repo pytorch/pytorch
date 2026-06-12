@@ -360,9 +360,7 @@ def _get_special_act_post_process(module: torch.nn.Module) -> Callable | None:
     input: torch.nn.Sigmoid
     output: default_affine_fixed_qparam_fake_quant
     """
-    return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(
-        type_before_parametrizations(module), None
-    )
+    return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(type_before_parametrizations(module))
 
 
 def _has_special_act_post_process(module: torch.nn.Module) -> bool:

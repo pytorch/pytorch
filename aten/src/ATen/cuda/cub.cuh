@@ -13,26 +13,7 @@
 #include <ATen/cuda/cub_definitions.cuh>
 #include <ATen/cuda/CUDAContextLight.h>
 
-#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
-
 #include <cub/cub.cuh>
-
-#else
-
-// include cub in a safe manner, see:
-// https://github.com/pytorch/pytorch/pull/55292
-#undef CUB_NS_POSTFIX //undef to avoid redefinition warnings
-#undef CUB_NS_PREFIX
-#undef CUB_NS_QUALIFIER
-#define CUB_NS_PREFIX namespace at_cuda_detail {
-#define CUB_NS_POSTFIX }
-#define CUB_NS_QUALIFIER ::at_cuda_detail::cub
-#include <cub/cub.cuh>
-#undef CUB_NS_POSTFIX
-#undef CUB_NS_PREFIX
-#undef CUB_NS_QUALIFIER
-
-#endif
 
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -55,19 +36,55 @@
 #define ROCM_HIPCUB(x) x
 #endif
 
-#if CUB_V3_PLUS()
+#if CUB_V3_4_PLUS()
+#include <cuda/iterator>
+#include <cuda/functional>
+#include <cuda/std/iterator>
+#define ATEN_CUB_TRANSFORM_ITERATOR(ValueType, ...) ::cuda::transform_iterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) ::cuda::counting_iterator<__VA_ARGS__>
+#define ATEN_CUB_CONSTANT_ITERATOR(...) ::cuda::constant_iterator<__VA_ARGS__>
+#define ATEN_CUB_MAXIMUM() ::cuda::maximum<>()
+template<class T>
+using cccl_constant_iterator = ::cuda::constant_iterator<T>;
+template<class T>
+using cccl_counting_iterator = ::cuda::counting_iterator<T>;
+using cccl_discard_iterator  = ::cuda::discard_iterator;
+template<class Iter>
+auto cccl_make_reverse_iterator(Iter it) { return ::cuda::std::make_reverse_iterator(it); }
+#elif CUB_V3_PLUS()
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/iterator/reverse_iterator.h>
 #define ATEN_CUB_TRANSFORM_ITERATOR(ValueType, ...) ::thrust::transform_iterator<__VA_ARGS__>
 #define ATEN_CUB_COUNTING_ITERATOR(...) ::thrust::counting_iterator<__VA_ARGS__>
 #define ATEN_CUB_CONSTANT_ITERATOR(...) ::thrust::constant_iterator<__VA_ARGS__>
 #define ATEN_CUB_MAXIMUM() ::cuda::maximum<>()
+template<class T>
+using cccl_constant_iterator = ::thrust::constant_iterator<T>;
+template<class T>
+using cccl_counting_iterator = ::thrust::counting_iterator<T>;
+using cccl_discard_iterator  = ::thrust::discard_iterator<>;
+template<class Iter>
+auto cccl_make_reverse_iterator(Iter it) { return ::thrust::make_reverse_iterator(it); }
 #else
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/iterator/reverse_iterator.h>
 #define ATEN_CUB_TRANSFORM_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::TransformInputIterator<__VA_ARGS__>
 #define ATEN_CUB_COUNTING_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::CountingInputIterator<__VA_ARGS__>
 #define ATEN_CUB_CONSTANT_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<__VA_ARGS__>
 #define ATEN_CUB_MAXIMUM() NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max()
+template<class T>
+using cccl_constant_iterator = ::thrust::constant_iterator<T>;
+template<class T>
+using cccl_counting_iterator = ::thrust::counting_iterator<T>;
+using cccl_discard_iterator  = ::thrust::discard_iterator<>;
+template<class Iter>
+auto cccl_make_reverse_iterator(Iter it) { return ::thrust::make_reverse_iterator(it); }
 #endif
 
 #if defined(USE_ROCM)
@@ -213,7 +230,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
       scan_op,
       num_items,
       at::cuda::getCurrentCUDAStream());
-  C10_HIP_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
@@ -249,8 +266,6 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   }
 #endif
 }
-
-# if defined(CUDA_VERSION) || defined(USE_ROCM)
 
 template<typename T>
 struct BlockPrefixCallbackOp
@@ -304,11 +319,11 @@ __global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem
   // load agg and reduce my starting value
   T agg_data;
   agg_data = threadIdx.x >= blockIdx.x ? T(0) : agg[threadIdx.x];
-  // if there are fewer threads than previous values to be read,
-  // read another value
-  if (threadIdx.x + blockDim.x < blockIdx.x) {
-    agg_data += agg[threadIdx.x + blockDim.x];
+  // In case there are fewer threads than previous block aggregates to be read, add more aggregates (should be at most 2-3 aggregates per thread)
+  for (unsigned int i=threadIdx.x + blockDim.x; i<blockIdx.x; i+=blockDim.x) {
+    agg_data += agg[i];
   }
+
   T aggregate = BlockReduceT(temp_storage.reduce).Sum(agg_data);
   __syncthreads();
   BlockPrefixCallbackOp prefix_op(aggregate);
@@ -444,8 +459,6 @@ inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * out
 
   const int iters_per_cta = (grid_size + num_sms - 1)/num_sms;
   grid_size = std::min(num_sms, grid_size);
-  // simple reduction in scan kernel handles at most 2 items per thread
-  TORCH_INTERNAL_ASSERT(2 * BLOCK_THREADS >= grid_size);
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto agg = allocator.allocate(grid_size * sizeof(scalar_t));
   calc_block_sums<BLOCK_THREADS, ITEMS_PER_THREAD, false>
@@ -458,7 +471,6 @@ inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * out
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-#endif
 
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT, int max_cub_size=impl::max_cub_size>
 inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {
@@ -471,7 +483,7 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
       init_value,
       num_items,
       at::cuda::getCurrentCUDAStream());
-  C10_HIP_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,

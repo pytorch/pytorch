@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["module: unknown"]
 
+import multiprocessing
 import os
 import random
 import shutil
@@ -32,6 +33,8 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_ASAN,
 )
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
@@ -119,6 +122,7 @@ class TestCheckpoint(TestCase):
 
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/97402")
     def test_checkpoint_trigger(self):
         class Net(nn.Module):
             def __init__(self) -> None:
@@ -561,10 +565,39 @@ class TestCheckpoint(TestCase):
         self.assertTrue(f"Device types: ['{device_type}', 'meta']" in warning_msg)
         self.assertTrue(f"first device type: {device_type}" in warning_msg)
 
+    @unittest.skipIf(not TEST_GPU, "No accelerator")
+    def test_checkpoint_preserves_device_context(self):
+        """Test that checkpoint preserves torch.device() context during recomputation.
+
+        When a forward function is executed inside a torch.device() context manager,
+        tensors created without explicit device should be placed on the context's device.
+        This should also hold during checkpoint recomputation in backward pass.
+        """
+        recomputed_devices = []
+
+        def fn_creates_tensor(x):
+            # Create tensor without explicit device - should use default from context
+            intermediate = torch.empty(4)
+            recomputed_devices.append(intermediate.device)
+            return x * intermediate.sum()
+
+        x = torch.randn(4, device=device_type, requires_grad=True)
+
+        with torch.device(device_type):
+            # Forward pass: intermediate should be on device_type
+            y = checkpoint(fn_creates_tensor, x, use_reentrant=False)
+            self.assertEqual(recomputed_devices[-1].type, device_type)
+
+            # Backward pass triggers recomputation: intermediate should still be on device_type
+            y.sum().backward()
+            self.assertEqual(len(recomputed_devices), 2)  # forward + recompute
+            self.assertEqual(recomputed_devices[-1].type, device_type)
+
 
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
 
+    @unittest.skipIf(TEST_WITH_ASAN, "https://github.com/pytorch/pytorch/issues/84937")
     def test_random_seed(self):
         def run():
             dataloader = torch.utils.data.DataLoader(
@@ -1013,11 +1046,44 @@ def _deprecated_api(x, y=15):
 class TestDeprecate(TestCase):
     def test_deprecated(self):
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            # pyrefly: ignore [unknown-name]
             deprecated_api(1, 2)  # noqa: F821
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            # pyrefly: ignore [unknown-name]
             deprecated_api(1, y=2)  # noqa: F821
         _deprecated_api(1, 2)
         _deprecated_api(1, y=2)
+
+
+class TestDeviceLazyInit(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "pthread_atfork not available on Windows")
+    def test_fork_poison_on_lazy_init(self, device):
+        torch.empty(1, device=device)
+
+        def child(q):
+            try:
+                torch.empty(1, device=device)
+            except Exception as e:
+                q.put(e)
+
+        ctx = multiprocessing.get_context("fork")
+        q = ctx.Queue()
+        p = ctx.Process(target=child, args=(q,))
+        p.start()
+        p.join()
+        self.assertTrue(not q.empty())
+        exc = q.get()
+        pattern = (
+            r"Cannot re-initialize .* in forked subprocess\. "
+            r"To use .* with multiprocessing, you must use the 'spawn' start method"
+        )
+        self.assertIsInstance(exc, RuntimeError)
+        self.assertRegex(str(exc), pattern)
+
+
+instantiate_device_type_tests(
+    TestDeviceLazyInit, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 
 if __name__ == "__main__":

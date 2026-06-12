@@ -1,12 +1,15 @@
 # mypy: allow-untyped-defs
+import contextlib
 import logging
-import pdb
 import sys
 import traceback
 import typing
 from datetime import timedelta
 
 import torch
+
+
+RankType = int | torch.SymInt
 
 
 log = logging.getLogger(__name__)
@@ -24,6 +27,35 @@ def is_available() -> bool:
     ``USE_DISTRIBUTED=0`` for MacOS.
     """
     return hasattr(torch._C, "_c10d_init")
+
+
+_spmd_types_available: bool | None = None
+
+
+def _is_spmd_types_available() -> bool:
+    """Check if the spmd_types package is installed."""
+    import importlib.util
+
+    global _spmd_types_available
+    if _spmd_types_available is None:
+        _spmd_types_available = importlib.util.find_spec("spmd_types") is not None
+    return _spmd_types_available
+
+
+def _spmd_no_typecheck():
+    """
+    Return a spmd_types no_typecheck context, or a no-op if not installed.
+    """
+    if _is_spmd_types_available():
+        import spmd_types
+
+        return spmd_types.no_typecheck()
+
+    @contextlib.contextmanager
+    def no_typecheck():
+        yield
+
+    return no_typecheck()
 
 
 if is_available() and not torch._C._c10d_init():
@@ -65,21 +97,27 @@ if is_available():
         Work as _Work,
     )
 
-    class _DistributedPdb(pdb.Pdb):
+    def _make_distributed_pdb():
         """
         Supports using PDB from inside a multiprocessing child process.
 
         Usage:
-        _DistributedPdb().set_trace()
+        _make_distributed_pdb().set_trace()
         """
 
-        def interaction(self, *args, **kwargs):
-            _stdin = sys.stdin
-            try:
-                sys.stdin = open("/dev/stdin")  # noqa: SIM115
-                pdb.Pdb.interaction(self, *args, **kwargs)
-            finally:
-                sys.stdin = _stdin
+        # Lazy import pdb only if we set breakpoints.
+        import pdb
+
+        class _DistributedPdb(pdb.Pdb):
+            def interaction(self, *args, **kwargs):
+                _stdin = sys.stdin
+                try:
+                    with open("/dev/stdin") as sys.stdin:
+                        pdb.Pdb.interaction(self, *args, **kwargs)
+                finally:
+                    sys.stdin = _stdin
+
+        return _DistributedPdb()
 
     _breakpoint_cache: dict[int, typing.Any] = {}
 
@@ -108,7 +146,7 @@ if is_available():
                 )
 
         if get_rank() == rank:
-            pdb = _DistributedPdb()
+            pdb = _make_distributed_pdb()
             pdb.message(
                 "\n!!! ATTENTION !!!\n\n"
                 f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"
@@ -133,9 +171,8 @@ if is_available():
     # Variables prefixed with underscore are not auto imported
     # See the comment in `distributed_c10d.py` above `_backend` on why we expose
     # this.
-    # pyrefly: ignore [deprecated]
     from .distributed_c10d import *  # noqa: F403
-    from .distributed_c10d import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
+    from .distributed_c10d import (
         _all_gather_base,
         _coalescing_manager,
         _CoalescingManager,
@@ -162,7 +199,8 @@ else:
     # stubs as necessary.
     # We cannot define stubs directly because they confuse pyre
 
-    class _ProcessGroupStub:
+    class _Stub:
         pass
 
-    sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]
+    sys.modules["torch.distributed"].GroupName = _Stub  # type: ignore[attr-defined]
+    sys.modules["torch.distributed"].ProcessGroup = _Stub  # type: ignore[attr-defined]
