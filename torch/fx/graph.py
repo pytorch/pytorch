@@ -910,7 +910,10 @@ class CodeGen:
                         f"{repr(node)}{maybe_type_annotation} = {_format_target(_get_repr(node.args[0]), node.args[1])}"
                     )
                     return
-                boxed_call_arg_indices = node.meta.get("boxed_call_arg_indices", ())
+                boxed_call_arg_indices = node.meta.get(
+                    "boxed_call_arg_indices",
+                    getattr(node.target, "_boxed_call_arg_indices", ()),
+                )
                 boxed_arg_names: dict[int, str] = {}
                 if boxed_call_arg_indices:
                     boxed_arg_names = {

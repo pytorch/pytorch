@@ -67,6 +67,7 @@ class InductorCompiledCode(HigherOrderOperator):
 
     def __init__(self) -> None:
         super().__init__("inductor_compiled_code")
+        self._boxed_call_arg_indices = (1,)
 
     def __call__(self, func, inputs, *, name: str | None = None):
         # pyrefly: ignore [missing-attribute]
@@ -219,8 +220,6 @@ def inductor_compiled_code_proxy(mode, func, inputs, *, name=None):
         (callable_idx, proxy_inputs),
         kwargs,
     )
-    if isinstance(proxy_inputs, list):
-        out_proxy.node.meta["boxed_call_arg_indices"] = (1,)
 
     return track_tensor_tree(example_out, out_proxy, constant=None, tracer=mode.tracer)
 

@@ -1297,7 +1297,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             if node.op == "call_function" and node.target is inductor_compiled_code
         ]
         self.assertEqual(len(hop_nodes), 2)
-        self.assertEqual(hop_nodes[1].meta.get("boxed_call_arg_indices"), (1,))
+        self.assertEqual(
+            getattr(hop_nodes[1].target, "_boxed_call_arg_indices", None), (1,)
+        )
         self.assertFalse(
             any(
                 getattr(node.target, "__name__", None) == "_box_call_inputs"
