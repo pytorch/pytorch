@@ -1874,8 +1874,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
         lastTimePollStore = currentTime;
         auto handleError = [&](const std::string& errorMessage) {
           LOG(WARNING)
-              << pg_->logPrefix()
-              << "TCPStore check for dump key \"" << kStoreDumpKey
+              << pg_->logPrefix() << "TCPStore check for dump key \""
+              << kStoreDumpKey
               << "\" failed (store unavailable, not absent key). Cannot detect "
               << "remote dump signals. A rank exiting outside NCCL without "
               << "broadcasting is a separate case. Error: " << errorMessage;
