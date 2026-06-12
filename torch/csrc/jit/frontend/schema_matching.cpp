@@ -234,7 +234,7 @@ static Value* tryMatchArgument(
         }
       }
 
-      ostream << ss.str();
+      ostream << std::move(ss).str();
     }
 
     return nullptr;
@@ -548,7 +548,7 @@ MatchedSchema matchSchema(
           /*allow_conversions=*/true)) {
     return *result;
   }
-  throw(ErrorReport(loc) << failure_messages.str());
+  throw(ErrorReport(loc) << std::move(failure_messages).str());
 }
 
 static std::string prefixLine(
@@ -562,7 +562,7 @@ static std::string prefixLine(
     ss.put(c);
     was_newline = c == '\n';
   }
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::pair<size_t, MatchedSchema> matchSchemas(
@@ -612,7 +612,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
                        << "The following variants are available:\n"
                        << prefixLine(failure_messages.str(), "  ")
                        << "\nThe original call is");
-  throw(ErrorReport(loc) << failure_messages.str());
+  throw(ErrorReport(loc) << std::move(failure_messages).str());
 }
 
 // pack outputs of a function following python rules. If there is a single value

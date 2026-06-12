@@ -141,8 +141,8 @@ def check_compiler_exist_windows(compiler: str) -> None:
     """
     try:
         subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
-    except FileNotFoundError as exc:
-        raise RuntimeError(f"Compiler: {compiler} is not found.") from exc
+    except FileNotFoundError as e:
+        raise exc.InvalidCxxCompiler(compiler) from e
     except subprocess.SubprocessError:
         # Expected that some compiler(clang, clang++) is exist, but they not support `/help` args.
         pass
@@ -1327,20 +1327,27 @@ def _get_torch_related_args(
         if config.aot_inductor.cross_target_platform == "windows":
             aoti_shim_library = config.aot_inductor.aoti_shim_library
 
-            assert aoti_shim_library, (
-                "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
-            )
+            if not aoti_shim_library:
+                raise AssertionError(
+                    "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
+                )
             if isinstance(aoti_shim_library, str):
                 libraries.append(aoti_shim_library)
             else:
-                assert isinstance(aoti_shim_library, list)
+                if not isinstance(aoti_shim_library, list):
+                    raise AssertionError(
+                        f"expected aoti_shim_library to be a list, got {type(aoti_shim_library)}"
+                    )
                 libraries.extend(aoti_shim_library)
 
     if config.aot_inductor.cross_target_platform == "windows":
-        assert config.aot_inductor.aoti_shim_library_path, (
-            "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
-            " when 'cross_target_platform' is 'windows'.",
-        )
+        if not config.aot_inductor.aoti_shim_library_path:
+            raise AssertionError(
+                (
+                    "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
+                    " when 'cross_target_platform' is 'windows'.",
+                )
+            )
         libraries_dirs.append(config.aot_inductor.aoti_shim_library_path)
 
     if _IS_WINDOWS:
@@ -2188,7 +2195,8 @@ class CppTorchDeviceOptions(CppTorchOptions):
             # Re-order library search paths in case there are lib conflicts
             # that also live in the FBCode python lib dir.
             _, python_lib_dirs = _get_python_related_args()
-            assert len(python_lib_dirs) == 1, f"Python lib dirs: {python_lib_dirs}"
+            if len(python_lib_dirs) != 1:
+                raise AssertionError(f"Python lib dirs: {python_lib_dirs}")
             if python_lib_dirs[0] in self._libraries_dirs:
                 self._libraries_dirs.remove(python_lib_dirs[0])
                 self._libraries_dirs.append(python_lib_dirs[0])
@@ -2300,7 +2308,10 @@ class CppBuilder:
         self._precompiling = BuildOption.get_precompiling()
         self._preprocessing = BuildOption.get_preprocessing()
         # Only one of these options (if any) should be true at any given time.
-        assert sum((self._compile_only, self._precompiling, self._preprocessing)) <= 1
+        if sum((self._compile_only, self._precompiling, self._preprocessing)) > 1:
+            raise AssertionError(
+                "at most one of compile_only, precompiling, preprocessing may be set"
+            )
         self._do_link = not (
             self._compile_only or self._precompiling or self._preprocessing
         )
@@ -2308,9 +2319,8 @@ class CppBuilder:
         # MSVC produces two files when precompiling: the actual .pch file, as well as an
         # object file which must be linked into the final library.  This class assumes
         # only one output file of note, so for now we'll error out here.
-        assert not _IS_WINDOWS or not self._precompiling, (
-            "Cannot currently precompile headers on Windows!"
-        )
+        if _IS_WINDOWS and self._precompiling:
+            raise AssertionError("Cannot currently precompile headers on Windows!")
 
         if self._compile_only:
             file_ext, output_flags = self.__get_object_flags()
@@ -2347,7 +2357,10 @@ class CppBuilder:
             sources = [os.path.basename(i) for i in sources]
 
         if self._precompiling:
-            assert len(sources) == 1
+            if len(sources) != 1:
+                raise AssertionError(
+                    f"expected exactly one source when precompiling, got {len(sources)}"
+                )
             # See above; we can currently assume this is not on MSVC.
             self._sources_args = f"-x c++-header {sources[0]}"
             if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
@@ -2410,7 +2423,9 @@ class CppBuilder:
             else:
                 self._libraries_args += f"-l{lib} "
 
-        for passthrough_arg in BuildOption.get_passthrough_args():
+        for passthrough_arg in self._stage_passthrough_paths(
+            BuildOption.get_passthrough_args()
+        ):
             self._passthrough_parameters_args += f"{passthrough_arg} "
 
     def get_command_line(self) -> str:
@@ -2461,6 +2476,28 @@ class CppBuilder:
 
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
+
+    def _stage_passthrough_paths(self, args: list[str]) -> list[str]:
+        """For fbcode remote builds, treat any absolute file path that appears
+        as a passthrough arg (e.g. precompiled .so kernels passed in via
+        ``extra_flags``) the same way as a source: stage the file into the
+        remote build sandbox and rewrite the command to reference it by
+        basename. Without this the linker is handed a path that only exists on
+        the submitting host and the remote build fails to find the file."""
+        if not (config.is_fbcode() and self._use_relative_path):
+            return args
+        rewritten = []
+        for arg in args:
+            tokens = shlex.split(arg)
+            new_tokens = []
+            for tok in tokens:
+                if os.path.isabs(tok) and os.path.isfile(tok):
+                    self._orig_source_paths.append(tok)
+                    new_tokens.append(os.path.basename(tok))
+                else:
+                    new_tokens.append(tok)
+            rewritten.append(" ".join(shlex.quote(t) for t in new_tokens))
+        return rewritten
 
     def build_fbcode_re(
         self,
@@ -2769,9 +2806,10 @@ class CppBuilder:
          """
         )
 
-        assert os.path.exists(cmake_path), (
-            f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
-        )
+        if not os.path.exists(cmake_path):
+            raise AssertionError(
+                f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
+            )
         with open(cmake_path, "a") as f:
             f.write(contents)
 

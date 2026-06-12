@@ -171,7 +171,7 @@ TEST(MobileTest, SaveParametersDefaultsToZip) {
   EXPECT_EQ(ss_data.str()[0], 'P');
   EXPECT_EQ(ss_data.str()[1], 'K');
   EXPECT_EQ(ss_data.str()[2], '\x03');
-  EXPECT_EQ(ss_data.str()[3], '\x04');
+  EXPECT_EQ(std::move(ss_data).str()[3], '\x04');
 }
 
 TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
@@ -187,7 +187,7 @@ TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
   EXPECT_EQ(ss_data.str()[4], 'P');
   EXPECT_EQ(ss_data.str()[5], 'T');
   EXPECT_EQ(ss_data.str()[6], 'M');
-  EXPECT_EQ(ss_data.str()[7], 'F');
+  EXPECT_EQ(std::move(ss_data).str()[7], 'F');
 }
 
 TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {

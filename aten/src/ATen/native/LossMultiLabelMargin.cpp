@@ -6,6 +6,8 @@
 #include <ATen/native/LossMulti.h>
 #include <c10/util/irange.h>
 
+#include <utility>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -289,7 +291,7 @@ std::tuple<Tensor, Tensor> multilabel_margin_loss_forward_cpu(
   auto is_target = at::empty({0}, self.options());
   at::native::multilabel_margin_loss_forward_out_cpu(
       self, target, reduction, output, is_target);
-  return std::make_tuple(output, is_target);
+  return std::make_tuple(std::move(output), std::move(is_target));
 }
 
 Tensor& multilabel_margin_loss_backward_cpu_out(const Tensor& grad_output,
