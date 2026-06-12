@@ -47,26 +47,55 @@ conv_get_md(
     const at::Tensor& dst,
     int64_t groups,
     bool is_channels_last) {
+  (void)is_channels_last;
   // create memory desc from the src/weight/dst tensors
   dnnl::memory::desc src_usr_md, weight_usr_md, dst_usr_md;
   auto ndim = src.ndimension();
-  auto fmt_src = conv_src_fmt(ndim, is_channels_last);
 
   auto src_size = src.sizes().vec();
+  auto src_strides = src.strides().vec();
   auto src_data_t = get_onednn_dtype_include_double(src);
-  src_usr_md = dnnl::memory::desc(src_size, src_data_t, fmt_src);
+  src_usr_md = dnnl::memory::desc(src_size, src_data_t, src_strides);
 
   auto dst_size = dst.sizes().vec();
+  auto dst_strides = dst.strides().vec();
   auto dst_data_t = get_onednn_dtype_include_double(dst);
-  dst_usr_md = dnnl::memory::desc(dst_size, dst_data_t, fmt_src);
+  dst_usr_md = dnnl::memory::desc(dst_size, dst_data_t, dst_strides);
 
   auto ic = src.size(1);
   auto oc = dst.size(1);
   auto wei_data_t = get_onednn_dtype_include_double(weight);
   dnnl::memory::dims weight_size =
       compatible_weight_dims(ndim, groups, oc, ic, weight.sizes());
-  auto fmt_weight = conv_weight_fmt(ndim, groups != 1, is_channels_last);
-  weight_usr_md = dnnl::memory::desc(weight_size, wei_data_t, fmt_weight);
+  if (groups == 1) {
+    auto weight_strides = weight.strides().vec();
+    weight_usr_md = dnnl::memory::desc(weight_size, wei_data_t, weight_strides);
+  } else {
+    TORCH_CHECK(
+        weight.ndimension() >= 3,
+        "Expected grouped convolution weight dim >= 3, got ",
+        weight.ndimension());
+    TORCH_CHECK(
+        weight.size(0) % groups == 0,
+        "Expected weight.size(0) divisible by groups, got weight.size(0)=",
+        weight.size(0),
+        ", groups=",
+        groups);
+
+    auto weight_strides = weight.strides().vec();
+    dnnl::memory::dims grouped_weight_strides;
+    grouped_weight_strides.reserve(
+        static_cast<size_t>(weight.ndimension()) + 1);
+    grouped_weight_strides.push_back(
+        weight_strides[0] * (weight.size(0) / groups));
+    grouped_weight_strides.push_back(weight_strides[0]);
+    for (int64_t d = 1; d < weight.ndimension(); ++d) {
+      grouped_weight_strides.push_back(weight_strides[d]);
+    }
+
+    weight_usr_md =
+        dnnl::memory::desc(weight_size, wei_data_t, grouped_weight_strides);
+  }
 
   return {src_usr_md, weight_usr_md, dst_usr_md};
 }
