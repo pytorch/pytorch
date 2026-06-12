@@ -109,9 +109,14 @@ def toRealValueType(dtype):
 def check_inplace_broadcast(self_shape, *args_shape):
     broadcasted_shape = tuple(_broadcast_shapes(self_shape, *args_shape))
     torch._check(
-        broadcasted_shape == self_shape,
+        len(broadcasted_shape) == len(self_shape),
         lambda: f"output with shape {self_shape} doesn't match the broadcast shape {broadcasted_shape}",
     )
+    for broadcasted_dim, self_dim in zip(broadcasted_shape, self_shape):
+        torch._check(
+            broadcasted_dim == self_dim,
+            lambda: f"output with shape {self_shape} doesn't match the broadcast shape {broadcasted_shape}",
+        )
 
 
 @register_meta([aten.linspace, aten.logspace])
