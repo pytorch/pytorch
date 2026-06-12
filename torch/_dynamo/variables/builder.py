@@ -115,7 +115,12 @@ from torch.utils.weak import TensorWeakRef
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, raise_observed_exception, unimplemented
-from ..guards import GuardBuilder, install_guard, make_dupe_guard
+from ..guards import (
+    GuardBuilder,
+    install_guard,
+    make_dupe_guard,
+    resolve_async_collective_tensor,
+)
 from ..pgo import (
     auto_dynamic,
     auto_unset,
@@ -125,6 +130,7 @@ from ..pgo import (
 )
 from ..side_effects import SideEffects
 from ..source import (
+    AsyncCollectiveTensorSource,
     AttrProxySource,
     AttrSource,
     CallMethodItemSource,
@@ -2833,8 +2839,10 @@ class VariableBuilder:
             return self.tx.output.input_source_to_var[source]
 
         options = {}
+        resolved_act_value = resolve_async_collective_tensor(value)
+        is_act = resolved_act_value is not None and resolved_act_value is not value
         subclass_type = infer_subclass_type(value)
-        if subclass_type is not None:
+        if subclass_type is not None and not is_act:
             self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if get_static_address_type(value) == "guarded":
@@ -2942,7 +2950,24 @@ class VariableBuilder:
         is_dtensor = torch.distributed.is_available() and isinstance(
             value, torch.distributed.tensor.DTensor
         )
-        if not is_dtensor:
+        if is_act:
+            # AOTAutograd resolves ACT inputs before execution, so guard the
+            # resolved tensor and allow an already-resolved Tensor to reuse it.
+            if resolved_act_value is None:
+                raise AssertionError("resolved ACT value must not be None")
+            resolved_source = AsyncCollectiveTensorSource(source)
+            self.tx.output.input_source_to_sizes_strides[resolved_source] = (
+                self.tx.output.input_source_to_sizes_strides[source]
+            )
+            install_guard(
+                resolved_source.make_guard(
+                    functools.partial(
+                        guard_type,
+                        value=TensorWeakRef(resolved_act_value),
+                    )
+                )
+            )
+        elif not is_dtensor:
             # We guard on the _local_tensor and the _spec, and therefore we dont
             # have to guard on the outer DTensor.
             self.install_guards(
@@ -2958,7 +2983,7 @@ class VariableBuilder:
 
         # We install TYPE_MATCH guards for traceable wrapper subclass object,
         # and recursively install corresponding guard for each inner attribute.
-        if is_traceable_wrapper_subclass(value):
+        if is_traceable_wrapper_subclass(value) and not is_act:
             # Tensor subclass guards are very expensive because they are
             # implemented in Python. Since DTensor is PyTorch-maintained class,
             # we can skip a lot of these guards.
