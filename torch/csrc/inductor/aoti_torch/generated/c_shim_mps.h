@@ -156,6 +156,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_sort(AtenTensorHandle self, int6
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_sort_stable(AtenTensorHandle self, int32_t* stable, int64_t dim, int32_t descending, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_squeeze_dim(AtenTensorHandle self, int64_t dim, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_to_sparse(AtenTensorHandle self, int32_t* layout, const int64_t** blocksize, int64_t blocksize_len_, int64_t* dense_dim, AtenTensorHandle* ret0);
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_topk_v2(AtenTensorHandle self, int64_t k, int64_t dim, int32_t largest, int32_t sorted, int32_t stable, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_topk(AtenTensorHandle self, int64_t k, int64_t dim, int32_t largest, int32_t sorted, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_triangular_solve(AtenTensorHandle self, AtenTensorHandle A, int32_t upper, int32_t transpose, int32_t unitriangular, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_uniform(AtenTensorHandle self, double from, double to, AtenGeneratorHandle* generator, AtenTensorHandle* ret0);

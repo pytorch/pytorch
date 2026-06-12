@@ -508,6 +508,44 @@ class TestSortAndSelect(TestCase):
         compare(t, 2000, 1, True)
         compare(t, 2000, 1, False)
 
+    def test_topk_stable(self, device):
+        x = torch.tensor([[5.0, 5.0, 5.0, 4.0], [0.0, 1.0, 1.0, 1.0]], device=device)
+        expected_values = torch.tensor([[5.0, 5.0], [1.0, 1.0]], device=device)
+        expected_indices = torch.tensor([[0, 1], [1, 2]], device=device)
+
+        values, indices = torch.topk(x, 2, dim=1, stable=True)
+        self.assertEqual(values, expected_values)
+        self.assertEqual(indices, expected_indices)
+
+        method_values, method_indices = x.topk(2, dim=1, stable=True)
+        self.assertEqual(method_values, expected_values)
+        self.assertEqual(method_indices, expected_indices)
+
+        values, indices = torch.topk(x, 2, dim=1, sorted=False, stable=True)
+        self.assertEqual(torch.sort(indices, dim=1).values, expected_indices)
+        self.assertEqual(values, x.gather(1, indices))
+
+        smallest = torch.tensor([[2.0, 0.0, 0.0, 0.0, 1.0]], device=device)
+        values, indices = torch.topk(smallest, 2, largest=False, stable=True)
+        self.assertEqual(values, torch.tensor([[0.0, 0.0]], device=device))
+        self.assertEqual(indices, torch.tensor([[1, 2]], device=device))
+
+        out_values = torch.empty_like(expected_values)
+        out_indices = torch.empty_like(expected_indices)
+        torch.topk(x, 2, dim=1, stable=True, out=(out_values, out_indices))
+        self.assertEqual(out_values, expected_values)
+        self.assertEqual(out_indices, expected_indices)
+
+    def test_topk_stable_nonfinite(self, device):
+        x = torch.tensor([float("nan"), float("nan"), 3.0, 3.0, 2.0], device=device)
+        values, indices = torch.topk(x, 4, stable=True)
+        self.assertEqual(values, torch.tensor([nan, nan, 3.0, 3.0], device=device))
+        self.assertEqual(indices, [0, 1, 2, 3])
+
+        values, indices = torch.topk(x, 4, largest=False, stable=True)
+        self.assertEqual(values, torch.tensor([2.0, 3.0, 3.0, nan], device=device))
+        self.assertEqual(indices, [4, 2, 3, 0])
+
     def test_topk_quantized_scalar_input(self):
         # Calling topk on a quantized scalar input used to segfault,
         # see https://github.com/pytorch/pytorch/issues/116324

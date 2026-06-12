@@ -8094,9 +8094,9 @@ def mode_default(self, dim=-1, keepdim=False):
 
 
 @register_lowering(aten.topk.default, type_promotion_kind=None)
-def topk(self, k, dim=-1, largest=True, sorted=True):
+def topk(self, k, dim=-1, largest=True, sorted=True, *, stable=False):
     if not config.triton.decompose_sort_ops:
-        return topk_fallback(self, k, dim, largest, sorted)
+        return topk_fallback(self, k, dim, largest, sorted, stable=stable)
     shape = self.get_size()
     ndim = len(shape)
     if ndim == 0:

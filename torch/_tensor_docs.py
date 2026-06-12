@@ -5462,7 +5462,7 @@ Examples::
 add_docstr_all(
     "topk",
     r"""
-topk(k, dim=None, largest=True, sorted=True) -> (Tensor, LongTensor)
+topk(k, dim=None, largest=True, sorted=True, *, stable=False) -> (Tensor, LongTensor)
 
 See :func:`torch.topk`
 """,

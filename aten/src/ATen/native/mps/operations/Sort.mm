@@ -578,6 +578,7 @@ TORCH_IMPL_FUNC(topk_out_mps)
  int64_t dim_,
  bool largest,
  bool /*sorted*/,
+ bool stable,
  const Tensor& values,
  const Tensor& indices) {
   // `sorted` is ignored: the Metal sort is always sorted, a valid topk result either way.
@@ -597,7 +598,7 @@ TORCH_IMPL_FUNC(topk_out_mps)
   const bool descending = largest;
 
   if (dim == self.dim() - 1) {
-    sort_out_mps_impl(self, /*stable=*/false, dim, descending, values, indices, sel);
+    sort_out_mps_impl(self, stable, dim, descending, values, indices, sel);
     return;
   }
 
@@ -607,7 +608,7 @@ TORCH_IMPL_FUNC(topk_out_mps)
   out_sizes.back() = k;
   Tensor v_tmp = at::empty(out_sizes, values.options());
   Tensor i_tmp = at::empty(out_sizes, indices.options());
-  sort_out_mps_impl(self_l, /*stable=*/false, self_l.dim() - 1, descending, v_tmp, i_tmp, sel);
+  sort_out_mps_impl(self_l, stable, self_l.dim() - 1, descending, v_tmp, i_tmp, sel);
   values.copy_(v_tmp.movedim(-1, dim));
   indices.copy_(i_tmp.movedim(-1, dim));
 }
