@@ -199,7 +199,7 @@ class TestTritonDotReduction(TestCase):
         out = torch.zeros((N_out, J), device=GPU_TYPE)
 
         self._check_equal(f, (inp, weight, val, I_idx, W_idx, O_idx, out))
-        self._check_code(f, (inp, weight, val, I_idx, W_idx, O_idx, out), 2, 1)
+        self._check_code(f, (inp, weight, val, I_idx, W_idx, O_idx, out), 1, 1)
 
     def test_bmm_fusion_complex2(self):
         # out[Ai[g],m,n] += Av[g,m,k,p] * B[Ak[g,p],k,n]
@@ -222,7 +222,7 @@ class TestTritonDotReduction(TestCase):
         out = torch.zeros((NA, M, N), device=GPU_TYPE)
 
         self._check_equal(f, (Av, B, Ai, Ak, out))
-        self._check_code(f, (Av, B, Ai, Ak, out), 2, 1)
+        self._check_code(f, (Av, B, Ai, Ak, out), 1, 1)
 
     def test_bmm_large_batch_reversed_pid(self):
         def f(x, y):
