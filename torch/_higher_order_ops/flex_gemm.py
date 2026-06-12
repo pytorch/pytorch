@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -16,9 +17,19 @@ from torch._ops import HigherOrderOperator
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
-FLEX_GEMM_OP_INPUT_INDICES = {
-    torch.ops.aten.mm.default: (0, 1),
-    torch.ops.aten.addmm.default: (1, 2),
+@dataclasses.dataclass(frozen=True)
+class FlexGemmOpSpec:
+    """Canonical FlexGEMM view of a supported GEMM op's operand layout."""
+
+    name: str
+    mat1_index: int
+    mat2_index: int
+    bias_index: int | None = None
+
+
+FLEX_GEMM_OP_SPECS = {
+    torch.ops.aten.mm.default: FlexGemmOpSpec("mm", 0, 1),
+    torch.ops.aten.addmm.default: FlexGemmOpSpec("addmm", 1, 2, bias_index=0),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
@@ -27,13 +38,9 @@ FLEX_GEMM_OP_ALIASES = {
 _SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
 
 
-def supported_flex_gemm_op_names() -> str:
-    return "/".join(
-        op.name().removeprefix("aten::") for op in FLEX_GEMM_OP_INPUT_INDICES
-    )
-
-
-_SUPPORTED_FLEX_GEMM_OP_NAMES = supported_flex_gemm_op_names()
+_SUPPORTED_FLEX_GEMM_OP_NAMES = "/".join(
+    spec.name for spec in FLEX_GEMM_OP_SPECS.values()
+)
 
 
 class FlexGemm(HigherOrderOperator):
@@ -48,7 +55,7 @@ class FlexGemm(HigherOrderOperator):
         gemm_kwargs: dict[str, Any],
         kernel_options: dict[str, Any],
     ) -> Any:
-        if gemm_op not in FLEX_GEMM_OP_INPUT_INDICES:
+        if gemm_op not in FLEX_GEMM_OP_SPECS:
             raise RuntimeError(f"unsupported GEMM op for FlexGEMM: {gemm_op}")
         if not isinstance(gemm_args, (tuple, list)):
             raise RuntimeError(f"gemm_args must be a tuple/list, got {type(gemm_args)}")
