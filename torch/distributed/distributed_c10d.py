@@ -39,11 +39,13 @@ from torch._C._distributed_c10d import (
     get_debug_level,
     PrefixStore,
     ProcessGroup,
+    ReconfigureOptions,
     ReduceOp,
     ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
     Store,
+    Window,
     Work,
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
@@ -1674,6 +1676,7 @@ def init_process_group(
     pg_options: Any | None = None,
     device_id: torch.device | int | None = None,
     _ranks: list[int] | None = None,
+    enable_reconfigure: bool = False,
 ) -> None:
     """
     Initialize the default distributed process group.
@@ -1750,6 +1753,11 @@ def init_process_group(
             type at compile time will be used.
         _ranks: The ranks in the process group. If provided, the process
                group name will be the hash of all the ranks in the group.
+        enable_reconfigure (bool, optional): If ``True``, create the backend in
+            the reconfigure (fault tolerance) regime. The communicator is not
+            initialized until :meth:`ProcessGroup.reconfigure` is called.
+            Backends that do not support reconfigure ignore this flag. Default
+            is ``False``.
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.
@@ -1877,6 +1885,7 @@ def init_process_group(
             group_name,
             timeout=timeout,
             group_desc="default_pg",
+            enable_reconfigure=enable_reconfigure,
         )
     else:
         # backward compatible API
@@ -1907,6 +1916,7 @@ def init_process_group(
             timeout=timeout,
             device_id=device_id,
             group_desc="default_pg",
+            enable_reconfigure=enable_reconfigure,
         )
 
     _update_default_pg(default_pg)
@@ -1993,6 +2003,7 @@ def _new_process_group_helper(
     pg_tag=None,
     device_id=None,
     group_desc=None,
+    enable_reconfigure=False,
 ):
     """
     Create a new distributed process group.
@@ -2066,23 +2077,17 @@ def _new_process_group_helper(
         group_size,
     )
     backend_config = BackendConfig(backend)
+    pg_backend_set = False
     # Set the default backend when single backend is passed in.
     if "," not in str(backend) and ":" not in str(backend):
         if backend not in Backend.backend_type_map:
             raise AssertionError(f"Unknown backend type {backend}")
-        if backend == Backend.UNDEFINED:
-            # Currently when backend is UNDEFINED, only one backend will be initialized
-            # we use nccl (if cuda is available) or gloo as default backend
-            # so we can correctly call getDefaultBackend which in ProcessGroup.
-            if Backend.NCCL in backend_config.get_device_backend_map().values():
-                pg._set_default_backend(ProcessGroup.BackendType.NCCL)
-            else:
-                pg._set_default_backend(ProcessGroup.BackendType.GLOO)
-        else:
+        if backend != Backend.UNDEFINED:
             pg._set_default_backend(Backend.backend_type_map[backend])
+            pg_backend_set = True
     # In order to correctly call pg._has_hooks(), we should set the default backend
     # when multi backend is passed in
-    else:
+    if not pg_backend_set:
         if Backend.NCCL in backend_config.device_backend_map.values():
             pg._set_default_backend(ProcessGroup.BackendType.NCCL)
         elif Backend._plugins.keys():
@@ -2172,6 +2177,7 @@ def _new_process_group_helper(
                 group_size,
                 # pyrefly: ignore [bad-argument-type]
                 timeout=timeout,
+                enable_reconfigure=enable_reconfigure,
             )
             backend_class.options.global_ranks_in_group = global_ranks_in_group
             backend_class.options.group_name = group_name
@@ -2204,6 +2210,8 @@ def _new_process_group_helper(
                 )
             backend_options.global_ranks_in_group = global_ranks_in_group
             backend_options.group_name = group_name
+            if enable_reconfigure:
+                backend_options.enable_reconfigure = True
             backend_class = ProcessGroupNCCL(
                 backend_prefix_store, group_rank, group_size, backend_options
             )
@@ -2229,6 +2237,8 @@ def _new_process_group_helper(
             backend_options.group_name = group_name
             # pyrefly: ignore [bad-argument-type]
             backend_options._timeout = timeout
+            if enable_reconfigure:
+                backend_options.enable_reconfigure = True
             backend_class = ProcessGroupXCCL(
                 backend_prefix_store, group_rank, group_size, backend_options
             )
@@ -3046,7 +3056,9 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
         key = "group_dst" if op.op is isend else "group_src"
         return {key: op.group_peer}
 
-    if type(group) is ProcessGroup and group._get_backend(device).supports_coalescing:
+    if isinstance(group, ProcessGroup) and getattr(
+        group._get_backend(device), "supports_coalescing", False
+    ):
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
@@ -6906,3 +6918,98 @@ def record_comm(name: str):
         yield
     finally:
         torch._C._distributed_c10d._set_comm_profiling_name(prev)
+
+
+def _supports_reconfigure(group: ProcessGroup | None = None) -> bool:
+    """
+    Return whether ``group`` supports the reconfigure-based fault tolerance API.
+
+    Args:
+        group (ProcessGroup, optional): The process group to query. If ``None``,
+            the default process group is used.
+    """
+    pg = group or _get_default_group()
+    return pg.supports_reconfigure
+
+
+def _get_reconfigure_handle(group: ProcessGroup | None = None) -> str:
+    """
+    Return an opaque reconfigure handle for ``group``.
+
+    The handle encodes the information peers exchange out-of-band to
+    (re)initialize the communicator via :func:`_reconfigure`.
+
+    Args:
+        group (ProcessGroup, optional): The process group to query. If ``None``,
+            the default process group is used.
+    """
+    pg = group or _get_default_group()
+    return pg.get_reconfigure_handle()
+
+
+def _reconfigure(
+    uuid: int,
+    handles: set[str] | list[str],
+    group: ProcessGroup | None = None,
+    timeout: timedelta | None = None,
+    hints: dict[str, str] | None = None,
+) -> Work:
+    """
+    Reconfigure ``group`` with a new set of peers for fault tolerance.
+
+    Args:
+        uuid (int): Uniquely identifies this instance of the communicator. Pass
+            a fresh value on every (re)initialization.
+        handles (set[str] or list[str]): One reconfigure handle per peer, as
+            returned by :func:`_get_reconfigure_handle`. A list assigns ranks by
+            position; a set lets the backend choose the rank assignment.
+        group (ProcessGroup, optional): The process group to reconfigure. If
+            ``None``, the default process group is used.
+        timeout (timedelta, optional): How long to allow reconfiguration before
+            failing. ``None`` uses the backend's default timeout.
+        hints (dict[str, str], optional): Backend-specific configuration.
+
+    Returns:
+        Work: An async work handle for the reconfigure operation.
+    """
+    pg = group or _get_default_group()
+    opts = ReconfigureOptions()
+    opts.uuid = uuid
+    opts.handles = handles
+    if timeout is not None:
+        opts.timeout = timeout
+    if hints is not None:
+        opts.hints = hints
+    return pg.reconfigure(opts)
+
+
+def _supports_window(group: ProcessGroup | None = None) -> bool:
+    """
+    Return whether ``group`` supports one-sided (RMA) window operations.
+
+    Args:
+        group (ProcessGroup, optional): The process group to query. If ``None``,
+            the default process group is used.
+    """
+    pg = group or _get_default_group()
+    return pg.supports_window
+
+
+def _new_window(
+    tensor: torch.Tensor | None = None,
+    group: ProcessGroup | None = None,
+) -> Window:
+    """
+    Create a new one-sided (RMA) communication window on ``group``.
+
+    Args:
+        tensor (torch.Tensor, optional): If provided, the tensor is registered
+            with the new window.
+        group (ProcessGroup, optional): The process group to create the window
+            on. If ``None``, the default process group is used.
+
+    Returns:
+        Window: The new one-sided communication window.
+    """
+    pg = group or _get_default_group()
+    return pg.new_window(tensor)
