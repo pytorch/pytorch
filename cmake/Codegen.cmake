@@ -107,13 +107,18 @@ if(INTERN_BUILD_ATEN_OPS)
             list(APPEND _file_compile_flags "-gencode;arch=compute_100a,code=sm_100a")
           endif()
         endif()
-        # We will need to gate against CUDA version, because sm_103a is available on CUDA 12.9+
+        # We need to gate against CUDA version, because sm_103a and sm_103f are available on CUDA 12.9+
         if("${_arch}" STREQUAL "103a" AND CUDA_VERSION VERSION_GREATER_EQUAL 12.9)
           if(_existing_arch_flags MATCHES ".*compute_100.*")
             list(APPEND _file_compile_flags "-gencode;arch=compute_103a,code=sm_103a")
           endif()
         endif()
-        # We will need to gate against CUDA version, because sm_110a is available on CUDA 13.0+
+        if("${_arch}" STREQUAL "103f" AND CUDA_VERSION VERSION_GREATER_EQUAL 12.9)
+          if(_existing_arch_flags MATCHES ".*compute_100.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_103f,code=sm_103f")
+          endif()
+        endif()
+        # We need to gate against CUDA version, because sm_110a is available on CUDA 13.0+
         if("${_arch}" STREQUAL "110a" AND CUDA_VERSION VERSION_GREATER_EQUAL 13.0)
           if(_existing_arch_flags MATCHES ".*compute_110.*")
             list(APPEND _file_compile_flags "-gencode;arch=compute_110a,code=sm_110a")
@@ -138,13 +143,13 @@ if(INTERN_BUILD_ATEN_OPS)
 
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
-      "89;90a;100a;103a;110a;120a;121a")
+      "89;90a;100a;103f;110a;120a;121a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
       "90a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
-      "90a;100a;103a;110a")
+      "90a;100a;103f;110a")
 
   endif()
 
@@ -369,6 +374,10 @@ if(INTERN_BUILD_ATEN_OPS)
 
   if(CXX_AVX512_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX512_CPU_DEFINITION")
+    # HIP code also needs CPU feature defines for DispatchStub ABI compatibility
+    if(USE_ROCM)
+      string(APPEND CMAKE_HIP_FLAGS " -DHAVE_AVX512_CPU_DEFINITION")
+    endif()
     list(APPEND CPU_CAPABILITY_NAMES "AVX512")
     if(MSVC)
       list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX512")
@@ -379,6 +388,9 @@ if(INTERN_BUILD_ATEN_OPS)
 
   if(CXX_AVX2_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX2_CPU_DEFINITION")
+    if(USE_ROCM)
+      string(APPEND CMAKE_HIP_FLAGS " -DHAVE_AVX2_CPU_DEFINITION")
+    endif()
 
     # Some versions of GCC pessimistically split unaligned load and store
     # instructions when using the default tuning. This is a bad choice on
@@ -423,9 +435,11 @@ if(INTERN_BUILD_ATEN_OPS)
   endif(CXX_ZVECTOR_FOUND)
 
   if(CXX_SVE256_FOUND)
-    list(APPEND CPU_CAPABILITY_NAMES "SVE256")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION")
+    list(APPEND CPU_CAPABILITY_NAMES "SVE256")
     list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -msve-vector-bits=256")
+    list(APPEND CPU_CAPABILITY_NAMES "SVE128")
+    list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -msve-vector-bits=128")
   endif()
 
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
