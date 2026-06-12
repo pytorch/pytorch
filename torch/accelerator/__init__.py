@@ -30,6 +30,7 @@ __all__ = [
     "current_device_idx",  # deprecated
     "current_device_index",
     "get_device_capability",
+    "get_device_name",
     "current_stream",
     "device_count",
     "device_index",
@@ -68,6 +69,27 @@ def device_count() -> int:
 
     mod = torch.get_device_module(acc)
     return mod.device_count()
+
+
+def get_device_name(device: _device_t = None, /) -> str:
+    r"""Return the name of the current :ref:`accelerator<accelerators>` device.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): The device to query the name for.
+            If not given, use :func:`torch.accelerator.current_device_index` by default.
+
+    Returns:
+        str: the name of the device, or an empty string if no accelerator is
+            available or the backend does not implement device name querying.
+    """
+    acc = current_accelerator()
+    if acc is None:
+        return ""
+
+    mod = torch.get_device_module(acc)
+    if not hasattr(mod, "get_device_name"):
+        return ""
+    return mod.get_device_name(device)
 
 
 def is_available() -> bool:

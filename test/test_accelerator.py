@@ -1,7 +1,9 @@
 # Owner(s): ["module: tests"]
 
 import gc
+import os
 import sys
+import tempfile
 import unittest
 from contextlib import nullcontext
 
@@ -269,6 +271,40 @@ class TestAccelerator(TestCase):
         free_bytes, total_bytes = torch.accelerator.get_memory_info()
         self.assertGreaterEqual(free_bytes, 0)
         self.assertGreaterEqual(total_bytes, 0)
+
+    def test_get_device_name(self):
+        device_name = torch.accelerator.get_device_name()
+        self.assertIsInstance(device_name, str)
+
+        acc = torch.accelerator.current_accelerator()
+        mod = torch.get_device_module(acc)
+        if hasattr(mod, "get_device_name"):
+            self.assertGreater(len(device_name), 0)
+
+    @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
+    def test_memory_snapshot(self):
+        acc = torch.accelerator.current_accelerator()
+        mem_mod = getattr(torch.get_device_module(acc), "memory", None)
+        if (
+            mem_mod is None
+            or not hasattr(mem_mod, "_dump_snapshot")
+            or not hasattr(mem_mod, "_snapshot")
+        ):
+            self.skipTest("Backend doesn't support memory snapshots")
+        snapshot_path = os.path.join(tempfile.gettempdir(), "test_snapshot.pickle")
+        torch.accelerator.memory._record_memory_history(max_entries=100)
+        try:
+            _ = torch.ones(64, device=acc)
+            snapshot = torch.accelerator.memory._snapshot()
+            self.assertIsInstance(snapshot, dict)
+            self.assertIn("segments", snapshot)
+            self.assertIn("device_traces", snapshot)
+            torch.accelerator.memory._dump_snapshot(snapshot_path)
+            self.assertTrue(os.path.exists(snapshot_path))
+        finally:
+            torch.accelerator.memory._record_memory_history(enabled=None)
+            if os.path.exists(snapshot_path):
+                os.remove(snapshot_path)
 
     @unittest.skipIf(
         TEST_XPU,
