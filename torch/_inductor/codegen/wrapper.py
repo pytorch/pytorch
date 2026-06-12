@@ -1314,6 +1314,13 @@ class PythonWrapperCodegen(CodeGen):
         super().__init__()
         self._pending_input_asserts: dict[str, tuple[str, str]] = {}
         self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
+        # When a variable is read by multiple streams, the copy_if_misaligned
+        # rewrite should not happen at first use: that first use will be on a
+        # stream that could be unsynchronized with other streams, and so the
+        # "first" use by line number might be the second or subsequent use at
+        # execution time. In such cases we hoist the rewrite to the prologue;
+        # this set contains the variables that need such hoisting.
+        self._prologue_alignment_copies: OrderedSet[str] = OrderedSet()
         self._names_iter: Iterator[int] = count()
         self.args_to_buffers: dict[
             str, None | ir.TensorBox | ir.Buffer | ir.TorchBindObject
@@ -1843,6 +1850,33 @@ class PythonWrapperCodegen(CodeGen):
             if name in self._pending_alignment_copies:
                 self._pending_alignment_copies.discard(name)
                 self.writeline(f"{name} = copy_if_misaligned({name})")
+
+    def defer_alignment_to_prologue(self, names: Iterable[str]) -> None:
+        """Reclassify inputs that are read on more than one stream so their
+        alignment copy is emitted once in the prologue rather than deferred to
+        the first reader.
+
+        The deferred-at-first-reader placement runs after stream-context and
+        mempool entry, so for a fork-join the copy lands inside one branch's
+        ``torch.cuda.stream`` / ``use_mem_pool`` body; the other branches would
+        then read a tensor cloned on (and ordered only after) that one branch's
+        stream -- a cross-stream race.  The fork's record/wait events already
+        order every branch after the default stream, so a copy emitted in the
+        prologue (default stream, default mempool) is seen aligned by all."""
+        for name in names:
+            if name in self._pending_alignment_copies:
+                self._pending_alignment_copies.discard(name)
+                self._prologue_alignment_copies.add(name)
+
+    def codegen_prologue_alignment_copies(self) -> None:
+        """Emit the hoisted alignment copies (see defer_alignment_to_prologue)
+        on the default stream, before any stream fork.  One-shot: clears the
+        set so a re-entered device guard doesn't re-emit them."""
+        if V.graph.cpp_wrapper or not self._prologue_alignment_copies:
+            return
+        for name in self._prologue_alignment_copies:
+            self.writeline(f"{name} = copy_if_misaligned({name})")
+        self._prologue_alignment_copies.clear()
 
     # this function (and below) takes the graph name as input so
     # that stream caching happens per graph instance. this

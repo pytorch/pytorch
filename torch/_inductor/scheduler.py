@@ -9606,6 +9606,21 @@ class Scheduler:
         # Deferred to just before the first kernel that reads each input.
         V.graph.wrapper_code.register_alignment_check_inputs()
 
+        # Hoist x=copy_if_misaligned(x) rewrites to the prologue if the
+        # variable (`x` here) is read by more than one stream.
+        if self._has_multi_stream_nodes():
+            pending = V.graph.wrapper_code._pending_alignment_copies
+            if pending:
+                input_streams: dict[str, OrderedSet[int]] = {}
+                for n in nodes:
+                    s = self.node_to_stream.get(n, 0)
+                    for dep in n.read_writes.reads:
+                        if dep.name in pending:
+                            input_streams.setdefault(dep.name, OrderedSet()).add(s)
+                multi = [name for name, ss in input_streams.items() if len(ss) > 1]
+                if multi:
+                    V.graph.wrapper_code.defer_alignment_to_prologue(multi)
+
         for node in nodes:
             if log.isEnabledFor(logging.DEBUG):
                 try:
@@ -9660,6 +9675,7 @@ class Scheduler:
                             num_streams,
                             self.stream_idx_to_user_obj_idx,
                         )
+                        V.graph.wrapper_code.codegen_prologue_alignment_copies()
 
             # Handle stream context switching for multi-stream scheduling.
             # This runs for all nodes (including device-less sync ops like
@@ -9672,8 +9688,6 @@ class Scheduler:
             # Emit deferred alignment copies for inputs first used by this
             # node.  This runs *after* stream context switching so the copy
             # executes on the same stream as the consuming kernel.
-            # TODO: inputs read on multiple streams should be copied in the
-            # prologue instead, to avoid cross-stream races.
             V.graph.wrapper_code.codegen_deferred_alignment_copies(
                 dep.name for dep in node.read_writes.reads
             )
