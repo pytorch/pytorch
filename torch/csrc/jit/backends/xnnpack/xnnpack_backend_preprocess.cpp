@@ -100,7 +100,7 @@ c10::IValue preprocess(
   }
   std::vector<at::Tensor> outputs;
   auto output_list = out.toList();
-  std::vector<c10::IntList> output_shapes;
+  std::vector<c10::IntArrayRef> output_shapes;
 
   // gather sample outputs from compile spec
   for (int i = 0; i < output_list.size(); i++) {
@@ -112,7 +112,7 @@ c10::IValue preprocess(
 
   // sample run on sample inputs
   graph_builder.runGraphOnInputs(inputs, outputs);
-  c10::List<c10::IntList> shapes_list(output_shapes);
+  c10::List<c10::IntArrayRef> shapes_list(output_shapes);
 
   compiled.insert("ser_model", graph_builder.serializedXNNGraph());
   compiled.insert("outputs", shapes_list);

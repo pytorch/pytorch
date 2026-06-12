@@ -283,8 +283,4 @@ ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
 
 using IntArrayRef = ArrayRef<int64_t>;
 
-using IntList [[deprecated(
-    "This alias is deprecated because it doesn't make ownership semantics obvious. Use IntArrayRef instead!")]] =
-    ArrayRef<int64_t>;
-
 } // namespace c10
