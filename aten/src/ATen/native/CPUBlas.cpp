@@ -214,7 +214,7 @@ void gemm(
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_ONEDNN_ENABLED()
-   if (mkldnn_reduced_f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (onednn_reduced_f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -361,7 +361,7 @@ void gemm(
      transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
 #endif
-   if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (!use_bf16_gemv_trans && onednn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -422,7 +422,7 @@ void gemm(
      transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
    if (!use_fp16_gemv_trans &&
-       mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+       onednn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -1178,7 +1178,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
   }
 
   static bool device_check(ScalarType dtype) {
-    if (!at::globalContext().userEnabledMkldnn()) {
+    if (!at::globalContext().userEnabledOnednn()) {
       return false;
     }
     static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16;
@@ -1240,7 +1240,7 @@ struct Pack : public KernelCache <PackKey, pack_t> {
   }
 
   static bool could_pack(ScalarType dtype) {
-    if (!at::globalContext().userEnabledMkldnn()) {
+    if (!at::globalContext().userEnabledOnednn()) {
       return false;
     }
     static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16;
