@@ -223,10 +223,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     // It's awakward to unbox the opts here and box them again in the custom C++
     // op. But it's also complicated to make opts as a CustomClassHolder. Leave
     // it as it is now.
-    int64_t hook_op_id =
-        firePreHook(HookOpName::BROADCAST, opts.asyncOp, opts.rootRank, [&] {
-          return std::make_pair(tensors, std::vector<at::Tensor>{});
-        });
     auto work = std::get<1>(op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -240,7 +236,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::BROADCAST, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -259,10 +254,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     bool,
                     int64_t)>();
 
-    int64_t hook_op_id =
-        firePreHook(HookOpName::ALLREDUCE, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(tensors, std::vector<at::Tensor>{});
-        });
     auto work = std::get<1>(op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -276,7 +267,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::ALLREDUCE, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -292,10 +282,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              bool,
                              int64_t)>();
 
-    int64_t hook_op_id =
-        firePreHook(HookOpName::ALLREDUCE, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(tensors, std::vector<at::Tensor>{});
-        });
     auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -308,7 +294,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::ALLREDUCE, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -325,10 +310,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              int64_t,
                              bool,
                              int64_t)>();
-    int64_t hook_op_id =
-        firePreHook(HookOpName::REDUCE, opts.asyncOp, opts.rootRank, [&] {
-          return std::make_pair(tensors, std::vector<at::Tensor>{});
-        });
     auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -343,7 +324,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::REDUCE, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -362,11 +342,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              bool,
                              int64_t)>();
 
-    int64_t hook_op_id =
-        firePreHook(HookOpName::ALLGATHER, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(
-              inputTensors, flattenTensorLists(outputTensors));
-        });
     auto work = std::get<1>(op.call(
         outputTensors,
         inputTensors,
@@ -381,7 +356,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         }
       }
     }
-    firePostHook(HookOpName::ALLGATHER, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -403,12 +377,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 bool,
                 int64_t)>();
 
-    int64_t hook_op_id =
-        firePreHook(HookOpName::ALLGATHER, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(
-              std::vector<at::Tensor>{inputBuffer},
-              std::vector<at::Tensor>{outputBuffer});
-        });
     auto work = std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
@@ -419,7 +387,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(outputBuffer, work);
     }
-    firePostHook(HookOpName::ALLGATHER, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -450,11 +417,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              bool)>();
 
-    int64_t hook_op_id =
-        firePreHook(HookOpName::ALLGATHER, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(
-              inputTensors, flattenTensorLists(outputTensorLists));
-        });
     auto work = op.call(
         outputTensorLists,
         inputTensors,
@@ -468,7 +430,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         }
       }
     }
-    firePostHook(HookOpName::ALLGATHER, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -488,10 +449,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 bool)>();
 
-    int64_t hook_op_id =
-        firePreHook(HookOpName::ALLGATHER, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(inputTensors, outputTensors);
-        });
     auto work = op.call(
         outputTensors,
         inputTensors,
@@ -503,7 +460,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::ALLGATHER, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -531,11 +487,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              int64_t,
                              bool,
                              int64_t)>();
-    int64_t hook_op_id =
-        firePreHook(HookOpName::GATHER, opts.asyncOp, opts.rootRank, [&] {
-          return std::make_pair(
-              inputTensors, flattenTensorLists(outputTensors));
-        });
     auto work = op.call(
         outputTensors,
         inputTensors,
@@ -551,7 +502,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         }
       }
     }
-    firePostHook(HookOpName::GATHER, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -570,11 +520,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     int64_t,
                     bool,
                     int64_t)>();
-    int64_t hook_op_id =
-        firePreHook(HookOpName::SCATTER, opts.asyncOp, opts.rootRank, [&] {
-          return std::make_pair(
-              flattenTensorLists(inputTensors), outputTensors);
-        });
     auto work = std::get<1>(op.call(
         outputTensors,
         inputTensors,
@@ -588,7 +533,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::SCATTER, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -607,11 +551,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ReduceOp>&,
                     bool,
                     int64_t)>();
-    int64_t hook_op_id =
-        firePreHook(HookOpName::REDUCE_SCATTER, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(
-              flattenTensorLists(inputTensors), outputTensors);
-        });
     auto work = std::get<1>(op.call(
         outputTensors,
         inputTensors,
@@ -625,7 +564,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::REDUCE_SCATTER, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -644,12 +582,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
                 bool,
                 int64_t)>();
-    int64_t hook_op_id =
-        firePreHook(HookOpName::REDUCE_SCATTER, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(
-              std::vector<at::Tensor>{inputBuffer},
-              std::vector<at::Tensor>{outputBuffer});
-        });
     auto work = std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
@@ -661,7 +593,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(outputBuffer, work);
     }
-    firePostHook(HookOpName::REDUCE_SCATTER, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -694,10 +625,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 bool,
                 int64_t)>();
 
-    int64_t hook_op_id =
-        firePreHook(HookOpName::REDUCE_SCATTER, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(inputTensors, outputTensors);
-        });
     auto work = op.call(
         outputTensors,
         inputTensors,
@@ -711,7 +638,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::REDUCE_SCATTER, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -743,12 +669,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              std::vector<int64_t>,
                              bool,
                              int64_t)>();
-    int64_t hook_op_id =
-        firePreHook(HookOpName::ALLTOALL, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(
-              std::vector<at::Tensor>{inputBuffer},
-              std::vector<at::Tensor>{outputBuffer});
-        });
     auto work = op.call(
         outputBuffer,
         inputBuffer,
@@ -761,7 +681,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(outputBuffer, work);
     }
-    firePostHook(HookOpName::ALLTOALL, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -793,10 +712,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     bool,
                     int64_t)>();
-    int64_t hook_op_id =
-        firePreHook(HookOpName::ALLTOALL, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(inputTensors, outputTensors);
-        });
     auto work = std::get<1>(op.call(
         outputTensors,
         inputTensors,
@@ -809,7 +724,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::ALLTOALL, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -882,10 +796,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t,
                              int64_t)>();
-    int64_t hook_op_id =
-        firePreHook(HookOpName::SEND, /*async_op=*/true, /*root=*/dstRank, [&] {
-          return std::make_pair(tensors, std::vector<at::Tensor>{});
-        });
     auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -896,7 +806,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::SEND, /*async_op=*/true, hook_op_id, work);
     return work;
   }
 
@@ -911,10 +820,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t,
                              int64_t)>();
-    int64_t hook_op_id =
-        firePreHook(HookOpName::RECV, /*async_op=*/true, /*root=*/srcRank, [&] {
-          return std::make_pair(std::vector<at::Tensor>{}, tensors);
-        });
     auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -925,7 +830,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::RECV, /*async_op=*/true, hook_op_id, work);
     return work;
   }
 
@@ -938,10 +842,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              at::TensorList,
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t)>();
-    int64_t hook_op_id =
-        firePreHook(HookOpName::RECV, /*async_op=*/true, /*root=*/-1, [&] {
-          return std::make_pair(std::vector<at::Tensor>{}, tensors);
-        });
     auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -951,7 +851,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10d::register_work(tensor, work);
       }
     }
-    firePostHook(HookOpName::RECV, /*async_op=*/true, hook_op_id, work);
     return work;
   }
 
@@ -990,11 +889,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              bool,
                              int64_t)>();
 
-    int64_t hook_op_id =
-        firePreHook(HookOpName::BARRIER, opts.asyncOp, /*root=*/-1, [&] {
-          return std::make_pair(
-              std::vector<at::Tensor>{}, std::vector<at::Tensor>{});
-        });
     auto work = op.call(
         tensor,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -1004,7 +898,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(tensor, work);
     }
-    firePostHook(HookOpName::BARRIER, opts.asyncOp, hook_op_id, work);
     return work;
   }
 
@@ -1264,7 +1157,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   std::optional<at::Device> bound_device_id_;
 
   // Pre/post collective hooks, keyed by an opaque hook_id, fired around every
-  // collective issued through this ProcessGroup. See Hooks.hpp.
+  // collective. They are invoked from the dispatcher kernels (Ops.cpp) rather
+  // than here, so they fire wherever a c10d op is dispatched -- including
+  // replay of a captured graph that re-dispatches the op directly. See
+  // Hooks.hpp.
   std::unordered_map<int64_t, PreHook> preHooks_;
   std::unordered_map<int64_t, PostHook> postHooks_;
   // Monotonic id correlating a pre-hook call with its matching post-hook call.
@@ -1279,27 +1175,19 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return flat;
   }
 
-  // Fire registered pre-hooks for a collective and return the op_id assigned to
-  // it (0 when no hooks are registered). makeTensors returns the {input,
-  // output} tensors recorded in the pre-hook and is only invoked when a
-  // pre-hook is registered, so the common no-hook path adds no work.
-  template <typename MakeTensors>
-  int64_t firePreHook(
+  int64_t firePreHookImpl(
       HookOpName name,
       bool async_op,
       int64_t root,
-      const MakeTensors& makeTensors) {
-    if (preHooks_.empty() && postHooks_.empty()) {
-      return 0;
-    }
+      std::vector<at::Tensor> input_tensors,
+      std::vector<at::Tensor> output_tensors) {
     int64_t op_id = hookOpIdCounter_++;
     if (!preHooks_.empty()) {
-      auto tensors = makeTensors();
       PreHookArgs args{
           name,
           async_op,
-          std::move(tensors.first),
-          std::move(tensors.second),
+          std::move(input_tensors),
+          std::move(output_tensors),
           root,
           op_id};
       for (auto& entry : preHooks_) {
@@ -1307,6 +1195,79 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       }
     }
     return op_id;
+  }
+
+ public:
+  // Fire registered pre-hooks for a collective and return the op_id assigned to
+  // it (0 when no hooks are registered). The tensor lists are only copied /
+  // flattened into the hook args when a pre-hook is registered, so the common
+  // no-hook path adds no work. Overloaded for the various collective tensor
+  // shapes (flat, list-of-lists, single tensor, none). Invoked from the
+  // dispatcher kernels in Ops.cpp; see firePostHook for the matching post-hook.
+  int64_t firePreHook(
+      HookOpName name,
+      bool async_op,
+      int64_t root,
+      const std::vector<at::Tensor>& input_tensors,
+      const std::vector<at::Tensor>& output_tensors = {}) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(name, async_op, root, input_tensors, output_tensors);
+  }
+
+  int64_t firePreHook(
+      HookOpName name,
+      bool async_op,
+      int64_t root,
+      const std::vector<at::Tensor>& input_tensors,
+      const std::vector<std::vector<at::Tensor>>& output_tensor_lists) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(
+        name,
+        async_op,
+        root,
+        input_tensors,
+        flattenTensorLists(output_tensor_lists));
+  }
+
+  int64_t firePreHook(
+      HookOpName name,
+      bool async_op,
+      int64_t root,
+      const std::vector<std::vector<at::Tensor>>& input_tensor_lists,
+      const std::vector<at::Tensor>& output_tensors) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(
+        name,
+        async_op,
+        root,
+        flattenTensorLists(input_tensor_lists),
+        output_tensors);
+  }
+
+  int64_t firePreHook(
+      HookOpName name,
+      bool async_op,
+      int64_t root,
+      const at::Tensor& input_tensor,
+      const at::Tensor& output_tensor) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(
+        name, async_op, root, {input_tensor}, {output_tensor});
+  }
+
+  int64_t firePreHook(HookOpName name, bool async_op, int64_t root) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(name, async_op, root, {}, {});
   }
 
   // Fire registered post-hooks for a collective, correlated with the matching

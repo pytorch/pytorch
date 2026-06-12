@@ -13,10 +13,12 @@ from torch.testing._internal.common_utils import run_tests
 class TestProcessGroupHooks(MultiProcessTestCase):
     """
     Verify that pre/post collective hooks registered on a ProcessGroup fire for
-    every collective issued through it. Uses a real gloo backend so collectives
-    dispatch through ProcessGroup's C++ collective methods, where the hooks are
-    wired (firePreHook / firePostHook). A pure-Python or fake ProcessGroup
-    overrides the collective methods and so would bypass the base-class hooks.
+    every collective issued through it. The hooks are wired into the c10d
+    dispatcher kernels (Ops.cpp), so they fire wherever a c10d op is dispatched
+    -- including replay of a captured graph that re-dispatches the raw op (see
+    test_hooks_fire_on_captured_graph_replay). Uses a real gloo backend; a
+    pure-Python or fake ProcessGroup overrides the collective methods and
+    dispatches without going through the c10d ops, so it bypasses these hooks.
     """
 
     def setUp(self):
@@ -123,6 +125,42 @@ class TestProcessGroupHooks(MultiProcessTestCase):
         dist.all_reduce(torch.ones(2))
         self.assertEqual(len(pre_ops), pre_count)
         self.assertEqual(len(post_ops), post_count)
+
+        dist.barrier()
+        dist.destroy_process_group()
+
+    def test_hooks_fire_on_captured_graph_replay(self):
+        # make_fx traces at the dispatcher (op) level and records the raw
+        # c10d.allreduce_ op. Replaying that graph re-dispatches the op directly,
+        # bypassing ProcessGroup::allreduce -- so this only fires hooks because
+        # they live in the dispatcher kernels (Ops.cpp), not on ProcessGroup.
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        pg = _get_default_group()
+        pre_ops: list[HookOpName] = []
+        pg.register_pre_hook(0, lambda args: pre_ops.append(args.name))
+
+        def fn(x):
+            dist.all_reduce(x)
+            return x
+
+        graph = make_fx(fn, tracing_mode="real")(torch.ones(2))
+        self.assertTrue(
+            any("allreduce_" in str(n.target) for n in graph.graph.nodes),
+            "expected make_fx to record the raw c10d.allreduce_ op",
+        )
+
+        # Replaying the captured graph re-dispatches the raw op; the hook fires.
+        pre_ops.clear()
+        graph(torch.ones(2))
+        self.assertIn(HookOpName.ALLREDUCE, pre_ops)
 
         dist.barrier()
         dist.destroy_process_group()
