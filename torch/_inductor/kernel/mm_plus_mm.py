@@ -166,10 +166,10 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         templates_to_use.append(aten_mm_plus_mm)
 
     if use_triton_template(layout1, check_max_autotune=False):
+        # TODO(#184490): remove this XPU guard once the Triton mm_plus_mm
+        # accuracy bug is fixed. The guard restores correct results via ATen
+        # but permanently forgoes the Triton fused template's perf benefit.
         if layout1.device.type != "xpu":
-            # Accuracy issues with the Triton mm_plus_mm template on XPU:
-            # https://github.com/pytorch/pytorch/issues/184490
-            # https://github.com/pytorch/pytorch/issues/173473
             templates_to_use.append(mm_plus_mm_template)
 
     # Single unified call for all templates
