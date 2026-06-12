@@ -141,14 +141,14 @@
   AT_DISPATCH_SWITCH(                                   \
       TYPE,                                             \
       NAME,                                             \
-      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(      \
-          kComplexHalf, kHalf, kBool, kBFloat16, __VA_ARGS__))
+      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND5(      \
+          kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, __VA_ARGS__))
 
 namespace at::sparse_csr {
 
 // Implements RAII object to manage checking sparse tensor invariants:
 class CheckSparseTensorInvariants {
-  bool old_state;
+  std::optional<bool> old_state;
 
  public:
   CheckSparseTensorInvariants(bool state)
@@ -441,7 +441,7 @@ inline std::tuple<Tensor, Tensor> create_acc_buffer(
     return std::make_tuple(
         new_values.resize_(nnz), new_values_acc.resize_(nnz));
   } else {
-    return std::make_tuple(new_values, new_values_acc);
+    return std::make_tuple(std::move(new_values), std::move(new_values_acc));
   }
 }
 

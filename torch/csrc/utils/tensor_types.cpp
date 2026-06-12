@@ -1,16 +1,11 @@
-#include <Python.h>
 
 #include <torch/csrc/utils/tensor_types.h>
 
 #include <ATen/Context.h>
 #include <ATen/Formatting.h>
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/tensor/python_tensor.h>
 
-#include <c10/util/CallOnce.h>
-
-#include <algorithm>
 #include <sstream>
 #include <unordered_map>
 
@@ -41,6 +36,8 @@ const char* backend_to_string(const at::Backend& backend) {
       return "torch.cuda.sparse";
     case at::Backend::SparseXPU:
       return "torch.xpu.sparse";
+    case at::Backend::SparseMPS:
+      return "torch.mps.sparse";
     case at::Backend::QuantizedCPU:
       return "torch.quantized";
     case at::Backend::HPU:
@@ -66,36 +63,33 @@ const char* backend_to_string(const at::Backend& backend) {
 
 std::string options_to_string(const at::TensorOptions& options) {
   std::ostringstream ss;
-  ss << backend_to_string(options.backend()) << "."
+  ss << backend_to_string(options.backend()) << '.'
      << toString(at::typeMetaToScalarType(options.dtype())) << "Tensor";
   return ss.str();
 }
 
 std::string type_to_string(const at::DeprecatedTypeProperties& type) {
   std::ostringstream ss;
-  ss << backend_to_string(type.backend()) << "." << toString(type.scalarType())
+  ss << backend_to_string(type.backend()) << '.' << toString(type.scalarType())
      << "Tensor";
   return ss.str();
 }
 
-at::TensorOptions options_from_string(const std::string& str) {
-  static std::string cuda_prefix("torch.cuda.");
-  static std::string xpu_prefix("torch.xpu.");
-  static std::string privateUser_prefix(
-      std::string(parse_privateuseone_backend()) + ".");
-  static c10::once_flag cpu_once;
-  static c10::once_flag cuda_once;
-  static c10::once_flag xpu_once;
-  static c10::once_flag privateUser1_once;
-  static std::unordered_map<std::string, at::DeprecatedTypeProperties*> cpu_map;
-  static std::unordered_map<std::string, at::DeprecatedTypeProperties*> xpu_map;
-  static std::unordered_map<std::string, at::DeprecatedTypeProperties*>
-      cuda_map;
-  static std::unordered_map<std::string, at::DeprecatedTypeProperties*>
-      privateUser1_map;
+using TypeMap = std::unordered_map<std::string, at::DeprecatedTypeProperties*>;
 
-  const std::unordered_map<std::string, at::DeprecatedTypeProperties*>* map =
-      nullptr;
+static TypeMap build_type_map(
+    const std::vector<at::DeprecatedTypeProperties*>& types) {
+  TypeMap m;
+  m.reserve(types.size());
+  for (auto type : types)
+    m.emplace(type_to_string(*type), type);
+  return m;
+}
+
+at::TensorOptions options_from_string(const std::string& str) {
+  static const std::string privateUser_prefix =
+      std::string(parse_privateuseone_backend()) + ".";
+  const TypeMap* map = nullptr;
 
   if (str == "torch.Tensor") {
     auto backend =
@@ -104,42 +98,21 @@ at::TensorOptions options_from_string(const std::string& str) {
     return getDeprecatedTypeProperties(backend, scalar_type).options();
   }
 
-  if (std::mismatch(cuda_prefix.begin(), cuda_prefix.end(), str.begin())
-          .first == cuda_prefix.end()) {
-    // torch.cuda. is prefix of str
-    c10::call_once(cuda_once, []() {
-      for (auto type : autograd::VariableType::allCUDATypes()) {
-        cuda_map.emplace(type_to_string(*type), type);
-      }
-    });
+  if (str.starts_with("torch.cuda.")) {
+    static const auto cuda_map =
+        build_type_map(autograd::VariableType::allCUDATypes());
     map = &cuda_map;
-  } else if (
-      std::mismatch(xpu_prefix.begin(), xpu_prefix.end(), str.begin()).first ==
-      xpu_prefix.end()) {
-    // torch.xpu. is prefix of str
-    c10::call_once(xpu_once, []() {
-      for (auto type : autograd::VariableType::allXPUTypes()) {
-        xpu_map.emplace(type_to_string(*type), type);
-      }
-    });
+  } else if (str.starts_with("torch.xpu.")) {
+    static const auto xpu_map =
+        build_type_map(autograd::VariableType::allXPUTypes());
     map = &xpu_map;
-  } else if (
-      std::mismatch(
-          privateUser_prefix.begin(), privateUser_prefix.end(), str.begin())
-          .first == privateUser_prefix.end()) {
-    // torch.foo. foo is privateUser1 name
-    c10::call_once(privateUser1_once, []() {
-      for (auto type : autograd::VariableType::allPrivateUser1Types()) {
-        privateUser1_map.emplace(type_to_string(*type), type);
-      }
-    });
+  } else if (str.starts_with(privateUser_prefix)) {
+    static const auto privateUser1_map =
+        build_type_map(autograd::VariableType::allPrivateUser1Types());
     map = &privateUser1_map;
   } else {
-    c10::call_once(cpu_once, []() {
-      for (auto type : autograd::VariableType::allCPUTypes()) {
-        cpu_map.emplace(type_to_string(*type), type);
-      }
-    });
+    static const auto cpu_map =
+        build_type_map(autograd::VariableType::allCPUTypes());
     map = &cpu_map;
   }
 

@@ -1,15 +1,11 @@
-# Ideally, there would be a way in Bazel to parse version.txt
-# and use the version numbers from there as substitutions for
-# an expand_template action. Since there isn't, this silly script exists.
-
 from __future__ import annotations
 
 import argparse
 import os
-from typing import cast, Tuple
+from typing import cast
 
 
-Version = Tuple[int, int, int]
+Version = tuple[int, int, int]
 
 
 def parse_version(version: str) -> Version:

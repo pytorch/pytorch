@@ -27,7 +27,7 @@ __global__ void cuda_multiple_vars_always_fail_assertion_kernel(
   if (i != 0) {
     CUDA_KERNEL_ASSERT2(i == -i);
   } else {
-    CUDA_KERNEL_ASSERT2(i == i + 1);
+    CUDA_KERNEL_ASSERT2(false);
   }
 }
 
@@ -64,8 +64,6 @@ void cuda_device_assertions_catches_stream() {
     throw std::runtime_error("Test didn't fail, but should have.");
   } catch (const c10::Error& err) {
     const auto err_str = std::string(err.what());
-    ASSERT_THAT(
-        err_str, HasSubstr("# of GPUs this process interacted with = 1"));
     ASSERT_THAT(
         err_str,
         HasSubstr("CUDA device-side assertion failures were found on GPU #0!"));

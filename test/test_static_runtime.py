@@ -1,18 +1,17 @@
 # Owner(s): ["module: unknown"]
+# ruff: noqa: F841
 
 import unittest
-from typing import Dict, Optional
 
 import numpy as np
 import torch
 from torch import nn
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.static_module import StaticModule
-from typing import List
 
 
 def linear_shim(
-    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor] = None
+    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = None
 ) -> torch.Tensor:
     output = input.matmul(weight.t())
     if bias is not None:
@@ -27,7 +26,8 @@ torch.nn.functional.linear = linear_shim
 class MultiHeadAttentionLayer(nn.Module):
     def __init__(self, hid_dim, n_heads, dropout, device):
         super().__init__()
-        assert hid_dim % n_heads == 0
+        if hid_dim % n_heads != 0:
+            raise AssertionError(f"hid_dim ({hid_dim}) must be divisible by n_heads ({n_heads})")
         self.hid_dim = hid_dim
         self.n_heads = n_heads
         self.head_dim = hid_dim // n_heads
@@ -60,7 +60,7 @@ class MultiHeadAttentionLayer(nn.Module):
 # Taken from https://github.com/facebookresearch/dlrm/blob/master/dlrm_s_pytorch.py
 def create_mlp(ln, sigmoid_layer):
     layers = nn.ModuleList()
-    for i in range(0, len(ln) - 1):
+    for i in range(len(ln) - 1):
         n = ln[i]
         m = ln[i + 1]
 
@@ -107,7 +107,7 @@ def fork_wait_graph2(input1, input2):
    :param iters: number of future/wait pairs to be created
 """
 def fork_wait_graph3(input, iters: int):
-    futures : List[torch.jit.Future[torch.Tensor]] = []
+    futures : list[torch.jit.Future[torch.Tensor]] = []
     for _ in range(iters):
         futures.append(torch.jit.fork(torch.neg, input))
     results = []
@@ -122,7 +122,7 @@ def fork_wait_graph3(input, iters: int):
    :param num_child_forks: number of child forks per parent fork
 """
 def fork_wait_graph4(input, num_forks: int, num_child_forks: int):
-    futures : List[torch.jit.Future[torch.Tensor]] = []
+    futures : list[torch.jit.Future[torch.Tensor]] = []
     for _ in range(num_forks):
         futures.append(torch.jit.fork(fork_wait_graph3, input, num_child_forks))
     results = []
@@ -139,7 +139,7 @@ def fork_wait_graph_exception(input1, input2):
 
 def loop_graph(a, b, iters: int):
     c = a + b * 2
-    for i in range(iters):
+    for _ in range(iters):
         c = c + b
         c *= 2
         c -= a
@@ -149,7 +149,7 @@ def loop_graph(a, b, iters: int):
 def output_graph(a, b, c, iters: int):
     s = torch.tensor([[3, 3], [3, 3]])
     k = a + b * c + s
-    d: Dict[int, torch.Tensor] = {}
+    d: dict[int, torch.Tensor] = {}
     for i in range(iters):
         d[i] = k + i
     return d
@@ -505,7 +505,8 @@ class TestStaticModule(TestCase):
         tg = torch.jit.script(trivial_graph)
         o_ref = tg(s, s, s)
         torch._C._fuse_to_static_module(tg.graph)
-        assert "StaticSubgraph" in str(tg.graph)
+        if "StaticSubgraph" not in str(tg.graph):
+            raise AssertionError("StaticSubgraph not found in graph")
         o_test = tg(s, s, s)
         torch.testing.assert_close(o_ref, o_test)
 
@@ -542,7 +543,8 @@ class TestStaticModule(TestCase):
         lg = torch.jit.script(loop_graph)
         o_ref = lg(a, b, c)
         torch._C._fuse_to_static_module(lg.graph)
-        assert "StaticSubgraph" in str(lg.graph)
+        if "StaticSubgraph" not in str(lg.graph):
+            raise AssertionError("StaticSubgraph not found in graph")
         o_test = lg(a, b, c)
         torch.testing.assert_close(o_ref, o_test)
 
@@ -554,13 +556,14 @@ class TestStaticModule(TestCase):
         og = torch.jit.script(output_graph)
         o_ref = og(a, b, b, c)
         torch._C._fuse_to_static_module(og.graph)
-        assert "StaticSubgraph" in str(og.graph)
+        if "StaticSubgraph" not in str(og.graph):
+            raise AssertionError("StaticSubgraph not found in graph")
         o_test = og(a, b, b, c)
-        for i in o_ref.keys():
+        for i in o_ref:
             torch.testing.assert_close(o_ref[i], o_test[i])
 
     def test_create_object(self):
-        class Foo:  # noqa: B903
+        class Foo:
             def __init__(self, x: torch.Tensor) -> None:
                 self.x = x
 

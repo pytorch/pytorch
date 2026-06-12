@@ -7,7 +7,7 @@ import logging
 import os
 import pkgutil
 import unittest
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch._utils_internal import get_file_path_2  # @manual
@@ -59,6 +59,7 @@ class TestPublicBindings(TestCase):
         #
         #   {elem for elem in dir(torch._C) if not elem.startswith("_")}
         torch_C_allowlist_superset = {
+            "AcceleratorError",
             "AggregationType",
             "AliasDb",
             "AnyType",
@@ -122,6 +123,7 @@ class TestPublicBindings(TestCase):
             "FutureType",
             "Generator",
             "GeneratorType",
+            "GreenContext",
             "get_autocast_cpu_dtype",
             "get_autocast_dtype",
             "get_autocast_ipu_dtype",
@@ -182,7 +184,6 @@ class TestPublicBindings(TestCase):
             "PyTorchFileReader",
             "PyTorchFileWriter",
             "qscheme",
-            "read_vitals",
             "RRefType",
             "ScriptClass",
             "ScriptClassFunction",
@@ -209,7 +210,6 @@ class TestPublicBindings(TestCase):
             "set_flush_denormal",
             "set_num_interop_threads",
             "set_num_threads",
-            "set_vital",
             "Size",
             "StaticModule",
             "Stream",
@@ -230,7 +230,6 @@ class TestPublicBindings(TestCase):
             "Value",
             "set_autocast_gpu_dtype",
             "get_autocast_gpu_dtype",
-            "vitals_enabled",
             "wait",
             "Tag",
             "set_autocast_xla_enabled",
@@ -288,8 +287,9 @@ class TestPublicBindings(TestCase):
 
         # It is ok to add new entries here but please be careful that these modules
         # do not get imported by public code.
+        # DO NOT add public modules here.
         private_allowlist = {
-            "torch._inductor.codegen.cuda.cuda_kernel",
+            "torch._inductor.codegen.cutlass.cuda_kernel",
             # TODO(#133647): Remove the onnx._internal entries after
             # onnx and onnxscript are installed in CI.
             "torch.onnx._internal.exporter",
@@ -308,6 +308,7 @@ class TestPublicBindings(TestCase):
             "torch.onnx._internal.exporter._reporting",
             "torch.onnx._internal.exporter._schemas",
             "torch.onnx._internal.exporter._tensors",
+            "torch.onnx._internal.exporter._torchlib.ops",
             "torch.onnx._internal.exporter._verification",
             "torch.onnx._internal.fx._pass",
             "torch.onnx._internal.fx.analysis",
@@ -353,12 +354,18 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.distributed.rpc.rpc_test",
             "torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture",
             "torch.testing._internal.distributed.rpc_utils",
-            "torch._inductor.codegen.cuda.cuda_template",
+            "torch.testing._internal.py312_intrinsics",
+            "torch._inductor.codegen.cutlass.cuda_template",
+            "torch._inductor.codegen.cutedsl._cutedsl_utils",
             "torch._inductor.codegen.cuda.gemm_template",
             "torch._inductor.codegen.cpp_template",
             "torch._inductor.codegen.cpp_gemm_template",
             "torch._inductor.codegen.cpp_micro_gemm",
             "torch._inductor.codegen.cpp_template_kernel",
+            "torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm",  # depends on cutlass
+            "torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent",  # depends on cutlass
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass_api
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass_api
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
@@ -377,6 +384,7 @@ class TestPublicBindings(TestCase):
             "torch.distributed._spmd.experimental_ops",
             "torch.distributed._spmd.parallel_mode",
             "torch.distributed._tensor",
+            "torch.distributed._tools.sac_ilp",
             "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
             "torch.distributed.algorithms._optimizer_overlap",
             "torch.distributed.rpc._testing.faulty_agent_backend_registry",
@@ -402,55 +410,27 @@ class TestPublicBindings(TestCase):
             "torch.utils.tensorboard._utils",
         }
 
-        # No new entries should be added to this list.
-        # All public modules should be importable on all platforms.
-        public_allowlist = {
-            "torch.distributed.algorithms.ddp_comm_hooks",
-            "torch.distributed.algorithms.model_averaging.averagers",
-            "torch.distributed.algorithms.model_averaging.hierarchical_model_averager",
-            "torch.distributed.algorithms.model_averaging.utils",
-            "torch.distributed.checkpoint",
-            "torch.distributed.constants",
-            "torch.distributed.distributed_c10d",
-            "torch.distributed.elastic.agent.server",
-            "torch.distributed.elastic.rendezvous",
-            "torch.distributed.fsdp",
-            "torch.distributed.launch",
-            "torch.distributed.launcher",
-            "torch.distributed.nn",
-            "torch.distributed.nn.api.remote_module",
-            "torch.distributed.optim",
-            "torch.distributed.optim.optimizer",
-            "torch.distributed.rendezvous",
-            "torch.distributed.rpc.api",
-            "torch.distributed.rpc.backend_registry",
-            "torch.distributed.rpc.constants",
-            "torch.distributed.rpc.internal",
-            "torch.distributed.rpc.options",
-            "torch.distributed.rpc.rref_proxy",
-            "torch.distributed.elastic.rendezvous.etcd_rendezvous",
-            "torch.distributed.elastic.rendezvous.etcd_rendezvous_backend",
-            "torch.distributed.elastic.rendezvous.etcd_store",
-            "torch.distributed.rpc.server_process_global_profiler",
-            "torch.distributed.run",
-            "torch.distributed.tensor.parallel",
-            "torch.distributed.utils",
-            "torch.utils.tensorboard",
-            "torch.utils.tensorboard.summary",
-            "torch.utils.tensorboard.writer",
-            "torch.ao.quantization.experimental.fake_quantize",
-            "torch.ao.quantization.experimental.linear",
-            "torch.ao.quantization.experimental.observer",
-            "torch.ao.quantization.experimental.qconfig",
-        }
-
         errors = []
         for mod, exc in failures:
-            if mod in public_allowlist:
-                # TODO: Ensure this is the right error type
-
-                continue
-            if mod in private_allowlist:
+            # Prefixes for modules whose top-level imports pull in optional
+            # runtime deps (cutlass, cuda-python, triton) that aren't
+            # available in CPU-only CI. Registrations are no-ops when the
+            # runtime is missing, so it's safe to skip them here.
+            cuda_dep_prefixes = (
+                "torch._native.ops.foreach_mm.",
+                "torch._native.ops.scatter_add.",
+                "torch._native.ops.topk.",
+                "torch._vendor.quack",
+            )
+            if (
+                mod in private_allowlist
+                or (mod.startswith("torch._native.ops.") and "triton" in mod)
+                or mod.startswith(cuda_dep_prefixes)
+            ):
+                if self._is_mod_public(mod):
+                    raise AssertionError(
+                        f"Expected private module name to include '_' segments: {mod}"
+                    )
                 continue
             errors.append(
                 f"{mod} failed to import with error {type(exc).__qualname__}: {str(exc)}"
@@ -458,7 +438,7 @@ class TestPublicBindings(TestCase):
         self.assertEqual("", "\n".join(errors))
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
-    @unittest.skipIf(IS_WINDOWS or IS_JETSON or IS_MACOS, "Distributed Attribute Error")
+    @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
     @skipIfTorchDynamo("Broken and not relevant for now")
     def test_correct_module_names(self):
         """
@@ -552,17 +532,20 @@ class TestPublicBindings(TestCase):
                             "does not have `__all__` defined"
                         )
                         fix_is_public = (
-                            f"remove it from the modules's (`{modname}`) `__all__`"
+                            f"remove it from the modules' (`{modname}`) `__all__`"
                             if is_all
                             else f"either define a `__all__` for `{modname}` or add a `_` at the beginning of the name"
                         )
                     else:
-                        assert is_all
+                        if not is_all:
+                            raise AssertionError(
+                                f"Expected {modname}.{elem} to be checked via __all__"
+                            )
                         why_is_public = (
                             f"it is not inside the module's (`{modname}`) `__all__`"
                         )
                         fix_is_public = (
-                            f"add it from the modules's (`{modname}`) `__all__`"
+                            f"add it from the modules' (`{modname}`) `__all__`"
                         )
                     if looks_public:
                         why_looks_public = (

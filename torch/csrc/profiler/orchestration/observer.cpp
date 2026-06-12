@@ -18,14 +18,28 @@ ExperimentalConfig::ExperimentalConfig(
     std::vector<std::string> performance_events,
     bool enable_cuda_sync_events,
     bool adjust_profiler_step,
-    bool adjust_timestamps)
+    bool disable_external_correlation,
+    bool profile_all_threads,
+    bool capture_overload_names,
+    bool record_python_gc_info,
+    bool expose_kineto_event_metadata,
+    std::string custom_profiler_config,
+    bool adjust_timestamps,
+    bool trace_only)
     : profiler_metrics{std::move(profiler_metrics)},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
       verbose{verbose},
       performance_events(std::move(performance_events)),
       enable_cuda_sync_events{enable_cuda_sync_events},
       adjust_profiler_step{adjust_profiler_step},
-      adjust_timestamps{adjust_timestamps} {}
+      disable_external_correlation{disable_external_correlation},
+      profile_all_threads{profile_all_threads},
+      capture_overload_names{capture_overload_names},
+      record_python_gc_info{record_python_gc_info},
+      expose_kineto_event_metadata{expose_kineto_event_metadata},
+      custom_profiler_config(std::move(custom_profiler_config)),
+      adjust_timestamps{adjust_timestamps},
+      trace_only{trace_only} {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {
   return !profiler_metrics.empty();
@@ -57,6 +71,10 @@ bool ProfilerConfig::global() const {
   return state == torch::profiler::impl::ProfilerState::KINETO_ONDEMAND;
 }
 
+bool ProfilerConfig::pushGlobalCallbacks() const {
+  return global() || experimental_config.profile_all_threads;
+}
+
 namespace {
 enum ProfilerIValueIdx {
   STATE = 0,
@@ -86,7 +104,7 @@ ProfilerConfig ProfilerConfig::fromIValue(
       c10::str(
           "Expected exactly ",
           NUM_PROFILER_CFG_IVALUE_IDX,
-          " ivalues to resconstruct ProfilerConfig."));
+          " ivalues to reconstruct ProfilerConfig."));
   return ProfilerConfig(
       static_cast<ProfilerState>(ivalues.get(ProfilerIValueIdx::STATE).toInt()),
       ivalues.get(ProfilerIValueIdx::REPORT_INPUT_SHAPES).toBool(),
@@ -112,14 +130,15 @@ ProfilerStateBase::~ProfilerStateBase() {
       ? GlobalManager::get()
       : static_cast<ProfilerStateBase*>(
             c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!out || out->config().global() == global);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !out || out->config().pushGlobalCallbacks() == global);
   return out;
 }
 
 /*static*/ void ProfilerStateBase::push(
     std::shared_ptr<ProfilerStateBase>&& state) {
   TORCH_INTERNAL_ASSERT(state != nullptr);
-  if (state->config().global()) {
+  if (state->config().pushGlobalCallbacks()) {
     GlobalManager::push(std::move(state));
   } else {
     c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);

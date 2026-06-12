@@ -1,7 +1,5 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
 
-
-import logging
 
 import torch
 import torch.ao.quantization as tq
@@ -14,12 +12,13 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     prepare_qat_fx,
 )
-from torch.testing._internal.common_utils import TestCase, xfailIfS390X
-
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    TestCase,
+    xfailIfS390X,
 )
+
 
 sparse_defaults = {
     "sparsity_level": 0.8,
@@ -71,6 +70,7 @@ def _calculate_sparsity(tensor):
 # This series of tests are to check the composability goals for sparsity and quantization. Namely
 # that performing quantization and sparsity model manipulations in various orderings
 # does not cause problems
+@skipIfNoFBGEMM
 class TestComposability(TestCase):
     # This test checks whether performing quantization prepare before sparse prepare
     # causes any issues and verifies that the correct observers are inserted and that
@@ -411,7 +411,6 @@ class TestFxComposability(TestCase):
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
-    @xfailIfS390X
     def test_q_prep_fx_s_prep_ref_conv(self):
         r"""
         This checks that the ordering: prepare_fx -> sparse prepare -> convert_to_reference_fx
@@ -586,7 +585,6 @@ class TestFxComposability(TestCase):
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
-    @xfailIfS390X
     def test_s_prep_q_prep_fx_ref(self):
         r"""
         This checks that the ordering: sparse prepare -> prepare_fx -> convert_to_reference_fx
@@ -640,3 +638,7 @@ class TestFxComposability(TestCase):
             sparsity_level, sparse_config[0]["sparsity_level"]
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

@@ -60,7 +60,6 @@ const std::array<at::Tag, 1> kJitOnlyOperatorTags = {
 // the concrete operator nature.
 struct TORCH_API Operator {
  private:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct C10Operator final {
     c10::OperatorHandle handle_;
     Operation op_;
@@ -69,7 +68,6 @@ struct TORCH_API Operator {
     std::string schema_string_;
     mutable std::optional<c10::AliasAnalysisKind> alias_analysis_;
   };
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct JitOnlyOperator final {
     // The only valid transition for schema_ is from right->left, i.e.
     // when the schema gets parsed.
@@ -269,8 +267,8 @@ TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
 TORCH_API std::vector<std::shared_ptr<Operator>> getAllSortedOperatorsFor(
     Symbol name);
 
-// given a operator with an overload name, find the specific operator related to
-// it, may return nullptr if no operator exists.
+// given an operator with an overload name, find the specific operator related
+// to it, may return nullptr if no operator exists.
 TORCH_API std::shared_ptr<Operator> findOperatorFor(
     const c10::OperatorName& full_name);
 
