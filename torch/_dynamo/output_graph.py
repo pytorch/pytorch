@@ -2820,6 +2820,14 @@ class OutputGraph(OutputGraphCommon):
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
+                if self.cpp_fake_mode is not None:
+                    self.cpp_fake_mode = (
+                        CppFakeTensorMode.create_cpp_fake_tensor_mode(
+                            backend_fake_mode.fake_tensor_converter,
+                            backend_fake_mode.shape_env,
+                        )
+                    )
+
             gm.graph.lint()
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
