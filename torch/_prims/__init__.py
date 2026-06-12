@@ -1279,8 +1279,11 @@ def _broadcast_in_dim_meta(
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
         guard_or_true,
+        has_guarding_hint,
         sym_or,
     )
+
+    backed_so = torch.fx.experimental._config.backed_size_oblivious
 
     # Type checks
     if not isinstance(a, TensorLike):
@@ -1336,17 +1339,30 @@ def _broadcast_in_dim_meta(
         if idx in broadcast_dimensions:
             # Assigns a stride of zero to dimensions
             # which were actually broadcast
-            if guard_or_false(a.shape[original_idx] == 1):
-                if guard_or_false(a.shape[original_idx] == shape[idx]):
-                    new_strides.append(a.stride()[original_idx])
+            input_size = a.shape[original_idx]
+            output_size = shape[idx]
+            stride = a.stride()[original_idx]
+            if guard_or_false(input_size == 1):
+                if guard_or_false(input_size == output_size):
+                    new_strides.append(stride)
                 else:
                     new_strides.append(0)
-            else:
+            elif (
+                backed_so
+                and has_guarding_hint(input_size)
+                and has_guarding_hint(output_size)
+            ):
                 torch._check(
-                    a.shape[original_idx] == shape[idx],
-                    lambda: f"non-broadcasting semantics require {a.shape[original_idx]} == {shape[idx]}",
+                    input_size == output_size,
+                    lambda: f"non-broadcasting semantics require {input_size} == {output_size}",
                 )
-                new_strides.append(a.stride()[original_idx])
+                new_strides.append(stride)
+            elif guard_or_false(input_size == output_size):
+                new_strides.append(stride)
+            else:
+                new_strides.append(
+                    torch.sym_ite(input_size == output_size, stride, stride * 0)
+                )
             original_idx = original_idx + 1
         else:
             if guard_or_true(shape[idx] != 1):

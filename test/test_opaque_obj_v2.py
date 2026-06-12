@@ -1479,8 +1479,12 @@ def forward(self, L_x_ : torch.Tensor, L_nested_queue_q : {fx_class}):
     sym_size_int_1 = torch.ops.aten.sym_size.int(pop2, 0)
     ge_1 = sym_size_int_1 >= 0
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
-    eq = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq = _assert_scalar_default_2 = None
+    eq = sym_size_int == 1
+    eq_1 = sym_size_int == sym_size_int_1;  sym_size_int = None
+    eq_2 = sym_size_int_1 == 1;  sym_size_int_1 = None
+    or_ = eq | eq_1;  eq = eq_1 = None
+    or__1 = or_ | eq_2;  or_ = eq_2 = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(or__1, "Runtime assertion failed for expression Eq(u0, 1) | Eq(u0, u1) | Eq(u1, 1) on node 'or__1'");  or__1 = _assert_scalar_default_2 = None
     add = pop1 + pop2;  pop1 = pop2 = None
     return (add,)""",
         )
@@ -1508,8 +1512,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_7, 0)
     ge_1 = sym_size_int_1 >= 0
     _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
-    eq_2 = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
-    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq_2 = _assert_scalar_2 = None
+    eq_2 = sym_size_int == 1
+    eq_3 = sym_size_int == sym_size_int_1;  sym_size_int = None
+    eq_4 = sym_size_int_1 == 1;  sym_size_int_1 = None
+    or_ = eq_2 | eq_3;  eq_2 = eq_3 = None
+    or__1 = or_ | eq_4;  or_ = eq_4 = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(or__1, "Runtime assertion failed for expression Eq(u0, 1) | Eq(u0, u1) | Eq(u1, 1) on node 'or__1'");  or__1 = _assert_scalar_2 = None
     add_4 = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
     return (getitem_6, add_4)""",
         )
