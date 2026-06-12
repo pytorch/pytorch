@@ -787,7 +787,7 @@ class _LocalOffsetBasedRNGTracker:
             # pyrefly: ignore [bad-argument-type, bad-argument-count]
             base_state_tensor = LocalTensor(per_rank_states)
         else:
-            base_state_tensor = torch.accelerator.get_rng_state()
+            base_state_tensor = self._device_handle.get_rng_state()
 
         state = _LocalPhiloxState(base_state_tensor)
 
@@ -2166,4 +2166,4 @@ class _LocalPhiloxState:
             self._per_rank_states[rank][8:] = offset_tensor
 
         # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        torch.accelerator.set_rng_state(LocalTensor(self._per_rank_states))
+        device_handle.set_rng_state(LocalTensor(self._per_rank_states))
