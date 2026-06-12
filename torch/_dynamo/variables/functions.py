@@ -1048,9 +1048,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return collected
         return None
 
-    def is_python_equal(self, other: object) -> bool:
-        return isinstance(other, variables.UserFunctionVariable) and self.fn is other.fn
-
 
 class InspectSignatureVariable(UserFunctionVariable):
     """
@@ -2517,12 +2514,6 @@ class SkipFunctionVariable(VariableTracker):
 
         return fn_var_getattr(tx, self.value, self.source, name)
 
-    def is_python_equal(self, other: object) -> bool:
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
-
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
     def __init__(
@@ -3045,22 +3036,6 @@ class FunctoolsPartialVariable(VariableTracker):
         if self.original_cache_hash is not None:
             result.cache_hash = self.original_cache_hash  # type: ignore[missing-attribute]
         return result
-
-    def is_python_equal(self, other: object) -> bool:
-        return (
-            isinstance(other, FunctoolsPartialVariable)
-            and self.func.is_python_equal(other.func)
-            and all(
-                arg_a.is_python_equal(arg_b)
-                for (arg_a, arg_b) in zip(self.args, other.args)
-            )
-            and all(
-                value_a.is_python_equal(value_b)
-                for (value_a, value_b) in zip(
-                    self.keywords.values(), other.keywords.values()
-                )
-            )
-        )
 
 
 class PolyfilledFunctionVariable(VariableTracker):
@@ -4065,14 +4040,6 @@ class MethodWrapperVariable(VariableTracker):
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
-
-    def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, VariableTracker):
-            return False
-        try:
-            return self.as_python_constant() == other.as_python_constant()
-        except NotImplementedError:
-            return False
 
 
 class MethodDescriptorVariable(VariableTracker):
