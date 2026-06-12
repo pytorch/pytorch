@@ -721,7 +721,7 @@ def rebind_unbacked(
 
             if not isinstance(raw_u1, sympy.Symbol):
                 if raw_u1.free_symbols:
-                    raise AssertionError(f"should have been constant, but got {raw_u1}")
+                    shape_env._eliminate_unbacked(raw_u0, raw_u1)
                 continue
 
             # The old and new could be the same if you improperly hit the memo
