@@ -29,6 +29,7 @@ from torch.optim import (
     SGD,
     SparseAdam,
 )
+from torch.optim._muon import NewtonSchulzAlgorithm
 from torch.optim.lr_scheduler import (
     ConstantLR,
     ExponentialLR,
@@ -931,6 +932,41 @@ def optim_error_inputs_func_muon(device, dtype):
             error_type=RuntimeError,
             error_regex="Muon does not support complex parameters",
             error_on=OptimizerErrorEnum.STEP_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={
+                    "gram_newton_schulz_config": {"gram_ns_reset_iterations": [2]},
+                },
+                desc="gram_newton_schulz_config rejected when ns_algorithm is STANDARD",
+            ),
+            error_type=ValueError,
+            error_regex="gram_newton_schulz_config is only valid when",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={
+                    "ns_algorithm": NewtonSchulzAlgorithm.GRAM,
+                    "gram_newton_schulz_config": {"bogus_key": 1},
+                },
+                desc="unknown key in gram_newton_schulz_config",
+            ),
+            error_type=ValueError,
+            error_regex="Unknown keys in gram_newton_schulz_config",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={"use_cuda_graph": True},
+                desc="use_cuda_graph requires foreach=True",
+            ),
+            error_type=ValueError,
+            error_regex="use_cuda_graph=True requires foreach=True",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
         ),
     ]
     return error_inputs
@@ -1923,8 +1959,10 @@ optim_db: list[OptimizerInfo] = [
         Muon,
         optim_inputs_func=optim_inputs_func_muon,
         optim_error_inputs_func=optim_error_inputs_func_muon,
-        supported_impls=(),
-        not_og_supported_flags=(),
+        supported_impls=("foreach",),
+        # `foreach` was not in the original Muon release; it must be exercised by
+        # the BC tests that compare new impls against the original (single-tensor).
+        not_og_supported_flags=("foreach",),
         supports_complex=False,
         skips=(
             # Note on numerical differences: `compile` applies different matmul tuning,
