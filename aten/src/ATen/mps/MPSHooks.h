@@ -39,6 +39,8 @@ struct MPSHooks : public at::MPSHooksInterface {
   size_t getRecommendedMaxMemory() const override;
   void setMemoryFraction(double ratio) const override;
   size_t getMaxBufferLength() const override;
+  void setMemoryBudget(size_t budget_bytes) const override;
+  size_t getMemoryBudget() const override;
   bool isPinnedPtr(const void* data) const override;
   Allocator* getPinnedMemoryAllocator() const override;
 
