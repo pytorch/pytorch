@@ -22,11 +22,12 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     parametrize,
     skipIfMPS,
+    skipIfXpu,
     skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyNativeDeviceTypes, onlyCUDA, onlyOn, largeTensorTest, ops, precisionOverride)
+    dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyNativeDeviceTypes, onlyAccelerator, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
@@ -101,7 +102,7 @@ def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
 
     return result
 
-class TestReductions(TestCase):
+class TestReductionsDevice(TestCase):
     ###########################################################################
     # ReductionOpInfo unit tests
     ###########################################################################
@@ -1049,7 +1050,8 @@ class TestReductions(TestCase):
         # Check whether the returned values are the mode
         self.assertTrue((values == v).all().item())
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_mode_large(self, device, dtype):
         # i should be less than (d - 2) / 2
@@ -1121,7 +1123,8 @@ class TestReductions(TestCase):
         test_for_dtypes(torch.int32, torch.int32, torch.float32, indices_err)
         test_for_dtypes(torch.float32, torch.float32, torch.float64, indices_err)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     def test_mode_wrong_device(self, device):
         # CPU Input Tensor
         x = torch.ones(2)
@@ -1538,7 +1541,8 @@ class TestReductions(TestCase):
         torch.sum(x, (2, 1), out=res2)
         self.assertEqual(res1, res2)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     @dtypes(torch.float16, torch.float32)
     def test_prod_gpu(self, device, dtype):
         x = torch.tensor([2, 3, 6, 9, 8], dtype=dtype, device=device)
@@ -2130,7 +2134,8 @@ class TestReductions(TestCase):
                     op(x, dim=dim)
 
     # TODO: update this test to compare against NumPy
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     def test_var(self, device):
         cpu_tensor = torch.randn(2, 3, 3)
         device_tensor = cpu_tensor.to(device)
@@ -2146,7 +2151,8 @@ class TestReductions(TestCase):
         self.assertEqual(device_tensor.var(), cpu_tensor.var())
 
     # TODO: update this test to compare against NumPy
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     def test_var_large_input(self, device):
         # Large, not-nice input
         cpu_tensor = torch.randn(2 * 32 * 1024 + 1, 2, 67)
@@ -2155,7 +2161,8 @@ class TestReductions(TestCase):
         self.assertEqual(cpu_tensor.var(2), device_tensor.var(2))
 
     # TODO: update this to compare against NumPy instead of CPU
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     @dtypes(torch.double)
     def test_sum_noncontig(self, device, dtype):
         x = torch.randn(1, 75, 57, 20, dtype=dtype, device=device).permute(0, 3, 1, 2)
@@ -2165,7 +2172,8 @@ class TestReductions(TestCase):
         self.assertEqual(x.sum(dim=(1, 3)).cpu(), y.sum(dim=(1, 3)))
 
     # TODO: update this to compare against NumPy instead of CPU
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     def test_min_max_nan(self, device):
         tests = [(lambda x: x.min(), 'min'),
                  (lambda x: x.max(), 'max'),
@@ -2185,7 +2193,7 @@ class TestReductions(TestCase):
                              expected[~torch.isnan(expected)], msg=f'nans for {name}')
 
     # TODO: make this test generic using OpInfos
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_sum_cpu_device_mismatch(self, device):
         x = torch.randn(20, dtype=torch.float32, device=device)
         y = torch.randn(1, dtype=torch.float32)
@@ -2451,7 +2459,8 @@ class TestReductions(TestCase):
         expected = fn(y, 1, keepdim=False)
         self.assertEqual(x[:, 1], expected, msg=f'{fn_name} with out= kwarg')
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     @largeTensorTest('10GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
@@ -2461,7 +2470,8 @@ class TestReductions(TestCase):
         expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
         self.assertEqual(result, expect)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
     def test_reduction_vectorize_along_input_corner(self, device, dtype):
         # 1D case: sum
@@ -2559,7 +2569,9 @@ class TestReductions(TestCase):
                 self.assertEqual(xs1[j].item(), size[1] - i)
                 self.assertEqual(xs2[j].item(), size[1] - i)
 
-    @onlyCUDA
+    @onlyAccelerator
+    @skipIfMPS
+    @skipIfXpu
     # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
     def test_reduction_vectorize_along_output(self, device, dtype):
@@ -2584,7 +2596,8 @@ class TestReductions(TestCase):
         run_test(torch.zeros(64, 61, dtype=dtype, device=device))
         run_test(torch.zeros(64, 1, dtype=dtype, device=device))
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
         x = torch.zeros(2**31, device=device, dtype=torch.int8)
@@ -3288,7 +3301,8 @@ class TestReductions(TestCase):
             bins=4)
         self.assertEqual(3.0, actual.sum())
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     @dtypes(torch.uint8, torch.int8, torch.int, torch.long)
     def test_histc_min_max_corner_cases_cuda(self, device, dtype):
         actual = torch.histc(
@@ -3882,7 +3896,8 @@ as the input tensor excluding its innermost dimension'):
 
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipIfMPS
     @largeTensorTest("8GB")
     @dtypes(torch.half, torch.chalf, torch.bfloat16)
     # skip chalf and half when XPU, see issues https://github.com/intel/torch-xpu-ops/issues/1973
@@ -3900,6 +3915,8 @@ as the input tensor excluding its innermost dimension'):
         with ctx:
             self.assertEqual(torch.mean(t), expected)
 
+
+class TestReductions(TestCase):
     def test_scalar_tensor_as_dim_argument(self):
         """Tests that scalar tensors work correctly as dimension arguments.
 
@@ -3938,7 +3955,7 @@ as the input tensor excluding its innermost dimension'):
         self.assertEqual(result_eager.shape, result_compiled.shape)
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
-instantiate_device_type_tests(TestReductions, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestReductionsDevice, globals(), allow_xpu=True, allow_mps=True)
 
 if __name__ == '__main__':
     run_tests()
