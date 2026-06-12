@@ -3285,9 +3285,9 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_lambda0_keywords_y_: "f32[s9, s9]", s9: "Sym(s9)"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul: "f32[s9, s9]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        add: "f32[s9, s9]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_
 
-        add: "f32[s9, s9]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        mul: "f32[s9, s9]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
         mul_1: "f32[s9, s9]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
