@@ -595,6 +595,10 @@ ProcessGroupGloo::ProcessGroupGloo(
       options_(std::move(options)),
 
       local_id_(process_group_id++) {
+  TORCH_CHECK(
+      !options_->enable_reconfigure,
+      "ProcessGroupGloo does not support enable_reconfigure "
+      "(reconfigure-based fault tolerance).");
   auto& devices = options_->devices;
   if (devices.empty()) {
     TORCH_CHECK(false, "No device(s) specified");

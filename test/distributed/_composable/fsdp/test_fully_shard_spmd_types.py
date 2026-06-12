@@ -221,36 +221,53 @@ class TestFullyShardSpmdTypes(TestCase):
             )
         self.assertExpectedInline(
             str(cm.exception),
-            """Parameter 'sharded_weight' has V type on mesh dim 'tp' but no PartitionSpec shard info. Use assert_type with S(dim) or pass a PartitionSpec.""",
+            """Cannot convert plain Varying to a DTensor placement. Use S(dim) to specify which tensor dimension is sharded.""",
         )
 
-    def test_partial_param_annotations_not_supported(self):
-        """TODO(pianpwk) support this by inferring from current_mesh."""
+    def test_partial_param_annotations_infer_fsdp_axes_at_compute(self):
         model = SpmdLinear(self.type_mesh, seq_parallel=False)
         dp_axis = spmd.MeshAxis.of(self.type_mesh.get_group("dp"))
+        cp_axis = spmd.MeshAxis.of(self.type_mesh.get_group("cp"))
         tp_axis = spmd.MeshAxis.of(self.type_mesh.get_group("tp"))
 
         spmd.assert_type(
             model.unsharded_weight,
-            {dp_axis: spmd.R, tp_axis: spmd.I},
+            {tp_axis: spmd.I},
         )
-        with self.assertRaises(ValueError) as cm:
-            fully_shard(
-                model,
-                mesh=self.fsdp_mesh,
-                dp_mesh_dims=DataParallelMeshDims(
-                    shard=("dps", "cp"),
-                    replicate="dpr",
-                ),
+        spmd.assert_type(
+            model.sharded_weight,
+            {tp_axis: spmd.S(0)},
+        )
+        fully_shard(
+            model,
+            mesh=self.fsdp_mesh,
+            dp_mesh_dims=DataParallelMeshDims(
+                shard=("dps", "cp"),
+                replicate="dpr",
+            ),
+        )
+
+        inp = torch.randn(4, 8, 16)
+        with (
+            spmd.set_current_mesh(self.type_mesh),
+            typecheck(strict_mode="strict", local=False),
+        ):
+            spmd.assert_type(
+                inp,
+                {dp_axis: spmd.V, cp_axis: spmd.V, tp_axis: spmd.I},
+                partition_spec=spmd.PartitionSpec(dp_axis, cp_axis, None),
             )
-        self.assertExpectedInline(
-            str(cm.exception),
-            "Parameter 'unsharded_weight' has spmd_types annotations that are "
-            "not compatible with the full SPMD mesh passed to fully_shard. "
-            "FSDP requires fully annotated parameters spanning the same mesh "
-            "as the one passed to fully_shard. Got local_type={mesh_dp: R, "
-            "mesh_tp: I}, partition_spec=None, and spmd_mesh=DeviceMesh((dpr=2, "
-            "dps=2, cp=2, tp=2), 'cpu', stride=(8, 4, 2, 1)).",
+            loss = model(inp)
+            spmd.assert_type(
+                loss,
+                {dp_axis: spmd.P, cp_axis: spmd.P, tp_axis: spmd.I},
+            )
+        self.assertEqual(
+            model.compute_param_types,
+            (
+                {dp_axis: spmd.R, cp_axis: spmd.R, tp_axis: spmd.I},
+                {dp_axis: spmd.R, cp_axis: spmd.R, tp_axis: spmd.V},
+            ),
         )
 
     def test_spmd_params_require_dp_mesh_dims(self):
@@ -267,6 +284,39 @@ class TestFullyShardSpmdTypes(TestCase):
             str(cm.exception),
             "spmd_types parameters require a named SPMD mesh "
             "(pass dp_mesh_dims to fully_shard)",
+        )
+
+    def test_partial_param_annotations_missing_non_fsdp_axis_errors(self):
+        model = SpmdLinear(self.type_mesh, seq_parallel=False)
+        dp_axis = spmd.MeshAxis.of(self.type_mesh.get_group("dp"))
+        cp_axis = spmd.MeshAxis.of(self.type_mesh.get_group("cp"))
+        tp_axis = spmd.MeshAxis.of(self.type_mesh.get_group("tp"))
+
+        spmd.assert_type(
+            model.unsharded_weight,
+            {dp_axis: spmd.R, cp_axis: spmd.R},
+        )
+        spmd.assert_type(
+            model.sharded_weight,
+            {tp_axis: spmd.S(0)},
+        )
+        with self.assertRaises(ValueError) as cm:
+            fully_shard(
+                model,
+                mesh=self.fsdp_mesh,
+                dp_mesh_dims=DataParallelMeshDims(
+                    shard=("dps", "cp"),
+                    replicate="dpr",
+                ),
+            )
+        self.assertExpectedInline(
+            str(cm.exception),
+            "Parameter 'unsharded_weight' has incomplete spmd_types annotations "
+            "for FSDP storage. Annotated axes: (mesh_dp, mesh_cp). Storage "
+            "mesh axes: (mesh_dpr, mesh_dps, mesh_cp, mesh_tp). FSDP mesh "
+            "dims: DataParallelMeshDims(shard=('dps', 'cp'), "
+            "replicate='dpr'). Missing non-FSDP storage axes: "
+            "(mesh_tp,).",
         )
 
     def test_fsdp_dp_axes_must_be_r(self):
@@ -288,7 +338,7 @@ class TestFullyShardSpmdTypes(TestCase):
             )
         self.assertExpectedInline(
             str(cm.exception),
-            "Expected spmd.R on FSDP DP mesh dim 'dpr' for parameter "
+            "Expected spmd.R on FSDP DP axis mesh_dp for parameter "
             "'unsharded_weight' but got PerMeshAxisLocalSpmdType.I. FSDP "
             "requires DP parameters to be R since it handles the DP gradient "
             "reduction.",
