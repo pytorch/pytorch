@@ -1041,7 +1041,7 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             # The size of reserved memory is the sum of all Segments.
             # Segments are cached and reused for future allocations.
             # If the reuse is smaller than the segment, the segment
-            # is split into more then one Block.
+            # is split into more than one Block.
             # empty_cache() frees Segments that are entirely inactive.
             address: int
             total_size: int  #  cudaMalloc'd size of segment
@@ -1099,7 +1099,7 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
                 "oom",  # the allocator threw an OOM exception. 'size' is
                 # the requested number of bytes that did not succeed
                 "snapshot",  # the allocator generated a memory snapshot
-                # useful to coorelate a previously taken
+                # useful to correlate a previously taken
                 # snapshot with this trace
             ]
             addr: int  # not present for OOM

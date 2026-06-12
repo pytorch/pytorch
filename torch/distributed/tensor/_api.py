@@ -81,7 +81,7 @@ def _normalize_placements_for_grad(
 # together with torch.Tensor within the autograd engine. This
 # allows DTensor to only exist on part of the module hierarchy.
 #
-# As an example, we have the a module that consists of submodules
+# As an example, we have a module that consists of submodules
 # A, B, and C, the execution flow would be like:
 #  input(torch.Tensor) -> Module A -> Module B -> Module C -> output (torch.Tensor)
 #
