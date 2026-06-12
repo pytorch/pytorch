@@ -836,7 +836,10 @@ class DefaultHandler(OpsHandler[Any]):
                 for p in sig.parameters.values()
             ):
                 self_arg, *args = sig.parameters.keys()
-                assert self_arg == "self"
+                if self_arg != "self":
+                    raise AssertionError(
+                        f"expected first parameter 'self', got {self_arg!r}"
+                    )
                 code.write(
                     f"""
                     def {target}(self, {", ".join(args)}):
@@ -1091,6 +1094,7 @@ class OpCountResult(NamedTuple):
     used_ops: OrderedSet[str]
     read_buffers: list[str]
     nontrivial_read_count: int
+    limit_exceeded: bool = False
 
 
 class OpCountLimitExceeded(RuntimeError):
@@ -1102,7 +1106,8 @@ class OpCounterCSE(DefaultHandler):
 
     def __init__(self, inner: OpsHandler[Any], max_ops: int | None = None):
         super().__init__()
-        assert max_ops is None
+        if max_ops is not None:
+            raise AssertionError(f"expected max_ops to be None, got {max_ops}")
         self.parent_handler = inner
         self.op_count = 0
         self.var_names: dict[str, str] = {}
@@ -1186,7 +1191,8 @@ class OpCounterCSE(DefaultHandler):
 
 class _BoundedOpCounterCSE(OpCounterCSE):
     def __init__(self, inner: OpsHandler[Any], max_ops: int | None = None):
-        assert max_ops is not None
+        if max_ops is None:
+            raise AssertionError("expected max_ops to be set")
         super().__init__(inner)
         self.max_ops = max_ops
         # This is a work bound, not the op-count threshold. Keep it looser so
@@ -1243,7 +1249,11 @@ class _BoundedOpCounterCSE(OpCounterCSE):
         if self.limit_exceeded:
             num_ops = max(num_ops, self.max_ops + 1)
         return OpCountResult(
-            num_ops, self._used_ops, self._read_names, self._nontrivial_read_count
+            num_ops,
+            self._used_ops,
+            self._read_names,
+            self._nontrivial_read_count,
+            self.limit_exceeded,
         )
 
 

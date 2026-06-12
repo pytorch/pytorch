@@ -5,10 +5,10 @@
 #ifdef USE_C10D_GLOO
 
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
-#include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/gloo/GlooDeviceFactory.hpp>
+#include <torch/csrc/distributed/c10d/gloo/ProcessGroupGlooDetail.hpp>
 #include <chrono>
 #include <exception>
 
@@ -595,6 +595,10 @@ ProcessGroupGloo::ProcessGroupGloo(
       options_(std::move(options)),
 
       local_id_(process_group_id++) {
+  TORCH_CHECK(
+      !options_->enable_reconfigure,
+      "ProcessGroupGloo does not support enable_reconfigure "
+      "(reconfigure-based fault tolerance).");
   auto& devices = options_->devices;
   if (devices.empty()) {
     TORCH_CHECK(false, "No device(s) specified");

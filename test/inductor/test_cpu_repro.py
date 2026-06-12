@@ -329,9 +329,15 @@ class CPUReproTests(TestCase):
                     else set_num_threads(1)
                 ):
                     with torch.no_grad():
+                        # Fold accumulates overlapping patches, so parallel CPU
+                        # codegen can differ slightly from eager accumulation order.
+                        tol_kwargs = (
+                            {"atol": 1e-4, "rtol": 1e-4} if num_threads is None else {}
+                        )
                         self.common(
                             mod,
                             (v,),
+                            **tol_kwargs,
                         )
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
@@ -1229,9 +1235,12 @@ class CPUReproTests(TestCase):
 
         # both inputs to conv should be channels last
         if config.cpp_wrapper:
-            FileCheck().check("{2L, 3L, 4L, 4L}").check("{128L, 1L, 32L, 8L}").check(
-                "{4L, 3L, 3L, 3L}"
-            ).check("{27L, 1L, 9L, 3L}").check("aoti_torch_empty_strided").run(code)
+            cpp_int_array_str = test_torchinductor.cpp_int_array_str
+            FileCheck().check(cpp_int_array_str([2, 3, 4, 4])).check(
+                cpp_int_array_str([128, 1, 32, 8])
+            ).check(cpp_int_array_str([4, 3, 3, 3])).check(
+                cpp_int_array_str([27, 1, 9, 3])
+            ).check("aoti_torch_empty_strided").run(code)
         else:
             FileCheck().check("(2, 3, 4, 4), (128, 1, 32, 8)").check(
                 "empty_strided_cpu((4, 3, 3, 3), (27, 1, 9, 3)"
@@ -7128,6 +7137,49 @@ class CPUReproTests(TestCase):
             self.assertTrue(large_reads_zero_threshold_storage.has_exceeded_max_reads())
             large_reads_zero_threshold_storage.realize_hint()
             realize_mock.assert_called_once_with(large_reads_zero_threshold_storage)
+
+        complete_calls = 0
+
+        def inner_complete_fn(index):
+            nonlocal complete_calls
+            complete_calls += 1
+            value = ops.load("in0", index[0])
+            for _ in range(45):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        complete_pointwise = Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=inner_complete_fn,
+            ranges=[10],
+        )
+        with config.patch(realize_opcount_threshold=30):
+            self.assertTrue(complete_pointwise.has_large_inner_fn())
+            self.assertEqual(complete_pointwise.inner_fn_opcount().num_ops, 47)
+        self.assertEqual(complete_calls, 1)
+
+        exceeded_calls = 0
+
+        def inner_exceeded_fn(index):
+            nonlocal exceeded_calls
+            exceeded_calls += 1
+            value = ops.load("in0", index[0])
+            for _ in range(101):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        exceeded_pointwise = Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=inner_exceeded_fn,
+            ranges=[10],
+        )
+        exceeded_opcount = exceeded_pointwise.bounded_inner_fn_opcount(max_ops=0)
+        self.assertTrue(exceeded_opcount.limit_exceeded)
+        self.assertEqual(exceeded_calls, 1)
+        self.assertEqual(exceeded_pointwise.inner_fn_opcount().num_ops, 103)
+        self.assertEqual(exceeded_calls, 2)
 
 
 if __name__ == "__main__":

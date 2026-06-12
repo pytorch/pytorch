@@ -114,7 +114,9 @@ class TestStandaloneInductor(TestCase):
         for i in range(5):
             opcounter.add(str(i), "1")
 
-        self.assertEqual(opcounter.getvalue().num_ops, 5)
+        opcount = opcounter.getvalue()
+        self.assertEqual(opcount.num_ops, 5)
+        self.assertFalse(opcount.limit_exceeded)
 
     def test_bounded_opcount_preserves_linear_counts_past_threshold(self):
         opcounter = OpCounterCSE(MockHandler(), max_ops=3)
@@ -129,7 +131,60 @@ class TestStandaloneInductor(TestCase):
             for i in range(101):
                 opcounter.add(str(i), "1")
 
-        self.assertGreater(opcounter.getvalue().num_ops, 1)
+        opcount = opcounter.getvalue()
+        self.assertGreater(opcount.num_ops, 1)
+        self.assertTrue(opcount.limit_exceeded)
+
+    def test_completed_bounded_opcount_populates_exact_cache(self):
+        from torch._inductor.ir import Pointwise
+        from torch._inductor.virtualized import ops
+
+        calls = 0
+
+        def inner_fn(index):
+            nonlocal calls
+            calls += 1
+            value = ops.load("in0", index[0])
+            for _ in range(45):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        pointwise = Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=inner_fn,
+            ranges=[10],
+        )
+        with config.patch(realize_opcount_threshold=30):
+            self.assertTrue(pointwise.has_large_inner_fn())
+            self.assertEqual(pointwise.inner_fn_opcount().num_ops, 47)
+        self.assertEqual(calls, 1)
+
+    def test_incomplete_bounded_opcount_does_not_populate_exact_cache(self):
+        from torch._inductor.ir import Pointwise
+        from torch._inductor.virtualized import ops
+
+        calls = 0
+
+        def inner_fn(index):
+            nonlocal calls
+            calls += 1
+            value = ops.load("in0", index[0])
+            for _ in range(101):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        pointwise = Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=inner_fn,
+            ranges=[10],
+        )
+        opcount = pointwise.bounded_inner_fn_opcount(max_ops=0)
+        self.assertTrue(opcount.limit_exceeded)
+        self.assertEqual(calls, 1)
+        self.assertEqual(pointwise.inner_fn_opcount().num_ops, 103)
+        self.assertEqual(calls, 2)
 
     def test_inductor_via_bare_module(self):
         mod = MyModule3().eval()
