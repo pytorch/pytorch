@@ -7616,8 +7616,8 @@ class Scheduler:
 
             write_dep = epilogue_writes[0]
             read_dep = epilogue_reads[0]
-            assert isinstance(read_dep, MemoryDep)
-            assert isinstance(write_dep, MemoryDep)
+            assert isinstance(read_dep, MemoryDep)  # noqa: S101
+            assert isinstance(write_dep, MemoryDep)  # noqa: S101
             if read_dep.index != write_dep.index or read_dep.size != write_dep.size:
                 why("epilogue's read and write indices differ")
                 return False
