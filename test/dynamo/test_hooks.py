@@ -510,11 +510,11 @@ def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     hook_body_0 = self.hook_body_0
     split = l_x_.split(2);  l_x_ = None
-    getitem = split[1]
-    getitem_1 = split[2]
-    getitem_2 = split[0];  split = None
-    cat = torch.cat((getitem_2, getitem, getitem_1));  getitem = getitem_1 = None
-    register_hook = torch.ops.higher_order.register_hook(getitem_2, hook_body_0);  getitem_2 = hook_body_0 = None
+    getitem = split[0]
+    getitem_1 = split[1]
+    getitem_2 = split[2];  split = None
+    cat = torch.cat((getitem, getitem_1, getitem_2));  getitem_1 = getitem_2 = None
+    register_hook = torch.ops.higher_order.register_hook(getitem, hook_body_0);  getitem = hook_body_0 = None
     sum_1 = cat.sum();  cat = None
     sum_2 = register_hook.sum();  register_hook = None
     add = sum_1 + sum_2;  sum_1 = sum_2 = None
