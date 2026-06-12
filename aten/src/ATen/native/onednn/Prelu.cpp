@@ -5,7 +5,7 @@
 
 #if !AT_ONEDNN_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor onednn_prelu(const Tensor& input, const Tensor& weight) {
   TORCH_CHECK(false, "onednn_prelu: ATen not compiled with ONEDNN support");
@@ -15,7 +15,7 @@ std::tuple<Tensor, Tensor> onednn_prelu_backward(const Tensor& grad_output, cons
   TORCH_CHECK(false, "onednn_prelu_backward: ATen not compiled with ONEDNN support");
 }
 
-}}
+}
 
 #else // AT_ONEDNN_ENABLED
 

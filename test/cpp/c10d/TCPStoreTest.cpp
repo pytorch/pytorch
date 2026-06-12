@@ -246,6 +246,52 @@ TEST(TCPStoreTest, testLibUVPartialRead) {
   clientThread.join();
 }
 
+TEST(TCPStoreTest, testLibUVSetAndWait) {
+  int numWorkers = 128; // thread 0 creates both server and client
+  std::vector<std::thread> threads;
+
+  // server part
+  c10d::TCPStoreOptions server_opts{
+      0,
+      true, // is master
+      numWorkers,
+      false, // don't wait otherwise client thread won't spawn
+      std::chrono::seconds(defaultTimeout)};
+  server_opts.useLibUV = true;
+
+  auto serverTCPStore =
+      std::make_unique<c10d::TCPStore>("127.0.0.1", server_opts);
+
+  // client part
+  c10d::TCPStoreOptions client_opts{
+      serverTCPStore->getPort(),
+      false, // is master
+      numWorkers,
+      false, // wait workers
+      std::chrono::seconds(defaultTimeout)};
+  client_opts.useLibUV = true;
+
+  for (const auto i : c10::irange(numWorkers)) {
+    threads.emplace_back([=, &client_opts] {
+      auto clientTCPStore =
+          c10::make_intrusive<c10d::TCPStore>("127.0.0.1", client_opts);
+      std::string key("k_" + std::to_string(i));
+      std::string value("v_" + std::to_string(i));
+      std::vector<uint8_t> valueBuf(value.begin(), value.end());
+      clientTCPStore->set(key, valueBuf);
+      std::vector<std::string> all_keys;
+      for (const auto j : c10::irange(numWorkers)) {
+        all_keys.push_back("k_" + std::to_string(j));
+      }
+      clientTCPStore->wait(all_keys);
+    });
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+}
+
 void testMultiTenantStores(bool libUV) {
   c10d::TCPStoreOptions opts{};
   opts.isServer = true;
@@ -273,4 +319,49 @@ TEST(TCPStoreTest, testMultiTenantStores) {
 
 TEST(TCPStoreTest, testMultiTenantStoresUV) {
   testMultiTenantStores(true);
+}
+
+void testBarrier(bool useLibUV) {
+  constexpr int numWorkers = 4;
+  auto serverTCPStore = _createServer(useLibUV, numWorkers);
+
+  std::vector<std::thread> threads;
+  c10d::TCPStoreOptions client_opts{};
+  client_opts.port = serverTCPStore->getPort();
+  client_opts.numWorkers = numWorkers;
+  client_opts.useLibUV = useLibUV;
+
+  for (int i = 0; i < numWorkers; ++i) {
+    threads.emplace_back([=, &client_opts] {
+      auto store =
+          c10::make_intrusive<c10d::TCPStore>("127.0.0.1", client_opts);
+      store->barrier(
+          "test_barrier", numWorkers, std::chrono::seconds(defaultTimeout));
+    });
+  }
+  for (auto& t : threads) {
+    t.join();
+  }
+}
+
+TEST(TCPStoreTest, testBarrier) {
+  testBarrier(false);
+}
+
+TEST(TCPStoreTest, testBarrierUV) {
+  testBarrier(true);
+}
+
+void testBarrierTimeout(bool useLibUV) {
+  auto store = _createServer(useLibUV, 1);
+  auto timeout = std::chrono::milliseconds(100);
+  EXPECT_THROW(store->barrier("timeout_key", 2, timeout), c10::DistStoreError);
+}
+
+TEST(TCPStoreTest, testBarrierTimeout) {
+  testBarrierTimeout(false);
+}
+
+TEST(TCPStoreTest, testBarrierTimeoutUV) {
+  testBarrierTimeout(true);
 }

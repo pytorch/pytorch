@@ -8,11 +8,11 @@ import math
 import operator
 import unittest
 from re import escape
-from typing import List, Set
 
 import torch
 from functorch.experimental.control_flow import cond
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch._export import config
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
@@ -67,19 +67,19 @@ def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> 
 
 class _AddOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {operator.add}
+        return node.op == "call_function" and node.target == operator.add
 
 
 class _AtenAddOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {torch.ops.aten.add.Tensor}
+        return node.op == "call_function" and node.target == torch.ops.aten.add.Tensor
 
 
-def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
+def _to_partition_names(partitions: list[Partition]) -> list[set[str]]:
     return [{n.name for n in p.nodes} for p in partitions]
 
 
-def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
+def _get_output_names(gm: torch.fx.GraphModule) -> list[str]:
     output_node = next(n for n in gm.graph.nodes if n.op == "output")
     args = pytree.tree_leaves(output_node.args)
     # if isinstance(args, tuple) and len(args) == 1:
@@ -177,7 +177,8 @@ def _set_grad_enabled_tests():
 
     def _get_predispatch_module(mod, args, ambient_grad_enabled=True):
         with torch.set_grad_enabled(ambient_grad_enabled):
-            return _export(mod, args, pre_dispatch=True).module()
+            with config.patch(use_new_tracer_experimental=True):
+                return _export(mod, args, pre_dispatch=True).module()
 
     return {
         "ctx_manager": (
@@ -305,7 +306,9 @@ def _with_mixed_autocast_set_grad_tests():
     x = torch.randn(2, 2)
 
     def _get_predispatch_module(mod, args):
-        return _export(mod, args, pre_dispatch=True).module()
+        with torch._export.config.patch(use_new_tracer_experimental=True):
+            ep = _export(mod, args, pre_dispatch=True).module()
+            return ep
 
     return {
         "multi_ctx_manager": (
@@ -352,9 +355,7 @@ def _sequential_split_inline_tests():
 
         for i, node in enumerate(insert_locs):
             with gm.graph.inserting_before(node):
-                gm.graph.call_function(
-                    torch._C._set_grad_enabled, (True if i % 2 == 0 else False,), {}
-                )
+                gm.graph.call_function(torch._C._set_grad_enabled, (i % 2 == 0,), {})
         return gm
 
     x = torch.randn(2, 2)
@@ -404,12 +405,15 @@ class TestPasses(TestCase):
         x = torch.zeros(2, 2, 3)
 
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
-        ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
+        ep = torch.export.export(
+            M(), (x,), dynamic_shapes={"x": {1: dim1_x}}, strict=True
+        )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[1] to be <= 6, but got 7"),
+            AssertionError,
+            escape("Guard failed: x.size()[1] <= 6"),
         ):
+            # expected <= 6, but got 7
             ep.module()(torch.zeros(2, 7, 3))
 
         self.assertEqual(
@@ -431,19 +435,24 @@ class TestPasses(TestCase):
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y", min=3)
 
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
+            M(),
+            (x, y),
+            dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}},
+            strict=True,
         )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[1] to be <= 6, but got 7"),
+            AssertionError,
+            escape("Guard failed: x.size()[1] <= 6"),
         ):
+            # expected <= 6, but got 7
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[1].shape[0] to be >= 3, but got 2"),
+            AssertionError,
+            escape("Guard failed: y.size()[0] >= 3"),
         ):
+            # expected >= 3, but got 2
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
@@ -461,20 +470,25 @@ class TestPasses(TestCase):
         dim0_x = torch.export.Dim("dim0_x", min=3)
 
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
+            M(),
+            (x, y),
+            dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None},
+            strict=True,
         )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[1] to be <= 6, but got 7"),
+            AssertionError,
+            escape("Guard failed: x.size()[1] <= 6"),
         ):
+            # expected <= 6, but got 7
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2"),
+            AssertionError,
+            escape("Guard failed: y.size()[0] == 5"),
         ):
+            # expected 5, but got 2
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -496,17 +510,22 @@ class TestPasses(TestCase):
 
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}
+            M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}, strict=True
         )
 
-        with self.assertRaisesRegex(RuntimeError, escape("shape[1] to be equal to 2")):
+        with self.assertRaisesRegex(
+            AssertionError,
+            escape("Guard failed: x.size()[1] == 2"),
+        ):
+            # expected 2, but got 7
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2"),
+            AssertionError,
+            escape("Guard failed: y.size()[0] == 5"),
         ):
+            # expected 5, but got 2
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -526,7 +545,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(M(), (x,))
+        ep = export(M(), (x,), strict=True)
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
         ep = ep._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
@@ -542,7 +561,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
         foo = Module()
-        ep = export(foo, (x,))._transform_do_not_use(
+        ep = export(foo, (x,), strict=True)._transform_do_not_use(
             ReplaceViewOpsWithViewCopyOpsPass()
         )
         # After this pass, there shouldn't be any view nodes in the graph
@@ -557,7 +576,8 @@ class TestPasses(TestCase):
 
         for aten_schema in aten_schemas:
             val = aten_schema.split(".")
-            assert len(val) <= 2
+            if len(val) > 2:
+                raise AssertionError(f"Expected at most 2 parts, got {len(val)}: {val}")
             name = ""
             overload = ""
             if len(val) == 1:
@@ -618,16 +638,13 @@ class TestPasses(TestCase):
         self.assertExpectedInline(
             without_token_ep.graph_module.code.strip(),
             """\
-def forward(self, token, obj_attr, x):
-    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, foo = obj_attr, x = x);  token = x = None
-    getitem = with_effects[0]
-    getitem_1 = with_effects[1]
-    getitem_2 = with_effects[2];  with_effects = None
+def forward(self, obj_attr, x):
+    takes_foo_tuple_return_default = torch.ops._TorchScriptTesting.takes_foo_tuple_return.default(foo = obj_attr, x = x);  x = None
+    getitem_1 = takes_foo_tuple_return_default[0]
+    getitem_2 = takes_foo_tuple_return_default[1];  takes_foo_tuple_return_default = None
     add = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, foo = obj_attr, x = add);  getitem = obj_attr = add = None
-    getitem_3 = with_effects_1[0]
-    getitem_4 = with_effects_1[1];  with_effects_1 = None
-    return (getitem_3, getitem_4)""",  # noqa: B950
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(foo = obj_attr, x = add);  obj_attr = add = None
+    return (takes_foo_default,)""",
         )
 
     def test_fakify_script_objects(self):
@@ -643,7 +660,7 @@ def forward(self, token, obj_attr, x):
                 allow_non_fake_inputs=True,
             )
             with _fakify_script_objects(m, (), {}, fake_mode) as (
-                patched_mod,
+                _,
                 _,
                 _,
                 fake_constant_attrs,
@@ -657,17 +674,16 @@ def forward(self, token, obj_attr, x):
     @unittest.expectedFailure
     def test_fakify_script_objects_properly_handle_containers(self):
         m = ModelsWithScriptObjectAttr.SimpleWithAttrInContainer()
-        constant_attrs = _gather_constant_attrs(m)
         fake_mode = FakeTensorMode(
             shape_env=ShapeEnv(tracked_fakes=[]),
             allow_non_fake_inputs=True,
         )
         with _fakify_script_objects(m, (), {}, fake_mode) as (
-            patched_mod,
+            _,
             _,
             _,
             fake_constant_attrs,
-            fake_to_real,
+            _,
         ):
             self.assertTrue("attr" in fake_constant_attrs.values())
             self.assertTrue("pytree_attr2" in fake_constant_attrs.values())
@@ -685,7 +701,7 @@ def forward(self, token, obj_attr, x):
 
         x = torch.tensor([2])
         mod = M()
-        ep = export(mod, (x,))
+        ep = export(mod, (x,), strict=True)
 
         with self.assertRaisesRegex(
             RuntimeError, r"Runtime assertion failed for expression u[\d+] \<\= 5"
@@ -710,7 +726,9 @@ def forward(self, token, obj_attr, x):
 
         mod = M()
         dim0_x = torch.export.Dim("dim0_x")
-        ep = torch.export.export(mod, (x,), dynamic_shapes={"x": {0: dim0_x}})
+        ep = torch.export.export(
+            mod, (x,), dynamic_shapes={"x": {0: dim0_x}}, strict=True
+        )
 
         num_assert = count_call_function(
             ep.graph, torch.ops.aten._assert_scalar.default
@@ -763,7 +781,7 @@ def forward(self, token, obj_attr, x):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        ep = export(mod, (torch.tensor(True), x, y))
+        ep = export(mod, (torch.tensor(True), x, y), strict=True)
 
         with self.assertRaisesRegex(
             RuntimeError, "is outside of inline constraint \\[2, 5\\]."
@@ -780,7 +798,7 @@ def forward(self, token, obj_attr, x):
 
         func = Module()
         x = torch.randn(1, dtype=torch.float32)
-        ep = torch.export.export(func, args=(x,))
+        ep = torch.export.export(func, args=(x,), strict=True)
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
     def test_predispatch_set_grad(self):
@@ -792,6 +810,7 @@ def forward(self, token, obj_attr, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -811,14 +830,16 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
-    sin = torch.ops.aten.sin.default(add);  add = None
-    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    submod_4 = self.submod_2
-    add_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
-    getitem = add_1[0];  add_1 = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1)
-    return pytree.tree_unflatten((getitem, sub), self._out_spec)
+    submod_4 = self.submod_1
+    sum_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_4, add);  submod_4 = add = None
+    getitem = sum_1[0];  sum_1 = None
+    add_1 = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
+    submod_5 = self.submod_3
+    sub = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add_1);  submod_5 = None
+    getitem_1 = sub[0];  sub = None
+    return pytree.tree_unflatten((add_1, getitem_1), self._out_spec)
     """,
         )
 
@@ -830,6 +851,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -849,6 +871,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -869,6 +892,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -881,7 +905,7 @@ def forward(self, x):
     sub = torch.ops.aten.sub.Tensor(add_1, 1)
     sub_1 = torch.ops.aten.sub.Tensor(add_2, 1)
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
-    """,  # noqa: B950
+    """,
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS[
@@ -894,6 +918,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -906,7 +931,7 @@ def forward(self, x):
     sub = wrap_with_set_grad_enabled_1[0]
     sub_1 = wrap_with_set_grad_enabled_1[1];  wrap_with_set_grad_enabled_1 = None
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
-    """,  # noqa: B950
+    """,
         )
 
     def test_sequential_split(self):
@@ -929,6 +954,7 @@ def forward(self, x):
             """\
 def forward(self, x1, x2):
     x1, x2, = fx_pytree.tree_flatten_spec(([x1, x2], {}), self._in_spec)
+    submod_0 = self.submod_0(x1, x2);  submod_0 = None
     submod_1 = self.submod_1(x1, x2);  x1 = x2 = None
     getitem = submod_1[0]
     getitem_1 = submod_1[1];  submod_1 = None
@@ -984,28 +1010,30 @@ def forward(self, sin, cos):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    submod_3 = self.submod_3
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
-    sin = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_3, add);  submod_3 = add = None
-    getitem_2 = sin[0];  sin = None
-    cos = torch.ops.aten.cos.default(getitem_2);  getitem_2 = None
-    submod_4 = self.submod_1
-    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_4, cos);  submod_4 = cos = None
+    sin = torch.ops.aten.sin.default(add);  add = None
+    submod_3 = self.submod_2
+    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_3, sin);  submod_3 = sin = None
+    add_1 = wrap_with_set_grad_enabled[0]
+    sub = wrap_with_set_grad_enabled[1];  wrap_with_set_grad_enabled = None
+    return pytree.tree_unflatten((add_1, sub), self._out_spec)
+    """,
+        )
+        self.assertExpectedInline(
+            mod.submod_2.code.strip("\n"),
+            """\
+def forward(self, sin):
+    cos = torch.ops.aten.cos.default(sin);  sin = None
+    submod_3 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_3, cos);  submod_3 = cos = None
     getitem = add_1[0];  add_1 = None
     sub = torch.ops.aten.sub.Tensor(getitem, 1)
-    return pytree.tree_unflatten((getitem, sub), self._out_spec)
+    return (getitem, sub)
     """,
         )
         self.assertExpectedInline(
-            mod.submod_3.code.strip("\n"),
-            """\
-def forward(self, add):
-    sin = torch.ops.aten.sin.default(add);  add = None
-    return (sin,)
-    """,
-        )
-        self.assertExpectedInline(
-            mod.submod_1.code.strip("\n"),
+            mod.submod_2.submod_1.code.strip("\n"),
             """\
 def forward(self, cos):
     add_1 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
@@ -1022,6 +1050,7 @@ def forward(self, cos):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_3 = self.submod_1
     add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_3, add);  submod_3 = add = None
@@ -1054,6 +1083,7 @@ def forward(self, add):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -1104,6 +1134,7 @@ def forward(self, add_1):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     wrap_with_autocast = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -1118,7 +1149,7 @@ def forward(self, x):
     sub = wrap_with_autocast_2[0]
     sub_1 = wrap_with_autocast_2[1];  wrap_with_autocast_2 = None
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
-    """,  # noqa: B950
+    """,
         )
 
         self.assertExpectedInline(
@@ -1161,6 +1192,7 @@ def forward(self, add_1, add_2):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -1202,6 +1234,7 @@ def forward(self, add_1):
             )
             after_inline_str = new_gm.print_readable(print_output=False)
             self.assertEqual(before_str, after_inline_str)
+            new_gm._guards_fn = gm._guards_fn
             self.assertEqual(gm(*args), new_gm(*args))
 
     def test_remove_auto_functionalized_pass(self) -> None:
@@ -1232,7 +1265,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,))
+            ep = export(mod, (x,), strict=True)
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             nodes = inplace_ep.graph.nodes
             for node in nodes:
@@ -1275,7 +1308,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,)).run_decompositions({})
+            ep = export(mod, (x,), strict=True).run_decompositions({})
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             graph_text = str(inplace_ep.graph)
             self.assertExpectedInline(
@@ -1292,6 +1325,49 @@ default](args = (%x, %b_state), kwargs = {})
             )
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_device_to(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.ops.aten.to.device(x, device="cuda:0", dtype=torch.float32)
+                return x + x
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+        ep = move_to_device_pass(ep, "cuda")
+        ep.graph_module.recompile()
+        self.assertExpectedInline(
+            ep.graph_module.code.strip("\n"),
+            """\
+def forward(self, x):
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float32, device = 'cuda', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.device(x, 'cuda', torch.float32);  x = None
+    add = torch.ops.aten.add.Tensor(to, to);  to = None
+    return (add,)
+    """,
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_device_submod(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    x = x.to(device="cuda:0")
+                    return x + x
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+        ep = move_to_device_pass(ep, "cuda")
+        ep.graph_module.submod_1.recompile()
+        self.assertExpectedInline(
+            ep.graph_module.submod_1.code.strip("\n"),
+            """\
+def forward(self, arg0_1):
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(arg0_1, dtype = torch.float32, device = 'cuda', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.dtype_layout(arg0_1, dtype = torch.float32, layout = torch.strided, device = 'cuda');  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(to, to);  to = None
+    return (add,)
+    """,
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_to_device_pass(self):
         class Model(torch.nn.Module):
             def __init__(self, size=4, h_dim=10):
@@ -1305,7 +1381,7 @@ default](args = (%x, %b_state), kwargs = {})
         # move the exported program from cpu to cuda:0
         mod = Model()
         example_inputs = (torch.rand(1, 10, 4),)
-        ep = export(mod, example_inputs)
+        ep = export(mod, example_inputs, strict=True)
         location = torch.device("cuda:0")
         ep = move_to_device_pass(ep, location=location)
         gm = ep.module()
@@ -1326,6 +1402,38 @@ default](args = (%x, %b_state), kwargs = {})
         test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
         outputs = gm(*test_inputs)
         self.assertEqual(outputs.device, torch.device("cuda:0"))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_device_example_inputs(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x, y, z):
+                return self.linear(x) + y + z
+
+        # Create model with example inputs on CPU
+        mod = Model()
+        example_args = (torch.rand(4, 4), torch.rand(4, 4))
+        example_kwargs = {"z": torch.tensor([1.0, 2.0, 3.0, 4.0])}
+
+        # Export with example inputs
+        ep = export(mod, example_args, example_kwargs)
+
+        # Verify initial state - all tensors should be on CPU
+        self.assertEqual(ep.example_inputs[0][0].device, torch.device("cpu"))
+        self.assertEqual(ep.example_inputs[0][1].device, torch.device("cpu"))
+        self.assertEqual(ep.example_inputs[1]["z"].device, torch.device("cpu"))
+
+        # Move to CUDA
+        location = torch.device("cuda:0")
+        ep_cuda = move_to_device_pass(ep, location=location)
+
+        # Verify example_inputs moved to CUDA
+        self.assertEqual(ep_cuda.example_inputs[0][0].device, torch.device("cuda:0"))
+        self.assertEqual(ep_cuda.example_inputs[0][1].device, torch.device("cuda:0"))
+        self.assertEqual(ep_cuda.example_inputs[1]["z"].device, torch.device("cuda:0"))
 
 
 if __name__ == "__main__":

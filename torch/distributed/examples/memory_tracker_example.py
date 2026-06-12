@@ -1,13 +1,11 @@
 # mypy: allow-untyped-defs
-import torchvision
-
 import torch
 from torch.distributed._tools import MemoryTracker
 
 
-def run_one_model(net: torch.nn.Module, input: torch.Tensor):
-    net.cuda()
-    input = input.cuda()
+def run_one_model(net: torch.nn.Module, input: torch.Tensor, device: str = "cuda"):
+    net.to(device)
+    input = input.to(device)
 
     # Create the memory Tracker
     mem_tracker = MemoryTracker()
@@ -30,4 +28,12 @@ def run_one_model(net: torch.nn.Module, input: torch.Tensor):
     mem_tracker.show_traces()
 
 
-run_one_model(torchvision.models.resnet34(), torch.rand(32, 3, 224, 224, device="cuda"))
+if __name__ == "__main__":
+    import torchvision
+
+    dev = "cuda"
+    run_one_model(
+        torchvision.models.resnet34(),
+        torch.rand(32, 3, 224, 224, device=dev),
+        device=dev,
+    )

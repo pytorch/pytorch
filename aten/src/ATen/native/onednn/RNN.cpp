@@ -215,11 +215,8 @@ struct RNNParams {
   }
 };
 
-template<bool is_single_direction>
-std::vector<int64_t> _output_size(const RNNParams& rnn) {
-  auto output_channels = is_single_direction ? rnn.hidden_size
-                                             : rnn.hidden_size * rnn.num_directions;
-  return {rnn.seq_length, rnn.mini_batch, output_channels};
+static std::vector<int64_t> _output_size(const RNNParams& rnn) {
+  return {rnn.seq_length, rnn.mini_batch, rnn.hidden_size};
 }
 
 // ONEDNN GRU gate order is different from PyTorch's which requires gates shuffle
@@ -286,7 +283,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> onednn_rnn_layer(const Tensor& input,
       batch_first,
       train);
 
-  auto output_size = _output_size</*is_single_direction*/ true>(rnn);
+  auto output_size = _output_size(rnn);
   auto output = at::empty(output_size, input.options());
 
   auto hy_ = at::empty(hx_.sizes(), hx_.options());
@@ -330,11 +327,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> onednn_rnn_layer(const Tensor& input,
         pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
     ideep::lstm_forward_training::compute(
         pd, x, hx, cx, w1_, w2_, b, onednn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
-    return std::make_tuple(output, hy_, cy_, workspace);
+    return std::make_tuple(
+        std::move(output), std::move(hy_), std::move(cy_), std::move(workspace));
   } else {
     ideep::lstm_forward_inference::compute(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, ideep::prop_kind::forward_inference);
-    return std::make_tuple(output, hy_, cy_, Tensor());
+    return std::make_tuple(std::move(output), std::move(hy_), std::move(cy_), Tensor());
   }
 }
 
@@ -416,7 +414,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> onednn_rnn_la
       bidirectional,
       batch_first,
       train);
-  auto output_size = _output_size</*is_single_direction*/ true>(rnn);
+  auto output_size = _output_size(rnn);
 
   auto weight_ih = _shuffle_weight(weight0, rnn.mode);
   auto weight_hh = _shuffle_weight(weight1, rnn.mode);
@@ -515,7 +513,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> onednn_rnn_la
       forward_hint.workspace_desc(), workspace.template data_ptr<uint8_t>());
   ideep::lstm_backward::compute(forward_hint, x, hx, cx, w1, w2, b, y, hy, cy, diff_y, diff_hy, diff_cy, onednn_workspace, diff_x, diff_hx, diff_cx, diff_w1, diff_w2, diff_b, reverse);
   auto diff_b2_ = at::clone(diff_b_);
-  return std::make_tuple(diff_x_, diff_w1_, diff_w2_, diff_b_, diff_b2_, diff_hx_, diff_cx_);
+  return std::make_tuple(std::move(diff_x_), std::move(diff_w1_), std::move(diff_w2_), std::move(diff_b_), std::move(diff_b2_), std::move(diff_hx_), std::move(diff_cx_));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor>
@@ -573,8 +571,13 @@ mkldnn_rnn_layer_backward(
 // I. Memory Formats
 //   a. onednn will use plain formats for input, hx/cx, output, hy/cy
 //      and possibly use blocked formats for weights depending shape info.
+<<<<<<< HEAD
+//   b. All onednn memories are created (in plain format) as views on ATen tensor,
+//      the weight reorder(if any) is handed automatically inside ideep (onednn bridge)
+=======
 //   b. All onednn memorys are created (in plain format) as views on ATen tensor,
 //      the weight reorder(if any) is handed automatically inside ideep (onednn bridge)
+>>>>>>> fae2aa0014d (Update non user APIs - 2)
 //
 // II. ONEDNN Primitive Mapping
 //   a. onednn rnn primitive doesn't support training with dropout or padded input sequence.
@@ -591,7 +594,7 @@ static std::tuple<Tensor, Tensor, Tensor> onednn_rnn(
     int64_t mode, int64_t hidden_size,
     int64_t num_layers, bool has_biases, bool batch_first, double dropout_p,
     bool train, bool bidirectional, IntArrayRef batch_sizes) {
-  TORCH_CHECK(batch_sizes.size() == 0, "onednn_rnn doesn't support packed input");
+  TORCH_CHECK(batch_sizes.empty(), "onednn_rnn doesn't support packed input");
   if (static_cast<ideep::rnn_kind>(mode) != ideep::rnn_kind::LSTM) {
     TORCH_CHECK(!cx_.defined(), "onednn_rnn: illegal defined cx for non-LSTM RNN");
   }
@@ -664,7 +667,7 @@ static std::tuple<Tensor, Tensor, Tensor> onednn_rnn(
   if (batch_first) {
     output = output.transpose(0, 1);
   }
-  return std::make_tuple(output, hy, cy);
+  return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

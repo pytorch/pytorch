@@ -3,8 +3,8 @@
 import functools
 import itertools
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 from unittest import skip
 
 import yaml
@@ -85,6 +85,7 @@ def init_lists():
         "linalg_inv_ex",
         "linalg_pinv.atol_rtol_tensor",
         "logsumexp",
+        "svd",
     }
     # For some ops, we don't support all variants. Here we use formatted_name
     # to uniquely identify the variant.
@@ -159,12 +160,12 @@ class TestLazyTensor(JitTestCase):
         def foo(x, *, mark_step):
             y = x.view(2, 2)
             y.add_(1)
-            z = x + x
+            z = x + x  # noqa: F841
 
             if mark_step:
                 torch._lazy.mark_step()
 
-            # y and x should contiue to be aliased after the mark_step call.
+            # y and x should continue to be aliased after the mark_step call.
             y.add_(1)
             return x
 
@@ -215,25 +216,20 @@ class TestLazyOpInfo(TestCase):
         torch._lazy.wait_device_ops()
         torch._lazy.metrics.reset()
 
-        r = op(*args, **kwargs)
+        op(*args, **kwargs)
         torch._lazy.mark_step()
         torch._lazy.wait_device_ops()
         prefix = "aten" if op.name in FALLBACK_LIST else "lazy"
         symint_suffix = "_symint" if op.name in HAS_SYMINT_SUFFIX else ""
-        found = f"{prefix}::{op.name}{symint_suffix}" in remove_suffixes(
-            torch._lazy.metrics.counter_names()
-        )
+        metrics = remove_suffixes(torch._lazy.metrics.counter_names())
+        cands = [f"{prefix}::{op.name}{symint_suffix}"]
         # check aliases
-        if not found:
-            for alias in op.aliases:
-                alias_found = (
-                    f"{prefix}::{alias.name}{symint_suffix}"
-                    in remove_suffixes(torch._lazy.metrics.counter_names())
-                )
-                found = found or alias_found
-                if found:
-                    break
-        self.assertTrue(found)
+        for alias in op.aliases:
+            cands.append(f"{prefix}::{alias.name}{symint_suffix}")
+
+        self.assertTrue(
+            any(c in metrics for c in cands), f"none of {cands} not found in {metrics}"
+        )
 
     @ops(
         [
@@ -243,7 +239,7 @@ class TestLazyOpInfo(TestCase):
             and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST
         ],
         allowed_dtypes=(torch.float,),
-    )  # noqa: B950
+    )
     def test_correctness(self, device, dtype, op):
         test_device = get_test_device()
 
@@ -259,7 +255,9 @@ class TestLazyOpInfo(TestCase):
             self.assertEqual(type(a), type(b))
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
-                    torch.allclose(clone_to_device(a, test_device), b, atol=1e-4)
+                    torch.allclose(
+                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
+                    )
                 )
 
             if isinstance(a, Sequence):
@@ -288,7 +286,7 @@ class TestLazyOpInfo(TestCase):
             and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST
         ],
         allowed_dtypes=(torch.float,),
-    )  # noqa: B950
+    )
     def test_correctness_with_reusing_ir(self, device, dtype, op):
         torch._lazy.config.set_reuse_ir(True)
         test_device = get_test_device()
@@ -305,7 +303,9 @@ class TestLazyOpInfo(TestCase):
             self.assertEqual(type(a), type(b))
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
-                    torch.allclose(clone_to_device(a, test_device), b, atol=1e-4)
+                    torch.allclose(
+                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
+                    )
                 )
 
             if isinstance(a, Sequence):

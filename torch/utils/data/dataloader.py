@@ -6,6 +6,9 @@ functions to be run in multiprocessing. E.g., the data loading worker loop is
 in `./_utils/worker.py`.
 """
 
+from __future__ import annotations
+
+import contextlib
 import functools
 import itertools
 import logging
@@ -14,7 +17,10 @@ import os
 import queue
 import threading
 import warnings
-from typing import Any, Callable, Generic, Iterable, List, Optional, TypeVar, Union
+import weakref
+from collections.abc import Callable
+from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
+from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
@@ -36,6 +42,9 @@ from torch.utils.data.sampler import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
 __all__ = [
     "DataLoader",
     "get_worker_info",
@@ -51,7 +60,7 @@ _worker_init_fn_t = Callable[[int], None]
 # Ideally we would parameterize `DataLoader` by the return type of `collate_fn`, but there is currently no way to have that
 # type parameter set to a default value if the user doesn't pass in a custom 'collate_fn'.
 # See https://github.com/python/mypy/issues/3737.
-_collate_fn_t = Callable[[List[_T]], Any]
+_collate_fn_t = Callable[[list[_T]], Any]
 
 
 # These functions used to be defined in this file. However, it was moved to
@@ -65,6 +74,12 @@ default_convert = _utils.collate.default_convert
 get_worker_info = _utils.worker.get_worker_info
 
 logger = logging.getLogger(__name__)
+
+_persistent_workers_atexit_lock = threading.Lock()
+_persistent_workers_atexit_registered = False
+_persistent_workers_atexit: weakref.WeakSet[_MultiProcessingDataLoaderIter] = (
+    weakref.WeakSet()
+)
 
 
 class _DatasetKind:
@@ -101,13 +116,17 @@ def _get_distributed_settings():
         return 1, 0
 
 
-def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
+def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id) -> None:
     global_worker_id = worker_id
     info = torch.utils.data.get_worker_info()
-    assert info is not None
+    if info is None:
+        raise AssertionError("Worker info is None in sharding worker init function")
     total_workers = info.num_workers
     datapipe = info.dataset
-    assert isinstance(datapipe, (IterDataPipe, MapDataPipe))
+    if not isinstance(datapipe, (IterDataPipe, MapDataPipe)):
+        raise AssertionError(
+            "datapipe must be an instance of IterDataPipe or MapDataPipe"
+        )
     # To distribute elements across distributed process evenly, we should shard data on distributed
     # processes first then shard on worker processes
     total_workers *= world_size
@@ -170,7 +189,9 @@ class DataLoader(Generic[_T_co]):
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
         multiprocessing_context (str or multiprocessing.context.BaseContext, optional): If
-            ``None``, the default `multiprocessing context`_ of your operating system will
+            ``None``, the default
+            `multiprocessing context <https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods>`_ # noqa: D401
+            of your operating system will
             be used. (default: ``None``)
         generator (torch.Generator, optional): If not ``None``, this RNG will be used
             by RandomSampler to generate random indexes and multiprocessing to generate
@@ -183,8 +204,8 @@ class DataLoader(Generic[_T_co]):
         persistent_workers (bool, optional): If ``True``, the data loader will not shut down
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
-        pin_memory_device (str, optional): the device to :attr:`pin_memory` to if ``pin_memory`` is
-            ``True``.
+        pin_memory_device (str, optional): Deprecated, the current :ref:`accelerator<accelerators>`
+            will be used as the device if ``pin_memory=True``.
         in_order (bool, optional): If ``False``, the data loader will not enforce that batches
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
 
@@ -217,44 +238,41 @@ class DataLoader(Generic[_T_co]):
 
     .. warning:: Setting `in_order` to `False` can harm reproducibility and may lead to a skewed data
                  distribution being fed to the trainer in cases with imbalanced data.
-
-    .. _multiprocessing context:
-        https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
     """
 
     dataset: Dataset[_T_co]
-    batch_size: Optional[int]
+    batch_size: int | None
     num_workers: int
     pin_memory: bool
     drop_last: bool
     timeout: float
-    sampler: Union[Sampler, Iterable]
+    sampler: Sampler | Iterable
     pin_memory_device: str
-    prefetch_factor: Optional[int]
-    _iterator: Optional["_BaseDataLoaderIter"]
+    prefetch_factor: int | None
+    _iterator: _BaseDataLoaderIter | None
     __initialized = False
 
     def __init__(
         self,
         dataset: Dataset[_T_co],
-        batch_size: Optional[int] = 1,
-        shuffle: Optional[bool] = None,
-        sampler: Union[Sampler, Iterable, None] = None,
-        batch_sampler: Union[Sampler[List], Iterable[List], None] = None,
+        batch_size: int | None = 1,
+        shuffle: bool | None = None,
+        sampler: Sampler | Iterable | None = None,
+        batch_sampler: Sampler[list] | Iterable[list] | None = None,
         num_workers: int = 0,
-        collate_fn: Optional[_collate_fn_t] = None,
+        collate_fn: _collate_fn_t | None = None,
         pin_memory: bool = False,
         drop_last: bool = False,
         timeout: float = 0,
-        worker_init_fn: Optional[_worker_init_fn_t] = None,
+        worker_init_fn: _worker_init_fn_t | None = None,
         multiprocessing_context=None,
         generator=None,
         *,
-        prefetch_factor: Optional[int] = None,
+        prefetch_factor: int | None = None,
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
-    ):
+    ) -> None:
         torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
@@ -313,9 +331,9 @@ class DataLoader(Generic[_T_co]):
             # finite `__len__` because in multi-process data loading, naive
             # settings will return duplicated data (which may be desired), and
             # thus using a sampler with length matching that of dataset will
-            # cause data lost (you may have duplicates of the first couple
+            # cause data loss (you may have duplicates of the first couple
             # batches, but never see anything afterwards). Therefore,
-            # `Iterabledataset` always uses an infinite sampler, an instance of
+            # `IterableDataset` always uses an infinite sampler, an instance of
             # `_InfiniteConstantSampler` defined above.
             #
             # A custom `batch_sampler` essentially only controls the batch size.
@@ -354,7 +372,7 @@ class DataLoader(Generic[_T_co]):
             self._dataset_kind = _DatasetKind.Map
 
         if sampler is not None and shuffle:
-            raise ValueError("sampler option is mutually exclusive with " "shuffle")
+            raise ValueError("sampler option is mutually exclusive with shuffle")
 
         if batch_sampler is not None:
             # auto_collation with custom batch_sampler
@@ -412,9 +430,7 @@ class DataLoader(Generic[_T_co]):
 
         self.check_worker_number_rationality()
 
-        torch.set_vital("Dataloader", "enabled", "True")  # type: ignore[attr-defined]
-
-    def _get_iterator(self) -> "_BaseDataLoaderIter":
+    def _get_iterator(self) -> _BaseDataLoaderIter:
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
         else:
@@ -426,7 +442,7 @@ class DataLoader(Generic[_T_co]):
         return self.__multiprocessing_context
 
     @multiprocessing_context.setter
-    def multiprocessing_context(self, multiprocessing_context):
+    def multiprocessing_context(self, multiprocessing_context) -> None:
         if multiprocessing_context is not None:
             if self.num_workers > 0:
                 if isinstance(multiprocessing_context, str):
@@ -458,7 +474,7 @@ class DataLoader(Generic[_T_co]):
 
         self.__multiprocessing_context = multiprocessing_context
 
-    def __setattr__(self, attr, val):
+    def __setattr__(self, attr, val) -> None:
         if self.__initialized and attr in (
             "batch_size",
             "batch_sampler",
@@ -473,11 +489,9 @@ class DataLoader(Generic[_T_co]):
 
         super().__setattr__(attr, val)
 
-    # We quote '_BaseDataLoaderIter' since it isn't defined yet and the definition can't be moved up
-    # since '_BaseDataLoaderIter' references 'DataLoader'.
-    def __iter__(self) -> "_BaseDataLoaderIter":
+    def __iter__(self) -> _BaseDataLoaderIter:
         # When using a single worker the returned iterator should be
-        # created everytime to avoid resetting its state
+        # created every time to avoid resetting its state
         # However, in the case of a multiple workers iterator
         # the iterator is only created once in the lifetime of the
         # DataLoader object so that workers can be reused
@@ -538,7 +552,7 @@ class DataLoader(Generic[_T_co]):
         else:
             return len(self._index_sampler)
 
-    def check_worker_number_rationality(self):
+    def check_worker_number_rationality(self) -> None:
         # This function check whether the dataloader's worker number is rational based on
         # current system's resource. Current rule is that if the number of workers this
         # Dataloader will create is bigger than the number of logical cpus that is allowed to
@@ -553,10 +567,10 @@ class DataLoader(Generic[_T_co]):
         #     necessary.
         #
         #
-        # [Note] Please note that this function repects `cpuset` only when os.sched_getaffinity is
+        # [Note] Please note that this function respects `cpuset` only when os.sched_getaffinity is
         #        available (available in most of Linux system, but not OSX and Windows).
         #        When os.sched_getaffinity is not available, os.cpu_count() is called instead, but
-        #        it doesn't repect cpuset.
+        #        it doesn't respect cpuset.
         #        We don't take threading into account since each worker process is single threaded
         #        at this time.
         #
@@ -597,34 +611,15 @@ class DataLoader(Generic[_T_co]):
             return
 
         # try to compute a suggested max number of worker based on system's resource
-        max_num_worker_suggest = None
-        cpuset_checked = False
-        if hasattr(os, "sched_getaffinity"):
-            try:
-                max_num_worker_suggest = len(os.sched_getaffinity(0))
-                cpuset_checked = True
-            except Exception:
-                pass
-        if max_num_worker_suggest is None:
-            # os.cpu_count() could return Optional[int]
-            # get cpu count first and check None in order to satisfy mypy check
-            cpu_count = os.cpu_count()
-            if cpu_count is not None:
-                max_num_worker_suggest = cpu_count
+        max_num_worker_suggest = torch._utils.cpu_count()
+        cpuset_checked = hasattr(os, "sched_getaffinity")
 
-        if max_num_worker_suggest is None:
+        if max_num_worker_suggest is None or self.num_workers > max_num_worker_suggest:
             warnings.warn(
                 _create_warning_msg(
                     max_num_worker_suggest, self.num_workers, cpuset_checked
-                )
-            )
-            return
-
-        if self.num_workers > max_num_worker_suggest:
-            warnings.warn(
-                _create_warning_msg(
-                    max_num_worker_suggest, self.num_workers, cpuset_checked
-                )
+                ),
+                stacklevel=2,
             )
 
 
@@ -651,22 +646,44 @@ class _BaseDataLoaderIter:
         ws, rank = _get_distributed_settings()
         self._world_size = ws
         self._rank = rank
-        # for other backends, pin_memory_device need to set. if not set
-        # default behaviour is CUDA device. if pin_memory_device is selected
-        # and pin_memory is not set, the default behaviour false.
-        if len(loader.pin_memory_device) == 0:
-            self._pin_memory = loader.pin_memory and torch.cuda.is_available()
-            self._pin_memory_device = None
-        else:
-            if not loader.pin_memory:
-                warn_msg = (
-                    "pin memory device is set and pin_memory flag is not used then device pinned memory won't be used"
-                    "please set pin_memory to true, if you need to use the device pin memory"
-                )
-                warnings.warn(warn_msg)
 
-            self._pin_memory = loader.pin_memory
-            self._pin_memory_device = loader.pin_memory_device
+        if loader.pin_memory and loader.pin_memory_device:
+            warnings.warn(
+                "pin_memory_device is deprecated, the current accelerator will be used as the device,"
+                f"ignore pin_memory_device='{loader.pin_memory_device}'.",
+                stacklevel=2,
+            )
+        if loader.pin_memory and not torch.accelerator.is_available():
+            warn_msg = (
+                "'pin_memory' argument is set as true but no accelerator is found, "
+                "then device pinned memory won't be used."
+            )
+            warnings.warn(warn_msg, stacklevel=2)
+
+        # Enabling pin_memory in _BaseDataLoaderIter to support identical
+        # behavior in forked implementations using _BaseDataLoaderIter.
+        self._pin_memory = loader.pin_memory and torch.accelerator.is_available()
+
+        # Set pin memory device based on the current accelerator.
+        self._pin_memory_device = (
+            acc.type
+            if self._pin_memory
+            and (acc := torch.accelerator.current_accelerator()) is not None
+            else None
+        )
+
+        # Currently, pin_memory would raise error on the MPS backend (see
+        # https://github.com/pytorch/pytorch/issues/86060), so forcibly
+        # disable pin_memory on MPS. Remove this restriction once pinned
+        # memory allocation for MPS is fixed.
+        if self._pin_memory_device == "mps":
+            self._pin_memory = False
+            warn_msg = (
+                "'pin_memory' argument is set as true but not supported on MPS now, "
+                "device pinned memory won't be used."
+            )
+            warnings.warn(warn_msg, stacklevel=2)
+
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
@@ -679,10 +696,10 @@ class _BaseDataLoaderIter:
         self._num_yielded = 0
         self._profile_name = f"enumerate(DataLoader)#{self.__class__.__name__}.__next__"
 
-    def __iter__(self) -> "_BaseDataLoaderIter":
+    def __iter__(self) -> Self:
         return self
 
-    def _reset(self, loader, first_iter=False):
+    def _reset(self, loader, first_iter=False) -> None:
         self._sampler_iter = iter(self._index_sampler)
         self._num_yielded = 0
         self._IterableDataset_len_called = loader._IterableDataset_len_called
@@ -697,7 +714,7 @@ class _BaseDataLoaderIter:
     def _next_index(self):
         return next(self._sampler_iter)  # may raise StopIteration
 
-    def _next_data(self):
+    def _next_data(self) -> NoReturn:
         raise NotImplementedError
 
     def __next__(self) -> Any:
@@ -722,7 +739,7 @@ class _BaseDataLoaderIter:
                         "IterableDataset replica at each worker. Please see "
                         "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples."
                     )
-                warnings.warn(warn_msg)
+                warnings.warn(warn_msg, stacklevel=2)
             return data
 
     def __len__(self) -> int:
@@ -738,10 +755,14 @@ class _BaseDataLoaderIter:
 
 
 class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
-    def __init__(self, loader):
+    def __init__(self, loader) -> None:
         super().__init__(loader)
-        assert self._timeout == 0
-        assert self._num_workers == 0
+        if self._timeout != 0:
+            raise AssertionError("_SingleProcessDataLoaderIter requires timeout == 0")
+        if self._num_workers != 0:
+            raise AssertionError(
+                "_SingleProcessDataLoaderIter requires num_workers == 0"
+            )
 
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
         #   Taking care of distributed sharding
@@ -860,7 +881,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #        2. A similar issue araises when a `DataLoader` is used in a subprocess.
     #           When a process ends, it shuts the all its daemonic children
     #           down with a SIGTERM (instead of joining them without a timeout).
-    #           Simiarly for threads, but by a different mechanism. This fact,
+    #           Similarly for threads, but by a different mechanism. This fact,
     #           together with a few implementation details of multiprocessing, forces
     #           us to make workers daemonic. All of our problems arise when a
     #           DataLoader is used in a subprocess, and are caused by multiprocessing
@@ -991,7 +1012,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #   `cancel_join_thread` on that queue if its `IterableDataset` iterator
     #   happens to exhaust coincidentally, which is out of the control of the
     #   main process). Thus, since we will exit `pin_memory_thread` before the
-    #   workers (see below), two separete events are used.
+    #   workers (see below), two separate events are used.
     #
     # NOTE: In short, the protocol is that the main process will set these
     #       `done_event`s and then the corresponding processes/threads a `None`,
@@ -1077,14 +1098,20 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #     processing indices already in `index_queue` if we are already shutting
     #     down.
 
-    def __init__(self, loader):
+    def __init__(self, loader) -> None:
         super().__init__(loader)
 
         self._prefetch_factor = loader.prefetch_factor
         self._in_order = loader.in_order
 
-        assert self._num_workers > 0
-        assert self._prefetch_factor > 0
+        if self._num_workers <= 0:
+            raise AssertionError(
+                "num_workers must be greater than 0 for MultiProcessingDataLoaderIter"
+            )
+        if self._prefetch_factor <= 0:
+            raise AssertionError(
+                "prefetch_factor must be greater than 0 for MultiProcessingDataLoaderIter"
+            )
 
         if loader.multiprocessing_context is None:
             multiprocessing_context = torch.multiprocessing
@@ -1143,7 +1170,20 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             #     it started, so that we do not call .join() if program dies
             #     before it starts, and __del__ tries to join but will get:
             #     AssertionError: can only join a started process.
-            w.start()
+            from pickle import PicklingError
+
+            try:
+                w.start()
+            except (TypeError, AttributeError, PicklingError):
+                warnings.warn(
+                    "Got pickle error when attempting to start a worker Process. "
+                    "This might be because the worker Process arguments are not picklable. "
+                    "Python 3.14+ changed the multiprocessing start method in non-Mac POSIX platforms "
+                    "to 'forkserver', which requires the worker Process arguments to be picklable. "
+                    "You can also try multiprocessing.set_start_method('fork').",
+                    stacklevel=2,
+                )
+                raise
             self._index_queues.append(index_queue)
             self._workers.append(w)
 
@@ -1152,21 +1192,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             # Queue is not type-annotated
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
-            if self._pin_memory_device == "xpu":
-                current_device = torch.xpu.current_device()  # type: ignore[attr-defined]
-            elif self._pin_memory_device == torch._C._get_privateuse1_backend_name():
-                custom_device_mod = getattr(
-                    torch, torch._C._get_privateuse1_backend_name()
-                )
-                current_device = custom_device_mod.current_device()
-            else:
-                current_device = torch.cuda.current_device()  # choose cuda for default
+            current_device_id = torch.accelerator.current_device_index()
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(
                     self._worker_result_queue,
                     self._data_queue,
-                    current_device,
+                    current_device_id,
                     self._pin_memory_thread_done_event,
                     self._pin_memory_device,
                 ),
@@ -1187,18 +1219,18 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # atexit is used to shutdown thread and child processes in the
         # right sequence before main process exits
         if self._persistent_workers and self._pin_memory:
-            import atexit
-
-            for w in self._workers:
-                atexit.register(_MultiProcessingDataLoaderIter._clean_up_worker, w)
+            self._register_persistent_workers_atexit()
 
         # .pid can be None only before process is spawned (not the case, so ignore)
-        _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self._workers))  # type: ignore[misc]
+        _utils.signal_handling._set_worker_pids(
+            id(self),
+            tuple(w.pid for w in self._workers),  # type: ignore[misc]
+        )
         _utils.signal_handling._set_SIGCHLD_handler()
         self._worker_pids_set = True
         self._reset(loader, first_iter=True)
 
-    def _reset(self, loader, first_iter=False):
+    def _reset(self, loader, first_iter=False) -> None:
         super()._reset(loader, first_iter)
         self._send_idx = 0  # idx of the next task to be sent to workers
         self._rcvd_idx = 0  # idx of the next task to be returned in __next__
@@ -1217,6 +1249,11 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # It does not mean that a worker is dead. In case of `_persistent_workers`,
         # the worker will be reset to available in the next epoch.
         self._workers_status = [True for i in range(self._num_workers)]
+        # A list of integers representing how many tasks are outstanding for each worker
+        # Incremented when a task is dispatched to the worker
+        # Decremented when that data has been given to the main thread
+        # Each worker should have at most self._prefetch_factor tasks outstanding
+        self._workers_num_tasks = [0 for i in range(self._num_workers)]
         # Reset the worker queue cycle so it resumes next epoch at worker 0
         self._worker_queue_idx_cycle = itertools.cycle(range(self._num_workers))
         # We resume the prefetching in case it was enabled
@@ -1229,7 +1266,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             while resume_iteration_cnt > 0:
                 return_idx, return_data = self._get_data()
                 if isinstance(return_idx, _utils.worker._ResumeIteration):
-                    assert return_data is None
+                    if return_data is not None:
+                        raise AssertionError(
+                            "Expected return_data to be None when resuming iteration"
+                        )
                     resume_iteration_cnt -= 1
         # prime the prefetch loop
         for _ in range(self._prefetch_factor * self._num_workers):
@@ -1276,7 +1316,11 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 # test.
                 # See NOTE [ DataLoader on Linux and open files limit ]
                 fds_limit_margin = 10
-                [tempfile.NamedTemporaryFile() for i in range(fds_limit_margin)]
+                with contextlib.ExitStack() as stack:
+                    for _ in range(fds_limit_margin):
+                        stack.enter_context(
+                            tempfile.NamedTemporaryFile()  # pyrefly: ignore [bad-argument-type]
+                        )
             except OSError as e:
                 if e.errno == errno.EMFILE:
                     raise RuntimeError(
@@ -1450,11 +1494,14 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             # Check if the next sample has already been generated
             if len(self._task_info[self._rcvd_idx]) == 2:
-                data = self._task_info.pop(self._rcvd_idx)[1]
+                worker_id, data = self._task_info.pop(self._rcvd_idx)
                 self._rcvd_idx += 1
-                return self._process_data(data)
+                return self._process_data(data, worker_id)
 
-            assert not self._shutdown and self._tasks_outstanding > 0
+            if self._shutdown or self._tasks_outstanding <= 0:
+                raise AssertionError(
+                    "Invalid iterator state: shutdown or no outstanding tasks when fetching next data"
+                )
             idx, data = self._get_data()
             self._tasks_outstanding -= 1
             if self._dataset_kind == _DatasetKind.Iterable:
@@ -1470,17 +1517,23 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             if idx != self._rcvd_idx:
                 if not self._in_order:
                     # don't store it for later, process now
-                    del self._task_info[idx]
-                    return self._process_data(data)
+                    # delete from self._task_info immediately
+                    # this keeps the object size manageable
+                    worker_id = self._task_info.pop(idx)[0]
+                    return self._process_data(data, worker_id)
                 # store out-of-order samples
                 self._task_info[idx] += (data,)
             else:
-                del self._task_info[idx]
+                worker_id = self._task_info.pop(idx)[0]
                 self._rcvd_idx += 1
-                return self._process_data(data)
+                return self._process_data(data, worker_id)
 
-    def _try_put_index(self):
-        assert self._tasks_outstanding < self._prefetch_factor * self._num_workers
+    def _try_put_index(self) -> None:
+        max_tasks = self._prefetch_factor * self._num_workers
+        if self._tasks_outstanding >= max_tasks:
+            raise AssertionError(
+                "Number of outstanding tasks exceeded maximum allowed tasks"
+            )
 
         try:
             index = self._next_index()
@@ -1489,30 +1542,44 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         for _ in range(self._num_workers):  # find the next active worker, if any
             worker_queue_idx = next(self._worker_queue_idx_cycle)
             if self._workers_status[worker_queue_idx]:
-                break
+                if self._in_order:
+                    break
+                elif self._workers_num_tasks[worker_queue_idx] < max_tasks // sum(
+                    self._workers_status
+                ):
+                    # when self._in_order is False, distribute work to a worker if it has capacity
+                    # _workers_status is updated only in this thread, so the sum is guaranteed > 0
+                    break
         else:
             # not found (i.e., didn't break)
             return
 
         self._index_queues[worker_queue_idx].put((self._send_idx, index))  # type: ignore[possibly-undefined]
         self._task_info[self._send_idx] = (worker_queue_idx,)
+        self._workers_num_tasks[worker_queue_idx] += 1
         self._tasks_outstanding += 1
         self._send_idx += 1
 
-    def _process_data(self, data):
+    def _process_data(self, data, worker_idx):
+        self._workers_num_tasks[worker_idx] -= 1
         self._try_put_index()
         if isinstance(data, ExceptionWrapper):
             data.reraise()
         return data
 
-    def _mark_worker_as_unavailable(self, worker_id, shutdown=False):
+    def _mark_worker_as_unavailable(self, worker_id, shutdown=False) -> None:
         # Mark a worker as having finished its work e.g., due to
         # exhausting an `IterableDataset`. This should be used only when this
         # `_MultiProcessingDataLoaderIter` is going to continue running.
 
-        assert self._workers_status[worker_id] or (
-            self._persistent_workers and shutdown
-        )
+        if (
+            not self._workers_status[worker_id]
+            and not self._persistent_workers
+            and not shutdown
+        ):
+            raise AssertionError(
+                "Worker status inconsistent when marking worker as unavailable"
+            )
 
         # Signal termination to that specific worker.
         q = self._index_queues[worker_id]
@@ -1525,21 +1592,26 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # (2) since we don't join, the worker may still raise error, and we
         # prefer capturing those, rather than ignoring them, even though they
         # are raised after the worker has finished its job.
-        # Joinning is deferred to `_shutdown_workers`, which it is called when
+        # Joining is deferred to `_shutdown_workers`, which it is called when
         # all workers finish their jobs (e.g., `IterableDataset` replicas) or
         # when this iterator is garbage collected.
 
         self._workers_status[worker_id] = False
 
-        assert self._workers_done_event.is_set() == shutdown
+        if self._workers_done_event.is_set() != shutdown:
+            raise AssertionError(
+                "_workers_done_event state does not match shutdown flag"
+            )
 
-    def _shutdown_workers(self):
+    def _shutdown_workers(self) -> None:
         # Called when shutting down this `_MultiProcessingDataLoaderIter`.
         # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on
         # the logic of this function.
         if (
             _utils is None
+            # pyrefly: ignore [unnecessary-comparison]
             or _utils.python_exit_status is True
+            # pyrefly: ignore [unnecessary-comparison]
             or _utils.python_exit_status is None
         ):
             # See (2) of the note. If Python is shutting down, do no-op.
@@ -1604,15 +1676,29 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
                         # we kill the worker.
                         w.terminate()
+                        w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
 
-    # staticmethod is used to remove reference to `_MultiProcessingDataLoaderIter`
     @staticmethod
-    def _clean_up_worker(w):
-        try:
-            w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-        finally:
-            if w.is_alive():
-                w.terminate()
+    def _clean_up_persistent_workers_atexit() -> None:
+        # This callback is registered after `_utils._set_python_exit_flag`,
+        # so it runs while `_shutdown_workers()` can still use multiprocessing.
+        with _persistent_workers_atexit_lock:
+            iterators = tuple(_persistent_workers_atexit)
+        for iterator in iterators:
+            iterator._shutdown_workers()
 
-    def __del__(self):
+    def _register_persistent_workers_atexit(self) -> None:
+        import atexit
+
+        global _persistent_workers_atexit_registered
+        with _persistent_workers_atexit_lock:
+            _persistent_workers_atexit.add(self)
+            if _persistent_workers_atexit_registered:
+                return
+            atexit.register(
+                _MultiProcessingDataLoaderIter._clean_up_persistent_workers_atexit
+            )
+            _persistent_workers_atexit_registered = True
+
+    def __del__(self) -> None:
         self._shutdown_workers()

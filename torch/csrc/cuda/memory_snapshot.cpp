@@ -1,6 +1,7 @@
 #include <ATen/Context.h>
 #include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -12,9 +13,41 @@ using c10::Dict;
 using c10::IValue;
 using torch::jit::Pickler;
 
-using c10::cuda::CUDACachingAllocator::SegmentInfo;
+using c10::CachingDeviceAllocator::SegmentInfo;
 
 namespace {
+
+class CallbackManager {
+ public:
+  // Constructor
+  CallbackManager() = default;
+  // Destructor
+  ~CallbackManager() = default;
+  // Methods to get and set the callback handles
+  at::CallbackHandle getAnnotationHandle() const {
+    return annotationHandle_;
+  }
+  void setAnnotationHandle(at::CallbackHandle handle) {
+    annotationHandle_ = handle;
+  }
+  at::CallbackHandle getCompileContextHandle() const {
+    return compileContextHandle_;
+  }
+  void setCompileContextHandle(at::CallbackHandle handle) {
+    compileContextHandle_ = handle;
+  }
+  std::unique_lock<std::mutex> lockCallbackMutex() const {
+    return std::unique_lock<std::mutex>(callbackMutex_);
+  }
+
+ private:
+  mutable std::mutex callbackMutex_;
+  at::CallbackHandle annotationHandle_{0};
+  at::CallbackHandle compileContextHandle_{0};
+};
+
+CallbackManager callbackManager;
+
 std::string write_pickle(const IValue& v) {
   std::vector<char> result;
   {
@@ -87,34 +120,71 @@ std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
   return CapturedTraceback::gather(true, true, true);
 }
 
-CapturedTraceback* getFromContext(
-    const std::shared_ptr<c10::GatheredContext>& x) {
-  if (CapturedTraceback* sc = dynamic_cast<CapturedTraceback*>(x.get())) {
-    return sc;
-  }
-  TORCH_CHECK(
-      false,
-      "attempting to gather stack context from the wrong StackContext type.");
+#define ADD_CALLBACK(callbackType) at::add##callbackType##Callback
+at::CallbackHandle _initRecordAnnotations(bool useGlobalCallback) {
+  auto addCallback =
+      useGlobalCallback ? ADD_CALLBACK(Global) : ADD_CALLBACK(ThreadLocal);
+  return addCallback(
+      at::RecordFunctionCallback(
+          [](const at::RecordFunction& fn)
+              -> std::unique_ptr<at::ObserverContext> {
+            c10::cuda::CUDACachingAllocator::recordAnnotation(
+                {{"name", fn.name()}, {"stage", "START"}});
+            return nullptr;
+          },
+          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+            c10::cuda::CUDACachingAllocator::recordAnnotation(
+                {{"name", fn.name()}, {"stage", "END"}});
+          })
+          .scopes({at::RecordScope::USER_SCOPE}));
 }
 
-void _initRecordAnnotations() {
-  static c10::once_flag ra_init;
-  c10::call_once(ra_init, [&] {
-    // Save user annotations to CCA memory snapshot tool
-    at::addThreadLocalCallback(
-        at::RecordFunctionCallback(
-            [](const at::RecordFunction& fn)
-                -> std::unique_ptr<at::ObserverContext> {
-              c10::cuda::CUDACachingAllocator::recordAnnotation(
-                  {{"name", fn.name()}, {"stage", "START"}});
-              return nullptr;
-            },
-            [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
-              c10::cuda::CUDACachingAllocator::recordAnnotation(
-                  {{"name", fn.name()}, {"stage", "END"}});
-            })
-            .scopes({at::RecordScope::USER_SCOPE}));
-  });
+at::CallbackHandle _initCompileContexts() {
+  return at::addGlobalCallback(
+      at::RecordFunctionCallback(
+          [](const at::RecordFunction& fn)
+              -> std::unique_ptr<at::ObserverContext> {
+            std::string functionName = fn.name();
+            const std::string functionNamePrefix = "Torch-Compiled Region";
+            if (functionName.starts_with(functionNamePrefix)) {
+              c10::cuda::CUDACachingAllocator::pushCompileContext(functionName);
+            }
+            return nullptr;
+          },
+          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+            std::string functionName = fn.name();
+            const std::string functionNamePrefix = "Torch-Compiled Region";
+            if (functionName.starts_with(functionNamePrefix)) {
+              c10::cuda::CUDACachingAllocator::popCompileContext();
+            }
+          })
+          .scopes({at::RecordScope::FUNCTION}));
+}
+
+void setRecordFunctionCallbacks(
+    bool enabled,
+    bool compileContext,
+    bool globalRecordAnnotations) {
+  // Handle Callbacks under mutex
+  auto lock = callbackManager.lockCallbackMutex();
+  if (enabled) {
+    if (callbackManager.getAnnotationHandle() == 0) {
+      callbackManager.setAnnotationHandle(
+          _initRecordAnnotations(globalRecordAnnotations));
+    }
+    if (compileContext && callbackManager.getCompileContextHandle() == 0) {
+      callbackManager.setCompileContextHandle(_initCompileContexts());
+    }
+  } else {
+    if (callbackManager.getAnnotationHandle() != 0) {
+      at::removeCallback(callbackManager.getAnnotationHandle());
+      callbackManager.setAnnotationHandle(0);
+    }
+    if (callbackManager.getCompileContextHandle() != 0) {
+      at::removeCallback(callbackManager.getCompileContextHandle());
+      callbackManager.setCompileContextHandle(0);
+    }
+  }
 }
 
 } // namespace
@@ -124,24 +194,34 @@ void _record_memory_history(
     bool record_context,
     int64_t trace_alloc_max_entries,
     bool trace_alloc_record_context,
-    bool record_cpp_context) {
-  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
+    bool record_cpp_context,
+    bool clearHistory,
+    bool compileContext,
+    bool globalRecordAnnotations,
+    const std::vector<std::string>& skip_actions) {
+  c10::CachingDeviceAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
   }
-  auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
+  auto when = c10::CachingDeviceAllocator::RecordContext::NEVER;
   if (trace_alloc_record_context) {
-    when = c10::cuda::CUDACachingAllocator::RecordContext::ALLOC;
+    when = c10::CachingDeviceAllocator::RecordContext::ALLOC;
   } else if (record_context) {
-    when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
+    when = c10::CachingDeviceAllocator::RecordContext::STATE;
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-  _initRecordAnnotations();
+
+  setRecordFunctionCallbacks(enabled, compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled, recorder, trace_alloc_max_entries, when);
+      enabled,
+      recorder,
+      trace_alloc_max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 static void checkOptionIn(
@@ -156,7 +236,11 @@ void _record_memory_history(
     std::optional<std::string> enabled,
     std::optional<std::string> context,
     const std::string& stacks,
-    size_t max_entries) {
+    size_t max_entries,
+    bool clearHistory,
+    bool compileContext,
+    bool globalRecordAnnotations,
+    const std::vector<std::string>& skip_actions) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -172,27 +256,33 @@ void _record_memory_history(
   checkOptionIn(
       stacks, {"python", "all"}, "expected stacks to be 'python', or 'all'");
 
-  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
+  c10::CachingDeviceAllocator::CreateContextFn recorder = gather;
   if (enabled && context && stacks == "all") {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
   }
   max_entries = (enabled && *enabled == "all") ? max_entries : 1;
-  auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
+  auto when = c10::CachingDeviceAllocator::RecordContext::NEVER;
   if (context) {
     if (context == "all") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::ALL;
+      when = c10::CachingDeviceAllocator::RecordContext::ALL;
     } else if (context == "alloc") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::ALLOC;
+      when = c10::CachingDeviceAllocator::RecordContext::ALLOC;
     } else if (context == "state") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
+      when = c10::CachingDeviceAllocator::RecordContext::STATE;
     }
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-  _initRecordAnnotations();
+  setRecordFunctionCallbacks(
+      enabled.has_value(), compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled.has_value(), recorder, max_entries, when);
+      enabled.has_value(),
+      recorder,
+      max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 std::string _memory_snapshot_pickled() {
@@ -217,9 +307,13 @@ std::string _memory_snapshot_pickled() {
   IValue name_s = "name";
   IValue line_s = "line";
   IValue frames_s = "frames";
+  IValue forward_frames_s = "forward_frames";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
   IValue time_us_s = "time_us";
+  IValue compile_contexts_s = "compile_context";
+  IValue user_metadata_s = "user_metadata";
+  IValue pool_id_s = "pool_id";
 
   auto empty_frames = new_list();
 
@@ -229,7 +323,7 @@ std::string _memory_snapshot_pickled() {
   auto add_frame_key = [&](const c10::Dict<IValue, IValue>& d,
                            const std::shared_ptr<c10::GatheredContext>& ctx) {
     if (ctx) {
-      frame_tracebacks.push_back(getFromContext(ctx));
+      frame_tracebacks.push_back(getCapturedTracebackFromContext(ctx));
       frame_dict.push_back(d);
     } else {
       d.insert(frames_s, empty_frames);
@@ -323,7 +417,7 @@ std::string _memory_snapshot_pickled() {
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
     }
-    throw std::runtime_error("unreachable");
+    TORCH_CHECK(false, "unreachable");
   };
 
   for (const auto& traceInfo : snapshot.device_traces) {
@@ -336,12 +430,15 @@ std::string _memory_snapshot_pickled() {
           static_cast<int64_t>(te.addr_));
       trace_entry.insert(size_s, (int64_t)te.size_);
       trace_entry.insert(stream_s, int64_t(te.stream_));
+      trace_entry.insert(compile_contexts_s, te.compile_context_);
+      trace_entry.insert(user_metadata_s, te.user_metadata_);
       if (te.context_) {
-        auto sc = getFromContext(te.context_);
+        auto sc = getCapturedTracebackFromContext(te.context_);
         frame_tracebacks.push_back(sc);
         frame_dict.push_back(trace_entry);
       }
       trace_entry.insert(time_us_s, te.time_.t_);
+      trace_entry.insert(pool_id_s, std::tuple<int64_t, int64_t>(te.mempool_));
       trace.push_back(trace_entry);
     }
     traces.push_back(trace);
@@ -367,6 +464,10 @@ std::string _memory_snapshot_pickled() {
   IValue release_lock_on_malloc_s = "release_lock_on_cudamalloc";
   IValue pinned_use_host_register_s = "pinned_use_cuda_host_register";
   IValue roundup_power2_divisions_s = "roundup_power2_divisions";
+  IValue graph_capture_record_stream_reuse_s =
+      "graph_capture_record_stream_reuse";
+  IValue max_round_threshold_s = "max_round_threshold";
+  IValue max_cached_size_s = "max_cached_size";
 
   allocator_settings.insert(
       last_allocator_settings_s,
@@ -387,6 +488,14 @@ std::string _memory_snapshot_pickled() {
   allocator_settings.insert(
       pinned_use_host_register_s,
       snapshot.config_metadata.pinned_use_host_register);
+  allocator_settings.insert(
+      graph_capture_record_stream_reuse_s,
+      snapshot.config_metadata.graph_capture_record_stream_reuse);
+  allocator_settings.insert(
+      max_round_threshold_s,
+      int64_t(snapshot.config_metadata.max_round_threshold));
+  allocator_settings.insert(
+      max_cached_size_s, int64_t(snapshot.config_metadata.max_cached_size));
   unsigned int roundup_key = 1;
   auto roundup_settings = new_dict();
   for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {
@@ -405,6 +514,17 @@ std::string _memory_snapshot_pickled() {
   auto frames = ivalue_symbolize(frame_tracebacks);
   for (auto i : c10::irange(frames.size())) {
     frame_dict.at(i).insert(frames_s, frames.at(i));
+
+    // Add forward frames if available
+    auto* tb = frame_tracebacks.at(i);
+    const auto& forward_tb = tb->forward_traceback();
+    if (forward_tb.has_value() && !forward_tb->empty()) {
+      auto forward_list = new_list();
+      for (const auto& frame_str : *forward_tb) {
+        forward_list.push_back(IValue(frame_str));
+      }
+      frame_dict.at(i).insert(forward_frames_s, forward_list);
+    }
   }
 
   return write_pickle(result);

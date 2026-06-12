@@ -130,7 +130,7 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
     return modules_.is_empty();
   }
 
-  /// Check if the centain parameter with the key in the `ModuleDict`.
+  /// Check if the certain parameter with the key in the `ModuleDict`.
   bool contains(const std::string& key) const noexcept {
     return modules_.contains(key);
   }

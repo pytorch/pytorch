@@ -15,9 +15,11 @@ import functools
 import inspect
 import os
 import re
+import sys
 import warnings
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -70,7 +72,7 @@ def _unique_state_dict(module, keep_vars=False):
     # as values, and deduplicate the params using Parameters and Buffers
     state_dict = module.state_dict(keep_vars=True)
     filtered_dict = type(state_dict)()
-    seen_ids: Set[int] = set()
+    seen_ids: set[int] = set()
     for k, v in state_dict.items():
         if id(v) in seen_ids:
             continue
@@ -112,7 +114,7 @@ class ONNXTracedModule(torch.nn.Module):
         outs = []
 
         def wrapper(*args):
-            in_args: List[torch.Tensor] = []
+            in_args: list[torch.Tensor] = []
             for i in range(len(in_vars)):
                 if not isinstance(args[i], torch.Tensor):
                     raise RuntimeError("Expected Tensor argument")
@@ -168,6 +170,7 @@ def _clone_inputs(args):
         else:
             return a.clone(memory_format=torch.preserve_format)
 
+    # pyrefly: ignore [missing-attribute]
     return function._nested_map(
         lambda x: isinstance(x, torch.Tensor), clone_input, condition_msg="tensors"
     )(args)
@@ -276,7 +279,8 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
 
     with torch.random.fork_rng(devices, _caller="torch.jit.verify"):
         uncompiled_outs, uncompiled_grads = run_fwd_bwd(args, force_trace=True)
-        assert model.has_trace_for(*args)
+        if not model.has_trace_for(*args):
+            raise AssertionError("Model should have trace for the given args")
 
     if is_module:
         model.load_state_dict(saved_state)  # type: ignore[possibly-undefined]
@@ -334,6 +338,7 @@ def _check_trace(
 
         if is_trace_module:
             copied_dict = {}
+
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
             check_mod = torch.jit.trace_module(
@@ -496,7 +501,7 @@ def _check_trace(
             if len(nondeterm_ops) > 0:
                 nondeterministic_ops_warning = "Trace had nondeterministic nodes. "
                 nondeterministic_ops_warning += (
-                    "Did you forget call .eval() on your model? Nodes:\n"
+                    "Did you forget to call .eval() on your model? Nodes:\n"
                 )
                 nondeterministic_ops_warning += "\n".join(
                     [indent(str(op)) for op in nondeterm_ops][:20]
@@ -541,9 +546,14 @@ def _check_trace(
                         elif getattr(orig, "is_nested", None) or getattr(
                             ref, "is_nested", None
                         ):
-                            assert getattr(orig, "is_nested", None) == getattr(
+                            if getattr(orig, "is_nested", None) != getattr(
                                 ref, "is_nested", None
-                            )
+                            ):
+                                raise AssertionError(
+                                    f"Nested tensor mismatch: orig.is_nested="
+                                    f"{getattr(orig, 'is_nested', None)}, "
+                                    f"ref.is_nested={getattr(ref, 'is_nested', None)}"
+                                )
                             for t_orig, t_ref in zip(orig.unbind(), ref.unbind()):
                                 torch.testing.assert_close(
                                     t_orig.double(),
@@ -648,7 +658,7 @@ def analyze_ts_result_with_export_result(export, trace):
         # onednn is not supported for torch.allclose
         if orig.layout == torch._mkldnn:  # type: ignore[attr-defined]
             return True
-        if type(orig) != type(loaded):
+        if type(orig) is not type(loaded):
             return False
 
         if isinstance(orig, torch._subclasses.FakeTensor):
@@ -683,7 +693,8 @@ def _trace_impl(
         # it is hard to trace it because the forward method on ScriptModule is already defined, so it
         # would result in an error.
         warnings.warn(
-            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is."
+            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.",
+            stacklevel=2,
         )
         return func
 
@@ -738,6 +749,7 @@ def _trace_impl(
         example_inputs = (example_inputs,)
     # done primarily so that weird iterables fail here and not pybind11 code
     elif example_kwarg_inputs is None and not isinstance(example_inputs, tuple):
+        # pyrefly: ignore [bad-argument-type]
         example_inputs = tuple(example_inputs)
 
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
@@ -764,6 +776,7 @@ def _trace_impl(
         traced = torch._C._create_function_from_trace(
             name,
             func,
+            # pyrefly: ignore [bad-argument-type]
             example_inputs,
             var_lookup_fn,
             strict,
@@ -960,6 +973,7 @@ def trace(
         import torch
         import torch.nn as nn
 
+
         class Net(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -967,6 +981,7 @@ def trace(
 
             def forward(self, x):
                 return self.conv(x)
+
 
         n = Net()
         example_weight = torch.rand(1, 1, 3, 3)
@@ -981,6 +996,17 @@ def trace(
         module = torch.jit.trace(n, example_forward_input)
 
     """
+    if sys.version_info >= (3, 14):
+        warnings.warn(
+            "`torch.jit.trace` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
+    else:
+        warnings.warn(
+            "`torch.jit.trace` is deprecated. Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
     if not _enabled:
         return func
     if optimize is not None:
@@ -991,11 +1017,7 @@ def trace(
             stacklevel=2,
         )
 
-    from torch._utils_internal import (
-        check_if_torch_exportable,
-        log_torch_jit_trace_exportability,
-        log_torchscript_usage,
-    )
+    from torch._utils_internal import log_torchscript_usage
 
     traced_func = _trace_impl(
         func,
@@ -1012,107 +1034,10 @@ def trace(
         _store_inputs,
     )
     log_torchscript_usage("trace", model_id=_get_model_id(traced_func))
-
-    if check_if_torch_exportable():
-        from torch._export.converter import TS2EPConverter
-        from torch.export._trace import (
-            _convert_ts_to_export_experimental,
-            _process_jit_trace_inputs_for_export,
-        )
-
-        traced_func_for_export = _trace_impl(
-            func,
-            example_inputs=example_inputs,
-            optimize=optimize,
-            check_trace=False,
-            check_inputs=check_inputs,
-            check_tolerance=check_tolerance,
-            strict=strict,
-            _force_outplace=_force_outplace,
-            _module_class=_module_class,
-            _compilation_unit=_compilation_unit,
-            example_kwarg_inputs=example_kwarg_inputs,
-            _store_inputs=_store_inputs,
-        )
-
-        export_args, _ = _process_jit_trace_inputs_for_export(
-            example_inputs, example_kwarg_inputs
-        )
-
-        def _log_exportability(func_to_export, export_func, export_args, export_type):
-            try:
-                traced_result = func_to_export(*export_args)
-            except Exception as e:
-                _ = e
-                log_torch_jit_trace_exportability(
-                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
-                )
-                return
-
-            try:
-                ep_module = export_func(func_to_export, export_args)
-            except Exception as e:
-                log_torch_jit_trace_exportability(
-                    "trace",
-                    str(export_type),
-                    str(_ExportOutcome.FAILED_TO_EXPORT),
-                    str(e),
-                )
-                return
-
-            try:
-                export = ep_module(*export_args)
-            except Exception as e:
-                log_torch_jit_trace_exportability(
-                    "trace", str(export_type), str(_ExportOutcome.FAILED_TO_RUN), str(e)
-                )
-                return
-
-            if not analyze_ts_result_with_export_result(export, traced_result):
-                log_torch_jit_trace_exportability(
-                    "trace",
-                    str(export_type),
-                    str(_ExportOutcome.ACCURACY_ERROR),
-                    "accuracy error",
-                )
-                return
-
-            log_torch_jit_trace_exportability(
-                "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
-            )
-
-        def _direct_export_and_lower(func, export_args):
-            return torch.export.export(func, export_args, strict=False).module()
-
-        def _convert_ts_to_export_source_to_source(func, export_args):
-            return TS2EPConverter(func, export_args).convert().module()
-
-        # torch.jit.trace is noop when the original module is torch.jit.ScriptModule
-        if not isinstance(traced_func_for_export, torch.jit.ScriptModule):
-            _log_exportability(
-                traced_func_for_export,
-                _direct_export_and_lower,
-                export_args,
-                _ExportType.DIRECT_EXPORT,
-            )
-
-        _log_exportability(
-            traced_func_for_export,
-            _convert_ts_to_export_experimental,
-            export_args,
-            _ExportType.TRACE_AND_EXPORT,
-        )
-        _log_exportability(
-            traced_func_for_export,
-            _convert_ts_to_export_source_to_source,
-            export_args,
-            _ExportType.SOURCE_TO_SOURCE,
-        )
-
     return traced_func
 
 
-_trace_module_map: Optional[Dict[Any, Any]] = None
+_trace_module_map: dict[Any, Any] | None = None
 
 
 def trace_module(
@@ -1176,6 +1101,7 @@ def trace_module(
         import torch
         import torch.nn as nn
 
+
         class Net(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1202,10 +1128,24 @@ def trace_module(
 
         # Trace specific methods on a module (specified in `inputs`), constructs
         # a `ScriptModule` with `forward` and `weighted_kernel_sum` methods
-        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        inputs = {
+            "forward": example_forward_input,
+            "weighted_kernel_sum": example_weight,
+        }
         module = torch.jit.trace_module(n, inputs)
 
     """
+    if sys.version_info >= (3, 14):
+        warnings.warn(
+            "`torch.jit.trace_method` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
+    else:
+        warnings.warn(
+            "`torch.jit.trace_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
     if not _enabled:
         return mod
     if optimize is not None:
@@ -1226,7 +1166,7 @@ def trace_module(
 
     old_module_map = torch.jit._trace._trace_module_map
     try:
-        trace_module_map: Dict[Any, Any] = {}
+        trace_module_map: dict[Any, Any] = {}
 
         def register_submods(mod, prefix):
             for name, child in mod.named_children():
@@ -1335,7 +1275,8 @@ class TracedModule(ScriptModule):
     def __init__(self, orig, id_set=None, _compilation_unit=None):
         # XXX: orig can be a nn.Module or a function!
         super().__init__()
-        assert isinstance(orig, torch.nn.Module)
+        if not isinstance(orig, torch.nn.Module):
+            raise AssertionError(f"Expected nn.Module, got {type(orig)}")
 
         # Copy a subset of `orig` to a temporary nn.Module.
         # This is a way to customize what will actually get compiled by create_script_module

@@ -267,15 +267,15 @@ void scan_dim_with_indices(const TensorBase& self, const TensorBase& values, con
  * outer dimensions, which contains several "inner rows").
  * Each thread processes a single inner row at a time.
  */
-template<typename scalar_t, class BinaryOp>
+template<typename scalar_t, typename index_t, class BinaryOp>
 __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, const scalar_t *src_,
                                               const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size,
                                               const scalar_t init, BinaryOp binary_op)
 {
   for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
-      const scalar_t *src = src_ + orow * row_size * num_irows + irow;
-      scalar_t *tgt = tgt_ + orow * row_size * num_irows + irow;
+      const scalar_t *src = src_ + static_cast<index_t>(orow) * row_size * num_irows + irow;
+      scalar_t *tgt = tgt_ + (index_t) orow * row_size * num_irows + irow;
       scalar_t acc = init;
 
       for (uint32_t col = 0; col < row_size; ++col) {
@@ -299,16 +299,16 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, const scalar_t *src
  * Each thread block processes one or more sets of contiguous rows (processing multiple rows
  * per thread block is quicker than processing a single row, especially for short rows).
  */
-template<typename T, class BinaryFunction>
+template<typename T, typename index_t, class BinaryFunction>
 __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const T *src_,
                                       const uint32_t num_rows, const uint32_t row_size,
                                       const uint32_t log_num_threads_x,
                                       T init, BinaryFunction binary_op){
-  const uint32_t num_threads_x = 1 << log_num_threads_x;
-  for (uint32_t block_row = blockIdx.x * blockDim.y;
+  const index_t num_threads_x = 1 << log_num_threads_x;
+  for (index_t block_row = blockIdx.x * (index_t) blockDim.y;
        block_row < num_rows;
        block_row += blockDim.y * gridDim.x) {
-    uint32_t row = block_row + threadIdx.y;
+    index_t row = block_row + (index_t) threadIdx.y;
     T block_total = init;
 
     const T *row_src = src_ + row * row_size;
@@ -317,10 +317,10 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
 
     // Perform scan on one block at a time, keeping track of the total value of
     // all blocks processed so far.
-    for (uint32_t block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
+    for (index_t block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
       // Load data into shared memory (two values per thread).
-      uint32_t col1 = block_col + threadIdx.x;
-      uint32_t col2 = block_col + num_threads_x + threadIdx.x;
+      index_t col1 = block_col + (index_t) threadIdx.x;
+      index_t col2 = block_col + num_threads_x + (index_t) threadIdx.x;
       if (row_exists) {
         if (col1 < row_size) {
           row_buf[threadIdx.x] = row_src[col1];
@@ -343,12 +343,12 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
 
       // Parallel reduction with Sklansky method. The diagram can be seen on this paper:
       // https://research.nvidia.com/publication/single-pass-parallel-prefix-scan-decoupled-look-back
-      for (uint32_t m = 0; m <= log_num_threads_x; ++m) {
+      for (int m = 0; m <= log_num_threads_x; ++m) {
         if (row_exists) {
-          uint32_t s = 1 << m; // s = 2 ^ m
-          uint32_t a = ((threadIdx.x >> m) << (m + 1)) | s; // a = (threadIdx.x / s) * (2 * s) + s
-          uint32_t ti = a + (threadIdx.x % s);
-          uint32_t si = a - 1;
+          index_t s = 1 << m; // s = 2 ^ m
+          auto a = static_cast<index_t>((threadIdx.x >> m) << (m + 1)) | s; // a = (threadIdx.x / s) * (2 * s) + s
+          index_t ti = a + (threadIdx.x % s);
+          index_t si = a - 1;
           row_buf[ti] = binary_op(row_buf[ti], row_buf[si]);
         }
         __syncthreads();
@@ -380,9 +380,13 @@ __global__ void tensor_kernel_scan_innermost_dim(
   T* sbuf2 = reinterpret_cast<T*>(sbuf);
   const uint32_t num_threads_x = 1 << log_num_threads_x;
   T* row_buf = reinterpret_cast<T*>(sbuf2 + num_threads_x * 2 * threadIdx.y);
-
-  tensor_kernel_scan_innermost_dim_impl<T>(
-      row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op);
+  if (num_rows * (size_t) row_size <= UINT_MAX) {
+      tensor_kernel_scan_innermost_dim_impl<T, uint32_t>(
+          row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op);
+  } else {
+      tensor_kernel_scan_innermost_dim_impl<T, size_t>(
+          row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op);
+  }
 }
 
 
@@ -405,10 +409,15 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(num_irows, "num_irows");
   check_fits_in_unsigned(num_orows, "num_orows");
   check_fits_in_unsigned(row_size, "row_size");
-
-  tensor_kernel_scan_outer_dim<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  if (static_cast<size_t>(num_irows) * num_orows * row_size <= UINT_MAX) {
+  tensor_kernel_scan_outer_dim<scalar_t, uint32_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
     num_orows, num_irows, row_size, init, binary_op);
+  } else  {
+  tensor_kernel_scan_outer_dim<scalar_t, size_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+    result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
+    num_orows, num_irows, row_size, init, binary_op);
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -447,14 +456,9 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
   TORCH_INTERNAL_ASSERT(result.is_contiguous());
 
   if (self.numel() == self.size(dim)) {
-    if constexpr (std::is_same<BinaryFunction, std::plus<scalar_t>>::value) {
+    if constexpr (std::is_same_v<BinaryFunction, std::plus<scalar_t>>) {
       if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms()) && (self.is_floating_point() || self.is_complex())) {
-# if (defined(CUDA_VERSION) && CUDA_VERSION > 11040) || defined(USE_ROCM)
         cuda::cub::inclusive_deterministic_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
-#else
-        globalContext().alertNotDeterministic("cumsum_cuda_kernel");
-        cuda::cub::inclusive_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
-#endif
       } else {
         cuda::cub::inclusive_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
       }

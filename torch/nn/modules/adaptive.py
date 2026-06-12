@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 
+import itertools
 from collections import namedtuple
-from typing import List, Sequence
+from collections.abc import Sequence
 
 import torch
 import torch.nn.functional as F
@@ -18,13 +19,15 @@ _ASMoutput = namedtuple("_ASMoutput", ["output", "loss"])
 
 
 class AdaptiveLogSoftmaxWithLoss(Module):
-    """Efficient softmax approximation.
+    (
+        """Efficient softmax approximation.
 
     As described in
     `Efficient softmax approximation for GPUs by Edouard Grave, Armand Joulin,
     Moustapha Ciss\u00e9, David Grangier, and Herv\u00e9 J\u00e9gou
     <https://arxiv.org/abs/1609.04309>`__.
-""" r"""
+"""
+        r"""
     Adaptive softmax is an approximate strategy for training models with large
     output spaces. It is most effective when the label distribution is highly
     imbalanced, for example in natural language modelling, where the word
@@ -104,10 +107,11 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     .. _Zipf's law: https://en.wikipedia.org/wiki/Zipf%27s_law
     """
+    )
 
     in_features: int
     n_classes: int
-    cutoffs: List[int]
+    cutoffs: list[int]
     div_value: float
     head_bias: bool
     head: Linear
@@ -171,36 +175,39 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             self.tail.append(projection)
 
     def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in ``__init__``.
+        """
         self.head.reset_parameters()
-        for i2h, h2o in self.tail:
-            i2h.reset_parameters()
-            h2o.reset_parameters()
+        for i2h, h2o in self.tail:  # type: ignore[misc]
+            i2h.reset_parameters()  # type: ignore[has-type]
+            h2o.reset_parameters()  # type: ignore[has-type]
 
     def forward(self, input_: Tensor, target_: Tensor) -> _ASMoutput:
+        """
+        Runs the forward pass.
+        """
         targ_dim = target_.dim()
 
         if targ_dim == 1:
             if input_.size(0) != target_.size(0):
                 raise RuntimeError(
-                    "Input and target should have the same size "
-                    "in the batch dimension."
+                    "Input and target should have the same size in the batch dimension."
                 )
             if input_.dim() != 2:
                 raise RuntimeError(
-                    "1D target tensor expects 2D input tensors, "
-                    "but found inputs with size",
-                    input_.size(),
+                    f"1D target tensor expects 2D input tensors, "
+                    f"but found inputs with size {input_.size()}"
                 )
         elif targ_dim == 0:
             if input_.dim() != 1:
                 raise RuntimeError(
-                    "0D target tensor expects 1D input tensors, "
-                    "but found inputs with size",
-                    input_.size(),
+                    f"0D target tensor expects 1D input tensors, "
+                    f"but found inputs with size {input_.size()}"
                 )
         else:
             raise RuntimeError(
-                "0D or 1D target tensor expected, " "multi-target not supported"
+                "0D or 1D target tensor expected, multi-target not supported"
             )
 
         is_batched = targ_dim > 0
@@ -265,7 +272,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         out[:, : self.shortlist_size] = head_logprob[:, : self.shortlist_size]
 
-        for i, (start_idx, stop_idx) in enumerate(zip(self.cutoffs, self.cutoffs[1:])):
+        for i, (start_idx, stop_idx) in enumerate(itertools.pairwise(self.cutoffs)):
             cluster_output = self.tail[i](input)
             cluster_logprob = F.log_softmax(cluster_output, dim=1)
             output_logprob = cluster_logprob + head_logprob[
@@ -283,7 +290,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             input (Tensor): a minibatch of examples
 
         Returns:
-            log-probabilities of for each class :math:`c`
+            log-probabilities for each class :math:`c`
             in range :math:`0 <= c <= \texttt{n\_classes}`, where :math:`\texttt{n\_classes}` is a
             parameter passed to ``AdaptiveLogSoftmaxWithLoss`` constructor.
 

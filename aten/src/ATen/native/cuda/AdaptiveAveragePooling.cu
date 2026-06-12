@@ -503,13 +503,13 @@ namespace {
         // encourage larger block_y & block_z for better cache hit while maintain
         // reasonable block_x for coalesced memory access;
         int block_x = std::min<int>(
-            maxThreadsDim[0], std::min<int>(lastPow2(sizeC), at::cuda::warp_size()));
+            {maxThreadsDim[0], lastPow2(sizeC), at::cuda::warp_size()});
         int block_y = std::min<int>(
-            maxThreadsDim[1], std::min<int>(lastPow2(osizeW), max_threads / block_x));
+            {maxThreadsDim[1], lastPow2(osizeW), max_threads / block_x});
         int block_z = std::min<int>(
-            maxThreadsDim[2], std::min<int>(lastPow2(osizeH), max_threads / block_x / block_y));
+            {maxThreadsDim[2], lastPow2(osizeH), max_threads / block_x / block_y});
         block_x = std::min<int>(
-            maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z));
+            {maxThreadsDim[0], lastPow2(sizeC), max_threads / block_y / block_z});
         const dim3 block(block_x, block_y, block_z);
         int kernel_stride_C = ceil_div(sizeC, block_x * 4);
         int kernel_size_C = ceil_div(sizeC, block_x * kernel_stride_C);
@@ -526,7 +526,7 @@ namespace {
 
 
         // we are dealing with packed tensor here. max index is the same as numel.
-        // TODO: to really support input tensor large enought to go beyond int32,
+        // TODO: to really support input tensor large enough to go beyond int32,
         // we will need to restrict out shared memory usage and adjust the launch
         // config;
         AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
@@ -608,6 +608,8 @@ namespace {
               input_arg{ input, "input", 3 };
 
     adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool2d_backward");
+    TORCH_CHECK(input.dim() == gradOutput_.dim(),
+      __func__, ": Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
 
     checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
@@ -657,13 +659,13 @@ namespace {
         bool done = false;
         do {
           int block_x = std::max<int>(std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(sizeC), at::cuda::warp_size())), 1);
+              {maxThreadsDim[0], lastPow2(sizeC), at::cuda::warp_size()}), 1);
           int block_y = std::max<int>(std::min<int>(
-              maxThreadsDim[1], std::min<int>(lastPow2(isizeW), max_threads / block_x)), 1);
+              {maxThreadsDim[1], lastPow2(isizeW), max_threads / block_x}), 1);
           int block_z = std::max<int>(std::min<int>(
-              maxThreadsDim[2], std::min<int>(lastPow2(isizeH), max_threads / block_x / block_y)), 1);
+              {maxThreadsDim[2], lastPow2(isizeH), max_threads / block_x / block_y}), 1);
           block_x = std::max<int>(std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z)), 1);
+              {maxThreadsDim[0], lastPow2(sizeC), max_threads / block_y / block_z}), 1);
           const dim3 block(block_x, block_y, block_z);
           int kernel_stride_C = ceil_div(sizeC, block_x * 4);
           int kernel_size_C = ceil_div(sizeC, block_x * kernel_stride_C);
@@ -679,7 +681,7 @@ namespace {
           const dim3 grid(grid_x, grid_y, grid_z);
 
           // we are dealing with packed tensor here. max index is the same as numel.
-          // TODO: to really support input tensor large enought to go beyond int32,
+          // TODO: to really support input tensor large enough to go beyond int32,
           // we will need to restrict out shared memory usage and adjust the launch
           // config;
           AT_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());
@@ -703,7 +705,7 @@ namespace {
             );
         } while (!done && max_threads);
         if (!done) {
-          TORCH_INTERNAL_ASSERT(false, "Couldn't reduce launch bounds to accomodate sharedMemPerBlock limit");
+          TORCH_INTERNAL_ASSERT(false, "Couldn't reduce launch bounds to accommodate sharedMemPerBlock limit");
         }
         break;
       }
