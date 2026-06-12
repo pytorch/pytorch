@@ -225,12 +225,14 @@ const std::vector<std::string> functions = {
         #          k: int,
         #          dim: int = -1,
         #          largest: bool = True,
-        #          sorted: bool = True):
-        #     result0, result1 = torch.topk(self, k, dim, largest, sorted)
+        #          sorted: bool = True,
+        #          stable: bool = False):
+        #     result0, result1 = torch.topk(
+        #         self, k, dim, largest, sorted, stable=stable)
         #     self_size = self.size()
         #     def backward(grad_output):
         #         grad_self = AD_index_select_backward(grad_output, dim, result1, self_size, True)
-        #         return grad_self, None, None, None, None
+        #         return grad_self, None, None, None, None, None
 
         #     return result0, result1, backward
 

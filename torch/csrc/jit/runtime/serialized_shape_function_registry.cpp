@@ -2901,7 +2901,10 @@ def _shape_as_tensor(self: List[int]) -> List[int]:
 )=====")
 + std::string(R"=====(def topk(self: List[int],
     k: int,
-    dim: int=-1) -> Tuple[List[int], List[int]]:
+    dim: int=-1,
+    largest: bool=True,
+    sorted: bool=True,
+    stable: bool=False) -> Tuple[List[int], List[int]]:
   _0 = "k ({}) is too big for dimension {} of size {}"
   if torch.eq(torch.len(self), 0):
     result = annotate(List[int], [])
@@ -3315,7 +3318,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor", "argmax"},
     {"aten::bmm(Tensor self, Tensor mat2) -> Tensor", "bmm"},
     {"aten::_shape_as_tensor(Tensor self) -> Tensor", "_shape_as_tensor"},
-    {"aten::topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)", "topk"},
+    {"aten::topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, bool stable=False) -> (Tensor values, Tensor indices)", "topk"},
     {"aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", "nll_loss_forward"},
     {"aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", "native_layer_norm"},
     {"aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},

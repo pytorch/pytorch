@@ -202,7 +202,9 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten.sort.stable": {},
     "aten.squeeze.dim": {},
     "aten.to_sparse.default": {},
-    "aten.topk.default": {},
+    "aten.topk.default": {
+        "v2": {"new_args": ["stable"], "since": "TORCH_VERSION_2_14_0"}
+    },
     "aten.triangular_solve.default": {},
     "aten.uniform.default": {},
     "aten.upsample_bicubic2d_backward.default": {},

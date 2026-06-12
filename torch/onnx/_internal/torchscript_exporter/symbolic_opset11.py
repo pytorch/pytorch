@@ -559,8 +559,12 @@ def unique_dim(
 
 
 @_onnx_symbolic("aten::topk")
-@symbolic_helper.parse_args("v", "v", "i", "i", "i", "none")
-def topk(g: jit_utils.GraphContext, self, k, dim, largest, sorted, out=None):
+@symbolic_helper.parse_args("v", "v", "i", "i", "i", "i", "none")
+def topk(g: jit_utils.GraphContext, self, k, dim, largest, sorted, stable, out=None):
+    if stable:
+        symbolic_helper._unimplemented(
+            "TopK", "stable=True is not supported for topk", self
+        )
     return symbolic_helper._topk_helper(
         g, self, k, dim, largest=largest, sorted=sorted, out=out
     )

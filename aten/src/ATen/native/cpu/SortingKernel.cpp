@@ -229,7 +229,8 @@ void topk_kernel(
     int64_t k,
     int64_t dim,
     bool largest,
-    bool sorted) {
+    bool sorted,
+    bool stable) {
   auto sizes = self.sizes();
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
@@ -249,11 +250,11 @@ void topk_kernel(
       if (self.scalar_type() == ScalarType::BFloat16) {
         return topk_impl_loop<scalar_t, float>(
             mode_values_stride, mode_indices_stride, tmp_values_stride,
-            k, sizes[dim], largest, sorted, data, strides, n);
+            k, sizes[dim], largest, sorted, stable, data, strides, n);
       } else {
         return topk_impl_loop<scalar_t, scalar_t>(
             mode_values_stride, mode_indices_stride, tmp_values_stride,
-            k, sizes[dim], largest, sorted, data, strides, n);
+            k, sizes[dim], largest, sorted, stable, data, strides, n);
       }
     };
 

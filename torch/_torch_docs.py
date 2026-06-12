@@ -11459,7 +11459,7 @@ Alias for :func:`torch.nn.functional.softmax`.
 add_docstr(
     torch.topk,
     r"""
-topk(input, k, dim=None, largest=True, sorted=True, *, out=None) -> (Tensor, LongTensor)
+topk(input, k, dim=None, largest=True, sorted=True, *, stable=False, out=None) -> (Tensor, LongTensor)
 
 Returns the :attr:`k` largest elements of the given :attr:`input` tensor along
 a given dimension.
@@ -11472,12 +11472,34 @@ A namedtuple of `(values, indices)` is returned with the `values` and
 `indices` of the largest `k` elements of each row of the `input` tensor in the
 given dimension `dim`.
 
-The boolean option :attr:`sorted` if ``True``, will make sure that the returned
-`k` elements are themselves sorted
+The boolean option :attr:`sorted` if ``True`` will make sure that the returned
+`k` elements are themselves sorted.
 
-.. note::
-    When using `torch.topk`, the indices of tied elements are not guaranteed to be stable
-    and may vary across different invocations.
+The boolean option :attr:`stable` if ``True`` gives stable tie handling. If
+more equivalent elements are eligible at the top-k cutoff than can fit in `k`,
+the earliest input indices are selected first. When :attr:`sorted` is also
+``True``, equivalent returned elements preserve their input order. This option
+may be slower than the default.
+
+.. list-table::
+    :header-rows: 1
+
+    * - ``sorted``
+      - ``stable``
+      - Behavior
+    * - ``False``
+      - ``False``
+      - Output order and selected tied indices are unspecified.
+    * - ``True``
+      - ``False``
+      - Values are sorted, but tied indices are unspecified.
+    * - ``False``
+      - ``True``
+      - Tied elements at the cutoff are selected by input order; output order
+        is not guaranteed.
+    * - ``True``
+      - ``True``
+      - Values are sorted and equal values preserve input order.
 
 Args:
     {input}
@@ -11489,6 +11511,8 @@ Args:
            in sorted order
 
 Keyword args:
+    stable (bool, optional): controls whether ties use stable input-order
+        handling
     out (tuple, optional): the output tuple of (Tensor, LongTensor) that can be
         optionally given to be used as output buffers
 
@@ -11499,6 +11523,9 @@ Example::
     tensor([ 1.,  2.,  3.,  4.,  5.])
     >>> torch.topk(x, 3)
     torch.return_types.topk(values=tensor([5., 4., 3.]), indices=tensor([4, 3, 2]))
+    >>> y = torch.tensor([5., 5., 5., 4.])
+    >>> torch.topk(y, 2, stable=True)
+    torch.return_types.topk(values=tensor([5., 5.]), indices=tensor([0, 1]))
 """.format(**common_args),
 )
 

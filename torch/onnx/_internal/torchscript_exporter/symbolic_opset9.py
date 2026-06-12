@@ -3866,11 +3866,15 @@ def numel(g: jit_utils.GraphContext, self):
 
 @_onnx_symbolic("aten::topk")
 # TODO(justinchuby): Support multiple quantized args in output
-@symbolic_helper.parse_args("v", "i", "i", "i", "i", "none")
-def topk(g: jit_utils.GraphContext, self, k, dim, largest, sorted, out=None):
+@symbolic_helper.parse_args("v", "i", "i", "i", "i", "i", "none")
+def topk(g: jit_utils.GraphContext, self, k, dim, largest, sorted, stable, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
             "TopK", "Out parameter is not supported for topk", self
+        )
+    if stable:
+        symbolic_helper._unimplemented(
+            "TopK", "stable=True is not supported for topk", self
         )
     if not largest:
         symbolic_helper._unimplemented("TopK", "Ascending TopK is not supported", self)
