@@ -470,7 +470,18 @@ class Vectorized<float> {
   }
   // Implementation is picked from
   // https://github.com/ARM-software/ComputeLibrary/blob/v25.01/src/core/NEON/SVEMath.inl#L179
-  Vectorized<float> tanh() const {
+#if defined(TORCH_INDUCTOR_PRECOMPILE_HEADERS) && defined(__GNUC__) && \
+    !defined(__clang__) &&                                             \
+    ((__GNUC__ == 14 && __GNUC_MINOR__ < 4) ||                         \
+     (__GNUC__ == 15 && __GNUC_MINOR__ < 3))
+  // GCC 14/15 can ICE when compiling AArch64 SVE intrinsics with PCH enabled
+  // (GCC PR target/123457). The fix is expected in GCC 14.4 and 15.3, and is
+  // backported to only some 14.3 and 15.2 packages, so conservatively guard by
+  // upstream minor version.
+  __attribute__((optimize("O0")))
+#endif
+  Vectorized<float>
+  tanh() const {
     // Constants used for the tanh calculation.
     const svfloat32_t CONST_1 =
         svdup_n_f32(1.f); // Constant 1.0f for the tanh formula.
