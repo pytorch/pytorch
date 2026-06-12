@@ -652,9 +652,8 @@ static void init_multicast_for_block(
   if constexpr (!use_fabric_handle) {
     recv_handle = ipc_channel.broadcast_fds(rank, 0, pids, mc_exported_handle);
   } else {
-    // TODO implement storeExchange.broadcast
-    auto gathered_handles = storeExchange.all_gather(store, rank, world_size, mc_exported_handle);
-    recv_handle = std::move(gathered_handles[0]);
+    recv_handle =
+        storeExchange.broadcast(store, rank, world_size, 0, mc_exported_handle);
   }
 
   // Check exchange result
