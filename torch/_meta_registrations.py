@@ -7886,8 +7886,8 @@ def miopen_rnn(
     )
 
 
-@register_meta(aten.mkldnn_rnn_layer.default)
-def mkldnn_rnn_layer(
+@register_meta(aten.onednn_rnn_layer.default)
+def onednn_rnn_layer(
     input,
     w0,
     w1,
@@ -8115,8 +8115,8 @@ def meta_pixel_shuffle(self, upscale_factor):
     )
 
 
-@register_meta(aten.mkldnn_rnn_layer_backward.default)
-def mkldnn_rnn_layer_backward(
+@register_meta(aten.onednn_rnn_layer_backward.default)
+def onednn_rnn_layer_backward(
     input,
     weight0,
     weight1,

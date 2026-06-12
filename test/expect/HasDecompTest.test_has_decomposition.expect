@@ -1007,10 +1007,6 @@ aten::mkldnn_reorder_conv2d_weight
 aten::mkldnn_reorder_conv2d_weight.out
 aten::mkldnn_reorder_conv3d_weight
 aten::mkldnn_reorder_conv3d_weight.out
-aten::mkldnn_rnn_layer
-aten::mkldnn_rnn_layer.out
-aten::mkldnn_rnn_layer_backward
-aten::mkldnn_rnn_layer_backward.out
 aten::mm
 aten::mm.dtype
 aten::mm.dtype_out
