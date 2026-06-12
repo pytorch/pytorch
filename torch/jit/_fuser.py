@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import List, Tuple
+import warnings
 
 import torch
 
@@ -84,7 +84,7 @@ def fuser(name):
 last_executed_optimized_graph = torch._C._last_executed_optimized_graph
 
 
-def _get_differentiable_graph_node(node, diff_node):
+def _get_differentiable_graph_node(node, diff_node) -> None:
     if node.kind() == "prim::DifferentiableGraph":
         diff_node.append(node)
     else:
@@ -101,16 +101,21 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
     try:
         dbs = parent.get_debug_state()
         eps = list(dbs.execution_plans.values())
-        assert len(eps) == 1
+        if len(eps) != 1:
+            raise AssertionError(f"Expected exactly 1 execution plan, got {len(eps)}")
         graph = eps[0].graph.copy()
 
         # graph_executor_states for differentiable node
         fw_states = eps[0].code.differentiable_op_executor_states()
-        diff_nodes: List[torch._C.Node] = []
+        diff_nodes: list[torch._C.Node] = []
         for n in graph.nodes():
             _get_differentiable_graph_node(n, diff_nodes)
 
-        assert len(fw_states) == len(diff_nodes)
+        if len(fw_states) != len(diff_nodes):
+            raise AssertionError(
+                f"Expected fw_states ({len(fw_states)}) and diff_nodes "
+                f"({len(diff_nodes)}) to have the same length"
+            )
         # swap each differentiable graph with optimized graph in their execution plan
         for n, state in zip(diff_nodes, fw_states):
             fw_execution_plans = list(state.execution_plans.values())
@@ -128,8 +133,11 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
         return last_executed_optimized_graph()
 
 
-def set_fusion_strategy(strategy: List[Tuple[str, int]]):
+def set_fusion_strategy(strategy: list[tuple[str, int]]):
     """Set the type and number of specializations that can occur during fusion.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
 
     Usage: provide a list of pairs (type, depth) where type is one of "STATIC" or "DYNAMIC"
     and depth is an integer.
@@ -144,7 +152,7 @@ def set_fusion_strategy(strategy: List[Tuple[str, int]]):
 
     Behavior - fallback functions & depth:
         When an input doesn't match the format required by the specialized compiled op, it will run
-        a fallback function. Fallback functions are recursively be compiled and specialized based
+        a fallback function. Fallback functions are recursively compiled and specialized based
         on the observed tensor shapes. Since compilation can be slow, the "depth" parameter is provided to
         limit the number of specializations that can be compiled, before giving up on recompiling and
         falling back to a completely un-fused, un-specialized implementation.
@@ -155,7 +163,11 @@ def set_fusion_strategy(strategy: List[Tuple[str, int]]):
     dynamic fusion, and any inputs that satisfy none of the 4 options will run an
     unfused implementation.
 
-    NB: in the future, if more as more fusion backends are added there may be more granular
+    NB: in the future, as more and more fusion backends are added there may be more granular
     apis for specific fusers.
     """
+    warnings.warn(
+        "`torch.jit.set_fusion_strategy` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     return torch._C._jit_set_fusion_strategy(strategy)

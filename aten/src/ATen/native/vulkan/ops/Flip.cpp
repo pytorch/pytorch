@@ -12,7 +12,7 @@ using namespace api::utils;
 
 Tensor flip(const at::Tensor& self, const IntArrayRef dim_list) {
   TORCH_CHECK(
-      self.dim() >= 1 || self.dim() <= 4,
+      self.dim() >= 1 && self.dim() <= 4,
       "Vulkan flip supports up to 4d tensors as input!");
 
   // Get the global Vulkan context

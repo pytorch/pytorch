@@ -5,7 +5,8 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from collections.abc import Callable, Sequence
+from typing import Any
 from unittest.mock import patch
 
 import sympy
@@ -21,21 +22,16 @@ from .. import ir
 from ..dependencies import Dep
 from ..loop_body import LoopBody
 from ..scheduler import BaseSchedulerNode, SchedulerBuffer
+from ..shape_propagation import BlockShapeType
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
-from .common import (
-    CSEVariable,
-    deduce_output_dtype_by_name,
-    Kernel,
-    KernelArgs,
-    OptimizationContext,
-)
+from .common import CSEVariable, Kernel, KernelArgs, OptimizationContext
 
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
     torch.float64: "double",
-    torch.float16: "half",
+    torch.float16: "at::Half",
     torch.int64: "int64_t",
     torch.int32: "int32_t",
     torch.int16: "int16_t",
@@ -45,12 +41,15 @@ DTYPE_TO_CPP = {
     torch.uint16: "uint16_t",
     torch.uint8: "uint8_t",
     torch.bool: "bool",
-    torch.bfloat16: "bfloat16",
-    torch.complex64: "c10::complex<float>",
-    torch.float8_e4m3fn: "float8_e4m3fn",
-    torch.float8_e5m2: "float8_e5m2",
-    torch.float8_e4m3fnuz: "float8_e4m3fnuz",
-    torch.float8_e5m2fnuz: "float8_e5m2fnuz",
+    torch.bfloat16: "at::BFloat16",
+    torch.complex32: "at::complex<at::Half>",
+    torch.bcomplex32: "at::complex<at::BFloat16>",
+    torch.complex64: "at::complex<float>",
+    torch.complex128: "at::complex<double>",
+    torch.float8_e4m3fn: "at::Float8_e4m3fn",
+    torch.float8_e5m2: "at::Float8_e5m2",
+    torch.float8_e4m3fnuz: "at::Float8_e4m3fnuz",
+    torch.float8_e5m2fnuz: "at::Float8_e5m2fnuz",
 }
 
 DTYPE_TO_ATEN = {
@@ -70,6 +69,7 @@ DTYPE_TO_ATEN = {
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
     torch.complex32: "at::kComplexHalf",
+    torch.bcomplex32: "at::kBComplex32",
     torch.complex64: "at::kComplexFloat",
     torch.complex128: "at::kComplexDouble",
     torch.float8_e4m3fn: "at::kFloat8_e4m3fn",
@@ -79,15 +79,20 @@ DTYPE_TO_ATEN = {
 }
 
 DEVICE_TO_ATEN = {
+    "meta": "at::kMeta",
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
     "xpu": "at::kXPU",
+    "mps": "at::kMPS",
 }
 
 LAYOUT_TO_ATEN = {
     torch.strided: "at::kStrided",
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
+
+# matches c10/core/DeviceType.h
+DEVICE_TO_INT = {"cpu": 0, "cuda": 1}
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -98,8 +103,10 @@ GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
 def get_promote_dtype(args):
     return (
+        # pyrefly: ignore [no-matching-overload]
         functools.reduce(
             torch.promote_types,  # type: ignore[arg-type]
+            # pyrefly: ignore [bad-argument-type]
             [n.dtype for n in args if isinstance(n, CppCSEVariable)],
         )
         if all(n.dtype is not None for n in args if isinstance(n, CppCSEVariable))
@@ -137,55 +144,17 @@ def promote_args(new_args):
     return new_args
 
 
-def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
-    return node.meta.get(OptimizationContext.key, None)
-
-
-def get_current_node_opt_ctx() -> OptimizationContext:
-    assert V.interpreter.current_node
-    return get_opt_ctx(V.interpreter.current_node)
-
-
-def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
-    if (
-        output_dtype := deduce_output_dtype_by_name(
-            name,
-            *args,
-            **kwargs,
-        )
-    ) is not None:
-        return output_dtype
-    elif name == "masked":
-        # <TODO> Leslie: perhaps we can also deduce the masked dtype by
-        # inputs' CppCseVariable like other. Let's check it if any
-        # unexpected failures.
-        assert (
-            hasattr(V.interpreter, "current_node")
-            and V.interpreter.current_node.target.startswith("masked_subblock")
-            and get_current_node_opt_ctx() is not None
-        )
-        return get_current_node_opt_ctx().dtype
-    else:
-        # deduce output dtype by inputs' dtype
-        assert all(
-            arg.dtype is not None for arg in args if isinstance(arg, CppCSEVariable)
-        )
-        return functools.reduce(
-            torch.promote_types,  # type: ignore[arg-type]
-            [arg.dtype for arg in args if isinstance(arg, CppCSEVariable)],
-        )
-
-
 class CppCSEVariable(CSEVariable):
     def __init__(
         self,
         name,
         bounds: ValueRanges[Any],
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
+        shape: BlockShapeType = None,
     ) -> None:
-        super().__init__(name, bounds, dtype)
+        super().__init__(name, bounds, dtype, shape=shape)
         self.is_vec = False
-        self.dependent_itervars: Set[sympy.Symbol] = set()
+        self.dependent_itervars = OrderedSet[sympy.Symbol]()
 
     def __repr__(self) -> str:
         return (
@@ -206,13 +175,10 @@ class CppCSEVariable(CSEVariable):
                     if isinstance(arg, CppCSEVariable)
                 ]
             )
-            if name == "index_expr":
+            if name in ("index_expr", "value_expr"):
                 self._set_dependent_itervars(args[0])
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
-        # NOTE [Deduce dtype of CppCSEVariable at runtime]
-        self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
-        assert self.dtype is not None
 
     def _set_dependent_itervars(self, index: sympy.Expr):
         """
@@ -238,6 +204,15 @@ class CppPrinter(_CppPrinter):
         if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
             expr = V.graph.sizevars.simplify(expr)
         return super().doprint(expr)
+
+    def parenthesize(self, item: sympy.Expr, level: int, strict: bool = False) -> str:
+        if isinstance(item, sympy.Mod):
+            # use parenthesis to enforce precedence.
+            # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
+            # pyrefly: ignore [missing-attribute]
+            return f"({self._print(item)})"
+        else:
+            return super().parenthesize(item, level, strict)
 
 
 # A function to print, useful for printing sympy symbols.
@@ -268,6 +243,8 @@ def rewrite_index_for_function(
 ):
     # Local buffer at the inner dimensions
     snode = V.graph.scheduler.name_to_buf[global_buf_name].defining_op
+    if snode is None:
+        raise AssertionError(f"expected defining_op for {global_buf_name}, got None")
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     scheduler_nodes = snode.get_nodes()
     _, (group, reduction_group) = max(
@@ -293,7 +270,9 @@ def rewrite_index_for_nodes(
     index: sympy.Expr,
     global_buf_name: str,
 ):
-    used_vars = {s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)}
+    used_vars = OrderedSet(
+        s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)
+    )
     index_vars = []
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     for i in range(len(local_buf.get_size())):
@@ -307,7 +286,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(
         self,
         inner,
-        global_to_local: Dict[str, ir.Buffer],
+        global_to_local: dict[str, ir.Buffer],
         rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
     ) -> None:
         super().__init__(inner)
@@ -316,7 +295,8 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
 
     def localize(self, name: str, index: sympy.Expr):
         if self.global_to_local and name in self.global_to_local:
-            assert self.rewrite_index is not None
+            if self.rewrite_index is None:
+                raise AssertionError("expected rewrite_index to be set, got None")
             index = self.rewrite_index(self, index, name)
             name = self.global_to_local[name].get_name()
         return name, index
@@ -338,6 +318,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         return res
 
     def store_reduction(self, name, index, value):
+        # pyrefly: ignore [bad-argument-count]
         return self._inner.store_reduction(*self.localize(name, index), value)
 
 
@@ -355,11 +336,13 @@ class LocalBufferContext:
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
         # map local buffer name to local buffer
-        self.local_buffers: Dict[str, ir.Buffer] = {}
+        self.local_buffers: dict[str, ir.Buffer] = {}
         # map global buffer name to global buffer
-        self.global_buffers: Dict[str, ir.Buffer] = {}
+        self.global_buffers: dict[str, ir.Buffer] = {}
         # map global buffer name to local buffer
-        self.global_to_local: Dict[str, ir.Buffer] = {}
+        self.global_to_local: dict[str, ir.Buffer] = {}
+        # record the global buffers that are removed by this LocalBufferContext
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -400,20 +383,31 @@ class LocalBufferContext:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def add_local_buffer(
-        self, local_buffer: ir.Buffer, global_buffers: Optional[List[ir.Buffer]] = None
+        self, local_buffer: ir.Buffer, global_buffers: list[ir.Buffer] | None = None
     ):
-        assert local_buffer.get_name() not in self.local_buffers
+        if local_buffer.get_name() in self.local_buffers:
+            raise AssertionError(
+                f"local buffer {local_buffer.get_name()} already registered"
+            )
         self.local_buffers[local_buffer.get_name()] = local_buffer
         if global_buffers:
             for global_buffer in global_buffers:
                 global_buffer_name = global_buffer.get_name()
-                assert (
+                if not (
                     global_buffer_name not in self.global_buffers
                     and global_buffer_name not in self.global_to_local
-                )
+                ):
+                    raise AssertionError(
+                        f"global buffer {global_buffer_name} already registered"
+                    )
                 self.global_buffers[global_buffer_name] = global_buffer
                 self.global_to_local[global_buffer_name] = local_buffer
-                V.graph.removed_buffers.add(global_buffer_name)
+                if global_buffer_name not in V.graph.removed_buffers:
+                    # Record the global buffers that are removed by this LocalBufferContext
+                    # since they may need to be restored. Refer to issue:
+                    # https://github.com/pytorch/pytorch/issues/144186
+                    self.removed_buffers.add(global_buffer_name)
+                    V.graph.removed_buffers.add(global_buffer_name)
 
     def localize_function(
         self,
@@ -436,11 +430,11 @@ class LocalBufferContext:
 
     def localize_nodes(
         self,
-        nodes: List[ir.IRNode],
+        nodes: list[ir.IRNode],
         rewrite_index: Callable[
             ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
         ] = rewrite_index_for_nodes,
-    ) -> List[ir.IRNode]:
+    ) -> list[ir.IRNode]:
         """
         Given `local_buf` and `global_buf` registered in current `LocalBufferContext`
         though the method of `add_local_buffer`, localizes the `global_buf` to `local_buf`
@@ -449,14 +443,16 @@ class LocalBufferContext:
         `local_buf`. This helps the fused loops to work on smaller-sized local buffers
         for better data locality.
 
-        The the data access of `local_buf` is assumed to be contiguous with the
+        The data access of `local_buf` is assumed to be contiguous with the
         same order as the `global_buf`.
         """
-        assert len(nodes) > 0
+        if len(nodes) <= 0:
+            raise AssertionError(f"expected non-empty nodes, got {len(nodes)}")
 
         def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node
-            assert isinstance(loops, ir.Loops)
+            if not isinstance(loops, ir.Loops):
+                raise AssertionError(f"expected ir.Loops, got {type(loops)}")
             new_inner_fn = self.localize_function(
                 loops.inner_fn,
                 rewrite_index,
@@ -477,7 +473,7 @@ class LocalBufferContext:
 
 def unify_mask_base_type(
     buffer: IndentedBuffer,
-    vars: Tuple[CSEVariable, ...],
+    vars: tuple[CSEVariable, ...],
     dtype=torch.float,
 ):
     """
@@ -494,8 +490,21 @@ def unify_mask_base_type(
     return new_vars
 
 
+def may_unify_binary_op_mask_type(a, b):
+    """
+    Given two cse variables, when dtype is bool, unify them to the same mask dtype and return casted cse variable.
+    """
+    if a.dtype == torch.bool:
+        if b.dtype != torch.bool:
+            raise AssertionError(f"expected b.dtype == torch.bool, got {b.dtype}")
+        mask_dtype = torch.int32
+        return unify_mask_base_type(V.kernel.compute, (a, b), mask_dtype)
+    return a, b
+
+
 def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
-    assert is_integer_dtype(offset.dtype)
+    if not is_integer_dtype(offset.dtype):
+        raise AssertionError(f"expected integer dtype, got {offset.dtype}")
     code.writeline("[&]()")
     with code.indent():
         code.writeline(
@@ -522,7 +531,7 @@ def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
 
 
 def get_gemm_template_output_and_compute_dtype(input_dtype):
-    if input_dtype == torch.uint8:
+    if input_dtype in [torch.uint8, torch.int8]:
         return (torch.int32, torch.int32)
     else:
         return (torch.float32, torch.float32)
@@ -539,7 +548,8 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
             return ops.maximum(input, zero)
 
     elif attr == "gelu":
-        assert "algorithm" in kwargs
+        if "algorithm" not in kwargs:
+            raise AssertionError("expected 'algorithm' in kwargs")
         if kwargs["algorithm"] == "none":
 
             def inner_fn(index):
@@ -555,7 +565,10 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
                 return result
 
         else:
-            assert kwargs["algorithm"] == "tanh"
+            if kwargs["algorithm"] != "tanh":
+                raise AssertionError(
+                    f"expected algorithm == 'tanh', got {kwargs['algorithm']}"
+                )
 
             def inner_fn(index):
                 input = input_loader(index)
@@ -617,8 +630,10 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
             return result
 
     elif attr == "leaky_relu":
-        assert "scalars" in kwargs
-        assert len(kwargs["scalars"]) == 1
+        if "scalars" not in kwargs:
+            raise AssertionError("expected 'scalars' in kwargs")
+        if len(kwargs["scalars"]) != 1:
+            raise AssertionError(f"expected 1 scalar, got {len(kwargs['scalars'])}")
         negative_slope = kwargs["scalars"][0]
 
         def inner_fn(index):
@@ -634,8 +649,10 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
             return result
 
     elif attr == "hardtanh":
-        assert "scalars" in kwargs
-        assert len(kwargs["scalars"]) == 2
+        if "scalars" not in kwargs:
+            raise AssertionError("expected 'scalars' in kwargs")
+        if len(kwargs["scalars"]) != 2:
+            raise AssertionError(f"expected 2 scalars, got {len(kwargs['scalars'])}")
         min_value = kwargs["scalars"][0]
         max_value = kwargs["scalars"][1]
 
@@ -652,7 +669,8 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
             return result
 
     elif attr in ["add", "sub", "mul"]:
-        assert "other" in kwargs
+        if "other" not in kwargs:
+            raise AssertionError("expected 'other' in kwargs")
         other = kwargs["other"]
         num_input_dims = len(input_buffer.get_size())
         num_other_dims = len(other.get_size())
@@ -667,9 +685,12 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
                 return op(input_loader(index), other_loader(index))
 
     elif attr == "bias_add":
-        assert "other" in kwargs
-        assert "beta" in kwargs
-        assert "dtype" in kwargs
+        if "other" not in kwargs:
+            raise AssertionError("expected 'other' in kwargs")
+        if "beta" not in kwargs:
+            raise AssertionError("expected 'beta' in kwargs")
+        if "dtype" not in kwargs:
+            raise AssertionError("expected 'dtype' in kwargs")
         beta = kwargs["beta"]
         other = kwargs["other"]
         dtype = kwargs["dtype"]
@@ -700,21 +721,26 @@ def _get_loop_body(fn_list):
     else:
         if hasattr(fn_list[0], "original_fn"):
             # For the case of local buffer, we wrap the fn with localize_function
-            assert all(hasattr(fn, "original_fn") for fn in fn_list)
-            assert all(
+            if not all(hasattr(fn, "original_fn") for fn in fn_list):
+                raise AssertionError("expected all fns to have 'original_fn'")
+            if not all(
                 isinstance(fn.original_fn.args[0]._body, LoopBody) for fn in fn_list
-            )
+            ):
+                raise AssertionError("expected all original_fn bodies to be LoopBody")
             loop_bodies = [fn.original_fn.args[0]._body for fn in fn_list]
         else:
-            assert all(isinstance(fn, functools.partial) for fn in fn_list)
-            assert all(isinstance(fn.args[0]._body, LoopBody) for fn in fn_list)
+            if not all(isinstance(fn, functools.partial) for fn in fn_list):
+                raise AssertionError("expected all fns to be functools.partial")
+            if not all(isinstance(fn.args[0]._body, LoopBody) for fn in fn_list):
+                raise AssertionError("expected all fn bodies to be LoopBody")
             loop_bodies = [fn.args[0]._body for fn in fn_list]
-    assert loop_bodies is not None
+    if loop_bodies is None:
+        raise AssertionError("expected loop_bodies to be set, got None")
     return loop_bodies
 
 
 def _get_dtype_from_loopbodies(loop_bodies):
-    dtypes = set()
+    dtypes = OrderedSet[torch.dtype]()
     for loop_body in loop_bodies:
         graphs = [loop_body.root_block.graph] + [
             body.graph for body in list(loop_body.subblocks.values())
@@ -728,11 +754,11 @@ def _get_dtype_from_loopbodies(loop_bodies):
 
 
 def template_fusion_with_epilogues_supported(
-    template: BaseSchedulerNode, epilogues: List[BaseSchedulerNode]
-) -> Tuple[bool, bool]:
+    template: BaseSchedulerNode, epilogues: list[BaseSchedulerNode]
+) -> tuple[bool, bool]:
     def _get_indexes_of_template_buf_read(
-        epilogue_node: ir.Operation, template_buf_names: List[str]
-    ) -> List[sympy.Expr]:
+        epilogue_node: ir.Operation, template_buf_names: list[str]
+    ) -> list[sympy.Expr]:
         return [
             read.index
             for read in epilogue_node.get_reads()
@@ -742,8 +768,8 @@ def template_fusion_with_epilogues_supported(
     def _check_supported_and_same_indexes(
         index_of_template_buf_read: Sequence[sympy.Expr],
         epilogue_writes: OrderedSet[Dep],
-    ) -> Tuple[bool, bool]:
-        num_indexes = len(set(index_of_template_buf_read))
+    ) -> tuple[bool, bool]:
+        num_indexes = len(OrderedSet(index_of_template_buf_read))
 
         if num_indexes > 1:
             same_index = False
@@ -763,8 +789,8 @@ def template_fusion_with_epilogues_supported(
         return supported, same_index
 
     def _template_fusion_supported(
-        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: List[ir.Operation]
-    ) -> Tuple[bool, bool]:
+        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: list[ir.Operation]
+    ) -> tuple[bool, bool]:
         template_buf_names = [x.get_name() for x in template_outputs]
         indexes_of_template_buf_reads = [
             _get_indexes_of_template_buf_read(epilogue_node, template_buf_names)
@@ -783,7 +809,8 @@ def template_fusion_with_epilogues_supported(
         supported, same_indexes = zip(*results)
         return all(supported), all(same_indexes)
 
-    assert template.is_template()
+    if not template.is_template():
+        raise AssertionError("expected template.is_template() to be True")
     template_outputs = template.get_outputs()
 
     epilogue_nodes = [

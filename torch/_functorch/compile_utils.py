@@ -1,19 +1,28 @@
-# mypy: ignore-errors
+from __future__ import annotations
 
+import operator
+from typing import Any, TYPE_CHECKING
 
-from typing import Callable
+import sympy
 
 import torch
 import torch.fx as fx
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch._ops import OpOverloadPacket
+    from torch.utils._pytree import TreeSpec
+
 aten = torch.ops.aten
 
 
-def get_aten_target(node: fx.Node) -> Callable:
+def get_aten_target(node: fx.Node) -> OpOverloadPacket | Callable[..., Any] | str:
     if hasattr(node.target, "overloadpacket"):
         return node.target.overloadpacket
     return node.target
@@ -39,11 +48,15 @@ rand_ops = [
 
 
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
-def fx_graph_cse(fx_g: torch.fx.graph.Graph):
+def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
     new_graph = fx.Graph()
-    env = {}  # map from node in the old graph to node in the new graph
-    hash_env = {}  # map from hash to a node in the new graph
-    token_map = {}  # map from hash to token
+    env: dict[
+        fx.Node, fx.Node
+    ] = {}  # map from node in the old graph to node in the new graph
+    hash_env: dict[
+        tuple[str, int], fx.Node
+    ] = {}  # map from hash to a node in the new graph
+    token_map: dict[tuple[str, int], dict[str, Any]] = {}  # map from hash to token
 
     from torch._inductor.pattern_matcher import (
         compute_mutation_region_ids,
@@ -56,7 +69,10 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     # when pruning.  This prevents us from deduplicating returned tensors which have
     # experienced identical operations, but are separate data structures in eager mode.
     output_node: fx.Node = list(fx_g.nodes)[-1]
-    assert output_node.op == "output"
+    if output_node.op != "output":
+        raise AssertionError(
+            f"expected output_node.op to be 'output', got '{output_node.op}'"
+        )
 
     def checkable_node(node: fx.Node) -> bool:
         """We can evaluate only nodes that represent tensors with defined storage."""
@@ -95,13 +111,29 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
+            # This CSE pass currently doesn't handle re-propagation of unbacked
+            # meta where it'll sometimes eliminate a _local_scalar_dense but not
+            # replace the meta of downstream users. eg. one bug we've seen is:
+            #
+            # _local_scalar_dense_11: "Sym(u14)" = torch.ops.aten._local_scalar_dense.default(select_10);
+            # sym_sum_2: "Sym(u19 + u20 + u21)" = torch.sym_sum((_local_scalar_dense_11, _local_scalar_dense_12, _local_scalar_dense_13))
+            #
+            # Notice how _local_scalar_dense_11 is u14 but sym_sum_2's meta is incorrectly the old
+            # pre-cse value of u19.
+            or (
+                "val" in n.meta
+                and isinstance(n.meta["val"], sympy.Symbol)
+                and free_unbacked_symbols(n.meta["val"])
+            )
         ):
             new_node = new_graph.node_copy(n, lambda x: env[x])
             env[n] = new_node
         else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'
             # substitute args and kwargs members to their mapping in env if exists
             # specs can be used to reconstruct nested list/dictionaries
-            def substitute(arg_list):
+            def substitute(
+                arg_list: list[Any] | tuple[Any, ...],
+            ) -> tuple[tuple[Any, ...], TreeSpec]:
                 arg_list, spec = tree_flatten(arg_list)
                 for i in range(len(arg_list)):
                     v = arg_list[i]
@@ -153,7 +185,28 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     return new_graph
 
 
-def strip_overloads(gm):
+def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
+    # Pre-create a list of nodes to iterate over, as modifying the node order
+    # during the loop can lead to infinite loops if not handled properly.
+    getitem_nodes = list(
+        gm.graph.find_nodes(op="call_function", target=operator.getitem)
+    )
+
+    # loop through getitem nodes in the graph and raise them to the parent node
+    # in reverse order to preserve their original relative order
+    for node in reversed(getitem_nodes):
+        if len(node.all_input_nodes) != 1:
+            raise AssertionError(
+                f"expected node {node.name} to have 1 input node, got {len(node.all_input_nodes)}"
+            )
+        parent = node.all_input_nodes[0]
+        parent.append(node)
+
+    gm.recompile()
+    return gm
+
+
+def strip_overloads(gm: fx.GraphModule) -> None:
     """
     Modifies the target of graph nodes in :attr:`gm` to strip overloads.
 
@@ -166,11 +219,11 @@ def strip_overloads(gm):
     gm.recompile()
 
 
-def get_placeholders(graph):
+def get_placeholders(graph: fx.Graph) -> list[Any]:
     return graph.find_nodes(op="placeholder")
 
 
-def get_outputs(graph):
+def get_outputs(graph: fx.Graph) -> list[fx.Node]:
     for node in graph.find_nodes(op="output"):
         return pytree.tree_leaves(node.args[0])
     raise AssertionError("No output node found")

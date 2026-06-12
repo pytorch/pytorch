@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
@@ -152,7 +151,7 @@ static void moveCatOpToEnd(Node* cat, const std::shared_ptr<Graph>& subgraph) {
         TORCH_INTERNAL_ASSERT(
             use.user->output()->owningGraph() == subgraph.get(),
             buildErrorMessage(
-                "aten::cat user graph does not math the given subgraph."));
+                "aten::cat user graph does not match the given subgraph."));
         auto new_cat = moveCatAfterUse(cat, use.user, subgraph);
         moveCatOpToEnd(new_cat, subgraph);
       }

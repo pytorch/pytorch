@@ -2,6 +2,14 @@
 #include <gtest/gtest.h>
 
 using namespace c10;
+using std::string;
+
+// TODO(NS): Remove me
+// For some reason emplace tests in this file fails to compile with C++20 with the following warning
+// aten/src/ATen/core/ivalue.h:240:3: error: array subscript 0 is outside array bounds of 'c10::IValue [0]'
+#if defined(__GNUC__) && __GNUC__ == 13
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
 
 // NOLINTBEGIN(performance-move-const-arg, bugprone-use-after-move, *analyzer*Move)
 TEST(ListTestIValueBasedList, givenEmptyList_whenCallingEmpty_thenReturnsTrue) {
@@ -1129,6 +1137,7 @@ TEST(ListTest, canAccessOptionalStringByReference) {
   EXPECT_EQ("two", str1);
   EXPECT_FALSE(str2.has_value());
   EXPECT_TRUE(strRef1.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ("two", strRef1.value().get());
   EXPECT_FALSE(strRef2.has_value());
 }

@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
@@ -115,7 +114,7 @@ class TORCH_API ScriptModuleSerializer {
 
   // Uniquely identifies a SourceRange in a model.
   // SourceRanges are associated with Nodes of Graphs.
-  // However for mobile deployment we dont intend to ship
+  // However for mobile deployment we don't intend to ship
   // full JIT with capabilities of reading code and constructing
   // graphs.
   // Instead we serialize the Code generated from graph of the methods.
@@ -215,7 +214,7 @@ struct TORCH_API BytecodeEmitMode {
 // true: instruction of default argument values (like LOADC) is emitted.
 // false: instruction of default argument values are not emitted. Instead
 // they are fetched from operator schema.
-// default_args_before_out_args (to forward compatibile support
+// default_args_before_out_args (to forward compatible support
 // operators allowing out arguments and default arguments):
 // true: the number of specified arguments will deserialized to (#all_args -
 // #default_args). false: the number of specified arguments will deserialized to

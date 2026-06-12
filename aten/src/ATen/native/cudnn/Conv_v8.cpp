@@ -39,14 +39,13 @@ C10_DIAGNOSTIC_POP()
 #include <dlfcn.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
 // TODO: remove duplicate code in Conv_v7.cpp
-constexpr int64_t operator"" _TiB(unsigned long long n) {
-  return size_t(n) << 40;
+constexpr int64_t operator""_TiB(unsigned long long n) {
+  return static_cast<size_t>(n) << 40;
 }
 
 uint8_t getAlignment(const Tensor& t) {
@@ -93,7 +92,10 @@ cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(
 
   std::vector<int64_t> strides_copy(std::begin(strides), std::end(strides));
   fixSizeOneDimStride<int64_t>(
-      sizes.size(), &sizes[0], (int64_t*)&strides_copy[0], channels_last);
+      sizes.size(),
+      &sizes[0],
+      static_cast<int64_t*>(&strides_copy[0]),
+      channels_last);
   auto r = cudnn_frontend::TensorBuilder()
                .setDim(sizes.size(), sizes.data())
                .setStrides(strides_copy.size(), strides_copy.data())
@@ -252,25 +254,25 @@ struct CacheKeyFusedWrapper : ParamsWrapper<CacheKeyFused> {
   }
 };
 
-static int getLRUCacheLimit() {
+int getLRUCacheLimit() {
   constexpr int DEFAULT_LIMIT =
       10000; // roughly corresponds to 2GiB assuming 200KiB per ExecutionPlan
   // 0 is used to indicate no limit
   // negative values are used to indicate no caching
   static int limit = [&] {
-    const char* val = getenv("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT");
+    const auto val = c10::utils::get_env("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT");
     if (!val) {
       return DEFAULT_LIMIT;
     }
     try {
-      return std::stoi(val);
-    } catch (std::invalid_argument const& e) {
+      return std::stoi(val.value());
+    } catch (std::invalid_argument const&) {
       TORCH_WARN(
           "invalid TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT,",
           " using default LRU cache limit of ",
           DEFAULT_LIMIT,
           " entries.");
-    } catch (std::out_of_range const& e) {
+    } catch (std::out_of_range const&) {
       TORCH_WARN(
           "invalid TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT,",
           " using default LRU cache limit of ",
@@ -337,8 +339,7 @@ struct BenchmarkCache {
             engine_cache_order.begin(), engine_cache_order, it->second.second);
       }
     } else {
-      engine_cache.erase(key);
-      engine_cache.emplace(
+      engine_cache.insert_or_assign(
           key,
           std::make_pair(results, engine_cache_order.end())); // dummy iterator
     }
@@ -347,12 +348,27 @@ struct BenchmarkCache {
 
 // @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to
 // be thread safe across all engines see Limitations in
-// https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
-thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>
-    benchmark_cache;
-thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>
-    benchmark_cache_fused;
+// https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
+//
+// We also leak them due to apparent teardown segfaults observed since cuDNN
+// version 9.10+
+BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>*
+_get_benchmark_cache() {
+  static thread_local BenchmarkCache<
+      cudnn_frontend::ExecutionPlan,
+      CacheKeyWrapper>* benchmark_cache =
+      new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>();
+  return benchmark_cache;
+}
 
+BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>*
+_get_benchmark_cache_fused() {
+  static thread_local BenchmarkCache<
+      cudnn_frontend::ExecutionPlan,
+      CacheKeyFusedWrapper>* benchmark_cache_fused =
+      new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>();
+  return benchmark_cache_fused;
+}
 } // namespace
 
 void run_conv_plan(
@@ -550,8 +566,8 @@ auto build_opgraph_fused(
               y, 'y', key.pod.y_alignment, key.pod.params.memory_format))
           .setpwDesc(actDesc)
           .build();
-  std::array<cudnn_frontend::Operation const*, 4> ops = {
-      &conv_op, &add_op, &add_bias_op, &act_op};
+  auto ops = std::to_array<cudnn_frontend::Operation const*>(
+      {&conv_op, &add_op, &add_bias_op, &act_op});
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
                      .setHandle(handle)
                      .setOperationGraph(ops.size(), ops.data())
@@ -630,14 +646,40 @@ static nlohmann::json errata_json_handle;
 
 bool plan_errata_exception(
     const cudnnHandle_t handle,
-    const std::string& executionPlanTag) {
+    const std::string& executionPlanTag,
+    const Tensor& x) {
   static bool has_json =
       cudnn_frontend::load_from_config(errata_json_handle, "");
-  if (!has_json) {
-    return false;
-  } else {
+  // rule_id is an arbitrary string, here we use the issue number if there is
+  // one
+  static auto hardcoded_errata_json_handle_3d = nlohmann::json::parse(R"(
+            { "version" : 1,
+              "rules"   :
+                [
+                    { "rule_id"             : "163539",
+                      "operation"           : "ConvFwd",
+                      "engine"              : 23,
+                      "cudnn_version_start" : 90800,
+                      "cudnn_version_end"   : 91500
+                    },
+                    { "rule_id"             : "ConvBwdData",
+                      "operation"           : "ConvBwdData",
+                      "engine"              : 23,
+                      "cudnn_version_start" : 8000,
+                      "cudnn_version_end"   : -1
+                    }
+                ]
+            })");
+  if (!has_json && x.dim() > 4) {
+    return cudnn_frontend::check_errata(
+        hardcoded_errata_json_handle_3d, executionPlanTag, handle, []() {
+          return true;
+        });
+  } else if (has_json) {
     return cudnn_frontend::check_errata(
         errata_json_handle, executionPlanTag, handle, []() { return true; });
+  } else {
+    return false;
   }
 }
 
@@ -650,7 +692,7 @@ void generate_and_filter_plans(
     at::DataPtr& workspace_ptr) {
   auto initial_predicate_function =
       [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
-    return plan_errata_exception(handle, plan.getTag());
+    return plan_errata_exception(handle, plan.getTag(), x);
   };
   auto plans =
       generator.cudnnGetPlan(handle, opGraph, initial_predicate_function);
@@ -676,9 +718,9 @@ void generate_and_filter_plans(
       workspace_ptr =
           c10::cuda::CUDACachingAllocator::get()->allocate(max_workspace_size);
       break;
-    } catch (c10::OutOfMemoryError& e) {
+    } catch (c10::OutOfMemoryError&) {
       max_workspace_size /= 2;
-      (void)cudaGetLastError(); // clear CUDA error
+      std::ignore = cudaGetLastError(); // clear CUDA error
       remove_invalid = true;
     }
   }
@@ -874,12 +916,12 @@ void try_plans(
   for (auto& plan : plans) {
     try {
       run_conv_plan(handle, x, y, w, plan, operation);
-      benchmark_cache.update(key, plan);
+      _get_benchmark_cache()->update(key, plan);
       return;
-    } catch (cudnn_frontend::cudnnException& e) {
-    } catch (CuDNNError& e) {
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (cudnn_frontend::cudnnException&) {
+    } catch (CuDNNError&) {
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   TORCH_CHECK(
@@ -898,12 +940,12 @@ void try_plans_fused(
   for (auto& plan : plans) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.update(key, plan);
+      _get_benchmark_cache_fused()->update(key, plan);
       return;
-    } catch (cudnn_frontend::cudnnException& e) {
-    } catch (CuDNNError& e) {
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (cudnn_frontend::cudnnException&) {
+    } catch (CuDNNError&) {
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   TORCH_CHECK(
@@ -925,16 +967,16 @@ bool try_configs(
                       .setHandle(handle)
                       .setEngineConfig(config, opgraph_tag)
                       .build();
-      if (plan_errata_exception(handle, plan.getTag())) {
+      if (plan_errata_exception(handle, plan.getTag(), x)) {
         continue;
       }
       run_conv_plan(handle, x, y, w, plan, operation);
-      benchmark_cache.update(key, plan);
+      _get_benchmark_cache()->update(key, plan);
       return true;
-    } catch (cudnn_frontend::cudnnException& e) {
-    } catch (CuDNNError& e) {
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (cudnn_frontend::cudnnException&) {
+    } catch (CuDNNError&) {
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   return false;
@@ -956,16 +998,16 @@ bool try_configs_fused(
                       .setHandle(handle)
                       .setEngineConfig(config, opgraph_tag)
                       .build();
-      if (plan_errata_exception(handle, plan.getTag())) {
+      if (plan_errata_exception(handle, plan.getTag(), x)) {
         continue;
       }
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.update(key, plan);
+      _get_benchmark_cache_fused()->update(key, plan);
       return true;
-    } catch (cudnn_frontend::cudnnException& e) {
-    } catch (CuDNNError& e) {
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (cudnn_frontend::cudnnException&) {
+    } catch (CuDNNError&) {
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   return false;
@@ -996,13 +1038,13 @@ void run_single_conv(
       deterministic,
       allow_tf32);
   // TODO: is this thread safe if cache is updated? is pointer stale?
-  auto search = benchmark_cache.find(key);
+  auto search = _get_benchmark_cache()->find(key);
   if (search) {
     try {
       run_conv_plan(handle, x, y, w, *search, operation);
       return;
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   if (!benchmark) {
@@ -1096,13 +1138,13 @@ void run_fused_conv(
       groups,
       deterministic,
       allow_tf32);
-  auto search = benchmark_cache_fused.find(key);
+  auto search = _get_benchmark_cache_fused()->find(key);
   if (search) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, *search);
       return;
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   if (!benchmark) {
@@ -1182,6 +1224,9 @@ void raw_cudnn_convolution_forward_out(
     const bool allow_tf32) {
   if (output.numel() == 0) {
     return;
+  }
+  for (long it : dilation) {
+    TORCH_CHECK_VALUE(it > 0, "Expected positive dilation in convolution.");
   }
   if (at::native::cudnnv8_enabled_check_debug()) {
     run_single_conv(
@@ -1348,7 +1393,6 @@ void raw_cudnn_convolution_add_relu_out(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED

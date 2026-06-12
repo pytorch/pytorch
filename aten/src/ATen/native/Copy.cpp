@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
-#include <ATen/native/Copy.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -15,7 +14,6 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
@@ -36,8 +34,10 @@
 #endif
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmConvert.h>
+C10_DIAGNOSTIC_POP()
 #endif
 
 namespace {
@@ -59,20 +59,20 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                              \
         AT_DISPATCH_V2(                             \
-            TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2,            \
-            kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
+            TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, \
+            AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #else
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)     \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(    \
-            kComplexHalf, kHalf, kBool, kBFloat16, \
-            TYPE, NAME, __VA_ARGS__)
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(    \
+            kComplexHalf, kBComplex32, kHalf,      \
+            kBool, kBFloat16, TYPE, NAME,          \
+            __VA_ARGS__)
 #endif
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
 void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t BLOCK_SZ;
+  int64_t BLOCK_SZ = 0;
   if (self.scalar_type() == kByte) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BLOCK_SZ = 120;
@@ -351,9 +351,7 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
-  auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
-    NoNamesGuard guard;
     if (self._is_zerotensor()) {
      TORCH_CHECK(false, "ZeroTensors are immutable. Please materialize the tensor using `.clone()`, if you want a mutable zero tensor.");
     }
@@ -362,7 +360,6 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
     }
     copy_impl(self, src, non_blocking);
   }
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 

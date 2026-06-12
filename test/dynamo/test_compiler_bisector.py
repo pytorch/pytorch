@@ -9,21 +9,22 @@ import torch._prims_common as utils
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
+from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 aten = torch.ops.aten
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32
 
 
-@requires_cuda
+@unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
 class TestCompilerBisector(TestCase):
     test_ns = "_test_bisector"
 
@@ -31,22 +32,22 @@ class TestCompilerBisector(TestCase):
         if hasattr(torch.ops, self.test_ns):
             delattr(torch.ops, self.test_ns)
         if hasattr(self, "lib"):
-            del self.lib.m
-            del self.lib
+            self.lib._destroy()
 
     def get_op(self, name):
         return getattr(getattr(torch.ops, self.test_ns), name).default
 
     def get_lib(self):
-        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        lib = Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
         self.lib = lib
         return lib
 
     def test_bad_decomp(self):
-        mod = import_module("torch._inductor.compile_fx")
+        import_module("torch._inductor.compile_fx")
 
         def bad_exp_decomp(self, rate=1, generator=None):
-            assert generator is None
+            if generator is not None:
+                raise AssertionError("Expected generator to be None")
             torch._check(
                 not utils.is_complex_dtype(self.dtype)
                 and not utils.is_integer_dtype(self.dtype)
@@ -84,9 +85,9 @@ class TestCompilerBisector(TestCase):
             torch._dynamo.reset()
             with patch_exp_decomp():
                 vq_compiled = torch.compile(vq)
-                x = torch.randn(4, 400, 256).cuda()
+                x = torch.randn(4, 400, 256, device=GPU_TYPE)
                 with torch._dynamo.utils.preserve_rng_state():
-                    out = vq(x)
+                    vq(x)
                 out_compiled = vq_compiled(x)
 
             return not out_compiled.isnan().any()
@@ -97,19 +98,23 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.bisect_number, 1)
         self.assertTrue("aten.exponential" in out.debug_info)
 
-    def test_joint_graph(self):
+    def test_pre_grad(self):
+        import operator
+
         from torch._inductor import config
 
-        def pass_fn(graph: torch.fx.Graph):
-            nodes = graph.find_nodes(
-                op="call_function", target=torch.ops.aten.add.Tensor
-            )
-            assert len(nodes) == 1
-            args = list(nodes[0].args)
-            args[1] = 2
-            nodes[0].args = tuple(args)
+        # similar setup to test_joint_graph (see below)
+        class CustomPrePass(CustomGraphPass):
+            def __call__(self, graph: torch.fx.Graph):
+                nodes = graph.find_nodes(op="call_function", target=operator.add)
+                if len(nodes) != 1:
+                    raise AssertionError(f"Expected 1 node, got {len(nodes)}")
+                args = list(nodes[0].args)
+                args[1] = 2
+                nodes[0].args = tuple(args)
 
-        config.joint_custom_post_pass = pass_fn
+            def uuid(self):
+                return hash("TestCompilerBisector.test_pre_grad.pass_class")
 
         def foo(x):
             return x + 1
@@ -117,14 +122,52 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            inp = torch.rand([10], device="cuda")
+            inp = torch.rand([10])
 
             out = foo(inp)
             out_c = torch.compile(foo)(inp)
 
             return torch.allclose(out, out_c)
 
-        out = CompilerBisector.do_bisect(test_fn)
+        with config.patch(pre_grad_custom_pass=CustomPrePass()):
+            out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "pre_grad_passes")
+        self.assertEqual(out.bisect_number, 3)
+        self.assertTrue("pre_grad_custom_pass" in out.debug_info)
+
+    def test_joint_graph(self):
+        from torch._inductor import config
+
+        class CustomPostPass(CustomGraphPass):
+            def __call__(self, graph: torch.fx.Graph):
+                nodes = graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.add.Tensor
+                )
+                if len(nodes) != 1:
+                    raise AssertionError(f"Expected 1 node, got {len(nodes)}")
+                args = list(nodes[0].args)
+                args[1] = 2
+                nodes[0].args = tuple(args)
+
+            def uuid(self):
+                return hash("TestCompilerBisector.test_joint_graph.pass_class")
+
+        def foo(x):
+            return x + 1
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            inp = torch.rand([10], device=GPU_TYPE)
+
+            out = foo(inp)
+            out_c = torch.compile(foo)(inp)
+
+            return torch.allclose(out, out_c)
+
+        with config.patch(joint_custom_post_pass=CustomPostPass()):
+            out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "joint_graph_passes")
         self.assertEqual(out.bisect_number, 4)
@@ -132,7 +175,7 @@ class TestCompilerBisector(TestCase):
 
     def test_rng(self):
         def foo():
-            return torch.rand([10], device="cuda") + 1
+            return torch.rand([10], device=GPU_TYPE) + 1
 
         def test_fn():
             torch._dynamo.reset()
@@ -150,7 +193,6 @@ class TestCompilerBisector(TestCase):
         self.assertTrue("inductor_fallback_random" in out.debug_info)
 
     def test_crossref(self):
-        test_ns = "bisect_ops"
         with _scoped_library(self.test_ns, "FRAGMENT") as lib:
             lib.define("foo(Tensor x) -> Tensor")
             op = self.get_op("foo")
@@ -187,7 +229,7 @@ class TestCompilerBisector(TestCase):
                 torch._dynamo.reset()
 
                 try:
-                    torch.testing.assert_allclose(torch.compile(op)(x), op(x))
+                    torch.testing.assert_close(torch.compile(op)(x), op(x))
                 except Exception:
                     return False
                 return True
@@ -207,7 +249,7 @@ class TestCompilerBisector(TestCase):
 
             dtype = torch.bfloat16
             torch.manual_seed(0)
-            inp = torch.randn(16, 16, 768, dtype=dtype, device="cuda")
+            inp = torch.randn(16, 16, 768, dtype=dtype, device=GPU_TYPE)
             eager_scale = calculate_scale(inp)
             compile_scale = torch.compile(calculate_scale)(inp)
 
@@ -225,7 +267,7 @@ class TestCompilerBisector(TestCase):
                 def my_func(x):
                     return ((x * -1) - 0.01).relu()
 
-                inp = torch.rand([100], device="cuda")
+                inp = torch.rand([100], device=GPU_TYPE)
 
                 return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
 
@@ -243,6 +285,131 @@ class TestCompilerBisector(TestCase):
         out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "eager")
         self.assertEqual(out.subsystem, None)
+
+    @config.patch(
+        {
+            "test_configs.bisect_pre_grad_graph": True,
+            "test_configs.bisect_keep_custom_backend_for_inductor": True,
+        }
+    )
+    def test_bisect_pre_grad_graph(self):
+        def f(x):
+            for _ in range(5):
+                x = x + 1
+            return x.relu()
+
+        class MyBackend:
+            def __call__(self, gm, example_inputs):
+                node_idx = 0
+
+                def node_to_graph_id(node):
+                    nonlocal node_idx
+                    out = 0 if node_idx < 3 else 1
+                    node_idx += 1
+                    return out
+
+                split_gm = torch.fx.passes.split_module.split_module(
+                    gm, None, node_to_graph_id, keep_original_order=True
+                )
+
+                for name, submod in split_gm.named_modules():
+                    if "submod_" in name:
+                        # the test case is simple enough that using
+                        # the original example_inputs works for sub
+                        # module
+                        submod.forward = torch._inductor.standalone_compile(
+                            submod,
+                            example_inputs,
+                            dynamic_shapes="from_example_inputs",
+                            options={},
+                        )
+
+                return split_gm
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            x = torch.randn(1024, device=GPU_TYPE)
+            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
+                opt_f = torch.compile(f, backend=MyBackend())
+                return torch.allclose(opt_f(x), f(x))
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "pre_grad_graph")
+        self.assertEqual(out.bisect_number, 1)
+
+    @requires_cuda
+    def test_cudagraph_bisect_max(self):
+        """Test that cudagraph bisector can limit number of cudagraphed graphs."""
+        import os
+        from unittest.mock import patch
+
+        from torch._dynamo.utils import counters
+        from torch._inductor.compiler_bisector import get_env_val
+
+        def foo(x):
+            return x + 1
+
+        def bar(x):
+            return x * 2
+
+        env = {
+            "TORCH_BISECT_BACKEND": "inductor",
+            "TORCH_BISECT_SUBSYSTEM": "cudagraphs",
+            "TORCH_BISECT_MAX": "0",
+        }
+
+        with patch.dict(os.environ, env):
+            get_env_val.cache_clear()
+            CompilerBisector.reset_counters()
+            torch._dynamo.reset()
+            counters.clear()
+            CompilerBisector.bisection_enabled = True
+            try:
+                foo_c = torch.compile(foo, mode="reduce-overhead")
+                bar_c = torch.compile(bar, mode="reduce-overhead")
+                x = torch.randn(10, device=GPU_TYPE)
+                foo_c(x)
+                bar_c(x)
+
+                # With max=0, all graphs should be skipped
+                self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
+            finally:
+                CompilerBisector.bisection_enabled = False
+                get_env_val.cache_clear()
+
+    def test_bisect_run_debuginfo(self):
+        import os
+        import subprocess
+        from pathlib import Path
+        from unittest.mock import patch
+
+        test_file = (
+            Path(__file__).resolve().parent / "_test_compiler_bisector_run_helper.py"
+        )
+        # Minimize test runtime by searching only the subsystem that's broken.
+        with patch.dict(
+            os.environ, {"TORCH_BISECT_BACKEND": "aot_eager_decomp_partition"}
+        ):
+            output = subprocess.run(
+                [
+                    "python",
+                    "-m",
+                    "torch._inductor.compiler_bisector",
+                    "run",
+                    "python",
+                    str(test_file),
+                ],
+                stdout=subprocess.PIPE,
+                check=True,
+                text=True,
+                timeout=300,
+            )
+        expected_result = (
+            "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
+        )
+        self.assertIn(expected_result, output.stdout)
 
 
 if __name__ == "__main__":

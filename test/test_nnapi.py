@@ -4,7 +4,6 @@
 import ctypes
 import os
 import unittest
-from typing import Tuple
 
 import torch
 from torch.backends._nnapi.prepare import convert_model_to_nnapi
@@ -29,6 +28,7 @@ def nhwc(t):
 )
 class TestNNAPI(TestCase):
     def setUp(self):
+        super().setUp()
         # Avoid saturation in fbgemm
         torch.backends.quantized.engine = "qnnpack"
 
@@ -700,7 +700,7 @@ class TestNNAPI(TestCase):
 
     def test_multi_output(self):
         class MultiModel(torch.nn.Module):
-            def forward(self, lhs, rhs) -> Tuple[torch.Tensor, torch.Tensor]:
+            def forward(self, lhs, rhs) -> tuple[torch.Tensor, torch.Tensor]:
                 the_sum = lhs + rhs
                 the_diff = lhs - rhs
                 return the_sum, the_diff
