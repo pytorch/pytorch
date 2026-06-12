@@ -34,8 +34,6 @@ TEST_MTIA = not (
 class TestCppExtensionMTIABackend(common.TestCase):
     """Tests MTIA backend with C++ extensions."""
 
-    module = None
-
     def setUp(self):
         super().setUp()
         # cpp extensions use relative paths. Those paths are relative to
