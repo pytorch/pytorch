@@ -1070,7 +1070,7 @@ def run_joint_graph_passes_on_hops(
     #   outputs - (*grad_outs)  -- Different
     # Here both input and output signature change. The output signature handling
     # is quite easy because the grads_out are sitting at the right place, so we
-    # dont have to do anything.
+    # don't have to do anything.
     #
     # For the input signature, we have to collect the saved tensors from the
     # corresponding forward graph output. We collect all saved_tensors when we

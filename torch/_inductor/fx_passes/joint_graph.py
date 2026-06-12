@@ -489,7 +489,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
 
         for node, value in node_replacements.items():
-            # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
+            # we don't have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
             # hasn't shown up to be important yet
             if "val" not in node.meta:
                 # This can only happen in AOTI
