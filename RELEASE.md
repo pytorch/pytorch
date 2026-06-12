@@ -51,6 +51,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | C++ | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- | --- |
+| 2.13 | >=3.10, <=(3.15, 3.15t experimental) | C++20 | CUDA 12.6 (CUDNN 9.10.2.21) (NCCL 2.29.3), CUDA 13.0 (CUDNN 9.20.0.48) (NCCL 2.29.7) | CUDA 13.2 (CUDNN 9.20.0.48) (NCCL 2.29.7) | ROCm 7.2 |
 | 2.12 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 13.0 (CUDNN 9.20.0.48) | CUDA 13.2 (CUDNN 9.20.0.48) | ROCm 7.2 |
 | 2.11 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.17.1.4), CUDA 13.0 (CUDNN 9.17.1.4) | -- | ROCm 7.2 |
 | 2.10 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.15.1.9) | ROCm 7.1 |
@@ -69,7 +70,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 ### PyTorch CUDA Support Matrix
 
-For Release 2.12 PyTorch Supports following CUDA Architectures:
+For Release 2.12 and 2.13 PyTorch Supports following CUDA Architectures:
 
 | CUDA | architectures supported for Linux x86 and Windows builds | notes |
 | --- | --- | --- |

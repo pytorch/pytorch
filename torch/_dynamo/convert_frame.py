@@ -413,11 +413,38 @@ def _has_condition_dependent_skip_guards(
     if not _has_tensor_related_state(code, output):
         return False
 
+    tensor_state_names = {
+        "shape",
+        "size",
+        "stride",
+        "dim",
+        "ndim",
+        "dtype",
+        "device",
+        "len",
+        "requires_grad",
+        "is_complex",
+        "is_floating_point",
+        "is_inference",
+        "is_nested",
+        "is_sparse",
+        "is_mkldnn",
+        "layout",
+        "numel",
+        "nelement",
+        "is_contiguous",
+        "is_cuda",
+        "is_meta",
+        "is_quantized",
+        "storage_offset",
+    }
+    has_tensor_state_name = bool(set(code.co_names) & tensor_state_names)
+
     for guard in output.guards:
         guard_create_fn_name = guard.create_fn_name()
-        if guard_create_fn_name == "SHAPE_ENV":
+        if guard_create_fn_name == "SHAPE_ENV" and has_tensor_state_name:
             return True
-        if guard_create_fn_name == "TENSOR_MATCH":
+        if guard_create_fn_name == "TENSOR_MATCH" and has_tensor_state_name:
             name = guard.name
             if name.startswith(("L[", "G[")):
                 return True
@@ -432,8 +459,38 @@ def _has_condition_dependent_skip_guards(
             continue
         if name.startswith(("L['___", "L['__nested_", "G['___", "G['__nested_")):
             continue
+        if name.startswith("G[") and not _is_condition_dependent_global_guard(
+            name, output
+        ):
+            continue
         return True
     return False
+
+
+def _is_condition_dependent_global_guard(name: str, output: OutputGraphCommon) -> bool:
+    key_start = len("G[") + 1
+    key_end = name.find("']", key_start)
+    if key_end == -1:
+        return False
+
+    obj = output.global_scope.get(name[key_start:key_end])
+    rest = name[key_end + 2 :]
+    if rest.startswith("."):
+        for attr in rest[1:].split("."):
+            try:
+                attrs = vars(obj)
+            except TypeError:
+                return False
+            if attr not in attrs:
+                return False
+            obj = attrs[attr]
+
+    return not (
+        isinstance(obj, ModuleType)
+        or callable(obj)
+        or inspect.isclass(obj)
+        or _is_torch_tensor_related_callable(obj)
+    )
 
 
 def _has_unstable_typing_guards(output: OutputGraphCommon) -> bool:

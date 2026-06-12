@@ -16,9 +16,15 @@ from torch.testing._internal.common_utils import AlwaysWarnTypedStorageRemoval
 _variable = 0
 _variable_2 = 0
 _condition_dependent_skip_flag = False
+_condition_dependent_skip_module = ModuleType("_condition_dependent_skip_module")
+_condition_dependent_skip_module.flag = False  # type: ignore[attr-defined]
 _P = ParamSpec("_P")
 _paramspec_module = ModuleType("_paramspec_module")
 _paramspec_module._P = ParamSpec("_paramspec_module._P")  # type: ignore[attr-defined]
+
+
+class _ConditionDependentSkipGate:
+    flag = False
 
 
 def user_function():
@@ -514,6 +520,58 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         finally:
             _condition_dependent_skip_flag = False
 
+    def test_condition_dependent_skip_with_module_attr_global_guard(self):
+        def fn(x):
+            if _condition_dependent_skip_module.flag:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+
+        try:
+            _condition_dependent_skip_module.flag = True
+            self.assertEqual(opt_fn(x), x - 1)
+            self.assertEqual(counter.frame_count, 0)
+
+            _condition_dependent_skip_module.flag = False
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(counter.frame_count, 1)
+        finally:
+            _condition_dependent_skip_module.flag = False
+
+    def test_condition_dependent_skip_with_class_attr_global_guard(self):
+        def fn(x):
+            if _ConditionDependentSkipGate.flag:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+
+        try:
+            _ConditionDependentSkipGate.flag = True
+            self.assertEqual(opt_fn(x), x - 1)
+            self.assertEqual(counter.frame_count, 0)
+
+            _ConditionDependentSkipGate.flag = False
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(counter.frame_count, 1)
+        finally:
+            _ConditionDependentSkipGate.flag = False
+
     def test_condition_dependent_skip_with_tensor_shape_guard(self):
         def fn(x):
             if x.shape[0] == 3:
@@ -578,6 +636,51 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 0)
 
         self.assertEqual(opt_fn(x_no_grad), x_no_grad + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_tensor_numel_guard(self):
+        def fn(x):
+            if x.numel() == 3:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        x3 = torch.ones(3)
+        x4 = torch.ones(4)
+        self.assertEqual(opt_fn(x3), x3 - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x4), x4 + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_tensor_storage_offset_guard(self):
+        def fn(x):
+            if x.storage_offset() == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        base = torch.ones(4)
+        x_offset_0 = base[:3]
+        x_offset_1 = base[1:]
+        self.assertEqual(opt_fn(x_offset_0), x_offset_0 - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x_offset_1), x_offset_1 + 1)
         self.assertEqual(counter.frame_count, 1)
 
     def test_condition_dependent_skip_with_tensor_predicate_guard(self):
