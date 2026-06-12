@@ -901,7 +901,7 @@ void enableProfilerWithEventPostProcess(
       "On-demand profiling does not support post processing callback");
 
   enableProfiler(config, activities, scopes);
-  if (config.global()) {
+  if (config.pushGlobalCallbacks()) {
     std::shared_ptr<KinetoThreadLocalState> state_ptr =
         KinetoThreadLocalState::getGlobal();
     state_ptr->setEventPostProcessingCallback(std::move(cb));
@@ -916,7 +916,7 @@ void enableProfiler(
     const std::set<torch::profiler::impl::ActivityType>& activities,
     const std::unordered_set<at::RecordScope>& scopes) {
   const auto has_cpu = activities.count(ActivityType::CPU);
-  bool already_enabled = config.global()
+  bool already_enabled = config.pushGlobalCallbacks()
       ? KinetoThreadLocalState::getGlobal() != nullptr
       : KinetoThreadLocalState::getTLS() != nullptr;
   TORCH_CHECK(
