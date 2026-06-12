@@ -179,7 +179,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertTrue(random._rng_tracker.distribute_region_enabled)
 
         # allgather the local tensors
-        gathered_local_tensors = funcol.all_gather_tensor(
+        gathered_local_tensors = funcol.all_gather_single(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -211,7 +211,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertTrue(not random._rng_tracker.distribute_region_enabled)
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_tensor(
+        local_tensor = funcol.all_gather_single(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -254,7 +254,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_tensor(
+        weight_gather = funcol.all_gather_single(
             weight_local,
             gather_dim=0,
             group=WORLD,
@@ -315,7 +315,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_tensor(
+        weight_gather = funcol.all_gather_single(
             weight_local,
             gather_dim=0,
             group=WORLD,
@@ -478,7 +478,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         WORLD = torch.distributed.group.WORLD
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
-        tensor_gather = funcol.all_gather_tensor(
+        tensor_gather = funcol.all_gather_single(
             spmd_dtensor.to_local(),
             gather_dim=0,
             group=WORLD,
@@ -516,7 +516,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         dtensor = dropout(dtensor)
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_tensor(
+        local_tensor = funcol.all_gather_single(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -546,7 +546,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             torch.distributed.tensor.randn,
         ]:
             dtensor = fn(size, device_mesh=device_mesh, placements=[Shard(1)])
-            local_tensor = funcol.all_gather_tensor(
+            local_tensor = funcol.all_gather_single(
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
 
@@ -568,7 +568,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             # we should set manual seed to the same value on all SPMD ranks
             torch.manual_seed(0)
             dtensor = fn(size, device_mesh=device_mesh, placements=[Replicate()])
-            local_tensor = funcol.all_gather_tensor(
+            local_tensor = funcol.all_gather_single(
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
 
@@ -782,7 +782,7 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         """Assert all ranks produced identical results (for Replicate placement)."""
         for i in range(len(results)):
             local_result = results[i]
-            gathered = funcol.all_gather_tensor(
+            gathered = funcol.all_gather_single(
                 local_result, gather_dim=0, group=(device_mesh, 0)
             ).wait()
             local_size = local_result.shape[0]
@@ -996,7 +996,7 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_tensor(
+        weight_gather = funcol.all_gather_single(
             weight_local,
             gather_dim=0,
             group=WORLD,
