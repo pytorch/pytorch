@@ -97,6 +97,7 @@ from torch._guards import (
     GuardEnvExpr,
     GuardSource,
     Source,
+    StorageMetadata,
     StorageOverlap,
 )
 from torch._inductor.utils import IndentedBuffer
@@ -4924,6 +4925,20 @@ class CheckFunctionManager:
                     None,
                 )
                 add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageMetadata):
+                metadata_code_parts = [
+                    (
+                        f"{guard.input_source.name}.untyped_storage().size() == "
+                        f"{guard.size}"
+                    ),
+                    f"{guard.input_source.name}.storage_offset() == {guard.offset}",
+                ]
+                builder.add_python_lambda_leaf_guard_to_root(
+                    metadata_code_parts,
+                    metadata_code_parts,
+                )
+                for code_part in metadata_code_parts:
+                    add_code_part(code_part, None, True)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 

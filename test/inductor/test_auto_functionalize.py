@@ -2097,10 +2097,10 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                 # The underlying pool must reflect both mutations through the
                 # shared storage.
                 self.assertEqual(pool_compiled, pool_eager)
-                # The pass must fire once per auto_functionalized_v2 node;
-                # we have two dtype-view mutations so the counter is 2.
+                # The pass must fire for the consolidated auto_functionalized_v2
+                # node that handles both dtype-view mutations.
                 self.assertEqual(
-                    counters["inductor"]["fix_auto_functionalized_dtype_views"], 2
+                    counters["inductor"]["fix_auto_functionalized_dtype_views"], 1
                 )
 
 

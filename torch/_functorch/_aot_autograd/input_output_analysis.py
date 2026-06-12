@@ -195,6 +195,14 @@ def create_synthetic_base_metadata(
                 if len(outer_indices) > 1
                 else m.input_info[outer_indices[0]].mutates_storage_metadata
             ),
+            mutation_requires_storage_copy=(
+                any(
+                    m.input_info[x].mutation_requires_storage_copy
+                    for x in outer_indices
+                )
+                if len(outer_indices) > 1
+                else m.input_info[outer_indices[0]].mutation_requires_storage_copy
+            ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
