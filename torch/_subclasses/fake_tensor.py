@@ -186,6 +186,10 @@ class MetadataMismatchError(RuntimeError):
     reason: str
 
 
+class FakeTensorInternalError(RuntimeError):
+    pass
+
+
 class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
@@ -2361,19 +2365,19 @@ class FakeTensorMode(TorchDispatchMode):
                     raise AssertionError(f"Expected Tensor, got {type(b)}")
                 assert_metadata_eq(assert_eq, a, b)
             else:
-                raise RuntimeError(f"Unsupported type {type(a)}")
+                raise FakeTensorInternalError(f"Unsupported type {type(a)}")
 
         try:
             true_output = self._dispatch_impl(func, types, args, kwargs)
         except Exception as e:
-            raise RuntimeError(
+            raise FakeTensorInternalError(
                 f"FakeTensor cache crosscheck failure: func={func}, "
                 f"args={args}, kwargs={kwargs}: Dispatch raised={e}"
             ) from e
         try:
             assert_helper(true_output, output)
         except Exception as e:
-            raise RuntimeError(
+            raise FakeTensorInternalError(
                 f"FakeTensor cache crosscheck failure: func={func}, "
                 f"args={args}, kwargs={kwargs}"
             ) from e
@@ -3673,7 +3677,7 @@ def _infer_fake_from_real_tensor(
     mode: FakeTensorMode, op: torch._ops.OpOverload, real_out: torch.Tensor
 ) -> torch.Tensor:
     def unsupported(reason: str) -> None:
-        raise RuntimeError(
+        raise FakeTensorInternalError(
             f"propagate_real_tensors: we cannot infer a Fake kernel "
             f"(meta kernel) for operator {op._name} because {reason}. "
             f"Please use torch.library.register_fake to add a Fake kernel."
@@ -3740,7 +3744,7 @@ def inferred_fake_kernel_from_real_out(
     # to avoid baking non-symbolic float/int outputs into the graph.
     real_flat_out, spec = pytree.tree_flatten(real_out)
     if not all(isinstance(t, torch.Tensor) for t in real_flat_out):
-        raise RuntimeError(
+        raise FakeTensorInternalError(
             f"propagate_real_tensors: we don't support operators that return "
             f"non-Tensors. Got {op._schema}"
         )
