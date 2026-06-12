@@ -59,9 +59,8 @@ static void forked_autograd_child() {
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
 #if !defined(WIN32)
-  static c10::once_flag flag;
-  c10::call_once(
-      flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_autograd_child);
 #endif
 }
 
@@ -76,17 +75,17 @@ inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
 std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
 #define COMPILED_AUTOGRAD_POISON \
   reinterpret_cast<Engine::compiled_autograd_fn>(1)
-std::atomic<int32_t> num_threads_in_backwards;
+std::atomic<int32_t> num_threads_in_compiled_autograd;
 struct CompiledAutogradThreadingDebugCheck {
   CompiledAutogradThreadingDebugCheck() {
-    num_threads_in_backwards++;
+    num_threads_in_compiled_autograd++;
   }
   ~CompiledAutogradThreadingDebugCheck() {
     release();
   }
   void release() {
     if (std::exchange(incremented, false)) {
-      num_threads_in_backwards--;
+      num_threads_in_compiled_autograd--;
     }
   }
 
@@ -273,8 +272,7 @@ bool ReadyQueue::empty() const {
   return heap_.empty();
 }
 
-Engine::Engine()
-    : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_count_(0) {}
+Engine::Engine() : non_reentrant_device_thread_count_(0) {}
 
 Engine::~Engine() {
   stop();
@@ -290,8 +288,10 @@ void Engine::stop() {
   stopped_ = true;
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
-  auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
-  auto wait_duration = wait_duration_str ? std::atof(wait_duration_str) : 10.0;
+  auto wait_duration_str =
+      c10::utils::get_env("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
+  auto wait_duration =
+      wait_duration_str ? std::atof(wait_duration_str->c_str()) : 10.0;
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
     noBackward = noBackward && queue->empty();
@@ -398,7 +398,7 @@ void GraphTaskGuard::restore_current_graph_task() {
   current_graph_task = std::move(last_graph_task_);
 }
 
-// The current graph task's exec_info is being used to trim unnecessary edegs
+// The current graph task's exec_info is being used to trim unnecessary edges
 // during node evaluation, see `Node.task_should_compute_output()` function.
 const std::unordered_map<Node*, GraphTask::ExecInfo>*
 get_current_graph_task_exec_info() {
@@ -610,7 +610,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
   }
 }
 
-// Reentrant call will re-use the graph_task's owner thread ready_queue for
+// Reentrant call will reuse the graph_task's owner thread ready_queue for
 // queueing tasks (NOTE: this is not true in the async_mode of the engine).
 // While we can create separate ready queue for each new reentrant
 // thread, but sharing the same cpu_ready_queue with parent thread is a
@@ -645,7 +645,7 @@ void Engine::reentrant_thread_init() {
 
 void Engine::thread_on_exception(
     const std::shared_ptr<GraphTask>& graph_task,
-    const std::shared_ptr<Node>& fn,
+    const c10::intrusive_ptr<Node>& fn,
     std::exception& e) {
   graph_task->set_exception(std::current_exception(), fn);
 }
@@ -663,7 +663,7 @@ GraphTask::GraphTask(
     bool exit_on_error)
     : keep_graph_(keep_graph),
       graph_roots_(std::move(graph_roots)),
-      owner_(NO_DEVICE),
+
       reentrant_depth_(reentrant_depth),
       exit_on_error_(exit_on_error),
       cpu_ready_queue_(std::move(cpu_ready_queue)),
@@ -706,9 +706,8 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
 }
 
 void GraphTask::exec_post_processing() {
-  if (!not_ready_.empty()) {
-    throw std::runtime_error("could not compute gradients for some functions");
-  }
+  TORCH_CHECK(
+      not_ready_.empty(), "could not compute gradients for some functions");
 
   // set the thread_local current_graph_task_ as more callbacks can be installed
   // by existing final callbacks.
@@ -781,7 +780,8 @@ void GraphTask::exec_post_processing() {
   }
 }
 
-void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
+void GraphTask::set_exception_without_signal(
+    const c10::intrusive_ptr<Node>& fn) {
   if (!has_error_.exchange(true)) {
     if (AnomalyMode::is_enabled() && fn) {
       fn->metadata()->print_stack(fn->name());
@@ -791,7 +791,7 @@ void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
 
 void GraphTask::set_exception(
     std::exception_ptr eptr,
-    const std::shared_ptr<Node>& fn) {
+    const c10::intrusive_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
     future_result_->setError(std::move(eptr));
@@ -869,11 +869,12 @@ void set_device(int device) {
 
 // Given an Edge or optional<InputMetdata>, return the InputMetadata
 template <typename T>
-const InputMetadata& get_input_metadata(const T& thing);
+const static InputMetadata& get_input_metadata(const T& thing);
 
 template <>
-const InputMetadata& get_input_metadata<c10::optional<InputMetadata>>(
-    const c10::optional<InputMetadata>& thing) {
+const InputMetadata& get_input_metadata<std::optional<InputMetadata>>(
+    const std::optional<InputMetadata>& thing) {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return thing.value();
 }
 
@@ -884,11 +885,11 @@ const InputMetadata& get_input_metadata<Edge>(const Edge& thing) {
 
 // Given an Edge or optional<InputMetdata>, return if there is an InputMetadata.
 template <typename T>
-bool has_input_metadata(const T& thing);
+static bool has_input_metadata(const T& thing);
 
 template <>
-bool has_input_metadata<c10::optional<InputMetadata>>(
-    const c10::optional<InputMetadata>& thing) {
+bool has_input_metadata<std::optional<InputMetadata>>(
+    const std::optional<InputMetadata>& thing) {
   return thing.has_value();
 }
 
@@ -897,11 +898,24 @@ bool has_input_metadata<Edge>(const Edge& thing) {
   return thing.is_valid();
 }
 
+std::vector<std::optional<InputMetadata>> collect_input_metadata(
+    const edge_list& edges) {
+  std::vector<std::optional<InputMetadata>> input_metadata;
+  for (const auto& edge : edges) {
+    if (!edge.is_valid()) {
+      input_metadata.emplace_back(std::nullopt);
+      continue;
+    }
+    input_metadata.emplace_back(edge.function->input_metadata(edge.input_nr));
+  }
+  return input_metadata;
+}
+
 // Given an vector<Edge> or vector<optional<InputMetdata>>, validate the
 // outputs. This involves using the InputMetadata to check the outputs and also
 // potentially calling .sum_to on the outputs.
 template <typename T>
-void validate_outputs_impl(
+static void validate_outputs_impl(
     const std::vector<T>& input_metadata_container,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
@@ -909,7 +923,7 @@ void validate_outputs_impl(
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
     ss << input_metadata_container.size() << ", but got " << grads.size();
-    TORCH_CHECK(false, format_error(ss.str()));
+    TORCH_CHECK(false, format_error(std::move(ss).str()));
   }
   for (const auto i : c10::irange(grads.size())) {
     if (!has_input_metadata(input_metadata_container[i])) {
@@ -934,15 +948,17 @@ void validate_outputs_impl(
     TORCH_CHECK(
         isFloatingType(grad.scalar_type()) ||
         (input_is_complex == grad_is_complex));
-    if (c10::typeMetaToScalarType(metadata.options().dtype()) !=
-        grad.scalar_type()) {
-      grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
-    }
-    if (grad.dtype() != metadata.dtype()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected dtype ";
-      ss << metadata.dtype() << " but got " << grad.dtype();
-      TORCH_CHECK(false, format_error(ss.str()));
+
+    if (metadata.grad_dtype().has_value()) {
+      if (grad.scalar_type() != metadata.grad_dtype().value()) {
+        grad = grad.to(metadata.grad_dtype().value());
+      }
+      if (grad.scalar_type() != metadata.grad_dtype().value()) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected dtype ";
+        ss << metadata.grad_dtype().value() << " but got " << grad.dtype();
+        TORCH_CHECK(false, format_error(std::move(ss).str()));
+      }
     }
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
@@ -959,22 +975,22 @@ void validate_outputs_impl(
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected layout ";
         ss << metadata.layout() << " but got " << grad.layout();
-        TORCH_CHECK(false, format_error(ss.str()));
+        TORCH_CHECK(false, format_error(std::move(ss).str()));
       }
     }
 
     if (grad.device() != metadata.device()) {
-      // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but
-      // should be eventually removed
-      if (!(metadata.is_tensor_subclass() ||
-            grad.unsafeGetTensorImpl()->is_python_dispatch())) {
-        if (grad.dim() == 0) {
-          grad = grad.to(metadata.device());
-        } else {
+      if (grad.dim() == 0) {
+        grad = grad.to(metadata.device());
+      } else {
+        // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but
+        // should be eventually removed
+        if (!(metadata.is_tensor_subclass() ||
+              grad.unsafeGetTensorImpl()->is_python_dispatch())) {
           std::stringstream ss;
           ss << "invalid gradient at index " << i << " - expected device ";
           ss << metadata.device() << " but got " << grad.device();
-          TORCH_CHECK(false, format_error(ss.str()));
+          TORCH_CHECK(false, format_error(std::move(ss).str()));
         }
       }
     }
@@ -991,7 +1007,7 @@ void validate_outputs(
 }
 
 void validate_outputs(
-    const std::vector<c10::optional<InputMetadata>>& input_metadata,
+    const std::vector<std::optional<InputMetadata>>& input_metadata,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
   return validate_outputs_impl(input_metadata, grads, format_error);
@@ -1050,12 +1066,39 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // The InputBuffer::adds that supplied incoming grads took pains to
-  // ensure they're safe to consume in the context of the present
-  // func's stream (if applicable). So we guard onto that stream
-  // before working with the grads in any capacity.
-  auto opt_parent_stream = (*func).stream();
+  // The parent stream was cached on the InputBuffer by InputBuffer::add()
+  // as the consuming node's canonical stream (possibly overridden by the
+  // stale-capture path when a stale non-capturing node stream collides
+  // with a capturing producer). Reading the cached value here keeps the
+  // override decision in one place and avoids re-running the detection
+  // per node visit. For code paths where InputBuffer::add() was never
+  // called with an accelerator input (e.g. CPU-only backward), fall back
+  // to the node's canonical stream. See
+  // InputBuffer::opt_overridden_consumer_stream for the invariant.
+  auto opt_parent_stream = inputs.opt_overridden_consumer_stream.has_value()
+      ? inputs.opt_overridden_consumer_stream
+      : func->stream();
+
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
+
+  // Ensure that the incoming gradients are ready
+  for (size_t pos = 0; pos < inputs.ready_events.size(); ++pos) {
+    if (!inputs.buffer[pos].defined()) {
+      continue;
+    }
+    const auto device = inputs.buffer[pos].device();
+    bool is_accelerator = at::accelerator::isAccelerator(device.type());
+    if (!is_accelerator) {
+      continue;
+    }
+    auto& opt_ready_stream = inputs.ready_streams[pos];
+    auto& opt_ready_event = inputs.ready_events[pos];
+    TORCH_INTERNAL_ASSERT(opt_ready_stream && opt_parent_stream);
+    if (*opt_parent_stream != *opt_ready_stream) {
+      TORCH_INTERNAL_ASSERT(opt_ready_event);
+      opt_parent_stream->wait(opt_ready_event.value());
+    }
+  }
 
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
@@ -1072,7 +1115,6 @@ void Engine::evaluate_function(
           *func, InputBuffer::variables(std::move(inputs)));
     }
     if (auto* capture_vec = fn_info.captures_.get()) {
-      auto opt_parent_stream = (*func).stream();
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (const auto& capture : *capture_vec) {
@@ -1118,12 +1160,13 @@ void Engine::evaluate_function(
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && isnan(output)._is_any_true().item<bool>()) {
-        std::stringstream ss;
-        ss << "Function '" << fn.name() << "' returned nan values in its " << i
-           << "th output.";
-        throw std::runtime_error(ss.str());
-      }
+      TORCH_CHECK(
+          !output.defined() || !isnan(output)._is_any_true().item<bool>(),
+          "Function '",
+          fn.name(),
+          "' returned nan values in its ",
+          i,
+          "th output.");
     }
   }
 
@@ -1144,7 +1187,7 @@ void Engine::evaluate_function(
 
     if (it == dependencies.end()) {
       auto name = next.function->name();
-      throw std::runtime_error(std::string("dependency not found for ") + name);
+      TORCH_CHECK(false, "dependency not found for ", name);
     } else if (--it->second == 0) {
       dependencies.erase(it);
       is_ready = true;
@@ -1163,10 +1206,12 @@ void Engine::evaluate_function(
       // No buffers have been allocated for the function
       InputBuffer input_buffer(next.function->num_inputs());
 
-      // Accumulates into buffer
-      auto opt_next_stream = next.function->stream();
       input_buffer.add(
-          next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
+          next.input_nr,
+          std::move(output),
+          opt_parent_stream,
+          next.function->stream(),
+          next.function.get());
 
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
@@ -1179,10 +1224,12 @@ void Engine::evaluate_function(
       // The function already has a buffer
       auto& input_buffer = not_ready_it->second;
 
-      // Accumulates into buffer
-      auto opt_next_stream = next.function->stream();
       input_buffer.add(
-          next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
+          next.input_nr,
+          std::move(output),
+          opt_parent_stream,
+          next.function->stream(),
+          next.function.get());
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
@@ -1194,7 +1241,7 @@ void Engine::evaluate_function(
 }
 
 static uint64_t compute_min_topological_nr(const edge_list& outputs) {
-  // Computes the mininum topological number among all the outputs
+  // Computes the minimum topological number among all the outputs
   if (outputs.empty()) {
     return 0;
   }
@@ -1265,15 +1312,13 @@ auto Engine::execute(
         "your parameters to None after use to break the cycle and avoid the leak.");
   }
 
-  // Allows us to assert no other threads are in backwards
-  CompiledAutogradThreadingDebugCheck _thread_check;
   auto compiled_autograd = the_compiled_autograd.load();
   TORCH_INTERNAL_ASSERT(compiled_autograd != COMPILED_AUTOGRAD_POISON);
 
   // accumulate_grad is true if and only if the frontend call was to
   // backward(), not grad(). grad() returns the sum of the gradients
   // w.r.t. the inputs and thus needs the inputs to be present.
-  TORCH_CHECK_VALUE(
+  TORCH_INTERNAL_ASSERT(
       accumulate_grad || !outputs.empty(), "grad requires non-empty inputs.");
 
   // A fresh first time Engine::execute call should start on the CPU device,
@@ -1292,16 +1337,19 @@ auto Engine::execute(
 
   auto graph_task = std::make_shared<GraphTask>(
       /* keep_graph */ keep_graph,
-      /* create_graph */ create_graph,
-      /* depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
+      /* grad_mode */ create_graph,
+      /* reentrant_depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
       /* cpu_ready_queue */ local_ready_queue,
       /* graph_roots */ std::move(temp_roots));
 
   // If we receive a single root, skip creating extra root node
   bool skip_dummy_node = root_edges.size() == 1 && compiled_autograd == nullptr;
-  auto graph_root = skip_dummy_node
-      ? root_edges.at(0).function
-      : std::make_shared<GraphRoot>(root_edges, inputs);
+  c10::intrusive_ptr<Node> graph_root;
+  if (skip_dummy_node) {
+    graph_root = root_edges.at(0).function;
+  } else {
+    graph_root = c10::make_intrusive<GraphRoot>(root_edges, inputs);
+  }
 
   auto min_topo_nr = compute_min_topological_nr(outputs);
   // Now compute the dependencies for all executable functions
@@ -1313,13 +1361,15 @@ auto Engine::execute(
   }
 
   if (compiled_autograd != nullptr) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        num_threads_in_compiled_autograd.load() == 0,
+        "Re-entrant into Compiled Autograd from a parent Compiled Autograd call is not yet supported. Consider disabling Compiled Autograd on the re-entrant call.");
+    // Allows us to assert no other threads are in backwards
+    CompiledAutogradThreadingDebugCheck _thread_check;
     // see [Note: Compiled Autograd]
-    TORCH_CHECK(
-        !create_graph, "compiled_autograd does not support create_graph");
     _thread_check.release();
-    TORCH_CHECK(
-        !AnomalyMode::is_enabled(),
-        "compiled_autograd does not support AnomalyMode")
+    GraphTaskGuard guard(graph_task);
+    CheckpointValidGuard cpvguard(graph_task);
     return (*compiled_autograd)(
         graph_root, *graph_task, accumulate_grad, outputs);
   }
@@ -1335,7 +1385,8 @@ auto Engine::execute(
         root_edges.at(0).input_nr,
         std::move(input),
         input_stream,
-        opt_next_stream);
+        opt_next_stream,
+        root_edges.at(0).function.get());
 
     execute_with_graph_task(
         graph_task, std::move(graph_root), std::move(input_buffer));
@@ -1357,13 +1408,16 @@ void Engine::initialize_device_threads_pool() {
       !in_bad_autograd_fork,
       "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
       "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
-  c10::call_once(
-      start_device_threads_flag_, &Engine::start_device_threads, this);
+  // Ensures device_ready_queues_ are initialized only once
+  static bool start_device_threads_flag_ [[maybe_unused]] = [this]() {
+    this->start_device_threads();
+    return true;
+  }();
 }
 
 c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root,
+    c10::intrusive_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
   initialize_device_threads_pool();
   // Lock mutex for GraphTask.
@@ -1437,7 +1491,7 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   return graph_task->future_result_;
 }
 
-// note that when python is present, this base engine will be overriden
+// note that when python is present, this base engine will be overridden
 // with a PythonEngine. Because this typically happens before get_default_engine
 // is called, this base engine will never be created.
 Engine& Engine::get_base_engine() {
@@ -1445,7 +1499,7 @@ Engine& Engine::get_base_engine() {
   return engine;
 }
 
-std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
+static std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
   engine_stub.store(stub);
@@ -1461,8 +1515,8 @@ void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
   }
   auto prior = the_compiled_autograd.exchange(COMPILED_AUTOGRAD_POISON);
   TORCH_CHECK(
-      num_threads_in_backwards.load() == 0 && prior != COMPILED_AUTOGRAD_POISON,
-      "compiled_autograd._enable() requires no threads in backwards()");
+      prior != COMPILED_AUTOGRAD_POISON,
+      "compiled_autograd._enable() does not support multiple Python threads");
   the_compiled_autograd.store(fn);
 }
 

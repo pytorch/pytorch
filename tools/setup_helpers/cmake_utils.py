@@ -6,10 +6,10 @@ which calls get_cmake_cache_variables_from_file
 from __future__ import annotations
 
 import re
-from typing import IO, Optional, Union
+from typing import IO
 
 
-CMakeValue = Optional[Union[bool, str]]
+CMakeValue = bool | str | None
 
 
 def convert_cmake_value_to_python_value(
@@ -28,7 +28,7 @@ def convert_cmake_value_to_python_value(
     cmake_type = cmake_type.upper()
     up_val = cmake_value.upper()
     if cmake_type == "BOOL":
-        # https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/VariablesListsStrings#boolean-values-in-cmake
+        # https://cmake.org/cmake/help/latest/manual/cmake-generator-expressions.7.html#genex:BOOL
         return not (
             up_val in ("FALSE", "OFF", "N", "NO", "0", "", "NOTFOUND")
             or up_val.endswith("-NOTFOUND")

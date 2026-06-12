@@ -313,7 +313,6 @@ class OtherMathOpsModule(torch.nn.Module):
         c = torch.randint(0, 8, (5,), dtype=torch.int64)
         e = torch.randn(4, 3)
         f = torch.randn(4, 4, 4)
-        size = [0, 1]
         dims = [0, 1]
         return len(
             torch.atleast_1d(a),
@@ -410,7 +409,6 @@ class BlasLapackOpsModule(torch.nn.Module):
             torch.baddbmm(m, a, b),
             torch.bmm(a, b),
             torch.chain_matmul(torch.randn(3, 3), torch.randn(3, 3), torch.randn(3, 3)),
-            # torch.cholesky(a), # deprecated
             # torch.cholesky_inverse(torch.randn(3, 3)), # had some error
             # torch.cholesky_solve(torch.randn(3, 3), torch.randn(3, 3)),
             torch.dot(v, v),

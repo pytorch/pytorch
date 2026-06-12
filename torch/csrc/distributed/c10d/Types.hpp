@@ -4,6 +4,12 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <variant>
+#include <vector>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/ivalue.h>
@@ -20,14 +26,16 @@ struct TORCH_API _SupplementBase : torch::CustomClassHolder {
 
 // Supplementary data specific to NCCL PREMUL_SUM
 // The point of use in ProcessGroupNCCL knows how to unpack it.
-struct NCCLPreMulSumSupplement : _SupplementBase {
+struct PreMulSumSupplement : _SupplementBase {
   double double_factor{0.0};
   at::Tensor tensor_factor;
-  NCCLPreMulSumSupplement(double f) : double_factor{f} {}
-  NCCLPreMulSumSupplement(at::Tensor t) : tensor_factor{std::move(t)} {
+  PreMulSumSupplement(double f) : double_factor{f} {}
+  PreMulSumSupplement(at::Tensor t) : tensor_factor{std::move(t)} {
     TORCH_CHECK_EQ(tensor_factor.numel(), 1);
   }
 };
+// Keep for BC only
+using NCCLPreMulSumSupplement = PreMulSumSupplement;
 
 // Other ReduceOps that need different supplementary data can also
 // derive from _SupplementBase.
@@ -71,6 +79,7 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
 
   ReduceOp(ReduceOp&& other) = default;
   ReduceOp& operator=(ReduceOp&& other) = default;
+  ~ReduceOp() override = default;
 
   operator RedOpType() const {
     return op_;
@@ -102,12 +111,14 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
 };
 
 template <typename T>
-ReduceOp makeNCCLPreMulSum(const T& factor) {
+ReduceOp makePreMulSum(const T& factor) {
   ReduceOp rop;
   rop.op_ = ReduceOp::PREMUL_SUM;
-  rop.supplement_ = c10::make_intrusive<NCCLPreMulSumSupplement>(factor);
+  rop.supplement_ = c10::make_intrusive<PreMulSumSupplement>(factor);
   return rop;
 }
+
+TORCH_API bool isComplexViewAsRealAllowed(const ReduceOp& reduceOp);
 
 constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);
 
@@ -121,6 +132,7 @@ struct BroadcastOptions {
 struct AllreduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
   std::optional<at::Tensor> sparseIndices = std::nullopt;
 };
 
@@ -131,6 +143,7 @@ struct ReduceOptions {
   int64_t rootRank = 0;
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
 };
 
 struct AllgatherOptions {
@@ -141,6 +154,7 @@ struct AllgatherOptions {
 struct GatherOptions {
   int64_t rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
 };
 
 struct ScatterOptions {
@@ -157,12 +171,14 @@ struct ReduceScatterOptions {
 
 struct AllToAllOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
 };
 
 struct BarrierOptions {
   std::vector<int64_t> device_ids;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   std::optional<at::Device> device;
+  bool asyncOp = true;
 };
 
 struct DistributedBackendOptions {
@@ -172,6 +188,49 @@ struct DistributedBackendOptions {
   std::chrono::duration<float> timeout;
   std::string group_id;
   std::vector<int64_t> global_ranks_in_group;
+};
+
+// Fault tolerance / reconfigure API. A ReconfigureHandle is an opaque,
+// backend-specific string that encodes the information peers need to
+// (re)initialize a communicator instance via Backend::reconfigure().
+using ReconfigureHandle = std::string;
+
+struct ReconfigureOptions {
+  // Uniquely identifies this instance of the communicator. Must not have been
+  // used previously on this communicator; pass a fresh value on every
+  // (re)initialization.
+  int64_t uuid = 0;
+
+  // Members participating in the communicator, one handle per rank. A vector
+  // assigns ranks by position (ordered); an unordered_set lets the backend
+  // choose the rank assignment.
+  std::variant<
+      std::unordered_set<ReconfigureHandle>,
+      std::vector<ReconfigureHandle>>
+      handles;
+
+  // How long to allow reconfiguration before failing. nullopt uses the
+  // backend's default timeout.
+  std::optional<std::chrono::milliseconds> timeout = std::nullopt;
+
+  // Backend-specific configuration key-value pairs.
+  std::unordered_map<std::string, std::string> hints;
+};
+
+// One-sided (RMA) window operation options. See Window.hpp.
+struct PutOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
+};
+
+struct SignalOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
+};
+
+struct WaitSignalOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
 };
 
 } // namespace c10d

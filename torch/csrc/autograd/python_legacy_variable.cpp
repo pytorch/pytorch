@@ -1,6 +1,7 @@
 #include <torch/csrc/autograd/python_legacy_variable.h>
 
 #include <ATen/ATen.h>
+#include <fmt/format.h>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -40,7 +41,7 @@ static PyObject* THPVariable_pynew(
           &name))
     return nullptr;
 
-  if (grad_fn == Py_None)
+  if (Py_IsNone(grad_fn))
     grad_fn = nullptr;
 
   if (is_volatile) {
@@ -57,12 +58,13 @@ static PyObject* THPVariable_pynew(
       !is_volatile || !requires_grad,
       "Variable can't be volatile and require_grad at the same time!");
   if (grad_fn && !THPFunction_Check(grad_fn)) {
-    throw TypeError(
-        "_grad_fn has to be a Function object or None, but got %s",
+    TORCH_CHECK_TYPE(
+        false,
+        "_grad_fn has to be a Function object or None, but got ",
         Py_TYPE(grad_fn)->tp_name);
   }
   Variable var;
-  if (!data || data == Py_None) {
+  if (!data || Py_IsNone(data)) {
     // For legacy serialization code, create an empty tensor. This is also used
     // by nn.Parameter() with no arguments.
     auto dispatch_key = torch::tensors::get_default_dispatch_key();
@@ -74,8 +76,10 @@ static PyObject* THPVariable_pynew(
   } else if (THPVariable_Check(data)) {
     var = THPVariable_Unpack(data).detach();
   } else {
-    throw torch::TypeError(
-        "Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
+    TORCH_CHECK_TYPE(
+        false,
+        "Variable data has to be a tensor, but got ",
+        Py_TYPE(data)->tp_name);
   }
   // We set `tensor`'s `allow_tensor_metadata_change` to true here, because we
   // want to allow the following use case for backward compatibility:
@@ -97,7 +101,7 @@ static PyObject* THPVariable_pynew(
     impl::set_name(var, name);
   }
 
-  if (jit::tracer::isTracing() && data && data != Py_None &&
+  if (jit::tracer::isTracing() && data && !Py_IsNone(data) &&
       THPVariable_Check(data)) {
     if (auto* v = jit::tracer::getValueTrace(THPVariable_Unpack(data))) {
       jit::tracer::setValueTrace(var, v);
@@ -108,7 +112,7 @@ static PyObject* THPVariable_pynew(
   END_HANDLE_TH_ERRORS
 }
 
-PyTypeObject THPLegacyVariableType = {
+static PyTypeObject THPLegacyVariableType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._LegacyVariableBase", /* tp_name */
     0, /* tp_basicsize */
@@ -151,12 +155,7 @@ PyTypeObject THPLegacyVariableType = {
 };
 
 void init_legacy_variable(PyObject* module) {
-  if (PyType_Ready(&THPLegacyVariableType) < 0) {
-    throw python_error();
-  }
-  auto obj = (PyObject*)&THPLegacyVariableType;
-  Py_INCREF(obj);
-  if (PyModule_AddObject(module, "_LegacyVariableBase", obj) < 0) {
+  if (PyModule_AddType(module, &THPLegacyVariableType) < 0) {
     throw python_error();
   }
 }

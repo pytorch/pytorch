@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import logging
 import warnings
-from typing import Any, Dict, Iterable, Optional, Tuple
+from collections.abc import Iterable
+from typing import Any
 
 import torch
 import torch.export
@@ -17,9 +18,9 @@ __all__ = ["report_exportability"]
 def _generate_inputs_for_submodules(
     model: torch.nn.Module,
     target_submodules: Iterable[str],
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Tuple[Any, Any]]:
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None = None,
+) -> dict[str, tuple[Any, Any]]:
     """
     Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
     function doesn't work.
@@ -50,7 +51,8 @@ def _generate_inputs_for_submodules(
         model(*args, **kwargs)
     except Exception as e:
         warnings.warn(
-            f"Failed to generate submodule inputs because of the following error:\n{e}"
+            f"Failed to generate submodule inputs because of the following error:\n{e}",
+            stacklevel=2,
         )
     finally:
         for h in handles:
@@ -60,12 +62,12 @@ def _generate_inputs_for_submodules(
 
 def report_exportability(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None = None,
     *,
     strict: bool = True,
     pre_dispatch: bool = False,
-) -> Dict[str, Optional[Exception]]:
+) -> dict[str, Exception | None]:
     """
     Report exportability issues for a module in one-shot.
 
@@ -92,7 +94,7 @@ def report_exportability(
     submod_inputs = _generate_inputs_for_submodules(mod, all_submod_names, args, kwargs)
 
     tried_module_types = set()
-    report: Dict[str, Optional[Exception]] = {}
+    report: dict[str, Exception | None] = {}
 
     def try_export(module, module_name, args, kwargs):
         nonlocal submod_inputs, report, strict, pre_dispatch, tried_module_types

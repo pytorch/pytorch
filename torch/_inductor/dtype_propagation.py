@@ -1,51 +1,51 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import (
-    Callable,
-    Optional,
-    Protocol,
-    Sequence,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Protocol, TYPE_CHECKING, TypeVar
 
 import sympy
 
-
-if TYPE_CHECKING:
-    from torch._inductor.loop_body import LoopBodyBlock
-
 import torch
-from torch._inductor.virtualized import V
-from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND, type_to_dtype
+from torch._prims_common import (
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    is_integer_dtype,
+    type_to_dtype,
+)
+from torch.utils._ordered_set import OrderedSet
 
-from . import config
+from .ops_handler import OP_NAMES, OpsHandler
 from .utils import upcast_compute_type
-from .virtualized import OpsValue
+from .virtualized import OpsValue, V
 
 
 T = TypeVar("T")
+_MISSING_SHAPE = object()
+_UNSIGNED_INT_DTYPES: frozenset[torch.dtype] = frozenset(
+    (
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+    )
+)
 
 
 class DTypeVar(Protocol):
     @property
-    def dtype(self) -> torch.dtype:
-        ...
+    def dtype(self) -> torch.dtype: ...
 
 
-DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
+DTypeArg = DTypeVar | torch.types.Number | str | OpsValue
 
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
 # So first decompose CSEVars -> tuple before calling this
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_promoted_dtype(
-    *args: Sequence[Tuple[torch.dtype, bool]],
-    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
+    *args: Sequence[tuple[torch.dtype, bool]],
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
 ):
     def construct_input(inp):
         if inp[1]:
@@ -67,28 +67,25 @@ def get_promoted_dtype(
 
 def promote_types(
     args: Sequence[DTypeArg],
-    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
 ):
     dtype_prop_candidates = []
 
     for arg in args:
         if isinstance(arg, str):
-            # TODO: fix the flex attention instances, enable internally
-            if not config.is_fbcode():
-                assert isinstance(
-                    V.get_ops_handler(),
-                    torch._inductor.select_algorithm.ModificationWrapper,
-                )
-            continue
-
+            raise AssertionError(f"expected non-str arg, got {type(arg)}")
         if isinstance(arg, OpsValue):
             arg = arg.value
-            assert isinstance(arg, torch._prims_common.Number) or hasattr(arg, "dtype")
+            if not (
+                isinstance(arg, torch._prims_common.Number) or hasattr(arg, "dtype")
+            ):
+                raise AssertionError("expected a Number or an object with a dtype")
 
         if isinstance(arg, torch._prims_common.Number):
             dtype_prop_candidates.append((type_to_dtype(type(arg)), True))
             continue
 
+        # pyrefly: ignore [missing-attribute]
         dtype_prop_candidates.append((arg.dtype, getattr(arg, "is_scalar", False)))
 
     dtype = get_promoted_dtype(
@@ -97,6 +94,58 @@ def promote_types(
     )
 
     return dtype
+
+
+def _unwrap_dtype_arg(arg: DTypeArg) -> DTypeVar | torch.types.Number | str:
+    if isinstance(arg, OpsValue):
+        return arg.value
+    return arg
+
+
+def _is_scalar_dtype_arg(arg: DTypeArg) -> bool:
+    arg = _unwrap_dtype_arg(arg)
+    if isinstance(arg, torch._prims_common.Number):
+        return True
+
+    is_scalar = getattr(arg, "is_scalar", False)
+    if callable(is_scalar):
+        if is_scalar():
+            return True
+    elif is_scalar:
+        return True
+
+    shape = getattr(arg, "shape", _MISSING_SHAPE)
+    if shape is _MISSING_SHAPE:
+        return False
+
+    if shape is None:
+        return True
+    if not isinstance(shape, Sequence):
+        return False
+
+    return len(shape) == 0
+
+
+def _has_known_nonnegative_scalar_int_value(arg: DTypeArg) -> bool:
+    arg = _unwrap_dtype_arg(arg)
+
+    if isinstance(arg, bool):
+        return True
+    if isinstance(arg, int):
+        return arg >= 0
+
+    dtype = getattr(arg, "dtype", None)
+    if dtype is None or not is_integer_dtype(dtype):
+        return False
+    if dtype in _UNSIGNED_INT_DTYPES:
+        return True
+
+    lower = getattr(getattr(arg, "bounds", None), "lower", None)
+    if lower is None:
+        return False
+    if isinstance(lower, sympy.Expr):
+        return lower.is_nonnegative is True
+    return lower >= 0
 
 
 class DtypePropagationOpsHandler:
@@ -143,10 +192,7 @@ class DtypePropagationOpsHandler:
                     self, op, functools.partial(self.return_dtype, dtype=torch.bool)
                 )
 
-        from torch._inductor.ops_handler import OpsHandler
-
-        ops_set = {s for s in dir(OpsHandler) if s[0] != "_"}
-        unimplemented_ops = ops_set - set(dir(self))
+        unimplemented_ops = OP_NAMES - OrderedSet(dir(self))
         torch._check(
             len(unimplemented_ops) == 0,
             lambda: f"Unimplemented dtype rule for ops: {unimplemented_ops}",
@@ -179,7 +225,13 @@ class DtypePropagationOpsHandler:
         return torch.int64
 
     @staticmethod
-    def masked(mask: DTypeArg, body: "LoopBodyBlock", other: DTypeArg) -> torch.dtype:
+    def masked(
+        mask: DTypeArg, body: Callable[[], DTypeArg], other: DTypeArg
+    ) -> torch.dtype:
+        from .loop_body import LoopBodyBlock
+
+        if not isinstance(body, LoopBodyBlock):
+            raise AssertionError("body must be a LoopBodyBlock")
         # TODO - we avoid calling this in codegen, needs work for non codegen use cases
         loads = body.graph.find_nodes(op="call_method", target="load")
         if len(loads) <= 1:
@@ -193,20 +245,31 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> torch.dtype:
-        # TODO - TODO - rationalize index_expr. The dtype is not always used and we are inconsistent about int32 or int64
-        # in lowerings. cpp just uses the dtype
+        # `index_expr` is for indexing-style uses: the kernel's chosen
+        # indexing dtype wins over the requested int dtype. For uses that
+        # must honor `dtype` (e.g. user-typed `arange(int64)` whose result
+        # participates in tensor computation), `value_expr` is the right op
+        # - see `convert_index_expr_to_value_expr` which rewrites accordingly.
         if dtype not in (torch.int32, torch.int64) or not hasattr(
             V.kernel, "index_dtype"
         ):
             return upcast_compute_type(dtype)
 
-        return torch.int32 if V.kernel.index_dtype == "tl.int32" else torch.int64
+        return V.kernel.get_index_dtype_as_torch_dtype()
+
+    @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> torch.dtype:
+        # Unlike `index_expr`, `value_expr` always honors the requested
+        # dtype because the result feeds tensor-value computation. The
+        # sympy expression is emitted literally, so there is no
+        # bf16/fp16 -> fp32 compute-type promotion here.
+        return dtype
 
     @staticmethod
     def to_dtype(
         x: DTypeArg,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types=True,
     ) -> torch.dtype:
         return upcast_compute_type(dtype) if use_compute_types else dtype
@@ -226,16 +289,27 @@ class DtypePropagationOpsHandler:
         return promote_types([a, b])
 
     @staticmethod
-    def div(a: DTypeArg, b: DTypeArg) -> torch.dtype:
-        return promote_types([a, b])
-
-    @staticmethod
     def truediv(a: DTypeArg, b: DTypeArg) -> torch.dtype:
         return promote_types([a, b])
 
     @staticmethod
-    def pow(a: DTypeArg, b: DTypeArg) -> torch.dtype:
+    def div_rn(a: DTypeArg, b: DTypeArg) -> torch.dtype:
         return promote_types([a, b])
+
+    @staticmethod
+    def pow(a: DTypeArg, b: DTypeArg) -> torch.dtype:
+        dtype = promote_types([a, b])
+        if (
+            is_integer_dtype(dtype)
+            and _is_scalar_dtype_arg(a)
+            and _is_scalar_dtype_arg(b)
+            and not _has_known_nonnegative_scalar_int_value(b)
+        ):
+            # Scalar integer pow follows Python semantics: negative exponents
+            # produce a floating result, even though tensor integer pow stays
+            # integral or errors out in separate lowering paths.
+            return torch.float64
+        return dtype
 
     @staticmethod
     def mod(a: DTypeArg, b: DTypeArg) -> torch.dtype:
@@ -256,6 +330,10 @@ class DtypePropagationOpsHandler:
         return torch.float
 
     @staticmethod
+    def rand_eager(seed, offset, threads_per_round, tid, vec) -> torch.dtype:
+        return torch.float
+
+    @staticmethod
     def store_reduction(name: str, index, value: DTypeArg) -> None:
         return None
 
@@ -266,7 +344,16 @@ class DtypePropagationOpsHandler:
         return dtype
 
     @staticmethod
-    def store(name: str, index, value: DTypeArg, mode: Optional[str] = None) -> None:
+    def store(name: str, index, value: DTypeArg, mode: str | None = None) -> None:
+        return None
+
+    @staticmethod
+    def partial_accumulate(
+        name: str,
+        reduction_type: str,
+        value: DTypeArg,
+        extra_meta: dict[str, Any],
+    ) -> None:
         return None
 
     @staticmethod
@@ -291,10 +378,10 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def scan(
-        dtypes: Tuple[torch.dtype, ...],
-        combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
-        values: Tuple[T, ...],
-    ) -> Tuple[torch.dtype, ...]:
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: Callable[[tuple[T, ...], tuple[T, ...]], tuple[T, ...]],
+        values: tuple[T, ...],
+    ) -> tuple[torch.dtype, ...]:
         return dtypes
 
     @staticmethod
@@ -310,17 +397,17 @@ class DtypePropagationOpsHandler:
         return promote_types([x])
 
     @staticmethod
-    def frexp(x: DTypeArg) -> Tuple[torch.dtype, torch.dtype]:
+    def frexp(x: DTypeArg) -> tuple[torch.dtype, torch.dtype]:
         # TODO - need to handle multiple outputs
         return (promote_types([x]), torch.int32)
 
     @staticmethod
     def sort(
-        dtypes: Tuple[torch.dtype, ...],
-        values: Tuple[T, ...],
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[T, ...],
         stable: bool,
         descending: bool,
-    ) -> Tuple[torch.dtype, ...]:
+    ) -> tuple[torch.dtype, ...]:
         return dtypes
 
     @staticmethod
@@ -330,10 +417,12 @@ class DtypePropagationOpsHandler:
     @staticmethod
     def bucketize(
         values: DTypeArg,
-        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: DTypeArg,
         indexing_dtype: torch.dtype,
         right: bool,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: T | None = None,
     ) -> torch.dtype:
         return indexing_dtype
 
@@ -346,10 +435,6 @@ class DtypePropagationOpsHandler:
         return promote_types(
             [x], type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
         )
-
-    @staticmethod
-    def getitem(x: DTypeArg, y: DTypeArg) -> torch.dtype:
-        raise RuntimeError("Unexpected op: getitem")
 
     @staticmethod
     def trunc_to_int(x: DTypeArg, dtype: torch.dtype) -> torch.dtype:
@@ -368,18 +453,24 @@ class DtypePropagationOpsHandler:
         return promote_types([x, y])
 
     @staticmethod
-    def round_decimal(x: DTypeArg, y: DTypeArg) -> torch.dtype:
-        # TODO - dont see it anywhere..
-        return promote_types([x])
-
-    @staticmethod
     def halide_clamp(value, size, check):
         # TODO - way of registering dtype for op in backend
         return torch.int32
 
     @staticmethod
+    def dot(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        # triton tl.dot out_dtype is tl.float32 by default.
+        return torch.float32
+
+    @staticmethod
     def inline_asm_elementwise(
-        *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
+        *inputs,
+        asm,
+        constraints=None,
+        dtype=torch.float32,
+        is_pure=True,
+        pack=1,
+        input_dtypes=None,
     ):
         return dtype
 
@@ -388,13 +479,27 @@ class DtypePropagationOpsHandler:
         return promote_types([x])
 
     @staticmethod
-    def libdevice_abs(x: DTypeArg) -> torch.dtype:
-        return promote_types([x])
+    def check_bounds(
+        expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        return None
+
+    def output(self, *args: DTypeArg) -> None:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.output should not appear here"
+        )
+
+    def placeholder(self, index: int) -> torch.dtype:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.placeholder should not appear here"
+        )
 
     @staticmethod
-    def invert(x: DTypeArg) -> torch.dtype:
-        raise RuntimeError("Unexpected op: invert")
+    def device_assert_async(cond, msg: str) -> None:
+        return None
 
-    @staticmethod
-    def matmul(x: DTypeArg, y: DTypeArg) -> torch.dtype:
-        raise RuntimeError("Unexpected op: matmul")
+
+if TYPE_CHECKING:
+    # pyrefly: ignore [inconsistent-inheritance]
+    class _typecheck_DtypePropagation(DtypePropagationOpsHandler, OpsHandler[Any]):
+        pass  # mypy will error if we got any of the signatures wrong
