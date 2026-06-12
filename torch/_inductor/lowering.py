@@ -8775,6 +8775,17 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
+    # pointwise associative_scan codegen requires CUDA/XPU; the eager wrapper
+    # skips its device check while compiling/exporting, so re-check it here. See
+    # https://github.com/pytorch/pytorch/issues/186594.
+    for x in xs:
+        device = x.get_device()
+        if device is not None and device.type not in ("cuda", "xpu"):
+            raise ValueError(
+                "associative_scan with combine_mode='pointwise' only supports "
+                f"CUDA or XPU tensors, but got an input on device '{device.type}'."
+            )
+
     num_scan_inputs = 2 * len(xs)
     placeholders = [
         node for node in combine_fn.graph_module.graph.nodes if node.op == "placeholder"
