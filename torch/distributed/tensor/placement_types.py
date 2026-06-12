@@ -4,7 +4,8 @@
 import functools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import cast, TypeGuard, TypeVar
+from enum import IntEnum
+from typing import Any, cast, TypeGuard, TypeVar
 
 import torch
 import torch._C
@@ -28,6 +29,7 @@ from torch.types import IntLikeType
 __all__ = ["Placement", "Shard", "Replicate", "Partial"]
 
 _RankTypeT = TypeVar("_RankTypeT", bound=RankType)
+_STRIDED_SHARD_BASE_SPLIT_FACTOR: Any = torch._C._distributed.StridedShard.split_factor
 
 
 # Appease TestPublicBindings.test_correct_module_names
@@ -44,6 +46,117 @@ def _raise_error(method_name, _):
 Placement.__eq__ = functools.partial(_raise_error, method_name="__eq__")
 Placement.__hash__ = functools.partial(_raise_error, method_name="__hash__")
 Placement.__fx_repr__ = functools.partial(_raise_error, method_name="__fx_repr__")
+
+
+class _StridedShardOffsetMode(IntEnum):
+    FIRST = 0
+    ALL = 1
+    NONE = 2
+
+
+def _explicit_or_backed_hint(value: IntLikeType) -> int | None:
+    from torch.fx.experimental.symbolic_shapes import (
+        free_unbacked_symbols,
+        optimization_hint,
+    )
+
+    if isinstance(value, int):
+        return int(value)
+    if not isinstance(value, torch.SymInt):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    shape_env = getattr(value.node, "shape_env", None)
+    if shape_env is None:
+        return None
+    unbacked_symbols = free_unbacked_symbols(value.node.expr)
+    if unbacked_symbols and not unbacked_symbols.issubset(
+        shape_env.var_to_hint_override.keys()
+    ):
+        return None
+    return int(optimization_hint(value, fallback=None))
+
+
+def _guarded_hint_int(value: IntLikeType, *, reason: str) -> int:
+    if isinstance(value, int):
+        return int(value)
+    if not isinstance(value, torch.SymInt):
+        return int(value)
+    hint = _explicit_or_backed_hint(value)
+    if hint is None:
+        raise RuntimeError(
+            f"Cannot specialize symbolic {reason} without a hint: {value}"
+        )
+    _defer_symbolic_equality_assert(value, hint, reason=reason)
+    return hint
+
+
+def _defer_symbolic_equality_assert(
+    value: IntLikeType, hint: int, *, reason: str
+) -> None:
+    if not isinstance(value, torch.SymInt):
+        return
+    shape_env = getattr(value.node, "shape_env", None)
+    if shape_env is None:
+        return
+    import sympy
+
+    from torch.fx.experimental.symbolic_shapes import (
+        free_unbacked_symbols,
+        RuntimeAssert,
+    )
+    from torch.utils._traceback import CapturedTraceback
+
+    expr = sympy.Eq(value.node.expr, hint)
+    cands = sorted(
+        free_unbacked_symbols(expr),
+        key=lambda symbol: int(symbol.name[1:]),
+    )
+    key = cands[-1] if cands else None
+    runtime_asserts = shape_env.deferred_runtime_asserts.setdefault(key, [])
+    if any(runtime_assert.expr == expr for runtime_assert in runtime_asserts):
+        return
+    runtime_asserts.append(
+        RuntimeAssert(
+            expr,
+            f"Runtime assertion failed: symbolic {reason} {value.node.expr} == {hint}",
+            CapturedTraceback.extract(skip=1),
+        )
+    )
+    shape_env.num_deferred_runtime_asserts += 1
+    shape_env._update_version_counter()
+
+
+def _split_factor_key(value: IntLikeType) -> object:
+    if isinstance(value, torch.SymInt):
+        return value.node.expr
+    return int(value)
+
+
+def _sym_mod(left: IntLikeType, right: IntLikeType) -> Any:
+    return cast(Any, left) % cast(Any, right)
+
+
+def _hint_proves_even_shard(size: IntLikeType, num_chunks: IntLikeType) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(_sym_mod(size, num_chunks) == 0):
+        return True
+    size_hint = _explicit_or_backed_hint(size)
+    chunk_hint = _explicit_or_backed_hint(num_chunks)
+    if (
+        size_hint is None
+        or chunk_hint is None
+        or chunk_hint == 0
+        or size_hint % chunk_hint != 0
+    ):
+        return False
+
+    # Padding decisions require a Python branch. Only explicit hint overrides
+    # can justify skipping padding for otherwise data-dependent sharding.
+    torch._check(_sym_mod(size, num_chunks) == 0)
+    return True
 
 
 class Shard(torch._C._distributed.Shard):
@@ -182,7 +295,7 @@ class Shard(torch._C._distributed.Shard):
 
     @staticmethod
     def _custom_chunk(
-        tensor: torch.Tensor, num_chunks: int, dim: int
+        tensor: torch.Tensor, num_chunks: IntLikeType, dim: int
     ) -> list[torch.Tensor]:
         """
         Returns list of tensor chunks along dim.
@@ -194,21 +307,29 @@ class Shard(torch._C._distributed.Shard):
 
         if tensor.dim() <= 0:
             raise AssertionError(f"Expected tensor.dim() > 0, got {tensor.dim()}")
-        if num_chunks <= 0:
+        num_chunks_int = _guarded_hint_int(num_chunks, reason="chunk count")
+        if num_chunks_int <= 0:
             raise AssertionError(f"Expected num_chunks > 0, got {num_chunks}")
 
         # TODO(pianpwk): remove the unbacked symbols check and fix AsyncTP pattern matching
         # for test_micro_pipeline_tp.py.
         if not _are_we_tracing() or not has_free_unbacked_symbols(tensor):
-            tensor_list = list(torch.chunk(tensor, num_chunks, dim=dim))
+            tensor_list = list(torch.chunk(tensor, num_chunks_int, dim=dim))
             return fill_empty_tensor_to_shards(
-                tensor_list, dim, num_chunks - len(tensor_list)
+                tensor_list, dim, num_chunks_int - len(tensor_list)
             )
         else:
             dim_size = tensor.size(dim)
+            if _hint_proves_even_shard(dim_size, num_chunks):
+                chunk_size = dim_size // num_chunks
+                return [
+                    tensor.narrow(dim, chunk_size * i, chunk_size)
+                    for i in range(num_chunks_int)
+                ]
+
             split_size = (dim_size + num_chunks - 1) // num_chunks
             chunks = []
-            for i in range(num_chunks):
+            for i in range(num_chunks_int):
                 start = torch.sym_min(split_size * i, dim_size)
                 end = torch.sym_min(split_size * (i + 1), dim_size)
                 chunks.append(tensor.narrow(dim, start, end - start))
@@ -371,8 +492,11 @@ class Shard(torch._C._distributed.Shard):
             # which should be an empty tensor
             return tensor
 
-        # Assume padding (uneven sharding) as general case for unbacked sizes.
-        is_padded = guard_or_true(tensor.size(self.dim) % num_chunks != 0)
+        # Assume padding (uneven sharding) as general case for unbacked sizes,
+        # unless an optimization hint can prove the even-shard branch.
+        is_padded = not _hint_proves_even_shard(
+            tensor.size(self.dim), num_chunks
+        ) and guard_or_true(tensor.size(self.dim) % num_chunks != 0)
         pad_sizes = None
         if is_padded:
             scattered_list, pad_sizes = self._split_tensor(
@@ -382,7 +506,7 @@ class Shard(torch._C._distributed.Shard):
         elif not tensor.is_contiguous():
             tensor = tensor.contiguous()
 
-        output = funcol.reduce_scatter_tensor(
+        output = funcol.reduce_scatter_single(
             tensor, reduce_op, scatter_dim=self.dim, group=(mesh, mesh_dim)
         )
 
@@ -403,8 +527,11 @@ class Shard(torch._C._distributed.Shard):
     ) -> torch.Tensor:
         from torch.fx.experimental.symbolic_shapes import guard_or_true
 
-        # Assume padding (uneven sharding) as general case for unbacked sizes.
-        is_padded = guard_or_true(logical_dim_size % num_chunks != 0)
+        # Assume padding (uneven sharding) as general case for unbacked sizes,
+        # unless an optimization hint can prove the even-shard branch.
+        is_padded = not _hint_proves_even_shard(
+            logical_dim_size, num_chunks
+        ) and guard_or_true(logical_dim_size % num_chunks != 0)
 
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
@@ -425,8 +552,11 @@ class Shard(torch._C._distributed.Shard):
     ) -> torch.Tensor:
         from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
-        # Assume padding (uneven sharding) as general case for unbacked sizes.
-        is_padded = guard_or_true(logical_dim_size % num_chunks != 0)
+        # Assume padding (uneven sharding) as general case for unbacked sizes,
+        # unless an optimization hint can prove the even-shard branch.
+        is_padded = not _hint_proves_even_shard(
+            logical_dim_size, num_chunks
+        ) and guard_or_true(logical_dim_size % num_chunks != 0)
 
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
@@ -449,6 +579,13 @@ class Shard(torch._C._distributed.Shard):
                     f"{orig_size} -> {local_tensor.size(self.dim)}"
                 )
 
+        # narrow/unpad on a non-leading dim leaves the tensor non-contiguous,
+        # which leaks out to callers that expect a Replicate() result to have
+        # a contiguous local tensor (e.g. downstream view ops in TP linear).
+        # Use unconditional .contiguous() to avoid guarding on symbolic strides
+        # under torch.compile with unbacked symints.
+        local_tensor = local_tensor.contiguous()
+
         return local_tensor
 
     def _to_replicate_tensor(
@@ -469,7 +606,7 @@ class Shard(torch._C._distributed.Shard):
             local_tensor, logical_dim_size, num_chunks
         )
 
-        result = funcol.all_gather_tensor(
+        result = funcol.all_gather_single(
             local_tensor,
             gather_dim=self.dim,
             group=(mesh, mesh_dim),
@@ -722,8 +859,48 @@ class _StridedShard(torch._C._distributed.StridedShard):
     TODO: we should remove _StridedShard placement once we can unify it with Shard
     """
 
+    def __init__(
+        self,
+        dim: int,
+        *,
+        split_factor: IntLikeType = 1,
+        sf: IntLikeType | None = None,
+    ) -> None:
+        # The C++ placement stores the unroll count as int64_t, but view
+        # propagation may derive the split factor from symbolic shape metadata.
+        # Preserve that symbolic value on the Python wrapper and guard the
+        # concrete unroll count used by list-based lowering.
+        if sf is not None:
+            if split_factor != 1:
+                raise TypeError("_StridedShard received both split_factor and sf")
+            split_factor = sf
+        split_factor_int = _guarded_hint_int(
+            split_factor, reason="_StridedShard split_factor"
+        )
+        super().__init__(dim, split_factor=split_factor_int)
+        if isinstance(split_factor, torch.SymInt):
+            self._symbolic_split_factor = split_factor
+
+    @property
+    def split_factor(self) -> IntLikeType:  # pyrefly: ignore [bad-override]
+        symbolic_split_factor = getattr(self, "_symbolic_split_factor", None)
+        if symbolic_split_factor is not None:
+            return symbolic_split_factor
+        return int(_STRIDED_SHARD_BASE_SPLIT_FACTOR.__get__(self, type(self)))
+
+    def _split_factor_int(self) -> int:
+        return int(_STRIDED_SHARD_BASE_SPLIT_FACTOR.__get__(self, type(self)))
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _StridedShard)
+            and self.dim == other.dim
+            and _split_factor_key(self.split_factor)
+            == _split_factor_key(other.split_factor)
+        )
+
     def __hash__(self) -> int:
-        return hash((self.dim, self.split_factor))
+        return hash((self.dim, _split_factor_key(self.split_factor)))
 
     def __repr__(self) -> str:
         """
@@ -745,8 +922,11 @@ class _StridedShard(torch._C._distributed.StridedShard):
         Returns FX-evaluable repr and required globals for Shard placement.
         Needed for passing this type as an opaque object input to a custom op.
         """
+        # FX repr cannot refer to this placement's private SymInt object. The
+        # constructor emitted a guard tying the symbolic split factor to this
+        # concrete unroll count before the placement can reach codegen.
         return (
-            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",
+            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self._split_factor_int()})",
             {},
         )
 
@@ -758,7 +938,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         mesh: DeviceMesh,
         mesh_dim: int,
         src_data_rank: int | None = 0,
-        split_factor: int = 1,
+        split_factor: IntLikeType = 1,
     ) -> torch.Tensor:
         strided_shard_placement = cls(dim=dim, split_factor=split_factor)
         return strided_shard_placement._shard_tensor(
@@ -842,34 +1022,31 @@ class _StridedShard(torch._C._distributed.StridedShard):
         # results in the transposed left-first order.
 
         # First split: chunk into split_factor pieces
-        first_split = list(torch.chunk(tensor, self.split_factor, dim=self.dim))
-        first_split = fill_empty_tensor_to_shards(
-            first_split, self.dim, self.split_factor - len(first_split)
-        )
+        split_factor = self.split_factor
+        split_factor_int = self._split_factor_int()
+        first_split = Shard._custom_chunk(tensor, split_factor, dim=self.dim)
 
         # Second split: chunk each piece into num_chunks pieces
         second_split = []
         for s in first_split:
-            chunks = list(torch.chunk(s, num_chunks, dim=self.dim))
-            chunks = fill_empty_tensor_to_shards(
-                chunks, self.dim, num_chunks - len(chunks)
-            )
-            second_split.append(chunks)
+            second_split.append(Shard._custom_chunk(s, num_chunks, dim=self.dim))
 
         shard_list: list[torch.Tensor] = []
         for i in range(num_chunks):
             shard = torch.cat(
-                [second_split[j][i] for j in range(self.split_factor)],
+                [second_split[j][i] for j in range(split_factor_int)],
                 dim=self.dim,
             )
             if contiguous:
                 shard = shard.contiguous()
             shard_list.append(shard)
 
-        # The amount of padding is determined by the local chunk with the largest size.
         pad_sizes: list[int] = []
-        max_chunk_size = max([shard.size(self.dim) for shard in shard_list])
         if with_padding:
+            # The amount of padding is determined by the local chunk with the
+            # largest size. Avoid this Python max when padding is disabled so
+            # tracing paths can keep unbacked sizes symbolic.
+            max_chunk_size = max([shard.size(self.dim) for shard in shard_list])
             pad_sizes = [max_chunk_size - shard.size(self.dim) for shard in shard_list]
 
         return shard_list, pad_sizes
@@ -1022,15 +1199,22 @@ class _StridedShard(torch._C._distributed.StridedShard):
         # squeeze back to 1D indices tensor
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
-        # First chunk should be one of those biggest chunks.
-        max_chunk_size = len(sharded_indices[0])
+        # First chunk should be one of those biggest chunks. Compute the size
+        # from the logical shape rather than the fake arange split so padding
+        # depends only on the original symbolic dimension and its hint.
+        max_chunk_size, _ = self.local_shard_size_and_offset(
+            logical_dim_size,
+            num_chunks,
+            rank=0,
+            offset_mode=_StridedShardOffsetMode.ALL,
+        )
         local_pad_size = max_chunk_size - local_tensor.size(self.dim)
         local_tensor_padded = pad_tensor(local_tensor, self.dim, local_pad_size)
 
         if not local_tensor_padded.is_contiguous():
             local_tensor_padded = local_tensor_padded.contiguous()
 
-        replicate_tensor_permuted_padded = funcol.all_gather_tensor(
+        replicate_tensor_permuted_padded = funcol.all_gather_single(
             local_tensor_padded,
             gather_dim=self.dim,
             group=(mesh, mesh_dim),
@@ -1044,11 +1228,16 @@ class _StridedShard(torch._C._distributed.StridedShard):
         #
         # Build select_indices where select_indices[original_pos] = position in
         # the padded tensor that holds the element for original_pos.
-        padded_positions = []
+        padded_positions: list[torch.Tensor] = []
         for i, shard in enumerate(sharded_indices):
             base_offset = i * max_chunk_size
-            positions = base_offset + torch.arange(
-                len(shard), device=local_tensor.device
+            positions = cast(
+                torch.Tensor,
+                base_offset
+                + torch.arange(
+                    shard.numel(),
+                    device=local_tensor.device,
+                ),
             )
             padded_positions.append(positions)
 
@@ -1064,6 +1253,14 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
         replicate_tensor = torch.index_select(
             replicate_tensor_permuted_padded, self.dim, select_indices
+        )
+        logical_shape = cast(list[IntLikeType], list(replicate_tensor.shape))
+        logical_shape[self.dim] = current_logical_shape[self.dim]
+        replicate_tensor = replicate_tensor.as_strided(
+            logical_shape,
+            torch._prims_common.make_contiguous_strides_for(
+                cast(list[int], logical_shape)
+            ),
         )
 
         return replicate_tensor.contiguous()
@@ -1111,10 +1308,10 @@ class _StridedShard(torch._C._distributed.StridedShard):
         curr_local_size: int,
         num_chunks: int,
         rank: RankType,
-        return_first_offset: bool = True,
-    ) -> tuple[int, int | list[int]]:
+        offset_mode: _StridedShardOffsetMode = _StridedShardOffsetMode.FIRST,
+    ) -> tuple[int, int | list[int] | None]:
         return self.local_shard_size_and_offset(
-            curr_local_size, num_chunks, rank, return_first_offset
+            curr_local_size, num_chunks, rank, offset_mode
         )
 
     @maybe_run_for_local_tensor
@@ -1123,8 +1320,8 @@ class _StridedShard(torch._C._distributed.StridedShard):
         curr_local_size: IntLikeType,
         num_chunks: int,
         rank: RankType,
-        return_first_offset: bool = True,
-    ) -> tuple[int, list[int] | int]:
+        offset_mode: _StridedShardOffsetMode = _StridedShardOffsetMode.FIRST,
+    ) -> tuple[int, list[int] | int | None]:
         """
         Compute the local shard size and offset(s) for a _StridedShard placement.
 
@@ -1137,16 +1334,53 @@ class _StridedShard(torch._C._distributed.StridedShard):
             curr_local_size (int): The current size of the tensor dimension to be sharded.
             num_chunks (int): Number of chunks to split the dimension into (typically the mesh dimension size).
             rank (RankType): The rank index to compute the shard for.
-            return_first_offset (bool): If True, return only the first offset as an int. If False,
-                return all offsets as a list. Defaults to True.
+            offset_mode (_StridedShardOffsetMode): Controls offset materialization.
+                FIRST returns only the first offset as an int, ALL returns all offsets
+                as a list, and NONE skips offset materialization. Defaults to FIRST.
 
         Returns:
             tuple: A tuple containing:
-                - local_shard_size (int): The number of elements in the local shard for this rank.
-                - offset (int | list[int]): If return_first_offset is True, returns the first offset
-                  as an int. If False or if the shard size is 0, returns a list of all offsets
-                  (which may be empty for empty shards).
+                - local_shard_size (int): The number of elements in the local shard
+                  for this rank.
+                - offset (int | list[int] | None): Determined by offset_mode. FIRST
+                  returns the first offset as an int, ALL returns a list of all offsets,
+                  and NONE returns None.
         """
+        offset_mode = _StridedShardOffsetMode(offset_mode)
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+        if (
+            offset_mode is not _StridedShardOffsetMode.FIRST
+            and isinstance(curr_local_size, torch.SymInt)
+            and free_unbacked_symbols(curr_local_size.node.expr)
+        ):
+            split_factor = self.split_factor
+            split_factor_int = self._split_factor_int()
+            offset = None if offset_mode is _StridedShardOffsetMode.NONE else []
+            if _hint_proves_even_shard(curr_local_size, split_factor * num_chunks):
+                return (
+                    curr_local_size // num_chunks,
+                    offset,
+                )  # pyrefly: ignore[bad-return]
+
+            local_shard_size: IntLikeType = 0
+            first_split_size = (curr_local_size + split_factor - 1) // split_factor
+            for split_idx in range(split_factor_int):
+                first_start = torch.sym_min(
+                    first_split_size * split_idx, curr_local_size
+                )
+                first_end = torch.sym_min(
+                    first_split_size * (split_idx + 1), curr_local_size
+                )
+                first_len = torch.sym_max(0, first_end - first_start)
+                second_split_size = (first_len + num_chunks - 1) // num_chunks
+                second_start = torch.sym_min(second_split_size * rank, first_len)
+                second_end = torch.sym_min(second_split_size * (rank + 1), first_len)
+                local_shard_size = local_shard_size + torch.sym_max(
+                    0, second_end - second_start
+                )
+            return local_shard_size, offset  # pyrefly: ignore[bad-return]
+
         # indices_tensor is 1D torch.arange(logical_dim_size) unsqueezed
         # so that we can reuse self._split_tensor which splits on self.dim
         shape = [1] * self.dim + [curr_local_size]
@@ -1165,12 +1399,15 @@ class _StridedShard(torch._C._distributed.StridedShard):
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
         local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
+        if offset_mode is _StridedShardOffsetMode.NONE:
+            # Avoid .tolist() which creates unbacked SymInts under FakeTensorMode.
+            return local_shard_size, None
         if local_shard_size > 0:
             offsets = sharded_indices[rank].tolist()
         else:
             offsets = []
 
-        if return_first_offset:
+        if offset_mode is _StridedShardOffsetMode.FIRST:
             # Always return an int for consistency across ranks.
             # For empty shards, return -1 as an invalid offset indicator.
             offsets = offsets[0] if len(offsets) > 0 else -1
