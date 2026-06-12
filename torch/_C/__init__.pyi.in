@@ -1232,8 +1232,8 @@ def _set_sdp_priority_order(
 ) -> None: ...  # THPModule_setSDPPriorityOrder
 def _get_cudnn_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_cudnn(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
-def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
-def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledMkldnn
+def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledOnednn
+def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledOnednn
 def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
 def _set_cudnn_benchmark(arg: _bool) -> None: ...  # THPModule_setBenchmarkCuDNN
 def _get_cudnn_depthwise_kernel() -> str: ...  # THPModule_getCuDNNDepthwiseKernel

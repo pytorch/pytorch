@@ -37,10 +37,10 @@ Tensor mkldnn_softmax(
       !half_to_float,
       "softmax with half to float conversion is not supported on Mkldnn");
   const int64_t wrapped_dim = maybe_wrap_dim(dim, self.dim());
-  ideep::tensor& x = itensor_from_mkldnn(self);
+  ideep::tensor& x = itensor_from_onednn(self);
   ideep::tensor y;
   ideep::softmax_forward::compute(x, y, wrapped_dim);
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+  return new_with_itensor_onednn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
 
