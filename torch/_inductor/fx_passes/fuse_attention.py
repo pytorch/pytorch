@@ -2,10 +2,10 @@
 import functools
 import inspect
 import logging
-import math
+import warnings
 
 import torch
-from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.utils._ordered_set import OrderedSet
 
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
@@ -19,15 +19,25 @@ from ..pattern_matcher import (
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
+_scaled_dot_product_attention = aten.scaled_dot_product_attention
 
-if torch.version.hip:
 
-    def _scaled_dot_product_attention(*args, **kwargs):
-        with sdpa_kernel(backends=[SDPBackend.MATH, SDPBackend.FLASH_ATTENTION]):
-            return aten.scaled_dot_product_attention(*args, **kwargs)
-
-else:
-    _scaled_dot_product_attention = aten.scaled_dot_product_attention
+_INFERENCE_ONLY_SFDP_PATTERNS = frozenset(
+    OrderedSet(
+        [
+            "_sfdp_pattern_13",
+            "_sfdp_pattern_15",
+            "_sfdp_pattern_17",
+            "_sfdp_pattern_18",
+            "_sfdp_pattern_19",
+            "_sfdp_pattern_20",
+            "_sfdp_pattern_21",
+            "_sfdp_pattern_22",
+            "_sfdp_pattern_23",
+            "_sfdp_pattern_24",
+        ]
+    )
+)
 
 
 def _sfdp_pattern_1(query, key, value, inv_scale):
@@ -116,15 +126,15 @@ def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
     )
 
 
-def _sfdp_pattern_5(query, key, value, attn_mask):
+def _sfdp_pattern_5(query, key, value, attn_mask, inv_scale):
     attn_weight = torch.softmax(
-        (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask, dim=-1
+        (query @ key.transpose(-2, -1) / (inv_scale)) + attn_mask, dim=-1
     )
     # attn_weight = torch.dropout(attn_weight, dropout_p)
     return attn_weight @ value
 
 
-def _sfdp_replacement_5(query, key, value, attn_mask):
+def _sfdp_replacement_5(query, key, value, attn_mask, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -132,19 +142,20 @@ def _sfdp_replacement_5(query, key, value, attn_mask):
         value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=0.0,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
 
-def _sfdp_pattern_6(query, key, value, attn_mask, dropout_p):
+def _sfdp_pattern_6(query, key, value, attn_mask, inv_scale, dropout_p):
     attn_weight = torch.softmax(
-        (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask, dim=-1
+        (query @ key.transpose(-2, -1) / inv_scale) + attn_mask, dim=-1
     )
     attn_weight = torch.dropout(attn_weight, dropout_p, True)
     return attn_weight @ value
 
 
-def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
+def _sfdp_replacement_6(query, key, value, attn_mask, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -152,26 +163,28 @@ def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
         value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=dropout_p,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
 
-def _sfdp_pattern_7(query, key, value, dropout_p):
+def _sfdp_pattern_7(query, key, value, inv_scale, dropout_p):
     # in real workloads inputs to matmul are permuted
     # causing matmul to expand to a series of expand and clone calls
     # we want the same to happen during pattern tracing
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
+    div = q @ k.transpose(-2, -1) / inv_scale
     div = div.to(torch.float32)
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p, True)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
-def _sfdp_replacement_7(query, key, value, dropout_p):
+def _sfdp_replacement_7(query, key, value, inv_scale, dropout_p):
     # sdpa prefers inputs in permuted format
     # it makes a copy to put them in this format
     # if they aren't already
@@ -187,23 +200,25 @@ def _sfdp_replacement_7(query, key, value, dropout_p):
         v,
         attn_mask=None,  # attn_mask,
         dropout_p=dropout_p,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
 
-def _sfdp_pattern_8(query, key, value):
+def _sfdp_pattern_8(query, key, value, inv_scale):
     # no dropout version of pattern 7
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
+    div = q @ k.transpose(-2, -1) / inv_scale
     div = div.to(torch.float32)
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
-def _sfdp_replacement_8(query, key, value):
+def _sfdp_replacement_8(query, key, value, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -214,24 +229,26 @@ def _sfdp_replacement_8(query, key, value):
         v,
         attn_mask=None,  # attn_mask,
         dropout_p=0.0,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
 
-def _sfdp_pattern_9(query, key, value, dropout_p):
+def _sfdp_pattern_9(query, key, value, inv_scale, dropout_p):
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    q = q / math.sqrt(q.size(-1))
+    q = q / inv_scale
     div = q @ k.transpose(-2, -1)
     div = div.to(torch.float32)
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p, True)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
-def _sfdp_replacement_9(query, key, value, dropout_p):
+def _sfdp_replacement_9(query, key, value, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -242,24 +259,26 @@ def _sfdp_replacement_9(query, key, value, dropout_p):
         v,
         attn_mask=None,  # attn_mask,
         dropout_p=dropout_p,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
 
-def _sfdp_pattern_10(query, key, value):
+def _sfdp_pattern_10(query, key, value, inv_scale):
     # no dropout version of 9
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    q = q / math.sqrt(q.size(-1))
+    q = q / inv_scale
     div = q @ k.transpose(-2, -1)
     div = div.to(torch.float32)
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
-def _sfdp_replacement_10(query, key, value):
+def _sfdp_replacement_10(query, key, value, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -270,6 +289,7 @@ def _sfdp_replacement_10(query, key, value):
         v,
         attn_mask=None,  # attn_mask,
         dropout_p=0.0,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
@@ -417,11 +437,24 @@ def _sfdp_pattern_16(query, key, value, attn_mask, inv_scale, dropout_p):
 
 def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+    if query.device.type == "cuda" and torch.version.hip is None:
+        # Keep the Bert CUDA pattern on its original math path; generic SDPA can
+        # pick fused backends whose scaling/dropout numerics fail tight checks.
+        attn_weight = torch.matmul(query, key.transpose(-2, -1))
+        attn_weight = attn_weight.div(inv_scale) + attn_mask
+        attn_weight = attn_weight.softmax(dim=-1)
+        if dropout_p != 0.0:
+            attn_weight = torch.nn.functional.dropout(attn_weight, p=dropout_p)
+        return attn_weight.to(dtype=query.dtype).matmul(value)
+    attn_mask = attn_mask.to(dtype=query.dtype)
     return _scaled_dot_product_attention(
-        query.transpose(1, 2),
-        key.transpose(1, 2),
-        value.transpose(1, 2),
-        attn_mask=attn_mask.to(dtype=query.dtype),
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
         dropout_p=dropout_p,
         is_causal=False,
         scale=1.0 / inv_scale,
@@ -468,7 +501,7 @@ def _sfdp_replacement_17(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_pattern_18(query, key, value, causal_mask, dropout_p):
+def _sfdp_pattern_18(query, key, value, causal_mask, inv_scale, dropout_p):
     # for hf_GPT2 with dropout (introduces clone node) for inference
     # it also returns permuted key & value
     query = query.permute([0, 2, 1, 3])
@@ -477,7 +510,7 @@ def _sfdp_pattern_18(query, key, value, causal_mask, dropout_p):
     attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
     inv_scale = torch.full(
         [],
-        value.size(-1) ** 0.5,
+        inv_scale,
         dtype=attn_weights.dtype,
         device=attn_weights.device,
     )
@@ -497,7 +530,7 @@ def _sfdp_pattern_18(query, key, value, causal_mask, dropout_p):
     )
 
 
-def _sfdp_replacement_18(query, key, value, causal_mask, dropout_p):
+def _sfdp_replacement_18(query, key, value, causal_mask, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     permuted_key = key.transpose(1, 2)
     permuted_value = value.transpose(1, 2)
@@ -509,19 +542,19 @@ def _sfdp_replacement_18(query, key, value, causal_mask, dropout_p):
             attn_mask=causal_mask,
             dropout_p=dropout_p,
             is_causal=False,
-            scale=1.0 / math.sqrt(value.size(-1)),
+            scale=1.0 / inv_scale,
         ),
         permuted_key,
         permuted_value,
     )
 
 
-def _sfdp_pattern_19(query, key, value, causal_mask, attn_mask, dropout_p):
+def _sfdp_pattern_19(query, key, value, causal_mask, attn_mask, inv_scale, dropout_p):
     # for token-classification+gpt2 / text-generation+gpt2
     attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
     inv_scale = torch.full(
         [],
-        value.size(-1) ** 0.5,
+        inv_scale,
         dtype=attn_weights.dtype,
         device=attn_weights.device,
     )
@@ -535,7 +568,9 @@ def _sfdp_pattern_19(query, key, value, causal_mask, attn_mask, dropout_p):
     return torch.nn.functional.dropout(attn_weights, dropout_p).matmul(value)
 
 
-def _sfdp_replacement_19(query, key, value, causal_mask, attn_mask, dropout_p):
+def _sfdp_replacement_19(
+    query, key, value, causal_mask, attn_mask, inv_scale, dropout_p
+):
     counters["inductor"]["fuse_attention"] += 1
     fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
     attn_mask = torch.where(causal_mask, attn_mask, fill_value)
@@ -546,12 +581,371 @@ def _sfdp_replacement_19(query, key, value, causal_mask, attn_mask, dropout_p):
         attn_mask=attn_mask,
         dropout_p=dropout_p,
         is_causal=False,
-        scale=1.0 / math.sqrt(value.size(-1)),
+        scale=1.0 / inv_scale,
     )
 
 
+def _sfdp_pattern_20(query, key, value, attn_mask, inv_scale, dropout_p):
+    # for DistilBert with dropout transformers==4.44.2
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    bs = q.size(0)
+    k_len = k.size(-2)
+    q = q.div(inv_scale)
+    scores = q @ k.transpose(-2, -1)
+    fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
+    attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
+    return (
+        torch.nn.functional.dropout(
+            torch.softmax(scores.masked_fill(attn_mask, fill_value), dim=-1), dropout_p
+        )
+        @ v
+    )
+
+
+def _sfdp_replacement_20(query, key, value, attn_mask, inv_scale, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    bs = query.size(0)
+    n_head = query.size(2)
+    q_len = query.size(1)
+    k_len = key.size(1)
+    # do attn_mask->logical_not() in _scaled_dot_product_attention
+    attn_mask = (
+        (attn_mask == 1).view((bs, 1, 1, k_len)).expand((bs, n_head, q_len, k_len))
+    )
+    return _scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask.to(dtype=torch.bool),
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=1.0 / inv_scale,
+    )
+
+
+def _sfdp_pattern_21(query, key, value, attn_mask):
+    # for T5 with inplace add
+    query = query.permute([0, 2, 1, 3])
+    key = key.permute([0, 2, 1, 3])
+    value = value.permute([0, 2, 1, 3])
+    score = torch.matmul(query, key.permute(0, 1, 3, 2))
+    masked_score = score + attn_mask
+    score = masked_score.type_as(query)
+    return score.float().softmax(dim=-1).type_as(query).matmul(value)
+
+
+def _sfdp_replacement_21(query, key, value, attn_mask):
+    counters["inductor"]["fuse_attention"] += 1
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attn_mask.to(dtype=query.dtype),
+        is_causal=False,
+        scale=1.0,
+    )
+
+
+def _sfdp_pattern_22(query, key, value, attn_mask):
+    # for T5 with inplace add and return key and value
+    query = query.permute([0, 2, 1, 3])
+    key = key.permute([0, 2, 1, 3])
+    value = value.permute([0, 2, 1, 3])
+    score = torch.matmul(query, key.permute(0, 1, 3, 2))
+    masked_score = score + attn_mask
+    score = masked_score.type_as(query)
+    return score.float().softmax(dim=-1).type_as(query).matmul(value), key, value
+
+
+def _sfdp_replacement_22(query, key, value, attn_mask):
+    counters["inductor"]["fuse_attention"] += 1
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    return (
+        _scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=attn_mask.to(dtype=query.dtype),
+            is_causal=False,
+            scale=1.0,
+        ),
+        key,
+        value,
+    )
+
+
+def _sfdp_pattern_23(query, key, value):
+    # for T5 with inplace add and
+    # return key and value and
+    # attn_mask is generated by atem.full(..., 0)
+    query = query.permute([0, 2, 1, 3])
+    key = key.permute([0, 2, 1, 3])
+    value = value.permute([0, 2, 1, 3])
+    score = torch.matmul(query, key.permute(0, 1, 3, 2))
+    fp32_score = score.float()
+    score = fp32_score.type_as(query)
+    return score.float().softmax(dim=-1).type_as(query).matmul(value), key, value
+
+
+def _sfdp_replacement_23(query, key, value):
+    counters["inductor"]["fuse_attention"] += 1
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    return (
+        _scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=None,
+            is_causal=False,
+            scale=1.0,
+        ),
+        key,
+        value,
+    )
+
+
+def _sfdp_pattern_24(query, key, value, attention_mask):
+    """
+    this pattern is for MBartForCausalLM/PLBartForCausalLM.
+    attn_mask has a different dtype with QKV.
+    there is no scale in sdpa.
+    """
+    bs = query.size(0)
+    n_head = query.size(1)
+    seq_len = query.size(2)
+    head_size = query.size(3)
+    q = query.view(bs * n_head, -1, head_size)
+    k = key.reshape(bs * n_head, -1, head_size)
+    v = value.reshape(bs * n_head, -1, head_size)
+    attn_weights = torch.bmm(q, k.transpose(1, 2))
+    attn_weights = attn_weights.view(bs, n_head, seq_len, -1) + attention_mask
+    attn_weights = attn_weights.view(bs * n_head, seq_len, -1)
+    attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+    if query.dtype == torch.half:
+        attn_weights = attn_weights.to(torch.half)
+    attn_output = torch.bmm(attn_weights, v)
+    attn_output = attn_output.view(bs, n_head, seq_len, head_size)
+    return attn_output
+
+
+def _sfdp_replacement_24(query, key, value, attention_mask):
+    counters["inductor"]["fuse_attention"] += 1
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attention_mask.to(dtype=query.dtype),
+        is_causal=False,
+        scale=1,
+    )
+
+
+def _sfdp_pattern_25(query, key, value, attn_mask, dropout_p):
+    # for T5 with inplace add
+    query = query.permute([0, 2, 1, 3])
+    key = key.permute([0, 2, 1, 3])
+    value = value.permute([0, 2, 1, 3])
+    score = torch.matmul(query, key.permute(0, 1, 3, 2))
+    masked_score = score + attn_mask
+    return torch.nn.functional.dropout(
+        masked_score.float().softmax(dim=-1).type_as(query), dropout_p
+    ).matmul(value)
+
+
+def _sfdp_replacement_25(query, key, value, attn_mask, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    if attn_mask.device.type == "xpu":
+        attn_mask = attn_mask.contiguous()
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=1.0,
+    )
+
+
+def _sfdp_pattern_26(query, key, value, attn_mask, dropout_p):
+    # for T5 with inplace add and return key and value
+    query = query.permute([0, 2, 1, 3])
+    key = key.permute([0, 2, 1, 3])
+    value = value.permute([0, 2, 1, 3])
+    score = torch.matmul(query, key.permute(0, 1, 3, 2))
+    masked_score = score + attn_mask
+    return (
+        torch.nn.functional.dropout(
+            masked_score.float().softmax(dim=-1).type_as(query), dropout_p
+        ).matmul(value),
+        key,
+        value,
+    )
+
+
+def _sfdp_replacement_26(query, key, value, attn_mask, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    if attn_mask.device.type == "xpu":
+        attn_mask = attn_mask.contiguous()
+    return (
+        _scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=attn_mask,
+            dropout_p=dropout_p,
+            is_causal=False,
+            scale=1.0,
+        ),
+        key,
+        value,
+    )
+
+
+def _sfdp_pattern_27(query, key, value, dropout_p):
+    # for T5 with inplace add and
+    # return key and value and
+    # attn_mask is generated by atem.full(..., 0)
+    query = query.permute([0, 2, 1, 3])
+    key = key.permute([0, 2, 1, 3])
+    value = value.permute([0, 2, 1, 3])
+    score = torch.matmul(query, key.permute(0, 1, 3, 2))
+    return (
+        torch.nn.functional.dropout(
+            score.float().softmax(dim=-1).type_as(query), dropout_p
+        ).matmul(value),
+        key,
+        value,
+    )
+
+
+def _sfdp_replacement_27(query, key, value, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    return (
+        _scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=None,
+            dropout_p=dropout_p,
+            is_causal=False,
+            scale=1.0,
+        ),
+        key,
+        value,
+    )
+
+
+def _sfdp_pattern_28(query, key, value, scale_factor, dropout_p):
+    # Visformer pattern
+    # same as pattern 4 but non-contiguous q/k/v
+    return _sfdp_pattern_4(query, key, value, scale_factor, dropout_p)
+
+
+def _sfdp_replacement_28(query, key, value, scale_factor, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    return _scaled_dot_product_attention(
+        query.contiguous(),
+        key.contiguous(),
+        value.contiguous(),
+        attn_mask=None,
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=scale_factor,
+    )
+
+
+def _sfdp_pattern_29(query, key, value, attn_mask, inv_scale):
+    # Matches _scaled_dot_product_attention_math decomposition for
+    # BERT-like models calling F.scaled_dot_product_attention with attn_mask.
+    # Scale is split as sqrt across Q and K (mul.Scalar in fp16), bmm stays
+    # in fp16, and _safe_softmax upcasts to fp32 internally.
+    # Permutations are needed to create clones in graph since real workloads
+    # have non-contiguous inputs from .transpose(1, 2).
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    q = torch.ops.aten.mul.Scalar(q, inv_scale)
+    k = torch.ops.aten.mul.Scalar(k.transpose(-2, -1), inv_scale)
+    attn_weight = (q @ k) + attn_mask
+    attn_weight = torch.ops.aten._safe_softmax(attn_weight, -1)
+    return attn_weight @ v
+
+
+def _sfdp_replacement_29(query, key, value, attn_mask, inv_scale):
+    counters["inductor"]["fuse_attention"] += 1
+    return _scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask.to(dtype=query.dtype),
+        dropout_p=0.0,
+        is_causal=False,
+        scale=inv_scale * inv_scale,
+    )
+
+
+def _sfdp_pattern_30(query, key, value, inv_scale):
+    # Same as pattern 29 but without attention mask.
+    # Permutations are needed to create clones in graph.
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    q = torch.ops.aten.mul.Scalar(q, inv_scale)
+    k = torch.ops.aten.mul.Scalar(k.transpose(-2, -1), inv_scale)
+    attn_weight = q @ k
+    attn_weight = torch.ops.aten._safe_softmax(attn_weight, -1)
+    return attn_weight @ v
+
+
+def _sfdp_replacement_30(query, key, value, inv_scale):
+    counters["inductor"]["fuse_attention"] += 1
+    return _scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=None,
+        dropout_p=0.0,
+        is_causal=False,
+        scale=inv_scale * inv_scale,
+    )
+
+
+@functools.lru_cache(None)
+def _warn_tf32_disabled() -> None:
+    if (
+        torch.cuda.is_available()
+        and torch.backends.cuda.matmul.fp32_precision != "tf32"
+        and torch.cuda.get_device_capability() >= (8, 0)
+    ):
+        warnings.warn(
+            "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
+            "Skipping pattern matching to fused flash-attention. "
+            "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
+        )
+
+
 def _sfdp_params_check(match):
-    assert all(k in match.kwargs for k in ("query", "key", "value"))
+    if not all(k in match.kwargs for k in ("query", "key", "value")):
+        raise AssertionError("expected query, key, value in match.kwargs")
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
     value = match.kwargs["value"].meta["val"]
@@ -559,6 +953,15 @@ def _sfdp_params_check(match):
         query.device == key.device == value.device
     ):
         return False
+    # fused kernels use tf32
+    if (
+        query.device.type == "cuda"
+        and query.dtype == torch.float32
+        and torch.backends.cuda.matmul.fp32_precision != "tf32"
+    ):
+        _warn_tf32_disabled()
+        return False
+
     add_mask_node = filter_nodes(match.nodes, aten.add.Tensor)
     # Has attn_mask add.
     if len(add_mask_node) > 0:
@@ -632,28 +1035,45 @@ def partialize_and_update_signature(func, **kwargs):
     return wrapper
 
 
-def _get_sfdp_patterns():
+def _get_sfdp_patterns(input_device: torch.device | None = None):
     from .joint_graph import patterns
 
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
+    if input_device:
+        device = str(input_device)
     else:
-        device = "cpu"
+        if torch.cuda.is_available():
+            # workaround https://github.com/pytorch/pytorch/issues/97894
+            device = "cuda"
+        elif torch.xpu.is_available():
+            device = "xpu"
+        else:
+            device = "cpu"
 
     # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
     g_inp = functools.partial(
         torch.empty, (2, 4, 8, 16), device=device, requires_grad=True
     )
+    # non-contiguous input to cover more patterns.
+    gn_inp = functools.partial(
+        torch.empty_strided,
+        (2, 6, 16, 8),
+        (2304, 128, 1, 16),
+        device=device,
+        requires_grad=True,
+    )
     # attn_mask
     b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
+    # need 2d attn_mask to generate patterns with view op
+    m_inp_2d = functools.partial(torch.empty, (2, 4), device=device)
     # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     d = {"dropout_p": 0.113377}
+    s = {"inv_scale": 0.66666}
+    sd = {"inv_scale": 0.66666, "dropout_p": 0.113377}
 
     # we could also generate all these patterns in 3d.. TODO
     g_3d_inp = functools.partial(
@@ -668,19 +1088,34 @@ def _get_sfdp_patterns():
     )
     m_bs1_inp = functools.partial(torch.empty, (1, 1, 1, 4), device=device)
 
+    # For patterns with permute([0,2,1,3]) inside (e.g. BERT-like models),
+    # input is [B, S, H, D] and after permute becomes [B, H, S, D].
+    # S must match the mask dimension (8) so Q@K^T shape [B, H, S, S] matches b().
+    # gp = "generic with permute"; gp_bs1 is the batch_size=1 variant (no clone).
+    gp_inp = functools.partial(
+        torch.empty, (2, 8, 4, 16), device=device, requires_grad=True
+    )
+    gp_bs1_inp = functools.partial(
+        torch.empty, (1, 8, 4, 16), device=device, requires_grad=True
+    )
+
     # softmax will generate a dtype conversion on inputs if they are in half,
     # but will not in float, so we generate a pattern for both
     for dtype in [torch.float, torch.half]:
         g = functools.partial(g_inp, dtype=dtype)
+        gn = functools.partial(gn_inp, dtype=dtype)
         b = functools.partial(b_inp, dtype=dtype)
         b_float = functools.partial(b_inp, dtype=torch.float)
         b_bool = functools.partial(b_inp, dtype=torch.bool)
         m = functools.partial(m_inp, dtype=dtype)
         m_float = functools.partial(m_inp, dtype=torch.float)
         m_bool = functools.partial(m_inp, dtype=torch.bool)
+        m_2d = functools.partial(m_inp_2d, dtype=dtype)
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
         g_bs1 = functools.partial(g_bs1_inp, dtype=dtype)
+        gp = functools.partial(gp_inp, dtype=dtype)
+        gp_bs1 = functools.partial(gp_bs1_inp, dtype=dtype)
         m_bs1 = functools.partial(m_bs1_inp, dtype=dtype)
         m_bs1_float = functools.partial(m_bs1_inp, dtype=torch.float)
         m_bs1_bool = functools.partial(m_bs1_inp, dtype=torch.bool)
@@ -718,42 +1153,42 @@ def _get_sfdp_patterns():
                 _sfdp_pattern_5,
                 _sfdp_replacement_5,
                 [g(), g(), g(), b()],
-                {},
+                s,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_6,
                 _sfdp_replacement_6,
                 [g(), g(), g(), b()],
-                d,
+                sd,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_7,
                 _sfdp_replacement_7,
                 [g(), g(), g()],
-                d,
+                sd,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_8,
                 _sfdp_replacement_8,
                 [g(), g(), g()],
-                {},
+                s,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_9,
                 _sfdp_replacement_9,
                 [g(), g(), g()],
-                d,
+                sd,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_10,
                 _sfdp_replacement_10,
                 [g(), g(), g()],
-                {},
+                s,
                 _sfdp_params_check,
             ),
             (
@@ -787,29 +1222,28 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_15,
                 _sfdp_replacement_15,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m_2d(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
             ),
-            # TODO: Enable CUDA after solving Bert accuracy issue of calling efficient attention
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g(), g(), g(), m(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_17,
                 _sfdp_replacement_17,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m_2d(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
             ),
@@ -817,22 +1251,155 @@ def _get_sfdp_patterns():
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g(), g(), g(), m_bool()],
-                d,
+                sd,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
-                d,
+                sd,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_19,
                 _sfdp_replacement_19,
                 [g(), g(), g(), b_bool(), b_float()],
-                d,
+                sd,
                 _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_20,
+                _sfdp_replacement_20,
+                [g(), g(), g(), m_2d()],
+                sd,
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_21,
+                _sfdp_replacement_21,
+                [g(), g(), g(), m_float()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_21,
+                _sfdp_replacement_21,
+                [g_bs1(), g_bs1(), g_bs1(), m_bs1_float()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_22,
+                _sfdp_replacement_22,
+                [g(), g(), g(), m_float()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_22,
+                _sfdp_replacement_22,
+                [g_bs1(), g_bs1(), g_bs1(), m_bs1_float()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_23,
+                _sfdp_replacement_23,
+                [g(), g(), g()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_23,
+                _sfdp_replacement_23,
+                [g_bs1(), g_bs1(), g_bs1()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_24,
+                _sfdp_replacement_24,
+                [g(), g(), g(), b_float()],
+                {},
+                _sfdp_extra_check,
+            ),
+            (
+                _sfdp_pattern_25,
+                _sfdp_replacement_25,
+                [g(), g(), g(), m()],
+                d,
+                _sfdp_extra_check(disable_cuda=True),
+            ),
+            (
+                _sfdp_pattern_25,
+                _sfdp_replacement_25,
+                [g_bs1(), g_bs1(), g_bs1(), m_bs1()],
+                d,
+                _sfdp_extra_check(disable_cuda=True),
+            ),
+            (
+                _sfdp_pattern_26,
+                _sfdp_replacement_26,
+                [g(), g(), g(), m()],
+                d,
+                _sfdp_extra_check(disable_cuda=True),
+            ),
+            (
+                _sfdp_pattern_26,
+                _sfdp_replacement_26,
+                [g_bs1(), g_bs1(), g_bs1(), m_bs1()],
+                d,
+                _sfdp_extra_check(disable_cuda=True),
+            ),
+            (
+                _sfdp_pattern_27,
+                _sfdp_replacement_27,
+                [g(), g(), g()],
+                d,
+                _sfdp_extra_check(disable_cuda=True),
+            ),
+            (
+                _sfdp_pattern_27,
+                _sfdp_replacement_27,
+                [g_bs1(), g_bs1(), g_bs1()],
+                d,
+                _sfdp_extra_check(disable_cuda=True),
+            ),
+            (
+                _sfdp_pattern_28,
+                _sfdp_replacement_28,
+                [gn(), gn(), gn(), c()],
+                d,
+                _sfdp_extra_check(aten.mul.Tensor),
+            ),
+            (
+                _sfdp_pattern_29,
+                _sfdp_replacement_29,
+                [gp(), gp(), gp(), b()],
+                s,
+                _sfdp_extra_check(aten.mul.Scalar),
+            ),
+            (
+                _sfdp_pattern_29,
+                _sfdp_replacement_29,
+                [gp_bs1(), gp_bs1(), gp_bs1(), b()],
+                s,
+                _sfdp_extra_check(aten.mul.Scalar),
+            ),
+            (
+                _sfdp_pattern_30,
+                _sfdp_replacement_30,
+                [gp(), gp(), gp()],
+                s,
+                _sfdp_extra_check(aten.mul.Scalar),
+            ),
+            (
+                _sfdp_pattern_30,
+                _sfdp_replacement_30,
+                [gp_bs1(), gp_bs1(), gp_bs1()],
+                s,
+                _sfdp_extra_check(aten.mul.Scalar),
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
@@ -844,7 +1411,9 @@ def _get_sfdp_patterns():
                     _sfdp_replacement_16,
                     [g(), g(), g(), m_float(), c()],
                     d,
-                    _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                    _sfdp_extra_check(
+                        aten.div.Tensor, disable_cuda=torch.version.hip is None
+                    ),
                 )
             )
             candidates.append(
@@ -853,15 +1422,21 @@ def _get_sfdp_patterns():
                     _sfdp_replacement_16,
                     [g_bs1(), g_bs1(), g_bs1(), m_bs1_float(), c()],
                     d,
-                    _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                    _sfdp_extra_check(
+                        aten.div.Tensor, disable_cuda=torch.version.hip is None
+                    ),
                 )
             )
 
         for pattern, replacement, args, workaround, extra_check in candidates:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
-            assert isinstance(workaround, dict)
+            if not isinstance(workaround, dict):
+                raise AssertionError(
+                    f"expected workaround to be a dict, got {type(workaround)}"
+                )
             name = pattern.__name__
+            pattern_name = name
 
             if dtype != torch.float:
                 name += "_half"
@@ -873,42 +1448,55 @@ def _get_sfdp_patterns():
             if args[0].size(0) == 1:
                 name += "_bs1"
 
-            training_name = name + "_training"
-            yield training_name, {
-                "search_fn": pattern,
-                "replace_fn": replacement,
-                "example_inputs": args,
-                "trace_fn": joint_fwd_bwd,
-                "pass_dicts": patterns,
-                "extra_check": extra_check,
-                "scalar_workaround": workaround,
-            }
-
-            if workaround:
-                assert len(workaround) == 1 and "dropout_p" in workaround
-                # functools.partial insufficient because we look at signature downstream
-                pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
-                replacement = partialize_and_update_signature(
-                    replacement, dropout_p=0.0
+            if pattern_name not in _INFERENCE_ONLY_SFDP_PATTERNS:
+                training_name = name + "_training"
+                yield (
+                    training_name,
+                    {
+                        "search_fn": pattern,
+                        "replace_fn": replacement,
+                        "example_inputs": args,
+                        "trace_fn": joint_fwd_bwd,
+                        "pass_dicts": patterns,
+                        "extra_check": extra_check,
+                        "scalar_workaround": workaround,
+                        "skip_duplicates": True,
+                    },
                 )
-                workaround = {}
+            inference_workaround = {}
+            if workaround:
+                if len(workaround) > 2:
+                    raise AssertionError(
+                        f"expected len(workaround) <= 2, got {len(workaround)}"
+                    )
+                if "inv_scale" in workaround:
+                    inference_workaround["inv_scale"] = workaround["inv_scale"]
+                if "dropout_p" in workaround:
+                    # functools.partial insufficient because we look at signature downstream
+                    pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
+                    replacement = partialize_and_update_signature(
+                        replacement, dropout_p=0.0
+                    )
 
             inference_name = name + "_inference"
-            yield inference_name, {
-                "search_fn": pattern,
-                "replace_fn": replacement,
-                "example_inputs": args,
-                "trace_fn": fwd_only,
-                "pass_dicts": patterns,
-                "extra_check": extra_check,
-                "scalar_workaround": workaround,
-                # with dropout turned into clone, we end up with a number of
-                # semantically identical graphs
-                "skip_duplicates": True,
-            }
+            yield (
+                inference_name,
+                {
+                    "search_fn": pattern,
+                    "replace_fn": replacement,
+                    "example_inputs": args,
+                    "trace_fn": fwd_only,
+                    "pass_dicts": patterns,
+                    "extra_check": extra_check,
+                    "scalar_workaround": inference_workaround,
+                    # with dropout turned into clone, we end up with a number of
+                    # semantically identical graphs
+                    "skip_duplicates": True,
+                },
+            )
 
 
-@functools.lru_cache(None)
-def _sfdp_init():
-    for key, register_replacement_kwargs in _get_sfdp_patterns():
+@functools.cache
+def _sfdp_init(input_device: torch.device | None = None):
+    for key, register_replacement_kwargs in _get_sfdp_patterns(input_device):
         gen_register_replacement(key, **register_replacement_kwargs)

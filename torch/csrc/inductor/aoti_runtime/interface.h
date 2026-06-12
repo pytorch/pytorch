@@ -6,6 +6,17 @@
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 
+#ifdef _WIN32
+/*
+On Windows, we need to explicit declaration for export APIs. And because the
+package loader call these API via GetProcAddress(ldsym on Linux), we can ignore
+the import case.
+*/
+#define AOTI_API __declspec(dllexport)
+#else
+#define AOTI_API __attribute__((__visibility__("default")))
+#endif
+
 extern "C" {
 struct AOTInductorModelOpaque;
 using AOTInductorModelHandle = AOTInductorModelOpaque*;
@@ -19,9 +30,60 @@ using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
 struct AOTInductorConstantMap;
 using AOTInductorConstantMapHandle = AOTInductorConstantMap*;
 
+struct AOTInductorConstantMapEntry {
+  const char* name;
+  AtenTensorHandle handle;
+};
+
+// ---------------------------------------------------------------------------
+// C-compatible tensor descriptor for crossing the DSO boundary.
+//
+// This struct carries the same information as ArrayRefTensor<T> but uses only
+// C-compatible types so the host process and DSO can be built with different
+// C++ standard libraries (e.g. libc++ vs libstdc++).  All pointer fields
+// reference memory owned by the caller; no copies are made.
+//
+// Maximum supported number of dimensions.  8 covers all practical AOTI
+// models; tensors with more dims should fall back to the AtenTensorHandle
+// interface.
+// ---------------------------------------------------------------------------
+#define AOTI_ARRAYREF_TENSOR_MAX_DIMS 8
+
+struct AOTInductorArrayRefTensor {
+  // Pointer to the raw data buffer.  Not owned.
+  void* data;
+
+  // Number of elements in the data buffer (product of sizes for contiguous
+  // tensors).
+  int64_t numel;
+
+  // Static-size arrays for shape metadata.  Only the first `ndim` entries
+  // are meaningful.
+  int64_t sizes[AOTI_ARRAYREF_TENSOR_MAX_DIMS];
+  int64_t strides[AOTI_ARRAYREF_TENSOR_MAX_DIMS];
+
+  // Number of dimensions (0 <= ndim <= AOTI_ARRAYREF_TENSOR_MAX_DIMS).
+  int32_t ndim;
+
+  // Torch dtype encoded as int32_t (same encoding as aoti_torch_dtype_*()).
+  int32_t dtype;
+
+  // Device information.
+  int32_t device_type;
+  int32_t device_idx;
+
+  // Reserved for future extension.  Zero-initialize and do not read — a
+  // newer reader must tolerate zeros, and an older reader must ignore them.
+  int64_t reserved[4];
+};
+
+static_assert(
+    sizeof(AOTInductorArrayRefTensor) == 192,
+    "changing the size of AOTInductorArrayRefTensor breaks ABI compatibility!");
+
 // TODO: Deprecate this API. This was kept for BC compatibility.
 // Please use AOTInductorModelContainerCreateWithDevice instead.
-AOTIRuntimeError AOTInductorModelContainerCreate(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerCreate(
     AOTInductorModelContainerHandle* container_handle,
     size_t num_models,
     bool is_cpu,
@@ -34,18 +96,32 @@ AOTIRuntimeError AOTInductorModelContainerCreate(
 // "cpu", "cuda", "cuda:0", etc. If the device index is not specified for CUDA
 // device, runtime will use the device index returned by
 // "cudaGetDevice(&device_idx)"
-AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
     AOTInductorModelContainerHandle* container_handle,
     size_t num_models,
     const char* device_str,
     const char* cubin_dir);
 
 // Deletes the AOTInductor model container.
-AOTIRuntimeError AOTInductorModelContainerDelete(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle);
 
 // Runs the inference.
-AOTIRuntimeError AOTInductorModelContainerRun(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerRun(
+    AOTInductorModelContainerHandle container_handle,
+    AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
+                                     // are stolen; the array itself is borrowed
+    size_t num_inputs,
+    AtenTensorHandle*
+        output_handles, // array for writing output AtenTensorHandle; handles
+                        // will be stolen by the caller; the array itself is
+                        // borrowed
+    size_t num_outputs,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle);
+
+// Single-threaded variant of previous.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
     AOTInductorModelContainerHandle container_handle,
     AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
                                      // are stolen; the array itself is borrowed
@@ -59,14 +135,14 @@ AOTIRuntimeError AOTInductorModelContainerRun(
     AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Retrieves the number of constants for the model.
-AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
     AOTInductorModelContainerHandle container_handle,
     size_t* num_constants);
 
 // Retrieves a constant's name.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTIRuntimeError AOTInductorModelContainerGetConstantName(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantName(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     const char** name);
@@ -74,7 +150,7 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantName(
 // Retrieves a constant's original FQN.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     const char** original_fqn);
@@ -82,7 +158,7 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
 // Retrieves whether a constant is from folded.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     bool* from_folded);
@@ -90,7 +166,7 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
 // Retrieves the inductor constant type.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTIRuntimeError AOTInductorModelContainerGetConstantType(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantType(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     int32_t* type);
@@ -98,55 +174,147 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantType(
 // Retrieves a constant's dtype.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     int32_t* dtype);
 
-// Setup the constant buffer in model container with provided ConstantMap
-// use_inactive should be set as true if the inactive buffer is to be updated.
-// validate_full_update checks if all constants are included in the ConstantMap
-AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
+// Retrieves a constant's data size.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantDataSize(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    size_t* data_size);
+
+// Extract the constants that is being used in the container.
+//
+// DEPRECATED: V1 API; see AOTInductorModelContainerExtractConstantsMapEntries.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive);
+
+// C-ABI-safe variant of AOTInductorModelContainerExtractConstantsMap.
+// On success, `entries` points to `num_entries` container-owned entries.
+// The returned array and each `entries[i].name` are valid until the next
+// AOTInductorModelContainerExtractConstantsMapEntries call on the same
+// container, until the container's constants are mutated, or until the
+// container is deleted. Callers that need to retain names should copy them.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMapEntries(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry** entries,
+    size_t* num_entries,
+    bool use_inactive);
+
+// Setup the constant buffer in model container with provided ConstantMap.
+// The ConstantMap is user managed, and the user would retain ownership.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateUserManagedConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
     bool use_inactive,
     bool validate_full_update);
 
+// Same as AOTInductorModelContainerUpdateUserManagedConstantBuffer,
+// but no std::unordered_map crosses DLL boundaries for cross-compilation.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update);
+
+// Setup the constant buffer in model container with provided ConstantMap
+// use_inactive should be set as true if the inactive buffer is to be updated.
+// validate_full_update checks if all constants are included in the ConstantMap
+//
+// DEPRECATED: V1 API; see AOTInductorModelContainerUpdateConstantBufferPairs.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update);
+
+// C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBuffer.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update);
+
+// Same as AOTInductorModelContainerUpdateConstantBuffer, but the caller is
+// allowed to pass CPU tensors even when the model lives on a non-CPU device.
+// CPU tensors are silently copied to the model's device.
+//
+// DEPRECATED: V1 API; see
+// AOTInductorModelContainerUpdateConstantBufferFromCpuPairs.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update);
+
+// C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBufferFromCpu.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateConstantBufferFromCpuPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update);
+
 // Setup the inactive constant buffer in model container with provided
 // ConstantMap
-AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
+//
+// DEPRECATED: V1 API; see
+// AOTInductorModelContainerUpdateInactiveConstantBufferPairs.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle);
 
+// C-ABI-safe variant of AOTInductorModelContainerUpdateInactiveConstantBuffer.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateInactiveConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs);
+
+// Free the inactive constant buffer in model container.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
+    AOTInductorModelContainerHandle container_handle);
+
 // Run constant folding on constant buffer.
-AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
     AOTInductorModelContainerHandle container_handle,
     bool use_inactive,
     AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Swap the constant buffer being used to the inactive one.
-AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
     AOTInductorModelContainerHandle container_handle);
 
 // Retrieves the number of inputs for the model.
-AOTIRuntimeError AOTInductorModelContainerGetNumInputs(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetNumInputs(
     AOTInductorModelContainerHandle container_handle,
     size_t* ret_num_inputs);
 
 // Retrieves the input name at the given index.
-AOTIRuntimeError AOTInductorModelContainerGetInputName(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetInputName(
     AOTInductorModelContainerHandle container_handle,
     size_t input_idx,
     const char** ret_input_names);
 
 // Retrieves the number of outputs for the model.
-AOTIRuntimeError AOTInductorModelContainerGetNumOutputs(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetNumOutputs(
     AOTInductorModelContainerHandle container_handle,
     size_t* ret_num_outputs);
 
 // Retrieves the output name at the given index.
-AOTIRuntimeError AOTInductorModelContainerGetOutputName(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetOutputName(
     AOTInductorModelContainerHandle container_handle,
     size_t output_idx,
     const char** ret_output_names);
@@ -158,33 +326,89 @@ AOTIRuntimeError AOTInductorModelContainerGetOutputName(
 //
 // constant_map_handle is an opaque type to satisfy the C ABI.  It should be a
 // std::unordered_map<std::string, at::Tensor*>*.
-AOTIRuntimeError AOTInductorModelCreate(
+//
+// DEPRECATED: V1 API; see AOTInductorModelCreateV2.
+AOTI_API AOTIRuntimeError AOTInductorModelCreate(
     AOTInductorModelHandle* model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
 
+// C-ABI-safe variant of AOTInductorModelCreate.
+// Pass `pairs == nullptr` (or `num_pairs == 0`) to load constants from the
+// embedded blob instead of an externally provided map.
+AOTI_API AOTIRuntimeError AOTInductorModelCreateV2(
+    AOTInductorModelHandle* model_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs);
+
 // Run an AOTInductorModel (see AOTInductorModelCreate for when one should use
 // this function versus AOTInductorModelContainerRun).
-AOTIRuntimeError AOTInductorModelRun(
+AOTI_API AOTIRuntimeError AOTInductorModelRun(
     AOTInductorModelHandle model_handle,
     AtenTensorHandle* input_handles,
     AtenTensorHandle* output_handles);
 
 // Replace AOTInductorModel's constant map. Note it doesn't handle concurrency
 // so be sure to handle ordering if AOTInductorModelRun is ran concurrently.
-AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
+AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
 
-// Delete an AOTInductorModel created by AOTInductorModelCreate.
-AOTIRuntimeError AOTInductorModelDelete(AOTInductorModelHandle model_handle);
+// C-ABI-safe variant of AOTInductorModelUpdateConstantsMap.
+// Uses an array of (name, handle) pairs instead of an opaque pointer to
+// std::unordered_map, so the host and DSO can use different C++ standard
+// libraries without ABI conflicts.
+AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMapV2(
+    AOTInductorModelHandle model_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    int32_t num_pairs);
 
-AOTIRuntimeError AOTInductorModelGetNumOutputs(
+// Get the size of the constant blob
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
+    AOTInductorModelContainerHandle container_handle,
+    uint64_t* ret_size);
+
+// Load weights from a single blob in weight_blob_ptr
+AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
+    AOTInductorModelContainerHandle container_handle,
+    const uint8_t* weight_blob_ptr);
+
+// Delete an AOTInductorModel created by AOTInductorModelCreate.
+AOTI_API AOTIRuntimeError
+AOTInductorModelDelete(AOTInductorModelHandle model_handle);
+
+AOTI_API AOTIRuntimeError AOTInductorModelGetNumOutputs(
     AOTInductorModelHandle model_handle,
     size_t* ret_num_outputs);
 
-AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
     AOTInductorModelContainerHandle container_handle,
     const char** in_spec,
     const char** out_spec);
+
+// Retrieves the error message from the last failed AOTI runtime call on the
+// current thread. The returned pointer is valid until the next AOTI runtime
+// call on the same thread. Returns an empty string if the last call succeeded.
+AOTI_API AOTIRuntimeError AOTInductorGetLastError(const char** error_msg);
+
+// ---------------------------------------------------------------------------
+// C-ABI-safe variant of AOTInductorModelRunMinimalArrayrefInterface.
+//
+// Instead of passing std::tuple<ArrayRefTensor<T>...>& (which encodes C++
+// standard library types into the ABI), this function accepts flat C arrays
+// of AOTInductorArrayRefTensor descriptors.  The descriptors reference the
+// same underlying data buffers -- no copies are made.
+//
+// The host process marshals its ArrayRefTensor<T> objects into
+// AOTInductorArrayRefTensor descriptors, calls into the DSO through this
+// pure-C interface, and then unmarshals the output descriptors back.
+// Because only C types cross the DSO boundary, the host and DSO can be
+// built with different C++ standard libraries (e.g. libc++ vs libstdc++).
+// ---------------------------------------------------------------------------
+AOTI_API AOTIRuntimeError AOTInductorModelRunMinimalArrayrefInterfaceV2(
+    AOTInductorModelHandle model_handle,
+    int32_t num_inputs,
+    const AOTInductorArrayRefTensor* inputs,
+    int32_t num_outputs,
+    AOTInductorArrayRefTensor* outputs);
 
 } // extern "C"

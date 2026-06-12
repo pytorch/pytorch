@@ -1,4 +1,3 @@
-#include <ATen/core/Tensor.h>
 #include <ATen/core/jit_type.h>
 #include <c10/core/GradMode.h>
 
@@ -65,7 +64,7 @@ VaryingShape<T> VaryingShape<T>::merge(const VaryingShape<T>& other) const {
 
 template <typename T>
 std::ostream& operator<<(std::ostream& out, const VaryingShape<T>& vs) {
-  out << "(";
+  out << '(';
   if (!vs.size()) {
     out << "*)";
     return out;
@@ -79,10 +78,10 @@ std::ostream& operator<<(std::ostream& out, const VaryingShape<T>& vs) {
     if (v.has_value()) {
       out << v.value();
     } else {
-      out << "*";
+      out << '*';
     }
   }
-  out << ")";
+  out << ')';
   return out;
 }
 
@@ -105,7 +104,7 @@ std::ostream& operator<<(
   }
   auto sizes_opt = ss.sizes();
 
-  os << "(";
+  os << '(';
   for (size_t i = 0; i < rank_opt.value(); i++) {
     if (i > 0) {
       os << ", ";
@@ -113,10 +112,10 @@ std::ostream& operator<<(
     if(sizes_opt.has_value() && sizes_opt.value()[i].is_static()) {
       os << sizes_opt.value()[i];
     } else {
-      os << "*";
+      os << '*';
     }
   }
-  os << ")";
+  os << ')';
 
   return os;
 }
@@ -131,17 +130,17 @@ std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s) {
 }
 
 std::ostream& operator<<(std::ostream& os, const Stride& s) {
-  os << "{";
+  os << '{';
   if (s.stride_index_.has_value()) {
     os << *s.stride_index_;
   } else {
-    os << "*";
+    os << '*';
   }
-  os << ":";
+  os << ':';
   if (s.stride_.has_value()) {
     os << *s.stride_;
   } else {
-    os << "*";
+    os << '*';
   }
   os << '}';
   return os;
@@ -172,7 +171,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
   // The logic below follows what TensorIterator uses in its logic:
   //   1. Fast_set_up is the short-cut to identify a. channels_last and
   //      b. contiguous format, which is what we have in the below logic.
-  //   2. In more generla cases, it does best effort to preserve permutatoin.
+  //   2. In more general cases, it does best effort to preserve permutatoin.
   if (is_channels_last_strides_2d(sizes, strides) || is_channels_last_strides_3d(sizes, strides)) {
     // case 1.a. short cut channels last
     std::iota(stride_indices.rbegin() + 1, stride_indices.rend() - 1, 2);
@@ -292,10 +291,11 @@ TensorTypePtr TensorType::create(
       scalar_type, device, symbol_sizes, sprops, requires_grad, undefined);
   } else {
     // strides are all null, but still have number of strides equal to number of ranks
-    TORCH_INTERNAL_ASSERT(sizes.sizes() && sizes.size());
-    auto symbol_sizes = SymbolicShape(*sizes.sizes());
+    auto const& sizes_opt = sizes.sizes();
+    TORCH_INTERNAL_ASSERT(sizes_opt.has_value() && sizes.size());
+    auto symbol_sizes = SymbolicShape(sizes_opt.value());
     return TensorType::create(
-      scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined);
+      scalar_type, device, symbol_sizes, VaryingShape<Stride>(sizes_opt->size()), requires_grad, undefined);
   }
 }
 

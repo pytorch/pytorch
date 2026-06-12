@@ -4,6 +4,7 @@ import collections
 import re
 import sys
 import time
+import typing
 from io import StringIO
 
 import torch._dynamo.test_case
@@ -30,7 +31,9 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
             def _(ctx):
                 ctx.print(ctx.get_local("e"), file=FILE)
 
-        Employee = collections.namedtuple("Employee", ["name", "id"])
+        class Employee(typing.NamedTuple):
+            name: object
+            id: object
 
         class mylist(list):
             pass
@@ -46,7 +49,6 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
             comptime_print(range(1, 3))
             comptime_print(Employee("foo", 2))
             comptime_print(mylist([1, 2]))
-            comptime_print(collections.defaultdict(lambda: None))
             comptime_print(set())
             comptime_print({"a", "b"})
             comptime_print(x.size(0))
@@ -57,18 +59,33 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-FakeTensor(..., size=(s0,))
+Tensor(shape=(s77,), dtype=torch.float32)
 2
-[FakeTensor(..., size=(s0,)), 2]
-(FakeTensor(..., size=(s0,)), 2)
-{'foo': FakeTensor(..., size=(s0,))}
-range(1, 3, 1)
+[Tensor(shape=(s77,), dtype=torch.float32), 2]
+(Tensor(shape=(s77,), dtype=torch.float32), 2)
+{'foo': Tensor(shape=(s77,), dtype=torch.float32)}
+range(1, 3)
 Employee(name='foo', id=2)
-[1, 2]
-defaultdict(NestedUserFunctionVariable(), {})
+UserDefinedListVariable(mylist)
 set()
-{'a','b'}
-s0""",
+{'a', 'b'}
+s77""",
+        )
+
+        FILE = StringIO()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def g(x):
+            comptime_print(collections.defaultdict(lambda: None))
+
+        g(torch.randn(2))
+
+        # it seems different pythons in CI change the
+        # function str repr. Since this doesn't seem that
+        # important, we just be very lenient
+        self.assertIn(
+            "defaultdict",
+            FILE.getvalue().strip(),
         )
 
     def test_print_graph(self):
@@ -160,7 +177,7 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-- FakeTensor(..., size=(2,))
+- Tensor(shape=(2,), dtype=torch.float32)
 """,
         )
 
@@ -186,8 +203,8 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-x = FakeTensor(..., size=(2,))
-y = FakeTensor(..., size=(2,))
+x = Tensor(shape=(2,), dtype=torch.float32)
+y = Tensor(shape=(2,), dtype=torch.float32)
 """,
         )
 
@@ -309,6 +326,13 @@ y = FakeTensor(..., size=(2,))
             'obj_weakref': None
             'guarded_class': None
         }
+        global '' AUTOGRAD_SAVED_TENSORS_HOOKS
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
         global '' GRAD_MODE
         {
             'guard_types': None,
@@ -317,6 +341,13 @@ y = FakeTensor(..., size=(2,))
             'guarded_class': None
         }
         global '' DETERMINISTIC_ALGORITHMS
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' GLOBAL_STATE
         {
             'guard_types': None,
             'code': None,
@@ -389,7 +420,7 @@ y = FakeTensor(..., size=(2,))
         @torch.compile(backend=cnt)
         def f(x):
             y = x * 2
-            lit = 2
+            lit = 2  # noqa: F841
 
             @comptime
             def _(ctx):

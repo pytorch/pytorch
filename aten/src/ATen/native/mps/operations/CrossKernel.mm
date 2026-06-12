@@ -1,6 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Cross.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -17,39 +16,53 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #endif
 
 void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other, int64_t dim) {
-  TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
+  // numThreads = number of cross triplets = numel / 3
+  const auto numThreads = out.numel() / 3;
+  // The dense kernel handles any contiguous layout: it uses dim_stride and a
+  // closed-form index mapping that works for outermost, innermost, and any dim.
+  const bool is_dense = out.is_contiguous() && input.is_contiguous() && other.is_contiguous();
+  const std::string suffix = is_dense ? "dense" : "strided";
 
-  auto iter = TensorIteratorConfig()
-                  .add_output(out)
-                  .add_input(input)
-                  .add_input(other)
-                  .resize_outputs(false)
-                  .declare_static_shape(out.sizes(), /*squash_dims=*/dim)
-                  .build();
+  // For the strided kernel, build squashed sizes (cross dim removed) for the
+  // thread-index → position mapping, plus full element strides (all ndim dims,
+  // including the cross dim) so the kernel can read strides[dim] directly.
+  const int64_t ndim = out.dim();
+  std::vector<int64_t> squashed_sizes, out_strides, input_strides, other_strides;
+  if (!is_dense) {
+    squashed_sizes.reserve(ndim - 1);
+    out_strides.resize(ndim);
+    input_strides.resize(ndim);
+    other_strides.resize(ndim);
+    for (int64_t d = 0; d < ndim; ++d) {
+      out_strides[d] = out.stride(d);
+      input_strides[d] = input.stride(d);
+      other_strides[d] = other.stride(d);
+      if (d != dim) {
+        squashed_sizes.push_back(out.size(d));
+      }
+    }
+  }
 
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
-  MPSStream* mpsStream = getCurrentMPSStream();
-  const int64_t out_dim_stride = out.stride(dim);
-  const int64_t input_dim_stride = input.stride(dim);
-  const int64_t other_dim_stride = other.stride(dim);
-  const uint32_t nDim = iter.ndim();
-  constexpr uint32_t nOffsets = 3;
-  const uint32_t numThreads = iter.numel();
+  const auto mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
-
-      auto crossPSO = lib.getPipelineStateForFunc("cross_" + scalarToMetalTypeString(out));
-
-      // this function call is a no-op if MPS Profiler is not enabled
+      auto crossPSO = lib.getPipelineStateForFunc(fmt::format("cross_{}_{}", suffix, scalarToMetalTypeString(out)));
       getMPSProfiler().beginProfileKernel(crossPSO, "cross", {input, other});
-
       [computeEncoder setComputePipelineState:crossPSO];
-      mtl_setArgs(
-          computeEncoder, input, other, out, kernelDataOffsets, out_dim_stride, input_dim_stride, other_dim_stride);
+      mtl_setArgs(computeEncoder, out, input, other);
+      if (is_dense) {
+        mtl_setArgs<3>(computeEncoder, static_cast<uint32_t>(out.stride(dim)));
+      } else {
+        mtl_setArgs<3>(computeEncoder,
+                       squashed_sizes,
+                       out_strides,
+                       input_strides,
+                       other_strides,
+                       static_cast<uint32_t>(ndim),
+                       static_cast<uint32_t>(dim));
+      }
       mtl_dispatch1DJob(computeEncoder, crossPSO, numThreads);
-
       getMPSProfiler().endProfileKernel(crossPSO);
     }
   });

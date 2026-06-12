@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -14,8 +15,10 @@
 #include <c10/util/Half.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmConvert.h>
+C10_DIAGNOSTIC_POP()
 #else
 #include <caffe2/perfkernels/embedding_lookup_idx.h>
 #endif
@@ -52,7 +55,7 @@
 namespace at::native {
 
 template<typename scalar_t>
-scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
+scalar_t dot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y, int64_t incy);
 
 static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
   offset2bag.index_add_(
@@ -106,17 +109,17 @@ bool is_fast_path(const Tensor& src, const std::optional<Tensor>& scale, Tensor&
 // index_add (using add_indices as the index), without creating an intermediary
 // tensor to hold the selected embeddings
 template <typename data_t, typename index_t>
-static std::enable_if_t<std::is_same_v<data_t, double>, void>
+std::enable_if_t<std::is_same_v<data_t, double>, void>
 index_select_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
     const Tensor& src,
     Tensor& output,
-    const Tensor& /*offsets*/,
-    bool /*include_last_offset*/,
+    [[maybe_unused]] const Tensor& offsets,
+    [[maybe_unused]] bool include_last_offset,
     Tensor& bag_size,
     index_t padding_idx,
-    _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
+    [[maybe_unused]] _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   TORCH_CHECK(select_indices.numel() == add_indices.numel());
   auto* add_indices_data = add_indices.const_data_ptr<index_t>();
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
@@ -492,18 +495,18 @@ index_select_add(const Tensor &select_indices,
 // mul (scaling by per_sample_weights)
 // index_add (using add_indices as the index)
 template <typename data_t, typename index_t>
-static std::enable_if_t<std::is_same_v<data_t, double>, void>
+std::enable_if_t<std::is_same_v<data_t, double>, void>
 index_select_scale_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
     const Tensor& scale,
     const Tensor& src,
     Tensor& output,
-    const Tensor& /*offsets*/,
-    bool /*include_last_offset*/,
+    [[maybe_unused]] const Tensor& offsets,
+    [[maybe_unused]] bool include_last_offset,
     Tensor& bag_size,
     index_t padding_idx,
-    _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
+    [[maybe_unused]] _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   AT_ASSERT(select_indices.numel() == add_indices.numel());
   auto* add_indices_data = add_indices.const_data_ptr<index_t>();
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
@@ -535,9 +538,9 @@ index_select_scale_add(
     if (idx != padding_idx) {
       auto* src_base = src_data + src_stride0 * idx;
       auto* output_base = output_data + output_stride0 * add_indices_data[i];
-      auto scale = scale_data[i * scale_stride];
+      auto element_scale = scale_data[i * scale_stride];
       for (const auto j : c10::irange(ddim)) {
-        output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
+        output_base[j * output_stride1] += src_base[j * src_stride1] * element_scale;
       }
     } else if (bag_size_data) {
       // Decrement bag_size to reflect that the index is padded
@@ -718,10 +721,10 @@ index_select_scale_add(
       if (idx != padding_idx) {
         auto* src_base = src_data + src_stride0 * idx;
         auto* output_base_fp32 = output_data_fp32 + ddim * add_indices_data[i];
-        auto scale = scale_data[i * scale_stride];
+        auto element_scale = scale_data[i * scale_stride];
         for (const auto j : c10::irange(ddim)) {
           output_base_fp32[j] += static_cast<float>(src_base[j * src_stride1]) *
-              static_cast<float>(scale);
+              static_cast<float>(element_scale);
         }
       } else if (bag_size_data) {
         // Decrement bag_size to reflect that the index is padded
@@ -851,9 +854,9 @@ index_select_scale_add(const Tensor &select_indices,
       if (idx != padding_idx) {
         auto* src_base = src_data + src_stride0 * idx;
         auto* output_base = output_data + output_stride0 * add_indices_data[i];
-        auto scale = scale_data[i * scale_stride];
+        auto element_scale = scale_data[i * scale_stride];
         for (const auto j : c10::irange(ddim)) {
-          output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
+          output_base[j * output_stride1] += src_base[j * src_stride1] * element_scale;
         }
       } else if (bag_size_data) {
         // Decrement bag_size to reflect that the index is padded
@@ -941,7 +944,7 @@ void make_bag_size_out(
 void make_max_indices_out(
     Tensor& max_indices_out,
     const Tensor& weight,
-    const Tensor& indices,
+    [[maybe_unused]] const Tensor& indices,
     const Tensor& offsets,
     const Tensor& bag_size,
     const int64_t mode,
@@ -1059,13 +1062,13 @@ static Tensor apply_bag_size_backward(
 }
 
 template <typename scalar_t>
-void embedding_bag_cpu_max_out(
+static void embedding_bag_cpu_max_out(
     Tensor* max_indices,
     const Tensor& weight,
     const Tensor& indices,
     const Tensor& offset2bag,
     const Tensor& output,
-    bool include_last_offset,
+    [[maybe_unused]] bool include_last_offset,
     Tensor& bag_size,
     int64_t padding_idx) {
   int64_t numIndices = indices.numel();
@@ -1151,7 +1154,9 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
     if (max_indices) {
       max_indices->copy_(bag_size);
     }
-  } else { // EmbeddingBagMode::MAX
+  } else {
+    TORCH_CHECK(mode == EmbeddingBagMode::MAX, "`mode` must be sum, mean, or max.")
+
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -1241,7 +1246,13 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
     padding_idx = maybe_wrap_dim(padding_idx, weight.size(0));
   }
   std::tuple<Tensor, Tensor, Tensor, Tensor> out;
-  if (!weight.requires_grad() && !weight._fw_grad(/*level=*/0).defined()) {
+  bool needs_grad_path = weight.requires_grad() ||
+                      weight._fw_grad(/*level=*/0).defined() ||
+                      (per_sample_weights_opt.has_value() &&
+                       per_sample_weights_opt.value().defined() &&
+                       per_sample_weights_opt.value().requires_grad());
+
+  if (!needs_grad_path) {
     out = at::_embedding_bag_forward_only(
       weight, indices.contiguous(), offsets.contiguous(), scale_grad_by_freq,
       mode, sparse, per_sample_weights, include_last_offset, padding_idx);
@@ -1317,9 +1328,9 @@ void _embedding_bag_cpu_out(
     const at::Tensor& weight,
     const at::Tensor& indices_,
     const at::Tensor& offsets_,
-    const bool /* scale_grad_by_freq */,
+    [[maybe_unused]] const bool scale_grad_by_freq,
     const int64_t mode,
-    const bool /* sparse */,
+    [[maybe_unused]] const bool sparse,
     const std::optional<at::Tensor>& per_sample_weights,
     const bool include_last_offset,
     const std::optional<int64_t>& padding_idx,
@@ -1499,7 +1510,7 @@ static std::vector<index_t> compute_counts_uniq(
 }
 
 template <typename scalar_t>
-void _embedding_bag_dense_backward_cpu_sum_mean(
+static void _embedding_bag_dense_backward_cpu_sum_mean(
     const Tensor& grad,
     const Tensor& indices_,
     const Tensor& offset2bag_,
@@ -1517,8 +1528,7 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
   auto offset2bag = offset2bag_.index_select(0, ind_sort);
 
   std::optional<Tensor> per_sample_weights;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const scalar_t* per_sample_weights_data;
+  const scalar_t* per_sample_weights_data = nullptr;
   std::optional<int64_t> per_sample_weights_stride;
   if (per_sample_weights_.defined()) {
     per_sample_weights = per_sample_weights_.index_select(0, ind_sort);
@@ -1548,11 +1558,11 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
         &counts, &grad, &index_grad_weight, &padding_idx
       ](index_t start, index_t end) {
       for (index_t i = start; i < end; i++) {
-        index_t start = i == 0 ? 0 : next_unique_index_idx[i - 1];
-        index_t index = indices_data[start];
+        index_t indices_start = i == 0 ? 0 : next_unique_index_idx[i - 1];
+        index_t index = indices_data[indices_start];
 
         if (index != static_cast<index_t>(padding_idx)) {
-          for (index_t j = start; j < next_unique_index_idx[i]; j++) {
+          for (index_t j = indices_start; j < next_unique_index_idx[i]; j++) {
             index_t source = offset2bag_data[j];
             double scale = 1.0;
             if (per_sample_weights) {
@@ -1636,7 +1646,7 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
 }
 
 template<typename scalar_t>
-Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
+static Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     const Tensor& grad,
     const Tensor& weight,  // NB: embedding table, not per_sample_weights
     const Tensor& indices_,
@@ -1712,9 +1722,8 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
 
         if (embedding_idx != static_cast<index_t>(padding_idx)) {
           output_data[sample_idx] = dot_impl<scalar_t>(
-              embedding_features,
-              const_cast<scalar_t*>(grad_data + grad_stride0 * bag_idx), grad_stride1,
-              const_cast<scalar_t*>(weight_data + weight_stride0 * embedding_idx), weight_stride1);
+              embedding_features, grad_data + grad_stride0 * bag_idx, grad_stride1,
+                 weight_data + weight_stride0 * embedding_idx, weight_stride1);
         }
       }
     });
@@ -1743,7 +1752,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu(
 }
 
 Tensor _embedding_bag_sparse_backward_symint(
-    const Tensor &grad_, const Tensor &indices, const Tensor &offsets,
+    const Tensor &grad_, const Tensor &indices, [[maybe_unused]] const Tensor &offsets,
     const Tensor &offset2bag, const Tensor &bag_size_, SymInt num_weights,
     bool scale_grad_by_freq, int64_t mode, const std::optional<Tensor>& per_sample_weights_opt,
     int64_t padding_idx) {

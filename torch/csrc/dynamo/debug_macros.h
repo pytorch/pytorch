@@ -58,14 +58,9 @@ extern "C" {
 inline _PyFrameEvalFunction _debug_set_eval_frame(
     PyThreadState* tstate,
     _PyFrameEvalFunction eval_frame) {
-#if PY_VERSION_HEX >= 0x03090000
   _PyFrameEvalFunction prev =
       _PyInterpreterState_GetEvalFrameFunc(tstate->interp);
   _PyInterpreterState_SetEvalFrameFunc(tstate->interp, eval_frame);
-#else
-  _PyFrameEvalFunction prev = tstate->interp->eval_frame;
-  tstate->interp->eval_frame = eval_frame;
-#endif
   return prev;
 }
 

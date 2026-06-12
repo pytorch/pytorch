@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # meant to be called only from the neighboring build.sh and build_cpu.sh scripts
+# NOTE: This script is only used for ROCm and s390x builds.
+#       CPU/CUDA x86 and aarch64 builds use build_wheel.sh + repair_wheel.sh.
 
 set -ex
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 source ${SOURCE_DIR}/set_desired_python.sh
+# shellcheck source=../pytorch/rocm_utils.sh
+source "$(dirname "${SOURCE_DIR}")/pytorch/rocm_utils.sh"
 
 
 if [[ -n "$BUILD_PYTHONLESS" && -z "$LIBTORCH_VARIANT" ]]; then
@@ -18,14 +22,29 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
-PLATFORM="manylinux2014_x86_64"
+# Detect architecture first
+ARCH=$(uname -m)
+echo "Detected architecture: $ARCH"
+
+PLATFORM=""
 # TODO move this into the Docker images
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
-if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
-elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
-    retry yum install -q -y zip openssl
-    PLATFORM="manylinux_2_28_x86_64"
+    # Set platform tag for the manylinux wheel rename below; ROCm/XPU/s390x
+    # builds still flow through this script, and pip won't accept a
+    # plain linux_* tag.
+    case $ARCH in
+        x86_64)
+            PLATFORM="manylinux_2_28_x86_64"
+            ;;
+        aarch64)
+            PLATFORM="manylinux_2_28_aarch64"
+            ;;
+        *)
+            echo "Other architectures: $ARCH, not setting PLATFORM"
+            ;;
+    esac
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
     retry dnf install -q -y zip openssl
 elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
@@ -33,10 +52,14 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
     # shellcheck disable=SC2046
     sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
-
     retry apt-get update
     retry apt-get -y install zip openssl
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
+
+echo "Platform set to: $PLATFORM"
 
 # We use the package name to test the package by passing this to 'pip install'
 # This is the env variable that setup.py uses to name the package. Note that
@@ -74,13 +97,6 @@ export PYTORCH_BUILD_NUMBER=$build_number
 export CMAKE_LIBRARY_PATH="/opt/intel/lib:/lib:$CMAKE_LIBRARY_PATH"
 export CMAKE_INCLUDE_PATH="/opt/intel/include:$CMAKE_INCLUDE_PATH"
 
-if [[ -e /opt/openssl ]]; then
-    export OPENSSL_ROOT_DIR=/opt/openssl
-    export CMAKE_INCLUDE_PATH="/opt/openssl/include":$CMAKE_INCLUDE_PATH
-fi
-
-
-
 mkdir -p /tmp/$WHEELHOUSE_DIR
 
 export PATCHELF_BIN=/usr/local/bin/patchelf
@@ -99,9 +115,13 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
     exit 1
 fi
 pushd "$PYTORCH_ROOT"
+retry pip install -qUr requirements-build.txt
 python setup.py clean
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
+  cp314*)
+    retry pip install -q --pre numpy==2.3.4
+    ;;
   cp31*)
     retry pip install -q --pre numpy==2.1.0
     ;;
@@ -110,12 +130,6 @@ case ${DESIRED_PYTHON} in
     retry pip install -q --pre numpy==2.0.2
     ;;
 esac
-
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    export _GLIBCXX_USE_CXX11_ABI=1
-else
-    export _GLIBCXX_USE_CXX11_ABI=0
-fi
 
 if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     echo "Calling build_amd.py at $(date)"
@@ -145,29 +159,17 @@ fi
 
 echo "Calling setup.py bdist at $(date)"
 
-if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    echo "Calling setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    time EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
-    BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 \
+time CMAKE_ARGS=${CMAKE_ARGS[@]} \
+    EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
     BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
-    python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
-    echo "Finished setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    echo "Calling setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-    time EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
-    BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 \
-    BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
-    USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
-    python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR --cmake
-    echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-else
-    time CMAKE_ARGS=${CMAKE_ARGS[@]} \
-        EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
-        BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
-        USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
-        python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
-fi
+    python -m build --wheel --no-isolation --outdir /tmp/$WHEELHOUSE_DIR
 echo "Finished setup.py bdist at $(date)"
+
+# Build rocm-composable-kernel (ck4inductor) wheel for ROCm builds
+if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
+    build_rocm_ck_wheel "/tmp/$WHEELHOUSE_DIR"
+fi
 
 # Build libtorch packages
 if [[ -n "$BUILD_PYTHONLESS" ]]; then
@@ -208,12 +210,6 @@ if [[ -n "$BUILD_PYTHONLESS" ]]; then
     echo "$(pushd $PYTORCH_ROOT && git rev-parse HEAD)" > libtorch/build-hash
 
     mkdir -p /tmp/$LIBTORCH_HOUSE_DIR
-
-    if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-        LIBTORCH_ABI="cxx11-abi-"
-    else
-        LIBTORCH_ABI=
-    fi
 
     zip -rq /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-$PYTORCH_BUILD_VERSION.zip libtorch
     cp /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-$PYTORCH_BUILD_VERSION.zip \
@@ -285,10 +281,6 @@ ls /tmp/$WHEELHOUSE_DIR
 mkdir -p "/$WHEELHOUSE_DIR"
 mv /tmp/$WHEELHOUSE_DIR/torch*linux*.whl /$WHEELHOUSE_DIR/
 
-if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    mv /tmp/$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/ || true
-fi
-
 if [[ -n "$BUILD_PYTHONLESS" ]]; then
     mkdir -p /$LIBTORCH_HOUSE_DIR
     mv /tmp/$LIBTORCH_HOUSE_DIR/*.zip /$LIBTORCH_HOUSE_DIR
@@ -333,8 +325,8 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
             # ROCm workaround for roctracer dlopens
             if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
                 patchedpath=$(fname_without_so_number $destpath)
-            # Keep the so number for XPU dependencies
-            elif [[ "$DESIRED_CUDA" == *"xpu"* ]]; then
+            # Keep the so number for XPU dependencies, libgomp.so.1, ACL libraries, and NVPL libraries to avoid twice load
+            elif [[ "$DESIRED_CUDA" == *"xpu"* || "$filename" == "libgomp.so.1" || "$filename" == libarm_compute* || "$filename" == libnvpl* || "$filename" == "libgfortran.so.5" ]]; then
                 patchedpath=$destpath
             else
                 patchedpath=$(fname_with_sha256 $destpath)
@@ -379,10 +371,16 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         $PATCHELF_BIN --print-rpath $sofile
     done
 
-    # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
+    # Rewrite the WHEEL metadata's platform tag so the wheel advertises as
+    # manylinux_2_28 (the legacy ROCm/XPU/s390x path runs through here).
+    # Must happen before regenerating RECORD so the new tag's hash is captured.
     if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
         wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
         sed -i -e s#linux_x86_64#"${PLATFORM}"# $wheel_file;
+    fi
+    if [[ $PLATFORM == "manylinux_2_28_aarch64" ]]; then
+        wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
+        sed -i -e s#linux_aarch64#"${PLATFORM}"# $wheel_file;
     fi
 
     # regenerate the RECORD file with new hashes
@@ -424,9 +422,15 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         popd
     fi
 
-    # Rename wheel for Manylinux 2_28
+    # Rename the file to match the manylinux platform tag we just wrote
+    # into WHEEL above; otherwise the upload artifact stays linux_*.
     if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
         pkg_name=$(echo $(basename $pkg) | sed -e s#linux_x86_64#"${PLATFORM}"#)
+        zip -rq $pkg_name $PREIX*
+        rm -f $pkg
+        mv $pkg_name $(dirname $pkg)/$pkg_name
+    elif [[ $PLATFORM == "manylinux_2_28_aarch64" ]]; then
+        pkg_name=$(echo $(basename $pkg) | sed -e s#linux_aarch64#"${PLATFORM}"#)
         zip -rq $pkg_name $PREIX*
         rm -f $pkg
         mv $pkg_name $(dirname $pkg)/$pkg_name
@@ -449,6 +453,10 @@ if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
         cp /$LIBTORCH_HOUSE_DIR/libtorch*.zip "$PYTORCH_FINAL_PACKAGE_DIR"
     else
         cp /$WHEELHOUSE_DIR/torch*.whl "$PYTORCH_FINAL_PACKAGE_DIR"
+        # Also copy rocm-composable-kernel wheel for ROCm builds
+        if compgen -G "/$WHEELHOUSE_DIR/rocm_composable_kernel*.whl" >/dev/null; then
+            cp /$WHEELHOUSE_DIR/rocm_composable_kernel*.whl "$PYTORCH_FINAL_PACKAGE_DIR"
+        fi
     fi
 fi
 
@@ -465,15 +473,7 @@ if [[ -z "$BUILD_PYTHONLESS" ]]; then
   pushd $PYTORCH_ROOT/test
 
   # Install the wheel for this Python version
-  if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    pip uninstall -y "$TORCH_NO_PYTHON_PACKAGE_NAME" || true
-  fi
-
   pip uninstall -y "$TORCH_PACKAGE_NAME"
-
-  if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    pip install "$TORCH_NO_PYTHON_PACKAGE_NAME" --no-index -f /$WHEELHOUSE_DIR --no-dependencies -v
-  fi
 
   pip install "$TORCH_PACKAGE_NAME" --no-index -f /$WHEELHOUSE_DIR --no-dependencies -v
 

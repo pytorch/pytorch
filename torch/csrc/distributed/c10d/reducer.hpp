@@ -26,8 +26,8 @@
 
 namespace c10d {
 
-constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
-constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
+constexpr int kDefaultFirstBucketBytes = 1024 * 1024;
+constexpr int kDefaultBucketBytesCap = 25 * 1024 * 1024;
 // Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
 constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
@@ -51,14 +51,17 @@ class TORCH_API Reducer {
   explicit Reducer(
       std::vector<at::Tensor> params,
       std::vector<std::vector<size_t>> bucket_indices,
-      const std::vector<size_t>& per_bucket_size_limits,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
       std::vector<bool> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
       bool gradient_as_bucket_view,
       std::unordered_map<size_t, std::string> param_names,
-      int64_t first_bucket_bytes_cap);
+      int64_t first_bucket_bytes_cap,
+      bool skip_all_reduce_unused_params,
+      bool use_python_reducer,
+      std::vector<int64_t> bucket_bytes_cap_list,
+      bool batched_grad_copy = false);
 
   ~Reducer() noexcept(false);
 
@@ -213,11 +216,11 @@ class TORCH_API Reducer {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<bool> expect_sparse_gradients_;
 
-  std::vector<std::shared_ptr<torch::autograd::Node>>
+  std::vector<c10::intrusive_ptr<torch::autograd::Node>>
       grad_accumulators_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<torch::autograd::Node*, size_t> gradAccToVariableMap_;
-  std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
+  std::vector<std::pair<uintptr_t, c10::intrusive_ptr<torch::autograd::Node>>>
       hooks_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -233,6 +236,8 @@ class TORCH_API Reducer {
   const bool find_unused_parameters_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool gradient_as_bucket_view_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  const bool batched_grad_copy_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<size_t> unused_parameters_;
   // Previous iteration's unused params, used for checking if unused parameters
@@ -310,6 +315,12 @@ class TORCH_API Reducer {
 #endif
   void runGradCallbackForVariable(at::Tensor& variable, const GradCallback& cb);
 
+  // Flushes deferred grad-to-bucket copies for a single bucket when
+  // batched_grad_copy_ is enabled. Called from mark_variable_ready (when
+  // bucket.pending == 0) and from delay_all_reduce (after all variables
+  // are marked ready).
+  void flush_deferred_copies(Bucket& bucket, size_t bucket_index);
+
   // This function is called inside `initialize_buckets()`. It initializes both
   // `bucket_views_in` and `bucket_views_out` with views for each variable's
   // gradient into the bucket's flattened `gradients` tensor. Views serve as
@@ -385,6 +396,9 @@ class TORCH_API Reducer {
     // If no hook is registered, a temporary vanilla allreduce hook is used.
     c10::intrusive_ptr<at::ivalue::Future> future_work;
 
+    // if this bucket contains complex parameters
+    bool is_complex_bucket = false;
+
     // If this bucket should expect a single sparse gradient
     // If `true`, then this implies that `bucket.variables.size() == 1`.
     bool expect_sparse_gradient = false;
@@ -397,6 +411,11 @@ class TORCH_API Reducer {
     // done on different CUDA streams. We record an event for every copy
     // so that we can synchronize with them prior to kicking off the reduction.
     // std::vector<at::cuda::CUDAEvent> events;
+
+    // Intra-bucket indices of variables whose grad-to-bucket copies are
+    // deferred for batching. Flushed as _foreach_copy_ + flat div_ when
+    // pending == 0. Only used when batched_grad_copy is enabled.
+    std::vector<size_t> deferred_copy_indices;
   };
 
   std::vector<Bucket> buckets_;
@@ -432,6 +451,8 @@ class TORCH_API Reducer {
   // track the number of buckets that have been ready for
   // communication calls like allReduce or communication hooks.
   int num_buckets_ready_;
+  // track the number of buckets that have been reduced.
+  int num_buckets_reduced_;
 
   // Timing information.
   int64_t backward_compute_start_time_ = -1;
@@ -493,6 +514,8 @@ class TORCH_API Reducer {
 
   bool static_graph_;
 
+  bool skip_all_reduce_unused_params_;
+
   // Key: size_t (index), Value: the number of times that a variable's
   // autograd_hook() should be triggered before marking this variable's grad as
   // ready for communication. Map will not change after 1st iteration.
@@ -506,7 +529,7 @@ class TORCH_API Reducer {
  private:
   // reset counting for buckets before backward starts
   void reset_bucket_counting();
-  // search unused parameters beore backward starts
+  // search unused parameters before backward starts
   void search_unused_parameters(
       const std::vector<torch::autograd::Variable>& outputs);
   void set_divide_factor();
@@ -522,6 +545,9 @@ class TORCH_API Reducer {
   bool dynamic_graph_find_unused();
   bool static_graph_first_iteration();
   bool static_graph_after_first_iteration();
+
+  bool is_unused_bucket(Bucket& bucket);
+  bool should_skip_all_reduce_bucket(Bucket& bucket);
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
@@ -555,6 +581,11 @@ class TORCH_API Reducer {
   void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
   // Retrieves parameter corresponding to the given VariableIndex.
   at::Tensor& get_param_from_index(size_t index);
+  // Python reducer keeps C++ reducer initialized. To remove this flag,
+  // we need to refactor the DDP wrapper's initialization.
+  bool use_python_reducer_;
+
+  const std::vector<int64_t> bucket_bytes_cap_list_;
 
   // Cached bucket index to model parameter mapping. Populated after buckets
   // are rebuilt after which this mapping is static.

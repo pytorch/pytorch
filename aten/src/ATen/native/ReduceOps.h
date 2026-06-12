@@ -27,6 +27,7 @@ DECLARE_DISPATCH(reduce_fn, min_values_stub)
 DECLARE_DISPATCH(reduce_fn, max_values_stub)
 DECLARE_DISPATCH(reduce_fn, argmax_stub)
 DECLARE_DISPATCH(reduce_fn, argmin_stub)
+DECLARE_DISPATCH(reduce_fn, xor_sum_stub)
 
 using reduce_std_var_function =
     void (*)(TensorIterator&, double correction, bool take_sqrt);
@@ -38,6 +39,7 @@ DECLARE_DISPATCH(reduce_norm_fn, norm_kernel)
 
 using reduce_fn_flag = void(*)(TensorIterator &, const c10::Scalar&);
 DECLARE_DISPATCH(reduce_fn_flag, norm_stub)
+DECLARE_DISPATCH(reduce_fn_flag, powsum_stub)
 
 using structured_cum_fn = void (*)(const Tensor&, const Tensor&, int64_t);
 using cum_fn = void (*)(Tensor&, const Tensor&, int64_t);

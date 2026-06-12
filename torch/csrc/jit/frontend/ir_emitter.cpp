@@ -2,9 +2,8 @@
 #include <torch/csrc/jit/frontend/tree_views.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
@@ -17,7 +16,6 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
@@ -28,7 +26,6 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
-#include <torch/csrc/jit/testing/hooks_for_testing.h>
 
 #include <torch/csrc/jit/ir/constants.h>
 
@@ -38,7 +35,6 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <climits>
 #include <set>
 #include <stack>
 
@@ -47,12 +43,11 @@ bool reportSourceLocation(size_t file_size) {
   if (file_size < 512ull * 1024) {
     return true;
   }
-  const char* enable_env =
-      std::getenv("PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION");
+  const auto enable_env =
+      c10::utils::get_env("PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION");
   bool flag = true;
-  if (enable_env == nullptr || std::strcmp(enable_env, "0") == 0 ||
-      std::strcmp(enable_env, "FALSE") == 0 ||
-      std::strcmp(enable_env, "false") == 0) {
+  if (!enable_env.has_value() || enable_env == "0" || enable_env == "FALSE" ||
+      enable_env == "false") {
     flag = false;
   }
   return flag;
@@ -421,7 +416,7 @@ struct Environment {
                    "of another type (torch.jit.annotate(List[T, []]) where T "
                    "is the type of elements in the list for Python 2)";
         }
-        error << "\n" << why_not.str();
+        error << '\n' << std::move(why_not).str();
         throw ErrorReport(error);
       }
     }
@@ -624,11 +619,6 @@ static Value* materializeConstant(
   return new_constant;
 }
 
-inline bool isSupportedListElementType(const TypePtr& type) {
-  return type->isSubtypeOf(*TensorType::get()) ||
-      type->isSubtypeOf(*NumberType::get());
-}
-
 // Information for each def being emitted.
 // Defs can be nested to support closures so we need a stack of this information
 // Currently records information about the functions return type.
@@ -679,7 +669,7 @@ struct to_ir {
 
     // At this point, we might have received a graph that is compiled with
     // old operator schemas that might not exist in the system anymore.
-    // Therefore, we replace such ops with its' valid upgrader.
+    // Therefore, we replace such ops with its valid upgrader.
     ReplaceOldOperatorsWithUpgraders(graph);
 
     // NB ORDERING: SSA conversion has to occur before
@@ -847,7 +837,7 @@ struct to_ir {
       throw(
           ErrorReport(def.decl().params().range())
           << "Number of type annotations for"
-          << " function parameters (" << schema.arguments().size() << ")"
+          << " function parameters (" << schema.arguments().size() << ')'
           << " does not match the number of parameters on the function ("
           << expected_annotation_size << ")!");
     }
@@ -964,7 +954,7 @@ struct to_ir {
       emitDef(
           def,
           nullptr,
-          closure_block); // ignore schema return, we just wont use it for now
+          closure_block); // ignore schema return, we just won't use it for now
                           // since we never create a Method for the closure
     };
     auto closure_value = emitClosure(emit_body);
@@ -980,7 +970,7 @@ struct to_ir {
       const std::string& stmt_name) {
     if (loop_status_ == LoopStatus::NOT_IN_LOOP) {
       throw(
-          ErrorReport(loc) << "SyntaxError: '" << stmt_name << "'"
+          ErrorReport(loc) << "SyntaxError: '" << stmt_name << '\''
                            << " outside loop");
     } else if (loop_status_ == LoopStatus::IN_UNROLLED_LOOP) {
       throw(
@@ -1456,7 +1446,7 @@ struct to_ir {
       }
       throw(
           ErrorReport(src) << "Union type annotation `" << type_hint->repr_str()
-                           << "` can hold " << vector_repr.str()
+                           << "` can hold " << std::move(vector_repr).str()
                            << ", but none of "
                            << "those types match the types of the given list "
                            << "elements, which were unified to "
@@ -1509,7 +1499,7 @@ struct to_ir {
       }
       throw(
           ErrorReport(src) << "Union type annotation `" << type_hint->repr_str()
-                           << "` can hold " << vector_repr.str()
+                           << "` can hold " << std::move(vector_repr).str()
                            << ", but none of "
                            << "those dict types can hold the types of the given"
                            << " keys and values, which were unified to Dict["
@@ -1583,7 +1573,7 @@ struct to_ir {
           /*default_to_union=*/true,
           elem_type_hint);
 
-      // Case: The list comprehension generated heterogenous values,
+      // Case: The list comprehension generated heterogeneous values,
       // and we don't have a type hint to suggest that this is what the
       // user expected
       if (!type_hint && (*unified_elem_type)->isUnionType()) {
@@ -1706,7 +1696,7 @@ struct to_ir {
             << "the first generated key was " << k->type()->repr_str());
       } else if (
           first_generated_key_type && first_generated_key_type != k->type()) {
-        // Values can be heterogenous, so we only need to check that the
+        // Values can be heterogeneous, so we only need to check that the
         // key types are all the same
         throw(
             ErrorReport(dc)
@@ -1748,11 +1738,11 @@ struct to_ir {
               << "` did not match the "
               << "type of an actual value type `" << v->type()->repr_str()
               << "`\n"
-              << ss.str();
+              << std::move(ss).str();
         }
 
         if (!is_key_subtype || !is_value_subtype) {
-          throw(ErrorReport(dc) << err.str());
+          throw(ErrorReport(dc) << std::move(err).str());
         }
       }
 
@@ -2044,7 +2034,7 @@ struct to_ir {
                  << "The source info is eliminated due to the source file is too large. "
                  << "To get it back, please set PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION=1 "
                  << "as env var";
-              return ss.str();
+              return std::move(ss).str();
             });
           }
         }
@@ -2069,7 +2059,7 @@ struct to_ir {
                  << "The source info is eliminated due to the source file is too large. "
                  << "To get it back, please set PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION=1 "
                  << "as env var";
-              return ss.str();
+              return std::move(ss).str();
             });
           }
         }
@@ -2123,7 +2113,7 @@ struct to_ir {
       // Try to unify the types. If we found a type annotation earlier
       // in the environment, and if that type annotation is some form
       // of union, then we need to tell `unifyTypes` not to throw an
-      // error if the branched return types we found are heterogenous
+      // error if the branched return types we found are heterogeneous
       bool default_to_union = full_type &&
           (full_type->kind() == UnionType::Kind ||
            full_type->kind() == OptionalType::Kind ||
@@ -2445,7 +2435,7 @@ struct to_ir {
     SugaredValuePtr iterable = sv->iter(loc, method);
 
     // We unroll the loop for iterables that contain ModuleLists so that we can
-    // compile Heterogenous module lists.
+    // compile Heterogeneous module lists.
     if (!iterable->shouldEmitUnrolled()) {
       emitLoopCommon(loc, emit_body, iterable, targets, {});
     } else {
@@ -3264,7 +3254,7 @@ struct to_ir {
       case TK_IN:
         return aten::__contains__;
       default:
-        throw std::runtime_error("unknown kind " + std::to_string(kind));
+        TORCH_CHECK(false, "unknown kind ", kind);
     }
   }
 
@@ -3311,7 +3301,7 @@ struct to_ir {
       case TK_RSHIFT:
         return "__rshift__";
       default:
-        throw std::runtime_error("unknown kind " + std::to_string(kind));
+        TORCH_CHECK(false, "unknown kind ", kind);
     }
   }
 
@@ -3457,8 +3447,8 @@ struct to_ir {
           throw(
               ErrorReport(apply.inputs())
               << "expected an expression of type " << type->repr_str()
-              << " but found " << expr->type()->repr_str() << "\n"
-              << why_not.str());
+              << " but found " << expr->type()->repr_str() << '\n'
+              << std::move(why_not).str());
         }
 
         // None is a subtype of Optional[T], but we want to remember what T is
@@ -3691,7 +3681,7 @@ struct to_ir {
             throw(
                 ErrorReport(loc)
                 << "enumerate expected kwarg name 'start', got '"
-                << attributes[0].name().name() << "'");
+                << attributes[0].name().name() << '\'');
           }
           start_index =
               emitSugaredExpr(attributes[0].value(), 1)->asValue(loc, method);
@@ -3833,18 +3823,18 @@ struct to_ir {
       if (!is_key_subtype) {
         err << "Generated key type " << key_type->repr_str()
             << " did not match the annotated key type, which was "
-            << annotated_k_type->repr_str() << "\n";
+            << annotated_k_type->repr_str() << '\n';
       }
 
       if (!is_value_subtype) {
         err << "Generated value type " << value_type->repr_str()
             << " did not match the annotated value type, which was "
-            << annotated_v_type->repr_str() << "\n"
-            << ss.str();
+            << annotated_v_type->repr_str() << '\n'
+            << std::move(ss).str();
       }
 
       if (!is_key_subtype || !is_value_subtype) {
-        throw(ErrorReport(apply) << err.str());
+        throw(ErrorReport(apply) << std::move(err).str());
       }
     };
 
@@ -4125,8 +4115,7 @@ struct to_ir {
     } else if (kind == aten::ge) {
       return aten::le;
     }
-    throw std::runtime_error(
-        "reverseComparision: unsupported NodeKind. File a bug");
+    TORCH_CHECK(false, "reverseComparision: unsupported NodeKind. File a bug");
   }
 
   // any expression that can produce a SugaredValue is handled here
@@ -4265,7 +4254,7 @@ struct to_ir {
   }
 
   std::shared_ptr<SugaredValue> emitRpcExpr(const Apply& apply, Symbol rpc_op) {
-    // TODO: This is a temporary apporoach to enable calling user fucntion
+    // TODO: This is a temporary apporoach to enable calling user function
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
@@ -5404,7 +5393,7 @@ struct FunctionResolver : public Resolver {
 
 CompilationUnit::CompilationUnit(const std::string& source)
     : CompilationUnit() {
-  // calles the define with native resolver to generate the graph for functions
+  // calls the define with native resolver to generate the graph for functions
   define(std::nullopt, source, nativeResolver(), nullptr);
 }
 
