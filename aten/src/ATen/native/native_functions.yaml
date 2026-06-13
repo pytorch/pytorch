@@ -2909,7 +2909,7 @@
 
 - func: native_group_norm_backward.multiple_grads(Tensor? grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, SymInt N, SymInt C, SymInt HxW, int group, bool[3] output_mask, *, Tensor? grad_mean=None, Tensor? grad_rstd=None) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU, CUDA: native_group_norm_backward_multiple_grads
+    CPU, CUDA, MPS: native_group_norm_backward_multiple_grads
   autogen: native_group_norm_backward.multiple_grads_out
   tags: core
 
