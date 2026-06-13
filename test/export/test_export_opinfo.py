@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    IS_CI,
     IS_FBCODE,
     IS_WINDOWS,
     run_tests,
@@ -39,13 +40,11 @@ export_failures = {
     xfail("linalg.lstsq", "grad_oriented"),
     xfail("nn.functional.ctc_loss"),
     xfail("nn.functional.gaussian_nll_loss"),
-    xfail("sparse.sampled_addmm"),
     xfail("tensor_split"),
 }
 
 # following are failing fake export on cuda device
 fake_export_failures = {
-    xfail("geqrf"),
     xfail("histogram"),
     xfail("masked.amax"),
     xfail("masked.amin"),
@@ -58,15 +57,11 @@ fake_export_failures = {
     xfail("masked.std"),
     xfail("masked.sum"),
     xfail("masked.var"),
-    xfail("nn.functional.grid_sample"),
-    xfail("to_sparse"),
-    # following are failing due to OptionalDeviceGuard
-    xfail("__getitem__"),
-    xfail("nn.functional.batch_norm"),
-    xfail("nn.functional.instance_norm"),
-    xfail("nn.functional.multi_margin_loss"),
-    xfail("nonzero"),
 }
+
+# __getitem__ passes locally but still fails on CI OSDC shards.
+if IS_CI:
+    fake_export_failures.add(xfail("__getitem__"))
 
 fake_decomposition_failures = {
     xfail("linalg.matrix_rank"),
