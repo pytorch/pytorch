@@ -8686,7 +8686,7 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
 def _flex_gemm_tensor_placeholders(
     graph_module: torch.fx.GraphModule,
 ) -> list[torch.fx.Node]:
-    """Return tensor placeholders in the body graph's flattened input order."""
+    """Return tensor-valued body placeholders, excluding scalar SymInt inputs."""
     return [
         node
         for node in graph_module.graph.nodes
@@ -8697,7 +8697,7 @@ def _flex_gemm_tensor_placeholders(
 def _flex_gemm_epilogue_arg_placeholders(
     graph_module: torch.fx.GraphModule, gemm_fx_node: torch.fx.Node
 ) -> tuple[torch.fx.Node, ...]:
-    """Find body tensor inputs used by the epilogue rather than by the GEMM op."""
+    """Find tensor inputs captured by epilogue loads, excluding GEMM operands."""
     gemm_placeholders = OrderedSet(
         arg
         for arg in pytree.tree_leaves((gemm_fx_node.args, gemm_fx_node.kwargs))
@@ -8712,10 +8712,10 @@ def _flex_gemm_epilogue_arg_placeholders(
 
 def _infer_flex_gemm_epilogue_arg_kinds(
     gemm_op: torch._ops.OpOverload,
-    epilogue_args: list[TensorBox],
+    epilogue_args: list[IRNode],
     output_size: list[Any],
 ) -> tuple[str, ...]:
-    """Classify read-only captured epilogue tensors for static wrapper kwargs."""
+    """Classify realized captured epilogue tensors for static wrapper kwargs."""
     if not epilogue_args:
         return ()
     if gemm_op is not torch.ops.aten.mm.default:
@@ -8812,16 +8812,19 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         output_size,
         ir.convert_shape_to_inductor(output_meta.stride()),
     )
+    gemm_input_nodes = [
+        ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args
+    ]
+    epilogue_input_nodes = [
+        ir.TemplateBuffer.realize_template_input(arg) for arg in epilogue_args
+    ]
+    input_nodes = [*gemm_input_nodes, *epilogue_input_nodes]
     epilogue_arg_kinds = _infer_flex_gemm_epilogue_arg_kinds(
-        gemm_op, epilogue_args, output_size
+        gemm_op, epilogue_input_nodes, output_size
     )
     epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
         subgraph.graph_module, gemm_op, epilogue_arg_placeholders
     )
-    input_nodes = [
-        ir.TemplateBuffer.realize_template_input(arg)
-        for arg in (*gemm_args, *epilogue_args)
-    ]
     if tuned:
         from torch._inductor.template_heuristics.flex_gemm import (
             candidate_gemm_configs_for_device,
@@ -8859,7 +8862,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 out_dtype=output_meta.dtype,
                 quack_config_key=quack_config_key,
                 epilogue_arg_indices=tuple(
-                    range(len(gemm_args), len(gemm_args) + len(epilogue_args))
+                    range(len(gemm_input_nodes), len(input_nodes))
                 ),
                 epilogue_arg_kinds=epilogue_arg_kinds,
             ),

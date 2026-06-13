@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import importlib
 import math
 import sys
@@ -681,6 +682,63 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 epilogue_fn(a.double() @ b.double()),
                 a.shape[1],
             )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
+            ("tile", lambda m, n: (m, n)),
+            ("row", lambda m, n: (1, n)),
+            ("col", lambda m, n: (m, 1)),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    @parametrize(
+        "tuned",
+        (False, True),
+        name_fn=lambda tuned: "tuned" if tuned else "untuned",
+    )
+    def test_mm_dynamic_shapes_reads_captured_tensor_epilogue_arg(self, case, tuned):
+        torch._dynamo.reset()
+        _, shape_fn = case
+
+        def fn(a, b, scale):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: (acc.float() * scale).relu(),
+                kernel_options={"backend": "QUACK", "tuned": tuned},
+            )
+
+        config_context = contextlib.nullcontext()
+        if tuned:
+            from torch._inductor.template_heuristics import (
+                flex_gemm as flex_gemm_heuristics,
+            )
+
+            configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                torch.device("cuda")
+            )[:2]
+            config_context = mock.patch(
+                "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+                return_value=configs,
+            )
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        with config_context:
+            for m, k, n in ((128, 64, 128), (256, 64, 192)):
+                a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+                b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+                scale = torch.randn(*shape_fn(m, n), device="cuda", dtype=torch.float32)
+                actual = compiled(a, b, scale)
+                self.assertMatchesLowPrecisionEager(
+                    actual,
+                    fn(a, b, scale),
+                    ((a.double() @ b.double()) * scale.double()).relu(),
+                    a.shape[1],
+                )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
