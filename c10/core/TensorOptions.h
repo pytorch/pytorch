@@ -134,6 +134,7 @@ DispatchKey computeDispatchKey(
     std::optional<Device> device);
 
 struct C10_API TensorOptions {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   TensorOptions() noexcept {}
 
   /// Constructs a `TensorOptions` object with the given layout.
