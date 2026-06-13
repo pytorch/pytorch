@@ -829,6 +829,22 @@ class TestAvgPool(TestCaseMPS):
             self.assertEqual(out_mps, out_cpu, msg=msg)
 
 
+    def test_avg_pool1d_large_input_precision(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/179608
+        torch.manual_seed(0)
+        large = torch.rand(1, 1, 18_000) * 3_400_000
+        zeros = torch.zeros(1, 1, 60)
+        x = torch.cat([large, zeros], dim=-1)
+
+        kernel_size = 30
+        cpu_out = F.avg_pool1d(x, kernel_size, stride=1)
+        mps_out = F.avg_pool1d(x.to("mps"), kernel_size, stride=1).cpu()
+
+        zero_region = mps_out[..., -31:]
+        self.assertTrue((zero_region >= 0).all(),
+                        f"avg_pool1d produced negative values in all-zero region: min={zero_region.min().item()}")
+        self.assertEqual(cpu_out, mps_out, atol=1e-3, rtol=1e-3)
+
     def test_channels_last_storage_offset(self):
         # Regression test: channels_last tensors with non-zero storage_offset produced wrong
         # results on MPS because the Placeholder path for NHWC ops ignored storage_offset.

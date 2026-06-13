@@ -1212,6 +1212,19 @@ Tensor max_unpooling3d_forward_mps(const Tensor& self,
   return output;
 }
 
+// MPSGraph's avgPooling2D can accumulate float32 precision error across large
+// inputs, producing incorrect results (e.g. negative values from non-negative
+// input). Use the Metal kernel for large inputs to avoid this.
+// See https://github.com/pytorch/pytorch/issues/179608
+static bool use_metal_for_avg_pool2d(const Tensor& input, bool ceil_mode) {
+  if (ceil_mode) {
+    return true;
+  }
+  const int64_t H = input.size(-2);
+  const int64_t W = input.size(-1);
+  return std::max(H, W) > 8192;
+}
+
 TORCH_IMPL_FUNC(avg_pool2d_out_mps)
 (const Tensor& input,
  int64_t kH,
@@ -1224,7 +1237,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& output) {
-  if (ceil_mode) {
+  if (use_metal_for_avg_pool2d(input, ceil_mode)) {
     mps::avg_pool_out_mps_template(output,
                                    input,
                                    {kH, kW},
@@ -1234,7 +1247,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_mps)
                                    count_include_pad,
                                    divisor_override,
                                    /*pooling_dims=*/2,
-                                   "avg_pool3d");
+                                   "avg_pool2d");
   } else {
     mps::avg_pool2d_template(input,
                              output,
