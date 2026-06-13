@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng", "module: rocm", "module: xpu"]
 # @generated DO NOT EDIT MANUALLY
 
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
@@ -74,7 +75,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -152,7 +156,7 @@ jobs:
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda12_6"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -160,7 +164,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -238,7 +245,7 @@ jobs:
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda13_0"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -246,7 +253,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -324,7 +334,7 @@ jobs:
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda13_2"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -332,7 +342,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -639,7 +652,7 @@ jobs:
   manywheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-build, manywheel-cpu-build, manywheel-cuda-cu126-build, manywheel-cuda-cu130-build, manywheel-cuda-cu132-build]
+    needs: [get-label-type, manywheel-cpu-build, manywheel-cuda-cu126-build, manywheel-cuda-cu130-build, manywheel-cuda-cu132-build]
     uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false

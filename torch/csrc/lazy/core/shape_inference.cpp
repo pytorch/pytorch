@@ -86,7 +86,7 @@ static std::vector<int64_t> expand_param_if_needed(
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
        << "dimensions, but got " << param_name << '=' << list_param;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   } else {
     return list_param.vec();
   }
@@ -504,12 +504,6 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
       "Size overflow");
   out_shape[dim] = static_cast<int64_t>(extended_dim_shape);
   return {Shape(tensors[0].scalar_type(), out_shape)};
-}
-
-TORCH_API std::vector<torch::lazy::Shape> compute_shape_cholesky(
-    const at::Tensor& self,
-    bool upper) {
-  return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
