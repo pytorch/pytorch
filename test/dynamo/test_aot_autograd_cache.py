@@ -34,8 +34,12 @@ from torch._functorch._aot_autograd.autograd_cache import (
     check_cacheable,
     sanitize_gm_for_cache,
 )
-from torch._functorch._aot_autograd.schemas import AOTConfig, CacheableAOTConfig
-from torch._guards import TracingContext
+from torch._functorch._aot_autograd.schemas import (
+    AOTConfig,
+    CacheableAOTConfig,
+    InputAliasInfo,
+)
+from torch._guards import StorageOverlap, TracingContext
 from torch._inductor import config as inductor_config
 from torch._inductor.custom_graph_pass import (
     CustomGraphPass,
@@ -316,6 +320,155 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         """
         torch._dynamo.reset()
         torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
+
+    def test_cache_hit_storage_overlap_guards_skip_unmutated_pairs(self):
+        from torch._dynamo.source import LocalSource
+
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=mutates_data,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a", is_input=True),
+                LocalSource("b", is_input=True),
+                LocalSource("c", is_input=True),
+            ],
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+
+        tracing_context = TracingContext(None)
+        with torch._guards.tracing(tracing_context):
+            AOTAutogradCache._install_cache_hit_guards(
+                [torch.ones(2), torch.ones(2), torch.ones(2)],
+                aot_config,
+                [
+                    input_alias_info(mutates_data=True),
+                    input_alias_info(mutates_data=False),
+                    input_alias_info(mutates_data=False),
+                ],
+            )
+
+        overlap_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageOverlap)
+        ]
+        self.assertEqual(len(overlap_guards), 2)
+        self.assertTrue(all(not guard.overlapping_sources for guard in overlap_guards))
+        self.assertEqual(
+            {
+                tuple(
+                    getattr(source, "local_name", source.name)
+                    for source in guard.non_overlapping_sources
+                )
+                for guard in overlap_guards
+            },
+            {("a", "b"), ("a", "c")},
+        )
+
+    def test_cache_hit_storage_overlap_guards_with_synthetic_base_metadata(self):
+        from torch._dynamo.source import LocalSource
+
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=mutates_data,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a", is_input=True),
+                LocalSource("b", is_input=True),
+                LocalSource("c", is_input=True),
+                LocalSource("d", is_input=True),
+            ],
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+
+        base = torch.ones(4)
+        args = [base[:2], base[1:3], torch.ones(2), torch.ones(2)]
+
+        tracing_context = TracingContext(None)
+        with torch._guards.tracing(tracing_context):
+            AOTAutogradCache._install_cache_hit_guards(
+                args,
+                aot_config,
+                [
+                    input_alias_info(mutates_data=True),
+                    input_alias_info(mutates_data=False),
+                    input_alias_info(mutates_data=False),
+                ],
+            )
+
+        overlap_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageOverlap)
+        ]
+        self.assertEqual(len(overlap_guards), 6)
+        self.assertEqual(
+            {
+                tuple(
+                    getattr(source, "local_name", source.name)
+                    for source in guard.overlapping_sources
+                )
+                for guard in overlap_guards
+                if guard.overlapping_sources
+            },
+            {("a", "b")},
+        )
+        self.assertEqual(
+            {
+                tuple(
+                    getattr(source, "local_name", source.name)
+                    for source in guard.non_overlapping_sources
+                )
+                for guard in overlap_guards
+                if guard.non_overlapping_sources
+            },
+            {("a", "c"), ("a", "d"), ("b", "c"), ("b", "d"), ("c", "d")},
+        )
 
     @functorch_config.patch({"enable_autograd_cache": True})
     @inductor_config.patch(
