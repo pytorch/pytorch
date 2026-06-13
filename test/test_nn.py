@@ -10214,6 +10214,40 @@ class TestNNDeviceType(NNTestCase):
                 y = torch.ones(10, 0, device=device).type(torch.long)
                 mod(x, y)
 
+    @expectedFailureMPS  # Unimplemented margin_loss
+    @onlyNativeDeviceTypes
+    def test_MultiMarginLoss_backward_invalid_grad_output(self, device):
+        # https://github.com/pytorch/pytorch/issues/146790
+        # With reduction='none' the kernel indexes grad_output per sample;
+        # a mismatched grad_output previously read past the end on both CPU
+        # and CUDA (including the 0-D target path).
+        dtype = torch.float
+
+        # 1-D input (nframe=1), 1-D target: expects grad_output of shape [1].
+        input_1d = torch.tensor([64.0], device=device, dtype=dtype)
+        target_1d = torch.tensor([0], device=device)
+        empty_grad = torch.empty(0, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, 'grad_output'):
+            torch.ops.aten.multi_margin_loss_backward(
+                empty_grad, input_1d, target_1d, 2, 1.0, None, 0)
+
+        # 2-D input (nframe=3): expects grad_output of shape [3].
+        input_2d = torch.randn(3, 5, device=device, dtype=dtype)
+        target_2d = torch.zeros(3, dtype=torch.long, device=device)
+        wrong_grad = torch.randn(2, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, 'grad_output'):
+            torch.ops.aten.multi_margin_loss_backward(
+                wrong_grad, input_2d, target_2d, 2, 1.0, None, 0)
+
+        # 0-D target (nframe=1): expects a 0-D scalar grad_output.
+        # Previously bypassed on CUDA, still segfaulting on the original bug.
+        input_scalar = torch.tensor([64.0], device=device, dtype=dtype)
+        target_scalar = torch.tensor(0, device=device)
+        empty_grad_scalar = torch.empty(0, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, 'grad_output'):
+            torch.ops.aten.multi_margin_loss_backward(
+                empty_grad_scalar, input_scalar, target_scalar, 2, 1.0, None, 0)
+
     @onlyCUDA
     @dtypes(torch.float, torch.double)
     def test_MarginLoss_race(self, device, dtype):
