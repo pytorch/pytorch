@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import torch
+import torch._dynamo.config
 
 if __name__ == '__main__':
     from torch.testing._internal.common_utils import parse_cmd_line_args
@@ -7666,6 +7667,7 @@ dedent """
         self.assertEqual(any_refinement2(torch.tensor(5)), torch.tensor(5))
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "bug persists in deprecated executor")
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_unspecialized_any_binding(self):
         # any binding will infer the type, if it infers
         # a specialized tensor type `x` Dict type will fail isinstance check
@@ -14301,6 +14303,7 @@ dedent """
         graph = torch.jit.script(test_multiple).graph
         FileCheck().check_count("prim::If", 3, exactly=True).run(graph)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_is_scripting_metacompile(self):
         @torch.jit.script
         def foo():
