@@ -888,11 +888,11 @@ class ComboKernelTests(TestCase):
         }
     )
     def test_combo_kernel_no_bench_carve_out(self):
-        # torch.bucketize triggers carve-out under both gate variants:
+        # torch.bucketize triggers carve-out under all gate variants:
         #   CUDA: pointwise heuristic returns 3 configs (>2) -> carve out
-        #   ROCm: lowering sets AutotuneHint.ONE_ELEMENT_PER_THREAD -> carve out
-        # Simple pointwise (b*2.0, c+1.0) passes both gates -> fuses into combo.
-        # Expect 1 combo + 1 standalone on both backends.
+        #   ROCm/XPU: lowering sets AutotuneHint.ONE_ELEMENT_PER_THREAD -> carve out
+        # Simple pointwise (b*2.0, c+1.0) passes all gates -> fuses into combo.
+        # Expect 1 combo + 1 standalone on all backends.
         def fn(a, b, c, boundaries):
             return torch.bucketize(a, boundaries), b * 2.0, c + 1.0
 
