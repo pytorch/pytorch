@@ -3,6 +3,7 @@
 import collections
 import collections.abc
 import contextlib
+import copy
 import functools
 import inspect
 import itertools
@@ -944,6 +945,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_dict_copy(x):
         z = dict({"foo": x + 1})
         return z
+
+    def test_copy_copy_tensor_unsupported_compile(self):
+        def fn(x):
+            return copy.copy(x) + 1
+
+        x = torch.randn(2, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with self.assertRaisesRegex(Unsupported, "copy.copy"):
+            opt_fn(x)
 
     @make_test
     def test_dict_keys(x):
