@@ -439,6 +439,7 @@ test_python_smoke_b200() {
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
       inductor/test_flex_flash \
+      inductor/test_flex_gemm \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
@@ -1369,6 +1370,7 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     local model_name=${model_cfg[0]}
     local data_type=${model_cfg[2]}
     local speedup_target=${model_cfg[5]}
+    local threshold_scale=${model_cfg[6]:-0.99}
     local backend=${model_cfg[1]}
     if [[ ${model_cfg[4]} == "cpp" ]]; then
       export TORCHINDUCTOR_CPP_WRAPPER=1
@@ -1388,9 +1390,10 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     fi
     cat "$output_name"
     # The threshold value needs to be actively maintained to make this check useful.
-    # Allow 1% variance for CPU perf to accommodate perf fluctuation.
+    # Allow 1% variance by default for CPU perf to accommodate perf fluctuation.
+    # Some models can override this in the target CSV when a tighter speedup band is flaky.
     # Fail on large improvements too so the baseline is updated promptly.
-    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target" -s 0.99 --fail-on-improvement
+    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target" -s "$threshold_scale" --fail-on-improvement
   done
 }
 
