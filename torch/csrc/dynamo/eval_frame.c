@@ -73,8 +73,8 @@ static PyObject* set_eval_frame_isolate_recompiles_id_py(
   return PyLong_FromLongLong(old_id);
 }
 
-// 3.15 Not supported at all. See cpython_defs.c for hints
-#if !(IS_PYTHON_3_15_PLUS)
+// 3.16 Not supported at all. See cpython_defs.c for hints
+#if !(IS_PYTHON_3_16_PLUS)
 
 #define DECLARE_PYOBJ_ATTR(name)                        \
   static PyObject* THPPyInterpreterFrame_##name(        \
