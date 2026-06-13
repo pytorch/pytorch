@@ -808,7 +808,7 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
         ) from None
     except Exception as err:
         raise RuntimeError(
-            "Failed to import pyzes. Ensure the Level Zero driver is installed and accessible."
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
         ) from err
 
     device = _get_device_index(device, optional=True)
@@ -909,7 +909,7 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
         ) from None
     except Exception as err:
         raise RuntimeError(
-            "Failed to import pyzes. Ensure the Level Zero driver is installed and accessible."
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
         ) from err
 
     device = _get_device_index(device, optional=True)
@@ -984,7 +984,7 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
         ) from None
     except Exception as err:
         raise RuntimeError(
-            "Failed to import pyzes. Ensure the Level Zero driver is installed and accessible."
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
         ) from err
 
     device = _get_device_index(device, optional=True)
@@ -1084,7 +1084,7 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
         ) from None
     except Exception as err:
         raise RuntimeError(
-            "Failed to import pyzes. Ensure the Level Zero driver is installed and accessible."
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
         ) from err
 
     device = _get_device_index(device, optional=True)
@@ -1207,7 +1207,7 @@ def _zes_get_memory_handle(device: Device = None) -> c_void_p:
         ) from None
     except Exception as err:
         raise RuntimeError(
-            "Failed to import pyzes. Ensure the Level Zero driver is installed and accessible."
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
         ) from err
 
     device = _get_device_index(device, optional=True)
