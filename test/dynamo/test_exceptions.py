@@ -622,6 +622,196 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         self.assertEqual(ref, res)
 
+    def test_fake_tensor_runtime_error_in_try_except(self):
+        @torch.library.custom_op(
+            "mylib::fake_tensor_runtime_error_message", mutates_args=()
+        )
+        def fake_tensor_runtime_error_message(x: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("intentional custom op failure")
+
+        @fake_tensor_runtime_error_message.register_fake
+        def _(x):
+            raise RuntimeError("intentional custom op failure")
+
+        @torch.library.custom_op(
+            "mylib::fake_tensor_runtime_error_multi_args", mutates_args=()
+        )
+        def fake_tensor_runtime_error_multi_args(x: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("intentional", 7)
+
+        @fake_tensor_runtime_error_multi_args.register_fake
+        def _(x):
+            raise RuntimeError("intentional", 7)
+
+        def bad_broadcast(x, y):
+            try:
+                return x + y
+            except RuntimeError:
+                return x.cos()
+
+        def bad_inplace_addmm(x, mat1, mat2):
+            x = x.clone()
+            try:
+                x.addmm_(mat1, mat2)
+            except RuntimeError:
+                return torch.tensor(False)
+            return torch.tensor(True)
+
+        def bad_inplace_addmm_args(x, mat1, mat2):
+            x = x.clone()
+            try:
+                x.addmm_(mat1, mat2)
+            except RuntimeError as e:
+                return e.args
+            return ()
+
+        def custom_op_error_message(x):
+            try:
+                return torch.ops.mylib.fake_tensor_runtime_error_message(x)
+            except RuntimeError as e:
+                return str(e)
+
+        def custom_op_error_args(x):
+            try:
+                return torch.ops.mylib.fake_tensor_runtime_error_multi_args(x)
+            except RuntimeError as e:
+                return e.args
+
+        x = torch.randn(3)
+        y = torch.randn(4)
+        opt_bad_broadcast = torch.compile(
+            bad_broadcast, backend="eager", fullgraph=True
+        )
+        self.assertEqual(bad_broadcast(x, y), opt_bad_broadcast(x, y))
+
+        opt_custom_op_error_message = torch.compile(
+            custom_op_error_message, backend="eager", fullgraph=True
+        )
+        self.assertEqual(
+            custom_op_error_message(x),
+            opt_custom_op_error_message(x),
+        )
+
+        opt_custom_op_error_args = torch.compile(
+            custom_op_error_args, backend="eager", fullgraph=True
+        )
+        self.assertEqual(
+            custom_op_error_args(x),
+            opt_custom_op_error_args(x),
+        )
+
+        inp = torch.randint(-2, 1, (1, 3), dtype=torch.int64)
+        mat1 = torch.randint(-2, 4, (2, 3), dtype=torch.int64)
+        mat2 = torch.randint(-8, 1, (3, 3), dtype=torch.int64)
+        opt_bad_inplace_addmm = torch.compile(
+            bad_inplace_addmm, backend="eager", fullgraph=True
+        )
+        self.assertEqual(
+            bad_inplace_addmm(inp, mat1, mat2),
+            opt_bad_inplace_addmm(inp, mat1, mat2),
+        )
+        opt_bad_inplace_addmm_args = torch.compile(
+            bad_inplace_addmm_args, backend="eager", fullgraph=True
+        )
+        self.assertEqual(
+            bad_inplace_addmm_args(inp, mat1, mat2),
+            opt_bad_inplace_addmm_args(inp, mat1, mat2),
+        )
+
+    def test_fake_tensor_wrapped_exception_preserves_type(self):
+        @torch.library.custom_op(
+            "mylib::fake_tensor_value_error_message", mutates_args=()
+        )
+        def fake_tensor_value_error_message(x: torch.Tensor) -> torch.Tensor:
+            raise ValueError("intentional value error")
+
+        @fake_tensor_value_error_message.register_fake
+        def _(x):
+            raise ValueError("intentional value error")
+
+        def catches_runtime(x):
+            try:
+                return torch.ops.mylib.fake_tensor_value_error_message(x)
+            except RuntimeError:
+                return x + 1
+
+        def catches_value(x):
+            try:
+                return torch.ops.mylib.fake_tensor_value_error_message(x)
+            except ValueError as e:
+                return str(e)
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(ValueError, "intentional value error"):
+            catches_runtime(x)
+
+        opt_catches_runtime = torch.compile(catches_runtime, backend="eager")
+        with self.assertRaisesRegex(ValueError, "intentional value error"):
+            opt_catches_runtime(x)
+
+        opt_catches_value = torch.compile(
+            catches_value, backend="eager", fullgraph=True
+        )
+        self.assertEqual(catches_value(x), opt_catches_value(x))
+
+    def test_fake_tensor_runtime_error_in_with_block_is_not_observed(self):
+        def f(x):
+            with torch.no_grad():
+                return x + torch.randn(4)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            "Dynamo failed to run FX node with fake tensors",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(torch.randn(3))
+
+    def test_fake_tensor_runtime_error_through_cleanup_to_outer_except(self):
+        def with_block(x):
+            try:
+                with torch.no_grad():
+                    return x + torch.randn(4)
+            except RuntimeError:
+                return x.cos()
+
+        def finally_block(x):
+            try:
+                try:
+                    return x + torch.randn(4)
+                finally:
+                    x.sin()
+            except RuntimeError:
+                return x.cos()
+
+        x = torch.randn(3)
+        for fn in (with_block, finally_block):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+
+    def test_fake_tensor_runtime_error_in_except_star_is_not_observed(self):
+        if sys.version_info < (3, 11):
+            self.skipTest("except* requires Python 3.11+")
+
+        namespace = {"torch": torch}
+        exec(
+            """
+def f(x):
+    result = None
+    try:
+        result = x + torch.randn(4)
+    except* RuntimeError:
+        result = x.cos()
+    return result
+""",
+            namespace,
+        )
+        f = namespace["f"]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            "Dynamo failed to run FX node with fake tensors",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(torch.randn(3))
+
     def test_raise_from_None(self):
         # Inspired from os.environ
         class MyMapping:

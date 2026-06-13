@@ -4721,6 +4721,42 @@ def run(runner, args, original_dir=None):
                 )
             else:
                 name = model_name
+                if (
+                    args.accuracy
+                    and name in runner.skip_accuracy_checks_large_models_dashboard
+                ):
+                    mode = "train" if args.training else "eval"
+                    print(f"{device:4} {mode:5} {name:34} ", flush=True)
+
+                    current_name = name
+                    current_device = device
+                    current_batch_size = batch_size
+                    current_backend = args.backend
+                    current_mode = (
+                        "training"
+                        if args.training
+                        else "inference"
+                        if args.inference
+                        else ""
+                    )
+                    if args.float16:
+                        current_dtype = "float16"
+                    elif args.bfloat16:
+                        current_dtype = "bfloat16"
+                    elif args.float32:
+                        current_dtype = "float32"
+                    elif args.amp:
+                        current_dtype = "amp"
+                    else:
+                        current_dtype = ""
+                    current_quantization = args.quantization
+                    current_settings = vars(args)
+
+                    runner._write_accuracy_row(
+                        "pass_due_to_skip", get_dynamo_stats(), args.tag
+                    )
+                    print("pass_due_to_skip")
+                    continue
                 try:
                     with tqdm(desc="loading model"):
                         extra_args = []
