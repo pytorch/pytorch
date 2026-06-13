@@ -212,12 +212,10 @@ class TestProfilerCUDA(TestCase):
                 event.get("args", {}).get("stack")
                 for event in trace["traceEvents"]
                 if event.get("cat") == "kernel"
-                and event.get("name", "").startswith("triton_")
             ]
             self.assertTrue(
                 any(stack for stack in kernel_stacks),
-                "Expected a generated Triton kernel in the exported trace to "
-                "carry a stack",
+                "Expected a generated kernel in the exported trace to carry a stack",
             )
             self.assertEqual(inductor_debug.get_kernel_information_jsons(), {})
         finally:
@@ -1245,6 +1243,58 @@ class TestProfiler(TestCase):
                     },
                     {
                         "name": kernel_name,
+                        "cat": "kernel",
+                        "ph": "X",
+                        "ts": 20,
+                        "dur": 3,
+                        "tid": 2,
+                        "args": {"External id": 6},
+                    },
+                ]
+            }
+
+            prof = _profile()
+            updated_trace = prof.add_to_chrome_trace(trace)
+
+            self.assertEqual(updated_trace["traceEvents"][2]["args"]["stack"], stack)
+
+    def test_add_inductor_kernel_stack_to_chrome_trace_by_external_id_without_triton_kernel_name(
+        self,
+    ):
+        kernel_name = "triton_poi_fused_add_0"
+        stack = ["model.py:7 in forward"]
+        kernel_information_jsons = {
+            str(("Torch-Compiled Region: 0/0", False)): {
+                kernel_name + ":1": {
+                    "stack_traces": stack,
+                    "post_grad_nodes": ["add"],
+                    "pre_grad_nodes": ["add"],
+                }
+            }
+        }
+        with self._kernel_information_jsons(kernel_information_jsons):
+            trace = {
+                "traceEvents": [
+                    {
+                        "name": "Torch-Compiled Region: 0/0",
+                        "cat": "cpu_op",
+                        "ph": "X",
+                        "ts": 0,
+                        "dur": 100,
+                        "tid": 1,
+                        "args": {},
+                    },
+                    {
+                        "name": "hipLaunchKernel",
+                        "cat": "cuda_runtime",
+                        "ph": "X",
+                        "ts": 10,
+                        "dur": 5,
+                        "tid": 1,
+                        "args": {"External id": 6},
+                    },
+                    {
+                        "name": "kernel",
                         "cat": "kernel",
                         "ph": "X",
                         "ts": 20,

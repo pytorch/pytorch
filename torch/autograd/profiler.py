@@ -760,6 +760,11 @@ class profile:
                     keys.append(key)
             return keys
 
+        def _stack_from_kernel_info(kernel_info):
+            if isinstance(kernel_info, dict):
+                return kernel_info.get("stack_traces")
+            return kernel_info
+
         def _stack_for_kernel(compile_info, graph_key, kernel_name):
             graph_info = compile_info.get(graph_key, {})
             kernel_info = graph_info.get(kernel_name)
@@ -769,19 +774,44 @@ class profile:
                     if name.startswith(kernel_prefix):
                         kernel_info = info
                         break
-            if isinstance(kernel_info, dict):
-                return kernel_info.get("stack_traces")
-            return kernel_info
+            return _stack_from_kernel_info(kernel_info)
+
+        def _single_stack_for_graph(compile_info, graph_key):
+            stacks = [
+                stack
+                for stack in (
+                    _stack_from_kernel_info(kernel_info)
+                    for kernel_info in compile_info.get(graph_key, {}).values()
+                )
+                if stack is not None
+            ]
+            if len(stacks) == 1:
+                return stacks[0]
+            return None
 
         def _assign_stack(event, compile_info, fwd_key, bw_keys, kernel_name):
             for bw_key in bw_keys:
                 stack = _stack_for_kernel(compile_info, bw_key, kernel_name)
                 if stack is not None:
                     event.setdefault("args", {})["stack"] = stack
-                    return
+                    return True
             stack = _stack_for_kernel(compile_info, fwd_key, kernel_name)
             if stack is not None:
                 event.setdefault("args", {})["stack"] = stack
+                return True
+            return False
+
+        def _assign_single_stack(event, compile_info, fwd_key, bw_keys):
+            for bw_key in bw_keys:
+                stack = _single_stack_for_graph(compile_info, bw_key)
+                if stack is not None:
+                    event.setdefault("args", {})["stack"] = stack
+                    return True
+            stack = _single_stack_for_graph(compile_info, fwd_key)
+            if stack is not None:
+                event.setdefault("args", {})["stack"] = stack
+                return True
+            return False
 
         def _kernel_events_for_op(op_id):
             if op_id in src2dst:
@@ -821,6 +851,8 @@ class profile:
                 if not kernel_events:
                     continue
                 for kernel_event in kernel_events:
+                    assigned_stack = False
+                    warn_if_unrecognized = False
                     if self._maybe_extern_call(
                         kernel_event,
                         compile_linenos,
@@ -831,25 +863,42 @@ class profile:
                         for extern_call, related_ops in ops_in_extern_region.items():
                             if op_id in related_ops:
                                 extern_event = uid_2_events[extern_call]
-                                _assign_stack(
+                                assigned_stack = _assign_stack(
                                     kernel_event,
                                     compile_linenos,
                                     fw_graph_key,
                                     bw_graph_keys,
                                     _extern_kernel_name(extern_event.get("name", "")),
                                 )
+                                if assigned_stack:
+                                    break
+                        if not assigned_stack:
+                            assigned_stack = _assign_single_stack(
+                                kernel_event,
+                                compile_linenos,
+                                fw_graph_key,
+                                bw_graph_keys,
+                            )
                     elif not self._maybe_triton_call(kernel_event.get("name", "")):
-                        log.warning(
-                            "Kernel %s cannot be recognized as a custom kernel or triton kernel. "
-                            "Please try profile with stack=True.",
-                            kernel_event.get("name", ""),
-                        )
-                    else:
-                        _assign_stack(
+                        warn_if_unrecognized = True
+                        assigned_stack = _assign_single_stack(
                             kernel_event,
                             compile_linenos,
                             fw_graph_key,
                             bw_graph_keys,
+                        )
+                    else:
+                        assigned_stack = _assign_stack(
+                            kernel_event,
+                            compile_linenos,
+                            fw_graph_key,
+                            bw_graph_keys,
+                            kernel_event.get("name", ""),
+                        )
+                    if not assigned_stack and warn_if_unrecognized:
+                        log.warning(
+                            "Kernel %s cannot be recognized as a custom kernel or triton kernel. "
+                            "Please try profile with stack=True.",
                             kernel_event.get("name", ""),
                         )
         return trace
