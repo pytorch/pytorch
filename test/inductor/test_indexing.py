@@ -2,6 +2,7 @@
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 
 import sympy
 
@@ -383,6 +384,27 @@ class TestIndexingSimplification(InductorTestCase):
         expected = FloorDiv(x * 15 + y, 3)
         self.assertEqual(expected, FloorDiv(actual, denominator))
 
+    def test_expand_floor_div_applied_symbolic_factor(self):
+        sizevars = SizeVarAllocator()
+        s = sympy.Symbol("s", integer=True, positive=True)
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = s * x + FloorDiv(y, 3)
+        actual, denominator = sizevars.expand_floor_div(expr, (x, y))
+        self.assertNotEqual(expr, actual)
+        expected = FloorDiv(3 * s * x + y, 3)
+        self.assertEqual(expected, FloorDiv(actual, denominator))
+
+    def test_expand_floor_div_skipped_cross_tree_symbolic_factor(self):
+        sizevars = SizeVarAllocator()
+        s = sympy.Symbol("s", integer=True, positive=True)
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = s * x + FloorDiv(y, 3)
+        self.assertFalse(sizevars.expand_floor_div(expr, (x,)))
+
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_int8_unpack(self):
         @torch.compile
@@ -403,6 +425,24 @@ class TestIndexingSimplification(InductorTestCase):
         if DO_PERF_TEST:
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
+
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    def test_int8_unpack_dynamic_shape(self):
+        @torch.compile(dynamic=True)
+        def f(x):
+            first_elements = x >> 4
+            second_elements = x & 15
+            unpacked = torch.stack([first_elements, second_elements], dim=-1).view(
+                *x.size()[:-1], -1
+            )
+            return unpacked * 2
+
+        x = torch.randint(0, 255, (2, 16, 32), dtype=torch.uint8, device=GPU_TYPE)
+
+        triton_code = run_and_get_triton_code(f, x)
+        # Dynamic shape coefficients should still be coalesced through the
+        # pointwise-cat view instead of loading from s*x1 + x0//2.
+        self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
 
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_floordiv_div_sympy_is_integer_bug(self):
@@ -882,6 +922,15 @@ class TestWideExpressionThresholds(InductorTestCase):
         wide = sum(syms)
         self.assertTrue(sizevars.statically_known_multiple_of(wide, wide))
 
+    def test_statically_known_multiple_of_factorable_add_floordiv(self):
+        sizevars = SizeVarAllocator()
+        s52, s97 = sympy.symbols("s52 s97", integer=True, positive=True)
+        k = FloorDiv(s97, s52)
+        denominator = s52 * k + k
+        numerator = 128 * s52 * k + 128 * k
+
+        self.assertTrue(sizevars.statically_known_multiple_of(numerator, denominator))
+
     def test_wide_modular_indexing_not_decomposed(self):
         """ModularIndexing with a wide base should not enter the per-term
         simplification loop (its result would feed into sympy.expand which
@@ -944,6 +993,52 @@ class TestOptimizationHintZeroDivision(InductorTestCase):
         expr = ModularIndexing(u0 + 1, u1, 4)
         hint = sizevars.optimization_hint(expr, fallback=8192)
         self.assertEqual(hint, 1)
+
+
+class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
+    """Tests for bounded unbacked replacement canonicalization in optimization_hint."""
+
+    def test_expression_replacements_still_apply_for_small_expr(self):
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        u0 = shape_env.create_unbacked_symint().node.expr
+        u1 = shape_env.create_unbacked_symint().node.expr
+        shape_env.deferred_runtime_asserts.setdefault(u1, []).append(
+            SimpleNamespace(expr=sympy.Eq(u1 + 1, u0 + 2))
+        )
+
+        self.assertEqual(sizevars.optimization_hint(u0 + 2, fallback=0), 1)
+
+    def test_expression_replacements_precede_symbol_replacements(self):
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        u0 = shape_env.create_unbacked_symint().node.expr
+        u1 = shape_env.create_unbacked_symint().node.expr
+        u2 = shape_env.create_unbacked_symint().node.expr
+        shape_env.guard_or_defer_runtime_assert(sympy.Eq(u0, u1), "u0 == u1")
+        shape_env.guard_or_defer_runtime_assert(sympy.Eq(u1 + 1, u2), "u1 + 1 == u2")
+
+        self.assertEqual(
+            sizevars.optimization_hint(u1 + 1, fallback=0),
+            sizevars.optimization_hint(u2, fallback=0),
+        )
+
+    def test_wide_expression_skips_expensive_expr_subs(self):
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        unbacked = [shape_env.create_unbacked_symint().node.expr for _ in range(128)]
+        for i, sym in enumerate(unbacked[1:], start=1):
+            shape_env.deferred_runtime_asserts.setdefault(sym, []).append(
+                SimpleNamespace(expr=sympy.Eq(sym + 1, unbacked[0] + i + 1))
+            )
+
+        expr = sum((i + 1) * sym for i, sym in enumerate(unbacked))
+
+        def fail_subs(*args, **kwargs):
+            raise AssertionError("wide optimization_hint should avoid sympy subs")
+
+        with unittest.mock.patch.object(sympy.Basic, "subs", fail_subs):
+            self.assertEqual(sizevars.optimization_hint(expr, fallback=0), 0)
 
 
 class TestOptimizationHintIdentityExpansion(InductorTestCase):

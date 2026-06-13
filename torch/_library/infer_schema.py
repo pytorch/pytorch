@@ -47,7 +47,7 @@ def infer_schema(
         prototype_function: The function from which to infer a schema for from its type annotations.
         op_name (Optional[str]): The name of the operator in the schema. If ``name`` is None, then the
             name is not included in the inferred schema. Note that the input schema to
-            ``torch.library.Library.define`` requires a operator name.
+            ``torch.library.Library.define`` requires an operator name.
         mutates_args ("unknown" | Iterable[str]): The arguments that are mutated in the function.
         tags (Tag | Sequence[Tag] | None): one or more tags to apply to the
             inferred schema. Use ``torch.Tag.inplace`` or ``torch.Tag.out`` to
@@ -92,9 +92,19 @@ def infer_schema(
     def convert_type_string(annotation_type: str):
         try:
             return eval(annotation_type, pf_globals, pf_locals)
-        except Exception:
+        except NameError as e:
             error_fn(
-                f"Unsupported type annotation {annotation_type}. It is not a type."
+                f"Unsupported type annotation {annotation_type}. It is not a type. "
+                f"({e}). "
+                f"If you are using 'from __future__ import annotations', note that "
+                f"annotations are evaluated lazily as strings; make sure all types "
+                f"referenced in annotations are importable at module scope, not only "
+                f"inside a local function."
+            )
+        except Exception as e:
+            error_fn(
+                f"Unsupported type annotation {annotation_type}. It is not a type. "
+                f"({type(e).__name__}: {e})"
             )
 
     def unstringify_types(
