@@ -849,14 +849,19 @@ class TestOptimRenewed(TestCase):
                 )
                 model.to(dtype=dtype, device=device)
 
-                # foreach/fused optimizers should be tested with a
-                # zero_size tensor as its last param.
-                # ref: https://github.com/pytorch/pytorch/issues/100701
-                empty_param = torch.empty(
-                    (), device=device, dtype=dtype, requires_grad=True
-                )
-                empty_param.grad = torch.rand_like(empty_param)
-                params = list(model.parameters()) + [empty_param]
+                if optim_cls.__name__ == "Muon":
+                    # Muon only accepts 2D parameters, so filter out the 1D
+                    # biases and the empty/0-D scalar.
+                    params = [p for p in model.parameters() if p.ndim == 2]
+                else:
+                    # foreach/fused optimizers should be tested with a
+                    # zero_size tensor as its last param.
+                    # ref: https://github.com/pytorch/pytorch/issues/100701
+                    empty_param = torch.empty(
+                        (), device=device, dtype=dtype, requires_grad=True
+                    )
+                    empty_param.grad = torch.rand_like(empty_param)
+                    params = list(model.parameters()) + [empty_param]
 
                 optimizer = optim_cls(params, **kwargs)
                 models.append(model)
@@ -2532,6 +2537,220 @@ class TestOptimRenewed(TestCase):
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
+
+
+class TestMuonForeach(TestCase):
+    """Tests for the bit-parity and state-dict BC contracts that the
+    multi-tensor (foreach) path advertises but that the generic OptimizerInfo
+    matrix does not test strictly enough."""
+
+    def test_state_dict_round_trip_backfills_foreach(self):
+        # `foreach` was added after the original Muon release; state dicts
+        # saved by older versions of Muon must load cleanly with `foreach`
+        # backfilled to None (the historical single-tensor default), not
+        # silently default to True/False.
+        from torch.optim import Muon
+
+        torch.manual_seed(0)
+        p1 = torch.nn.Parameter(torch.randn(8, 16))
+        p1.grad = torch.randn_like(p1)
+        opt1 = Muon([p1])
+        opt1.step()
+        sd = opt1.state_dict()
+
+        # Simulate an older state dict that predates the foreach flag.
+        sd["param_groups"][0].pop("foreach", None)
+
+        p2 = torch.nn.Parameter(torch.randn(8, 16))
+        p2.grad = torch.randn_like(p2)
+        opt2 = Muon([p2])
+        opt2.load_state_dict(sd)
+
+        # __setstate__ must backfill foreach to None, preserving the
+        # historical single-tensor default for older checkpoints.
+        self.assertEqual(opt2.param_groups[0]["foreach"], None)
+        # And a subsequent step() must succeed on the single-tensor path.
+        opt2.step()
+
+    def test_foreach_matches_forloop_bit_parity_rectangular(self):
+        # The multi-tensor path runs Newton-Schulz per-tensor for rectangular
+        # 2D params (no batching), so the foreach=True and foreach=False
+        # results must be bit-identical on rectangular shapes. float64 makes
+        # any unexpected reduction-order difference visible.
+        from torch.optim import Muon
+
+        torch.manual_seed(0)
+        bases = [torch.randn(8, 16, dtype=torch.float64) for _ in range(3)]
+        grads = [torch.randn(8, 16, dtype=torch.float64) for _ in range(3)]
+
+        p_loop = [torch.nn.Parameter(b.clone().detach()) for b in bases]
+        p_fe = [torch.nn.Parameter(b.clone().detach()) for b in bases]
+        for p, g in zip(p_loop, grads, strict=True):
+            p.grad = g.clone()
+        for p, g in zip(p_fe, grads, strict=True):
+            p.grad = g.clone()
+
+        Muon(p_loop, foreach=False).step()
+        Muon(p_fe, foreach=True).step()
+
+        for a, b in zip(p_loop, p_fe, strict=True):
+            self.assertEqual(a, b, atol=0, rtol=0)
+
+
+class TestMuon(TestCase):
+    """Muon-specific behavior that does not fit the generic OptimizerInfo matrix."""
+
+    def _ensure_2d_grads(self, params):
+        for p in params:
+            p.grad = torch.randn_like(p)
+
+    def test_gram_vs_standard_differ_on_rectangular(self):
+        from torch.optim import Muon
+        from torch.optim._muon import NewtonSchulzAlgorithm
+
+        torch.manual_seed(42)
+        base = torch.randn(8, 16)
+        p_std = torch.nn.Parameter(base.clone().detach())
+        p_gram = torch.nn.Parameter(base.clone().detach())
+
+        grad = torch.randn(8, 16)
+        p_std.grad = grad.clone()
+        p_gram.grad = grad.clone()
+
+        opt_std = Muon([p_std], ns_algorithm=NewtonSchulzAlgorithm.STANDARD)
+        opt_gram = Muon([p_gram], ns_algorithm=NewtonSchulzAlgorithm.GRAM)
+        opt_std.step()
+        opt_gram.step()
+
+        # Gram NS converges to a different (but still valid) orthogonalization,
+        # so the rectangular update must differ.
+        self.assertFalse(torch.equal(p_std, p_gram))
+
+    def test_gram_square_falls_back_to_standard(self):
+        from torch.optim import Muon
+        from torch.optim._muon import NewtonSchulzAlgorithm
+
+        torch.manual_seed(42)
+        base = torch.randn(8, 8)
+        p_std = torch.nn.Parameter(base.clone().detach())
+        p_gram = torch.nn.Parameter(base.clone().detach())
+
+        grad = torch.randn(8, 8)
+        p_std.grad = grad.clone()
+        p_gram.grad = grad.clone()
+
+        opt_std = Muon([p_std], ns_algorithm=NewtonSchulzAlgorithm.STANDARD)
+        opt_gram = Muon([p_gram], ns_algorithm=NewtonSchulzAlgorithm.GRAM)
+        opt_std.step()
+        opt_gram.step()
+
+        # Square shapes are explicitly routed to standard NS even under GRAM,
+        # so the two updates must be bit-identical for a single tensor.
+        self.assertEqual(p_std, p_gram, atol=0, rtol=0)
+
+    def test_batched_standard_square_matches_per_tensor(self):
+        from torch.optim import Muon
+
+        torch.manual_seed(42)
+        # Three same-shape square params - the multi-tensor path should batch
+        # them via bmm; the single-tensor path runs per-tensor.
+        bases = [torch.randn(8, 8) for _ in range(3)]
+        grads = [torch.randn(8, 8) for _ in range(3)]
+
+        per_tensor_params = [torch.nn.Parameter(b.clone().detach()) for b in bases]
+        batched_params = [torch.nn.Parameter(b.clone().detach()) for b in bases]
+        for p, g in zip(per_tensor_params, grads, strict=True):
+            p.grad = g.clone()
+        for p, g in zip(batched_params, grads, strict=True):
+            p.grad = g.clone()
+
+        opt_per_tensor = Muon(per_tensor_params, foreach=False)
+        opt_batched = Muon(batched_params, foreach=True)
+        opt_per_tensor.step()
+        opt_batched.step()
+
+        # bmm/baddbmm and per-tensor mm/addmm differ in reduction order across
+        # the batch dim. Tolerance accounts for that; we just confirm they stay
+        # close in float32.
+        for pt, bt in zip(per_tensor_params, batched_params, strict=True):
+            self.assertEqual(pt, bt, atol=1e-5, rtol=1e-5)
+
+    def test_gram_converges_on_toy_regression(self):
+        from torch.optim import Muon
+        from torch.optim._muon import NewtonSchulzAlgorithm
+
+        torch.manual_seed(0)
+        # Rectangular shapes so the gram path actually runs (square falls back).
+        linear1 = torch.nn.Linear(8, 16, bias=False)
+        linear2 = torch.nn.Linear(16, 4, bias=False)
+        params = list(linear1.parameters()) + list(linear2.parameters())
+
+        opt = Muon(
+            params,
+            lr=0.02,
+            weight_decay=0.0,
+            ns_algorithm=NewtonSchulzAlgorithm.GRAM,
+        )
+
+        x = torch.randn(64, 8)
+        true_w1 = torch.randn(8, 16)
+        true_w2 = torch.randn(16, 4)
+        target = (x @ true_w1) @ true_w2
+
+        def forward_loss():
+            return ((linear2(linear1(x)) - target) ** 2).mean()
+
+        with torch.no_grad():
+            initial = forward_loss().item()
+        for _ in range(200):
+            opt.zero_grad()
+            forward_loss().backward()
+            opt.step()
+        with torch.no_grad():
+            final = forward_loss().item()
+        self.assertLess(final, initial * 0.1)
+
+    def test_ns_algorithm_accepts_str(self):
+        from torch.optim import Muon
+        from torch.optim._muon import NewtonSchulzAlgorithm
+
+        param = torch.nn.Parameter(torch.randn(8, 16))
+        # The enum subclasses str, so plain string aliases must also work.
+        opt = Muon([param], ns_algorithm="gram")
+        self.assertIs(
+            opt.param_groups[0]["ns_algorithm"], NewtonSchulzAlgorithm.GRAM
+        )
+
+    def test_state_dict_round_trip_normalizes_ns_algorithm(self):
+        from torch.optim import Muon
+        from torch.optim._muon import NewtonSchulzAlgorithm
+
+        torch.manual_seed(0)
+        p1 = torch.nn.Parameter(torch.randn(8, 16))
+        p1.grad = torch.randn_like(p1)
+        opt1 = Muon([p1], ns_algorithm=NewtonSchulzAlgorithm.GRAM)
+        opt1.step()
+        sd = opt1.state_dict()
+
+        # Simulate an older state dict that does not yet have the gram NS
+        # keys, plus a plain-string ns_algorithm (post-JSON round-trip).
+        sd["param_groups"][0]["ns_algorithm"] = "gram"
+        sd["param_groups"][0].pop("gram_ns_coefficients", None)
+        sd["param_groups"][0].pop("gram_ns_reset_iterations", None)
+
+        p2 = torch.nn.Parameter(torch.randn(8, 16))
+        p2.grad = torch.randn_like(p2)
+        opt2 = Muon([p2])
+        opt2.load_state_dict(sd)
+        # __setstate__ should normalize the string back to the enum and
+        # backfill the gram coefficients/reset schedule.
+        self.assertIs(
+            opt2.param_groups[0]["ns_algorithm"], NewtonSchulzAlgorithm.GRAM
+        )
+        self.assertIn("gram_ns_coefficients", opt2.param_groups[0])
+        self.assertIn("gram_ns_reset_iterations", opt2.param_groups[0])
+        # And a subsequent step() must succeed.
+        opt2.step()
 
 
 if __name__ == "__main__":
