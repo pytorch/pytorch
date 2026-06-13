@@ -147,7 +147,8 @@ def run_triton_kernel_with_autotune(
     else:
         raise RuntimeError(f"Unexpected kernel object type: {type(kernel_obj)}")
 
-    assert isinstance(kernel_fn, CachingAutotuner)
+    if not isinstance(kernel_fn, CachingAutotuner):
+        raise AssertionError(f"Expected CachingAutotuner, got {type(kernel_fn)}")
 
     inductor_meta = kernel_fn.inductor_meta
     inductor_meta["store_cubin"] = True
@@ -175,9 +176,13 @@ def run_triton_kernel_with_autotune(
                 f"{key_name} not found in cached params for {kernel_name}"
             )
     cubin_path = cached_params[cubin_path_name]
-    assert isinstance(cubin_path, str)
+    if not isinstance(cubin_path, str):
+        raise AssertionError(f"expected cubin_path to be str, got {type(cubin_path)}")
     runtime_bin_path = cached_params.get("runtime_bin_path", cubin_path)
-    assert isinstance(runtime_bin_path, str)
+    if not isinstance(runtime_bin_path, str):
+        raise AssertionError(
+            f"expected runtime_bin_path to be str, got {type(runtime_bin_path)}"
+        )
     mangled_name = cached_params["mangled_name"]
     num_warps = cached_params["num_warps"]
     shared_mem = cached_params["shared_mem"]
