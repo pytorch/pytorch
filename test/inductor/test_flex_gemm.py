@@ -882,6 +882,36 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_bmm_batch_one_generated_code_calls_flex_gemm_adapter(self):
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.bmm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(1, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(1, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.bmm(a, b)),
+            epilogue_fn(torch.bmm(a.double(), b.double())),
+            a.shape[-1],
+        )
+        self.assertFlexGemmGeneratedCode(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_bmm_generated_code_tuned_matches_reference(self):
         def epilogue_fn(acc):
             return acc.relu()
