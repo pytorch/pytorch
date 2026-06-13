@@ -513,6 +513,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if only_gen_src_code:
             return src_code
 
+        # Precompile only base (non-EFC) kernels. EFC kernels produce
+        # closure-wrapped artifacts that can't be serialized to disk cache.
         if epilogue_nodes:
             precompile_metadata = None
         else:
@@ -579,8 +581,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
         max_active_clusters = None
         kernel_name = ctb.kernel_metadata.get("kernel_name")
-        if kernel_name and torch.cuda.is_available():
-            try:
+        try:
+            if kernel_name and torch.cuda.is_available():
                 from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
                     get_kernel_by_name,
                 )
@@ -594,8 +596,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     max_active_clusters = get_max_active_clusters(
                         k.impl.cluster_shape_mn
                     )
-            except Exception:
-                log.debug("Could not extract max_active_clusters for precompile")
+        except Exception:
+            log.debug(
+                "Failed to resolve max_active_clusters for precompile", exc_info=True
+            )
 
         return {
             "precompile_shapes": precompile_shapes,
