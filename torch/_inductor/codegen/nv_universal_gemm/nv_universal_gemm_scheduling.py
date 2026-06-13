@@ -130,22 +130,26 @@ class NVUniversalGemmScheduling(BaseScheduling):
         """
         Codegen a NVIDIA Universal GEMM template. Currently doesn't support fusion.
         """
-        assert self.is_nv_universal_gemm_template(template_node), (
-            "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
-            "SchedulerNode that wraps a NVUniversalGemmBuffer"
-        )
+        if not self.is_nv_universal_gemm_template(template_node):
+            raise AssertionError(
+                "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
+                "SchedulerNode that wraps a NVUniversalGemmBuffer"
+            )
         # TODO: add support for fusion when needed
-        assert not epilogue_nodes, (
-            "NVIDIA Universal GEMM doesn't support epilogue fusion yet"
-        )
-        assert not prologue_nodes, (
-            "NVIDIA Universal GEMM doesn't support prologue fusion yet"
-        )
+        if epilogue_nodes:
+            raise AssertionError(
+                "NVIDIA Universal GEMM doesn't support epilogue fusion yet"
+            )
+        if prologue_nodes:
+            raise AssertionError(
+                "NVIDIA Universal GEMM doesn't support prologue fusion yet"
+            )
 
         template_node = cast(SchedulerNode, template_node)
         ctb: NVUniversalGemmBuffer = cast(NVUniversalGemmBuffer, template_node.node)
 
-        assert ctb.make_kernel_render is not None
+        if ctb.make_kernel_render is None:
+            raise AssertionError("expected ctb.make_kernel_render to be set, got None")
         kernel, render = ctb.make_kernel_render(ctb)
         template_node.mark_run()
         src_code = render()
@@ -201,9 +205,16 @@ class NVUniversalGemmScheduling(BaseScheduling):
         device = ctb.layout.device
         device_index = device.index if device.index is not None else 0
 
+        import torch
+
+        device_capability = None
+        if torch.cuda.is_available():
+            device_capability = torch.cuda.get_device_capability(device_index)
+
         return {
             "precompile_shapes": precompile_shapes,
             "precompile_strides": precompile_strides,
             "precompile_dtypes": precompile_dtypes,
             "device_index": device_index,
+            "device_capability": device_capability,
         }
