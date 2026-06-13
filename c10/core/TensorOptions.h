@@ -134,8 +134,15 @@ DispatchKey computeDispatchKey(
     std::optional<Device> device);
 
 struct C10_API TensorOptions {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  TensorOptions() noexcept {}
+  TensorOptions()
+      : requires_grad_(false),
+        pinned_memory_(false),
+        has_device_(false),
+        has_dtype_(false),
+        has_layout_(false),
+        has_requires_grad_(false),
+        has_pinned_memory_(false),
+        has_memory_format_(false) {}
 
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
@@ -144,8 +151,9 @@ struct C10_API TensorOptions {
 
   /// Constructs a `TensorOptions` object with the given device.
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
-  template <typename T>
-  requires std::is_same_v<std::decay_t<T>, Device>
+  template <
+      typename T,
+      typename = std::enable_if_t<std::is_same_v<std::decay_t<T>, Device>>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -158,8 +166,9 @@ struct C10_API TensorOptions {
   /// NB: Ideally we only allow implicit constructors here. But there is no easy
   ///     way to detect them. So we have this one that allows explicit
   ///     constructors too.
-  template <typename... Args>
-  requires std::is_constructible_v<Device, Args&&...>
+  template <
+      typename... Args,
+      typename = std::enable_if_t<std::is_constructible_v<Device, Args&&...>>>
   /* implicit */ TensorOptions(Args&&... args)
       : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
@@ -543,15 +552,15 @@ struct C10_API TensorOptions {
   // Bitmask required here to get this to fit inside 32 bits (or even 64 bits,
   // for that matter)
 
-  bool requires_grad_ : 1 = false;
-  bool pinned_memory_ : 1 = false;
+  bool requires_grad_ : 1;
+  bool pinned_memory_ : 1;
 
-  bool has_device_ : 1 = false;
-  bool has_dtype_ : 1 = false;
-  bool has_layout_ : 1 = false;
-  bool has_requires_grad_ : 1 = false;
-  bool has_pinned_memory_ : 1 = false;
-  bool has_memory_format_ : 1 = false;
+  bool has_device_ : 1;
+  bool has_dtype_ : 1;
+  bool has_layout_ : 1;
+  bool has_requires_grad_ : 1;
+  bool has_pinned_memory_ : 1;
+  bool has_memory_format_ : 1;
 };
 
 // We should aspire to fit in one machine-size word; but a size greater than two
