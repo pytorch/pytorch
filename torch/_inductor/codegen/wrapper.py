@@ -97,7 +97,7 @@ log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 
 
-ReuseKey = tuple[torch.device, torch.dtype, str, bool, int]
+ReuseKey = tuple[torch.device, torch.dtype, str, bool, int, tuple[int, int] | None]
 CommBufferReuseKey = tuple[torch.device, torch.dtype, str, "ir.CommBufferType", str]
 BufferLike = ir.Buffer | WorkspaceArg
 FxConversionFunc = Callable[["WrapperLine"], None]
@@ -116,6 +116,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
     storage_size = V.graph.get_allocation_storage_size(node)
     alignment = node.get_name() not in V.graph.unaligned_buffers
     stream = V.graph.scheduler.get_buf_stream(node.get_name())
+    mempool = V.graph.scheduler.get_buf_mempool(node.get_name())
     return (
         node.get_device_or_error(),
         node.get_dtype(),
@@ -125,6 +126,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
         sympy_str(V.graph.sizevars.simplify(storage_size)),
         alignment,
         stream,
+        mempool,
     )
 
 
@@ -508,6 +510,9 @@ class HasWriteLine(Protocol):
 
 
 class WrapperLine:
+    def codegen(self, code: Any) -> None:
+        raise NotImplementedError(f"Codegen not yet supported for type {type(self)}")
+
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         raise NotImplementedError(f"FX codegen not yet supported for type {type(self)}")
 
@@ -867,6 +872,29 @@ class ExitCudaStreamContextLine(WrapperLine):
         code.do_unindent()
 
 
+@dataclasses.dataclass
+class EnterCudaMemPoolContextLine(WrapperLine):
+    """Enter a torch.cuda.use_mem_pool context for scheduler node codegen."""
+
+    mempool_index: int
+    device_index: int
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.writeline(
+            "with torch.cuda.use_mem_pool("
+            f"get_external_object_by_index({self.mempool_index}), "
+            f"device={self.device_index}):"
+        )
+        code.do_indent()
+
+
+class ExitCudaMemPoolContextLine(WrapperLine):
+    """Exit the active torch.cuda.use_mem_pool context."""
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_unindent()
+
+
 class EfficientPeakEstimate:
     def __init__(self):
         from ..memory import estimate_peak_memory, get_freeable_input_buf
@@ -979,8 +1007,7 @@ class AllocateLine(MemoryPlanningLine):
         if self.comm_buffer:
             self._codegen_comm_buffer(code)
         else:
-            line = self.wrapper.make_buffer_allocation(self.node)
-            code.writeline(line)
+            code.writeline(self.wrapper.make_buffer_allocation(self.node))
 
     def _codegen_comm_buffer(self, code: IndentedBuffer) -> None:
         """Generate allocation code for comm buffers."""
@@ -1960,6 +1987,25 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_cuda_stream_exit(self) -> None:
         """Generate data structure for exiting a CUDA Stream context."""
         self.writeline(ExitCudaStreamContextLine())
+
+    def codegen_cuda_mempool_enter(self, mempool: tuple[int, int]) -> None:
+        """Generate a CUDA MemPool context around code that may allocate."""
+        if V.graph.cpp_wrapper:
+            raise AssertionError("CUDA MemPool contexts require Python wrapper")
+        import_line = (
+            "from torch._dynamo.graph_bytecode_inputs import "
+            "get_external_object_by_index"
+        )
+        if not self.imports.contains(import_line):
+            self.imports.writeline(import_line)
+        mempool_index, device_index = mempool
+        self.writeline(EnterCudaMemPoolContextLine(mempool_index, device_index))
+
+    def codegen_cuda_mempool_exit(self) -> None:
+        """Generate data structure for exiting the current CUDA MemPool context."""
+        if V.graph.cpp_wrapper:
+            raise AssertionError("CUDA MemPool contexts require Python wrapper")
+        self.writeline(ExitCudaMemPoolContextLine())
 
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
