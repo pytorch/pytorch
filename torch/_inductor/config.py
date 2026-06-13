@@ -2069,7 +2069,7 @@ class triton:
     #   assume_aligned_inputs to also be enabled
     # TMA descriptors are only going to be generated if the above conditions
     # can be satisfied, along with any existing requirements for index expressions
-    use_tensor_descriptor = False
+    use_tensor_descriptor = True
 
     # (Experimental)
     # Whether to allow reordering tensor descriptor matches with descending
@@ -2097,6 +2097,11 @@ class triton:
     enable_tma_load_for_template_epilogue = (
         os.environ.get("ENABLE_TMA_LOAD_FOR_TEMPLATE_EPILOGUE", "0") == "1"
     )
+    # Host-side TMA: create TensorDescriptors on CPU and pass as kernel args
+    # instead of creating them device-side inside the kernel. Enables
+    # use_tensor_descriptor and assume_aligned_inputs automatically.
+    enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
+
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
