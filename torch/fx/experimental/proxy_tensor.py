@@ -2658,6 +2658,9 @@ class _MakefxTracer:
         self.decomposition_table.setdefault(
             torch.ops.aten.sym_numel.default, torch._decomp.decompositions.sym_numel
         )
+        # Only inject the default detach decomp when the caller passed no table
+        # at all. An explicit table, even empty, opts out and preserves exact
+        # detach semantics for pre-autograd export and compile paths.
         if decomposition_table is None and not pre_dispatch:
             self.decomposition_table.setdefault(
                 torch.ops.aten.detach.default,
