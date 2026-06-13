@@ -708,13 +708,6 @@ class TestLibtorchAgnostic(TestCase):
 
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCPU
-    # TODO: Debug this:
-    # Dynamo failed to run FX node with fake tensors:
-    # call_function libtorch_agnostic.test_parallel_for.default(*(100, 10), **{}):
-    # got RuntimeError('libtorch_agnostic::test_parallel_for() expected at most
-    # 2 argument(s) but received 3 argument(s).
-    # Declaration: libtorch_agnostic::test_parallel_for(int size, int grain_size) -> Tensor')
-    @xfailIfTorchDynamo
     def test_parallel_for(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
