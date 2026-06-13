@@ -1,3 +1,4 @@
+import sys
 from collections import OrderedDict
 from typing import Any
 
@@ -252,11 +253,10 @@ def get_memory_info(device_index: _device_t = None, /) -> tuple[int, int]:
     return torch._C._accelerator_getMemoryInfo(device_index)
 
 
-def _snapshot(device=None, augment_with_fx_traces: bool = False):
+def _snapshot(device=None, augment_with_fx_traces: bool = False) -> dict[str, Any]:
     r"""Return a snapshot of the current :ref:`accelerator<accelerators>` memory allocator state.
 
-    Requires :func:`_record_memory_history` on the appropriate device module
-    (e.g., :func:`torch.cuda.memory._record_memory_history`) to have been called.
+    Requires :func:`torch.accelerator.memory._record_memory_history` to have been called.
 
     Args:
         device: the device to snapshot. If not given, uses the current device.
@@ -264,13 +264,63 @@ def _snapshot(device=None, augment_with_fx_traces: bool = False):
             with FX graph information. Default: ``False``.
 
     Returns:
-        dict: a dictionary containing memory allocator state information.
+        dict: a dictionary containing memory allocator state information,
+            or an empty dict if no accelerator is available or the backend
+            does not support memory snapshots.
     """
     acc = torch.accelerator.current_accelerator()
-    if acc is not None and acc.type == "xpu":
-        return torch.xpu.memory._snapshot(
-            device, augment_with_fx_traces=augment_with_fx_traces
-        )
-    return torch.cuda.memory._snapshot(
-        device, augment_with_fx_traces=augment_with_fx_traces
-    )
+    if acc is None:
+        return {}
+    mem_mod = getattr(torch.get_device_module(acc), "memory", None)
+    if mem_mod is None or not hasattr(mem_mod, "_snapshot"):
+        return {}
+    return mem_mod._snapshot(device, augment_with_fx_traces=augment_with_fx_traces)
+
+
+def _record_memory_history(
+    enabled: str | None = "all",
+    *,
+    max_entries: int = sys.maxsize,
+    **kwargs,
+) -> None:
+    r"""Enable recording of stack traces associated with memory allocations for
+    the current :ref:`accelerator<accelerators>`.
+
+    This is a no-op if the current accelerator does not support memory history recording.
+
+    Args:
+        enabled (str or None): ``"all"`` records all events, ``"state"`` records
+            only current allocations, ``None`` disables recording.
+            Default: ``"all"``.
+        max_entries (int, optional): Maximum number of trace entries to store.
+            Default: ``sys.maxsize``.
+    """
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
+        return
+    mem_mod = getattr(torch.get_device_module(acc), "memory", None)
+    if mem_mod is None or not hasattr(mem_mod, "_record_memory_history"):
+        return
+    mem_mod._record_memory_history(enabled=enabled, max_entries=max_entries, **kwargs)
+
+
+def _dump_snapshot(
+    filename: str = "dump_snapshot.pickle", augment_with_fx_traces: bool = False
+) -> None:
+    r"""Save a pickled snapshot of the current :ref:`accelerator<accelerators>` memory state.
+
+    This is a no-op if the current accelerator does not support memory snapshots.
+
+    Args:
+        filename (str, optional): Path to write the snapshot to.
+            Default: ``"dump_snapshot.pickle"``.
+        augment_with_fx_traces (bool, optional): if True, augment stack traces
+            with FX graph information. Default: ``False``.
+    """
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
+        return
+    mem_mod = getattr(torch.get_device_module(acc), "memory", None)
+    if mem_mod is None or not hasattr(mem_mod, "_dump_snapshot"):
+        return
+    mem_mod._dump_snapshot(filename, augment_with_fx_traces=augment_with_fx_traces)
