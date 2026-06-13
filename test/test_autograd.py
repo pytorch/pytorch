@@ -15615,6 +15615,224 @@ class TestMultithreadAutograd(TestCase):
         torch._C._remove_obj_from_tls("test_obj")
         self.assertFalse(torch._C._is_key_in_tls("test_obj"))
 
+    @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_no_device_threads_when_multithreading_disabled(self):
+        # Issue #184783: set_multithreading_enabled(False) should prevent
+        # autograd device threads from being spawned.
+        # We run in a subprocess to ensure a fresh engine state.
+        script = """\
+import os, sys, torch
+
+torch.autograd.set_multithreading_enabled(False)
+x = torch.ones(100, device="cuda", requires_grad=True)
+(x * 2).sum().backward()
+
+threads = []
+for tid in os.listdir("/proc/self/task"):
+    try:
+        with open(f"/proc/self/task/{tid}/comm") as f:
+            name = f.read().strip()
+        if name.startswith("pt_autograd"):
+            threads.append(name)
+    except OSError:
+        pass
+
+if threads:
+    print(f"FAIL: found autograd threads: {threads}", file=sys.stderr)
+    sys.exit(1)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Autograd threads spawned despite multithreading disabled: {result.stderr}",
+        )
+
+    @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_device_threads_created_on_reenable(self):
+        # Verify that disabling multithreading, running backward, then
+        # re-enabling actually creates device threads for subsequent calls.
+        script = """\
+import os, sys, threading, torch
+from torch.autograd import Function
+
+torch.autograd.set_multithreading_enabled(False)
+x = torch.ones(10, device="cuda", requires_grad=True)
+x.mean().backward()
+
+# No threads should exist yet
+threads = []
+for tid in os.listdir("/proc/self/task"):
+    try:
+        with open(f"/proc/self/task/{tid}/comm") as f:
+            name = f.read().strip()
+        if name.startswith("pt_autograd"):
+            threads.append(name)
+    except OSError:
+        pass
+if threads:
+    print(f"FAIL phase1: threads exist while disabled: {threads}", file=sys.stderr)
+    sys.exit(1)
+
+# Re-enable and run backward again
+torch.autograd.set_multithreading_enabled(True)
+
+exec_threads = []
+class RecordThread(Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x.clone()
+    @staticmethod
+    def backward(ctx, grad):
+        exec_threads.append(threading.current_thread().name)
+        return grad
+
+y = torch.ones(10, device="cuda", requires_grad=True)
+RecordThread.apply(y).sum().backward()
+
+# Device threads should now exist
+threads = []
+for tid in os.listdir("/proc/self/task"):
+    try:
+        with open(f"/proc/self/task/{tid}/comm") as f:
+            name = f.read().strip()
+        if name.startswith("pt_autograd"):
+            threads.append(name)
+    except OSError:
+        pass
+if not threads:
+    print("FAIL phase2: no threads after re-enable", file=sys.stderr)
+    sys.exit(1)
+
+# Backward should have run on the device thread, not main
+if exec_threads[0] == threading.current_thread().name:
+    print("FAIL phase2: backward ran on main thread after re-enable", file=sys.stderr)
+    sys.exit(1)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Re-enable test failed: {result.stderr}",
+        )
+
+    @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_device_threads_default_behavior(self):
+        # Regression test: default multithreading (enabled) still creates
+        # device threads and routes CUDA backward work to them.
+        script = """\
+import os, sys, threading, torch
+from torch.autograd import Function
+
+exec_threads = []
+class RecordThread(Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x.clone()
+    @staticmethod
+    def backward(ctx, grad):
+        exec_threads.append(threading.current_thread().name)
+        return grad
+
+x = torch.ones(10, device="cuda", requires_grad=True)
+RecordThread.apply(x).sum().backward()
+
+threads = []
+for tid in os.listdir("/proc/self/task"):
+    try:
+        with open(f"/proc/self/task/{tid}/comm") as f:
+            name = f.read().strip()
+        if name.startswith("pt_autograd"):
+            threads.append(name)
+    except OSError:
+        pass
+if not threads:
+    print("FAIL: no autograd threads with default settings", file=sys.stderr)
+    sys.exit(1)
+
+if exec_threads[0] == threading.current_thread().name:
+    print("FAIL: backward ran on main thread with default settings", file=sys.stderr)
+    sys.exit(1)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Default behavior test failed: {result.stderr}",
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_multithreading_disabled_cuda_correctness(self):
+        # Functional correctness: CUDA backward with multithreading disabled
+        # produces correct gradients.
+        with torch.autograd.set_multithreading_enabled(False):
+            x = torch.randn(4, 4, device="cuda", requires_grad=True)
+            y = (x**2).sum()
+            y.backward()
+            self.assertEqual(x.grad, 2 * x)
+
+    @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_context_manager_deferred_threads(self):
+        # Inside the disabled context manager, no device threads should
+        # be spawned.  After exiting and running backward, threads appear.
+        script = """\
+import os, sys, torch
+
+def autograd_threads():
+    names = []
+    for tid in os.listdir("/proc/self/task"):
+        try:
+            with open(f"/proc/self/task/{tid}/comm") as f:
+                name = f.read().strip()
+            if name.startswith("pt_autograd"):
+                names.append(name)
+        except OSError:
+            pass
+    return names
+
+with torch.autograd.set_multithreading_enabled(False):
+    x = torch.ones(10, device="cuda", requires_grad=True)
+    x.mean().backward()
+    threads_inside = autograd_threads()
+    if threads_inside:
+        print(f"FAIL: threads inside context: {threads_inside}", file=sys.stderr)
+        sys.exit(1)
+
+# After exiting the context manager, multithreading is re-enabled
+y = torch.ones(10, device="cuda", requires_grad=True)
+y.mean().backward()
+threads_after = autograd_threads()
+if not threads_after:
+    print("FAIL: no threads after context exit", file=sys.stderr)
+    sys.exit(1)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Context manager test failed: {result.stderr}",
+        )
+
 
 class TestNestedCheckpoint(TestCase):
     @staticmethod

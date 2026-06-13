@@ -272,7 +272,9 @@ bool ReadyQueue::empty() const {
   return heap_.empty();
 }
 
-Engine::Engine() : non_reentrant_device_thread_count_(0) {}
+Engine::Engine()
+    : thread_pool_shared_(std::make_shared<ThreadPoolShared>()),
+      non_reentrant_device_thread_count_(0) {}
 
 Engine::~Engine() {
   stop();
@@ -1408,11 +1410,14 @@ void Engine::initialize_device_threads_pool() {
       !in_bad_autograd_fork,
       "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
       "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
-  // Ensures device_ready_queues_ are initialized only once
-  static bool start_device_threads_flag_ [[maybe_unused]] = [this]() {
-    this->start_device_threads();
-    return true;
-  }();
+  // thread_pool_shared_ is initialized in the Engine constructor so it is
+  // always available for re-entrant backward.  Device threads are deferred
+  // until the first backward that actually needs multithreading.
+  if (!c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
+    return;
+  }
+  c10::call_once(
+      device_threads_flag_, [this]() { this->start_device_threads(); });
 }
 
 c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
@@ -1585,10 +1590,9 @@ auto Engine::ready_queue_by_index(
 }
 
 auto Engine::start_device_threads() -> void {
-  // First always initialize the thread pool for re-entrant threads
-  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+  // thread_pool_shared_ is now initialized in the Engine constructor.
 
-  // Second, create special threads for each non-CPU device
+  // Create special threads for each non-CPU device
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
