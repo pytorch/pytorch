@@ -4529,6 +4529,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 prescreening_elapse,
                 hint_override=hint_override,
                 is_collective=is_collective,
+                is_cache_hit=not has_autotuned,
             )
 
         def profiler_bench_function(choices_override=None):
@@ -5731,6 +5732,7 @@ class AlgorithmSelectorCache(PersistentCache):
         prescreening_elapse: float | None = None,
         hint_override: int | None = None,
         is_collective: bool = False,
+        is_cache_hit: bool = False,
     ):
         """Log the autotuning results, currently only handles mm and flex. Log Collective op autotuning result"""
         if is_collective and timings:
@@ -5792,7 +5794,8 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
         best_time = timings[best]
-        sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
+        cache_status = " [CACHE HIT]" if is_cache_hit else ""
+        sys.stderr.write(f"AUTOTUNE {name}({sizes}){cache_status}\n")
         sys.stderr.write(f"strides: {strides}\n")
         sys.stderr.write(f"dtypes: {dtypes}\n")
 
