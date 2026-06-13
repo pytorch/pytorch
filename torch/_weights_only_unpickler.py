@@ -172,11 +172,13 @@ def _tensor_rebuild_functions():
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
 def _get_allowed_globals():
+    rebuild_opaque_base = torch._opaque_base._rebuild_opaque_base
     rc: dict[str, Any] = {
         "collections.OrderedDict": OrderedDict,
         "collections.Counter": Counter,
         "torch.nn.parameter.Parameter": torch.nn.Parameter,
         "torch.serialization._get_layout": torch.serialization._get_layout,
+        "torch._opaque_base._rebuild_opaque_base": rebuild_opaque_base,
         "torch.Size": torch.Size,
         "torch.Tensor": torch.Tensor,
         "torch.device": torch.device,
