@@ -199,8 +199,8 @@ class StaticallyLaunchedTritonKernel:
         """
         if ty[0] == "*":
             return "O"
-        elif ty == "nvTmaDesc":
-            raise NotImplementedError("nvTmaDesc kernels are not yet supported")
+        elif ty == "nvTmaDesc" or ty.startswith("tensordesc<"):
+            raise NotImplementedError("TMA descriptor kernels are not yet supported")
         return StaticallyLaunchedTritonKernel.type_mappings()[ty]
 
     def arg_ty_from_signature(self, src: ASTSource) -> str:

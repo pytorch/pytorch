@@ -919,11 +919,31 @@ class TritonTemplateKernel(TritonKernel):
         else:
             self.triton_meta.update(triton_meta)
 
+        # Upgrade signature for host-side TMA: pointer args that the launcher
+        # will replace with TensorDescriptors need tensordesc<> types so Triton
+        # compiles the kernel with the correct arg types.
+        if self.host_tma_descriptor_args:
+            from .codegen.triton_utils import _type_of
+
+            sig = self.triton_meta["signature"]
+            for argname, arg in zip(argdefs, signature):
+                if hasattr(arg, "name") and arg.name in self.host_tma_descriptor_args:
+                    info = self.host_tma_descriptor_args[arg.name]
+                    block_shape = info["block_shape"] if isinstance(info, dict) else info
+                    dtype = V.graph.get_dtype(arg.buffer)
+                    inner = _type_of(dtype)[1:]  # strip "*": *bf16 -> bf16
+                    sig[argname.name] = f"tensordesc<{inner}{list(block_shape)}>"
+
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }
+        if self.host_tma_descriptor_args:
+            inductor_meta["host_tma_descriptor_args"] = {
+                inner: info
+                for inner, info in self.host_tma_descriptor_args.items()
+            }
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
@@ -1086,6 +1106,51 @@ class TritonTemplateKernel(TritonKernel):
         if isinstance(index, int):
             return texpr(self.rename_indexing(val[index]))
         return ", ".join([texpr(self.rename_indexing(i)) for i in val])
+
+    def tma_descriptor(
+        self,
+        desc_name: str,
+        input_name: str | None,
+        block_shape: list[int],
+        dim_order: list[int] | None = None,
+    ) -> str:
+        """
+        Hook called from template code to declare a TMA descriptor.
+
+        When HOST_SIDE_TMA is True: registers the input's pointer arg in
+        host_tma_descriptor_args so the launcher replaces it with a
+        TensorDescriptor. Emits an alias so the template can use desc_name.
+
+        When HOST_SIDE_TMA is False: emits device-side descriptor creation
+        using tl.make_tensor_descriptor().
+
+        dim_order: permutation of dimensions for TMA layout. e.g. [1, 0]
+            transposes a 2D tensor so the contiguous dim is last. If None,
+            uses natural order [0, 1, ...].
+        """
+        if input_name is not None:
+            node = self.named_input_nodes[input_name]
+        else:
+            node = self.output_node
+
+        size = node.get_size()
+        ndim = len(size)
+        if dim_order is None:
+            dim_order = list(range(ndim))
+
+        if self.meta.get("HOST_SIDE_TMA", False):
+            arg_name = self.args.input_buffers.get(node.get_name(), input_name)
+            self.host_tma_descriptor_args[arg_name] = {
+                "block_shape": [int(b) for b in block_shape],
+                "dim_order": dim_order,
+            }
+            return f"{desc_name} = {input_name}"
+
+        base_name = input_name if input_name is not None else "output"
+        stride_exprs = ", ".join(self.stride(input_name, d) for d in dim_order)
+        size_exprs = ", ".join(self.size(input_name, d) for d in dim_order)
+        block_str = ", ".join(str(b) for b in block_shape)
+        return f"{desc_name} = tl.make_tensor_descriptor(base={base_name}, shape=[{size_exprs}], strides=[{stride_exprs}], block_shape=[{block_str}])"
 
     def _get_subgraph(self, subgraph_number: int):
         if not isinstance(subgraph_number, int):
@@ -1745,6 +1810,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.modification,
                 self.gen_argdefs,
                 self.gen_defines,
+                self.tma_descriptor,
                 *self.extra_template_env_fns,
             ]
         }
@@ -3815,7 +3881,7 @@ def _classify_kernel_operation(
                     "grouped_mm",
                     "scaled_grouped_mm",
                     "mm_plus_mm",
-                    "blackwell_ws_persistent_device_tma",
+                    "blackwell_ws_persistent_tma",
                     "scaled_mm_device_tma_main_loop_scaling",
                 ):
                     return "mm"

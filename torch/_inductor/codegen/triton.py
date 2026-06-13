@@ -2848,16 +2848,18 @@ class TMACompatibilityChecker:
     ) -> bool:
         if self.force:
             return True
+        use_tma = config.triton.use_tensor_descriptor or config.triton.enable_host_side_tma
+        assume_aligned = config.assume_aligned_inputs or config.triton.enable_host_side_tma
         if not (
             (
                 (
                     V.graph.get_current_device_or_throw().type == "cuda"
                     and torch.cuda.get_device_capability()[0] >= 9
-                    and config.assume_aligned_inputs
+                    and assume_aligned
                 )
                 or V.graph.get_current_device_or_throw().type == "xpu"
             )
-            and config.triton.use_tensor_descriptor
+            and use_tma
             and has_triton_stable_tma_api()
             # For CUDA The base ptr needs to be aligned
         ):
@@ -3181,6 +3183,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             collections.defaultdict(dict)
         )
         self.tma_min_block_sizes = dict[str, int]()
+        # Maps inner kernel-arg name (e.g. "in_ptr0") to the
+        # TensorDescriptorOptions for host-side TMA descriptor creation.
+        # The per-config launcher calls TensorDescriptor.from_tensor()
+        # before kernel launch instead of every CTA calling
+        # tl.make_tensor_descriptor() (fixes issue #185819).
+        self.host_tma_descriptor_args: dict[str, TensorDescriptorOptions] = {}
+        # Buffers that have any non-TMA access (pointer arithmetic, non-zero
+        # offset) and cannot be replaced with host-side TMA descriptors.
+        self._host_tma_ineligible: OrderedSet[str] = OrderedSet()
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._pdl_load_index = 0
@@ -3263,6 +3274,118 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return False
 
         return any(stride == 1 for stride in stride_vars)
+
+    @staticmethod
+    def _is_host_tma_eligible(
+        indexing: TensorDescriptorOptions,
+        dtype: torch.dtype | None = None,
+    ) -> bool:
+        """Check if an access pattern is eligible for host-side TMA.
+
+        Rejects:
+        - Complex block shape expressions (floor division, etc.)
+        - Sub-byte dtypes (i1/bool) that TMA can't handle
+        """
+        if dtype is not None and dtype == torch.bool:
+            return False
+        for dim in indexing.block_shape:
+            if isinstance(dim, (int, sympy.Integer)):
+                continue
+            if isinstance(dim, sympy.Symbol):
+                continue
+            return False
+        return True
+
+    def _prescan_host_tma_eligibility(self) -> None:
+        """Pre-scan all buffer reads to identify those with non-block-ptr access.
+
+        Populates _host_tma_ineligible_buffers (buffer names) with buffers
+        that have any read which can't be expressed as a block pointer.
+        During codegen, load() maps these names to var names and adds them
+        to _host_tma_ineligible.
+        """
+        self._host_tma_ineligible_buffers = set()
+        if not (config.triton.enable_host_side_tma or config.triton.use_tensor_descriptor):
+            return
+        if not hasattr(self, "features") or not hasattr(self.features, "node_schedule"):
+            return
+
+        from .simd_kernel_features import NodeScheduleMarker
+
+        range_tree_symbols = OrderedSet(
+            tree.symbol() for tree in self.range_trees
+        )
+        if not range_tree_symbols:
+            return
+
+        from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+
+        buffer_read_indices: dict[str, list[tuple[sympy.Expr, tuple[sympy.Symbol, ...]]]] = (
+            collections.defaultdict(list)
+        )
+        for node in NodeScheduleMarker.only_nodes(self.features.node_schedule):
+            for dep in node.read_writes.reads:
+                if not hasattr(dep, "var_names"):
+                    if hasattr(dep, "name"):
+                        self._host_tma_ineligible_buffers.add(dep.name)
+                    continue
+                buffer_read_indices[dep.name].append((dep.index, dep.var_names))
+
+        for buf_name, reads in buffer_read_indices.items():
+            if buf_name in self._host_tma_ineligible_buffers:
+                continue
+
+            for index, var_names in reads:
+                dep_vars = set(var_names)
+
+                if any(symbol_is_type(s, SymT.TMP) for s in index.free_symbols):
+                    self._host_tma_ineligible_buffers.add(buf_name)
+                    break
+
+                for expr_node in sympy.preorder_traversal(index):
+                    if isinstance(expr_node, (FloorDiv, ModularIndexing)):
+                        if expr_node.free_symbols & dep_vars:
+                            self._host_tma_ineligible_buffers.add(buf_name)
+                            break
+                else:
+                    continue
+                break
+
+            if buf_name in self._host_tma_ineligible_buffers:
+                continue
+
+            # Multiple reads from the same buffer may have different access
+            # patterns (different strides, offsets). Since we can't verify
+            # compatibility until codegen runs, conservatively mark buffers
+            # with >1 read as ineligible.
+            if len(reads) > 1:
+                self._host_tma_ineligible_buffers.add(buf_name)
+
+    def _check_buffer_alignment(self, name: str, var: str, dtype: torch.dtype) -> bool:
+        """Check if a buffer has a misaligned layout offset that prevents TMA use.
+
+        Returns True if the buffer is misaligned (TMA should be skipped).
+        """
+        if not (config.triton.use_tensor_descriptor or config.triton.enable_host_side_tma):
+            return False
+        try:
+            buf = V.graph.try_get_buffer(name)
+            if buf is None and hasattr(V.graph, "scheduler") and V.graph.scheduler:
+                real_name = V.graph.scheduler.mutation_real_name.get(name, name)
+                if real_name != name:
+                    buf = V.graph.try_get_buffer(real_name)
+            if buf is not None:
+                layout = buf.get_layout()
+                layout_offset = getattr(layout, "offset", 0)
+                if layout_offset != 0:
+                    offset_bytes = int(layout_offset) * dtype.itemsize
+                    if offset_bytes % 16 != 0:
+                        self._host_tma_ineligible.add(var)
+                        self.host_tma_descriptor_args.pop(var, None)
+                        return True
+        except (TypeError, ValueError):
+            pass
+        return False
 
     @property
     def has_store_with_contiguous_rdim(self) -> bool:
@@ -3914,6 +4037,41 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if other != ", other=0.0":
                     raise AssertionError(f"expected ', other=0.0', got {other!r}")
                 other = ""
+
+            # ── Host-side TMA fast path (issue #185819) ─────────────────
+            # When the stable Triton TMA API is available and this buffer
+            # has no constant offset, skip kernel-side descriptor creation.
+            # The kernel receives a pre-built TensorDescriptor from the
+            # host launcher, eliminating per-CTA construction overhead that
+            # causes a 1.4-1.6x slowdown for simple pointwise ops.
+            #
+            # Template-forced paths (can_lift=True) manage their own
+            # host-side descriptors via ir.TMADescriptor; skip them.
+            use_tma = config.triton.use_tensor_descriptor or config.triton.enable_host_side_tma
+            if (
+                has_triton_stable_tma_api()
+                and use_tma
+                and not indexing.can_lift
+                and indexing.constant_offset == 0
+                and var not in self._host_tma_ineligible
+                and self._is_host_tma_eligible(indexing, V.graph.get_dtype(name))
+            ):
+                if var not in self.host_tma_descriptor_args:
+                    self.host_tma_descriptor_args[var] = indexing
+                return var, other  # arg IS the pre-created descriptor
+            elif (
+                has_triton_stable_tma_api()
+                and use_tma
+                and not indexing.can_lift
+                and indexing.constant_offset != 0
+            ):
+                # Non-zero offset access — this buffer can't be host-side TMA
+                self._host_tma_ineligible.add(var)
+                if var in self.host_tma_descriptor_args:
+                    del self.host_tma_descriptor_args[var]
+            # ── end host-side TMA fast path ──────────────────────────────
+
+
         else:
             if not check:
                 # workaround https://github.com/triton-lang/triton/issues/2813
@@ -4219,16 +4377,32 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         original_index = index
         dtype = V.graph.get_dtype(name)
         uses_uint8_storage = use_uint8_triton_storage_for_cuda_float8_e4m3fn(dtype, var)
-        indexing = self.indexing(
-            index,
-            block_ptr=True,
-            tma_compatibility_checker=self.tma_compatibility_checker_cls(
+
+        # Apply pre-scan results: if the buffer was identified as having
+        # non-block-ptr reads, mark the var as ineligible for host-side TMA.
+        if not hasattr(self, "_host_tma_ineligible_buffers"):
+            self._prescan_host_tma_eligibility()
+        prescan_ineligible = name in self._host_tma_ineligible_buffers
+        if prescan_ineligible:
+            self._host_tma_ineligible.add(var)
+
+        buffer_misaligned = self._check_buffer_alignment(name, var, dtype)
+
+        skip_tma = buffer_misaligned or prescan_ineligible
+        tma_checker = (
+            None if skip_tma
+            else self.tma_compatibility_checker_cls(
                 self,
                 dtype,
                 for_store=False,
                 force=getattr(self, "tma_load_for_template_epilogue", False),
                 buffer_name=name,
-            ),
+            )
+        )
+        indexing = self.indexing(
+            index,
+            block_ptr=True,
+            tma_compatibility_checker=tma_checker,
         )
 
         if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
@@ -4338,10 +4512,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     for_store=False,
                 )
             elif is_sympy_integer_like(original_index):
+                self._host_tma_ineligible.add(var)
+                self.host_tma_descriptor_args.pop(var, None)
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
                 shape = ()
             else:
+                self._host_tma_ineligible.add(var)
+                self.host_tma_descriptor_args.pop(var, None)
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
 
                 # The block shape of tl.load depends on the indexing expression.
@@ -4424,8 +4602,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         original_index = index
         dtype = V.graph.get_dtype(name)
 
+        buffer_misaligned = self._check_buffer_alignment(name, var, dtype)
+
         tma_compatibility_checker = None
-        if mode is None or mode == "tma":
+        if not buffer_misaligned and (mode is None or mode == "tma"):
             force = mode == "tma" or getattr(self, "tma_store", False)
             tma_compatibility_checker = self.tma_compatibility_checker_cls(
                 self,
@@ -4441,6 +4621,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             tma_compatibility_checker=tma_compatibility_checker,
             mask_constant_index=mode == "atomic_add",
         )
+
+        if (
+            isinstance(indexing, TensorDescriptorOptions)
+            and config.triton.enable_host_side_tma
+            and not config.triton.use_tensor_descriptor
+            and not self._is_host_tma_eligible(indexing, dtype)
+        ):
+            indexing = self.indexing(
+                index,
+                dense_indexing=True,
+                block_ptr=mode is None,
+                tma_compatibility_checker=None,
+                mask_constant_index=mode == "atomic_add",
+            )
 
         if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
             indexing.index
@@ -4482,6 +4676,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 ):
                     value_shape = ", ".join(map(str, value.shape))
                     indexing_str += f".broadcast_to({value_shape})"
+            self._host_tma_ineligible.add(var)
+            self.host_tma_descriptor_args.pop(var, None)
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
             self.atomic_add_found = True
@@ -6403,6 +6599,56 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             flops = self.estimate_flops()
             if flops is not None:
                 out["kernel_flop"] = flops
+        if self.host_tma_descriptor_args:
+            # Block shapes contain sympy expressions (XBLOCK, R0_BLOCK, etc).
+            # We need to distinguish autotuned symbols (kernel function args
+            # whose values vary per-config) from fixed symbols (defined in
+            # the kernel body with concrete values).
+            _, _, signature, _ = self.args.python_argdefs()
+            sig_arg_names = OrderedSet(
+                arg.name for arg in signature if hasattr(arg, "name")
+            )
+            fixed_blocks: dict[str, int] = {}
+            if self.persistent_reduction:
+                for rt in self.range_trees:
+                    if rt.is_reduction:
+                        block_name = f"{rt.prefix.upper()}BLOCK"
+                        if block_name not in sig_arg_names:
+                            try:
+                                val = self._get_persistent_RBLOCK(rt.numel)
+                                if self.is_native_matmul:
+                                    val = max(val, 16)
+                                fixed_blocks[block_name] = val
+                            except (TypeError, ValueError):
+                                pass
+
+            def _resolve_block_dim(s):
+                s_str = str(s)
+                if s_str in sig_arg_names:
+                    return s_str
+                if s_str in fixed_blocks:
+                    return fixed_blocks[s_str]
+                try:
+                    return int(s)
+                except (TypeError, ValueError):
+                    return s_str
+
+            resolved = {}
+            for inner, opts in self.host_tma_descriptor_args.items():
+                if isinstance(opts, dict):
+                    resolved[inner] = opts
+                    continue
+                dims = [_resolve_block_dim(s) for s in opts.block_shape]
+                if any(isinstance(d, int) and d <= 0 for d in dims):
+                    continue
+                shape_dims = [_resolve_block_dim(s) for s in opts.shape]
+                stride_dims = [_resolve_block_dim(s) for s in opts.strides]
+                resolved[inner] = {
+                    "block_shape": dims,
+                    "shape": shape_dims,
+                    "strides": stride_dims,
+                }
+            out["host_tma_descriptor_args"] = resolved
         return out
 
     @functools.cached_property
@@ -6496,6 +6742,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     signature[i] = SizeArg(
                         arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
                     )
+
+        # NOTE: host-side TMA signature upgrade (TensorArg -> tensordesc<>)
+        # is deferred to _precompile_config() where concrete block sizes are
+        # available. The triton_meta signature keeps pointer types here.
 
         mutated_args: OrderedSet[str] = OrderedSet()
         for mutation in self.mutations:
@@ -6614,7 +6864,35 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.inductor_meta = inductor_meta
 
         self.codegen_prologue(self.body)
+        self._prescan_host_tma_eligibility()
         self.codegen_body()
+
+        # After codegen_body, host_tma_descriptor_args may have been pruned
+        # (buffers with mixed TMA/pointer accesses are removed). Update
+        # inductor_meta with the final set.
+        if self.host_tma_descriptor_args:
+            self.inductor_meta["host_tma_descriptor_args"] = (
+                self.inductor_meta.get("host_tma_descriptor_args", {})
+            )
+            # Re-filter: only keep buffers still in host_tma_descriptor_args
+            kept = {
+                k: v
+                for k, v in self.inductor_meta["host_tma_descriptor_args"].items()
+                if k in self.host_tma_descriptor_args
+            }
+            self.inductor_meta["host_tma_descriptor_args"] = kept
+        elif "host_tma_descriptor_args" in self.inductor_meta:
+            del self.inductor_meta["host_tma_descriptor_args"]
+
+        # If no buffers use host-side TMA and device-side TMA is off,
+        # clear tma_min_block_sizes to avoid overly aggressive config filtering.
+        if (
+            config.triton.enable_host_side_tma
+            and not config.triton.use_tensor_descriptor
+            and not self.inductor_meta.get("host_tma_descriptor_args")
+        ):
+            self.inductor_meta.pop("tma_min_block_sizes", None)
+
         self._filter_pdl(self.body)
 
         # Compute configs after codegen_body() so we know if the kernel
@@ -6786,9 +7064,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         val = max(val, 16)
 
                 code.writeline(f"{tree.prefix.upper()}BLOCK: tl.constexpr = {val}")
+                # Store resolved block size for host-side TMA descriptor args
+                if not hasattr(self, "_resolved_block_sizes"):
+                    self._resolved_block_sizes = {}
+                self._resolved_block_sizes[f"{tree.prefix.upper()}BLOCK"] = val
 
             if tree.prefix == "x" and self.no_x_dim:
                 code.writeline("XBLOCK: tl.constexpr = 1")
+                if not hasattr(self, "_resolved_block_sizes"):
+                    self._resolved_block_sizes = {}
+                self._resolved_block_sizes["XBLOCK"] = 1
 
     def _get_grid_type(self) -> type[triton_heuristics.GridExpr]:
         n = sum([int(not tree.is_reduction) for tree in self.range_trees])
