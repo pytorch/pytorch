@@ -13296,8 +13296,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: sigmoid_backward_out
-    MPS: sigmoid_backward_out_mps
+    CPU, CUDA, MPS, XPU: sigmoid_backward_out
   tags: pointwise
 
 - func: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
