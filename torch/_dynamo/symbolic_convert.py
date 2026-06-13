@@ -1258,6 +1258,16 @@ class ExceptionStack:
     def clear_current_exception(self) -> None:
         self._current_exception = None
 
+    def fetch_current_exception(self) -> ExceptionVals | None:
+        # PyErr_Fetch: atomically read and clear the error indicator.
+        saved = self._current_exception
+        self._current_exception = None
+        return saved
+
+    def restore_current_exception(self, saved: ExceptionVals | None) -> None:
+        # PyErr_Restore: set the error indicator to a previously fetched value.
+        self._current_exception = saved
+
     def set_current_exception(
         self, val: ExceptionVals, set_context: bool = True
     ) -> None:

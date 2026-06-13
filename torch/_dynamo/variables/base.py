@@ -693,15 +693,35 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
-        unimplemented(
-            gb_type="Unsupported hasattr call",
-            context=f"call_obj_hasattr {self} {name}",
-            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
-            hints=[
-                f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
+        """Dynamo's hasattr(): try getattro_impl, catch AttributeError.
+
+        Mirrors CPython's PyObject_HasAttr: call PyObject_GetAttr (full
+        attribute access including descriptors/__getattr__), suppress
+        AttributeError, return True/False.
+        """
+        from ..exc import ObservedAttributeError, Unsupported
+
+        saved_exc = tx.exn_vt_stack.fetch_current_exception()
+        try:
+            try:
+                self.getattro_impl(tx, name)
+                return variables.ConstantVariable.create(True)
+            except ObservedAttributeError:
+                return variables.ConstantVariable.create(False)
+            except (NotImplementedError, Unsupported):
+                pass
+
+            unimplemented(
+                gb_type="Unsupported hasattr call",
+                context=f"call_obj_hasattr {self} {name}",
+                explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
+                hints=[
+                    f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        finally:
+            tx.exn_vt_stack.restore_current_exception(saved_exc)
 
     def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """
