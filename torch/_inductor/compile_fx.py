@@ -112,7 +112,11 @@ from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
 from . import config, distributed_autotune, metrics
-from .autocast_utils import low_precision_autocast_enabled, LOW_PRECISION_FP_DTYPES
+from .autocast_utils import (
+    low_precision_autocast_enabled,
+    LOW_PRECISION_FP_DTYPES,
+    needs_low_precision_pointwise_barrier,
+)
 from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
 from .decomposition import select_decomp_table
@@ -1786,14 +1790,6 @@ class _InProcessFxCompile(FxCompile):
                             )
                         )
 
-                    if (
-                        cudagraphs
-                        and not V.graph.disable_cudagraphs_reason
-                        and graph.scheduler.count_kernel_nodes(graph.scheduler.nodes)
-                        == 0
-                    ):
-                        V.graph.disable_cudagraphs_reason = "no CUDA kernel invocations"
-
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
                     if (
@@ -3012,6 +3008,8 @@ def _mark_low_precision_pointwise_barriers(model: torch.nn.Module) -> bool:
 
     for graph_module in graph_modules:
         for node in graph_module.graph.nodes:
+            if not needs_low_precision_pointwise_barrier(node.target):
+                continue
             output_low_precision = _contains_low_precision_fp_tensor(
                 node.meta.get("val")
             )

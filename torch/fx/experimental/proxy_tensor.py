@@ -1094,6 +1094,11 @@ def _maybe_record_pointwise_barrier(
     if not isinstance(func, torch._ops.OpOverload):
         return
 
+    from torch._inductor.autocast_utils import needs_low_precision_pointwise_barrier
+
+    if not needs_low_precision_pointwise_barrier(func):
+        return
+
     last_node = next(iter(reversed(proxy_mode.tracer.graph.nodes)))
     t = last_node.meta.get("val")
     from torch._inductor.autocast_utils import LOW_PRECISION_FP_DTYPES
