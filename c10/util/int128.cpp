@@ -39,9 +39,8 @@
 namespace c10 {
 
 const uint128_pod kuint128max = {
-    .hi = uint64_t{0xFFFFFFFFFFFFFFFFu},
-    .lo = uint64_t{0xFFFFFFFFFFFFFFFFu},
-};
+    uint64_t{0xFFFFFFFFFFFFFFFFu},
+    uint64_t{0xFFFFFFFFFFFFFFFFu}};
 
 // Returns the 0-based position of the last set bit (i.e., most significant bit)
 // in the given uint64. The argument may not be 0.
@@ -168,7 +167,7 @@ std::ostream& operator<<(std::ostream& o, const uint128& b) {
     os << std::noshowbase << std::setfill('0') << std::setw(div_base_log);
   }
   os << low.lo_;
-  std::string rep = std::move(os).str();
+  std::string rep = os.str();
 
   // Add the requisite padding.
   std::streamsize width = o.width(0);

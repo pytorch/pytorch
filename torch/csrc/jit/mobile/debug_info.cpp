@@ -105,7 +105,7 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
   std::ostringstream ss;
   ss << "Module hierarchy:" << module_info << '\n';
   format_stack_trace(ss, stack_entries);
-  return {std::move(ss).str(), std::move(module_info)};
+  return {ss.str(), std::move(module_info)};
 }
 
 } // namespace

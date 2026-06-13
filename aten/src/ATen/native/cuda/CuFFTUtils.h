@@ -59,7 +59,7 @@ static inline std::string _cudaGetErrorEnum(cufftResult error)
     default:
       std::ostringstream ss;
       ss << "unknown error " << error;
-      return std::move(ss).str();
+      return ss.str();
   }
 }
 
@@ -68,7 +68,7 @@ static inline void CUFFT_CHECK(cufftResult error)
   if (error != CUFFT_SUCCESS) {
     std::ostringstream ss;
     ss << "cuFFT error: " << _cudaGetErrorEnum(error);
-    TORCH_CHECK(false, std::move(ss).str());
+    TORCH_CHECK(false, ss.str());
   }
 }
 
