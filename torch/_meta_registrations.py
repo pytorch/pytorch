@@ -7440,9 +7440,14 @@ def _check_scaled_mm_sizes_v2(
             )
         elif is_mx(scale_recipe_a, scale_recipe_b):
             if torch.version.hip:
-                # Note(slayton58): These mirror ROCm in ScaledBlas.cpp, but I think they're wrong..
-                expected_scale_a_elems = ceil_div(self.shape[0], 32) * self.shape[1]
-                expected_scale_b_elems = ceil_div(self.shape[1], 32) * self.shape[0]
+                # Mirror ROCm ScaledBlas.cpp (_scaled_mxfp8_mxfp8 / _scaled_mxfp4_mxfp4).
+                k_multiplier = 2 if self.dtype == torch.float4_e2m1fn_x2 else 1
+                expected_scale_a_elems = (
+                    ceil_div(k_multiplier * self.shape[0], 32) * self.shape[1]
+                )
+                expected_scale_b_elems = (
+                    ceil_div(k_multiplier * mat2.shape[1], 32) * mat2.shape[0]
+                )
                 expected_swizzle = SwizzleType.NO_SWIZZLE
             else:
                 expected_scale_a_elems = round_up(self.shape[0], 128) * round_up(
