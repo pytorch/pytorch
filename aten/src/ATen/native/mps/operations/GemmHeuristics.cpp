@@ -75,22 +75,22 @@ GemvConfig pick_t_m3(c10::ScalarType dt, int64_t outlen, int64_t K) {
     return {32, 2};
   }
   if (outlen <= 1024) {
-    return t2d(32, 8);
+    // Few column-blocks: a moderate simdgroup count with 16-byte t2d loads
+    // keeps the small matrix streaming without over-splitting K.
+    return t2d(16, 8);
   }
-  if (outlen > 65536) {
-    return {1, 2};
-  }
-  if (outlen > 24576) {
+  if (outlen <= 3072) {
     return {4, 2};
   }
-  if (K == 4096 && outlen >= 8192) {
-    return {8, 2};
+  if (outlen <= 6144) {
+    // Enough column-blocks already fill the GPU, so splitting K across many
+    // simdgroups only adds cross-simdgroup reduction overhead; a 2-way split
+    // across K wins here.
+    return {2, 2};
   }
-  if (K == 3072 && outlen >= 12288) {
-    return {8, 4};
-  }
-  if (K == 3072 && outlen >= 8192) {
-    return {32, 4};
+  if (outlen > 65536) {
+    // Very wide outputs: maximally wide t2d loads amortize best.
+    return t2d(16, 2);
   }
   return {32, 2};
 }
