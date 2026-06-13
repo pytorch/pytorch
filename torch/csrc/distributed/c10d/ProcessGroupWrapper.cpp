@@ -662,6 +662,15 @@ ErrorType ProcessGroupWrapper::getError() {
   return backend_->getError();
 }
 
+std::optional<at::Device> ProcessGroupWrapper::getBoundDeviceId() const {
+  return backend_->getBoundDeviceId();
+}
+
+void ProcessGroupWrapper::setBoundDeviceId(std::optional<at::Device> device) {
+  Backend::setBoundDeviceId(device);
+  backend_->setBoundDeviceId(device);
+}
+
 void ProcessGroupWrapper::eagerConnectSingleDevice(at::Device device) {
   backend_->eagerConnectSingleDevice(device);
 }

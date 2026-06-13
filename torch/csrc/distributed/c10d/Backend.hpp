@@ -605,7 +605,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // See similar functions in ProcessGroup.hpp for context.
-  std::optional<at::Device> getBoundDeviceId() const {
+  virtual std::optional<at::Device> getBoundDeviceId() const {
     return bound_device_id_;
   }
 
@@ -616,7 +616,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // backends may perform
   }
 
-  void setBoundDeviceId(std::optional<at::Device> device) {
+  virtual void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }
