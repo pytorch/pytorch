@@ -3371,7 +3371,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
         variable: "TritonKernelVariable",
         grids: Any,
         combined_args: dict[str, Any],
-        backend_option_kwargs: dict[str, Any],
+        launch_kwargs: tuple[str, ...],
+        kernel_arg_names: set[str],
         tx: "InstructionTranslatorBase",
     ) -> ConstantVariable | None:
         from .dicts import ConstDictVariable
@@ -3413,24 +3414,23 @@ class DynamoTritonHOPifier(TritonHOPifier):
             for k, v in combined_args_vt.items()
             if not (isinstance(v, VariableTracker) and v.is_python_constant())
         }
-        backend_options = {
-            k: v.as_python_constant()
-            for k, v in backend_option_kwargs.items()
-            if isinstance(v, VariableTracker) and v.is_python_constant()
-        }
-        # backend_option_kwargs starts as the original Triton launch kwargs
-        # because direct Triton exposes that full kwargs dict to
-        # backend.parse_options(). This is an over-approximation: tensor and
-        # symbolic kwargs that bind real kernel parameters are not backend
-        # options, even though their names were included in the original
-        # launch kwargs. Only reject non-constant values that are not also
-        # legitimate non-constant kernel args.
-        missing_options = set(backend_option_kwargs) - set(backend_options)
-        missing_options -= {k.as_python_constant() for k in non_constant_args}
-        if missing_options:
+        # launch_kwargs records the names passed as kwargs at the Triton launch
+        # site. A non-kernel launch kwarg can only be a compiler option, so it
+        # must be a Python constant before entering the graph. Kernel launch
+        # kwargs may also be compiler options, but that target-specific check
+        # happens in Inductor after the triton backend is determined and
+        # backend.parse_options() is called.
+        non_const_options: list[str] = []
+        for k in launch_kwargs:
+            if k in kernel_arg_names:
+                continue
+            v = combined_args[k]
+            if not (isinstance(v, VariableTracker) and v.is_python_constant()):
+                non_const_options.append(k)
+        if non_const_options:
             self.raise_unsupported(
                 "Triton backend options must be Python constants: "
-                f"{sorted(missing_options)!r}."
+                f"{sorted(non_const_options)!r}."
             )
 
         for v in non_constant_args.values():
@@ -3452,7 +3452,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 "grid": grids,
                 "tma_descriptor_metadata": tma_descriptor_metadata,
                 "kwargs": meta.as_proxy(),
-                "backend_options": backend_options,
+                "launch_kwargs": launch_kwargs,
             },
         )
 

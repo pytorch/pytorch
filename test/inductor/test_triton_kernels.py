@@ -215,6 +215,30 @@ class KernelTests(torch._inductor.test_case.TestCase):
             return f"launchKernel({kernel_name}" in code
         return f"{kernel_name}.run(" in code
 
+    def _run_and_get_triton_compile_options(self, fn, *args):
+        # TestCase already gives each test a fresh compile cache. This patch
+        # only keeps compilation in-process while the triton.compile mock is
+        # installed, so we can assert on the actual options passed to Triton.
+        with (
+            inductor_config.patch("compile_threads", 1),
+            mock.patch.object(triton, "compile", wraps=triton.compile) as compile_mock,
+        ):
+            out, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        compile_options = [
+            dict(call.kwargs["options"])
+            for call in compile_mock.call_args_list
+            if "options" in call.kwargs
+        ]
+        self.assertTrue(compile_options)
+        return out, codes, compile_options
+
+    def _assert_triton_compile_option(self, options, name, expected_value):
+        self.assertTrue(
+            any(option.get(name) == expected_value for option in options),
+            f"expected triton.compile options to include "
+            f"{name}={expected_value!r}, got {options!r}",
+        )
+
     @requires_gpu
     def test_triton_kernel_with_kernel_param(self):
         @triton.jit
@@ -498,7 +522,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr'], backend_options = {});  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr'], launch_kwargs = ());  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0'];  getitem = None
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
@@ -2352,7 +2376,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256;  arg0_1 = None
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], backend_options = {});  floordiv = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], launch_kwargs = ());  floordiv = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2365,7 +2389,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([arg0_1], [256], 4)), 'in_desc_ptr1': ('experimental', ([arg0_1], [256], 4)), 'out_desc_ptr': ('experimental', ([arg0_1], [256], 4))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], backend_options = {});  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([arg0_1], [256], 4)), 'in_desc_ptr1': ('experimental', ([arg0_1], [256], 4)), 'out_desc_ptr': ('experimental', ([arg0_1], [256], 4))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], launch_kwargs = ());  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2376,7 +2400,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], backend_options = {});  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], launch_kwargs = ());  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2386,7 +2410,7 @@ def forward(self, arg0_1, arg1_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([301], [256], 4)), 'in_desc_ptr1': ('experimental', ([301], [256], 4)), 'out_desc_ptr': ('experimental', ([301], [256], 4))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], backend_options = {});  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([301], [256], 4)), 'in_desc_ptr1': ('experimental', ([301], [256], 4)), 'out_desc_ptr': ('experimental', ([301], [256], 4))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], launch_kwargs = ());  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2742,10 +2766,28 @@ def forward(self, arg0_1, arg1_1):
         f = _get_backend_options_fn(add_kernel, BLOCK_SIZE=128, enable_fp_fusion=False)
 
         x = torch.randn(4, device=GPU_TYPE)
-        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
+        out, _, options = self._run_and_get_triton_compile_options(f, x, x)
         self.assertEqual(out, x + x)
-        self.assertIn("'backend_options':", code)
-        self.assertIn("'enable_fp_fusion': False", code)
+        self._assert_triton_compile_option(options, "enable_fp_fusion", False)
+
+    @requires_gpu
+    def test_triton_kernel_invalid_backend_options_error(self):
+        # Dynamo leaves the determination of the target triton backend to
+        # inductor, so it will accept constant non-kernel arguments provided
+        # to a user defined triton kernels launch. Inductor will then validate
+        # backend compiler options once the target is known:
+        # every launch kwarg must be either a kernel parameter or a
+        # backend option accepted by backend.parse_options(), matching direct
+        # Triton's _pack_args check.
+        add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=False)
+        f = _get_backend_options_fn(
+            add_kernel, BLOCK_SIZE=128, not_a_backend_option=False
+        )
+
+        x = torch.randn(4, device=GPU_TYPE)
+        msg = "Triton launch kwargs must be kernel parameters or valid backend options"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(f, fullgraph=True)(x, x)
 
     @requires_gpu
     def test_triton_kernel_backend_options_also_used_as_kernel_kwarg(self):
@@ -2765,10 +2807,9 @@ def forward(self, arg0_1, arg1_1):
         eager_backend_out = torch.compile(f, backend="eager", fullgraph=True)(x, y)
         self.assertEqual(eager_backend_out, x * y)
 
-        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        out, _, options = self._run_and_get_triton_compile_options(f, x, y)
         self.assertEqual(out, x * y)
-        self.assertIn("'backend_options':", code)
-        self.assertIn("'enable_fp_fusion': False", code)
+        self._assert_triton_compile_option(options, "enable_fp_fusion", False)
 
     @requires_gpu
     def test_triton_kernel_backend_options_also_kernel_kwarg_with_autotune(self):
@@ -2786,11 +2827,10 @@ def forward(self, arg0_1, arg1_1):
         eager_backend_out = torch.compile(f, backend="eager", fullgraph=True)(x, y)
         self.assertEqual(eager_backend_out, x * y)
 
-        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        out, (code,), options = self._run_and_get_triton_compile_options(f, x, y)
         self.assertEqual(out, x * y)
         self.assertIn("@triton_heuristics.user_autotune", code)
-        self.assertIn("'backend_options':", code)
-        self.assertIn("'enable_fp_fusion': False", code)
+        self._assert_triton_compile_option(options, "enable_fp_fusion", False)
 
     @requires_gpu
     def test_triton_kernel_autotune_config_conflicts_with_launch_kwarg(self):
@@ -2827,11 +2867,10 @@ def forward(self, arg0_1, arg1_1):
         f = _get_backend_options_fn(add_kernel, enable_fp_fusion=False)
 
         x = torch.randn(4, device=GPU_TYPE)
-        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
+        out, (code,), options = self._run_and_get_triton_compile_options(f, x, x)
         self.assertEqual(out, x + x)
         self.assertIn("@triton_heuristics.user_autotune", code)
-        self.assertIn("'backend_options':", code)
-        self.assertIn("'enable_fp_fusion': False", code)
+        self._assert_triton_compile_option(options, "enable_fp_fusion", False)
 
     @requires_gpu
     def test_triton_kernel_special_kwargs_with_autotune_use_configs(self):
@@ -2850,7 +2889,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertNotIn("backend_options", code)
 
     @requires_gpu
-    def test_capture_triton_backend_options_exclude_kernel_args(self):
+    def test_capture_triton_backend_options_preserve_launch_kwarg_names(self):
         @triton.jit
         def add_kernel(
             in_ptr0,
@@ -2866,9 +2905,9 @@ def forward(self, arg0_1, arg1_1):
             n_elements = output.numel()
             grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
             capture_triton(add_kernel)[grid](
-                in_ptr0=x,
-                in_ptr1=y,
-                out_ptr=output,
+                x,
+                y,
+                output,
                 n_elements=n_elements,
                 BLOCK_SIZE=16,
                 enable_fp_fusion=False,
@@ -2887,17 +2926,19 @@ def forward(self, arg0_1, arg1_1):
             and node.target is triton_kernel_wrapper_mutation
         )
 
-        # capture_triton sees the original launch kwargs, including tensor and
-        # symbolic kernel args. Dynamic kernel args must remain only in kwargs,
-        # not backend_options, while concrete launch kwargs such as BLOCK_SIZE
-        # and enable_fp_fusion stay visible to backend.parse_options().
+        # capture_triton preserves the original launch kwarg names separately
+        # from the normalized argument values. Kernel args are present here too
+        # because names such as enable_fp_fusion may have direct Triton dual
+        # meaning as both a kernel parameter and a compiler option. Inductor
+        # later recovers values by name and filters them with the target
+        # backend before serializing triton_meta.
         self.assertEqual(
-            set(hop_node.kwargs["kwargs"]),
-            {"in_ptr0", "in_ptr1", "out_ptr", "n_elements", "BLOCK_SIZE"},
-        )
-        self.assertEqual(
-            hop_node.kwargs["backend_options"],
-            {"BLOCK_SIZE": 16, "enable_fp_fusion": False},
+            set(hop_node.kwargs["launch_kwargs"]),
+            {
+                "n_elements",
+                "BLOCK_SIZE",
+                "enable_fp_fusion",
+            },
         )
 
     @requires_gpu
@@ -2938,11 +2979,11 @@ def forward(self, arg0_1, arg1_1):
         # Direct Triton gives a kwarg such as enable_fp_fusion two meanings
         # when the kernel also has a parameter with that name: it binds the
         # tl.constexpr parameter and backend.parse_options() still sees it as
-        # a backend option. The tracing path should preserve that concrete
-        # kwarg instead of dropping it just because it is also a kernel arg.
+        # a backend option. The tracing path should preserve the launch-site
+        # name instead of dropping it just because it is also a kernel arg.
         self.assertEqual(
-            hop_node.kwargs["backend_options"],
-            {"BLOCK_SIZE": 16, "enable_fp_fusion": False},
+            hop_node.kwargs["launch_kwargs"],
+            ("BLOCK_SIZE", "enable_fp_fusion"),
         )
 
     @requires_gpu
@@ -2996,7 +3037,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertNotIn("BLOCK_SIZE", hop_node.kwargs["kwargs"])
         self.assertNotIn("BLOCK_SIZE", constant_args)
         self.assertEqual(hop_node.kwargs["grid"], [(1, 1, 1)])
-        self.assertEqual(hop_node.kwargs["backend_options"], {})
+        self.assertEqual(hop_node.kwargs["launch_kwargs"], ())
 
     @requires_gpu
     def test_capture_triton_dynamic_backend_options_error(self):
