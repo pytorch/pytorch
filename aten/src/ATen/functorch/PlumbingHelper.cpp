@@ -40,6 +40,9 @@ std::vector<Tensor> makeBatchedVector(std::vector<Tensor> tensors, std::optional
 }
 
 std::tuple<Tensor, std::optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level) {
+  if (!tensor.defined()) {
+    return std::make_tuple(tensor, std::nullopt);
+  }
   auto* batched = maybeGetBatchedImpl(tensor);
   if (!batched) {
     return std::make_tuple(tensor, std::nullopt);

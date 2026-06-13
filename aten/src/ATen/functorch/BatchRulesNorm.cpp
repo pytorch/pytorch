@@ -339,45 +339,66 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
   return std::make_tuple(std::move(result0), std::move(mean), std::move(rstd));
 }
 
+static inline at::Tensor group_norm_backward_tensor_reshape(
+    const at::Tensor& t, const std::optional<int64_t>& bdim, int64_t bdim_size) {
+  if (!t.defined()) {
+    return t;
+  }
+
+  auto ret{moveBatchDimToFront(t, bdim)};
+  ret = ensure_has_bdim(ret, bdim.has_value(), bdim_size);
+  return reshape_dim_into(0, 0, ret);
+}
+
 static at::Tensor group_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, std::optional<int64_t> grad_out_bdim,
     const at::Tensor & input, std::optional<int64_t> input_bdim,
     const at::Tensor & mean, std::optional<int64_t> mean_bdim,
     const at::Tensor & rstd, std::optional<int64_t> rstd_bdim,
-    int64_t N, int64_t C, int64_t HxW, int64_t group) {
-  auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
-  auto input_ = moveBatchDimToFront(input, input_bdim);
-  auto mean_ = moveBatchDimToFront(mean, mean_bdim);
-  auto rstd_ = moveBatchDimToFront(rstd, rstd_bdim);
+    int64_t N, int64_t C, int64_t HxW, int64_t group,
+    const at::Tensor & grad_mean, std::optional<int64_t> grad_mean_bdim,
+    const at::Tensor & grad_rstd, std::optional<int64_t> grad_rstd_bdim) {
+  const auto bdim_size = get_bdim_size6(
+    grad_out, grad_out_bdim,
+    input, input_bdim,
+    mean, mean_bdim,
+    rstd, rstd_bdim,
+    grad_mean, grad_mean_bdim,
+    grad_rstd, grad_rstd_bdim);
 
-  const auto bdim_size = get_bdim_size2(grad_out, grad_out_bdim, input, input_bdim);
-  grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), bdim_size);
-  input_ = ensure_has_bdim(input_, input_bdim.has_value(), bdim_size);
-  mean_ = ensure_has_bdim(mean_, mean_bdim.has_value(), bdim_size);
-  rstd_ = ensure_has_bdim(rstd_, rstd_bdim.has_value(), bdim_size);
-
-  grad_out_ = reshape_dim_into(0, 0, grad_out_); // [B0 * N, C, *]
-  input_ = reshape_dim_into(0, 0, input_);       // [B0 * N, C, *]
-  mean_ = reshape_dim_into(0, 0, mean_);         // [B0 * N, G]
-  rstd_ = reshape_dim_into(0, 0, rstd_);         // [B0 * N, G]
+  auto grad_out_{group_norm_backward_tensor_reshape(grad_out, grad_out_bdim, bdim_size)};
+  auto input_{group_norm_backward_tensor_reshape(input, input_bdim, bdim_size)};
+  auto mean_{group_norm_backward_tensor_reshape(mean, mean_bdim, bdim_size)};
+  auto rstd_{group_norm_backward_tensor_reshape(rstd, rstd_bdim, bdim_size)};
+  auto grad_mean_{group_norm_backward_tensor_reshape(grad_mean, grad_mean_bdim, bdim_size)};
+  auto grad_rstd_{group_norm_backward_tensor_reshape(grad_rstd, grad_rstd_bdim, bdim_size)};
 
   auto result0 = std::get<0>(native_group_norm_backward(
-      grad_out_.contiguous(),
-      input_.contiguous(),
-      mean_.contiguous(),
-      rstd_.contiguous(),
-      std::nullopt, N * bdim_size, C, HxW, group, {true, false, false}));
+      grad_out_,
+      input_,
+      mean_,
+      rstd_,
+      std::nullopt, N * bdim_size, C, HxW, group, {true, false, false},
+      grad_mean_,
+      grad_rstd_));
   return reshape_dim_outof(0, bdim_size, result0);
 }
 
-static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
-  const Tensor & grad_out, const Tensor & input, const Tensor & mean,
+static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_multiple_grads_plumbing(
+  const std::optional<Tensor> & grad_out_opt, const Tensor & input, const Tensor & mean,
   const Tensor & rstd, const std::optional<Tensor> & weight_opt,
-  int64_t N, int64_t C, int64_t HxW, int64_t group, std::array<bool,3> output_mask
+  int64_t N, int64_t C, int64_t HxW, int64_t group, std::array<bool,3> output_mask,
+  const std::optional<Tensor> & grad_mean_opt, const std::optional<Tensor> & grad_rstd_opt
 ) {
   // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> grad_out_maybe_owned = at::borrow_from_optional_tensor(grad_out_opt);
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> grad_mean_maybe_owned = at::borrow_from_optional_tensor(grad_mean_opt);
+  c10::MaybeOwned<Tensor> grad_rstd_maybe_owned = at::borrow_from_optional_tensor(grad_rstd_opt);
+  const Tensor& grad_out = *grad_out_maybe_owned;
   const Tensor& weight = *weight_maybe_owned;
+  const Tensor& grad_mean = *grad_mean_maybe_owned;
+  const Tensor& grad_rstd = *grad_rstd_maybe_owned;
 
   // plumbing
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -385,9 +406,9 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
 
-  if (!areAnyBatchedAtLevel({grad_out, input, mean, rstd, weight_opt}, cur_level)) {
+  if (!areAnyBatchedAtLevel({grad_out_opt, input, mean, rstd, weight_opt, grad_mean_opt, grad_rstd_opt}, cur_level)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return at::native_group_norm_backward(grad_out, input, mean, rstd, weight_opt, N, C, HxW, group, output_mask);
+    return at::native_group_norm_backward(grad_out_opt, input, mean, rstd, weight_opt, N, C, HxW, group, output_mask, grad_mean_opt, grad_rstd_opt);
   }
 
   auto [input_value, input_bdim] = unwrapTensorAtLevel(input, cur_level);
@@ -404,23 +425,35 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
   Tensor grad_weight;
   Tensor grad_bias;
 
-  TORCH_INTERNAL_ASSERT(grad_out.dim() > 1);  // group_norm can't operate on 1D tensors so the output will be at least 2D
+  // group_norm can't operate on 1D tensors so the output will be at least 2D
+  TORCH_INTERNAL_ASSERT(!grad_out.defined() || grad_out.dim() > 1);
+  auto param_options{(weight.defined() ? weight.options() : input.options()).memory_format(MemoryFormat::Contiguous)};
   if (output_mask[2]) {
-    grad_bias = grad_out.transpose(0, 1).sum(range(1, grad_out.dim()));
+    if (grad_out.defined()) {
+      grad_bias = grad_out.transpose(0, 1).sum(range(1, grad_out.dim()));
+    } else {
+      grad_bias = at::zeros({C}, param_options);
+    }
   }
 
-  if (output_mask[1] && weight.defined()) {
-    const auto reshaped_input = reshape_dim_outof(1, group, input);
-    const auto normalized_input = (reshaped_input - padRight(mean, std::nullopt, reshaped_input.dim())) * padRight(rstd, std::nullopt, reshaped_input.dim());
-    const auto expanded_grad_weight = reshape_dim_into(1, 1, normalized_input) * grad_out;
-    grad_weight = expanded_grad_weight.transpose(0, 1).sum(range(1, expanded_grad_weight.dim()));
+  if (output_mask[1]) {
+    if (grad_out.defined()) {
+      const auto reshaped_input = reshape_dim_outof(1, group, input);
+      const auto normalized_input = (reshaped_input - padRight(mean, std::nullopt, reshaped_input.dim())) * padRight(rstd, std::nullopt, reshaped_input.dim());
+      const auto expanded_grad_weight = reshape_dim_into(1, 1, normalized_input) * grad_out;
+      grad_weight = expanded_grad_weight.transpose(0, 1).sum(range(1, expanded_grad_weight.dim()));
+    } else {
+      grad_weight = at::zeros({C}, param_options);
+    }
   }
 
   if (output_mask[0]) {
-    const auto grad_normalized_input = weight.defined() ?
+    auto grad_normalized_input = (weight.defined() && grad_out.defined()) ?
       grad_out * padRight(weight, std::nullopt, grad_out.dim() - 1) : grad_out;
     auto [grad_normalized_input_value, grad_normalized_input_bdim] =
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
+    auto [grad_mean_value, grad_mean_bdim] = unwrapTensorAtLevel(grad_mean, cur_level);
+    auto [grad_rstd_value, grad_rstd_bdim] = unwrapTensorAtLevel(grad_rstd, cur_level);
 
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     auto tensor = group_norm_backward_no_weight_bias_batch_rule(
@@ -428,11 +461,21 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
         input_value, input_bdim,
         mean_value, mean_bdim,
         rstd_value, rstd_bdim,
-        N, C, HxW, group
-    );
+        N, C, HxW, group,
+        grad_mean_value, grad_mean_bdim,
+        grad_rstd_value, grad_rstd_bdim);
     grad_input = makeBatched(std::move(tensor), 0, cur_level);
   }
   return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
+}
+
+static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
+  const Tensor & grad_out, const Tensor & input, const Tensor & mean,
+  const Tensor & rstd, const std::optional<Tensor> & weight_opt,
+  int64_t N, int64_t C, int64_t HxW, int64_t group, std::array<bool,3> output_mask
+) {
+  return native_group_norm_backward_multiple_grads_plumbing(
+    grad_out, input, mean, rstd, weight_opt, N, C, HxW, group, output_mask, std::nullopt, std::nullopt);
 }
 
 static bool has_same_shape(
@@ -873,6 +916,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("miopen_batch_norm_backward", MIOPEN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::miopen_batch_norm_backward_wrapper));
   m.impl("native_group_norm", native_group_norm_plumbing);
   m.impl("native_group_norm_backward", native_group_norm_backward_plumbing);
+  m.impl("native_group_norm_backward.multiple_grads", native_group_norm_backward_multiple_grads_plumbing);
   VMAP_SUPPORT(native_layer_norm, native_layer_norm_batch_rule);
   m.impl("native_layer_norm_backward", native_layer_norm_backward_plumbing);
 }
