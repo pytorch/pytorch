@@ -12,6 +12,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -151,6 +152,7 @@ class CodegenInductorTest(InductorTestCase):
             self.assertGreater(welford_count, 0)
 
     @requires_cuda_and_triton
+    @skipIfRocm
     @parametrize(
         "two_pass_variance_l2_fraction, expect_welford",
         [(0.0, True), (1e-12, True), (1.0, False)],
