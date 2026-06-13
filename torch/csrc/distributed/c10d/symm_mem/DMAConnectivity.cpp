@@ -8,7 +8,7 @@ std::string get_detector_key(
     const std::string& connection_type) {
   std::ostringstream oss;
   oss << device_type << '/' << connection_type;
-  return std::move(oss).str();
+  return oss.str();
 }
 
 class DetectorMap {

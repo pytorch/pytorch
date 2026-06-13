@@ -45,7 +45,7 @@ class TORCH_API TSComputation : public Computation {
   const std::string to_string() const override {
     std::ostringstream oss;
     oss << *graph_;
-    return std::move(oss).str();
+    return oss.str();
   }
 
   std::shared_ptr<torch::jit::Graph> graph() const {

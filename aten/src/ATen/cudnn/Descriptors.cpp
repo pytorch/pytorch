@@ -93,7 +93,7 @@ std::string cudnnTypeToString(cudnnDataType_t dtype) {
     default:
       std::ostringstream oss;
       oss << "(unknown data-type " << static_cast<int>(dtype) << ')';
-      return std::move(oss).str();
+      return oss.str();
   }
 }
 
@@ -168,7 +168,7 @@ std::string cudnnMemoryFormatToString(cudnnTensorFormat_t tformat) {
     default:
       std::ostringstream oss;
       oss << "(unknown cudnn tensor format " << static_cast<int>(tformat) << ')';
-      return std::move(oss).str();
+      return oss.str();
   }
 }
 

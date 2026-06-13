@@ -543,7 +543,7 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
             << params.attn_mask.value().sym_stride(-1)
             << " (GPU backends require attn_mask's last dimension to have stride 1 while the CPU does not).";
       }
-      TORCH_WARN(std::move(message).str());
+      TORCH_WARN(message.str());
     }
 
     return false;

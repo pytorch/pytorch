@@ -515,7 +515,7 @@ static std::string import_err_msg(
       << " (host: " << reqs[peer].hostname
       << ", device: " << reqs[peer].device_idx << ", NCCL_MNNVL_CLIQUE_ID: "
       << c10::utils::get_env("NCCL_MNNVL_CLIQUE_ID").value_or("unset") << ").";
-  return std::move(oss).str();
+  return oss.str();
 }
 
 void validate_rendezvous_requests(
@@ -572,7 +572,7 @@ static void validate_nvlink_fabric_support(
           << ", device: " << reqs[r].device_idx
           << ", clique_id: " << reqs[r].clique_id << ')';
     }
-    TORCH_CHECK(false, std::move(oss).str());
+    TORCH_CHECK(false, oss.str());
   }
 }
 
