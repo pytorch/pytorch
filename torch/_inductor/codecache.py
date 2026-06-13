@@ -1474,7 +1474,10 @@ class FxGraphHashDetails:
         # in the CompiledFxGraph, so it must be part of the cache key.
         # Note: the "trace" prefix is excluded from _cache_config_ignore_prefix,
         # so we add this explicitly.
-        self.provenance_tracking_level = config.trace.provenance_tracking_level
+        self.provenance_tracking_level = config.effective_provenance_tracking_level()
+        self.provenance_tracking_to_timeline = (
+            config.trace.provenance_tracking_to_timeline
+        )
 
         # Factory ops with dtype=None are lowered using the ambient default dtype,
         # so cached code compiled under one default dtype is not valid under another.
@@ -3525,7 +3528,7 @@ end
                 if config.aot_inductor.package:
                     generated_files.append(output_so)
 
-        if config.trace.provenance_tracking_level != 0:
+        if config.effective_provenance_tracking_level() != 0:
             kernel_info = torch._inductor.debug.create_kernel_information_json()
             kernel_info_json = os.path.join(
                 wrapper_path_operator.parent, "kernel_information.json"

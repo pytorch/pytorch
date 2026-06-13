@@ -120,9 +120,14 @@ const DeviceAndResource kineto_ids() {
 void addMetadata(
     activity_t* activity,
     const std::string& key,
-    const std::string& value) {
+    const std::string& value,
+    bool quote) {
 #ifdef USE_KINETO
-  activity->addMetadata(key, value);
+  if (quote) {
+    activity->addMetadataQuoted(key, value);
+  } else {
+    activity->addMetadata(key, value);
+  }
 #endif // USE_KINETO
 }
 
