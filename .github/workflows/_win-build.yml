@@ -51,6 +51,30 @@ on:
         default: "windows.4xlarge.nonephemeral"
         description: |
           Label of the runner this job should run on.
+      cuda-arch-list:
+        required: false
+        type: string
+        default: "8.6"
+        description: |
+          CUDA architectures to build for (e.g., "8.9" for 40xx, "12.0" for 50xx)
+      python-version:
+        required: false
+        type: string
+        default: "3.10"
+        description: |
+          The python version to be used. Will be 3.10 by default
+      runner-machine:
+        required: false
+        type: string
+        default: "pytorch"
+        description: |
+          The runner machine used for the build process.
+      aws-role-to-assume:
+        required: false
+        type: string
+        default: ""
+        description: |
+          The AWS role to assume for the workflow.
 
     outputs:
       test-matrix:
@@ -59,6 +83,12 @@ on:
       build-environment:
         value: ${{ jobs.build.outputs.build-environment }}
         description: Top-level label for what's being built/tested.
+      build-secure-hash:
+        value: ${{ jobs.build.outputs.build-secure-hash }}
+        description: Secure hash generated during build process.
+      build-artifact-name:
+        value: ${{ jobs.build.outputs.build-artifact-name }}
+        description: filename of the build wheel.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -68,10 +98,15 @@ jobs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner }}
+    permissions:
+      id-token: write
+      contents: read
     timeout-minutes: 240
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
+      build-secure-hash: ${{ steps.compute_hash.outputs.hash_val }}
+      build-artifact-name: ${{ steps.compute_hash.outputs.filename }}
     defaults:
       run:
         shell: bash
@@ -90,6 +125,7 @@ jobs:
           git config --global core.fsmonitor false
 
       - name: Setup SSH (Click me for login details)
+        if: ${{ inputs.runner-machine == 'pytorch' }}
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -110,9 +146,19 @@ jobs:
           no-sudo: true
 
       - name: Setup Windows
+        if: ${{ inputs.runner-machine == 'pytorch' }}
         uses: ./.github/actions/setup-win
         with:
           cuda-version: ${{ inputs.cuda-version }}
+
+      - name: configure aws credentials
+        if: inputs.runner-machine == 'nvidia'
+        id: aws_creds
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          aws-region: us-east-1
+          role-duration-seconds: 10800
 
       - name: Parse ref
         id: parse-ref
@@ -153,7 +199,7 @@ jobs:
           BUILD_WHEEL: 1
           MAX_JOBS: 8
           CUDA_VERSION: ${{ inputs.cuda-version }}
-          PYTHON_VERSION: "3.10"
+          PYTHON_VERSION: ${{ inputs.python-version }}
           SCCACHE_BUCKET: "ossci-compiler-cache"
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SCCACHE_REGION: us-east-1
@@ -165,13 +211,36 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
-          TORCH_CUDA_ARCH_LIST: "8.6"
+          TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           USE_XPU: ${{ inputs.use-xpu == true && '1' || '0' }}
           XPU_VERSION: "${{ inputs.xpu-version }}"
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           .ci/pytorch/win-build.sh
+
+      - name: Compute and Secure Hash
+        if: steps.build.outcome != 'skipped'
+        id: compute_hash
+        shell: bash
+        env:
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+        run: |
+          cd "$PYTORCH_FINAL_PACKAGE_DIR"
+
+          # Find the .whl file.
+          # Note: Bash uses forward slashes even on Windows, which is safer here.
+          FILENAME=$(ls *.whl | head -n 1)
+
+          # 1. Calculate SHA256 using Git Bash's built-in sha256sum
+          HASH_VALUE=$(sha256sum "$FILENAME" | awk '{print $1}')
+          echo "Raw Hash Value: $HASH_VALUE" | cat -v
+
+          # 2. Set as output for the next job
+          echo "hash_val=$HASH_VALUE" >> "$GITHUB_OUTPUT"
+          echo "filename=$FILENAME" >> "$GITHUB_OUTPUT"
+
+          echo "Hash calculated and secured."
 
       # Collect Windows torch libs and CUDA libs for cross-compilation
       - name: Collect Windows CUDA libs for cross-compilation
@@ -226,7 +295,7 @@ jobs:
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win
-        if: always()
+        if: ${{ inputs.runner-machine != 'nvidia' }}
         timeout-minutes: 120
         with:
           extra-delete-dir: /c/${{ github.run_id }}/build-results/
