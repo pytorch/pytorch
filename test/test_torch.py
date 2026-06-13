@@ -3073,7 +3073,6 @@ class TestTorchDeviceType(TestCase):
         expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=2)]
         self.assertEqual(actual, expected, exact_dtype=False)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @onlyNativeDeviceTypes
     def test_gradient_type_promotion(self, device):
         inputs = (
