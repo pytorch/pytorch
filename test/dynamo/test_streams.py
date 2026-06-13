@@ -421,12 +421,12 @@ class <lambda>(torch.nn.Module):
         # Annotation: {'stream': 2}
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
 
-        # Annotation: {'stream': 3}
-        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-
         # Annotation: {'stream': 2}
-        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, 2);  add = None
-        return (add_1, add_2)
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, 2);  add = None
+
+        # Annotation: {'stream': 3}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+        return (add_2, add_1)
 """,
         )
 
@@ -513,12 +513,12 @@ class <lambda>(torch.nn.Module):
         # Annotation: {'stream': 1}
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
 
-        # Annotation: {'stream': 3}
-        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-
         # Annotation: {'stream': 1}
-        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, 2);  add = None
-        return (add_1, add_2)
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, 2);  add = None
+
+        # Annotation: {'stream': 3}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+        return (add_2, add_1)
 """,
         )
 
@@ -616,15 +616,15 @@ class <lambda>(torch.nn.Module):
         # Annotation: {'stream': 3}
         add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg1_1, arg1_1)
 
-        # Annotation: {'stream': 3}
-        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, arg1_1);  arg1_1 = None
-
         # Annotation: {'stream': 1}
-        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2)
+
+        # Annotation: {'stream': 3}
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, arg1_1);  add_1 = arg1_1 = None
 
         # Annotation: {'stream': 1}
         copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
-        return (add_2, add_3)
+        return (add_3, add_2)
 """,
         )
 

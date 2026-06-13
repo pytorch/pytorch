@@ -313,9 +313,9 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_: "f32[2, 2]", L_x_: "f32[2, 2]"):
-        l_y_ = L_y_
+    def forward(self, L_x_: "f32[2, 2]", L_y_: "f32[2, 2]"):
         l_x_ = L_x_
+        l_y_ = L_y_
 
         _get_data_attr: "f32[2, 2]" = torch._C._autograd._get_data_attr(l_y_)
 
@@ -325,9 +325,9 @@ class GraphModule(torch.nn.Module):
 
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
 
-        _lower_version_count_by_1 = torch__dynamo_variables_builtin__lower_version_count_by_1(set_);  set_ = _lower_version_count_by_1 = None
-
         mul: "f32[2, 2]" = l_x_ * l_y_;  l_x_ = l_y_ = None
+
+        _lower_version_count_by_1 = torch__dynamo_variables_builtin__lower_version_count_by_1(set_);  set_ = _lower_version_count_by_1 = None
         return (mul,)
 """,
         )
