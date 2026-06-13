@@ -24,7 +24,7 @@ from torch.distributed.tensor._random import (
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -179,7 +179,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertTrue(random._rng_tracker.distribute_region_enabled)
 
         # allgather the local tensors
-        gathered_local_tensors = funcol.all_gather_tensor(
+        gathered_local_tensors = funcol.all_gather_single(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -211,7 +211,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertTrue(not random._rng_tracker.distribute_region_enabled)
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_tensor(
+        local_tensor = funcol.all_gather_single(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -254,7 +254,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_tensor(
+        weight_gather = funcol.all_gather_single(
             weight_local,
             gather_dim=0,
             group=WORLD,
@@ -315,7 +315,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_tensor(
+        weight_gather = funcol.all_gather_single(
             weight_local,
             gather_dim=0,
             group=WORLD,
@@ -478,7 +478,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         WORLD = torch.distributed.group.WORLD
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
-        tensor_gather = funcol.all_gather_tensor(
+        tensor_gather = funcol.all_gather_single(
             spmd_dtensor.to_local(),
             gather_dim=0,
             group=WORLD,
@@ -516,7 +516,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         dtensor = dropout(dtensor)
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_tensor(
+        local_tensor = funcol.all_gather_single(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -546,7 +546,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             torch.distributed.tensor.randn,
         ]:
             dtensor = fn(size, device_mesh=device_mesh, placements=[Shard(1)])
-            local_tensor = funcol.all_gather_tensor(
+            local_tensor = funcol.all_gather_single(
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
 
@@ -568,7 +568,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             # we should set manual seed to the same value on all SPMD ranks
             torch.manual_seed(0)
             dtensor = fn(size, device_mesh=device_mesh, placements=[Replicate()])
-            local_tensor = funcol.all_gather_tensor(
+            local_tensor = funcol.all_gather_single(
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
 
@@ -782,7 +782,7 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         """Assert all ranks produced identical results (for Replicate placement)."""
         for i in range(len(results)):
             local_result = results[i]
-            gathered = funcol.all_gather_tensor(
+            gathered = funcol.all_gather_single(
                 local_result, gather_dim=0, group=(device_mesh, 0)
             ).wait()
             local_size = local_result.shape[0]
@@ -835,7 +835,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             eager_results, eager_rng_states, inductor_results, inductor_rng_states
         )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179985")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_native_dropout(self):
@@ -847,7 +846,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179973")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_normal_(self):
@@ -859,7 +857,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179977")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_rand_like(self):
@@ -871,7 +868,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179963")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_randn_like(self):
@@ -883,7 +879,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179984")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_randint_like(self):
@@ -895,7 +890,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179964")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_uniform_(self):
@@ -907,7 +901,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179981")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_bernoulli(self):
@@ -929,7 +922,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
                 fn, device_mesh, create_input=create_input, placements=placements
             )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179987")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_bernoulli_float(self):
@@ -941,7 +933,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/185520")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_multiple_random_ops(self):
@@ -1005,7 +996,7 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_tensor(
+        weight_gather = funcol.all_gather_single(
             weight_local,
             gather_dim=0,
             group=WORLD,

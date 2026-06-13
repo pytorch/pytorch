@@ -109,7 +109,10 @@ from torch.testing._internal.optests import (
 )
 from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    TorchDispatchMode,
+)
 
 
 USE_TORCHVISION = False
@@ -225,7 +228,21 @@ def unpack_fp8_with_scale(packed):
 
 
 class AOTTestCase(TestCase):
-    pass
+    def assertTensorMetadataEqual(self, actual, expected):
+        self.assertEqual(tuple(actual.shape), tuple(expected.shape))
+        self.assertEqual(actual.stride(), expected.stride())
+        self.assertEqual(actual.storage_offset(), expected.storage_offset())
+
+        if is_traceable_wrapper_subclass(expected):
+            self.assertTrue(is_traceable_wrapper_subclass(actual))
+            expected_attrs, _ = expected.__tensor_flatten__()
+            actual_attrs, _ = actual.__tensor_flatten__()
+            self.assertEqual(actual_attrs, expected_attrs)
+            for attr in expected_attrs:
+                expected_inner = getattr(expected, attr)
+                actual_inner = getattr(actual, attr)
+                if isinstance(expected_inner, torch.Tensor):
+                    self.assertTensorMetadataEqual(actual_inner, expected_inner)
 
 
 class TestPythonKey(AOTTestCase):
@@ -638,6 +655,18 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 1, requires_grad=True)]
         self.verify_aot_autograd(f, inp, dynamic=True)
         inp = [torch.randn(3, 1, requires_grad=False)]
+        self.verify_aot_autograd(f, inp, dynamic=True)
+
+    def test_to_dense_strided_tensor(self):
+        def f(a):
+            return (
+                a.to_dense(),
+                a.to_dense(masked_grad=True),
+                a.to_dense(dtype=torch.float32),
+                a.to_dense(dtype=torch.float64),
+            )
+
+        inp = [torch.randn(3, 4)]
         self.verify_aot_autograd(f, inp, dynamic=True)
 
     def test_complex_linear(self):
@@ -2459,17 +2488,80 @@ def forward(self, primals_1):
             x = torch.ones(1, 2, 4, requires_grad=req_grad).clone()
             return [(x,), (x,)]
 
-        # See https://github.com/pytorch/pytorch/issues/114975
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Metadata mutations are currently not allowed on tensor subclasses",
-        ):
-            self.verify_aot_autograd(
-                f,
-                partial(inp_callable, req_grad=req_grad),
-                test_mutation=True,
-                make_inputs_subclasses=True,
-            )
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable, req_grad=req_grad),
+            test_mutation=True,
+            make_inputs_subclasses=True,
+        )
+
+    def test_subclass_metadata_mutation_aot_function_metadata(self):
+        def f(a):
+            a.transpose_(1, 0)
+            tmp = a.mul(2)
+            return tmp.transpose(1, 0)
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            decompositions=None,
+            keep_inference_input_mutations=True,
+            dynamic=False,
+        )
+
+        with TwoTensorMode():
+            ref_inp = torch.ones(1, 2, 4).clone()
+        with TwoTensorMode():
+            test_inp = torch.ones(1, 2, 4).clone()
+
+        ref_out = f(ref_inp)
+        test_out = compiled_f(test_inp)
+
+        self.assertEqual(test_inp, ref_inp)
+        self.assertEqual(test_out, ref_out)
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+        self.assertTensorMetadataEqual(test_out, ref_out)
+
+    @parametrize("req_grad", [False, True])
+    @skipIfDynamoInput("Dynamo fails to fakeify non-contiguous TwoTensor inputs")
+    def test_subclass_metadata_mutation_noncontiguous_input(self, req_grad):
+        def f(a):
+            a.transpose_(1, 0)
+            tmp = a.mul(2)
+            return tmp.transpose(1, 0)
+
+        def inp_callable(req_grad):
+            x = torch.ones(2, 4, requires_grad=req_grad).clone()[:, ::2]
+            return [(x,), (x,)]
+
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable, req_grad=req_grad),
+            test_mutation=True,
+            make_inputs_subclasses=True,
+        )
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            decompositions=None,
+            keep_inference_input_mutations=True,
+            dynamic=False,
+        )
+        with TwoTensorMode():
+            ref_inp = torch.ones(2, 4, requires_grad=req_grad).clone()[:, ::2]
+        with TwoTensorMode():
+            test_inp = torch.ones(2, 4, requires_grad=req_grad).clone()[:, ::2]
+
+        ref_out = f(ref_inp)
+        test_out = compiled_f(test_inp)
+
+        self.assertEqual(test_inp, ref_inp)
+        self.assertEqual(test_out, ref_out)
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+        self.assertTensorMetadataEqual(test_out, ref_out)
 
     def test_input_data_and_metadata_mutation(self):
         def f(a):
@@ -3553,7 +3645,7 @@ def forward(self, primals_1, primals_2):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Metadata mutations are currently not allowed on tensor subclasses",
+            "Encountered aliased inputs that are mutated in the graph",
         ):
             self.verify_aot_autograd(
                 f,
@@ -8215,6 +8307,12 @@ def forward(self, primals_1, tangents_1):
         out = f(x)
         (grad_x,) = torch.autograd.grad(out.sum(), x, create_graph=True)
         self.assertEqual(grad_x, 2 * x)
+        self.assertTrue(grad_x.requires_grad)
+        self.assertIsNotNone(grad_x.grad_fn)
+        with self.assertRaisesRegex(
+            RuntimeError, "does not currently support double backward"
+        ):
+            grad_x.sum().backward()
 
     def test_compiled_backward_multiple_outputs(self):
         @torch.compile(backend="aot_eager")
@@ -8254,7 +8352,9 @@ def forward(self, primals_1, tangents_1):
             _codegen_compiled_backward,
         )
 
-        bwd_fn = _codegen_compiled_backward(num_rng=0, num_tensors_no_vc_check=None)
+        bwd_fn = _codegen_compiled_backward(
+            num_rng=0, num_tensors_no_vc_check=None, inputs_require_grad=False
+        )
 
         def noop(*a, **kw):
             return None
@@ -9563,6 +9663,25 @@ def forward(self, primals_1, tangents_1):
             node = g.call_function(target, args=())
             self.assertEqual(_size_of(node), 0)
 
+    def test_size_of_fake_script_object(self):
+        import torch._functorch.config as functorch_config
+        from torch._functorch.partitioners import _size_of
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        g = torch.fx.Graph()
+        node = g.call_function(torch.ops.aten.abs.default, args=())
+        node.meta["val"] = FakeScriptObject(None, "test_class", None)
+
+        # A (Fake)ScriptObject may hold tensors internally, so by default
+        # _size_of refuses to guess its memory footprint and raises.
+        with self.assertRaisesRegex(RuntimeError, "Cannot compute the size"):
+            _size_of(node)
+
+        # The unsafe escape hatch makes _size_of assume such objects are
+        # zero size, unblocking compilation at the cost of soundness.
+        with functorch_config.patch(unsafe_treat_script_objects_as_zero_size=True):
+            self.assertEqual(_size_of(node), 0)
+
 
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
@@ -9803,6 +9922,9 @@ metadata incorrectly.
         self.assertEqual(a_test, a_ref)
         self.assertEqual(b_test.a, b_ref.a)
         self.assertEqual(b_test.b, b_ref.b)
+        self.assertTensorMetadataEqual(a_test, a_ref)
+        self.assertTensorMetadataEqual(b_test, b_ref)
+        self.assertTensorMetadataEqual(out_test, out_ref)
 
         # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile the backward.
         (b_ref * out_ref).sum().backward()
@@ -9813,9 +9935,6 @@ metadata incorrectly.
         self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
         self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
 
-    # NB: Metadata mutation for subclasses is currently broken and disabled
-    # See https://github.com/pytorch/pytorch/issues/114975
-    @unittest.expectedFailure
     def test_aot_dispatch_input_metadata_mutation(self):
         def f(a, b):
             a.t_()
@@ -9856,6 +9975,9 @@ metadata incorrectly.
         self.assertEqual(a_test, a_ref)
         self.assertEqual(b_test.a, b_ref.a)
         self.assertEqual(b_test.b, b_ref.b)
+        self.assertTensorMetadataEqual(a_test, a_ref)
+        self.assertTensorMetadataEqual(b_test, b_ref)
+        self.assertTensorMetadataEqual(out_test, out_ref)
 
         # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile the backward.
         (b_ref * out_ref).sum().backward()
@@ -9866,8 +9988,7 @@ metadata incorrectly.
         self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
         self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
 
-    # NB: Metadata mutation for subclasses is currently broken and disabled
-    # See https://github.com/pytorch/pytorch/issues/114975
+    # NB: Mixed data and metadata mutations still need tangent metadata support.
     @unittest.expectedFailure
     def test_aot_dispatch_input_data_and_metadata_mutation(self):
         def f(a, b):
@@ -11469,10 +11590,6 @@ if not TEST_MKL:
     )
 
 symbolic_aot_autograd_failures = {
-    xfail("combinations", ""),  # aten.masked_select.default
-    xfail(
-        "index_fill", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "linalg.lstsq", ""
     ),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition
@@ -11724,8 +11841,6 @@ instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for=onl
 @xfail_inherited_tests(
     [
         "test_set__and_data_mutation_bad",
-        "test_subclass_metadata_mutation_req_grad_True",
-        "test_subclass_metadata_mutation_req_grad_False",
     ]
 )
 class TestAOTAutogradWithDynamo(TestAOTAutograd):
@@ -11814,6 +11929,18 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         optout = run(optf)
 
         self.assertEqual(out, optout)
+
+    def test_lift_after_factory(self):
+        def f(low, high, size):
+            y = torch.randint(low=low, high=high, size=size)
+            return torch.ops.aten.lift.default(y)
+
+        torch.manual_seed(0)
+        out = f(0, 100, [2, 3])
+        torch.manual_seed(0)
+        opt_out = torch.compile(f, backend="aot_eager", fullgraph=True)(0, 100, [2, 3])
+
+        self.assertEqual(out, opt_out)
 
     def test_mutations_in_bw_detached_from_tangent(self):
         class AF(torch.autograd.Function):

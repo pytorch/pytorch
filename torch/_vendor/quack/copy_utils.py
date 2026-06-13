@@ -8,7 +8,7 @@ import cutlass.cute as cute
 
 from cutlass import Int32, Int16, Boolean, const_expr
 from cutlass.base_dsl.arch import Arch
-from cutlass.cute.nvgpu import cpasync, tcgen05, warp, warpgroup
+from cutlass.cute.nvgpu import cpasync, tcgen05, warp
 from cutlass.cute.nvgpu.tcgen05.mma import CtaGroup  # noqa
 from cutlass.cutlass_dsl import dsl_user_op
 import cutlass.pipeline
@@ -329,18 +329,14 @@ def as_position_independent_swizzle_tensor(tensor: cute.Tensor) -> cute.Tensor:
     return cute.make_tensor(cute.recast_ptr(tensor.iterator, dtype=tensor.element_type), new_layout)
 
 
-def partition_D_position_independent(
-    thr_copy: cute.core.ThrCopy, tensor: cute.Tensor
-) -> cute.Tensor:
+def partition_D_position_independent(thr_copy: cute.ThrCopy, tensor: cute.Tensor) -> cute.Tensor:
     return cute.make_tensor(
         swizzle_ptr(thr_copy.partition_D(tensor).iterator),
         thr_copy.partition_D(as_position_independent_swizzle_tensor(tensor)).layout,
     )
 
 
-def partition_S_position_independent(
-    thr_copy: cute.core.ThrCopy, tensor: cute.Tensor
-) -> cute.Tensor:
+def partition_S_position_independent(thr_copy: cute.ThrCopy, tensor: cute.Tensor) -> cute.Tensor:
     return cute.make_tensor(
         swizzle_ptr(thr_copy.partition_S(tensor).iterator),
         thr_copy.partition_S(as_position_independent_swizzle_tensor(tensor)).layout,
@@ -531,7 +527,7 @@ def get_smem_store_A(
     tiled_mma: cute.TiledMma, sA: cute.Tensor, tidx: Int32, position_independent=False
 ) -> Tuple[Callable, cute.TiledCopy, cute.Tensor]:
     dtype = sA.element_type
-    transpose = tiled_mma.op.a_major_mode == warpgroup.OperandMajorMode.MN
+    transpose = tiled_mma.op.a_major_mode == cute.nvgpu.OperandMajorMode.MN
     copy_atom = get_smem_store_atom(dtype, transpose)
     tiled_copy = cute.make_tiled_copy_A(copy_atom, tiled_mma)
     thr_copy = tiled_copy.get_slice(tidx)
@@ -554,7 +550,7 @@ def get_smem_load_A(
     position_independent=False,
 ) -> Tuple[Callable, cute.TiledCopy, cute.Tensor]:
     dtype = sA.element_type
-    transpose = tiled_mma.op.a_major_mode == warpgroup.OperandMajorMode.MN
+    transpose = tiled_mma.op.a_major_mode == cute.nvgpu.OperandMajorMode.MN
     copy_atom = get_smem_load_atom(dtype, transpose)
     tiled_copy = cute.make_tiled_copy_A(copy_atom, tiled_mma)
     thr_copy = tiled_copy.get_slice(tidx)
@@ -856,6 +852,18 @@ def tma_producer_copy_fn(copy: Callable, pipeline: cutlass.pipeline.PipelineAsyn
             tma_bar_ptr=pipeline.producer_get_barrier(producer_state),
             **new_kwargs,
         )
+
+    return copy_fn
+
+
+def chain_tma_producer_copy_fns(copy_fns: Sequence[Optional[Callable]]):
+    if not any(fn is not None for fn in copy_fns):
+        return None
+
+    def copy_fn(src_idx, producer_state: cutlass.pipeline.PipelineState, **new_kwargs):
+        for fn in copy_fns:
+            if const_expr(fn is not None):
+                fn(src_idx=src_idx, producer_state=producer_state, **new_kwargs)
 
     return copy_fn
 

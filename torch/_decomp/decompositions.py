@@ -206,9 +206,14 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
 
 @register_decomposition(aten.hardtanh_backward)
 @out_wrapper("grad_input")
+@pw_cast_for_opmath
 def hardtanh_backward(
     grad_output: Tensor, self: Tensor, min_val: float, max_val: float
 ):
+    # Compare in opmath (compute) dtype to match the eager kernel, which casts
+    # self to opmath_t before comparing against the float bounds. Comparing in
+    # the low-precision input dtype would round the bound and misclassify
+    # boundary values (e.g. bf16(0.7) == 0.69921875 vs max_val=0.7).
     return torch.where((self <= min_val) | (self >= max_val), 0.0, grad_output)
 
 
@@ -1290,8 +1295,6 @@ def native_dropout(input: Tensor, p: float, train: bool | None):
 @register_decomposition(aten._softmax)
 @out_wrapper()
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
     # eager softmax returns a contiguous tensor. Ensure that decomp also returns
     # a contiguous tensor.
     x = x.contiguous()
@@ -1304,22 +1307,37 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if guard_or_false(x.numel() == 0):
-        unnormalized = torch.exp(x)
-    else:
-        x_max = torch.amax(x, dim, keepdim=True)
-        unnormalized = torch.exp(x - x_max)
+    x_max = _softmax_unbacked_safe_amax(x, dim)
+    unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
     return result
 
 
+def _softmax_unbacked_safe_amax(x: Tensor, dim: int) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if x.ndim == 0:
+        return torch.amax(x, dim, keepdim=True)
+
+    canonical_dim = utils.canonicalize_dim(x.ndim, dim)
+    if guard_or_false(x.shape[canonical_dim] > 0):
+        return torch.amax(x, dim, keepdim=True)
+
+    # Plain amax has no identity, so it cannot reduce over an empty dim.
+    # With unbacked sizes this becomes a deferred runtime assert, but eager
+    # softmax handles empty inputs. Pad a single -inf, the identity for max:
+    # it never wins for non-empty input and makes empty input well-defined.
+    pad_shape = list(x.shape)
+    pad_shape[canonical_dim] = 1
+    x = torch.cat((x, x.new_full(pad_shape, float("-inf"))), dim=dim)
+    return torch.amax(x, dim, keepdim=True)
+
+
 @register_decomposition(aten._log_softmax)
 @out_wrapper(exact_dtype=True)
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
     # eager log_softmax returns a contiguous tensor. Ensure that decomp also
     # returns a contiguous tensor.
     x = x.contiguous()
@@ -1332,11 +1350,8 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if guard_or_false(x.numel() == 0):
-        shifted = x
-    else:
-        x_max = torch.amax(x, dim, keepdim=True)
-        shifted = x - x_max
+    x_max = _softmax_unbacked_safe_amax(x, dim)
+    shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     result = shifted - shifted_logsumexp
     if not half_to_float:
@@ -1667,10 +1682,8 @@ def _addmm_activation(
     return aten.relu(out)
 
 
-@register_decomposition(aten.addmv)
-@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
-def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+def _addmv_impl(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
         alpha = int(alpha)
@@ -1680,6 +1693,16 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     if out.numel() == 0:  # handle empty matrix
         return beta * self
     return out + beta * self
+
+
+@register_decomposition(aten.addmv)
+@out_wrapper(exact_dtype=True)
+def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+    torch._check(
+        self.dtype == mat1.dtype and mat1.dtype == vec.dtype,
+        lambda: f"addmv input tensors must have the same dtype, but got {self.dtype}, {mat1.dtype}, and {vec.dtype}",
+    )
+    return _addmv_impl(self, mat1, vec, beta, alpha)
 
 
 @register_decomposition(aten.native_group_norm_backward.default)
@@ -2408,15 +2431,19 @@ def _batch_norm_no_update(
 
 @register_decomposition(aten._fused_dropout)
 @out_wrapper("out0", "out1")
-@pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
     if generator is not None:
         raise AssertionError(
             f"generator must be None for _fused_dropout decomposition, got {generator}"
         )
-    mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
-    res = mask.type_as(input) * input * (1.0 / p)
-    return (res, mask)
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        input, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    input_acc = input.to(computation_dtype)
+    mask = (torch.rand_like(input_acc) < p).to(dtype=torch.uint8)
+    scale = torch.scalar_tensor(1.0, dtype=computation_dtype, device=input.device) / p
+    res = mask.to(computation_dtype) * input_acc * scale
+    return (res.to(result_dtype), mask)
 
 
 @register_decomposition(aten._to_copy)
@@ -3040,6 +3067,111 @@ def max_pool3d_with_indices(
     )
 
 
+@register_decomposition(aten.adaptive_max_pool2d)
+@out_wrapper("out", "indices")
+def adaptive_max_pool2d(
+    input: Tensor,
+    output_size: tuple[int, int],
+) -> tuple[Tensor, Tensor]:
+    ndim = input.ndim
+    torch._check(
+        ndim in (3, 4),
+        lambda: f"adaptive_max_pool2d(): Expected 3D or 4D tensor, but got {ndim}D",
+    )
+    for i in range(1, ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                "adaptive_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
+        )
+
+    h_in = input.shape[-2]
+    w_in = input.shape[-1]
+    h_out, w_out = output_size
+
+    # Case 1: empty output
+    if h_out == 0 or w_out == 0:
+        output_shape = list(input.shape[:-2]) + [h_out, w_out]
+        return (
+            input.new_empty(output_shape),
+            input.new_empty(output_shape, dtype=torch.int64),
+        )
+
+    # Case 2: global pooling (output_size == (1, 1))
+    # Equivalent to amax over spatial dims. argmax on the flattened spatial
+    # plane produces flat indices encoded as ih*W+iw.
+    if h_out == 1 and w_out == 1:
+        values = torch.amax(input, dim=(-2, -1), keepdim=True)
+        indices = torch.argmax(input.flatten(-2), dim=-1).unsqueeze(-1).unsqueeze(-1)
+        return values, indices
+
+    # Case 3: evenly divisible -- delegate to max_pool2d_with_indices
+    if h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [h_in // h_out, w_in // w_out]
+        return aten.max_pool2d_with_indices(input, kernel_size)
+
+    # Case 4: general (non-evenly-divisible, output_size > 1)
+    return NotImplemented
+
+
+@register_decomposition(aten.adaptive_max_pool3d)
+@out_wrapper("out", "indices")
+def adaptive_max_pool3d(
+    input: Tensor,
+    output_size: tuple[int, int, int],
+) -> tuple[Tensor, Tensor]:
+    ndim = input.ndim
+    torch._check(
+        ndim in (4, 5),
+        lambda: f"adaptive_max_pool3d(): Expected 4D or 5D tensor, but got {ndim}D",
+    )
+    for i in range(1, ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                "adaptive_max_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
+        )
+
+    d_in = input.shape[-3]
+    h_in = input.shape[-2]
+    w_in = input.shape[-1]
+    d_out, h_out, w_out = output_size
+
+    # Case 1: empty output
+    if d_out == 0 or h_out == 0 or w_out == 0:
+        output_shape = list(input.shape[:-3]) + [d_out, h_out, w_out]
+        return (
+            input.new_empty(output_shape),
+            input.new_empty(output_shape, dtype=torch.int64),
+        )
+
+    # Case 2: global pooling (output_size == (1, 1, 1))
+    # Equivalent to amax over spatial dims. argmax on the flattened spatial
+    # volume produces flat indices encoded as
+    # id*H*W + ih*W + iw.
+    if d_out == 1 and h_out == 1 and w_out == 1:
+        values = torch.amax(input, dim=(-3, -2, -1), keepdim=True)
+        indices = (
+            torch.argmax(input.flatten(-3), dim=-1)
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+        )
+        return values, indices
+
+    # Case 3: evenly divisible -- delegate to max_pool3d_with_indices
+    if d_in % d_out == 0 and h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [d_in // d_out, h_in // h_out, w_in // w_out]
+        return aten.max_pool3d_with_indices(input, kernel_size)
+
+    # Case 4: general (non-evenly-divisible, output_size > 1)
+    return NotImplemented
+
+
 def _max_unpoolnd(
     self: TensorLike, indices: TensorLike, output_size: list[int], dim: int
 ):
@@ -3050,6 +3182,14 @@ def _max_unpoolnd(
     # equal. If this condition is not satisfied, the operation is
     # non-deterministic as one of the different values in `self` 'wins'.
     utils.alert_not_deterministic(f"max_unpooling{dim}d_forward_out")
+    for i, size in enumerate(output_size):
+        torch._check(
+            size >= 0,
+            lambda i=i, size=size: (
+                f"max_unpooling{dim}d(): output_size must contain non-negative "
+                f"spatial dimensions, but got output_size[{i}]={size}"
+            ),
+        )
     output_shape = list(self.shape[:-dim]) + list(output_size)
     if any(s == 0 for s in output_shape):
         return self.new_zeros(output_shape)
@@ -3295,6 +3435,8 @@ def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 def _index_copy(
     x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
         x.device == index.device and x.device == tensor.device,
@@ -3308,6 +3450,45 @@ def _index_copy(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
+    num_indices = index.numel()
+    if tensor.ndim == 0:
+        torch._check(
+            num_indices == 1,
+            lambda: (
+                "index_copy_(): When source is scalar, index should have "
+                f"one element (got {num_indices})"
+            ),
+        )
+    elif x.ndim != 0:
+        torch._check(
+            tensor.ndim == x.ndim,
+            lambda: (
+                "index_copy_(): When source and destination are not scalars, "
+                "their dimensionality must match. Source dimensionality "
+                f"({tensor.ndim}), destination dimensionality ({x.ndim})"
+            ),
+        )
+
+    x_sliced_shape = x.shape[:dim] + x.shape[dim + 1 :] if x.ndim > 0 else ()
+    tensor_sliced_shape = (
+        tensor.shape[:dim] + tensor.shape[dim + 1 :] if tensor.ndim > 0 else ()
+    )
+    torch._check(
+        sym_eq(x_sliced_shape, tensor_sliced_shape),
+        lambda: (
+            "index_copy_(): Source/destination tensor must have same slice shapes. "
+            f"Destination slice shape: {x_sliced_shape} at dimension {dim} "
+            f"and source slice shape: {tensor_sliced_shape} at dimension 0."
+        ),
+    )
+    if tensor.ndim != 0:
+        torch._check(
+            num_indices == tensor.size(dim),
+            lambda: (
+                f"index_copy_(): Number of indices ({num_indices}) should be "
+                f"equal to source.size(dim) ({tensor.size(dim)})"
+            ),
+        )
     # Treat scalars as elements of \R^1
     zero_dim = x.ndim == 0
     x1 = x.unsqueeze(0) if zero_dim else x
@@ -3987,7 +4168,7 @@ def one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
 
     out = torch.cat(step_output, 0)
 
-    return out, (hx.squeeze(1), cx.squeeze(1))
+    return out, (hx.squeeze(0), cx.squeeze(0))
 
 
 def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=False):

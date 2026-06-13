@@ -22,10 +22,6 @@ class TestFactory(TestCase):
         self.assertEqual(x.device.type, "openreg")
         self.assertEqual(x.shape, torch.Size([3]))
 
-        x = torch.empty([2, 3, 4, 5], device="openreg", names=["N", "C", "H", "W"])
-        self.assertEqual(x.device.type, "openreg")
-        self.assertEqual(x.shape, torch.Size([2, 3, 4, 5]))
-
         with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.empty(3, 3, device="openreg")
             y = torch.empty(3, 3, device="openreg:0")

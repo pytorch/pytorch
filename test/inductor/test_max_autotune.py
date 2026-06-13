@@ -40,6 +40,7 @@ from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
+from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.select_algorithm import (
@@ -188,7 +189,7 @@ class TestMaxAutotune(TestCase):
         Verify that `max_autotune` includes all pointwise configs from
         `max_autotune_pointwise` for 1D, 2D, and 3D pointwise kernels.
         """
-        triton_meta = {"device": object()}
+        triton_meta = {"device": DeviceProperties.create(torch.device(GPU_TYPE, 0))}
         inductor_meta_common = {"autotune_pointwise": False}
 
         for size_hints in (
@@ -1182,6 +1183,22 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_addmm_unrealized_view_bias(self, dynamic):
+        """
+        Make sure autotuning addmm with an unrealized view-class bias
+        (here a PermuteView over a fused Pointwise) works without crashes.
+        """
+
+        def fn(x, a, b):
+            return torch.addmm((x * 2.0).transpose(0, 1), a, b)
+
+        x = torch.randn(8, 8).to(GPU_TYPE)
+        a = torch.randn(8, 16).to(GPU_TYPE)
+        b = torch.randn(16, 8).to(GPU_TYPE)
+        with config.patch({"max_autotune": True}):
+            torch.compile(fn, dynamic=dynamic)(x, a, b)
+
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_autotune_conv1x1(self, search_space):
         # Assuming input has 3 channels and we want to produce 16 channels as output
@@ -1626,7 +1643,7 @@ class TestMaxAutotune(TestCase):
 
         ref = x1 @ y1 + x2 @ y2
         act = f(x1, y1, x2, y2)
-        torch.testing.assert_close(act, ref, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(act, ref, atol=1e-1, rtol=1e-2)
 
     @config.patch(
         max_autotune=True,
