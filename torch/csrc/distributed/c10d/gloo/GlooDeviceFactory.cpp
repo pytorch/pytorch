@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
+#include <torch/csrc/distributed/c10d/gloo/GlooDeviceFactory.hpp>
 
 #ifdef USE_C10D_GLOO
 
