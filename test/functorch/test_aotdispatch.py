@@ -4227,6 +4227,16 @@ def forward(self, tangents_1):
             out_test = aot_mod(inp)
         self.assertEqual(out_ref, out_test)
 
+    def test_inference_mode_inside_forward_with_view(self):
+        def f(x):
+            y = x.view(4, 4)
+            with torch.inference_mode():
+                return y.transpose(0, 1)
+
+        inp = torch.randn(16)
+        compiled_f = aot_function(f, nop)
+        self.assertEqual(compiled_f(inp), f(inp))
+
     def test_default_partitioner_saves_symints_not_tensors_for_bw(self):
         """
         In this test, the important thing is that primals_1 is **only** needed in the backward

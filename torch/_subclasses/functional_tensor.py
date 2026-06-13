@@ -485,6 +485,25 @@ class FunctionalTensorMode(TorchDispatchMode):
         if _has_unrecognized_tensor_types(types):
             return NotImplemented
 
+        # C++ functionalization cannot operate on inference tensors because
+        # they lack a version counter.  Temporarily exit inference mode so
+        # tensors created during functionalization are normal tensors.  Since
+        # c10::InferenceMode(false) also sets grad_mode=true as a side effect,
+        # pair it with no_grad() to keep grad off -- this ensures output
+        # requires_grad stays False and AOT Autograd's inference-only graph
+        # decision is not disturbed.
+        if torch.is_inference_mode_enabled():
+            with torch.inference_mode(False), torch.no_grad():
+                return self._torch_dispatch_impl(func, types, args, kwargs)
+        return self._torch_dispatch_impl(func, types, args, kwargs)
+
+    def _torch_dispatch_impl(
+        self,
+        func: OpOverload,
+        types: Sequence[type],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> Any:
         if (
             func not in FunctionalTensor.metadata_fns
             and self._can_decompose(func, args, kwargs)
