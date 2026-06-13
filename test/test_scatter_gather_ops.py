@@ -5,7 +5,6 @@ import unittest
 from typing import NamedTuple
 
 import torch
-import torch._dynamo.config
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
