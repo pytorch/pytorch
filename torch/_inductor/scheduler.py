@@ -53,6 +53,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.autotune_process import use_pipelined_autotuning
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
+from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch._inductor.stream_utils import get_stream_name
@@ -115,6 +116,17 @@ compute_dependencies_log = torch._logging.getArtifactLogger(
     __name__, "compute_dependencies"
 )
 cudagraphs_log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
+
+_FLOAT8_DTYPES = tuple(
+    dtype
+    for dtype in (
+        getattr(torch, "float8_e4m3fn", None),
+        getattr(torch, "float8_e5m2", None),
+        getattr(torch, "float8_e4m3fnuz", None),
+        getattr(torch, "float8_e5m2fnuz", None),
+    )
+    if dtype is not None
+)
 
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
@@ -3982,6 +3994,51 @@ def _is_prologue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     return config.prologue_fusion
 
 
+def _is_pre_sm90_cuda_device(device: torch.device | None) -> bool:
+    if device is None or device.type != "cuda" or torch.version.hip is not None:
+        return False
+
+    try:
+        cuda_arch = get_cuda_arch()
+        return cuda_arch is not None and int(cuda_arch) < 90
+    except ValueError:
+        return False
+
+
+def _has_float8_read(node: BaseSchedulerNode) -> bool:
+    for dep in node.read_writes.reads:
+        try:
+            if V.graph.get_dtype(dep.name) in _FLOAT8_DTYPES:
+                return True
+        except KeyError:
+            continue
+    return False
+
+
+def _is_pre_sm90_fp8_to_bf16_triton_template_prologue(
+    prologue_node: BaseSchedulerNode,
+    template_node: BaseSchedulerNode,
+    prologue_nodes: Sequence[BaseSchedulerNode],
+) -> bool:
+    template = template_node.get_template_node()
+    if (
+        template is None
+        or not isinstance(template, ir.TritonTemplateBuffer)
+        or not _is_pre_sm90_cuda_device(template_node.get_device())
+        or not prologue_nodes
+    ):
+        return False
+
+    final_prologue_outputs = prologue_nodes[-1].get_outputs()
+    if (
+        len(final_prologue_outputs) != 1
+        or final_prologue_outputs[0].node.get_dtype() != torch.bfloat16
+    ):
+        return False
+
+    return _has_float8_read(prologue_node)
+
+
 def is_epilogue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return (
         node1.is_template()
@@ -7718,6 +7775,12 @@ class Scheduler:
                 why(
                     "template prologue can only fuse nodes with a single use into template"
                 )
+                return False
+
+            if _is_pre_sm90_fp8_to_bf16_triton_template_prologue(
+                node1, node2, prologue_nodes
+            ):
+                why("fp8 to bf16 prologue into triton template requires sm90")
                 return False
 
             if not self.check_prologue_fusion_heuristics_fusable(node1, node2, why):
