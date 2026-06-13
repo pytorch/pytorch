@@ -18,6 +18,7 @@ import sympy
 
 import torch
 import torch._logging
+import torch.fx
 from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
@@ -4161,6 +4162,352 @@ class SIMDScheduling(BaseScheduling):
 
         return ranked_tilings
 
+    @staticmethod
+    def _expensive_pointwise_ops() -> dict[str, int]:
+        return {
+            "acos": 32,
+            "asin": 32,
+            "atan": 32,
+            "cos": 32,
+            "cosh": 32,
+            "div": 8,
+            "erf": 32,
+            "erfc": 32,
+            "exp": 32,
+            "expm1": 32,
+            "lgamma": 32,
+            "log": 32,
+            "log10": 32,
+            "log1p": 32,
+            "log2": 32,
+            "pow": 16,
+            "reciprocal": 8,
+            "rsqrt": 16,
+            "sin": 32,
+            "sinh": 32,
+            "sqrt": 16,
+            "tan": 32,
+            "tanh": 32,
+            "truediv": 8,
+        }
+
+    @staticmethod
+    def _has_cat_origin(node_schedule: list[NodeScheduleEntry]) -> bool:
+        for schedule_entry in NodeScheduleMarker.only_nodes(node_schedule):
+            for node in schedule_entry.get_nodes():
+                if not isinstance(node, scheduler.SchedulerNode):
+                    continue
+
+                ir_node = node.node
+                if ir_node is None:
+                    continue
+
+                for origin in ir_node.get_origins():
+                    if getattr(origin, "op", None) != "call_function":
+                        continue
+
+                    if getattr(origin, "target", None) == torch.ops.aten.cat.default:
+                        return True
+
+                    original_aten = getattr(origin, "meta", {}).get("original_aten")
+                    if original_aten == torch.ops.aten.cat.default:
+                        return True
+
+        return False
+
+    @staticmethod
+    def _read_score(
+        read_expr: sympy.Expr,
+        var_ranges: dict[sympy.Symbol, sympy.Expr],
+        buf_names: OrderedSet[str],
+    ) -> int:
+        indexed_ranges = [
+            var_ranges[var]
+            for var in read_expr.free_symbols
+            if var in var_ranges and not symbol_is_type(var, SymT.INDIRECT)
+        ]
+        numel_hint = V.graph.sizevars.optimization_hint(
+            sympy_product(indexed_ranges), fallback=0
+        )
+        if numel_hint <= 0:
+            return 0
+
+        total_score = 0
+        for buf_name in buf_names:
+            buf = V.graph.try_get_buffer(buf_name)
+            if buf is None:
+                continue
+            buf_numel = V.graph.sizevars.optimization_hint(
+                sympy_product(buf.get_size()), fallback=0
+            )
+            if buf_numel <= 0:
+                continue
+            total_score += min(buf_numel, numel_hint) * buf.dtype.itemsize
+
+        return total_score
+
+    @classmethod
+    def _normalized_index_exprs_for_node(
+        cls,
+        node: scheduler.SchedulerNode,
+        pointwise_numel: sympy.Expr,
+        reduction_numel: sympy.Expr,
+        coalesce_analysis: CoalesceVarAnalysis,
+    ) -> dict[str, sympy.Expr] | None:
+        from torch._inductor.tiling_utils import apply_var_mapping, get_pw_red_splits
+
+        norm_read_writes = coalesce_analysis.norm_read_writes
+        norm_pw_vars = list(norm_read_writes.index_vars)
+        norm_red_vars = list(norm_read_writes.reduce_vars)
+        pw_splits = [norm_read_writes.var_ranges[var] for var in norm_pw_vars]
+        red_splits = [norm_read_writes.var_ranges[var] for var in norm_red_vars]
+        (iter_vars, n_pw_splits), (red_vars, n_red_splits) = get_pw_red_splits(
+            node, pointwise_numel, reduction_numel
+        )
+
+        groups = pw_splits + red_splits
+        lengths = SIMDKernel.prepare_split_iteration_lengths(
+            groups, (n_pw_splits, n_red_splits), reduction_numel
+        )
+        try:
+            new_ranges, return_getters_groups = SIMDKernel._split_iteration_ranges(
+                groups, lengths
+            )
+        except CantSplit:
+            return None
+
+        var_map = apply_var_mapping(
+            iter_vars,
+            red_vars,
+            norm_pw_vars,
+            norm_red_vars,
+            new_ranges,
+            return_getters_groups,
+        )
+
+        def remove_identity(expr: sympy.Expr) -> sympy.Expr:
+            return expr.replace(Identity, lambda x: x)
+
+        return {
+            name: V.graph.sizevars.simplify_with_ranges(
+                sympy_subs(remove_identity(expr), var_map),
+                norm_read_writes.var_ranges,
+            )
+            for name, expr in node._body.indexing_exprs.items()
+        }
+
+    @staticmethod
+    def _fx_arg_nodes(arg: Any) -> Iterator[torch.fx.Node]:
+        if isinstance(arg, torch.fx.Node):
+            yield arg
+        elif isinstance(arg, (list, tuple)):
+            for item in arg:
+                yield from SIMDScheduling._fx_arg_nodes(item)
+        elif isinstance(arg, dict):
+            for item in arg.values():
+                yield from SIMDScheduling._fx_arg_nodes(item)
+
+    @classmethod
+    def _score_expensive_broadcast_dependents(
+        cls,
+        node_schedule: list[NodeScheduleEntry],
+        pointwise_numel: sympy.Expr,
+        reduction_numel: sympy.Expr,
+        coalesce_analysis: CoalesceVarAnalysis,
+        broadcast_reads_by_key: dict[tuple[str, sympy.Expr], sympy.Expr],
+        trailing_vars_by_split: dict[sympy.Expr, OrderedSet[sympy.Symbol]],
+    ) -> Counter[sympy.Expr]:
+        expensive_ops = cls._expensive_pointwise_ops()
+        scores: Counter[sympy.Expr] = Counter()
+
+        for schedule_entry in NodeScheduleMarker.only_nodes(node_schedule):
+            for node in schedule_entry.get_nodes():
+                if not isinstance(node, scheduler.SchedulerNode):
+                    continue
+
+                normalized_index_exprs = cls._normalized_index_exprs_for_node(
+                    node, pointwise_numel, reduction_numel, coalesce_analysis
+                )
+                if normalized_index_exprs is None:
+                    continue
+
+                node_vars: dict[torch.fx.Node, OrderedSet[sympy.Symbol]] = {}
+                node_splits: dict[torch.fx.Node, OrderedSet[sympy.Expr]] = {}
+
+                for fx_node in node._body.root_block.graph.nodes:
+                    vars_used: OrderedSet[sympy.Symbol] = OrderedSet()
+                    source_splits: OrderedSet[sympy.Expr] = OrderedSet()
+
+                    if (
+                        fx_node.op == "call_module"
+                        and fx_node.target == "get_index"
+                        and fx_node.args
+                    ):
+                        index_name = fx_node.args[0]
+                        if isinstance(index_name, str):
+                            index_expr = normalized_index_exprs.get(index_name)
+                            if index_expr is not None:
+                                vars_used.update(index_expr.free_symbols)
+                    elif fx_node.op == "call_method" and fx_node.target == "load":
+                        buffer_name = fx_node.args[1] if len(fx_node.args) > 1 else None
+                        index_node = fx_node.args[2] if len(fx_node.args) > 2 else None
+                        index_expr = None
+                        if isinstance(index_node, torch.fx.Node):
+                            vars_used.update(node_vars.get(index_node, OrderedSet()))
+                            if (
+                                index_node.op == "call_module"
+                                and index_node.target == "get_index"
+                                and index_node.args
+                            ):
+                                index_name = index_node.args[0]
+                                if isinstance(index_name, str):
+                                    index_expr = normalized_index_exprs.get(index_name)
+
+                        if isinstance(buffer_name, str) and index_expr is not None:
+                            split_var = broadcast_reads_by_key.get(
+                                (buffer_name, index_expr)
+                            )
+                            if split_var is not None:
+                                source_splits.add(split_var)
+                    else:
+                        for arg_node in cls._fx_arg_nodes(
+                            (fx_node.args, fx_node.kwargs)
+                        ):
+                            vars_used.update(node_vars.get(arg_node, OrderedSet()))
+                            source_splits.update(
+                                node_splits.get(arg_node, OrderedSet())
+                            )
+
+                    if fx_node.op == "call_method":
+                        op_score = expensive_ops.get(str(fx_node.target), 0)
+                        if op_score:
+                            for split_var in source_splits:
+                                trailing_vars = trailing_vars_by_split[split_var]
+                                if not vars_used & trailing_vars:
+                                    scores[split_var] += op_score
+
+                    node_vars[fx_node] = vars_used
+                    node_splits[fx_node] = source_splits
+
+        return scores
+
+    @classmethod
+    def compute_broadcast_reuse_scores(
+        cls,
+        node_schedule: list[NodeScheduleEntry],
+        pointwise_numel: sympy.Expr,
+        coalesce_analysis: CoalesceVarAnalysis,
+    ) -> dict[sympy.Expr, int]:
+        """
+        Score pointwise splits that expose reuse of expensive broadcast work.
+
+        For a flattened NCHW pointwise kernel, a channel-only expression has an
+        index like `c` and is invariant over the trailing H*W suffix. Splitting
+        after `c` lets Triton evaluate expensive scalar chains as [YBLOCK, 1]
+        and broadcast them across [YBLOCK, XBLOCK].
+        """
+        norm_read_writes = coalesce_analysis.norm_read_writes
+        if norm_read_writes.reduce_vars:
+            return {}
+
+        # Pointwise cat lowers to predicated, mutually exclusive regions. The
+        # dataflow score below does not model branch exclusivity, so cat-origin
+        # regions must not introduce a broadcast-only tiling score.
+        if cls._has_cat_origin(node_schedule):
+            return {}
+
+        iter_vars = list(norm_read_writes.index_vars)
+        if len(iter_vars) <= 1:
+            return {}
+
+        sizevars = V.graph.sizevars
+        min_pointwise_hint = 16384
+        pointwise_hint = sizevars.optimization_hint(pointwise_numel, fallback=0)
+        if pointwise_hint < min_pointwise_hint:
+            return {}
+
+        # Low-precision broadcast sources need more total work before the
+        # special-function savings reliably amortize the extra 2D tiling shape.
+        min_low_precision_pointwise_hint = 4_000_000
+        broadcast_reads_by_key: dict[tuple[str, sympy.Expr], sympy.Expr] = {}
+        trailing_vars_by_split: dict[sympy.Expr, OrderedSet[sympy.Symbol]] = {}
+        reuse_factor_by_split: dict[sympy.Expr, int] = {}
+        max_read_itemsize_by_split: dict[sympy.Expr, int] = {}
+        ranges = norm_read_writes.var_ranges
+
+        for read_expr, buf_names in norm_read_writes.reads.items():
+            read_score = cls._read_score(read_expr, ranges, buf_names)
+            if read_score == 0:
+                continue
+
+            read_vars = read_expr.free_symbols
+            read_iter_var_indices = [
+                idx for idx, var in enumerate(iter_vars) if var in read_vars
+            ]
+            if not read_iter_var_indices:
+                continue
+
+            split_idx = max(read_iter_var_indices)
+            if split_idx == len(iter_vars) - 1:
+                continue
+
+            trailing_numel = sympy_product(
+                ranges[var] for var in iter_vars[split_idx + 1 :]
+            )
+            reuse_factor = sizevars.optimization_hint(trailing_numel, fallback=1)
+            if reuse_factor < 8:
+                continue
+
+            suffix_coalesced_score = sum(
+                coalesce_analysis.coalesced_by_var.get(var, 0)
+                for var in iter_vars[split_idx + 1 :]
+            )
+            if suffix_coalesced_score == 0:
+                continue
+
+            split_var = iter_vars[split_idx]
+            trailing_vars_by_split[split_var] = OrderedSet(iter_vars[split_idx + 1 :])
+            reuse_factor_by_split[split_var] = reuse_factor
+            read_itemsizes = [
+                buf.dtype.itemsize
+                for buf_name in buf_names
+                if (buf := V.graph.try_get_buffer(buf_name)) is not None
+            ]
+            if read_itemsizes:
+                max_read_itemsize_by_split[split_var] = max(
+                    max_read_itemsize_by_split.get(split_var, 0),
+                    *read_itemsizes,
+                )
+            for buf_name in buf_names:
+                broadcast_reads_by_key[(buf_name, read_expr)] = split_var
+
+        if not broadcast_reads_by_key:
+            return {}
+
+        expensive_scores = cls._score_expensive_broadcast_dependents(
+            node_schedule,
+            pointwise_numel,
+            sympy.S.One,
+            coalesce_analysis,
+            broadcast_reads_by_key,
+            trailing_vars_by_split,
+        )
+
+        scores: dict[sympy.Expr, int] = {}
+        for var, op_score in expensive_scores.items():
+            if op_score == 0:
+                continue
+            reuse_factor = reuse_factor_by_split[var]
+            saved_elems = pointwise_hint * (reuse_factor - 1) // reuse_factor
+            if (
+                max_read_itemsize_by_split.get(var, 0) <= 2
+                and pointwise_hint < min_low_precision_pointwise_hint
+            ):
+                continue
+            scores[var] = op_score * saved_elems
+
+        return scores
+
     @classmethod
     def compute_tiling_strategy(
         cls,
@@ -4184,6 +4531,13 @@ class SIMDScheduling(BaseScheduling):
 
         pw_ranges = [ranges[v] for v in all_iter_vars]
         red_ranges = [ranges[v] for v in all_red_vars]
+        broadcast_reuse_scores = (
+            cls.compute_broadcast_reuse_scores(
+                node_schedule, pointwise_numel, coalesce_analysis
+            )
+            if reduction_numel == 1
+            else {}
+        )
 
         # Sometimes dynamic shapes is unable to prove equality without hint
         get_hint = V.graph.sizevars.optimization_hint
@@ -4263,7 +4617,10 @@ class SIMDScheduling(BaseScheduling):
 
                 prod *= v_range
                 splits.append(prod)
-                split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
+                split_scores.append(
+                    coalesce_analysis.coalesced_by_var.get(v, 0)
+                    + (broadcast_reuse_scores.get(v, 0) if is_pointwise else 0)
+                )
                 prod = 1
 
             if prod != 1 or (is_pointwise and len(splits) == 0):
@@ -4302,9 +4659,9 @@ class SIMDScheduling(BaseScheduling):
 
         # TODO, add tests, reduction splits if config.triton.tile_reductions
         # TODO: we should ignore tiny increases in score for extra splits
-        overlapping_iter_vars = (
-            all_iter_vars & coalesce_analysis.coalesced_by_var.keys()
-        )
+        scored_iter_vars = OrderedSet(coalesce_analysis.coalesced_by_var.keys())
+        scored_iter_vars.update(broadcast_reuse_scores.keys())
+        overlapping_iter_vars = all_iter_vars & scored_iter_vars
         for v in overlapping_iter_vars:
             score_split.append(
                 (
