@@ -4,6 +4,7 @@
 #include <ATen/native/Activation.h>
 
 #include <cmath>
+#include <limits>
 
 #include <thrust/tuple.h>
 
@@ -34,9 +35,21 @@ void softplus_kernel(
         auto threshold = threshold_.to<opmath_t>();
         gpu_kernel(iter, [beta, threshold] GPU_LAMBDA(scalar_t a) -> scalar_t {
           opmath_t aop = static_cast<opmath_t>(a);
-          return (aop * beta) > threshold
-              ? aop
-              : (::log1p(std::exp(aop * beta))) / beta;
+          if ((aop * beta) > threshold) {
+            return a; 
+          }
+          opmath_t result = (::log1p(std::exp(aop * beta))) / beta;
+          if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
+            opmath_t max_val = static_cast<opmath_t>(std::numeric_limits<scalar_t>::max());
+            // Clamp to max_val to prevent silent overflow on downcast.
+            // Note: If result is NaN, IEEE 754 rules dictate that (NaN > max_val) 
+            // evaluates to false. The ternary safely falls through and returns NaN.
+            return static_cast<scalar_t>(result > max_val ? max_val : result);
+          } else {
+            // For full-precision types, opmath_t == scalar_t. 
+            // We return result directly to avoid a cast.
+            return result;
+          }
         });
       });
 }

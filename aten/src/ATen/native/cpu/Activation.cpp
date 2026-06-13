@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <functional>
+#include <limits>
 
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
@@ -955,16 +956,40 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
       auto threshold = threshold_.to<float>();
       const Vec beta_vec(beta);
       const Vec threshold_vec(threshold);
+      float max_val = static_cast<float>(std::numeric_limits<scalar_t>::max());
+      const Vec max_vec(max_val); 
       cpu_kernel_vec(
           iter,
-          [beta, threshold](scalar_t a) -> scalar_t {
-            return (float(a) * beta) > threshold ? a
-              : static_cast<scalar_t>((std::log1p(std::exp(float(a) * beta))) / beta);
+          [beta, threshold, max_val](scalar_t a) -> scalar_t {
+            float fa = float(a);
+            if ((fa * beta) > threshold) {
+              return a; 
+            }
+            float result = (std::log1p(std::exp(fa * beta))) / beta;
+            // Clamp to max_val to prevent silent overflow on downcast.
+            // Note: If result is NaN, IEEE 754 rules dictate that (NaN > max_val) 
+            // evaluates to false. The ternary safely falls through and returns NaN.
+            return static_cast<scalar_t>(result > max_val ? max_val : result);
           },
-          [beta_vec, threshold_vec](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
+          [beta_vec, threshold_vec, max_vec](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
             auto [a0, a1] = convert_to_float<scalar_t>(a);
-            a0 = Vec::blendv((a0 * beta_vec).exp().log1p() / beta_vec, a0, (a0 * beta_vec) > threshold_vec);
-            a1 = Vec::blendv((a1 * beta_vec).exp().log1p() / beta_vec, a1, (a1 * beta_vec) > threshold_vec);
+
+            auto a0_beta = a0 * beta_vec;
+            auto a1_beta = a1 * beta_vec;
+
+            auto softplus_a0 = a0_beta.exp().log1p() / beta_vec;
+            auto softplus_a1 = a1_beta.exp().log1p() / beta_vec;
+
+            // If the softplus evaluation is NaN, (NaN > max_vec) evaluates to false,
+            // allowing the NaN to safely pass through.
+            auto bounded_a0 = Vec::blendv(softplus_a0, max_vec, softplus_a0 > max_vec);
+            auto bounded_a1 = Vec::blendv(softplus_a1, max_vec, softplus_a1 > max_vec);
+
+            // If a0_beta exceeds the threshold, we select the un-evaluated input (a0/a1).
+            // This preserves +inf inputs. Otherwise, we select the bounded result.
+            a0 = Vec::blendv(bounded_a0, a0, a0_beta > threshold_vec);
+            a1 = Vec::blendv(bounded_a1, a1, a1_beta > threshold_vec);
+
             return convert_from_float<scalar_t>(a0, a1);
           }
       );

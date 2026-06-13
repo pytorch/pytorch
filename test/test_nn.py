@@ -13815,6 +13815,45 @@ if __name__ == '__main__':
         output = model(input)
         torch.autograd.gradcheck(model, input)
 
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_softplus_small_beta_overflow(self, device, dtype):
+        # Tests that small beta values don't cause silent overflow in reduced precision
+        # See https://github.com/pytorch/pytorch/issues/187180
+        dtype_max = torch.finfo(dtype).max
+
+        x_tiny = torch.tensor([[1.0]], dtype=dtype, device=device, requires_grad=True)
+        res_tiny = torch.nn.functional.softplus(x_tiny, beta=1e-6)
+
+        if dtype == torch.bfloat16:
+            # bfloat16 max (~3.39e38) exceeds the float32 intermediate max. 
+            # The clamp check (result > max_val) is unreachable for finite inputs.
+            # This assertion verifies the clamp allows
+            # the underlying float32 intermediate (~6.9e5) to pass through safely.
+            self.assertTrue(res_tiny.item() < dtype_max)
+            self.assertTrue(res_tiny.item() > 0.0)
+        else:
+            # float16 hits the clamp ceiling (65504.0)
+            self.assertTrue(res_tiny.item() <= dtype_max)
+            self.assertTrue(res_tiny.item() > 0.0)
+
+        x_large = torch.tensor([[60000.0]], dtype=dtype, device=device, requires_grad=True)
+        res_large = torch.nn.functional.softplus(x_large, beta=1e-5)
+        
+        if dtype == torch.bfloat16:
+            self.assertTrue(res_large.item() < dtype_max)
+        else:
+            self.assertTrue(res_large.item() <= dtype_max)
+        self.assertTrue(res_large.item() > 0.0)
+
+        with torch.no_grad():
+            inf_tensor = torch.tensor([[float('inf')]], dtype=dtype, device=device)
+            inf_result = torch.nn.functional.softplus(inf_tensor, beta=1e-6)
+            self.assertTrue(torch.isinf(inf_result).all())
+
+            nan_tensor = torch.tensor([[float('nan')]], dtype=dtype, device=device)
+            nan_result = torch.nn.functional.softplus(nan_tensor, beta=1e-6)
+            self.assertTrue(torch.isnan(nan_result).all())
+
     def test_softshrink_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
