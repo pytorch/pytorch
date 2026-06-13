@@ -82,7 +82,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         skinny = config(128, 192, 2, 1, True)
         large_rect = config(256, 256, 2, 1, True)
         large = config(256, 256, 2, 2, True)
-        rejected = config(128, 128, 1, 1, False, swap_ab=True)
+        swap_variant = config(128, 128, 1, 1, False, swap_ab=True)
+        gather_rejected = config(128, 128, 1, 1, False, use_tma_gather=True)
 
         fake_graph = SimpleNamespace(
             sizevars=SimpleNamespace(guard_or_false=lambda expr: bool(expr))
@@ -93,7 +94,14 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             mock.patch("torch.cuda.get_device_capability", return_value=(11, 0)),
             mock.patch(
                 "torch._vendor.quack.gemm_config.get_all_configs",
-                return_value=[rejected, large_rect, default, skinny, large],
+                return_value=[
+                    gather_rejected,
+                    swap_variant,
+                    large_rect,
+                    default,
+                    skinny,
+                    large,
+                ],
             ),
             V.set_graph_handler(fake_graph),
         ):
@@ -101,7 +109,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 flex_gemm_heuristics.candidate_gemm_configs_for_device(
                     torch.device("cuda")
                 ),
-                [default, skinny, large_rect, large],
+                [default, skinny, large_rect, large, swap_variant],
             )
             self.assertEqual(
                 flex_gemm_heuristics.default_gemm_config_key(
@@ -131,7 +139,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 flex_gemm_heuristics.candidate_gemm_configs_for_device(
                     torch.device("cuda")
                 ),
-                [default, skinny, large_rect, large],
+                [default, skinny, large_rect, large, swap_variant],
             )
             self.assertEqual(
                 GemmConfig(**dict(flex_gemm_heuristics.gemm_config_key(large))), large
@@ -212,6 +220,22 @@ class FlexGemmTestCase(TestCase):
             *shape, device="cuda", dtype=dtype, low=-0.1, high=0.1
         )
 
+    def swapAndNonSwapConfigKeys(self, device):
+        """Return one swap_ab and one non-swap candidate config key for ``device``."""
+        from torch._inductor.template_heuristics.flex_gemm import (
+            candidate_gemm_configs_for_device,
+            gemm_config_key,
+        )
+
+        keys = [
+            gemm_config_key(config)
+            for config in candidate_gemm_configs_for_device(device)
+        ]
+        swap_keys = [key for key in keys if dict(key)["swap_ab"]]
+        non_swap_keys = [key for key in keys if not dict(key)["swap_ab"]]
+        self.assertTrue(swap_keys and non_swap_keys)
+        return swap_keys[0], non_swap_keys[0]
+
     def assertMatchesLowPrecisionEager(
         self,
         actual,
@@ -245,6 +269,7 @@ class FlexGemmTestCase(TestCase):
 
 @skipIfNoCuteDSL
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
+@instantiate_parametrized_tests
 class TestFlexGemmRuntime(FlexGemmTestCase):
     @classmethod
     def setUpClass(cls):
@@ -454,6 +479,111 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             )
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("shape", ((128, 512, 256), (512, 128, 256), (256, 256, 256)))
+    def test_swap_ab_matches_non_swap_and_eager(self, shape):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+
+        m, n, k = shape
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        swap_key, non_swap_key = self.swapAndNonSwapConfigKeys(a.device)
+
+        swapped = gemm_epilogue(
+            a,
+            b,
+            self.relu_epilogue,
+            "test_flex_gemm_swap_ab_mm",
+            out_dtype=torch.float32,
+            config_key=swap_key,
+        )
+        non_swapped = gemm_epilogue(
+            a,
+            b,
+            self.relu_epilogue,
+            "test_flex_gemm_non_swap_ab_mm",
+            out_dtype=torch.float32,
+            config_key=non_swap_key,
+        )
+        # swap_ab only reorients tile scheduling, so the result is bit-identical.
+        self.assertEqual(swapped, non_swapped)
+        self.assertMatchesLowPrecisionEager(
+            swapped, (a @ b).float().relu(), (a.double() @ b.double()).relu(), k
+        )
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_swap_ab_with_c_alpha_beta_matches_non_swap(self):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+
+        m, n, k = 256, 384, 192
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        c = self.makeTensor(m, n)
+        swap_key, non_swap_key = self.swapAndNonSwapConfigKeys(a.device)
+
+        def run(name, config_key):
+            return gemm_epilogue(
+                a,
+                b,
+                self.relu_epilogue,
+                name,
+                C=c,
+                alpha=1.5,
+                beta=0.5,
+                out_dtype=torch.float32,
+                config_key=config_key,
+            )
+
+        swapped = run("test_flex_gemm_swap_ab_addmm", swap_key)
+        non_swapped = run("test_flex_gemm_non_swap_ab_addmm", non_swap_key)
+        # The transposed C view must reproduce the non-swapped addmm result.
+        self.assertEqual(swapped, non_swapped)
+        self.assertMatchesLowPrecisionEager(
+            swapped,
+            (0.5 * c.float() + 1.5 * (a @ b).float()).relu(),
+            (0.5 * c.double() + 1.5 * (a.double() @ b.double())).relu(),
+            k,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_swap_ab_captured_aux_matches_non_swap(self):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+
+        m, n, k = 128, 384, 256
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        col_bias = self.makeTensor(m, 1, dtype=torch.float32)
+        row_scale = self.makeTensor(1, n, dtype=torch.float32)
+        tile_bias = self.makeTensor(m, n, dtype=torch.float32)
+        swap_key, non_swap_key = self.swapAndNonSwapConfigKeys(a.device)
+
+        def run(name, config_key):
+            return gemm_epilogue(
+                a,
+                b,
+                self.affine_aux_epilogue,
+                name,
+                out_dtype=torch.float32,
+                epilogue_args=(col_bias, row_scale, tile_bias),
+                epilogue_arg_kinds=("col", "row", "tile"),
+                config_key=config_key,
+            )
+
+        swapped = run("test_flex_gemm_swap_ab_aux", swap_key)
+        non_swapped = run("test_flex_gemm_non_swap_ab_aux", non_swap_key)
+        # Swapped row/col broadcast roles must reproduce the non-swapped result.
+        self.assertEqual(swapped, non_swapped)
+        high_precision_expected = (
+            (a.double() @ b.double() + col_bias.double()) * row_scale.double()
+            + tile_bias.double()
+        ).relu()
+        low_precision_expected = (
+            ((a @ b).float() + col_bias) * row_scale + tile_bias
+        ).relu()
+        self.assertMatchesLowPrecisionEager(
+            swapped, low_precision_expected, high_precision_expected, k
+        )
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_reads_captured_aux_tensors(self):
         from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
 
@@ -602,6 +732,50 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 epilogue_fn(a.double() @ b.double()),
                 a.shape[1],
             )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_swap_ab_dynamic_shapes_tuned_matches_reference(self):
+        def epilogue_fn(acc):
+            return (acc + 1).relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
+
+        device = torch.device("cuda")
+        swap_configs = [
+            config
+            for config in flex_gemm_heuristics.candidate_gemm_configs_for_device(device)
+            if config.swap_ab
+        ]
+        self.assertTrue(swap_configs)
+        with mock.patch(
+            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            return_value=swap_configs[:1],
+        ):
+            compiled = torch.compile(
+                fn, backend="inductor", fullgraph=True, dynamic=True
+            )
+            for m, n in ((128, 128), (256, 192)):
+                a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+                b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+                actual = compiled(a, b)
+                self.assertMatchesLowPrecisionEager(
+                    actual,
+                    epilogue_fn(a @ b),
+                    epilogue_fn(a.double() @ b.double()),
+                    a.shape[1],
+                )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
