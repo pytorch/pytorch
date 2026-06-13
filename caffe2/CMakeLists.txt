@@ -1701,6 +1701,12 @@ if(USE_XPU)
   target_link_libraries(torch PUBLIC torch_xpu_library)
 endif()
 
+target_optimize_if_llvm_bolt_enabled(torch_cpu)
+if(USE_CUDA)
+  target_optimize_if_llvm_bolt_enabled(torch_cuda)
+endif()
+target_optimize_if_llvm_bolt_enabled(torch)
+
 if(PRINT_CMAKE_DEBUG_INFO)
   print_target_properties(torch)
   print_target_properties(torch_cpu)
