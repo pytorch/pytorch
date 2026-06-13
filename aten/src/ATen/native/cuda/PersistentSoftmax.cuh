@@ -7,8 +7,11 @@
 #include <c10/macros/Macros.h>
 
 #include <ATen/cuda/DeviceUtils.cuh>
+#include <ATen/native/cuda/WarpReduce.cuh>
 
 namespace {
+
+using at::native::WarpReduceDirection;
 
 int log2_ceil(int value) {
     int log2_value = 0;
@@ -16,32 +19,19 @@ int log2_ceil(int value) {
     return log2_value;
 }
 
-template<typename T>
-struct Add {
+struct AddOp {
+  template <typename T>
   __device__ __forceinline__ T operator()(T a, T b) const {
     return a + b;
   }
 };
 
-template<typename T>
-struct Max {
+struct MaxOp {
+  template <typename T>
   __device__ __forceinline__ T operator()(T a, T b) const {
     return a < b ? b : a;
   }
 };
-
-template <typename acc_t, int WARP_BATCH, int WARP_SIZE, template<typename> class ReduceOp>
-__device__ __forceinline__ void warp_reduce(acc_t* sum) {
-    ReduceOp<acc_t> r;
-    #pragma unroll
-    for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
-        #pragma unroll
-        for (int i = 0;  i < WARP_BATCH;  ++i) {
-            acc_t b = WARP_SHFL_XOR(sum[i], offset, WARP_SIZE);
-            sum[i] = r(sum[i], b);
-        }
-    }
-}
 
 // The softmax_warp_* methods perform softmax forward and backward propagation on samples spanning the fast dimension.
 // Each sample contains element_count scalar elements. element_count can be any integer value <= 1024.
@@ -142,7 +132,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
             }
         }
     }
-    warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Max>(max_value);
+    at::native::warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, WarpReduceDirection::DESCENDING>(max_value, MaxOp{});
 
     acc_t sum[WARP_BATCH] { 0.0f };
     #pragma unroll
@@ -185,7 +175,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
             }
         }
     }
-    warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Add>(sum);
+    at::native::warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, WarpReduceDirection::DESCENDING>(sum, AddOp{});
 
     // store result
     #pragma unroll
@@ -272,7 +262,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
             }
         }
     }
-    warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Add>(sum);
+    at::native::warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, WarpReduceDirection::DESCENDING>(sum, AddOp{});
 
     // store result
     #pragma unroll

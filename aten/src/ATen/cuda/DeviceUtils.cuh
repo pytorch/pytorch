@@ -47,6 +47,20 @@ __device__ __forceinline__ T WARP_SHFL_XOR(T value, int laneMask, int width = wa
 }
 
 template <typename T>
+__device__ __forceinline__ c10::complex<T> WARP_SHFL_XOR(c10::complex<T> value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff)
+{
+#if !defined(USE_ROCM)
+    return c10::complex<T>(
+        __shfl_xor_sync(mask, value.real_, laneMask, width),
+        __shfl_xor_sync(mask, value.imag_, laneMask, width));
+#else
+    return c10::complex<T>(
+        __shfl_xor(value.real_, laneMask, width),
+        __shfl_xor(value.imag_, laneMask, width));
+#endif
+}
+
+template <typename T>
 __device__ __forceinline__ T WARP_SHFL(T value, int srcLane, int width = warpSize, unsigned int mask = 0xffffffff)
 {
 #if !defined(USE_ROCM)
