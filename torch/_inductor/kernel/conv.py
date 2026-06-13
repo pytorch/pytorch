@@ -22,6 +22,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    is_nvidia_sm100_or_later,
     is_ones,
     is_zeros,
     pad_listlike,
@@ -961,6 +962,22 @@ conv2d_bwd_input_template = TritonTemplate(
 aten_convolution_backward_fallback = fallback_handler(aten.convolution_backward.default)
 
 
+def _skip_sm100_ptxas_bad_conv_bwd_weight_config(
+    cfg,
+    *,
+    allow_tf32: bool,
+) -> bool:
+    return (
+        not allow_tf32
+        and is_nvidia_sm100_or_later()
+        and cfg.kwargs.get("BLOCK_M") == 256
+        and cfg.kwargs.get("BLOCK_N") == 16
+        and cfg.kwargs.get("BLOCK_K") == 16
+        and cfg.num_warps == 4
+        and cfg.num_stages == 2
+    )
+
+
 @register_lowering(aten.convolution_backward.default)
 def convolution_backward_lowering(
     grad_out: TensorBox,
@@ -1055,6 +1072,12 @@ def convolution_backward_lowering(
                 in_chan,
                 dtype_size=dtype_size,
             ):
+                allow_tf32 = torch.backends.cudnn.allow_tf32
+                if _skip_sm100_ptxas_bad_conv_bwd_weight_config(
+                    cfg, allow_tf32=allow_tf32
+                ):
+                    continue
+
                 if ndim == 2:
                     has_triton_dw_choices = True
                     conv2d_bwd_weight_template.maybe_append_choice(
@@ -1070,7 +1093,7 @@ def convolution_backward_lowering(
                         DILATION_H=dilation[0],
                         DILATION_W=dilation[1],
                         GROUPS=groups,
-                        ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                        ALLOW_TF32=allow_tf32,
                         num_stages=cfg.num_stages,
                         num_warps=cfg.num_warps,
                         **cfg.kwargs,
