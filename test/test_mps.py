@@ -2492,6 +2492,45 @@ class TestMPS(TestCaseMPS):
         freq_mps = torch.fft.fftfreq(10**4, device='mps')
         self.assertEqual(freq_cpu, freq_mps)
 
+    def test_fft_transform_dims_outside_last_four(self):
+        # MPSGraph FFT only handles the last four dims; the backend transposes
+        # outer transform dims into that window. See https://github.com/pytorch/pytorch/issues/124096
+        def check(fn, x_cpu, **kwargs):
+            x_mps = x_cpu.detach().to("mps")
+            self.assertEqual(fn(x_cpu, **kwargs), fn(x_mps, **kwargs).cpu())
+
+        # Exact repro from the issue.
+        check(torch.fft.fftn, torch.randn(2, 1, 1, 1, 2, 2, dtype=torch.complex64), dim=(1, 2))
+
+        # complex-to-complex over outer dims
+        cdata = torch.randn(3, 4, 2, 1, 2, dtype=torch.complex64)
+        check(torch.fft.fftn, cdata, dim=(0, 1))
+        check(torch.fft.ifftn, cdata, dim=(0, 1))
+        check(torch.fft.fft, cdata, dim=0)
+
+        # real-to-complex over outer dims
+        rdata = torch.randn(3, 4, 2, 1, 4)
+        check(torch.fft.rfftn, rdata, dim=(0, 4))
+        check(torch.fft.rfftn, rdata, dim=(0, 1, 4))
+        check(torch.fft.rfft, torch.randn(3, 1, 1, 1, 1), dim=0)
+
+        # complex-to-real round trip
+        fwd = torch.fft.rfftn(rdata, dim=(0, 4))
+        check(lambda y: torch.fft.irfftn(y, s=(rdata.size(0), rdata.size(4)), dim=(0, 4)), fwd)
+
+        # Unsorted dims: dim.back() is an outer axis, exercising the inverse permutation.
+        check(torch.fft.fftn, cdata, dim=(2, 0))
+        check(torch.fft.ifftn, cdata, dim=(2, 0))
+        check(torch.fft.rfftn, rdata, dim=(3, 0))
+        rev = torch.fft.rfftn(rdata, dim=(3, 0))
+        check(lambda y: torch.fft.irfftn(y, s=(rdata.size(3), rdata.size(0)), dim=(3, 0)), rev)
+
+    def test_fftn_too_many_dims(self):
+        # MPSGraph cannot transform more than four dims.
+        x = torch.randn(2, 2, 2, 2, 2, device="mps", dtype=torch.complex64)
+        with self.assertRaisesRegex(RuntimeError, "up to 4 dimensions"):
+            torch.fft.fftn(x, dim=(0, 1, 2, 3, 4))
+
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
 
