@@ -371,11 +371,13 @@ def insert_deferred_runtime_asserts(
         ra: RuntimeAssert, node: fx.Node, *, prefer_node_expr: bool = False
     ) -> str:
         if ra.error_message is None:
+            node_expr = _get_sym_val(node)
+            if isinstance(node_expr, sympy.logic.boolalg.BooleanAtom):
+                node_expr = None
             if (message := existing_assert_messages.get(ra.expr)) is not None and not (
                 prefer_node_expr and is_generated_assert_message(message)
             ):
                 return message
-            node_expr = _get_sym_val(node)
             if (
                 node_expr is not None
                 and (message := existing_assert_messages.get(node_expr)) is not None
@@ -453,7 +455,7 @@ def insert_deferred_runtime_asserts(
             if matches_bound_assert(ra.expr, symbol, lower=lower, upper=upper):
                 return render_assert_message(ra, node, prefer_node_expr=True)
         expr = _get_sym_val(node)
-        if expr is None:
+        if expr is None or isinstance(expr, sympy.logic.boolalg.BooleanAtom):
             expr = bound_expr
         return f"Runtime assertion failed for expression {expr} on node '{node}'"
 
