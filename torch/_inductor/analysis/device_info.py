@@ -177,7 +177,7 @@ _device_mapping: dict[str, DeviceInfo] = {
             torch.int8: 1677.72,
         },
         dram_bw_gbs=3276.8,
-        dram_gb=128,
+        dram_gb=128.0,
     ),
     # Source:
     # @lint-ignore https://www.amd.com/content/dam/amd/\
