@@ -33,7 +33,7 @@ template <
     typename gamma_T,
     typename beta_T,
     typename idx_T>
-kernel void group_norm(
+[[kernel]] void group_norm(
     device T* Y [[buffer(0)]],
     device stat_T* mean [[buffer(1)]],
     device stat_T* rstd [[buffer(2)]],
@@ -148,25 +148,87 @@ REGISTER_GROUP_NORM_AFFINE_TYPES(bfloat, float);
 REGISTER_GROUP_NORM_AFFINE_TYPES(half, half);
 REGISTER_GROUP_NORM_AFFINE_TYPES(bfloat, bfloat);
 
-template <typename T, typename stat_T, typename gamma_T, typename idx_T>
-kernel void group_norm_backward_x(
+template <
+    typename T,
+    typename dY_T,
+    typename stat_T,
+    typename gamma_T,
+    typename dmean_T,
+    typename drstd_T,
+    typename idx_T>
+[[kernel]] ::metal::enable_if_t<::metal::is_same_v<dY_T, void>, void>
+group_norm_backward_x(
     device T* dX [[buffer(0)]],
-    constant T* dY [[buffer(1)]],
+    constant dY_T* dY [[buffer(1)]],
     constant T* X [[buffer(2)]],
     constant stat_T* mean [[buffer(3)]],
     constant stat_T* rstd [[buffer(4)]],
     constant gamma_T* gamma [[buffer(5)]],
     constant GroupNormParams<idx_T>& params [[buffer(6)]],
+    constant dmean_T* dmean [[buffer(7)]],
+    constant drstd_T* drstd [[buffer(8)]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
     uint tptg [[threads_per_threadgroup]]) {
   idx_T group_offset = tgid * params.elements_per_group;
   constant T* x = X + group_offset;
-  constant T* dy = dY + group_offset;
   device T* dx = dX + group_offset;
 
   auto mean_val = float(mean[tgid]);
   auto rstd_val = float(rstd[tgid]);
+  auto dmean_val = load_affine_bias(dmean, tgid);
+  auto drstd_val = load_affine_bias(drstd, tgid);
+  idx_T channel_base = (tgid % params.num_groups) * params.channels_per_group;
+
+  // Compute per-group coefficients
+  auto m = float(params.elements_per_group);
+  auto c2 = -drstd_val * rstd_val * rstd_val * rstd_val / m;
+  auto c3 = -c2 * mean_val + dmean_val / m;
+
+  // Write dX.
+  for (idx_T r = 0; r < params.elements_per_group; r += tptg * BLOCK_SIZE) {
+    idx_T base = r + tid * BLOCK_SIZE;
+#pragma unroll
+    for (idx_T i = 0; i < BLOCK_SIZE; i++) {
+      idx_T elem = base + i;
+      if (elem < params.elements_per_group) {
+        dx[elem] = T(c2 * float(x[elem]) + c3);
+      }
+    }
+  }
+}
+
+template <
+    typename T,
+    typename dY_T,
+    typename stat_T,
+    typename gamma_T,
+    typename dmean_T,
+    typename drstd_T,
+    typename idx_T>
+[[kernel]] ::metal::enable_if_t<!::metal::is_same_v<dY_T, void>, void>
+group_norm_backward_x(
+    device T* dX [[buffer(0)]],
+    constant dY_T* dY [[buffer(1)]],
+    constant T* X [[buffer(2)]],
+    constant stat_T* mean [[buffer(3)]],
+    constant stat_T* rstd [[buffer(4)]],
+    constant gamma_T* gamma [[buffer(5)]],
+    constant GroupNormParams<idx_T>& params [[buffer(6)]],
+    constant dmean_T* dmean [[buffer(7)]],
+    constant drstd_T* drstd [[buffer(8)]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]]) {
+  idx_T group_offset = tgid * params.elements_per_group;
+  constant T* x = X + group_offset;
+  constant dY_T* dy = dY + group_offset;
+  device T* dx = dX + group_offset;
+
+  auto mean_val = float(mean[tgid]);
+  auto rstd_val = float(rstd[tgid]);
+  auto dmean_val = load_affine_bias(dmean, tgid);
+  auto drstd_val = load_affine_bias(drstd, tgid);
   idx_T channel_base = (tgid % params.num_groups) * params.channels_per_group;
 
   // Accumulate `ds = sum(dY * gamma * X)` and `db = sum(dY * gamma)` over all
@@ -200,8 +262,9 @@ kernel void group_norm_backward_x(
 
   // Compute per-group coefficients
   auto m = float(params.elements_per_group);
-  auto c2 = (db_val * mean_val - ds_val) * rstd_val * rstd_val * rstd_val / m;
-  auto c3 = -c2 * mean_val - db_val * rstd_val / m;
+  auto c2 = (db_val * mean_val - ds_val - drstd_val) * rstd_val * rstd_val *
+      rstd_val / m;
+  auto c3 = -c2 * mean_val - (db_val * rstd_val - dmean_val) / m;
 
   // Write dX.
   for (idx_T r = 0; r < params.elements_per_group; r += tptg * BLOCK_SIZE) {
@@ -218,30 +281,53 @@ kernel void group_norm_backward_x(
   }
 }
 
-#define REGISTER_GROUP_NORM_BACKWARD_X(T, stat_T, gamma_T, idx_T)           \
-  template [[host_name("group_norm_backward_x_" #T "_" #stat_T "_" #gamma_T \
-                       "_" #idx_T)]]                                        \
-  kernel void group_norm_backward_x<T, stat_T, gamma_T, idx_T>(             \
+#define REGISTER_GROUP_NORM_BACKWARD_X(                                     \
+    T, dY_T, stat_T, gamma_T, dmean_T, drstd_T, idx_T)                      \
+  template [[host_name("group_norm_backward_x_" #T "_" #dY_T "_" #stat_T    \
+                       "_" #gamma_T "_" #dmean_T "_" #drstd_T               \
+                       "_" #idx_T)]] [[kernel]] void                        \
+  group_norm_backward_x<T, dY_T, stat_T, gamma_T, dmean_T, drstd_T, idx_T>( \
       device T * dX [[buffer(0)]],                                          \
-      constant T * dY [[buffer(1)]],                                        \
+      constant dY_T * dY [[buffer(1)]],                                     \
       constant T * X [[buffer(2)]],                                         \
       constant stat_T * mean [[buffer(3)]],                                 \
       constant stat_T * rstd [[buffer(4)]],                                 \
       constant gamma_T * gamma [[buffer(5)]],                               \
       constant GroupNormParams<idx_T> & params [[buffer(6)]],               \
+      constant dmean_T * dmean [[buffer(7)]],                               \
+      constant drstd_T * drstd [[buffer(8)]],                               \
       uint tgid [[threadgroup_position_in_grid]],                           \
       uint tid [[thread_position_in_threadgroup]],                          \
       uint tptg [[threads_per_threadgroup]]);
 
-#define REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(T, stat_T, gamma_T) \
-  REGISTER_GROUP_NORM_BACKWARD_X(T, stat_T, gamma_T, uint32_t);      \
-  REGISTER_GROUP_NORM_BACKWARD_X(T, stat_T, gamma_T, uint64_t);
+#define REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(            \
+    T, dY_T, stat_T, gamma_T, dmean_T, drstd_T)              \
+  REGISTER_GROUP_NORM_BACKWARD_X(                            \
+      T, dY_T, stat_T, gamma_T, dmean_T, drstd_T, uint32_t); \
+  REGISTER_GROUP_NORM_BACKWARD_X(                            \
+      T, dY_T, stat_T, gamma_T, dmean_T, drstd_T, uint64_t);
 
-#define REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(T, stat_T)    \
-  REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(T, stat_T, float);  \
-  REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(T, stat_T, half);   \
-  REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(T, stat_T, bfloat); \
-  REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(T, stat_T, void);
+// Deliberately skip the void, void, void case, which is an invalid input.
+#define REGISTER_GROUP_NORM_BACKWARD_GRADIENT_TYPES(T, stat_T, gamma_T)        \
+  REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(                                    \
+      T, void, stat_T, gamma_T, void, stat_T);                                 \
+  REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(                                    \
+      T, void, stat_T, gamma_T, stat_T, void);                                 \
+  REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(                                    \
+      T, void, stat_T, gamma_T, stat_T, stat_T);                               \
+  REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(T, T, stat_T, gamma_T, void, void); \
+  REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(                                    \
+      T, T, stat_T, gamma_T, void, stat_T);                                    \
+  REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(                                    \
+      T, T, stat_T, gamma_T, stat_T, void);                                    \
+  REGISTER_GROUP_NORM_BACKWARD_INDEX_TYPES(                                    \
+      T, T, stat_T, gamma_T, stat_T, stat_T);
+
+#define REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(T, stat_T)       \
+  REGISTER_GROUP_NORM_BACKWARD_GRADIENT_TYPES(T, stat_T, float);  \
+  REGISTER_GROUP_NORM_BACKWARD_GRADIENT_TYPES(T, stat_T, half);   \
+  REGISTER_GROUP_NORM_BACKWARD_GRADIENT_TYPES(T, stat_T, bfloat); \
+  REGISTER_GROUP_NORM_BACKWARD_GRADIENT_TYPES(T, stat_T, void);
 
 REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(float, float);
 REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(half, float);

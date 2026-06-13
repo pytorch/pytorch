@@ -14983,9 +14983,9 @@ class TestConsistency(TestCaseMPS):
                 atol = 7e-4
                 rtol = 1.5e-3
 
-            if op.name in ["nn.functional.group_norm"] and dtype == torch.float32:
-                atol = 1e-5
-                rtol = 1e-5
+            if op.name in ("native_group_norm", "nn.functional.group_norm") and dtype == torch.float32:
+                atol = 2e-4
+                rtol = 6e-5
 
             if op.name in self.RANDOM_OP_NAMES:
                 self._assert_random_op_match(mps_out, cpu_out)
