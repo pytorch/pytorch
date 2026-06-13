@@ -736,7 +736,8 @@ def full_like(
         return result.to(memory_format=memory_format)
 
     else:
-        assert layout == torch.strided
+        if layout != torch.strided:
+            raise AssertionError(f"expected torch.strided layout, got {layout}")
         if utils.is_non_overlapping_and_dense_or_false(self):
             result = torch.full(
                 self.shape,
@@ -745,9 +746,21 @@ def full_like(
                 layout=layout,
                 device=device,
                 pin_memory=pin_memory,
-                requires_grad=requires_grad,
+                requires_grad=False,
             )
-            return result.as_strided(self.shape, self.stride())
+            if result.stride() != self.stride():
+                empty = torch.empty_strided(
+                    self.shape,
+                    self.stride(),
+                    dtype=dtype,
+                    layout=layout,
+                    device=device,
+                    pin_memory=pin_memory,
+                )
+                result = torch.ops.aten.copy.default(empty, result)
+            if requires_grad:
+                result.requires_grad_(True)
+            return result
 
         shape, permutation = _get_shape_permutation_like(self)
         result = torch.full(
@@ -1290,8 +1303,12 @@ def repeat_interleave_Tensor(
         return NotImplemented
     if repeat.device.type == "mps":
         return NotImplemented
-    assert repeat.dtype in [torch.int32, torch.int64]
-    assert repeat.ndim == 1
+    if repeat.dtype not in [torch.int32, torch.int64]:
+        raise AssertionError(
+            f"expected repeat dtype int32 or int64, got {repeat.dtype}"
+        )
+    if repeat.ndim != 1:
+        raise AssertionError(f"expected repeat.ndim == 1, got {repeat.ndim}")
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
     indices = torch.searchsorted(
@@ -1314,9 +1331,8 @@ def conv1d_to_conv2d(
     # input:  (N, C_in, L_in)
     # weight: (C_out, C_in // groups, K)
     # bias:   (C_out,)
-    assert input.dim() == 3 and weight.dim() == 3, (
-        "Expect (N,C_in,L) and (C_out,C_in//groups,K)"
-    )
+    if not (input.dim() == 3 and weight.dim() == 3):
+        raise AssertionError("Expect (N,C_in,L) and (C_out,C_in//groups,K)")
 
     # pyrefly: ignore [bad-assignment]
     stride = stride[0]
