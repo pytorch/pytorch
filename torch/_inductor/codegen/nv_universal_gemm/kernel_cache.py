@@ -88,32 +88,37 @@ def _get_kernel_cache() -> dict[str, Any]:
     return cache
 
 
-def get_compatible_kernels(
+def partition_compatible_kernels(
     args: Any,
     cc: int,
-    metadata_filter: Callable[[Any], bool] | None = None,
-) -> list[Any]:
-    """Get kernels compatible with the given arguments from the cache."""
+    classifier: Callable[[Any], int],
+    num_buckets: int,
+) -> list[list[Any]]:
+    """Partition compatible kernels into N buckets in a single pass.
+
+    `classifier(metadata)` returns a bucket index in [0, num_buckets-1] or
+    -1 to drop the kernel. This avoids iterating the full kernel cache
+    (~390K entries, each with a non-trivial `supports()` call) once per
+    bucket.
+    """
     cache = _get_kernel_cache()
-    compatible = []
+    buckets: list[list[Any]] = [[] for _ in range(num_buckets)]
     for kernel in cache.values():
         if kernel.metadata.min_cc > cc:
             continue
-
-        if metadata_filter is not None and not metadata_filter(kernel.metadata):
+        bucket = classifier(kernel.metadata)
+        if bucket < 0:
             continue
-
         status = kernel.supports(args)
         if status.error is not None:
             continue
-        compatible.append(kernel)
-
+        buckets[bucket].append(kernel)
     log.debug(
-        "Found %d compatible kernels from cache of %d total",
-        len(compatible),
+        "Partitioned %s compatible kernels from cache of %d total",
+        [len(b) for b in buckets],
         len(cache),
     )
-    return compatible
+    return buckets
 
 
 def get_kernel_by_name(kernel_name: str) -> Any:

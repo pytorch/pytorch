@@ -453,7 +453,7 @@ def _add_nv_gemm_choices_impl(
     _ensure_fp4_dtype_registered()
 
     from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
-        get_compatible_kernels,
+        partition_compatible_kernels,
     )
 
     # Create dummy tensors for cutlass_api's supports() checks.
@@ -504,14 +504,22 @@ def _add_nv_gemm_choices_impl(
         return
     cc_int = int(cc)
 
-    non_efc_kernels = get_compatible_kernels(
-        args, cc_int, metadata_filter=_exclude_efc_kernels
+    # Single-pass partition over the ~390K-entry kernel cache. The two-pass
+    # form below called `kernel.supports(args)` once per bucket -- i.e. twice
+    # per non-EFC-class kernel -- across the full cache.
+    def _classify(metadata) -> int:
+        if _include_efc_kernels_only(metadata):
+            return 1  # efc bucket (with tile_M >= 128)
+        if _exclude_efc_kernels(metadata):
+            return 0  # non-efc bucket
+        # NOTE: tile_M < 128 EFC kernels are dropped due to a cutlass_api
+        # broadcast bug. Tracking: https://github.com/pytorch/pytorch/issues/181901
+        return -1
+
+    non_efc_kernels, efc_kernels = partition_compatible_kernels(
+        args, cc_int, _classify, num_buckets=2
     )
-    if config.epilogue_fusion:
-        efc_kernels = get_compatible_kernels(
-            args, cc_int, metadata_filter=_include_efc_kernels_only
-        )
-    else:
+    if not config.epilogue_fusion:
         efc_kernels = []
     if not non_efc_kernels and not efc_kernels:
         log.debug("No compatible %s kernels found", variant.op_name)
