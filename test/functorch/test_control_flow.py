@@ -8742,7 +8742,7 @@ class GraphModule(torch.nn.Module):
         out_x: "f32[s77, s27]" = while_loop[1];  while_loop = None
 
         gt: "Sym(u2 > 0)" = getitem_4 > 0
-        _check = torch._check(gt);  gt = _check = None
+        _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression u2 > 0 on node 'gt'");  gt = _assert_scalar_default_2 = None
 
         add: "Sym(u2 + 1)" = getitem_4 + 1
 
@@ -8775,11 +8775,11 @@ class GraphModule(torch.nn.Module):
             x_clone: "f32[s77, s27]" = child_1.clone()
 
             ge: "Sym(u1 >= 0)" = unbacked_symint_0 >= 0
-            _check = torch._check(ge);  ge = _check = None
+            _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
 
             size = child_1.size();  child_1 = size = None
             lt: "Sym(u1 < s77)" = unbacked_symint_0 < sym_size_int;  sym_size_int = None
-            _check_1 = torch._check(lt);  lt = _check_1 = None
+            _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < s77 on node 'lt'");  lt = _assert_scalar_default_1 = None
 
             select: "f32[s27]" = x_clone.select(0, unbacked_symint_0)
             select_1: "f32[s27]" = x_clone.select(0, unbacked_symint_0)
@@ -10214,6 +10214,199 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
+    def _check_eager_and_aot_eager_only(self, gen_fn, args, device, dynamic):
+        """Stripped-down version of self.check that runs eager + aot_eager
+        but NOT inductor.
+
+        scan currently only has Steps 1-3 (gen_schema, py_functionalize_impl,
+        Dynamo) wired for input mutation. Step 4 (Inductor MutationOutput
+        emission) is a follow-up; until then the Inductor arm of the full
+        check() helper trips on the un-tracked mutation. This helper exercises
+        everything that IS in place for scan.
+        """
+        args = pytree.tree_map(lambda t: t.to(device=device), args)
+
+        def _clone(args):
+            return [
+                arg.clone() if isinstance(arg, torch.Tensor) else arg for arg in args
+            ]
+
+        def _new_fn():
+            mod_or_fn = gen_fn()
+            if isinstance(mod_or_fn, torch.nn.Module):
+                mod_or_fn.to(device)
+            return mod_or_fn
+
+        cloned_args = [_clone(args) for _ in range(2)]
+        with torch.no_grad():
+            mod0 = _new_fn()
+            exp = mod0(*cloned_args[0])
+        backend = AotEagerAndRecordGraphs()
+        torch._dynamo.reset()
+        with torch.no_grad():
+            mod1 = _new_fn()
+            eager_out = torch.compile(
+                mod1, backend=backend, fullgraph=True, dynamic=dynamic
+            )(*cloned_args[1])
+
+        self.assertEqual(exp, eager_out)
+        self.assertEqual(cloned_args[0], cloned_args[1])
+        for k in mod0._buffers:
+            self.assertTrue(k in mod1._buffers)
+            self.assertEqual(mod0._buffers[k], mod1._buffers[k])
+        return backend.fw_graphs[0]
+
+    @skipIfTorchDynamo()
+    @parametrize("dynamic", [True, False])
+    def test_scan_auto_functionalize_buffer_mutation(self, dynamic):
+        device = "cpu"
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "buf", torch.ones(4, requires_grad=False, device=device)
+                )
+
+            def forward(self, init, xs):
+                def combine_fn(carry, x):
+                    self.buf.add_(x)
+                    return carry + x, carry * x + self.buf.sum()
+
+                return scan(combine_fn, init, xs, dim=0)
+
+        init = torch.zeros(4, requires_grad=False)
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+        fw_gm = self._check_eager_and_aot_eager_only(M, (init, xs), device, dynamic)
+        graph_str = fw_gm.print_readable(print_output=False)
+        self.assertIn("auto_functionalized_v2", graph_str)
+        self.assertIn("torch.ops.higher_order.scan", graph_str)
+
+    @skipIfTorchDynamo()
+    @parametrize("dynamic", [True, False])
+    def test_scan_auto_functionalize_multiple_buffer_mutation(self, dynamic):
+        device = "cpu"
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf1", torch.ones(4, device=device))
+                self.register_buffer("buf2", torch.zeros(4, device=device))
+
+            def forward(self, init, xs):
+                def combine_fn(carry, x):
+                    self.buf1.add_(x)
+                    self.buf2.add_(self.buf1)
+                    return carry + x, carry * x
+
+                return scan(combine_fn, init, xs, dim=0)
+
+        init = torch.zeros(4, requires_grad=False)
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+        fw_gm = self._check_eager_and_aot_eager_only(M, (init, xs), device, dynamic)
+        graph_str = fw_gm.print_readable(print_output=False)
+        self.assertIn("auto_functionalized_v2", graph_str)
+
+    @skipIfTorchDynamo()
+    @parametrize("dynamic", [True, False])
+    def test_scan_auto_functionalize_captured_tensor_mutation(self, dynamic):
+        device = "cpu"
+
+        class M(torch.nn.Module):
+            def forward(self, init, xs, y):
+                def combine_fn(carry, x):
+                    y.add_(-1)
+                    return carry + x, carry * x + y.sum()
+
+                out = scan(combine_fn, init, xs, dim=0)
+                return out[0] + y.sum(), out[1]
+
+        init = torch.zeros(4, requires_grad=False)
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+        y = torch.ones(4, requires_grad=False)
+        fw_gm = self._check_eager_and_aot_eager_only(M, (init, xs, y), device, dynamic)
+        graph_str = fw_gm.print_readable(print_output=False)
+        self.assertIn("auto_functionalized_v2", graph_str)
+
+    def test_scan_init_mutation_graph_breaks(self):
+        def combine_fn(carry, x):
+            carry.add_(1)  # mutating init is disallowed
+            return carry + x, carry * x
+
+        init = torch.zeros(4)
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+
+        def fn(init, xs):
+            return scan(combine_fn, init, xs, dim=0)
+
+        torch._dynamo.reset()
+        with torch.no_grad():
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                r"Higher Order Operator: torch\.ops\.higher_order\.scan",
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(init, xs)
+
+    def test_scan_xs_mutation_graph_breaks(self):
+        def combine_fn(carry, x):
+            x.add_(1)  # mutating xs[t] is disallowed
+            return carry + x, carry * x
+
+        init = torch.zeros(4)
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+
+        def fn(init, xs):
+            return scan(combine_fn, init, xs, dim=0)
+
+        torch._dynamo.reset()
+        with torch.no_grad():
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                r"Higher Order Operator: torch\.ops\.higher_order\.scan",
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(init, xs)
+
+    @skipIfTorchDynamo()
+    @parametrize("dynamic", [True, False])
+    def test_scan_auto_functionalize_partial_buffer_mutation(self, dynamic):
+        device = "cpu"
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf0", torch.zeros(4, device=device))
+                self.register_buffer("buf1", torch.zeros(4, device=device))
+                self.register_buffer("buf2", torch.zeros(4, device=device))
+
+            def forward(self, init, xs):
+                def combine_fn(carry, x):
+                    # Skip buf1 to make non-contiguous mutation set.
+                    self.buf0.add_(x)
+                    self.buf2.add_(x)
+                    return carry + x, carry * x + self.buf1.sum()
+
+                return scan(combine_fn, init, xs, dim=0)
+
+        init = torch.zeros(4, requires_grad=False)
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+        fw_gm = self._check_eager_and_aot_eager_only(M, (init, xs), device, dynamic)
+        graph_str = fw_gm.print_readable(print_output=False)
+        self.assertIn("auto_functionalized_v2", graph_str)
+
+    def test_scan_eager_init_mutation_raises(self):
+        def combine_fn(carry, x):
+            carry.add_(1)
+            return carry + x, carry * x
+
+        init = torch.zeros(4)
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
+        ):
+            scan(combine_fn, init, xs, dim=0)
+
 
 _hop_schema_test_schema_types = [
     "bool",
@@ -10461,108 +10654,39 @@ class TestHopSchema(TestCase):
             """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1) -> (Tensor, Tensor, Tensor, Tensor)""",
         )
 
-    def test_scan_gen_schema_with_additional_input_mutation(self):
-        def combine_fn(carry, x, buf):
-            buf.add_(x)
+    def test_scan_gen_schema_with_mutated_arg_indices_kwarg(self):
+        def combine_fn(carry, x, buf0, buf1):
             return carry + x, carry * x
 
         schema = torch.ops.higher_order.scan.gen_schema(
             combine_fn,
             (torch.randn(3, 4),),
             (torch.randn(5, 3, 4),),
-            (torch.randn(3, 4),),
+            (torch.randn(3, 4), torch.randn(3, 4)),
+            "3",
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor(a3!) additional_input0) -> (Tensor, Tensor)""",
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0, Tensor(a4!) additional_input1) -> (Tensor, Tensor)""",
         )
 
-    def test_scan_gen_schema_with_multiple_additional_input_mutation(self):
-        n_init, n_xs = 1, 1
-
-        def make_combine_fn(n_buf, mutated):
-            def combine_fn(carry, x, *bufs):
-                assert len(bufs) == n_buf  # noqa: S101
-                for i in mutated:
-                    bufs[i].add_(x)
-                return carry + x, carry * x
-
-            return combine_fn
-
-        def expected_schema(n_buf, mutated):
-            mutated_set = set(mutated)
-            parts = []
-            for i in range(n_buf):
-                if i in mutated_set:
-                    # combine_fn occupies arg_idx 0
-                    # then n_init inits
-                    # then n_xs xs
-                    # then additional_inputs
-                    aidx = 1 + n_init + n_xs + i
-                    parts.append(f"Tensor(a{aidx}!) additional_input{i}")
-                else:
-                    parts.append(f"Tensor additional_input{i}")
-            return (
-                "scan(Any combine_fn, Tensor init0, Tensor xs0, "
-                + ", ".join(parts)
-                + ") -> (Tensor, Tensor)"
-            )
-
-        cases = [
-            # 2 buffers: only first, only second (the case aorenste flagged),
-            # and both — covers all non-empty subsets at this size.
-            (2, (0,)),
-            (2, (1,)),
-            (2, (0, 1)),
-            # 3 buffers: only middle, only last, first+last (non-contiguous),
-            # and all — distinguishes start/middle/end positions and mixed
-            # selections that a constant offset would mismatch.
-            (3, (1,)),
-            (3, (2,)),
-            (3, (0, 2)),
-            (3, (0, 1, 2)),
-        ]
-        for n_buf, mutated in cases:
-            with self.subTest(n_buf=n_buf, mutated=mutated):
-                schema = torch.ops.higher_order.scan.gen_schema(
-                    make_combine_fn(n_buf, mutated),
-                    (torch.randn(3, 4),),
-                    (torch.randn(5, 3, 4),),
-                    tuple(torch.randn(3, 4) for _ in range(n_buf)),
-                )
-                self.assertEqual(str(schema), expected_schema(n_buf, mutated))
-
-    def test_scan_gen_schema_init_mutation_raises(self):
-        def combine_fn(carry, x):
-            carry.add_(x)
-            return carry, carry * x
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "For scan, combine_fn can only mutate additional_inputs",
-        ):
-            torch.ops.higher_order.scan.gen_schema(
-                combine_fn,
-                (torch.randn(3, 4),),
-                (torch.randn(5, 3, 4),),
-                (),
-            )
-
-    def test_scan_gen_schema_xs_mutation_raises(self):
-        def combine_fn(carry, x):
-            x.add_(1)
+    def test_scan_gen_schema_multiple_additional_mutation_via_kwarg(self):
+        def combine_fn(carry, x, b0, b1, b2):
+            b1.add_(x)
+            b2.add_(x)
             return carry + x, carry * x
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "For scan, combine_fn can only mutate additional_inputs",
-        ):
-            torch.ops.higher_order.scan.gen_schema(
-                combine_fn,
-                (torch.randn(3, 4),),
-                (torch.randn(5, 3, 4),),
-                (),
-            )
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4),),
+            (torch.randn(5, 3, 4),),
+            (torch.randn(3, 4), torch.randn(3, 4), torch.randn(3, 4)),
+            "3,4",
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0, Tensor(a4!) additional_input1, Tensor(a5!) additional_input2) -> (Tensor, Tensor)""",
+        )
 
     def test_associative_scan_gen_schema_tensor_inputs(self):
         def combine_fn(x, y):
