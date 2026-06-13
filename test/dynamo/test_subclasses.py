@@ -4096,8 +4096,6 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
 
-    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
-    @unittest.expectedFailure
     def test_in_graph_construction_from_intermediate_5(self):
         # non-shared intermediate
         def fn(values):
