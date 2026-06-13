@@ -777,15 +777,40 @@ class BuiltinVariable(BaseBuiltinVariable):
                 # Tensor is None, List is not None, etc
                 none_result = op(object(), None)
 
-                def never(
+                def never_none(
                     tx: "InstructionTranslatorBase",
-                    a: VariableTracker,
-                    b: VariableTracker,
+                    left: VariableTracker,
+                    right: VariableTracker,
                 ) -> VariableTracker:
-                    return VariableTracker.build(tx, none_result)
+                    if (
+                        isinstance(left, ConstantVariable)
+                        and left.as_python_constant() is None
+                    ) or (
+                        isinstance(right, ConstantVariable)
+                        and right.as_python_constant() is None
+                    ):
+                        return VariableTracker.build(tx, none_result)
 
-                obj_op_none = never
-                none_op_obj = never
+                    if isinstance(left, SymNodeVariable) or isinstance(
+                        right, SymNodeVariable
+                    ):
+                        result = None
+                    else:
+                        result = vt_identity_compare(tx, left, right)
+                    if result is None:
+                        unimplemented(
+                            gb_type="unsupported identity comparison",
+                            context=f"{op.__name__}({left}, {right})",
+                            explanation="Dynamo could not prove a guarded result for this identity comparison.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                    is_same = result.as_python_constant()
+                    return VariableTracker.build(
+                        tx, is_same if op.__name__ == "is_" else not is_same
+                    )
+
+                obj_op_none = never_none
+                none_op_obj = never_none
 
                 types_that_are_never_none = (
                     TensorVariable,
@@ -837,9 +862,14 @@ class BuiltinVariable(BaseBuiltinVariable):
                     left: VariableTracker,
                     right: VariableTracker,
                 ) -> VariableTracker | None:
-                    result = vt_identity_compare(left, right)
+                    result = vt_identity_compare(tx, left, right)
                     if result is None:
-                        return None
+                        unimplemented(
+                            gb_type="unsupported identity comparison",
+                            context=f"{op.__name__}({left}, {right})",
+                            explanation="Dynamo could not prove a guarded result for this identity comparison.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
                     is_same = result.as_python_constant()
                     return VariableTracker.build(
                         tx, is_same if op.__name__ == "is_" else not is_same
@@ -2568,7 +2598,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         tx: "InstructionTranslatorBase",
         left: VariableTracker,
         right: VariableTracker,
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
         from .builder import wrap_fx_proxy_cls
         from .tensor import supported_tensor_comparison_op_values
 
@@ -2581,10 +2611,18 @@ class BuiltinVariable(BaseBuiltinVariable):
                 and id(extract_fake_example_value(left.as_proxy().node))
                 == id(extract_fake_example_value(right.as_proxy().node))
             )
-            if op is operator.is_:
-                return VariableTracker.build(tx, is_result)
-            else:
-                return VariableTracker.build(tx, not is_result)
+            if left.is_tensor() and right.is_tensor():
+                if op is operator.is_:
+                    return VariableTracker.build(tx, is_result)
+                else:
+                    return VariableTracker.build(tx, not is_result)
+            result = vt_identity_compare(tx, left, right)
+            if result is not None:
+                is_same = result.as_python_constant()
+                return VariableTracker.build(
+                    tx, is_same if op is operator.is_ else not is_same
+                )
+            return None
 
         if op not in supported_tensor_comparison_op_values:
             unimplemented(
@@ -2630,6 +2668,25 @@ class BuiltinVariable(BaseBuiltinVariable):
         from .tensor import supported_tensor_comparison_op_values
 
         op = self.fn
+
+        if op in (operator.is_, operator.is_not):
+            non_symnode = right if isinstance(left, SymNodeVariable) else left
+            if not isinstance(non_symnode, (SymNodeVariable, ConstantVariable)):
+                result = vt_identity_compare(tx, left, right)
+                if result is not None:
+                    is_same = result.as_python_constant()
+                    return VariableTracker.build(
+                        tx, is_same if op is operator.is_ else not is_same
+                    )
+            elif left is right:
+                return VariableTracker.build(tx, op is operator.is_)
+
+            unimplemented(
+                gb_type="unsupported identity comparison",
+                context=f"{op.__name__}({left}, {right})",
+                explanation="Dynamo could not prove a guarded result for this identity comparison.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         if op not in supported_tensor_comparison_op_values:
             unimplemented(
