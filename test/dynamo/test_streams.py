@@ -2481,6 +2481,60 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(actual_default, default_s.cuda_stream)
 
 
+class TestStreamsEventTracingUnderProxyMode(torch._dynamo.test_case.TestCase):
+    """``Event.record(stream)`` and ``Stream.wait_event(event)`` must
+    produce ``torch.ops.streams.{record,wait}_event`` FX nodes whenever
+    the call happens while an fx proxy tracer is active, including the
+    case where the call is plain eager Python rather than dynamo
+    bytecode being traced.
+
+    Bytecode tracing already produces these nodes via
+    ``EventVariable.call_method`` / ``StreamVariable.call_method``.
+    The gap that ``maybe_emit_streams_op_proxy`` closes is when a
+    proxy tracer is live but the surrounding Python call is *not*
+    being bytecode-traced.  The canonical example is a function
+    traced by :func:`torch.fx.experimental.proxy_tensor.make_fx`
+    directly: ``make_fx`` installs a proxy tracer plus a
+    ``FakeTensorMode`` and then invokes the user function as ordinary
+    Python, with no dynamo bytecode tracer in the mix.  Any
+    ``Event.record(stream)`` call inside that user function lands
+    here.
+    """
+
+    @requires_cuda
+    def test_record_wait_under_make_fx(self) -> None:
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def f(x):
+            evt = torch.cuda.Event()
+            cur = torch.cuda.current_stream()
+            evt.record(cur)
+            cur.wait_event(evt)
+            return torch.relu(x)
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(8, device="cuda"))
+        record_op = torch.ops.streams.record_event.default
+        wait_op = torch.ops.streams.wait_event.default
+        record_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target is record_op
+        ]
+        wait_nodes = [
+            n for n in gm.graph.nodes if n.op == "call_function" and n.target is wait_op
+        ]
+        self.assertEqual(
+            len(record_nodes),
+            1,
+            f"expected 1 streams.record_event node in:\n{gm.graph}",
+        )
+        self.assertEqual(
+            len(wait_nodes),
+            1,
+            f"expected 1 streams.wait_event node in:\n{gm.graph}",
+        )
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
