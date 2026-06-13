@@ -154,7 +154,7 @@ std::vector<std::shared_ptr<ModuleType>> replicate(
     replicas.push_back(
         std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }
-  // Configure gradient edges to point from replcia parameters to original
+  // Configure gradient edges to point from replica parameters to original
   // module parameters. See [Replicating Modules]
   replicate_grad_edges(module, replicas, devices);
   return replicas;
