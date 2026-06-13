@@ -593,6 +593,17 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       set(XNNPACK_BUILD_WITH_LIBM OFF CACHE BOOL "")
     endif()
 
+    # Rename XNNPACK's "memory" OBJECT target to "xnnpack-memory" to avoid
+    # collision with abseil-cpp's "memory" INTERFACE target.
+    file(READ "${XNNPACK_SOURCE_DIR}/CMakeLists.txt" _xnnpack_cmake)
+    string(REPLACE "ADD_LIBRARY(memory OBJECT" "ADD_LIBRARY(xnnpack-memory OBJECT" _xnnpack_cmake "${_xnnpack_cmake}")
+    string(REPLACE "SET_TARGET_PROPERTIES(memory " "SET_TARGET_PROPERTIES(xnnpack-memory " _xnnpack_cmake "${_xnnpack_cmake}")
+    string(REPLACE "TARGET_LINK_LIBRARIES(memory " "TARGET_LINK_LIBRARIES(xnnpack-memory " _xnnpack_cmake "${_xnnpack_cmake}")
+    string(REPLACE "TARGET_INCLUDE_DIRECTORIES(memory " "TARGET_INCLUDE_DIRECTORIES(xnnpack-memory " _xnnpack_cmake "${_xnnpack_cmake}")
+    string(REPLACE " memory " " xnnpack-memory " _xnnpack_cmake "${_xnnpack_cmake}")
+    string(REPLACE " memory)" " xnnpack-memory)" _xnnpack_cmake "${_xnnpack_cmake}")
+    file(WRITE "${XNNPACK_SOURCE_DIR}/CMakeLists.txt" "${_xnnpack_cmake}")
+
     add_subdirectory(
       "${XNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
@@ -1403,6 +1414,9 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   endif()
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
   set(Python3_EXECUTABLE "${Python_EXECUTABLE}")
+  # Tell ONNX that protobuf was built locally so it skips export() calls
+  # that fail when libprotobuf is in a different export set.
+  set(Build_Protobuf ON)
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
   endif()
