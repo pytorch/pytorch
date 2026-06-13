@@ -40,7 +40,7 @@ for name in dir(return_types):
 
     if not name.startswith("_"):
         # pyrefly: ignore [unresolvable-dunder-all]
-        __all__.append(name)
+        __all__ += [name]  # noqa: PLE0604
         all_return_types.append(_attr)
 
     # Today everything in torch.return_types is a structseq, aka a "namedtuple"-like

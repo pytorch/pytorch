@@ -794,7 +794,7 @@ for name in math_op_names:
     METHOD_TO_OPERATOR[sym_name] = getattr(torch, priv_sym_name)
     unary_magic_methods.add(sym_name)
     # pyrefly: ignore [unresolvable-dunder-all]
-    __all__.append(sym_name)
+    __all__ += [sym_name]  # noqa: PLE0604
 
 
 # Unary methods that are not magic methods

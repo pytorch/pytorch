@@ -51,7 +51,8 @@ def _apply_docstring_templates(func: Callable[_P, _T]) -> Callable[_P, _T]:
         func.__doc__ = doc_string
 
     # Expose function as public symbol
-    __all__.append(func.__name__)
+    global __all__
+    __all__ += [func.__name__]
 
     return func
 
