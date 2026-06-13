@@ -5530,7 +5530,7 @@ class Scheduler:
                                 ms_fused_choice = choice
                     multi_node._choice_timings[hint_override] = new_timings
                     if ms_fused_choice is not None:
-                        assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
+                        assert isinstance(ms_fused_choice, TritonTemplateCallerBase)  # noqa: S101
                         hint_override_best_fusion_choice[hint_override] = (
                             ms_fused_choice
                         )
