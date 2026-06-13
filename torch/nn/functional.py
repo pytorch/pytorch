@@ -3067,6 +3067,12 @@ def local_response_norm(
         raise ValueError(
             f"Expected 3D or higher dimensionality                          input (got {dim} dimensions)"
         )
+    if k <= 0 and alpha <= 0 and beta != 0:
+        raise ValueError(
+            f"k ({k}) and alpha ({alpha}) cannot both be non-positive "
+            f"when beta ({beta}) is non-zero, "
+            "as this would make the normalization denominator zero"
+        )
 
     if input.numel() == 0:
         return input
