@@ -56,6 +56,8 @@ def make_halide(cls):
         (config, "halide.scan_kernels", True),
         (config, "cpu_backend", "halide"),
         (config, "cuda_backend", "halide"),
+        (config, "test_configs.runtime_triton_dtype_assert", False),
+        (config, "test_configs.runtime_triton_shape_assert", False),
         xfail_prop="_expected_failure_halide",
     )
 
@@ -274,6 +276,21 @@ class HalideTests(TestCase):
                 torch.randn(1024, 1024, device="cuda"),
             )
             self.assertIn("@hl.generator", code)
+
+    def test_inplace_add_broadcast_input_alias(self):
+        @torch.compile(backend="inductor", options={"cpu_backend": "halide"})
+        def fn(x, y):
+            return x.add_(y)
+
+        x = torch.ones([2, 12, 13, 17]).transpose(1, 2)
+        y = torch.ones([2, 13, 1, 17])
+        expected = x.clone()
+        expected.add_(y)
+
+        result = fn(x, y)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(x, expected)
 
 
 if test_torchinductor.HAS_CPU and HAS_HALIDE:
