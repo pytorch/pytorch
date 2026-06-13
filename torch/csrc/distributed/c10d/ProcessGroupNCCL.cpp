@@ -58,7 +58,11 @@ inline bool isUnsupportedFloat8(at::ScalarType t) {
   return (
       t == at::ScalarType::Float8_e5m2fnuz ||
       t == at::ScalarType::Float8_e4m3fnuz ||
-      t == at::ScalarType::Float8_e8m0fnu);
+      t == at::ScalarType::Float8_e8m0fnu
+#ifndef NCCL_SUPPORTS_FP8
+      || t == at::ScalarType::Float8_e5m2 || t == at::ScalarType::Float8_e4m3fn
+#endif
+  );
 }
 
 template <typename T, ncclDataType_t dataType>
@@ -934,6 +938,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  TORCH_CHECK(
+      !options_->enable_reconfigure,
+      "ProcessGroupNCCL does not support enable_reconfigure "
+      "(reconfigure-based fault tolerance).");
 
   // getNcclVersion needs to get called before launching threads which can
   // potentially call getenv. getNcclVersion internally calls setenv to set some
@@ -1870,10 +1878,11 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
         lastTimePollStore = currentTime;
         auto handleError = [&](const std::string& errorMessage) {
           LOG(WARNING)
-              << pg_->logPrefix()
-              << "Failed to check the \"should dump\" flag on TCPStore, "
-              << "(maybe TCPStore server has shut down too early), with error: "
-              << errorMessage;
+              << pg_->logPrefix() << "TCPStore check for dump key \""
+              << kStoreDumpKey
+              << "\" failed (store unavailable, not absent key). Cannot detect "
+              << "remote dump signals. A rank exiting outside NCCL without "
+              << "broadcasting is a separate case. Error: " << errorMessage;
           // We give up for now assuming TCPStore has been torn down.
           return;
         };
@@ -5942,6 +5951,7 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   return tensor;
 }
 
+#ifdef NCCL_HAS_COMM_SHRINK
 c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
     const std::vector<int64_t>& ranks_to_exclude,
     int shrink_flags,
@@ -6036,6 +6046,21 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
 
   return c10::static_intrusive_pointer_cast<Backend>(new_pg);
 }
+
+#else // !NCCL_HAS_COMM_SHRINK
+// Backend interface override: raise consistent error when shrink is
+// unsupported.
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
+    const std::vector<int64_t>& /*ranks_to_exclude*/,
+    int /*shrink_flags*/,
+    const c10::intrusive_ptr<Backend::Options>& /*opts_override*/) {
+  TORCH_CHECK(
+      false,
+      "ProcessGroupNCCL::shrink requires NCCL version 2.27.0 or later, "
+      "but PyTorch was built with an older version or without NCCL shrink support.");
+}
+
+#endif // NCCL_HAS_COMM_SHRINK
 
 void ProcessGroupNCCL::initializeDeviceStateForComm(
     const at::Device& device,
