@@ -2676,6 +2676,17 @@
       ]
     }
   ],
+  "GB5491": [
+    {
+      "Gb_type": "Failed to mutate tensor data attribute across devices with different shape/strides",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo only supports cross-device `.data` mutation when shape and strides match",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    }
+  ],
   "GB0188": [
     {
       "Gb_type": "getattr with no source",

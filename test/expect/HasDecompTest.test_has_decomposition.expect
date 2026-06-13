@@ -1193,6 +1193,7 @@ aten::set_
 aten::set_.source_Storage
 aten::set_.source_Storage_storage_offset
 aten::set_.source_Tensor
+aten::shallow_copy_data_
 aten::slice_copy.Tensor
 aten::slice_copy.Tensor_out
 aten::slice_inverse

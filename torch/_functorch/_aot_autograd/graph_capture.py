@@ -123,6 +123,14 @@ def _create_graph(
             _allow_token_discovery=True,
         )
 
+    # TODO(#186860): Handle shallow_copy_data_ in ProxyTensor following
+    # how t_() works, instead of this save/restore workaround.
+    original_fake_devices = {
+        i: arg.fake_device
+        for i, arg in enumerate(args)
+        if isinstance(arg, torch.Tensor) and hasattr(arg, "fake_device")
+    }
+
     with (
         enable_python_dispatcher(),
         ctx,
@@ -134,6 +142,22 @@ def _create_graph(
             pre_dispatch=aot_config.pre_dispatch,
             _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
         )(*args)
+
+        # Restore FakeTensor devices on args and placeholder nodes that
+        # may have been mutated by in-graph shallow_copy_data_().
+        if original_fake_devices:
+            for i, device in original_fake_devices.items():
+                if args[i].fake_device != device:  # pyrefly: ignore[missing-attribute]
+                    args[i].fake_device = device  # pyrefly: ignore[missing-attribute]
+            arg_idx = 0
+            for node in fx_g.graph.nodes:
+                if node.op != "placeholder":
+                    break
+                ev = node.meta.get("val", None)
+                if ev is not None and hasattr(ev, "fake_device"):
+                    if arg_idx in original_fake_devices:
+                        ev.fake_device = original_fake_devices[arg_idx]
+                    arg_idx += 1
 
         if args_descs is not None:
             flat_args_descs, _ = pytree.tree_flatten(args_descs)

@@ -681,7 +681,10 @@ class _RuntimeForwardEpilogue:
                         )
                     updated_inpt = updated_inpt.alias
                 with torch.no_grad():
-                    original_inpt.set_(updated_inpt)
+                    if original_inpt.device != updated_inpt.device:
+                        torch.ops.aten.shallow_copy_data_(original_inpt, updated_inpt)
+                    else:
+                        original_inpt.set_(updated_inpt)
                 continue
             if meta.mutates_metadata and not meta.mutates_data:
                 if self.trace_joint:

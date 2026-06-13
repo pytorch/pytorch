@@ -1747,6 +1747,23 @@ def forward(self, x_1):
         self.checkType(r3, "cpu", (4, 4))
         self.checkType(out, "cpu", (4, 4))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_aten_set_data_multi_device(self):
+        with FakeTensorMode():
+            x1 = torch.rand(4, device="cpu")
+            x2 = torch.rand(4, device="cuda")
+            # cpu -> cuda
+            torch.ops.aten.shallow_copy_data_(x1, x2)
+            self.checkType(x1, "cuda", (4,))
+            # cuda -> cpu
+            x3 = torch.rand(4, device="cuda")
+            x4 = torch.rand(4, device="cpu")
+            torch.ops.aten.shallow_copy_data_(x3, x4)
+            self.checkType(x3, "cpu", (4,))
+
     def test__adaptive_avg_pool2d_backward(self):
         with FakeTensorMode():
             grad_out = torch.rand(2, 3, 4, 4)
