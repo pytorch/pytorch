@@ -9,7 +9,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast, Protocol, TYPE_CHECKING, TypeGuard
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import torch
 from torch import Tensor
@@ -519,15 +519,11 @@ class ViewMetaSequence:
         return self
 
 
-class _HasAsTuple(Protocol):
-    def as_tuple(self) -> tuple[object, ...]: ...
-
-
 def _view_meta_signature(
     view_meta_sequence: ViewMetaSequence,
 ) -> tuple[tuple[type[object], tuple[object, ...]], ...]:
     return tuple(
-        (type(view_meta), cast(_HasAsTuple, view_meta).as_tuple())
+        (type(view_meta), view_meta.as_tuple())
         for view_meta in view_meta_sequence.sequence
     )
 
