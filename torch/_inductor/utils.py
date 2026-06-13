@@ -1081,7 +1081,7 @@ def get_kernel_metadata(
                     continue
                 if hasattr(n.read_writes, "reads") and n.read_writes.reads is not None:
                     for r in n.read_writes.reads:
-                        # Remove the dupricated inputs
+                        # Remove the duplicated inputs
                         if r.name in all_reads:
                             continue
                         all_reads.add(r.name)

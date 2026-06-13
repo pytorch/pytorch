@@ -50,7 +50,7 @@ def _get_view_type(tgt: object) -> _ViewType:
 
 # Stores a bunch of metadata related to functionalization each node.
 # Relevant metadata:
-# n.meta['fake_result']: FakeTensor (same type as the output of the node, but with FakeTenors instead of Tensors)
+# n.meta['fake_result']: FakeTensor (same type as the output of the node, but with FakeTensors instead of Tensors)
 #   The fake tensor output from running the current node
 # n.meta['view_of']: Node
 #   If the current node n is a view of some base tensor, the 'view_of' field tells us which

@@ -170,7 +170,7 @@ class _ExportPackage:
 
     This design allows users to decouple the exported callables from the actual sample inputs which can
     be helpful for use cases where the exported callable is hidden behind helper functions or when sample
-    inpusts are hard to get.
+    inputs are hard to get.
 
     NOTE: This is an experimental API and anything can be changed in the future.
 
@@ -246,7 +246,7 @@ class _ExportPackage:
         A "fallback" is exported when no overload precondition matches a given set of sample
         inputs. Overloads should
         Fallbacks don't have names and are ordered in a list. It's up to a backend to decide
-        which fallback is used amony multiple ones.
+        which fallback is used among multiple ones.
 
         A reference backend implementation of ExportMethod may look like the following:
         ```
