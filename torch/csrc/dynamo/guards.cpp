@@ -5707,29 +5707,39 @@ class SetGetItemGuardAccessor : public GuardAccessor {
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
 
-    PyObject* lst = PySequence_List(obj);
+    PyObject* lst = to_list(obj);
+    if (lst == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
     PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
-    Py_XDECREF(lst);
     if (x == nullptr) {
+      Py_DECREF(lst);
       PyErr_Clear();
       return false;
     }
     bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(lst);
     return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
 
-    PyObject* lst = PySequence_List(obj);
+    PyObject* lst = to_list(obj);
+    if (lst == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(false, 0);
+    }
     PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
-    Py_XDECREF(lst);
 
     if (x == nullptr) {
+      Py_DECREF(lst);
       PyErr_Clear();
       return GuardDebugInfo(false, 0);
     }
     GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(lst);
     return result;
   }
 
@@ -5756,6 +5766,24 @@ class SetGetItemGuardAccessor : public GuardAccessor {
   }
 
  private:
+  static PyObject* to_list(PyObject* obj) {
+    PyObject* iterator = nullptr;
+    if (PySet_Check(obj)) {
+      iterator = PySet_Type.tp_iter(obj);
+    } else if (PyFrozenSet_Check(obj)) {
+      iterator = PyFrozenSet_Type.tp_iter(obj);
+    } else {
+      return PySequence_List(obj);
+    }
+
+    if (iterator == nullptr) {
+      return nullptr;
+    }
+    PyObject* result = PySequence_List(iterator);
+    Py_DECREF(iterator);
+    return result;
+  }
+
   Py_ssize_t _index{-1};
 };
 
