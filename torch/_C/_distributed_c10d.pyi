@@ -203,6 +203,57 @@ class AllToAllOptions:
     timeout: timedelta
     asyncOp: bool
 
+class ReconfigureOptions:
+    uuid: int
+    handles: set[str] | list[str]
+    timeout: timedelta | None
+    hints: dict[str, str]
+
+class PutOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class SignalOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class WaitSignalOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class WindowAccessType(Enum):
+    UNIFIED = ...
+    SEPARATE = ...
+
+class WindowAttr:
+    access_type: WindowAccessType
+
+class Window:
+    def tensor_register(self, tensor: Tensor, owning: bool = ...) -> None: ...
+    def tensor_deregister(self) -> None: ...
+    def put(
+        self,
+        tensor: Tensor,
+        dst_rank: int,
+        target_offset_nelems: int,
+        async_op: bool,
+        opts: PutOptions = ...,
+    ) -> Work: ...
+    def map_remote_tensor(self, rank: int) -> Tensor: ...
+    def signal(
+        self,
+        peer_rank: int,
+        async_op: bool,
+        opts: SignalOptions = ...,
+    ) -> Work: ...
+    def wait_signal(
+        self,
+        peer_rank: int,
+        async_op: bool,
+        opts: WaitSignalOptions = ...,
+    ) -> Work: ...
+    def get_attr(self, peer_rank: int) -> WindowAttr: ...
+
 class Store:
     def set(self, key: str, value: str) -> None: ...
     def get(self, key: str) -> bytes: ...
@@ -324,6 +375,7 @@ class Backend:
         global_ranks_in_group: list[int]
         group_name: GroupName
         use_pg_for_symm_mem_rendezvous: bool
+        enable_reconfigure: bool
 
     def __init__(
         self,
@@ -336,6 +388,13 @@ class Backend:
     def supports_coalescing(self) -> bool: ...
     @property
     def supports_time_estimate(self) -> bool: ...
+    @property
+    def supports_reconfigure(self) -> bool: ...
+    def get_reconfigure_handle(self) -> str: ...
+    def reconfigure(self, opts: ReconfigureOptions) -> Work: ...
+    @property
+    def supports_window(self) -> bool: ...
+    def new_window(self, tensor: Tensor | None = None) -> Window: ...
     def set_timeout(self, timeout: timedelta) -> None: ...
     @property
     def options(self) -> Options: ...
@@ -398,6 +457,13 @@ class ProcessGroup:
     def abort(self) -> None: ...
     def set_timeout(self, timeout: timedelta) -> None: ...
     def shutdown(self) -> None: ...
+    @property
+    def supports_reconfigure(self) -> bool: ...
+    def get_reconfigure_handle(self) -> str: ...
+    def reconfigure(self, opts: ReconfigureOptions) -> Work: ...
+    @property
+    def supports_window(self) -> bool: ...
+    def new_window(self, tensor: Tensor | None = None) -> Window: ...
     @overload
     def broadcast(
         self,
@@ -711,6 +777,7 @@ class ProcessGroupGloo(Backend):
         rank: int,
         size: int,
         timeout: timedelta,
+        enable_reconfigure: bool = ...,
     ) -> None: ...
     @staticmethod
     def create_device(hostname="", interface="", lazy_init=None) -> Device: ...
@@ -840,6 +907,42 @@ def _register_external_nccl_comm(
     group_name: str, comm_ptr: int, device: torch.device
 ) -> None: ...
 def _unregister_external_nccl_comm(group_name: str, device: torch.device) -> None: ...
+
+# NCCL EP (contrib/nccl_ep) bindings; only registered in USE_C10D_NCCL builds.
+class _NcclEpGroup:
+    @staticmethod
+    def create(
+        pg: ProcessGroup,
+        num_experts: int,
+        max_dispatch_tokens_per_rank: int,
+        max_recv_tokens_per_rank: int,
+        max_token_bytes: int,
+    ) -> _NcclEpGroup: ...
+
+class _NcclEpHandle:
+    @staticmethod
+    def create(
+        group: _NcclEpGroup,
+        topk_idx: Tensor,
+        recv_expert_counter: Tensor | None = None,
+    ) -> _NcclEpHandle: ...
+    def get_num_recv_tokens(self) -> int: ...
+
+# handle is Any: the Python layer (torch.distributed._token_switch.Routing)
+# holds it opaquely as `object`, so callers don't carry the concrete type.
+def _nccl_ep_dispatch(
+    handle: Any,
+    tokens: Tensor,
+    topk_weights: Tensor,
+    out_tokens: Tensor,
+    out_topk_weights: Tensor,
+    out_topk_idx: Tensor,
+) -> None: ...
+def _nccl_ep_combine(
+    handle: Any,
+    expert_tokens: Tensor,
+    out_tokens: Tensor,
+) -> None: ...
 
 class _SymmetricMemory:
     @staticmethod
