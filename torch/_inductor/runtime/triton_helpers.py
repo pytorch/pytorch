@@ -147,6 +147,15 @@ def is_floating(x):
 
 
 @triton.jit
+def signbit(x):
+    idtype: tl.constexpr = tl.core.get_int_dtype(
+        x.dtype.primitive_bitwidth, signed=False
+    )
+    sign_mask: tl.constexpr = 1 << (x.dtype.primitive_bitwidth - 1)
+    return (x.to(idtype, bitcast=True) & sign_mask) != 0
+
+
+@triton.jit
 def _prod_accumulate(a, b):
     return a * b
 
@@ -160,6 +169,8 @@ def prod(input, axis):
 def minimum(a, b):
     mask = a < b
     if is_floating(a):
+        both_zero = (a == 0.0) & (b == 0.0)
+        mask |= both_zero & signbit(a)
         mask |= a != a
     return tl.where(mask, a, b)
 
@@ -168,6 +179,8 @@ def minimum(a, b):
 def maximum(a, b):
     mask = a > b
     if is_floating(a):
+        both_zero = (a == 0.0) & (b == 0.0)
+        mask |= both_zero & ~signbit(a)
         mask |= a != a
     return tl.where(mask, a, b)
 
