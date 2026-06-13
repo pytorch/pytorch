@@ -426,7 +426,7 @@ std::string AliasDb::getElementName(const Element* e) const {
       ss << '%' << v->debugName() << ", ";
     }
     ss << ')';
-    return ss.str();
+    return std::move(ss).str();
   }
 }
 
@@ -518,7 +518,7 @@ std::string AliasDb::toGraphviz() const {
         ss << "\\%" << v->debugName() << ", ";
       }
       ss << ")\"";
-      return ss.str();
+      return std::move(ss).str();
     }
   };
 
@@ -626,7 +626,7 @@ void AliasDb::analyzeImpl(Node* node) {
           node->kind().toDisplayString(),
           " but it isn't a special case.  ",
           "Argument types: ",
-          oss.str());
+          std::move(oss).str());
     }
   }
 
