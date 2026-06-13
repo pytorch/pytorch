@@ -195,7 +195,7 @@ def is_bf16_supported(including_emulation: bool = True):
     if torch.version.hip:
         return True
 
-    # If CUDA is not available, than it does not support bf16 either
+    # If CUDA is not available, then it does not support bf16 either
     if not is_available():
         return False
 
@@ -1664,6 +1664,7 @@ def _get_rng_state_offset(device: int | str | torch.device = "cuda") -> int:
 
 # pyrefly: ignore [deprecated]
 from .memory import *  # noqa: F403
+from .memory import _use_uvm
 from .random import *  # noqa: F403
 
 

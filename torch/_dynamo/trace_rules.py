@@ -216,10 +216,16 @@ manual_torch_name_rule_map: dict[
     "torch.cuda.get_rng_state": SkipFunctionVariable,
     "torch.set_rng_state": SkipFunctionVariable,
     "torch.cuda.set_rng_state": SkipFunctionVariable,
+    "torch.cuda.manual_seed": SkipFunctionVariable,
+    "torch.cuda.manual_seed_all": SkipFunctionVariable,
+    "torch.cuda.random.manual_seed": SkipFunctionVariable,
+    "torch.cuda.random.manual_seed_all": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/107187
     "torch.manual_seed": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/93501
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
+    # https://github.com/pytorch/pytorch/issues/162374
+    "torch.nn.utils.rnn.pad_packed_sequence": SkipFunctionVariable,
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch.nn.Buffer": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
@@ -250,6 +256,8 @@ manual_torch_name_rule_map: dict[
     "torch.cuda.set_device": SkipFunctionVariable,
     "torch.cuda.current_device": TorchInGraphFunctionVariable,
     "torch.autograd.grad": TorchInGraphFunctionVariable,
+    "torch.autograd.grad_mode._enter_inference_mode": TorchInGraphFunctionVariable,
+    "torch.autograd.grad_mode._exit_inference_mode": TorchInGraphFunctionVariable,
     "torch.autograd.backward": SkipFunctionVariable,
     "torch.distributions.constraints.is_dependent": SkipFunctionVariable,
     "torch.jit.isinstance": SkipFunctionVariable,
@@ -323,6 +331,7 @@ manual_torch_name_rule_map: dict[
     "torch.autograd.forward_ad.exit_dual_level": UserFunctionVariable,
     "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
+    "torch.autograd.graph.region_activation_memory_budget": UserFunctionVariable,
     # functorch/linearize
     "torch._functorch.eager_transforms.linearize": FunctorchHigherOrderVariable,
     # functorch/jacfwd
@@ -374,6 +383,7 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch._dynamo.bytecode_debugger.breakpoint": UserFunctionVariable,
     "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
+    "torch._dynamo.disable_nested_graph_breaks": UserFunctionVariable,
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
     "torch._dynamo.override_cudagraphs": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
@@ -1864,7 +1874,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.channel_shuffle",
         "torch.cholesky_inverse",
         "torch.cholesky_solve",
-        "torch.cholesky",
         "torch.choose_qparams_optimized",
         "torch.chunk",
         "torch.clamp_",
@@ -2492,7 +2501,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.accelerator.is_available",
         "torch.accelerator.set_stream",
         "torch.accelerator.synchronize",
-        "torch.align_tensors",
         "torch.amp.autocast_mode.autocast_decorator",
         "torch.amp.autocast_mode.custom_bwd",
         "torch.amp.autocast_mode.custom_fwd",
@@ -2535,8 +2543,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.autograd.functional.jvp",
         "torch.autograd.functional.vhp",
         "torch.autograd.functional.vjp",
-        "torch.autograd.grad_mode._enter_inference_mode",
-        "torch.autograd.grad_mode._exit_inference_mode",
         "torch.autograd.graph._get_sid",
         "torch.autograd.graph._get_tid",
         "torch.autograd.graph.allow_mutation_on_saved_tensors",
@@ -2740,8 +2746,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.profiler.stop",
         "torch.cuda.random.get_rng_state_all",
         "torch.cuda.random.initial_seed",
-        "torch.cuda.random.manual_seed_all",
-        "torch.cuda.random.manual_seed",
         "torch.cuda.random.seed_all",
         "torch.cuda.random.seed",
         "torch.cuda.random.set_rng_state_all",
@@ -3106,6 +3110,19 @@ def get_tensor_method() -> frozenset[Any]:
     s = set()
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
+        if (
+            isinstance(
+                method,
+                (
+                    types.MethodDescriptorType,
+                    types.WrapperDescriptorType,
+                    types.BuiltinFunctionType,
+                ),
+            )
+            and name not in disallowed_tensor_methods
+        ):
+            s.add(method)
+    for name, method in torch._C.TensorBase.__dict__.items():
         if (
             isinstance(
                 method,
@@ -3502,6 +3519,7 @@ MOD_INLINELIST = [
     "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
+    "torch.ao.quantization.fx._decomposed",
     "torch.autograd.function",
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
@@ -3581,7 +3599,6 @@ MOD_SKIPLIST = [
     "torch._logging",
     "torch._lowrank",
     "torch._meta_registrations",
-    "torch._namedtensor_internals",
     "torch._numpy",
     "torch._ops",
     "torch._prims",

@@ -366,6 +366,27 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             onnx_program, args=(torch.randn(3, 3, 4, dtype=torch.float),)
         )
 
+    def test_dynamic_shape_bilstm_batch_first(self):
+        class BiLSTM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(4, 3, batch_first=True, bidirectional=True)
+
+            def forward(self, x):
+                out, _ = self.lstm(x)
+                return out
+
+        time = torch.export.Dim("time")
+        onnx_program = self.export(
+            BiLSTM(),
+            (torch.randn(2, 5, 4),),
+            input_names=["x"],
+            dynamic_shapes={"x": {1: time}},
+            optimize=False,
+        )
+        self.assertEqual(onnx_program.model.graph.inputs[0].shape[1].value, "time")
+        onnx_testing.assert_onnx_program(onnx_program, args=(torch.randn(2, 7, 4),))
+
     def test_export_with_specialized_input_during_tracing(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -829,6 +850,84 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_program = self.export(ComplexInitModel(), (x,))
         onnx_testing.assert_onnx_program(onnx_program)
 
+    def test_adaptive_max_pool2d_global_pooling(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool2d((1, 1))
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 8, 8)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_adaptive_max_pool2d_evenly_divisible(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool2d((2, 2))
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 4, 4)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_adaptive_max_pool3d_global_pooling(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool3d((1, 1, 1))
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 4, 4, 4)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_adaptive_max_pool3d_evenly_divisible(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool3d((2, 2, 2))
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 4, 4, 4)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_adaptive_max_pool1d_global_pooling(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool1d(1)
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 8)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_adaptive_max_pool1d_evenly_divisible(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool1d(2)
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 4)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
 
 @common_utils.instantiate_parametrized_tests
 class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
@@ -967,6 +1066,57 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         # Verify the output is correct
         onnx_testing.assert_onnx_program(onnx_program, args=(x, y))
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_onnx_export_invoke_subgraph_with_lifted_tensor_constant(self):
+        # Covers the full decoder-style pipeline: a region wrapped in
+        # ``nested_compile_region`` that captures an inline tensor constant,
+        # repeated several times so the region is materialized as an
+        # invoke_subgraph HOP with a shared ``repeated_subgraph0`` submodule.
+        # Exercises the decomposition / verifier / named_buffers /
+        # FunctionalTensor / ONNX initializer paths end-to-end.
+        @torch.compiler.nested_compile_region
+        def block(x):
+            w = torch.tensor([1.0, 2.0, 3.0, 4.0])
+            return x * w + 1.0
+
+        class RepeatedBlockModel(torch.nn.Module):
+            def forward(self, x):
+                x = block(x)
+                x = block(x)
+                x = block(x)
+                return x
+
+        x = torch.randn(4)
+
+        onnx_program = self.export(RepeatedBlockModel(), (x,), optimize=False)
+
+        # Regardless of whether the subgraph is preserved as an ONNX function
+        # or inlined by the version converter, the lifted tensor constant must
+        # be self-contained in the exported model: no ONNX function should
+        # silently reference a root-graph initializer from its outer scope
+        # (which is invalid ONNX and was the bug being fixed).
+        root_initializer_names = {
+            initializer.name
+            for initializer in onnx_program.model.graph.initializers.values()
+        }
+        for function in onnx_program.model.functions.values():
+            function_value_names = {value.name for value in function.inputs}
+            for node in function:
+                for input_value in node.inputs:
+                    if input_value is None:
+                        continue
+                    if (
+                        input_value.name in root_initializer_names
+                        and input_value.name not in function_value_names
+                    ):
+                        self.fail(
+                            f"ONNX function {function.name} captures root graph "
+                            f"initializer {input_value.name}"
+                        )
+                function_value_names.update(
+                    output.name for output in node.outputs if output is not None
+                )
 
 
 if __name__ == "__main__":

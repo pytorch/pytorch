@@ -14,7 +14,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
-#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 namespace at {
@@ -87,7 +88,7 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
   @autoreleasepool {
     auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" +
-        std::to_string(attn_mask.has_value());
+        std::to_string(attn_mask.has_value()) + ":" + std::to_string(scale_factor);
     auto cachedGraph =
         LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&, q_ = query, k_ = key, v_ = value](auto mpsGraph, auto graph) {
           auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, q_);
@@ -561,7 +562,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
   const int64_t num_kv_heads = k_.size(1);
   const int gqa_factor = static_cast<int>(num_heads / num_kv_heads);
 
-  auto out = at::empty_like(q_);
+  auto out = at::empty(q_.sizes(), q_.options());
 
   // Strides for [B, H, L, D] layout. Last-dim stride must be 1.
   TORCH_CHECK(q_.stride(-1) == 1, "sdpa prefill:query last-dim must be contiguous");
