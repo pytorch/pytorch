@@ -224,6 +224,11 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 trace_bytecode_log = torch._logging.getArtifactLogger(__name__, "trace_bytecode")
 tls = threading.local()
+_ZERO_ARG_CALLS_TO_RESUME_IN_FRAME = (
+    # C++ RAII guard: its destructor restores TLS state saved by the
+    # constructor, so the object must live in the resume frame.
+    torch._C._EnableTorchFunction,
+)
 compare_op_handlers: dict[str, Any] = {
     k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
 }
@@ -1144,14 +1149,33 @@ def break_graph_if_unsupported(
             if self.parent is not None:
                 self._maybe_replace_warnings_warn_on_stack(inst)
 
-            resume_at_call = False
-            if inst.opname in ("CALL", "CALL_FUNCTION") and inst.arg == 0:
-                callable_depth = get_call_callable_depth(inst.opname, 0)
-                resume_at_call = (
-                    len(self.stack) >= callable_depth
-                    and getattr(self.stack[-callable_depth], "value", None)
-                    is torch._C._EnableTorchFunction
+            def should_resume_in_frame() -> bool:
+                if inst.opname == "CALL_FUNCTION_EX":
+                    call_arg = inst.arg or 0
+                    callable_depth = get_call_callable_depth(inst.opname, call_arg)
+                    args_depth = 2 if sys.version_info >= (3, 14) or call_arg else 1
+                    if len(self.stack) < max(callable_depth, args_depth):
+                        return False
+                    args_value = self.stack[-args_depth]
+                    if not (
+                        isinstance(args_value, BaseListVariable)
+                        and len(args_value.items) == 0
+                    ):
+                        return False
+                elif inst.opname in ("CALL", "CALL_FUNCTION") and inst.arg == 0:
+                    callable_depth = get_call_callable_depth(inst.opname, 0)
+                else:
+                    return False
+
+                if len(self.stack) < callable_depth:
+                    return False
+                callable_value = getattr(self.stack[-callable_depth], "value", None)
+                return any(
+                    callable_value is guard
+                    for guard in _ZERO_ARG_CALLS_TO_RESUME_IN_FRAME
                 )
+
+            resume_at_call = should_resume_in_frame()
 
             log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
@@ -1160,7 +1184,7 @@ def break_graph_if_unsupported(
                 # _EnableTorchFunction is an RAII guard: constructing it in
                 # the outer generated frame gives it the wrong lifetime. Keep
                 # the callable as a resume input and let the resume bytecode
-                # execute CALL with its normal local lifetime.
+                # execute the call with its normal local lifetime.
                 stack_pops=0 if resume_at_call else int(push) - stack_effect,
             )
             if resume_at_call:
@@ -1869,7 +1893,7 @@ class InstructionTranslatorBase(
             cg.extend_output(
                 [
                     *create_swap(2),
-                    create_instruction("LIST_APPEND", arg=1),
+                    *cg.create_list_append(),
                 ]
             )
             self.parent.push(UnknownVariable())
@@ -3659,6 +3683,9 @@ class InstructionTranslatorBase(
             if skip_leaf_resume and i == 0:
                 from .eval_frame import skip_code
 
+                # This marks the whole leaf resume code object eager-only. That
+                # is intentional here: retracing it would graph-break again on
+                # the same unsupported constructor.
                 skip_code(resume_code)
             resume_codes.append(resume_code)
             resume_names.append(resume_name)
