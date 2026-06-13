@@ -27,7 +27,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-_allowed_backends = ("gloo", "nccl", "ucc")
+_allowed_backends = ("gloo", "nccl", "ucc", "xccl")
 if (
     "BACKEND" not in os.environ
     or "WORLD_SIZE" not in os.environ
