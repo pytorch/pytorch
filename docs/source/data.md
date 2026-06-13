@@ -331,6 +331,57 @@ using {ref}`automatic memory pinning <memory-pinning>` (i.e., setting
 GPUs.
 :::
 
+(choosing-num-workers)=
+### Choosing the right num_workers
+
+Increasing {attr}`num_workers` does not always improve performance. Use this
+decision guide before tuning it.
+
+**Use `num_workers=0` (default) when:**
+
+- Your `__getitem__` does minimal work per sample — for example, returning a
+  row from a pre-loaded `torch.Tensor` or `numpy` array with no preprocessing.
+  Worker IPC overhead can exceed any parallelism benefit when `__getitem__` is
+  cheap.
+- You are debugging: single-process mode gives cleaner error traces.
+
+**Use `num_workers > 0` when:**
+
+- `__getitem__` does significant work per sample — such as image decoding,
+  random augmentation, or feature extraction. Workers run these operations in
+  parallel, overlapping CPU preprocessing with GPU computation and keeping the
+  GPU fed.
+
+For plain `torch.Tensor` or `numpy` datasets with no per-sample preprocessing,
+direct slicing (`X[i : i + batch_size].to(device)`) bypasses DataLoader
+overhead entirely and is typically 3-10x faster — see
+[GitHub issue #154318](https://github.com/pytorch/pytorch/issues/154318)
+for benchmarks across tensor, numpy, CSV, and image-like datasets.
+
+**Finding the right num_workers value**
+
+When workers help, there is no single correct value — it depends on your
+specific hardware and pipeline. The right approach is to benchmark:
+
+- Start with `num_workers=0` as your baseline
+- Increase by one step at a time: try 1, 2, 4, 8
+- Measure training throughput (samples per second) at each value
+- Stop increasing when throughput stops improving — adding more workers beyond
+  this point wastes memory without speeding things up
+
+Two resources are consumed as you increase `num_workers`:
+
+- **CPU time**: Workers run `__getitem__` in parallel. Throughput improves
+  until your CPU cores are fully utilized.
+- **CPU memory**: Each worker holds its own prefetched data. If RAM is
+  limited, keep `num_workers` low to avoid out-of-memory errors.
+
+:::{note}
+{attr}`pin_memory=True` only benefits discrete GPU setups (NVIDIA, AMD) where
+tensors travel from CPU RAM to GPU DRAM across the PCIe bus. It is silently
+ignored on MPS (Apple Silicon unified memory) and CPU-only machines.
+:::
+
 (platform-specific-behaviors)=
 #### Platform-specific behaviors
 
