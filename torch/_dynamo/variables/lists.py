@@ -1777,6 +1777,42 @@ class SizeVariable(TupleVariable):
     def python_type(self) -> type:
         return torch.Size
 
+    @staticmethod
+    def _size_item_example(proxy: Any) -> Any:
+        if not isinstance(proxy, torch.fx.Proxy):
+            return proxy
+
+        example_value = proxy.node.meta["example_value"]
+        missing = object()
+        constant = getattr(example_value, "constant", missing)
+        if constant is not missing:
+            if constant is None:
+                unimplemented(
+                    gb_type="torch.Size() with non-constant tensor data",
+                    context=f"torch.Size item example_value={example_value}",
+                    explanation=(
+                        "Dynamo cannot construct torch.Size from tensor elements "
+                        "unless their values are known while tracing."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            example_value = constant
+
+        if isinstance(example_value, torch.Tensor):
+            if example_value.numel() != 1:
+                unimplemented(
+                    gb_type="torch.Size() with non-scalar tensor item",
+                    context=f"torch.Size item example_value={example_value}",
+                    explanation=(
+                        "Dynamo expected each tensor element used to construct "
+                        "torch.Size to be scalar."
+                    ),
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+            return int(example_value.item())
+
+        return example_value
+
     def as_proxy(self) -> Any:
         if self.proxy is not None:
             return self.proxy
@@ -1815,12 +1851,7 @@ class SizeVariable(TupleVariable):
         proxy = tracer.create_proxy("call_function", torch.Size, (proxies,), {})
         set_example_value(
             proxy.node,
-            torch.Size(
-                [
-                    p.node.meta["example_value"] if not isinstance(p, int) else p
-                    for p in proxies
-                ]
-            ),
+            torch.Size([self._size_item_example(p) for p in proxies]),
         )
         return proxy
 

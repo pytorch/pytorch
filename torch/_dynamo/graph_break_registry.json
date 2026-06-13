@@ -2495,6 +2495,26 @@
       ]
     }
   ],
+  "GB3482": [
+    {
+      "Gb_type": "torch.Size() with non-constant tensor data",
+      "Context": "torch.Size item example_value={example_value}",
+      "Explanation": "Dynamo cannot construct torch.Size from tensor elements unless their values are known while tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6509": [
+    {
+      "Gb_type": "torch.Size() with non-scalar tensor item",
+      "Context": "torch.Size item example_value={example_value}",
+      "Explanation": "Dynamo expected each tensor element used to construct torch.Size to be scalar.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0173": [
     {
       "Gb_type": "backward_state does not support export",
@@ -4083,6 +4103,16 @@
       "Gb_type": "list_richcompare_ordering_symbolic",
       "Context": "lexicographic ordering with symbolic element comparison",
       "Explanation": "Cannot determine list/tuple ordering at compile time when element comparison is symbolic.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1124": [
+    {
+      "Gb_type": "torch.Size() with non-constant tensor argument",
+      "Context": "torch.Size({tensor_arg})",
+      "Explanation": "Dynamo cannot construct torch.Size from tensor data unless the tensor values are known while tracing.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
