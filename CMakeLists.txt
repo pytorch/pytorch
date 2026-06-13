@@ -408,13 +408,13 @@ cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
-# prioritized text linker, ON by default for AArch64+Linux, option visible to all AArch64, x86 and ppc64le.
-set(USE_PRIORITIZED_TEXT_DEFAULT OFF)
+# prioritized text linker for function sort optimization, ON by default for AArch64+Linux.
+option(USE_PRIORITIZED_TEXT "Use prioritized text linker for ld/lld." OFF)
 if(LINUX AND CPU_AARCH64)
-  set(USE_PRIORITIZED_TEXT_DEFAULT ON)
+  set(USE_PRIORITIZED_TEXT ON)
+else()
+  message(STATUS "Prioritized text linker for function sort optimization only for AArch64+Linux now.")
 endif()
-cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker for ld."
-  "${USE_PRIORITIZED_TEXT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
@@ -761,39 +761,65 @@ if(NOT DEFINED USE_BLAS)
 endif()
 
 # Prioritized Text Linker Optimization
-if(USE_PRIORITIZED_TEXT_FOR_LD)
+if(USE_PRIORITIZED_TEXT)
 
-  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
-  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
+  message(STATUS "USE_PRIORITEZED_TEXT is ON.")
+  set(SYMBOL_ORDER_FILE "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
+  set(OPT_LINKER_FLAGS "")
 
   execute_process(
-    COMMAND ${Python_EXECUTABLE}
-            ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py
-            --filein "${LINKER_SCRIPT_FILE_IN}"
-            --fout  "${LINKER_SCRIPT_FILE_OUT}"
-    RESULT_VARIABLE _gen_result
-    OUTPUT_VARIABLE _gen_output
-    ERROR_VARIABLE  _gen_error
-  )
+    COMMAND "${CMAKE_C_COMPILER}" -Wl,--version
+    ERROR_QUIET
+    OUTPUT_VARIABLE LD_VERSION)
 
-  if(NOT _gen_result EQUAL 0)
-    message(FATAL_ERROR
-      "Failed to generate linker script:\n${_gen_output}\n${_gen_error}")
+  if("${LD_VERSION}" MATCHES "LLD")
+    message(STATUS "Clang LLD is available, using it to link for Prioritized Text Linker Optimization.")
+    include(CheckLinkerFlag)
+    check_linker_flag(CXX "-Wl,--symbol-ordering-file=${SYMBOL_ORDER_FILE}" LINKER_SUPPORTS_FLAG)
+    if(LINKER_SUPPORTS_FLAG)
+      message(STATUS "Option symbol-ordering-file is supported.")
+      set(OPT_LINKER_FLAGS "-Wl,--symbol-ordering-file=${SYMBOL_ORDER_FILE}")
+    else()
+      message(WARNING "Option symbol-ordering-file is not supported. Prioritized Text Linker Optimization is OFF.")
+    endif()
+
+  elseif("${LD_VERSION}" MATCHES "GNU ld")
+    message(STATUS "GNU LD is available, using it to link for Prioritized Text Linker Optimization.")
+    set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
+
+    execute_process(
+      COMMAND ${Python_EXECUTABLE}
+              ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py
+              --filein "${SYMBOL_ORDER_FILE}"
+              --fout  "${LINKER_SCRIPT_FILE_OUT}"
+      RESULT_VARIABLE _gen_result
+      OUTPUT_VARIABLE _gen_output
+      ERROR_VARIABLE  _gen_error
+    )
+
+    if(NOT _gen_result EQUAL 0)
+      message(FATAL_ERROR
+        "Failed to generate linker script:\n${_gen_output}\n${_gen_error}")
+    endif()
+
+    set(OPT_LINKER_FLAGS "-T${LINKER_SCRIPT_FILE_OUT}")
+
+  else()
+    message(WARNING "GNU LD and Clang LLD is not available. Disable Prioritized Text Linker Optimization. Check it.")
   endif()
 
   append_cxx_flag_if_supported("-ffunction-sections" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fdata-sections" CMAKE_CXX_FLAGS)
   append_c_flag_if_supported("-ffunction-sections" CMAKE_C_FLAGS)
   append_c_flag_if_supported("-fdata-sections" CMAKE_C_FLAGS)
-
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${OPT_LINKER_FLAGS}")
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${OPT_LINKER_FLAGS}")
 
 else()
   if(LINUX AND CPU_AARCH64)
     message(WARNING [[
     It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
-    To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+    To do so please export USE_PRIORITIZED_TEXT=1
     ]])
   endif()
 endif()
