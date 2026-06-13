@@ -13,6 +13,7 @@ import pickle
 import platform
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -5067,6 +5068,35 @@ class TestSerialization(TestCase, SerializationMixin):
         with torch.sparse.check_sparse_tensor_invariants(True):
             with self.assertRaisesRegex(RuntimeError, "size is inconsistent with indices"):
                 torch.load(bad_buf, weights_only=False)
+
+    def test_serialization_deterministic_across_processes(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/39383
+        env = {**os.environ, "PYTHONHASHSEED": "0"}
+
+        def run(snippet):
+            r = subprocess.run(
+                [sys.executable, "-c", snippet],
+                capture_output=True, text=True, env=env, timeout=60,
+            )
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            return r.stdout.strip()
+
+        pickle_snippet = (
+            "import base64, pickle, torch; "
+            "print(base64.b64encode(pickle.dumps(torch.IntTensor([1, 2, 3]))).decode())"
+        )
+        save_snippet = (
+            "import base64, io, torch; "
+            "buf = io.BytesIO(); "
+            "torch.save(torch.IntTensor([1, 2, 3]), buf); "
+            "print(base64.b64encode(buf.getvalue()).decode())"
+        )
+        for label, snippet in (("pickle.dumps", pickle_snippet), ("torch.save", save_snippet)):
+            with self.subTest(method=label):
+                self.assertEqual(
+                    run(snippet), run(snippet),
+                    msg=f"{label} bytes differ across processes (gh#39383)",
+                )
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
