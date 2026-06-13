@@ -1001,9 +1001,14 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
         used_names: set[str] = set()
         for i, node in enumerate(subgraph.graph.nodes):
             if i < len(hoo_phs):  # placeholder, retain name
-                name_map[node.name] = hoo_phs[i].name
-                node.name = node.target = hoo_phs[i].name
-                _build_cache(node.name, find_available, used_names)
+                node.name = node.target = _rename_without_collisions(
+                    name_map,
+                    find_available,
+                    used_names,
+                    node.name,
+                    hoo_phs[i].name,
+                    is_placeholder=True,
+                )
             else:  # non-placeholder, check for collisions
                 node.name = _rename_without_collisions(
                     name_map, find_available, used_names, node.name, node.name
