@@ -3250,6 +3250,12 @@ def poisson_nll_loss(
         ret = input
         raise ValueError(reduction + " is not a valid value for reduction")
 
+    if not log_input and isinstance(input, Tensor) and torch.any(input < 0):
+        raise ValueError(
+            "poisson_nll_loss: input must be non-negative when log_input=False, "
+            "since the loss computes log(input + eps). Got negative values in input."
+        )
+
     ret = torch.poisson_nll_loss(
         input, target, log_input, full, eps, _Reduction.get_enum(reduction)
     )

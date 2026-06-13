@@ -2754,6 +2754,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(F.gaussian_nll_loss(input, target, var_tensor, reduction='none'),
                          F.gaussian_nll_loss(input, target, var, reduction='none'))
 
+    def test_poisson_nll_loss_negative_input(self):
+        target = torch.rand(3, 5)
+        neg_input = torch.randn(3, 5) - 1.0
+        with self.assertRaisesRegex(ValueError, "input must be non-negative"):
+            F.poisson_nll_loss(neg_input, target, log_input=False)
+
+        pos_input = torch.rand(3, 5)
+        F.poisson_nll_loss(pos_input, target, log_input=False)
+
+        any_input = torch.randn(3, 5)
+        F.poisson_nll_loss(any_input, target, log_input=True)
+
     def test_KLDivLoss_batch_mean(self):
         input_shape = (2, 5)
         log_prob1 = F.log_softmax(torch.randn(input_shape), 1)
