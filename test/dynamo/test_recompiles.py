@@ -122,6 +122,12 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             opt(torch.ones(1, 3), torch.ones(2, 3)), torch.full((2, 3), 2.0)
         )
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            self.assertEqual(
+                opt(torch.ones(2, 3), torch.ones(2, 3)), torch.full((2, 3), 2.0)
+            )
+            with self.assertRaises(torch._dynamo.exc.RecompileError):
+                opt(torch.ones(2, 3), torch.ones(1, 3))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 

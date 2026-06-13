@@ -1933,10 +1933,7 @@ def register_fast_op_impl(
 def infer_size(
     a: Sequence[IntLikeType], b: Sequence[IntLikeType]
 ) -> tuple[IntLikeType, ...]:
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        statically_known_true,
-    )
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_or
 
     dimsA = len(a)
     dimsB = len(b)
@@ -1962,15 +1959,43 @@ def infer_size(
         # sizeA == sizeB is now expect_true and we can defer it as a runtime
         # assert (this works because Python will return the terminal
         # expression of an or statement as-is, without bool()'ing it; if this
-        # were not the case, we'd need to write this using torch.sym_or() or
+        # were not the case, we'd need to write this using sym_or() or
         # something like that).
-        torch._check(
-            guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
-            lambda: f"The size of tensor a ({sizeA}) "
-            f"must match the size of tensor b ({sizeB}) "
-            f"at non-singleton dimension {i})",
-        )
-        expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
+        if statically_known_true(sizeA == 1):
+            torch._check(
+                sym_or(sizeA == 1, sizeA == sizeB),
+                lambda: f"The size of tensor a ({sizeA}) "
+                f"must match the size of tensor b ({sizeB}) "
+                f"at non-singleton dimension {i})",
+            )
+            expandedSizes[i] = sizeB
+        elif statically_known_true(sizeB == 1):
+            torch._check(
+                sym_or(sizeB == 1, sizeA == sizeB),
+                lambda: f"The size of tensor a ({sizeA}) "
+                f"must match the size of tensor b ({sizeB}) "
+                f"at non-singleton dimension {i})",
+            )
+            expandedSizes[i] = sizeA
+        else:
+            sizeA_hint = _optimization_hint_or_none(sizeA)
+            sizeB_hint = _optimization_hint_or_none(sizeB)
+            if sizeA_hint == 1 and sizeB_hint != 1:
+                torch._check(
+                    sym_or(sizeA == 1, sizeA == sizeB),
+                    lambda: f"The size of tensor a ({sizeA}) "
+                    f"must match the size of tensor b ({sizeB}) "
+                    f"at non-singleton dimension {i})",
+                )
+                expandedSizes[i] = sizeB
+            else:
+                torch._check(
+                    sym_or(sizeB == 1, sizeA == sizeB),
+                    lambda: f"The size of tensor a ({sizeA}) "
+                    f"must match the size of tensor b ({sizeB}) "
+                    f"at non-singleton dimension {i})",
+                )
+                expandedSizes[i] = sizeA
     return tuple(expandedSizes)
 
 
@@ -2010,7 +2035,7 @@ def make_fast_binary_impl(
         if final_shape is None:
             raise AssertionError("final_shape must not be None")
 
-        from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
+        from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
         # Do some extra safety checks to see if the output
         # stride is obvious
@@ -2019,7 +2044,7 @@ def make_fast_binary_impl(
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
                 # take the slow path if result is not determined.
-                and guard_or_false(sym_eq(op.shape, final_shape))  # type: ignore[arg-type]
+                and statically_known_true(sym_eq(op.shape, final_shape))  # type: ignore[arg-type]
             ):
                 break
         else:
