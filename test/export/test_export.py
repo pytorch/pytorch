@@ -595,6 +595,27 @@ class TestExport(TestCase):
         #     exported_program.module()(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
         # )
 
+    def test_guards_fn_recovers_from_unparse_recursion_error(self):
+        # Regression test: guards-fn codegen pretty-prints each guard for the
+        # assert error message via ast.unparse(ast.parse(...)), which recurses
+        # once per AST node. A deeply-nested guard (e.g. a sum over thousands of
+        # symbolic sizes) overflowed the recursion limit there, crashing export
+        # even though the pretty-printing is cosmetic and the executed guard
+        # does not depend on it. Codegen must fall back to the raw guard string
+        # instead of propagating the error.
+        #
+        # We inject the overflow via a mocked ast.unparse rather than building a
+        # genuinely deep expression: the test target is ASAN-instrumented, where
+        # deep ast.parse/compile recursion can abort the process before the
+        # pure-Python RecursionError is reached.
+        from torch.export._unlift import _convert_guards_code_to_fn
+
+        guard = "args[0] == 0"
+        with patch("ast.unparse", side_effect=RecursionError):
+            guards_fn = _convert_guards_code_to_fn([guard], [])
+
+        self.assertIsNotNone(guards_fn)
+
     def _check_dynamic_shapes_specs_and_shapes(
         self,
         model,
@@ -19239,6 +19260,20 @@ def forward(self, x, y):
             export_result = exported.module()(boundaries)
             self.assertEqual(eager_result, export_result)
             self.assertEqual(export_result.dtype, expected_dtype)
+
+    def test_constant_pad_nd_run_decompositions(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167068
+        # constant_pad_nd's ref decomposition must be fully functional so that
+        # run_decompositions (used by ONNX dynamo export) doesn't trip
+        # assert_functional_graph.
+        class Pad(torch.nn.Module):
+            def forward(self, x):
+                return F.pad(x, (0, 0, 0, 240, 0, 0))
+
+        ep = export(Pad(), (torch.randn(1, 16, 64),), strict=False)
+        decomposed = ep.run_decompositions(decomposition_table)
+        result = decomposed.module()(torch.randn(1, 16, 64))
+        self.assertEqual(result.shape, (1, 256, 64))
 
 
 if __name__ == "__main__":
