@@ -14,10 +14,8 @@ struct TORCH_API SimplifierHashType {
   explicit SimplifierHashType(size_t s) : _h(s) {}
 
   bool operator==(const SimplifierHashType& other) const;
-  bool operator!=(const SimplifierHashType& other) const;
   bool operator<(const SimplifierHashType& other) const;
   bool operator==(const size_t other) const;
-  bool operator!=(const size_t other) const;
 
   size_t _h{0};
 };
