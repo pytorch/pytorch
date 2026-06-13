@@ -35,6 +35,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import types
 import unittest
 import warnings
@@ -6371,6 +6372,7 @@ def run_concurrently(worker_func, num_threads=None, args=(), kwargs=None):
         except Exception as e:
             nonlocal exc_value
             exc_value = e
+            traceback.clear_frames(e.__traceback__)
 
     workers = [
         threading.Thread(target=wrapper_func, args=(i, func, *args),

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -119,6 +120,7 @@ class TuningProcess:
                     result = job()
                 except Exception as e:
                     result = e
+                    traceback.clear_frames(e.__traceback__)
                 TuningProcess.send(result, write_pipe)
 
         try:

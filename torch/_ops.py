@@ -5,6 +5,7 @@ import ctypes
 import importlib
 import inspect
 import sys
+import traceback
 import types
 from collections.abc import Callable, Iterator
 from functools import cached_property
@@ -1316,6 +1317,7 @@ def _call_overload_packet_from_python(
             break
         except RuntimeError as e:
             exceptions[overload_name] = e
+            traceback.clear_frames(e.__traceback__)
 
     if found_op:
         return found_op(*args, **kwargs)

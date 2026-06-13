@@ -3,6 +3,7 @@
 import inspect
 import logging
 import os
+import traceback
 import warnings
 from typing import Any, cast, TYPE_CHECKING
 from typing_extensions import deprecated
@@ -234,6 +235,7 @@ def _load_state_dict(
             metadata = storage_reader.read_metadata()
         except Exception as e:
             global_metadata_exc = e
+            traceback.clear_frames(e.__traceback__)
             logger.warning(
                 "Global metadata is not found. Falling back to rank local metadata.",
                 exc_info=True,
@@ -248,6 +250,7 @@ def _load_state_dict(
                 use_collectives = False
             except Exception as e:
                 rank_metadata_exc = e
+                traceback.clear_frames(e.__traceback__)
                 logger.warning("Rank local metadata is not found.", exc_info=True)
 
         if planner is None:

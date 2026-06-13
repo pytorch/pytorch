@@ -46,6 +46,7 @@ import operator
 import os
 import sys
 import threading
+import traceback
 from ast import Call
 from collections import defaultdict
 from collections.abc import Callable, Generator, Sequence
@@ -1935,6 +1936,7 @@ class _ExceptionRaisingThread(threading.Thread):
             super().run()
         except BaseException as e:
             self.exception = e
+            traceback.clear_frames(e.__traceback__)
 
     def join(self, timeout=None):
         super().join(timeout=timeout)

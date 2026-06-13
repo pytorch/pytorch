@@ -1891,3 +1891,19 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+code = 'EXCEPTION_TRACEBACK'
+include_patterns = [
+    'torch/**/*.py',
+]
+exclude_patterns = [
+    'torch/testing/**',
+    '**/fb/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/exception_traceback_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]

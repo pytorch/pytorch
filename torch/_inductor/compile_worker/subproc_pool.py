@@ -293,6 +293,7 @@ class SubprocPool:
                 # notify that particular future and continue on.
                 log.exception("unpickle failure in SubprocPool._read_thread")
                 result = e
+                traceback.clear_frames(e.__traceback__)
 
             with self.futures_lock:
                 if not self.running:
