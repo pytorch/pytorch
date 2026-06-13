@@ -81,7 +81,7 @@ def _normalize_placements_for_grad(
 # together with torch.Tensor within the autograd engine. This
 # allows DTensor to only exist on part of the module hierarchy.
 #
-# As an example, we have the a module that consists of submodules
+# As an example, we have a module that consists of submodules
 # A, B, and C, the execution flow would be like:
 #  input(torch.Tensor) -> Module A -> Module B -> Module C -> output (torch.Tensor)
 #
@@ -105,6 +105,7 @@ class _ToTorchTensor(torch.autograd.Function):
         ctx.grad_placements = grad_placements
         ctx.set_materialize_grads(False)
         local_tensor = input._local_tensor
+        ctx.local_tensor_stride = local_tensor.stride()
 
         # We need to return a fresh Tensor object there as autograd metadata
         # will be inplaced into it. So we don't want to pollute the Tensor
@@ -121,25 +122,78 @@ class _ToTorchTensor(torch.autograd.Function):
         grad_placements = ctx.grad_placements
         dtensor_meta = dtensor_spec.tensor_meta
 
-        _, tensor_stride = compute_global_tensor_info(
-            grad_output, mesh, dtensor_spec.placements
-        )
-        tensor_stride = tuple(tensor_stride)
-
         # user should provide grad_placements as there's no guarantee on input gradient placement
         # if grad_placement is None, we provide default placement
         if grad_placements is None:
             # See DTensor.from_local docstring for gradient placement guarantees
             grad_placements = _normalize_placements_for_grad(dtensor_spec.placements)
 
+        from torch._prims_common import check_contiguous_sizes_strides
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        def strides_provably_match(stride, other):
+            return len(stride) == len(other) and all(
+                guard_or_false(a == b) for a, b in zip(stride, other)
+            )
+
+        def strides_provably_differ(stride, other):
+            return len(stride) != len(other) or any(
+                guard_or_false(a != b) for a, b in zip(stride, other)
+            )
+
+        def strides_are_contiguous_for_shape(shape, stride, other):
+            if not (len(shape) == len(stride) == len(other)):
+                return False
+            return check_contiguous_sizes_strides(
+                shape, stride, false_if_dde=True
+            ) and check_contiguous_sizes_strides(shape, other, false_if_dde=True)
+
+        def strides_may_match(shape, stride, other):
+            return (
+                strides_provably_match(stride, other)
+                or strides_are_contiguous_for_shape(shape, stride, other)
+                or not strides_provably_differ(stride, other)
+            )
+
+        def check_stride_matches(shape, stride, other):
+            if strides_provably_match(
+                stride, other
+            ) or strides_are_contiguous_for_shape(shape, stride, other):
+                return
+            for a, b in zip(stride, other):
+                torch._check(
+                    a == b,
+                    lambda: (
+                        f"Expected matching DTensor local strides, got {stride} and {other}"
+                    ),
+                )
+
+        # Same-placement to_local() backward preserves the forward DTensor
+        # layout. With symbolic shapes, the local grad stride can be equivalent
+        # to the saved stride while carrying different symbol provenance.
         if (
-            tensor_stride == dtensor_meta.stride
-            and grad_placements == dtensor_spec.placements
+            grad_placements == dtensor_spec.placements
+            and strides_may_match(
+                grad_output.shape, grad_output.stride(), ctx.local_tensor_stride
+            )
+            and strides_may_match(
+                dtensor_meta.shape, ctx.local_tensor_stride, dtensor_meta.stride
+            )
         ):
+            check_stride_matches(
+                grad_output.shape, grad_output.stride(), ctx.local_tensor_stride
+            )
+            check_stride_matches(
+                dtensor_meta.shape, ctx.local_tensor_stride, dtensor_meta.stride
+            )
             # Avoid actual sharing of specs in case they're modified during (e.g.)
             # sharding propagation.
             grad_spec = copy.copy(dtensor_spec)
         else:
+            _, tensor_stride = compute_global_tensor_info(
+                grad_output, mesh, dtensor_spec.placements
+            )
+            tensor_stride = tuple(tensor_stride)
             grad_spec = DTensorSpec(
                 mesh,
                 grad_placements,
