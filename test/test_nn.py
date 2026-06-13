@@ -14437,7 +14437,7 @@ if __name__ == '__main__':
         self.assertEqual(p1.grad, p2.grad)
 
     @skipIfMPS  # TypeError: the MPS framework doesn't support float64
-    @parametrize_test('foreach', (False, True))
+    @parametrize_test('foreach', (None, False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
