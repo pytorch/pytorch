@@ -2520,7 +2520,7 @@ class Module:
             for key in state_dict:
                 if key.startswith(prefix) and key != extra_state_key:
                     input_name = key[len(prefix) :].split(".", 1)
-                    # Must be Module if it have attributes
+                    # Must be Module if it has attributes
                     if len(input_name) > 1:
                         if input_name[0] not in self._modules:
                             unexpected_keys.append(key)
@@ -2610,8 +2610,8 @@ class Module:
                 out = hook(module, incompatible_keys)
                 if out is not None:
                     raise AssertionError(
-                        "Hooks registered with ``register_load_state_dict_post_hook`` are not"
-                        "expected to return new values, if incompatible_keys need to be modified,"
+                        "Hooks registered with ``register_load_state_dict_post_hook`` are not "
+                        "expected to return new values, if incompatible_keys need to be modified, "
                         "it should be done inplace."
                     )
 

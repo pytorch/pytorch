@@ -1284,7 +1284,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float, torch.double, torch.half),
+            (torch.float, torch.double, torch.half, torch.bfloat16),
         )
     )
     @dtypesIfXPU(
@@ -1357,7 +1357,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float, torch.double, torch.half),
+            (torch.float, torch.double, torch.half, torch.bfloat16),
         )
     )
     @dtypesIfXPU(
