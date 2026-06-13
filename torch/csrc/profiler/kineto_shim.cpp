@@ -513,9 +513,10 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::PYTHON_FUNCTION:
     case libkineto::ActivityType::CUDA_DRIVER:
     case libkineto::ActivityType::PRIVATEUSE1_RUNTIME:
-    case libkineto::ActivityType::PRIVATEUSE1_DRIVER:
     case libkineto::ActivityType::OVERHEAD:
       return c10::DeviceType::CPU;
+    case libkineto::ActivityType::PRIVATEUSE1_DRIVER:
+      return c10::DeviceType::PrivateUse1;
     default: {
       TORCH_WARN(
           "Unknown activity type (",
