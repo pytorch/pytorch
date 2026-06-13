@@ -722,10 +722,7 @@ class TestVarlenAttention(NNTestCase):
             (384, 0),  # edge case
         ],
     )
-    @parametrize(
-        "backend",
-        ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if SM100OrLater else []),
-    )
+    @parametrize("backend", _varlen_backends(include_fa4_paged_kv=True))
     def test_batch_invariance(
         self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
     ):
@@ -1150,10 +1147,7 @@ class TestVarlenAttention(NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize(
-        "backend",
-        ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if SM100OrLater else []),
-    )
+    @parametrize("backend", _varlen_backends(include_fa4_paged_kv=True))
     def test_enable_gqa(self, device, dtype, backend):
         torch.manual_seed(42)
 
