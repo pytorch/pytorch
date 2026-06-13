@@ -711,6 +711,9 @@ class TensorLikePair(Pair):
         check_stride: bool = False,
         **other_parameters: Any,
     ):
+        self._has_python_scalar = isinstance(actual, (int, float, complex)) or isinstance(
+            expected, (int, float, complex)
+        )
         actual, expected = self._process_inputs(
             actual, expected, id=id, allow_subclasses=allow_subclasses
         )
@@ -728,13 +731,20 @@ class TensorLikePair(Pair):
     def _process_inputs(
         self, actual: Any, expected: Any, *, id: tuple[Any, ...], allow_subclasses: bool
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        is_python_scalar = isinstance(actual, (int, float, complex)) or isinstance(
+            expected, (int, float, complex)
+        )
         directly_related = isinstance(actual, type(expected)) or isinstance(
             expected, type(actual)
-        )
+        ) or is_python_scalar
         if not directly_related:
             self._inputs_not_supported()
 
-        if not allow_subclasses and type(actual) is not type(expected):
+        if (
+            not allow_subclasses
+            and type(actual) is not type(expected)
+            and not is_python_scalar
+        ):
             self._inputs_not_supported()
 
         actual, expected = (self._to_tensor(input) for input in (actual, expected))
@@ -829,7 +839,7 @@ class TensorLikePair(Pair):
         if self.check_device and actual.device != expected.device:
             raise_mismatch_error("device", actual.device, expected.device)
 
-        if self.check_dtype and actual.dtype != expected.dtype:
+        if self.check_dtype and actual.dtype != expected.dtype and not self._has_python_scalar:
             raise_mismatch_error("dtype", actual.dtype, expected.dtype)
 
     def _equalize_attributes(
