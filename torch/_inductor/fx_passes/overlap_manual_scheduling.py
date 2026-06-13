@@ -240,6 +240,20 @@ class ManualOverlapScheduler(OverlapScheduler):
         # Manual overlap historically used "custom_ops" mode for bucketing
         bucket_mode = bucket_mode or "custom_ops"
 
+        # ManualOverlapScheduler is plan-driven rather than estimation-driven.
+        # Keep a no-op estimator by default so the inherited OverlapScheduler
+        # initialization path does not enter analytical NCCL estimation for
+        # compile-on-one-rank graphs where group_name may be an FX Node.
+        if custom_runtime_estimation is None:
+
+            def default_custom_runtime_estimation(
+                node: fx.Node,
+                size: int | None,
+            ) -> float | None:
+                return 0.0
+
+            custom_runtime_estimation = default_custom_runtime_estimation
+
         super().__init__(
             gm,
             max_in_flight_gb=0.0,

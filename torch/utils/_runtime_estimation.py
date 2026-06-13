@@ -76,6 +76,8 @@ _IGNORE_OPS = _VIEW_OPS | _CREATE_OPS
 
 
 def _get_device_from_value(value) -> torch.device | None:  # type: ignore[no-untyped-def]
+    # Runtime estimation assumes a single dominant device per op; use the
+    # first tensor device found in the nested FX metadata values.
     flat_values, _ = pytree.tree_flatten(value)
     for item in flat_values:
         if isinstance(item, torch.Tensor):
@@ -91,13 +93,11 @@ def flops_to_ns(
     Uses 75% of theoretical peak and converts FLOPs to MACs (divide by 2).
     """
     device_tflops = get_device_tflops(dtype, device=device)
-    if device_tflops is None or device_tflops == 0:
+
+    if device_tflops == 0:
         return 0.0
 
     peak_gpu_flops = device_tflops * 1e12
-
-    if peak_gpu_flops == 0:
-        return 0.0
     macs = flops / 2
     return (macs / (0.75 * peak_gpu_flops)) * 1e9
 

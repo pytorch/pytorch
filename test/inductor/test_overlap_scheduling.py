@@ -50,7 +50,7 @@ class TestOverlapSchedulingRuntimeEstimation(TestCase):
         device = torch.device("cpu")
         fake_device_info = SimpleNamespace(
             tops={torch.float16: 456.0},
-            tops_sparsity_factor=1.0,
+            tops_sparsity_factor=1,
         )
 
         with (
