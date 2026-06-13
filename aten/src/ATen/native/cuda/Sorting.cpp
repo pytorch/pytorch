@@ -35,6 +35,10 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cuda(
     int64_t k,
     int64_t dim_,
     bool keepdim) {
+  // See note [Writing Nondeterministic Operations]
+  // The selection algorithm may return different indices for duplicate values
+  // depending on CUDA thread scheduling.
+  at::globalContext().alertNotDeterministic("kthvalue CUDA");
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   int64_t slicesize = self.dim() == 0 ? 1 : self.size(dim);
   zero_numel_check_dims(self, dim, "kthvalue()");

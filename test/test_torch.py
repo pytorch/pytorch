@@ -1951,6 +1951,31 @@ class TestTorchDeviceType(TestCase):
         test_func_expect_error('method with indices', is_cuda)
         test_func_expect_error('out with indices', is_cuda)
 
+    @dtypes(torch.double)
+    def test_nondeterministic_alert_kthvalue(self, device, dtype):
+        def test_func(call_type):
+            S = 10
+            a = torch.randn(S, device=device)
+            if call_type == 'function':
+                torch.kthvalue(a, 3)
+            elif call_type == 'method':
+                a.kthvalue(3)
+            elif call_type == 'out':
+                values = torch.empty_like(a)
+                indices = torch.empty((), dtype=torch.long, device=device)
+                torch.kthvalue(a, 3, out=(values, indices))
+            else:
+                self.fail(f"'{call_type}' is not a valid call type")
+
+        is_cuda = torch.device(device).type == 'cuda'
+
+        self.check_nondeterministic_alert(
+            lambda: test_func('function'), 'kthvalue CUDA', is_cuda)
+        self.check_nondeterministic_alert(
+            lambda: test_func('method'), 'kthvalue CUDA', is_cuda)
+        self.check_nondeterministic_alert(
+            lambda: test_func('out'), 'kthvalue CUDA', is_cuda)
+
     # FIXME: move to test_scatter_gather_ops
     def _test_gather_backward_one_dim(self, device, deterministic: bool = False) -> None:
         with DeterministicGuard(deterministic):
