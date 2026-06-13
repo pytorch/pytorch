@@ -62,6 +62,12 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_graph_capture_record_stream_reuse;
   }
 
+  // Allow malloc to reclaim an idle whole segment from another stream's cache
+  // (with a cross-stream ordering dependency) before cudaMalloc.
+  static bool cross_stream_reclaim() {
+    return instance().m_cross_stream_reclaim;
+  }
+
   static double per_process_memory_fraction() {
     return instance().m_per_process_memory_fraction;
   }
@@ -167,6 +173,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
         "release_lock_on_hipmalloc",
         "pinned_use_hip_host_register",
         "graph_capture_record_stream_reuse",
+        "cross_stream_reclaim",
         "pinned_reserve_segment_size_mb",
         "pinned_num_register_threads",
         "per_process_memory_fraction",
@@ -196,6 +203,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parseGraphCaptureRecordStreamReuse(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
+  size_t parseCrossStreamReclaim(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
   size_t parsePerProcessMemoryFraction(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
@@ -217,6 +227,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_release_lock_on_cudamalloc{false};
   std::atomic<bool> m_pinned_use_cuda_host_register{false};
   std::atomic<bool> m_graph_capture_record_stream_reuse{false};
+  std::atomic<bool> m_cross_stream_reclaim{false};
   std::atomic<double> m_per_process_memory_fraction{1.0};
   std::atomic<bool> m_pinned_free_catch_all{false};
   // When true, throw OOM error before calling cudaMalloc if allocation would

@@ -5667,6 +5667,41 @@ class TestCudaAllocator(TestCase):
                 f"expandable_segments:{EXPANDABLE_SEGMENTS}"
             )
 
+    @serialTest()
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "cross_stream_reclaim is native-allocator only"
+    )
+    def test_cross_stream_reclaim(self):
+        # With the flag on, a malloc on stream B reclaims a whole idle segment
+        # freed on stream A, ordered safely behind A's pending work.
+        try:
+            torch.cuda.empty_cache()
+            torch.cuda.memory._set_allocator_settings(
+                "expandable_segments:False,cross_stream_reclaim:True"
+            )
+            n = 8 * 1024 * 1024  # whole, exact-size-class segment
+
+            s_a = torch.cuda.Stream()
+            with torch.cuda.stream(s_a):
+                a = torch.empty(n, dtype=torch.int8, device="cuda")
+                a.fill_(1)
+                torch.cuda._sleep(int(50 * get_cycles_per_ms()))  # delay A's write
+                ptr_a = a.data_ptr()
+            del a
+
+            s_b = torch.cuda.Stream()
+            with torch.cuda.stream(s_b):
+                b = torch.empty(n, dtype=torch.int8, device="cuda")
+                b.fill_(2)
+            torch.cuda.synchronize()
+
+            self.assertEqual(b.data_ptr(), ptr_a)  # reclaimed, not cudaMalloc'd
+            self.assertTrue((b == 2).all().item())  # A's delayed write didn't race B
+        finally:
+            torch.cuda.memory._set_allocator_settings(
+                f"expandable_segments:{EXPANDABLE_SEGMENTS},cross_stream_reclaim:False"
+            )
+
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
             pow2 = 1
