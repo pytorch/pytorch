@@ -77,7 +77,7 @@ def build_triton(
         if device == "rocm":
             triton_pkg_name = "triton-rocm"
         elif device == "xpu":
-            triton_pkg_name = "triton-xpu"
+            triton_pkg_name = "triton"
             triton_repo = "https://github.com/intel/intel-xpu-backend-for-triton"
         else:
             triton_pkg_name = "triton"
@@ -104,6 +104,14 @@ def build_triton(
             env["TRITON_EXT_ENABLED"] = "ON"
         if with_clang_ldd:
             env["TRITON_BUILD_WITH_CLANG_LLD"] = "1"
+
+        # For XPU, set version suffix so the wheel version becomes:
+        # Release: version+xpu
+        # Nightly: version+git<hash>.xpu
+        # Triton's setup.py handles +git<hash> via get_git_version_suffix(),
+        # and appends TRITON_WHEEL_VERSION_SUFFIX after that.
+        if device == "xpu":
+            env["TRITON_WHEEL_VERSION_SUFFIX"] = f"+{device}"
 
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
@@ -161,11 +169,11 @@ def main() -> None:
     if args.triton_version:
         triton_version = args.triton_version
 
+    commit_hash = args.commit_hash if args.commit_hash else read_triton_pin(args.device)
+
     build_triton(
         device=args.device,
-        commit_hash=(
-            args.commit_hash if args.commit_hash else read_triton_pin(args.device)
-        ),
+        commit_hash=commit_hash,
         version=triton_version,
         py_version=args.py_version,
         release=args.release,
