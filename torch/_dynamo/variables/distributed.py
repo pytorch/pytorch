@@ -239,6 +239,9 @@ class BackwardHookVariable(VariableTracker):
     def as_proxy(self) -> torch.fx.Proxy:
         return self.proxy
 
+    def python_type(self) -> type:
+        return torch.utils.hooks.BackwardHook
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
