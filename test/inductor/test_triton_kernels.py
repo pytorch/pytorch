@@ -1271,6 +1271,56 @@ def forward(self, x_1, output_1):
             self.assertEqual(int(compiled(large)[0].item()), 4)
 
     @requires_gpu
+    def test_triton_kernel_autotune_key_after_constexpr_arg(self):
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 2}, num_stages=3, num_warps=4),
+                triton.Config({"BLOCK_SIZE": 4}, num_stages=3, num_warps=4),
+            ],
+            key=["M"],
+        )
+        @triton.jit
+        def keyed_autotune_kernel(
+            out_ptr,
+            ENABLE: "tl.constexpr",
+            M,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            output = tl.full((BLOCK_SIZE,), BLOCK_SIZE, tl.float32)
+
+            if ENABLE and (
+                (M == 4 and BLOCK_SIZE == 4) or (M == 40 and BLOCK_SIZE == 2)
+            ):
+                i = 0
+                acc = offsets.to(tl.float32)
+                while i < 4096:
+                    acc = tl.sin(acc + 0.125)
+                    i += 1
+                output += acc * 1.0e-20
+
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def call_triton(x: torch.Tensor, key_source: torch.Tensor):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            keyed_autotune_kernel[grid](output, True, key_source.shape[0], n_elements)
+            return output
+
+        with fresh_cache():
+            compiled = torch.compile(call_triton, fullgraph=True)
+            x = torch.empty(80, device=GPU_TYPE)
+            small_key = torch.empty(4, device=GPU_TYPE)
+            large_key = torch.empty(40, device=GPU_TYPE)
+
+            self.assertEqual(int(compiled(x, small_key)[0].item()), 2)
+            self.assertEqual(int(compiled(x, large_key)[0].item()), 4)
+
+    @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @inductor_config.patch("unsafe_ignore_unsupported_triton_autotune_args", True)
     def test_triton_kernel_autotune_with_unsupported_args(self, backend):
@@ -6079,6 +6129,30 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         out, code = run_and_get_code(torch.compile(fn), a, b, c)
         self.assertEqual(out, fn(a, b, c))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
+
+    @requires_cuda_and_triton
+    def test_fusion_cast_epilogue(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.to(torch.float16)
+
+        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
 
 if HAS_CUDA_AND_TRITON:
