@@ -21,6 +21,7 @@ __all__ = [
     "accumulate",
     "chain",
     "chain_from_iterable",
+    "combinations",
     "combinations_with_replacement",
     "compress",
     "cycle",
@@ -28,6 +29,7 @@ __all__ = [
     "filterfalse",
     "islice",
     "pairwise",
+    "permutations",
     "starmap",
     "takewhile",
     "tee",
@@ -91,6 +93,38 @@ def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
 
 
 chain.from_iterable = chain_from_iterable  # type: ignore[attr-defined]
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.combinations
+@substitute_in_graph(itertools.combinations, is_embedded_type=True)  # type: ignore[arg-type]
+def combinations(iterable: Iterable[_T], r: int, /) -> Iterator[tuple[_T, ...]]:
+    pool = tuple(iterable)
+    n = len(pool)
+
+    if r < 0:
+        raise ValueError("r must be non-negative")
+
+    def _combinations() -> Iterator[tuple[_T, ...]]:
+        if r > n:
+            return
+
+        indices = list(range(r))
+        yield tuple(pool[i] for i in indices)
+
+        while True:
+            for i in reversed(range(r)):
+                if indices[i] != i + n - r:
+                    break
+            else:
+                return
+
+            indices[i] += 1
+            for j in range(i + 1, r):
+                indices[j] = indices[j - 1] + 1
+
+            yield tuple(pool[i] for i in indices)
+
+    return _combinations()
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.compress
@@ -240,6 +274,43 @@ def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
         else:
             yield a, b  # type: ignore[misc]
         a = b
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.permutations
+@substitute_in_graph(itertools.permutations, is_embedded_type=True)  # type: ignore[arg-type]
+def permutations(
+    iterable: Iterable[_T], r: int | None = None, /
+) -> Iterator[tuple[_T, ...]]:
+    pool = tuple(iterable)
+    n = len(pool)
+    r = n if r is None else r
+
+    if r < 0:
+        raise ValueError("r must be non-negative")
+
+    def _permutations() -> Iterator[tuple[_T, ...]]:
+        if r > n:
+            return
+
+        indices = list(range(n))
+        cycles = list(range(n, n - r, -1))
+        yield tuple(pool[i] for i in indices[:r])
+
+        while n:
+            for i in reversed(range(r)):
+                cycles[i] -= 1
+                if cycles[i] == 0:
+                    indices[i:] = indices[i + 1 :] + indices[i : i + 1]
+                    cycles[i] = n - i
+                else:
+                    j = cycles[i]
+                    indices[i], indices[-j] = indices[-j], indices[i]
+                    yield tuple(pool[i] for i in indices[:r])
+                    break
+            else:
+                return
+
+    return _permutations()
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
