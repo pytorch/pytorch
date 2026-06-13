@@ -160,7 +160,7 @@ def _transfer_meta(
 
     # Transfer metadata after pattern matching occurs.
     # Copies _COPY_META_FIELDS, stack_trace, and (if missing) val/tensor_meta.
-    if config.trace.provenance_tracking_level == 1:
+    if config.effective_provenance_tracking_level() == 1:
         new_from_node = new_meta.get("from_node", []).copy()
         new_from_node.append(NodeSource(old_node, pass_name, NodeSourceAction.REPLACE))
         new_meta.update(
