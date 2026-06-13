@@ -1300,12 +1300,29 @@ class TestMPS(TestCaseMPS):
         result_cpu = torch.addmm(bias.cpu().conj(), a.cpu(), b.cpu())
         self.assertEqual(result_cpu, result_mps)
 
+    def _noncontig_out(self, M, N, layout, dtype):
+        # transposed: column-major out; outer: unit inner stride but row-gapped.
+        if layout == "transposed":
+            return torch.empty(N, M, device="mps", dtype=dtype).t()
+        if layout == "outer":
+            return torch.empty(2 * M, N, device="mps", dtype=dtype)[::2]
+        return torch.empty(M, N, 2, device="mps", dtype=dtype)[..., 0]
+
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    def test_mm_strided_output(self, dtype):
-        M, K, N = 8, 64, 12
+    @parametrize("case", [
+        ((1, 64, 12), "inner"),
+        ((12, 64, 1), "inner"),
+        ((8, 64, 12), "transposed"),
+        ((33, 17, 49), "inner"),
+        ((33, 17, 49), "transposed"),
+        ((16, 24, 20), "outer"),
+    ])
+    def test_mm_strided_output(self, case, dtype):
+        # Non-contiguous out= is mis-written by the MPSGraph matmul before macOS 26.4.
+        (M, K, N), layout = case
         a = torch.randn(M, K, device="mps", dtype=dtype)
         b = torch.randn(K, N, device="mps", dtype=dtype)
-        out = torch.empty(M, N, 2, device="mps", dtype=dtype)[..., 0]
+        out = self._noncontig_out(M, N, layout, dtype)
         self.assertFalse(out.is_contiguous())
         torch.mm(a, b, out=out)
         ref = torch.mm(a.cpu(), b.cpu())
@@ -1313,13 +1330,21 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    def test_addmm_strided_output(self, dtype):
+    @parametrize("case", [
+        ((1, 64, 12), "inner"),
+        ((12, 64, 1), "inner"),
+        ((8, 64, 12), "transposed"),
+        ((33, 17, 49), "inner"),
+        ((33, 17, 49), "transposed"),
+        ((16, 24, 20), "outer"),
+    ])
+    def test_addmm_strided_output(self, case, dtype):
         # addmm shares mm's strided-output fallback; same contract.
-        M, K, N = 8, 64, 12
+        (M, K, N), layout = case
         bias = torch.randn(M, N, device="mps", dtype=dtype)
         a = torch.randn(M, K, device="mps", dtype=dtype)
         b = torch.randn(K, N, device="mps", dtype=dtype)
-        out = torch.empty(M, N, 2, device="mps", dtype=dtype)[..., 0]
+        out = self._noncontig_out(M, N, layout, dtype)
         self.assertFalse(out.is_contiguous())
         torch.addmm(bias, a, b, out=out)
         ref = torch.addmm(bias.cpu(), a.cpu(), b.cpu())
