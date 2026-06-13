@@ -223,6 +223,17 @@ struct C10_API PyInterpreterVTable {
       c10::DeviceType device_type,
       uintptr_t event) const = 0;
 
+  // Notify tracing tools (e.g. CSAN) that an NCCL collective was launched on
+  // `stream`, reading from `input_data_ptrs` and writing to
+  // `output_data_ptrs`.  This lets the sanitizer model happens-before edges
+  // through the otherwise-invisible NCCL internal stream.
+  virtual void trace_gpu_collective_launch(
+      uintptr_t stream,
+      const uintptr_t* input_data_ptrs,
+      size_t num_inputs,
+      const uintptr_t* output_data_ptrs,
+      size_t num_outputs) const = 0;
+
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
 };
 

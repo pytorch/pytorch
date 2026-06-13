@@ -31,6 +31,9 @@ StreamSynchronizationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
 EventSynchronizationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
     "CUDA event synchronization"
 )
+CollectiveLaunchCallbacks: "CallbackRegistry[int, list[int], list[int]]" = (
+    CallbackRegistry("CUDA collective launch")
+)
 
 
 def register_callback_for_event_creation(cb: Callable[[int], None]) -> None:
@@ -71,3 +74,9 @@ def register_callback_for_stream_synchronization(cb: Callable[[int], None]) -> N
 
 def register_callback_for_event_synchronization(cb: Callable[[int], None]) -> None:
     EventSynchronizationCallbacks.add_callback(cb)
+
+
+def register_callback_for_collective_launch(
+    cb: Callable[[int, list[int], list[int]], None],
+) -> None:
+    CollectiveLaunchCallbacks.add_callback(cb)

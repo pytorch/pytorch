@@ -464,6 +464,34 @@ class EventHandler:
     def _handle_event_synchronization(self, event: EventId) -> None:
         self.syncs.all_streams_wait_for_event(event)
 
+    def _handle_collective_launch(
+        self,
+        stream: StreamId,
+        input_data_ptrs: list[int],
+        output_data_ptrs: list[int],
+    ) -> None:
+        """Register tensor accesses for an NCCL collective on the NCCL stream.
+
+        This is called from the C++ GPUTrace callback when ProcessGroupNCCL
+        launches a collective.  It records reads of input tensors and writes of
+        output tensors on the NCCL stream so that CSAN's vector-clock algorithm
+        can properly model the happens-before relationship.
+        """
+        input_set = set(input_data_ptrs)
+        output_set = set(output_data_ptrs)
+        read_only = {p for p in input_set if p != 0} - output_set
+        read_write = {p for p in output_set if p != 0}
+        outputs = read_write.copy()
+        tensor_aliases: dict[int, list[str]] = {
+            ptr: [] for ptr in read_only | read_write
+        }
+        errors = self._handle_kernel_launch(
+            stream, read_only, read_write, outputs, "nccl::collective", tensor_aliases
+        )
+        if errors:
+            for error in errors:
+                logger.warning("CSAN detected potential race in NCCL collective:\n%s", error)
+
 
 def zip_by_key(a: dict[TK, TVa], b: dict[TK, TVb]) -> Iterator[tuple[TK, TVa, TVb]]:
     for arg, value in a.items():
@@ -589,6 +617,9 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         )
         gpu_trace.register_callback_for_event_synchronization(
             self.event_handler._handle_event_synchronization
+        )
+        gpu_trace.register_callback_for_collective_launch(
+            self.event_handler._handle_collective_launch
         )
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):

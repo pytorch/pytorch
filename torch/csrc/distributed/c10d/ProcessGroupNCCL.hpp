@@ -264,7 +264,6 @@ class TensorShelf {
   // Clear the shelf.
   void clear();
 
- protected:
   // Get the inner tensor vector. Use with caution as it is not protected by
   // mutex.
   std::vector<at::Tensor>& get();
@@ -1428,7 +1427,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // on main thread, we clear the `shelves` in one shot. This is mainly because
   // watchdog (a side thread) unstashing the shelf directly seems to cause some
   // problem.
-  std::vector<std::shared_ptr<TensorShelf>> shelvesToUnstash_;
+  // Each entry pairs a tensor shelf with the NCCL end event that marks
+  // completion of the collective that produced those tensors.  Before
+  // unstashing, we block the current stream on the end event so that the
+  // CUDA caching allocator sees the NCCL completion.
+  std::vector<
+      std::pair<std::shared_ptr<TensorShelf>, std::shared_ptr<at::cuda::CUDAEvent>>>
+      shelvesToUnstash_;
   std::mutex shelvesMutex_;
 
   // Whether or not wait() and synchronize() are blocking operations that wait

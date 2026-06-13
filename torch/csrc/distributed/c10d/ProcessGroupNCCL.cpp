@@ -36,6 +36,7 @@
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/torch.h>
+#include <c10/core/impl/GPUTrace.h>
 #include <optional>
 
 namespace c10d {
@@ -2460,9 +2461,11 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
         // structure owned by the PG.
         if (!work.stashed_for_allocator_safety_->empty()) {
           std::lock_guard<std::mutex> lock(pg_->shelvesMutex_);
-          // We are just pushing back a shared_ptr here, so the cost should be
-          // minimal
-          pg_->shelvesToUnstash_.push_back(work.stashed_for_allocator_safety_);
+          // Pair the shelf with its NCCL end event so that workEnqueue can
+          // block the current stream on the event before unstashing.  This
+          // ensures the CUDA caching allocator sees the NCCL completion.
+          pg_->shelvesToUnstash_.emplace_back(
+              work.stashed_for_allocator_safety_, work.ncclEndEvent_);
         }
 
         if (pg_->enableTiming_ && logger) {
@@ -3554,7 +3557,15 @@ void ProcessGroupNCCL::workEnqueue(
   // that would be triggered by a next user call.
   {
     std::lock_guard<std::mutex> lock(shelvesMutex_);
-    for (auto& shelf : shelvesToUnstash_) {
+    for (auto& [shelf, endEvent] : shelvesToUnstash_) {
+      // Block the current stream on the NCCL end event before releasing
+      // tensors.  This ensures the CUDA caching allocator knows the NCCL
+      // operation has completed and won't recycle memory prematurely.
+      if (endEvent) {
+        auto currentStream = at::cuda::getCurrentCUDAStream(
+            endEvent->device_index());
+        endEvent->block(currentStream);
+      }
       shelf->unstash();
     }
     shelvesToUnstash_.clear();
@@ -3667,6 +3678,26 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   // Record end after ncclGroupEnd
   // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
   work->ncclEndEvent_->record(ncclStream);
+
+  // Notify GPU trace (e.g. CSAN) about tensor accesses on the NCCL stream
+  // for the coalesced group.  We treat all stashed tensors as read-write since
+  // we don't have per-op input/output separation for the coalesced group.
+  {
+    const c10::impl::PyInterpreter* interp =
+        c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      std::vector<uintptr_t> dataPtrs;
+      for (const auto& t : coalescedTensors_.get()) {
+        dataPtrs.push_back(reinterpret_cast<uintptr_t>(t.data_ptr()));
+      }
+      (*interp)->trace_gpu_collective_launch(
+          reinterpret_cast<uintptr_t>(ncclStream.stream()),
+          dataPtrs.data(),
+          dataPtrs.size(),
+          dataPtrs.data(),
+          dataPtrs.size());
+    }
+  }
 
   if (enqueue) {
     workEnqueue(work);
@@ -3878,6 +3909,30 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // End event should only be recorded after the ncclGroupEnd()
   if (!coalescing_state_) {
     work->ncclEndEvent_->record(ncclStream);
+
+    // Notify GPU trace (e.g. CSAN) about tensor accesses on the NCCL stream
+    // so that the sanitizer can model the happens-before relationship through
+    // the otherwise-invisible NCCL internal stream.
+    const c10::impl::PyInterpreter* interp =
+        c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      std::vector<uintptr_t> inputPtrs;
+      std::vector<uintptr_t> outputPtrs;
+      inputPtrs.reserve(inputs.size());
+      outputPtrs.reserve(outputs.size());
+      for (const auto& t : inputs) {
+        inputPtrs.push_back(reinterpret_cast<uintptr_t>(t.data_ptr()));
+      }
+      for (const auto& t : outputs) {
+        outputPtrs.push_back(reinterpret_cast<uintptr_t>(t.data_ptr()));
+      }
+      (*interp)->trace_gpu_collective_launch(
+          reinterpret_cast<uintptr_t>(ncclStream.stream()),
+          inputPtrs.data(),
+          inputPtrs.size(),
+          outputPtrs.data(),
+          outputPtrs.size());
+    }
   }
   work->ncclComm_ = ncclComm;
 
@@ -4042,6 +4097,31 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   }
 
   work->ncclEndEvent_->record(ncclStream);
+
+  // Notify GPU trace (e.g. CSAN) about tensor accesses on the NCCL stream
+  {
+    const c10::impl::PyInterpreter* interp =
+        c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      std::vector<uintptr_t> inputPtrs;
+      std::vector<uintptr_t> outputPtrs;
+      inputPtrs.reserve(inputs.size());
+      outputPtrs.reserve(outputs.size());
+      for (const auto& t : inputs) {
+        inputPtrs.push_back(reinterpret_cast<uintptr_t>(t.data_ptr()));
+      }
+      for (const auto& t : outputs) {
+        outputPtrs.push_back(reinterpret_cast<uintptr_t>(t.data_ptr()));
+      }
+      (*interp)->trace_gpu_collective_launch(
+          reinterpret_cast<uintptr_t>(ncclStream.stream()),
+          inputPtrs.data(),
+          inputPtrs.size(),
+          outputPtrs.data(),
+          outputPtrs.size());
+    }
+  }
+
   work->ncclComm_ = ncclComm;
 
   {

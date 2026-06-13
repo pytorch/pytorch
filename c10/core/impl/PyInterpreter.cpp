@@ -138,6 +138,12 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void trace_gpu_event_synchronization(
       c10::DeviceType device_type,
       uintptr_t event) const override {}
+  void trace_gpu_collective_launch(
+      uintptr_t stream,
+      const uintptr_t* input_data_ptrs,
+      size_t num_inputs,
+      const uintptr_t* output_data_ptrs,
+      size_t num_outputs) const override {}
 
   void reset_backward_hooks(const TensorImpl* self) const override {
     PANIC(reset_backward_hooks);

@@ -150,6 +150,35 @@ struct ConcretePyInterpreterVTable final
     CONCRETE_GPU_TRACE(device_type, "EventSynchronizationCallbacks", event);
   }
 
+  void trace_gpu_collective_launch(
+      uintptr_t stream,
+      const uintptr_t* input_data_ptrs,
+      size_t num_inputs,
+      const uintptr_t* output_data_ptrs,
+      size_t num_outputs) const override {
+    at::impl::MaybeSetTLSOnEntryGuard guard;
+    if (Py_IsInitialized()) {
+      pybind11::gil_scoped_acquire gil;
+      try {
+        py::module mod = py::module::import("torch.cuda._gpu_trace");
+        py::object hook =
+            mod.attr("CollectiveLaunchCallbacks").attr("fire_callbacks");
+        py::list inputs;
+        py::list outputs;
+        for (size_t i = 0; i < num_inputs; i++) {
+          inputs.append(input_data_ptrs[i]);
+        }
+        for (size_t i = 0; i < num_outputs; i++) {
+          outputs.append(output_data_ptrs[i]);
+        }
+        hook(stream, inputs, outputs);
+      } catch (const std::exception& e) {
+        LOG(ERROR) << "CUDA collective trace hook execution failed: "
+                   << e.what();
+      }
+    }
+  }
+
   void reset_backward_hooks(const c10::TensorImpl* self) const override;
 
   static ConcretePyInterpreterVTable* instance() {
