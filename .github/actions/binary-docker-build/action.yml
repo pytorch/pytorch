@@ -63,7 +63,9 @@ runs:
         set +x
         if [[ ${WITH_PUSH:-false} == "true" ]]; then
           echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
-          docker push ${DOCKER_IMAGE_NAME_PREFIX}
+          if [[ "${GIT_BRANCH_NAME}" == "main" ]]; then
+            docker push ${DOCKER_IMAGE_NAME_PREFIX}
+          fi
           docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}
           docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}
           docker push ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}
