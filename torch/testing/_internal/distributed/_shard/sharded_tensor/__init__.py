@@ -7,7 +7,9 @@ import torch
 import torch.distributed as dist
 from torch.distributed import rpc
 from torch.testing._internal.common_distributed import (
+    exit_if_lt_x_cuda_devs,
     MultiProcessTestCase,
+    require_n_gpus_for_nccl_backend,
     TEST_SKIPS,
     tp_transports,
 )
