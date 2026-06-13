@@ -107,6 +107,7 @@ from .common import (
     RemovedArg,
     SizeArg,
     TensorArg,
+    TMADescriptorArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -761,15 +762,20 @@ class BlockDescriptorOptions:
 class TensorDescriptorOptions(BlockDescriptorOptions):
     def format(self, name: str, roffset=True) -> str:
         """
-        Codegen a call to tl.make_tensor_descriptor()
+        Codegen a call to tl.make_tensor_descriptor(), or, when host-side TMA is
+        enabled, the kernel-arg reference itself: the descriptor is built once
+        on the host and passed in as `name` (typed tensordesc<>), so the kernel
+        references the argument directly instead of constructing one per CTA.
 
         Args:
             name: variable name for pointer
             roffset: unused, but kept for compatibility with BlockPtrOptions.format()
 
         Returns:
-            "tl.make_tensor_descriptor(...)"
+            "tl.make_tensor_descriptor(...)", or `name` for the host-side path.
         """
+        if V.kernel.register_host_tma_descriptor(self, name):
+            return name
 
         f = V.kernel.index_to_str
         args = [
@@ -3181,6 +3187,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             collections.defaultdict(dict)
         )
         self.tma_min_block_sizes = dict[str, int]()
+        self.host_tma_descriptor_inputs: dict[str, list[int]] = {}
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._pdl_load_index = 0
@@ -3880,6 +3887,26 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             index,
             expand_shape=expand_shape,
         )
+
+    def register_host_tma_descriptor(
+        self, indexing: TensorDescriptorOptions, name: str
+    ) -> bool:
+        """
+        To support host-side TMA tensor descriptors, record the
+        pinned block shape for kernel arg `name`, so the launcher builds the
+        TensorDescriptor on the host and the signature is upgraded to
+        tensordesc<> and returns True; the caller then references `name`
+        directly instead of emitting a per-CTA tl.make_tensor_descriptor().
+        Returns False to fall back to device-side creation.
+        """
+        if not (
+            config.triton.use_host_side_tma_descriptor and has_triton_stable_tma_api()
+        ):
+            return False
+        if self.inside_reduction or len(indexing.block_shape) != 1:
+            return False
+        self.host_tma_descriptor_inputs[name] = [config.triton.host_side_tma_block_size]
+        return True
 
     def codegen_block_ptr(
         self,
@@ -6379,6 +6406,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         if self.tma_min_block_sizes:
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
+        if self.host_tma_descriptor_inputs:
+            out["host_tma_descriptor_block_size"] = (
+                config.triton.host_side_tma_block_size
+            )
         if self.tiling_scores:
             out["tiling_scores"] = self.tiling_scores
         if self.min_xblock is not None:
@@ -6495,6 +6526,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if symbol in V.graph.sizevars.inv_precomputed_replacements:
                     signature[i] = SizeArg(
                         arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
+                    )
+
+        if self.host_tma_descriptor_inputs:
+            for i, arg in enumerate(signature):
+                if (
+                    isinstance(arg, TensorArg)
+                    and arg.name in self.host_tma_descriptor_inputs
+                ):
+                    signature[i] = TMADescriptorArg(
+                        name=arg.name,
+                        api_type="stable",
+                        block_shape=self.host_tma_descriptor_inputs[arg.name],
+                        dtype=arg.dtype,
                     )
 
         mutated_args: OrderedSet[str] = OrderedSet()
@@ -6829,7 +6873,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ):
         wrapper = V.graph.wrapper_code
         wrapper.write_triton_header_once()
-        _, call_args, _, arg_types = self.args.python_argdefs()
+        argdefs, call_args, _, arg_types = self.args.python_argdefs()
+
+        if self.host_tma_descriptor_inputs:
+            call_args = list(call_args)
+            for i, argdef in enumerate(argdefs):
+                block = self.host_tma_descriptor_inputs.get(argdef.name)
+                if block is None:
+                    continue
+                desc_var = f"{argdef.name}_host_tma_desc"
+                wrapper.writeline(
+                    f"{desc_var} = triton.tools.tensor_descriptor.TensorDescriptor"
+                    f".from_tensor({call_args[i]}.reshape(-1), {block})"
+                )
+                call_args[i] = desc_var
+
         self.add_numel_to_call_args(name, call_args, arg_types)
 
         for ws in self.args.workspace_args:

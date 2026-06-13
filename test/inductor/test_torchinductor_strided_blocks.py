@@ -40,6 +40,7 @@ from torch.testing._internal.inductor_utils import (
     skip_windows_ci,
     TRITON_HAS_CPU,
 )
+from torch.utils._triton import has_triton_stable_tma_api
 
 
 try:
@@ -1671,6 +1672,27 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         compiled_fn = torch.compile(fn)
         actual = compiled_fn(t)
         self.assertTrue((actual == 4).all())
+
+    @unittest.skipIf(
+        not has_triton_stable_tma_api(),
+        "Host-side TMA requires the Triton stable tensor-descriptor API (triton>=3.4)",
+    )
+    @config.patch({"triton.use_host_side_tma_descriptor": True})
+    def test_silu_host_side_tma_descriptor(self):
+        def fn(x):
+            return torch.nn.functional.silu(x)
+
+        # Contiguous bf16, large enough to be TMA-eligible and a multiple of the
+        # pinned block size so the flattened 1D view tiles evenly.
+        x = torch.randn(2048, 2048, dtype=torch.bfloat16, device=self.device)
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+
+        self.assertEqual(result, fn(x))
+        # No per-CTA descriptor construction.
+        self.assertNotIn("tl.make_tensor_descriptor", code)
+        # Host builds the descriptor and the kernel arg is a tensordesc<>.
+        self.assertIn("TensorDescriptor.from_tensor", code)
+        self.assertIn("tensordesc<", code)
 
     def test_slice_constant_offset_disables_tma(self):
         """TMA requires 16-byte aligned base; x[1:] with float32 yields 4-byte offset."""
