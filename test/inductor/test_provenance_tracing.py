@@ -95,12 +95,6 @@ class Model4(torch.nn.Module):
         return x, z
 
 
-def _bias_like_addmm_input(device):
-    # These provenance tests exercise the GPU addmm-unfusion path. Keep the
-    # input bias-like so they do not depend on full-size accumulator unfusion.
-    return torch.randn(30, device=device)
-
-
 @config.patch("trace.enabled", True)
 @config.patch("trace.provenance_tracking_level", 1)
 class TestProvenanceTracingArtifact(TestCase):
@@ -129,10 +123,7 @@ class TestProvenanceTracingArtifact(TestCase):
     def _test_triton_kernel_to_post_grad_tracing(self, device):
         a = torch.randn(10, 20, device=device)
         b = torch.randn(20, 30, device=device)
-        if device == "cpu":
-            c = torch.randn(10, 30, device=device)
-        else:
-            c = _bias_like_addmm_input(device)
+        c = torch.randn(10, 30, device=device)
         example_inputs = (a, b, c)
 
         model = Model().to(device)
@@ -629,7 +620,7 @@ class TestProvenanceTracingStackTraces(TestCase):
         x = torch.randn(8, 10).to(device)
         a = torch.randn(10, 20).to(device)
         b = torch.randn(20, 30).to(device)
-        c = _bias_like_addmm_input(device)
+        c = torch.randn(10, 30).to(device)
         example_inputs = (x, a, b, c)
 
         expected = {
@@ -727,7 +718,7 @@ class TestProvenanceTracingStackTraces(TestCase):
         x = torch.randn(8, 10, device=GPU_TYPE)
         a = torch.randn(10, 20, device=GPU_TYPE)
         b = torch.randn(20, 30, device=GPU_TYPE)
-        c = _bias_like_addmm_input(GPU_TYPE)
+        c = torch.randn(10, 30, device=GPU_TYPE)
         inputs = (x, a, b, c)
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -909,10 +900,7 @@ class ProvenanceTracingKernelContextTemplate:
         x = torch.randn(8, 10).to(self.device)
         a = torch.randn(10, 20).to(self.device)
         b = torch.randn(20, 30).to(self.device)
-        if self.device == "cpu":
-            c = torch.randn(10, 30).to(self.device)
-        else:
-            c = _bias_like_addmm_input(self.device)
+        c = torch.randn(10, 30).to(self.device)
         example_inputs = (x, a, b, c)
 
         with config.patch(
@@ -943,10 +931,7 @@ class ProvenanceTracingKernelContextTemplate:
         x = torch.randn(8, 10).to(self.device)
         a = torch.randn(10, 20).to(self.device)
         b = torch.randn(20, 30).to(self.device)
-        if self.device == "cpu":
-            c = torch.randn(10, 30).to(self.device)
-        else:
-            c = _bias_like_addmm_input(self.device)
+        c = torch.randn(10, 30).to(self.device)
         example_inputs = (x, a, b, c)
         model = Model().to(self.device)
 
@@ -954,11 +939,38 @@ class ProvenanceTracingKernelContextTemplate:
         _, code = run_and_get_cpp_code(torch._inductor.aoti_compile_and_package, ep)
 
         self.assertTrue("KernelContextGuard" not in code)
+        FileCheck().check_not(
+            "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+        ).check_not("thread_local KernelContext* tls_kernel_context = nullptr;").run(
+            code
+        )
 
         with config.patch(
             {
                 "trace.provenance_tracking_level": 1,
                 "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": False,
+            }
+        ):
+            package_path, code = run_and_get_cpp_code(
+                torch._inductor.aoti_compile_and_package, ep
+            )
+
+            FileCheck().check_not(
+                "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+            ).check_not(
+                "thread_local KernelContext* tls_kernel_context = nullptr;"
+            ).check_not("KernelContextGuard").run(code)
+
+            compiled_model = torch._inductor.aoti_load_package(package_path)
+            result = compiled_model(*example_inputs)
+            self.assertEqual(result, model(*example_inputs))
+
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 1,
+                "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": True,
             }
         ):
             package_path, code = run_and_get_cpp_code(

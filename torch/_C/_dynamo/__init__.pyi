@@ -55,6 +55,7 @@ class PyNumberSlots:
     NB_INDEX: int
     NB_MATRIX_MULTIPLY: int
     NB_INPLACE_MATRIX_MULTIPLY: int
+    NB_DIVMOD: int
 
 class PyTypeSlots:
     TP_HASH: int
@@ -67,3 +68,4 @@ class PyTypeSlots:
     TP_SETATTRO: int
     TP_DESCR_GET: int
     TP_DESCR_SET: int
+    TP_STR: int
