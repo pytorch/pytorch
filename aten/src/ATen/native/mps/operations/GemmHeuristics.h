@@ -9,7 +9,6 @@ namespace at::native::mps {
 
 enum class GemvKernel {
   Standard,
-  TUnroll8,
   T2D, // 2D lane layout, 16-byte loads; vec is implied, kq = k-sublanes
 };
 
@@ -26,8 +25,16 @@ class GemvPolicy {
 
   static GemvPolicy current();
 
-  GemvConfig pick_t(c10::ScalarType dt, int64_t outlen, int64_t K, int64_t align) const;
-  GemvConfig pick_nt(c10::ScalarType dt, int64_t outlen, int64_t K, int64_t align) const;
+  GemvConfig pick_t(
+      c10::ScalarType dt,
+      int64_t outlen,
+      int64_t K,
+      int64_t align) const;
+  GemvConfig pick_nt(
+      c10::ScalarType dt,
+      int64_t outlen,
+      int64_t K,
+      int64_t align) const;
 
   static GemvConfig clamp_t(GemvConfig cfg, int64_t align);
   static GemvConfig clamp_nt(GemvConfig cfg, int64_t align);

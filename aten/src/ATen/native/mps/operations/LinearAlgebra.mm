@@ -123,26 +123,6 @@ void dispatch_gemv(const Tensor& A,
   const bool gemv_use_t = m_is_one ? !mat.trans : mat.trans;
   const int64_t align = mat.ld | mat.view.storage_offset();
   GemvConfig cfg = gemv_use_t ? policy.pick_t(dt, outlen, K, align) : policy.pick_nt(dt, outlen, K, align);
-  // Tuning-only override: PYTORCH_MPS_GEMV_FORCE_T="nsimd,vec[,u8]" or
-  // "nsimd,kq,t2d", PYTORCH_MPS_GEMV_FORCE_NT="nsimd,vec[,rows]". Read per
-  // call so a tuner can flip configs via os.environ without restarting.
-  if (const char* force = getenv(gemv_use_t ? "PYTORCH_MPS_GEMV_FORCE_T" : "PYTORCH_MPS_GEMV_FORCE_NT")) {
-    int fn = 0, fv = 0;
-    char extra[8] = {0};
-    if (sscanf(force, "%d,%d,%7s", &fn, &fv, extra) >= 2) {
-      cfg = GemvConfig{fn, fv};
-      if (gemv_use_t && strcmp(extra, "u8") == 0) {
-        cfg.kernel = GemvKernel::TUnroll8;
-      } else if (gemv_use_t && strcmp(extra, "t2d") == 0) {
-        cfg.kernel = GemvKernel::T2D;
-        cfg.kq = fv;
-        cfg.vec = 1;
-      } else if (!gemv_use_t && extra[0] != 0) {
-        cfg.rows = atoi(extra);
-      }
-      cfg = gemv_use_t ? GemvPolicy::clamp_t(cfg, align) : GemvPolicy::clamp_nt(cfg, align);
-    }
-  }
   // T2D loads a full 16 bytes per lane; misaligned matrices fall back to the
   // scalar-column standard kernel.
   const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
@@ -151,7 +131,6 @@ void dispatch_gemv(const Tensor& A,
     cfg.vec = 1;
   }
   const GemvConfig launch_cfg = cfg;
-  const bool gemv_t_u8 = gemv_use_t && launch_cfg.kernel == GemvKernel::TUnroll8;
   const bool gemv_t2d = gemv_use_t && launch_cfg.kernel == GemvKernel::T2D;
 
   const auto vvec = m_is_one ? A : B;
@@ -183,8 +162,7 @@ void dispatch_gemv(const Tensor& A,
   if (gemv_t2d) {
     fname = fmt::format("gemv_t2d_{}_{}_{}_{}", dt_str, launch_cfg.nsimd, launch_cfg.kq, epi_str);
   } else if (gemv_use_t) {
-    fname = fmt::format(
-        "{}_{}_{}_{}_{}", gemv_t_u8 ? "gemv_t_u8" : "gemv_t", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str);
+    fname = fmt::format("gemv_t_{}_{}_{}_{}", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str);
   } else {
     fname = fmt::format("gemv_nt_{}_{}_{}_{}_{}{}",
                         dt_str,
@@ -226,7 +204,7 @@ bool try_mps_gemv(const Tensor& A,
                   const Scalar& beta,
                   at_gemm::GemmEpilogue epi) {
   if (!c10::isFloatingType(out.scalar_type())) {
-    // only support floats for gemv for now
+    // gemv kernels are float-only; integer types fall back to MPSGraph
     return false;
   }
   const auto M = A.size(0);

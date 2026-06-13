@@ -26,7 +26,7 @@ GemvConfig GemvPolicy::clamp_nt(GemvConfig cfg, int64_t align) {
 namespace {
 using AppleGPUFamily = at::mps::AppleGPUFamily;
 
-// Existing Apple10/M5 tuning. Apple9 reuses this until it is tuned separately.
+// Default config for families without a dedicated table: M1 (Apple7) and M5+ (Apple10).
 GemvConfig pick_t_default(c10::ScalarType dt, int64_t outlen, int64_t K) {
   int nsimd = 32;
   int vec = 2;

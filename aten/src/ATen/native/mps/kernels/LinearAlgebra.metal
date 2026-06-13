@@ -1355,108 +1355,10 @@ kernel void gemv_t(
   }
 }
 
-// gemv_t with a wider inner-loop unroll; wins on M2 bf16 small-N where loop overhead shows.
-template <typename DT, int NSIMD, int VEC, GemmEpilogue EPI>
-kernel void gemv_t_u8(
-    device const DT* B [[buffer(0)]],
-    device const DT* x [[buffer(1)]],
-    device DT* y [[buffer(2)]],
-    constant GemvDims& gP [[buffer(3)]],
-    device const DT* self [[buffer(4)]],
-    constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>& alpha_beta
-    [[buffer(5)]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint sgid [[simdgroup_index_in_threadgroup]],
-    uint lane [[thread_index_in_simdgroup]]) {
-  using ACC_T = ::c10::metal::opmath_t<DT>;
-  using Vec = GemmVec<DT, VEC>;
-  constexpr int BLOCK_N = 32 * VEC;
-  const int gN = gP.n, gK = gP.K, gLdb = gP.ld, gXs = gP.xs;
-  threadgroup ACC_T partials[NSIMD][BLOCK_N + 1];
-
-  const int col0 = int(tgid.x) * BLOCK_N;
-  const int n0 = col0 + int(lane) * VEC;
-
-  const int k_per_simd = (gK + NSIMD - 1) / NSIMD;
-  const int k_start = int(sgid) * k_per_simd;
-  const int k_end = min(gK, k_start + k_per_simd);
-
-  ACC_T acc[VEC];
-#pragma unroll
-  for (int i = 0; i < VEC; ++i) {
-    acc[i] = (ACC_T)0;
-  }
-
-  const bool full = (n0 + VEC) <= gN;
-  if (full) {
-    int k = k_start;
-    for (; k + 8 <= k_end; k += 8) {
-      Vec b0 = *((const device Vec*)(&B[(k + 0) * gLdb + n0]));
-      Vec b1 = *((const device Vec*)(&B[(k + 1) * gLdb + n0]));
-      Vec b2 = *((const device Vec*)(&B[(k + 2) * gLdb + n0]));
-      Vec b3 = *((const device Vec*)(&B[(k + 3) * gLdb + n0]));
-      Vec b4 = *((const device Vec*)(&B[(k + 4) * gLdb + n0]));
-      Vec b5 = *((const device Vec*)(&B[(k + 5) * gLdb + n0]));
-      Vec b6 = *((const device Vec*)(&B[(k + 6) * gLdb + n0]));
-      Vec b7 = *((const device Vec*)(&B[(k + 7) * gLdb + n0]));
-      ACC_T x0 = (ACC_T)x[(k + 0) * gXs], x1 = (ACC_T)x[(k + 1) * gXs];
-      ACC_T x2 = (ACC_T)x[(k + 2) * gXs], x3 = (ACC_T)x[(k + 3) * gXs];
-      ACC_T x4 = (ACC_T)x[(k + 4) * gXs], x5 = (ACC_T)x[(k + 5) * gXs];
-      ACC_T x6 = (ACC_T)x[(k + 6) * gXs], x7 = (ACC_T)x[(k + 7) * gXs];
-#pragma unroll
-      for (int i = 0; i < VEC; ++i) {
-        acc[i] += (ACC_T)b0.v[i] * x0;
-        acc[i] += (ACC_T)b1.v[i] * x1;
-        acc[i] += (ACC_T)b2.v[i] * x2;
-        acc[i] += (ACC_T)b3.v[i] * x3;
-        acc[i] += (ACC_T)b4.v[i] * x4;
-        acc[i] += (ACC_T)b5.v[i] * x5;
-        acc[i] += (ACC_T)b6.v[i] * x6;
-        acc[i] += (ACC_T)b7.v[i] * x7;
-      }
-    }
-    for (; k < k_end; ++k) {
-      Vec bv = *((const device Vec*)(&B[k * gLdb + n0]));
-      ACC_T xk = (ACC_T)x[k * gXs];
-#pragma unroll
-      for (int i = 0; i < VEC; ++i) {
-        acc[i] += (ACC_T)bv.v[i] * xk;
-      }
-    }
-  } else {
-    for (int k = k_start; k < k_end; ++k) {
-      ACC_T xk = (ACC_T)x[k * gXs];
-#pragma unroll
-      for (int i = 0; i < VEC; ++i) {
-        int n = n0 + i;
-        if (n < gN) {
-          acc[i] += (ACC_T)B[k * gLdb + n] * xk;
-        }
-      }
-    }
-  }
-#pragma unroll
-  for (int i = 0; i < VEC; ++i) {
-    partials[sgid][int(lane) * VEC + i] = acc[i];
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  const ACC_T alpha = alpha_beta[0];
-  const ACC_T beta = alpha_beta[1];
-  for (int cc = int(sgid); cc < BLOCK_N; cc += NSIMD) {
-    ACC_T v = int(lane) < NSIMD ? partials[lane][cc] : (ACC_T)0;
-    v = simd_sum(v);
-    const int n = col0 + cc;
-    if (lane == 0 && n < gN) {
-      y[n] = apply_epilogue<EPI, DT, ACC_T>(
-          v, /*r=*/0, /*c=*/n, self, gP.self_r, gP.self_c, alpha, beta);
-    }
-  }
-}
-
 // gemv_t with a 2D lane layout (KQ k-sublanes x C=32/KQ column groups), each
 // lane loading a full 16-byte vector: up to 8x fewer/wider loads, which holds
-// up under reduced GPU clocks. Requires ld and offset VEC-aligned (host checks).
+// up under reduced GPU clocks. Requires ld and offset VEC-aligned (host
+// checks).
 template <typename DT, int NSIMD, int KQ, GemmEpilogue EPI>
 kernel void gemv_t2d(
     device const DT* B [[buffer(0)]],
@@ -1645,8 +1547,9 @@ kernel void gemv_nt(
   }
 }
 
-// Explicit instantiations (host_name = dispatch key). These include the
-// family-tuned policy configs and adjacent variants used while tuning.
+// Explicit instantiations (host_name = dispatch key): exactly the configs the
+// GemvPolicy can emit, closed under clamp_t/clamp_nt (vec halved when the
+// matrix is not vec-aligned) and the T2D->Standard misalignment fallback.
 #define MB_GEMV_T(DT, NSIMD, VEC, EN, EV)                           \
   template [[host_name("gemv_t_" #DT "_" #NSIMD "_" #VEC "_" #EN)]] \
   kernel void gemv_t<DT, NSIMD, VEC, GemmEpilogue::EV>(             \
@@ -1662,22 +1565,7 @@ kernel void gemv_nt(
 #define MB_GEMV_T_E(DT, NSIMD, VEC) \
   MB_GEMV_T(DT, NSIMD, VEC, none, None) MB_GEMV_T(DT, NSIMD, VEC, ab, AlphaBeta)
 
-#define MB_GEMV_T_U8(DT, NSIMD, VEC, EN, EV)                           \
-  template [[host_name("gemv_t_u8_" #DT "_" #NSIMD "_" #VEC "_" #EN)]] \
-  kernel void gemv_t_u8<DT, NSIMD, VEC, GemmEpilogue::EV>(             \
-      device const DT*,                                                \
-      device const DT*,                                                \
-      device DT*,                                                      \
-      constant GemvDims&,                                              \
-      device const DT*,                                                \
-      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&,    \
-      uint3,                                                           \
-      uint,                                                            \
-      uint);
-#define MB_GEMV_T_U8_E(DT, NSIMD, VEC) \
-  MB_GEMV_T_U8(DT, NSIMD, VEC, none, None) MB_GEMV_T_U8(DT, NSIMD, VEC, ab, AlphaBeta)
-
-#define MB_GEMV_T2D(DT, NSIMD, KQ, EN, EV)                            \
+#define MB_GEMV_T2D(DT, NSIMD, KQ, EN, EV)                           \
   template [[host_name("gemv_t2d_" #DT "_" #NSIMD "_" #KQ "_" #EN)]] \
   kernel void gemv_t2d<DT, NSIMD, KQ, GemmEpilogue::EV>(             \
       device const DT*,                                              \
@@ -1689,25 +1577,16 @@ kernel void gemv_nt(
       uint3,                                                         \
       uint,                                                          \
       uint);
-#define MB_GEMV_T2D_E(DT, NSIMD, KQ) \
-  MB_GEMV_T2D(DT, NSIMD, KQ, none, None) MB_GEMV_T2D(DT, NSIMD, KQ, ab, AlphaBeta)
+#define MB_GEMV_T2D_E(DT, NSIMD, KQ)     \
+  MB_GEMV_T2D(DT, NSIMD, KQ, none, None) \
+  MB_GEMV_T2D(DT, NSIMD, KQ, ab, AlphaBeta)
 
-#define MB_GEMV_T2D_ALL(DT)  \
-  MB_GEMV_T2D_E(DT, 2, 2)    \
-  MB_GEMV_T2D_E(DT, 4, 2)    \
-  MB_GEMV_T2D_E(DT, 8, 2)    \
-  MB_GEMV_T2D_E(DT, 16, 2)   \
-  MB_GEMV_T2D_E(DT, 32, 2)   \
-  MB_GEMV_T2D_E(DT, 2, 4)    \
-  MB_GEMV_T2D_E(DT, 4, 4)    \
-  MB_GEMV_T2D_E(DT, 8, 4)    \
-  MB_GEMV_T2D_E(DT, 16, 4)   \
-  MB_GEMV_T2D_E(DT, 32, 4)   \
-  MB_GEMV_T2D_E(DT, 2, 8)    \
-  MB_GEMV_T2D_E(DT, 4, 8)    \
-  MB_GEMV_T2D_E(DT, 8, 8)    \
-  MB_GEMV_T2D_E(DT, 16, 8)   \
-  MB_GEMV_T2D_E(DT, 32, 8)
+// t2d is only ever emitted at nsimd=16 (kq in {2,4,8}); kq=4 is bf16-only but
+// kept for all dtypes for one shared macro.
+#define MB_GEMV_T2D_ALL(DT) \
+  MB_GEMV_T2D_E(DT, 16, 2)  \
+  MB_GEMV_T2D_E(DT, 16, 4)  \
+  MB_GEMV_T2D_E(DT, 16, 8)
 
 #define MB_GEMV_NT(DT, NSIMD, VEC, EN, EV, XN, XV, RN, R)           \
   template[[host_name("gemv_nt_" #DT "_" #NSIMD "_" #VEC "_" #EN    \
@@ -1740,55 +1619,24 @@ kernel void gemv_nt(
   MB_GEMV_NT(DT, NSIMD, VEC, none, None, xs, false, "_r2", 2)   \
   MB_GEMV_NT(DT, NSIMD, VEC, ab, AlphaBeta, xs, false, "_r2", 2)
 
-// fp32: VEC caps at 4 (float4 = 16-byte loads).
+// fp32: VEC caps at 4 (float4 = 16-byte loads); the lone vec=8 (gemv_t 2,8) is
+// the A8 outlen==4096,K==14336 config.
 #define MB_GEMV_FLOAT(DT)  \
   MB_GEMV_T_E(DT, 1, 1)    \
   MB_GEMV_T_E(DT, 2, 1)    \
-  MB_GEMV_T_E(DT, 3, 1)    \
   MB_GEMV_T_E(DT, 4, 1)    \
-  MB_GEMV_T_E(DT, 5, 1)    \
-  MB_GEMV_T_E(DT, 6, 1)    \
-  MB_GEMV_T_E(DT, 7, 1)    \
   MB_GEMV_T_E(DT, 8, 1)    \
-  MB_GEMV_T_E(DT, 10, 1)   \
-  MB_GEMV_T_E(DT, 12, 1)   \
-  MB_GEMV_T_E(DT, 14, 1)   \
   MB_GEMV_T_E(DT, 16, 1)   \
-  MB_GEMV_T_E(DT, 20, 1)   \
-  MB_GEMV_T_E(DT, 24, 1)   \
-  MB_GEMV_T_E(DT, 28, 1)   \
   MB_GEMV_T_E(DT, 32, 1)   \
-  MB_GEMV_T_E(DT, 1, 2)    \
   MB_GEMV_T_E(DT, 2, 2)    \
-  MB_GEMV_T_E(DT, 3, 2)    \
   MB_GEMV_T_E(DT, 4, 2)    \
-  MB_GEMV_T_E(DT, 5, 2)    \
-  MB_GEMV_T_E(DT, 6, 2)    \
-  MB_GEMV_T_E(DT, 7, 2)    \
   MB_GEMV_T_E(DT, 8, 2)    \
-  MB_GEMV_T_E(DT, 10, 2)   \
-  MB_GEMV_T_E(DT, 12, 2)   \
-  MB_GEMV_T_E(DT, 14, 2)   \
   MB_GEMV_T_E(DT, 16, 2)   \
-  MB_GEMV_T_E(DT, 20, 2)   \
-  MB_GEMV_T_E(DT, 24, 2)   \
-  MB_GEMV_T_E(DT, 28, 2)   \
   MB_GEMV_T_E(DT, 32, 2)   \
-  MB_GEMV_T_E(DT, 1, 4)    \
   MB_GEMV_T_E(DT, 2, 4)    \
-  MB_GEMV_T_E(DT, 3, 4)    \
   MB_GEMV_T_E(DT, 4, 4)    \
-  MB_GEMV_T_E(DT, 5, 4)    \
-  MB_GEMV_T_E(DT, 6, 4)    \
-  MB_GEMV_T_E(DT, 7, 4)    \
   MB_GEMV_T_E(DT, 8, 4)    \
-  MB_GEMV_T_E(DT, 10, 4)   \
-  MB_GEMV_T_E(DT, 12, 4)   \
-  MB_GEMV_T_E(DT, 14, 4)   \
   MB_GEMV_T_E(DT, 16, 4)   \
-  MB_GEMV_T_E(DT, 20, 4)   \
-  MB_GEMV_T_E(DT, 24, 4)   \
-  MB_GEMV_T_E(DT, 28, 4)   \
   MB_GEMV_T_E(DT, 2, 8)    \
   MB_GEMV_NT_E1(DT, 2)     \
   MB_GEMV_NT_E1(DT, 4)     \
@@ -1804,87 +1652,31 @@ kernel void gemv_nt(
   MB_GEMV_NT_EV(DT, 16, 4) \
   MB_GEMV_NT_EV(DT, 2, 8)  \
   MB_GEMV_NT_EV(DT, 4, 8)  \
-  MB_GEMV_NT_EV(DT, 8, 8)  \
-  MB_GEMV_NT_EV(DT, 16, 8) \
-  MB_GEMV_NT_R2(DT, 2, 8)  \
-  MB_GEMV_NT_R2(DT, 4, 2)  \
-  MB_GEMV_NT_R2(DT, 8, 2)  \
-  MB_GEMV_NT_R2(DT, 16, 2) \
-  MB_GEMV_NT_R2(DT, 2, 4)  \
-  MB_GEMV_NT_R2(DT, 4, 4)  \
-  MB_GEMV_NT_R2(DT, 8, 4)  \
-  MB_GEMV_NT_R2(DT, 16, 4) \
-  MB_GEMV_NT_R2(DT, 4, 8)  \
-  MB_GEMV_NT_R2(DT, 8, 8)  \
-  MB_GEMV_NT_R2(DT, 16, 8)
+  MB_GEMV_NT_R2(DT, 8, 4)
 
 // half/bf16: VEC=8 = 16-byte loads.
-#define MB_GEMV_LP_T(DT)  \
-  MB_GEMV_T_E(DT, 1, 1)   \
-  MB_GEMV_T_E(DT, 2, 1)   \
-  MB_GEMV_T_E(DT, 3, 1)   \
-  MB_GEMV_T_E(DT, 4, 1)   \
-  MB_GEMV_T_E(DT, 5, 1)   \
-  MB_GEMV_T_E(DT, 6, 1)   \
-  MB_GEMV_T_E(DT, 7, 1)   \
-  MB_GEMV_T_E(DT, 8, 1)   \
-  MB_GEMV_T_E(DT, 10, 1)  \
-  MB_GEMV_T_E(DT, 12, 1)  \
-  MB_GEMV_T_E(DT, 14, 1)  \
-  MB_GEMV_T_E(DT, 16, 1)  \
-  MB_GEMV_T_E(DT, 20, 1)  \
-  MB_GEMV_T_E(DT, 24, 1)  \
-  MB_GEMV_T_E(DT, 28, 1)  \
-  MB_GEMV_T_E(DT, 32, 1)  \
-  MB_GEMV_T_E(DT, 1, 2)   \
-  MB_GEMV_T_E(DT, 2, 2)   \
-  MB_GEMV_T_E(DT, 3, 2)   \
-  MB_GEMV_T_E(DT, 4, 2)   \
-  MB_GEMV_T_E(DT, 5, 2)   \
-  MB_GEMV_T_E(DT, 6, 2)   \
-  MB_GEMV_T_E(DT, 7, 2)   \
-  MB_GEMV_T_E(DT, 8, 2)   \
-  MB_GEMV_T_E(DT, 10, 2)  \
-  MB_GEMV_T_E(DT, 12, 2)  \
-  MB_GEMV_T_E(DT, 14, 2)  \
-  MB_GEMV_T_E(DT, 16, 2)  \
-  MB_GEMV_T_E(DT, 20, 2)  \
-  MB_GEMV_T_E(DT, 24, 2)  \
-  MB_GEMV_T_E(DT, 28, 2)  \
-  MB_GEMV_T_E(DT, 32, 2)  \
-  MB_GEMV_T_E(DT, 1, 4)   \
-  MB_GEMV_T_E(DT, 2, 4)   \
-  MB_GEMV_T_E(DT, 3, 4)   \
-  MB_GEMV_T_E(DT, 4, 4)   \
-  MB_GEMV_T_E(DT, 5, 4)   \
-  MB_GEMV_T_E(DT, 6, 4)   \
-  MB_GEMV_T_E(DT, 7, 4)   \
-  MB_GEMV_T_E(DT, 8, 4)   \
-  MB_GEMV_T_E(DT, 10, 4)  \
-  MB_GEMV_T_E(DT, 12, 4)  \
-  MB_GEMV_T_E(DT, 14, 4)  \
-  MB_GEMV_T_E(DT, 16, 4)  \
-  MB_GEMV_T_E(DT, 20, 4)  \
-  MB_GEMV_T_E(DT, 24, 4)  \
-  MB_GEMV_T_E(DT, 28, 4)  \
-  MB_GEMV_T_E(DT, 32, 4)  \
-  MB_GEMV_T_E(DT, 1, 8)   \
-  MB_GEMV_T_E(DT, 2, 8)   \
-  MB_GEMV_T_E(DT, 3, 8)   \
-  MB_GEMV_T_E(DT, 4, 8)   \
-  MB_GEMV_T_E(DT, 5, 8)   \
-  MB_GEMV_T_E(DT, 6, 8)   \
-  MB_GEMV_T_E(DT, 7, 8)   \
-  MB_GEMV_T_E(DT, 8, 8)   \
-  MB_GEMV_T_E(DT, 10, 8)  \
-  MB_GEMV_T_E(DT, 12, 8)  \
-  MB_GEMV_T_E(DT, 14, 8)  \
-  MB_GEMV_T_E(DT, 16, 8)  \
-  MB_GEMV_T_E(DT, 20, 8)  \
-  MB_GEMV_T_E(DT, 24, 8)  \
-  MB_GEMV_T_E(DT, 28, 8)  \
-  MB_GEMV_T_U8_E(DT, 8, 1)
+#define MB_GEMV_LP_T(DT) \
+  MB_GEMV_T_E(DT, 1, 1)  \
+  MB_GEMV_T_E(DT, 2, 1)  \
+  MB_GEMV_T_E(DT, 4, 1)  \
+  MB_GEMV_T_E(DT, 8, 1)  \
+  MB_GEMV_T_E(DT, 16, 1) \
+  MB_GEMV_T_E(DT, 32, 1) \
+  MB_GEMV_T_E(DT, 1, 2)  \
+  MB_GEMV_T_E(DT, 2, 2)  \
+  MB_GEMV_T_E(DT, 4, 2)  \
+  MB_GEMV_T_E(DT, 8, 2)  \
+  MB_GEMV_T_E(DT, 16, 2) \
+  MB_GEMV_T_E(DT, 32, 2) \
+  MB_GEMV_T_E(DT, 4, 4)  \
+  MB_GEMV_T_E(DT, 8, 4)  \
+  MB_GEMV_T_E(DT, 16, 4) \
+  MB_GEMV_T_E(DT, 4, 8)  \
+  MB_GEMV_T_E(DT, 8, 8)
 
+// NT nsimd=16 is unreachable for lp: pick_nt's K==4096 branch returns {4,8,2}
+// before the only {16,8} branch can fire, and no other lp branch emits
+// nsimd=16.
 #define MB_GEMV_LP(DT)    \
   MB_GEMV_LP_T(DT)        \
   MB_GEMV_NT_E1(DT, 4)    \
@@ -1895,14 +1687,8 @@ kernel void gemv_nt(
   MB_GEMV_NT_EV(DT, 8, 2) \
   MB_GEMV_NT_EV(DT, 8, 4) \
   MB_GEMV_NT_EV(DT, 8, 8) \
-  MB_GEMV_NT_EV(DT, 16, 4) \
-  MB_GEMV_NT_EV(DT, 16, 8) \
   MB_GEMV_NT_R2(DT, 4, 4) \
-  MB_GEMV_NT_R2(DT, 4, 8) \
-  MB_GEMV_NT_R2(DT, 8, 4) \
-  MB_GEMV_NT_R2(DT, 8, 8) \
-  MB_GEMV_NT_R2(DT, 16, 4) \
-  MB_GEMV_NT_R2(DT, 16, 8)
+  MB_GEMV_NT_R2(DT, 4, 8)
 
 MB_GEMV_FLOAT(float)
 MB_GEMV_LP(half)
