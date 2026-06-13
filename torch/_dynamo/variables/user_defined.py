@@ -1370,10 +1370,35 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
-            from .lists import SizeVariable
+            from .lists import SizeVariable, TupleVariable
+            from .tensor import TensorVariable
+
+            if len(args) == 1 and isinstance(args[0], TensorVariable):
+                tensor_arg = args[0]
+                example_value = tensor_arg.proxy.node.meta.get("example_value")
+                if (
+                    example_value is None
+                    or getattr(example_value, "constant", None) is None
+                ):
+                    unimplemented(
+                        gb_type="torch.Size() with non-constant tensor argument",
+                        context=f"torch.Size({tensor_arg})",
+                        explanation=(
+                            "Dynamo cannot construct torch.Size from tensor "
+                            "data unless the tensor values are known while "
+                            "tracing."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
-            return SizeVariable(tup.items)  # type: ignore[missing-attribute]
+            if not isinstance(tup, TupleVariable):
+                raise AssertionError(f"Expected TupleVariable, got {type(tup)}")
+            items = [
+                item.nb_index_impl(tx) if item.is_tensor() else item
+                for item in tup.items
+            ]
+            return SizeVariable(items)
         elif is_pydantic_dataclass_cls(self.value):
             # Pydantic populates dataclass fields through an external validator,
             # so tracing through the constructor misses the instance mutations.
