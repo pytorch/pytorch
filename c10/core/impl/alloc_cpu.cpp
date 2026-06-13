@@ -1,5 +1,6 @@
 #include <c10/core/impl/alloc_cpu.h>
 
+#include <c10/core/CPUAllocator.h>
 #include <c10/core/alignment.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
@@ -7,9 +8,15 @@
 #include <c10/util/error.h>
 #include <c10/util/irange.h>
 #include <c10/util/numa.h>
+#include <climits>
+#include <cstdint>
 #include <cstring>
+#include <limits>
+#include <string>
+#include <unordered_map>
 
 #ifdef USE_MIMALLOC
+#include <mimalloc-stats.h>
 #include <mimalloc.h>
 #endif
 
@@ -77,6 +84,60 @@ constexpr size_t c10_compute_alignment(size_t /*nbytes*/) {
 constexpr bool is_thp_alloc([[maybe_unused]] size_t nbytes) {
   return false;
 }
+#endif
+
+#ifdef USE_MIMALLOC
+mi_option_t parse_mimalloc_option_name(const std::string& name) {
+  static const std::unordered_map<std::string, mi_option_t> options = {
+      // stable options
+      {"show_errors", mi_option_show_errors},
+      {"show_stats", mi_option_show_stats},
+      {"verbose", mi_option_verbose},
+      {"max_errors", mi_option_max_errors},
+      {"max_warnings", mi_option_max_warnings},
+
+      // advanced options
+      {"reserve_huge_os_pages", mi_option_reserve_huge_os_pages},
+      {"reserve_huge_os_pages_at", mi_option_reserve_huge_os_pages_at},
+      {"reserve_os_memory", mi_option_reserve_os_memory},
+      {"allow_large_os_pages", mi_option_allow_large_os_pages},
+      {"purge_decommits", mi_option_purge_decommits},
+      {"arena_reserve", mi_option_arena_reserve},
+      {"os_tag", mi_option_os_tag},
+      {"retry_on_oom", mi_option_retry_on_oom},
+      {"generic_collect", mi_option_generic_collect},
+      {"allow_thp", mi_option_allow_thp},
+
+      // guard pages
+      {"guarded_min", mi_option_guarded_min},
+      {"guarded_max", mi_option_guarded_max},
+      {"guarded_precise", mi_option_guarded_precise},
+      {"guarded_sample_rate", mi_option_guarded_sample_rate},
+      {"guarded_sample_seed", mi_option_guarded_sample_seed},
+
+      // experimental options
+      {"eager_commit", mi_option_eager_commit},
+      {"eager_commit_delay", mi_option_eager_commit_delay},
+      {"arena_eager_commit", mi_option_arena_eager_commit},
+      {"abandoned_page_purge", mi_option_abandoned_page_purge},
+      {"purge_delay", mi_option_purge_delay},
+      {"use_numa_nodes", mi_option_use_numa_nodes},
+      {"disallow_os_alloc", mi_option_disallow_os_alloc},
+      {"max_segment_reclaim", mi_option_max_segment_reclaim},
+      {"destroy_on_exit", mi_option_destroy_on_exit},
+      {"arena_purge_mult", mi_option_arena_purge_mult},
+      {"abandoned_reclaim_on_free", mi_option_abandoned_reclaim_on_free},
+      {"purge_extend_delay", mi_option_purge_extend_delay},
+      {"disallow_arena_alloc", mi_option_disallow_arena_alloc},
+      {"visit_abandoned", mi_option_visit_abandoned},
+      {"target_segments_per_thread", mi_option_target_segments_per_thread},
+  };
+
+  auto it = options.find(name);
+  TORCH_CHECK(it != options.end(), "Unknown mimalloc option: ", name);
+  return it->second;
+}
+
 #endif
 } // namespace
 
@@ -170,6 +231,59 @@ void free_cpu(void* data) {
 #else
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(data);
+#endif
+}
+
+bool is_mimalloc_enabled() {
+#ifdef USE_MIMALLOC
+  return true;
+#else
+  return false;
+#endif
+}
+
+std::string get_mimalloc_stats_json() {
+#ifdef USE_MIMALLOC
+  char* stats = mi_stats_get_json(0, nullptr);
+  TORCH_CHECK(stats != nullptr, "Failed to get mimalloc stats");
+  std::string result(stats);
+  mi_free(stats);
+  return result;
+#else
+  TORCH_CHECK(false, "mimalloc is not enabled in this build");
+#endif
+}
+
+void reset_mimalloc_stats() {
+#ifdef USE_MIMALLOC
+  mi_stats_reset();
+#else
+  TORCH_CHECK(false, "mimalloc is not enabled in this build");
+#endif
+}
+
+void set_mimalloc_option(const std::string& name, int64_t value) {
+#ifdef USE_MIMALLOC
+#if INT64_MAX > LONG_MAX
+  // Mimalloc's options are passed as long which may be 32 bit on some
+  // platforms whereas we prefer a platform-independent int64_t:
+  TORCH_CHECK(
+      value >= std::numeric_limits<long>::min() &&
+          value <= std::numeric_limits<long>::max(),
+      "mimalloc option value out of range: ",
+      value);
+#endif
+  mi_option_set(parse_mimalloc_option_name(name), static_cast<long>(value));
+#else
+  TORCH_CHECK(false, "mimalloc is not enabled in this build");
+#endif
+}
+
+int64_t get_mimalloc_option(const std::string& name) {
+#ifdef USE_MIMALLOC
+  return mi_option_get(parse_mimalloc_option_name(name));
+#else
+  TORCH_CHECK(false, "mimalloc is not enabled in this build");
 #endif
 }
 
