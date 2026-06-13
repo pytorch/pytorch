@@ -141,10 +141,11 @@ GemvConfig pick_t_for_family(c10::ScalarType dt, int64_t outlen, int64_t K, Appl
   int vec = 2;
   GemvKernel kernel = GemvKernel::Standard;
   if (outlen == 512 && K == 3584) {
-    return t2d(8, 8);
+    return t2d(16, 8);
   } else if (dt == at::kBFloat16 && outlen == 1024 && K == 1024) {
-    nsimd = 24;
-    vec = 2;
+    // The standard gemv_t (24,2) leaves the SLC-resident 2MB matrix
+    // bandwidth on the table here; the 16-byte-load t2d path is ~30% faster.
+    return t2d(16, 4);
   } else if (outlen == 16384 && K == 3072) {
     nsimd = 1;
     vec = 2;
@@ -274,7 +275,7 @@ GemvConfig pick_nt_for_family(c10::ScalarType dt, int64_t outlen, int64_t K, App
     return {4, 1};
   }
   if (dt == at::kBFloat16 && outlen == 512 && K == 3584) {
-    return {16, 8, 2};
+    return {4, 8, 2};
   }
   if (outlen <= 512) {
     return K >= 2048 ? GemvConfig{4, 4} : GemvConfig{4, 1};
