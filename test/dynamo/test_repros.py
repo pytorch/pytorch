@@ -8128,6 +8128,42 @@ SavedForBackwardsAOTOutput(idx=5)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_issue_185888_as_strided_inplace(self):
+        """as_strided_ must propagate mutated metadata to graph-input tensors.
+
+        See https://github.com/pytorch/pytorch/issues/185888
+        """
+
+        # Basic metadata propagation on graph input
+        def fn(x):
+            x.as_strided_((2, 2), (2, 1))
+            return x.clone()
+
+        x_eager = torch.arange(4.0, dtype=torch.float32)
+        fn(x_eager)
+
+        x_compiled = torch.arange(4.0, dtype=torch.float32)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        compiled_fn(x_compiled)
+
+        self.assertEqual(x_compiled.size(), x_eager.size())
+        self.assertEqual(x_compiled.stride(), x_eager.stride())
+
+        # with storage_offset (same rank, no guard mismatch)
+        def fn_offset(x):
+            x.as_strided_((2,), (1,), 1)
+            return x.clone()
+
+        x_eager3 = torch.arange(4.0)
+        fn_offset(x_eager3)
+
+        x_compiled3 = torch.arange(4.0)
+        compiled_fn3 = torch.compile(fn_offset, backend="aot_eager", fullgraph=True)
+        compiled_fn3(x_compiled3)
+
+        self.assertEqual(x_compiled3.size(), x_eager3.size())
+        self.assertEqual(x_compiled3.stride(), x_eager3.stride())
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     @serialTest()
