@@ -2492,6 +2492,32 @@ class TestMPS(TestCaseMPS):
         freq_mps = torch.fft.fftfreq(10**4, device='mps')
         self.assertEqual(freq_cpu, freq_mps)
 
+    def test_fft_high_rank_subset_dims_error(self):
+        # MPS FFT does not support transforming a subset of dims on >4-D tensors.
+        # Transforming all dims (or <=4-D tensors) must still work.
+        # Regression test for https://github.com/pytorch/pytorch/pull/186896
+        device = 'mps'
+
+        # 5-D real tensor: subset of dims should raise, all dims should pass
+        x_real = torch.randn(2, 2, 2, 2, 2, device=device)
+        with self.assertRaisesRegex(RuntimeError, "MPS FFT does not support"):
+            torch.fft.rfftn(x_real, dim=(0, 1))
+        # All dims: should not raise
+        torch.fft.rfftn(x_real)
+
+        # 5-D complex tensor: subset of dims should raise for fftn and irfftn
+        x_complex = torch.randn(2, 2, 2, 2, 2, device=device, dtype=torch.complex64)
+        with self.assertRaisesRegex(RuntimeError, "MPS FFT does not support"):
+            torch.fft.fftn(x_complex, dim=(0, 1))
+        with self.assertRaisesRegex(RuntimeError, "MPS FFT does not support"):
+            torch.fft.irfftn(x_complex, dim=(0, 1))
+        # All dims: should not raise
+        torch.fft.fftn(x_complex)
+
+        # 4-D tensor: subset of dims is fine (MPS supports up to 4-D freely)
+        x_4d = torch.randn(2, 2, 2, 2, device=device)
+        torch.fft.rfftn(x_4d, dim=(0, 1))
+
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
 
