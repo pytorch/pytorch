@@ -83,6 +83,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
 ]
 dynamic = [
     "entry-points",
@@ -353,9 +354,6 @@ select = [
     "LOG015" # please fix
 ]
 
-# torch/ folders still needing S101 migration
-"torch/_inductor/**" = ["S101"]
-
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
 
@@ -375,4 +373,10 @@ package = 'torch'
   ".spin/cmds.py:regenerate_type_stubs",
   ".spin/cmds.py:regenerate_clangtidy_files",
   ".spin/cmds.py:regenerate_github_workflows",
+]
+"Documentation" = [
+  ".spin/cmds.py:docs",
+]
+"Type" = [
+    ".spin/cmds.py:pyrefly",
 ]

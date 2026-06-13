@@ -142,7 +142,7 @@ def _get_mobile_model_contained_types(f_input) -> int:
 
 
 def _backport_for_mobile(f_input, f_output, to_version):
-    r"""Take a input string containing a file name (file-like object) and a new destination to return a boolean.
+    r"""Take an input string containing a file name (file-like object) and a new destination to return a boolean.
 
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
