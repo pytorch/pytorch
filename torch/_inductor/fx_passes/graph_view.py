@@ -154,11 +154,7 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
         blocks.
     """
     fqn_map: dict[str, str] = getattr(V.graph, "fx_fqn_map", {})
-    log.debug(
-        "[fqn_trace] get_fused_kernel_module_fqn entry: fqn_map size=%d snodes=%d",
-        len(fqn_map),
-        len(scheduler_nodes),
-    )
+    log.debug("get_fused_kernel_module_fqn: snodes=%d", len(scheduler_nodes))
 
     # Pass 1: derive block anchor prefixes from each snode's origin_node.
     # origin_node is direct (not accumulated), giving clean block identity.
@@ -172,21 +168,9 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
         origin = snode.node.get_origin_node()
         origin_name = origin.name if origin is not None else None
         anchor_fqn = fqn_map.get(origin_name) if origin_name else None
-        log.debug(
-            "[fqn_trace] pass1 snode=%s buf_name=%s origin_node=%s op=%s in_fqn_map=%s",
-            snode, buf_name, origin_name,
-            origin.op if origin is not None else "None",
-            anchor_fqn is not None,
-        )
-
         if anchor_fqn:
             stack = origin.meta.get("nn_module_stack")
             prefix = _outermost_prefix(stack) if stack else None
-            log.debug(
-                "[fqn_trace] pass1 snode=%s buf_name=%s origin_node=%s op=%s "
-                "anchor_fqn=%s outermost_prefix=%s",
-                snode, buf_name, origin_name, origin.op, anchor_fqn, prefix,
-            )
             if prefix:
                 anchor_prefixes.add(prefix)
             continue
@@ -201,37 +185,15 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
         else:
             fallback_source = snode.node.origins
             fallback_kind = "origin"
-        log.debug(
-            "[fqn_trace] pass1 snode=%s buf_name=%s origin_node=%s op=%s "
-            "not in fqn_map — scanning %ss for fallback anchor",
-            snode, buf_name, origin_name,
-            origin.op if origin is not None else "None",
-            fallback_kind,
-        )
         for fx_node in fallback_source:
             fallback_fqn = fqn_map.get(fx_node.name)
             if fallback_fqn:
                 stack = fx_node.meta.get("nn_module_stack")
                 prefix = _outermost_prefix(stack) if stack else None
-                log.debug(
-                    "[fqn_trace] pass1 snode=%s buf_name=%s fallback_%s=%s op=%s "
-                    "fallback_fqn=%s outermost_prefix=%s",
-                    snode, buf_name, fallback_kind, fx_node.name, fx_node.op,
-                    fallback_fqn, prefix,
-                )
                 if prefix:
                     anchor_prefixes.add(prefix)
                 break
-        else:
-            log.debug(
-                "[fqn_trace] pass1 snode=%s buf_name=%s no anchor found in %ss",
-                snode, buf_name, fallback_kind,
-            )
-
-    log.debug("[fqn_trace] pass1 complete: anchor_prefixes=%s", list(anchor_prefixes))
-
     if not anchor_prefixes:
-        log.debug("[fqn_trace] get_fused_kernel_module_fqn: result=None (no anchors)")
         return None
 
     # Pass 2: walk all origins across every snode (the transitively accumulated
@@ -247,34 +209,15 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
         for fx_node in snode.node.origins:
             fqn = fqn_map.get(fx_node.name)
             if not fqn:
-                log.debug(
-                    "[fqn_trace] pass2 snode=%s buf_name=%s fx_node=%s op=%s "
-                    "skipped (not in fqn_map)",
-                    snode, buf_name, fx_node.name, fx_node.op,
-                )
                 continue
             if fqn in extern_fqns:
-                log.debug(
-                    "[fqn_trace] pass2 snode=%s buf_name=%s fx_node=%s "
-                    "fqn=%s skipped (claimed by extern kernel)",
-                    snode, buf_name, fx_node.name, fqn,
-                )
                 continue
             if not any(fqn == p or fqn.startswith(p + ".") for p in anchor_prefixes):
-                log.debug(
-                    "[fqn_trace] pass2 snode=%s buf_name=%s fx_node=%s "
-                    "fqn=%s excluded (prefix not in anchors=%s)",
-                    snode, buf_name, fx_node.name, fqn, list(anchor_prefixes),
-                )
                 continue
-            log.debug(
-                "[fqn_trace] pass2 snode=%s buf_name=%s fx_node=%s fqn=%s included",
-                snode, buf_name, fx_node.name, fqn,
-            )
             module_names.add(fqn)
 
     result = " + ".join(module_names) if module_names else None
-    log.debug("[fqn_trace] get_fused_kernel_module_fqn: result=%s", result)
+    log.debug("get_fused_kernel_module_fqn: result=%s", result)
     return result
 
 

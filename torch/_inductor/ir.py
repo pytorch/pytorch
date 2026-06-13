@@ -693,15 +693,6 @@ class IRNode:
         self._post_init_setattr("annotations", {})
         self._post_init_setattr("stream_idx", self._current_stream_idx)
         self._post_init_setattr("mempool", self._current_mempool)
-        log.debug(
-            "[fqn_trace] IRNode.__post_init__: type=%s origin_node=%s origins=[%s]",
-            type(self).__name__,
-            self._current_primary_node.name if self._current_primary_node is not None else None,
-            ", ".join(
-                f"{o.name}:{list(o.meta['nn_module_stack'].values()) if o.meta.get('nn_module_stack') else 'no_stack'}"
-                for o in origins
-            ),
-        )
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())

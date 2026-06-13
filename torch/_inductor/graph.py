@@ -2013,15 +2013,6 @@ class GraphLowering(torch.fx.Interpreter):
             self.disable_cudagraphs_reason = (
                 "user CUDA MemPool contexts are not compatible with CUDA graphs"
             )
-        log.debug(
-            "[fqn_trace] run_node: n=%s op=%s origins=[%s]",
-            n.name,
-            n.op,
-            ", ".join(
-                f"{o.name}:{list(o.meta['nn_module_stack'].values()) if o.meta.get('nn_module_stack') else 'no_stack'}"
-                for o in origins
-            ),
-        )
         # Populate fx_fqn_map for n itself if it has nn_module_stack.
         # Every FX node is processed by run_node exactly once, so iterating
         # over n (not the accumulated origins) gives us a complete map by the
@@ -2035,12 +2026,6 @@ class GraphLowering(torch.fx.Interpreter):
 
             _innermost = _clean_stack_name(list(_stack.values())[-1][0])
             self.fx_fqn_map[n.name] = f"{_innermost}.{_strip_instance_suffix(n.name)}"
-            log.debug(
-                "[fqn_trace] run_node: n=%s fx_fqn_map entry: %s -> %s",
-                n.name,
-                n.name,
-                self.fx_fqn_map[n.name],
-            )
         with (
             ir.IRNode.current_origins(origins),
             ir.IRNode.current_primary_node(n),
