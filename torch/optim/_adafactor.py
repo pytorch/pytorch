@@ -380,7 +380,7 @@ def _single_tensor_adafactor(
         rho_t = min(lr, 1 / (step_float**0.5))
         alpha = max(eps2, param.norm(2).item() / (param.numel() ** 0.5)) * rho_t
 
-        # Perform stepweight decay
+        # Perform step weight decay
         if weight_decay != 0:
             param.mul_(1 - lr * weight_decay)
 
@@ -532,7 +532,7 @@ def _multi_tensor_adafactor(
             for p, r in zip(device_params, rho_ts, strict=True)
         ]
 
-        # Perform stepweight decay
+        # Perform step weight decay
         if weight_decay != 0:
             torch._foreach_mul_(device_params, 1 - lr * weight_decay)
 

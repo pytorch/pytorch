@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import itertools
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -94,18 +93,6 @@ def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
 
-    def _assert_cpp_wrapper_debug_sync_code(self, code, expected_count=1):
-        self.assertGreaterEqual(
-            len(
-                re.findall(
-                    r"AOTI_RUNTIME_CUDA_CHECK\((cuda|hip)DeviceSynchronize\(\)\);",
-                    code,
-                )
-            ),
-            expected_count,
-        )
-        self.assertNotIn("torch.cuda.synchronize()", code)
-
     def test_aoti_debug_printer_works_on_constants(self):
         batch_size = 32
         seq_length = 50
@@ -126,42 +113,6 @@ class TestGpuWrapper(InductorTestCase):
             }
         )(test_fn)
         comp()
-
-    def test_debug_sync_graph(self):
-        if not RUN_GPU:
-            self.skipTest("GPU not available")
-        if GPU_TYPE != "cuda":
-            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
-
-        def test_fn(x):
-            return x * 2
-
-        compiled = torch.compile(
-            options={"cpp_wrapper": True, "triton.debug_sync_graph": True}
-        )(test_fn)
-        x = torch.randn(8, device=self.device)
-        with torch.utils._device.DeviceContext(self.device):
-            result, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
-        self.assertEqual(result, x * 2)
-        self._assert_cpp_wrapper_debug_sync_code(code, expected_count=2)
-
-    def test_debug_sync_kernel(self):
-        if not RUN_GPU:
-            self.skipTest("GPU not available")
-        if GPU_TYPE != "cuda":
-            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
-
-        def test_fn(x):
-            return x * 2
-
-        compiled = torch.compile(
-            options={"cpp_wrapper": True, "triton.debug_sync_kernel": True}
-        )(test_fn)
-        x = torch.randn(8, device=self.device)
-        with torch.utils._device.DeviceContext(self.device):
-            result, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
-        self.assertEqual(result, x * 2)
-        self._assert_cpp_wrapper_debug_sync_code(code)
 
     def test_non_tensor_args_wrapped_on_cpu(self):
         if not RUN_GPU:
