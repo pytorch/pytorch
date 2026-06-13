@@ -1785,14 +1785,6 @@ class _InProcessFxCompile(FxCompile):
                             )
                         )
 
-                    if (
-                        cudagraphs
-                        and not V.graph.disable_cudagraphs_reason
-                        and graph.scheduler.count_kernel_nodes(graph.scheduler.nodes)
-                        == 0
-                    ):
-                        V.graph.disable_cudagraphs_reason = "no CUDA kernel invocations"
-
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
                     if (
