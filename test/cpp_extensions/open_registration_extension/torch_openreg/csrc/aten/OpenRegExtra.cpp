@@ -2,6 +2,8 @@
 
 #include <ATen/native/CPUFallback.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/ops/_make_per_tensor_quantized_tensor_native.h>
+#include <ATen/ops/dequantize_native.h>
 
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/library.h>
@@ -38,6 +40,23 @@ void wrapper_quantize_tensor_per_tensor_affine_stub(
     int64_t zero_point) {
   at::native::openreg::quantize_tensor_per_tensor_affine_stub(
       rtensor, qtensor, scale, zero_point);
+}
+
+void wrapper_dequantize_tensor_per_tensor_affine_stub(
+    const at::Tensor& qtensor,
+    at::Tensor& rtensor,
+    double scale,
+    int64_t zero_point) {
+  at::native::openreg::dequantize_tensor_per_tensor_affine_stub(
+      qtensor, rtensor, scale, zero_point);
+}
+
+at::Tensor wrapper_make_per_tensor_quantized_tensor(
+    const at::Tensor& self,
+    double scale,
+    int64_t zero_point) {
+  return at::native::openreg::make_per_tensor_quantized_tensor(
+      self, scale, zero_point);
 }
 
 std::tuple<
@@ -139,6 +158,9 @@ REGISTER_PRIVATEUSE1_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
     &wrapper_quantize_tensor_per_tensor_affine_stub);
 REGISTER_PRIVATEUSE1_DISPATCH(
+    dequantize_tensor_per_tensor_affine_stub,
+    &wrapper_dequantize_tensor_per_tensor_affine_stub);
+REGISTER_PRIVATEUSE1_DISPATCH(
     _fused_sdp_choice_stub,
     &wrapper__fused_sdp_choice);
 // LITERALINCLUDE END: STUB DEFAULT
@@ -165,6 +187,9 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   */
   m.impl("abs.out", &wrapper_abs_out);
   m.impl("quantize_per_tensor", &wrapper_quantize_per_tensor);
+  m.impl(
+      "_make_per_tensor_quantized_tensor",
+      &wrapper_make_per_tensor_quantized_tensor);
   m.impl("_fused_sdp_choice", &wrapper__fused_sdp_choice);
   m.impl(
       "_scaled_dot_product_fused_attention_overrideable",
@@ -177,6 +202,10 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
 TORCH_LIBRARY_FRAGMENT(openreg, m) {
   m.def("custom_autograd_fn_returns_self(Tensor input)-> Tensor");
   m.def("custom_autograd_fn_aliasing(Tensor(a) input)-> Tensor(a)");
+}
+
+TORCH_LIBRARY_IMPL(aten, QuantizedPrivateUse1, m) {
+  m.impl("dequantize.self", at::native::dequantize_quantized);
 }
 
 TORCH_LIBRARY_IMPL(openreg, AutogradPrivateUse1, m) {
