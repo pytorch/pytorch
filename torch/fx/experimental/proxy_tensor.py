@@ -58,7 +58,13 @@ from torch._subclasses.fake_tensor import (
     is_fake,
     unset_fake_temporarily,
 )
-from torch._subclasses.functional_tensor import FunctionalTensor
+from torch._subclasses.functional_tensor import (
+    can_replay_functional_tensor_view,
+    can_replay_functional_tensor_view_with_unsafe_view,
+    FunctionalTensor,
+    maybe_get_inner_functional_tensor_view_base,
+    replay_functional_tensor_view,
+)
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import GraphModule, Proxy, Tracer
 from torch.fx.graph_module import _assign_attr
@@ -1021,6 +1027,57 @@ class _ProxyTensor:
     constant: Tensor | None
 
 
+def _maybe_get_proxy_view_from_functional_base(
+    tracer: _ProxyTracer, t: Tensor
+) -> _ProxyTensor | None:
+    base = t._base
+    inner = maybe_get_inner_functional_tensor_view_base(t)
+    if not isinstance(inner, FakeTensor) or not can_replay_functional_tensor_view(
+        inner, t
+    ):
+        return None
+
+    inner_proxy = get_proxy_slot(inner, tracer, None)
+    if inner_proxy is None and isinstance(base, Tensor):
+        inner_proxy = get_proxy_slot(base, tracer, None)
+    if not isinstance(inner_proxy, _ProxyTensor):
+        return None
+
+    def proxy_arg(e: object) -> object:
+        return fetch_sym_proxy(tracer)(e) if isinstance(e, py_sym_types) else e
+
+    can_use_unsafe_view = can_replay_functional_tensor_view_with_unsafe_view(inner, t)
+    with disable_proxy_modes_tracing():
+        fake_view = replay_functional_tensor_view(inner, t)
+    if not isinstance(fake_view, FakeTensor):
+        return None
+
+    if can_use_unsafe_view:
+        target = aten._unsafe_view.default
+        args = (inner_proxy.proxy, [proxy_arg(s) for s in t.shape])
+    else:
+        target = aten.as_strided.default
+        args = (
+            inner_proxy.proxy,
+            [proxy_arg(s) for s in t.shape],
+            [proxy_arg(s) for s in t.stride()],
+            proxy_arg(t.storage_offset()),
+        )
+
+    proxy = tracer.create_proxy(
+        "call_function",
+        target,
+        args,
+        {},
+    )
+    set_meta(proxy, fake_view)
+
+    proxy_tensor = _ProxyTensor(proxy, constant=None)
+    set_proxy_slot(t, tracer, proxy_tensor)
+    set_proxy_slot(fake_view, tracer, proxy_tensor)
+    return proxy_tensor
+
+
 def fetch_sym_proxy(
     tracer: _ProxyTracer,
 ) -> Callable[[PySymType], bool | int | float | Proxy]:
@@ -1069,7 +1126,14 @@ def fetch_object_proxy(
     tracer: _ProxyTracer,
     t: Tensor | _AnyScriptObjectType | PySymType | OpaqueBase,
 ) -> object:
-    return get_proxy_slot(t, tracer, t)
+    proxy = get_proxy_slot(t, tracer, None)
+    if proxy is not None:
+        return proxy
+    if isinstance(t, Tensor):
+        proxy = _maybe_get_proxy_view_from_functional_base(tracer, t)
+        if proxy is not None:
+            return proxy
+    return t
 
 
 HANDLED_TYPES = (Tensor, torch.nn.Parameter, FakeTensor)
