@@ -11,6 +11,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map, tree_map_only
 
@@ -391,17 +392,66 @@ def create_num_blocks_fake_generator(sparse_indices):
     that we are computing 0 blocks for each row, which would provide bogus
     autotuning results.
 
-    In this case, we choose to use min(16, max_block) blocks, because I
-    (Horace) think it'll probably result in pretty representative performance.
-    If it's too short then prefetching won't help. If it's too long then
-    autotuning will take longer for no good reason.
+    When the real BlockMask counts are available, use them for autotuning so
+    partial and full block counts keep their runtime distribution. Otherwise,
+    use the index tensor width as a conservative fallback so benchmarking still
+    does work.
     """
+
+    def get_real_num_blocks(x, size: Sequence[int]) -> torch.Tensor | None:
+        def valid_real_num_blocks(real_num_blocks: Any) -> torch.Tensor | None:
+            if (
+                isinstance(real_num_blocks, torch.Tensor)
+                and not isinstance(real_num_blocks, FakeTensor)
+                and list(real_num_blocks.shape) == list(size)
+            ):
+                return real_num_blocks
+            return None
+
+        name = x.get_name()
+        if name in V.graph.constants:
+            return valid_real_num_blocks(V.graph.constants[name])
+
+        graph_input_names = V.graph.graph_input_names
+        if name not in graph_input_names:
+            return None
+
+        idx = list(graph_input_names).index(name)
+        example_inputs = V.graph.example_inputs
+        if isinstance(example_inputs, Sequence) and idx < len(example_inputs):
+            real_num_blocks = valid_real_num_blocks(example_inputs[idx])
+            if real_num_blocks is not None:
+                return real_num_blocks
+
+        real_inputs = V.real_inputs
+        if not isinstance(real_inputs, Sequence):
+            return None
+
+        if len(real_inputs) == len(graph_input_names):
+            real_input_idx = idx
+        else:
+            # Lifted params/buffers are prepended to graph inputs, but not to
+            # V.real_inputs. Align the real runtime inputs as the suffix.
+            real_input_idx = idx - (len(graph_input_names) - len(real_inputs))
+
+        if real_input_idx < 0 or real_input_idx >= len(real_inputs):
+            return None
+        return valid_real_num_blocks(real_inputs[real_input_idx])
 
     def create_num_blocks_fake(x) -> torch.Tensor:
         num_blocks_for_autotuning = V.graph.sizevars.optimization_hint(
             sparse_indices.shape[-1]
         )
         size = V.graph.sizevars.optimization_hints(x.get_size())
+        real_num_blocks = get_real_num_blocks(x, size)
+        if real_num_blocks is not None:
+            return (
+                real_num_blocks.detach()
+                .to(device=x.get_device(), dtype=x.get_dtype())
+                .clamp(max=num_blocks_for_autotuning)
+                .contiguous()
+            )
+
         return torch.full(
             size,
             num_blocks_for_autotuning,
