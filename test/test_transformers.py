@@ -4178,7 +4178,11 @@ class TestSDPACudaOnly(NNTestCase):
         "Regression is specific to the ROCm CK SDPA backend",
     )
     @setSdpaBackendsToDefaultFinally
-    def test_flash_attention_ck_gqa_seqlen_q_1(self, device):
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("n_heads", [[8, 2], [16, 8]])
+    @parametrize("seqlen_k", [4, 256, 1024])
+    def test_flash_attention_ck_gqa_seqlen_q_1(self, device, dtype: torch.dtype,
+                                               n_heads: list[int], seqlen_k: int):
         # Regression: the CK flash-attention host wrapper mis-ported the
         # seqlenq_ngroups_swapped optimization, which triggers for GQA
         # (num_heads_q > num_heads_kv) with seqlen_q == 1 (single-query decode).
@@ -4193,43 +4197,41 @@ class TestSDPACudaOnly(NNTestCase):
         ):
             self.skipTest("CK SDPA backend not available")
         batch_size, head_dim, seqlen_q = 8, 128, 1
-        for dtype in (torch.float16, torch.bfloat16):
-            for num_heads_q, num_heads_kv in ((8, 2), (16, 8)):
-                for seqlen_k in (4, 256, 1024):
-                    q = torch.rand(
-                        batch_size, num_heads_q, seqlen_q, head_dim,
-                        device=device, dtype=dtype,
-                    )
-                    k = torch.rand(
-                        batch_size, num_heads_kv, seqlen_k, head_dim,
-                        device=device, dtype=dtype,
-                    )
-                    v = torch.rand(
-                        batch_size, num_heads_kv, seqlen_k, head_dim,
-                        device=device, dtype=dtype,
-                    )
-                    with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-                        out = F.scaled_dot_product_attention(
-                            q, k, v, dropout_p=0.0, is_causal=False, enable_gqa=True
-                        )
-                    with sdpa_kernel(backends=[SDPBackend.MATH]):
-                        ref = F.scaled_dot_product_attention(
-                            q.double(), k.double(), v.double(),
-                            dropout_p=0.0, is_causal=False, enable_gqa=True,
-                        )
-                    msg = (
-                        f"dtype={dtype}, num_heads_q={num_heads_q}, "
-                        f"num_heads_kv={num_heads_kv}, seqlen_k={seqlen_k}"
-                    )
-                    self.assertFalse(
-                        torch.isnan(out).any().item(),
-                        f"CK GQA seqlen_q==1 produced NaN ({msg})",
-                    )
-                    self.assertFalse(
-                        torch.isinf(out).any().item(),
-                        f"CK GQA seqlen_q==1 produced Inf ({msg})",
-                    )
-                    self.assertEqual(out, ref.to(out.dtype), atol=2e-2, rtol=2e-2)
+        num_heads_q, num_heads_kv = n_heads
+        q = torch.rand(
+            batch_size, num_heads_q, seqlen_q, head_dim,
+            device=device, dtype=dtype,
+        )
+        k = torch.rand(
+            batch_size, num_heads_kv, seqlen_k, head_dim,
+            device=device, dtype=dtype,
+        )
+        v = torch.rand(
+            batch_size, num_heads_kv, seqlen_k, head_dim,
+            device=device, dtype=dtype,
+        )
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            out = F.scaled_dot_product_attention(
+                q, k, v, dropout_p=0.0, is_causal=False, enable_gqa=True
+            )
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            ref = F.scaled_dot_product_attention(
+                q.double(), k.double(), v.double(),
+                dropout_p=0.0, is_causal=False, enable_gqa=True,
+            )
+        msg = (
+            f"dtype={dtype}, num_heads_q={num_heads_q}, "
+            f"num_heads_kv={num_heads_kv}, seqlen_k={seqlen_k}"
+        )
+        self.assertFalse(
+            torch.isnan(out).any().item(),
+            f"CK GQA seqlen_q==1 produced NaN ({msg})",
+        )
+        self.assertFalse(
+            torch.isinf(out).any().item(),
+            f"CK GQA seqlen_q==1 produced Inf ({msg})",
+        )
+        self.assertEqual(out, ref.to(out.dtype), atol=2e-2, rtol=2e-2)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
