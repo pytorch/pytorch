@@ -2853,6 +2853,7 @@ from torch import (
     return_types as return_types,
 )
 from torch._higher_order_ops import cond as cond, while_loop as while_loop
+from torch._non_strict_compile import non_strict_compile as non_strict_compile
 from torch.func import vmap as vmap
 
 
