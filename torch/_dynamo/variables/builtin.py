@@ -119,8 +119,11 @@ from .object_protocol import (
     generic_neg,
     generic_pos,
     generic_repr,
+    generic_str,
     maybe_get_python_type,
     pysequence_check,
+    ternary_iop,
+    ternary_op,
     vt_add,
     vt_getitem,
     vt_identity_compare,
@@ -572,8 +575,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     ]:
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
-            pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
-            operator.pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
             # operator.matmul
@@ -1690,6 +1691,10 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g. list.__len__(my_list) → len(my_list)
             return generic_len(tx, args[0])
 
+        if name == "__str__" and len(args) == 1 and not kwargs:
+            # type.__str__(instance) → str(instance)
+            return generic_str(tx, args[0])
+
         if name == "__repr__" and len(args) == 1 and not kwargs:
             return super().call_method(tx, name, args, kwargs)
 
@@ -1822,7 +1827,10 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         try:
-            fn = args[0].get_function()
+            if isinstance(args[0], variables.NestedUserFunctionVariable):
+                fn = args[0].get_function(allow_sourced_cells=True)
+            else:
+                fn = args[0].get_function()
         except NotImplementedError:
             fail(args, kwargs)
 
@@ -2769,6 +2777,24 @@ class BuiltinVariable(BaseBuiltinVariable):
         # in-place form. https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1056
         return binary_op(tx, a, b, "nb_divmod", "divmod()")
 
+    def call_pow(
+        self,
+        tx: "InstructionTranslatorBase",
+        a: VariableTracker,
+        b: VariableTracker,
+        c: VariableTracker | None = None,
+    ) -> VariableTracker | None:
+        return ternary_op(tx, a, b, c, "nb_power", "** or pow()")
+
+    def call_ipow(
+        self,
+        tx: "InstructionTranslatorBase",
+        a: VariableTracker,
+        b: VariableTracker,
+        c: VariableTracker | None = None,
+    ) -> VariableTracker | None:
+        return ternary_iop(tx, a, b, c, "nb_inplace_power", "nb_power", "**=")
+
     def call_not_(
         self, tx: "InstructionTranslatorBase", a: VariableTracker
     ) -> VariableTracker | None:
@@ -3417,11 +3443,11 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                             ],
                         )
 
-                    # Remove the old reference in tracked fakes - if we don't do this
-                    # new .data value size and shape differences will cause
-                    # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
-                    # coming out of set_() below will be a new one, and get
-                    # installed in tracked fakes.
+                    # Remove the old reference in tracked fakes - if we don't
+                    # do this, .data value size/shape differences cause
+                    # tracked fakes to produce incorrect guards. Sound
+                    # because the TensorVariable from shallow_copy_data_
+                    # below is new and gets installed in tracked fakes.
                     to_remove = [
                         tf for tf in tx.output.tracked_fakes if tf.source == obj.source
                     ]
@@ -3441,9 +3467,14 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                             ),
                         )
 
-                    # shallow_copy_data_ uses shallow_copy_from which
-                    # preserves the version counter, matching eager .data =
-                    # behavior. No version counter adjustment needed.
+                    # Note: shallow_copy_data_ mutates the input
+                    # FakeTensor's device in-place. For cross-device
+                    # mutations this corrupts the placeholder's device
+                    # annotation since the placeholder and output share
+                    # the same FakeTensor. This is cosmetic; AOTAutograd
+                    # and Inductor handle it via device save/restore
+                    # workarounds in graph_capture.py and compile_fx.py.
+                    # TODO(#186860): fix in ProxyTensor dispatch.
                     return out
                 elif name in ("_grad", "grad"):
                     # NOTE: [Tensor "grad" and "_grad" attr]

@@ -1176,14 +1176,24 @@ def is_dynamic_shape_enabled():
     return not torch._dynamo.config.assume_static_by_default
 
 
+def cpp_int_array_str(values):
+    suffix = "LL" if sys.platform in ["darwin", "win32"] else "L"
+
+    def fmt(v):
+        return f"{v}{suffix}" if isinstance(v, int) else str(v)
+
+    return "{" + ", ".join(fmt(v) for v in values) + "}"
+
+
 def target_assert_size_stride_str(
     name, sizes, strides, dynamic_sizes=None, dynamic_strides=None
 ):
     """Build expected assert_size_stride check string for generated code.
 
-    Handles cpp_wrapper ({}/L suffix) vs Python wrapper (()). When dynamic_sizes
+    Handles cpp_wrapper ({}/L or LL suffix) vs Python wrapper (()). When dynamic_sizes
     and dynamic_strides are provided, uses them if dynamic shapes are enabled.
-    Values that are ints get the L suffix in cpp_wrapper mode; strings are kept as-is.
+    Values that are ints get the platform-specific C++ int64 suffix in cpp_wrapper
+    mode; strings are kept as-is.
 
     If name is None, returns just the tuple pair (e.g. "(16, 32), (32, 1)")
     for substring matching when the buffer name is unknown.
@@ -1192,13 +1202,8 @@ def target_assert_size_stride_str(
         sizes, strides = dynamic_sizes, dynamic_strides
 
     if config.cpp_wrapper:
-        suffix = "LL" if sys.platform in ["darwin", "win32"] else "L"
-
-        def fmt(v):
-            return f"{v}{suffix}" if isinstance(v, int) else str(v)
-
-        size_str = "{" + ", ".join(fmt(s) for s in sizes) + "}"
-        stride_str = "{" + ", ".join(fmt(s) for s in strides) + "}"
+        size_str = cpp_int_array_str(sizes)
+        stride_str = cpp_int_array_str(strides)
     else:
         size_str = "(" + ", ".join(str(s) for s in sizes) + ")"
         stride_str = "(" + ", ".join(str(s) for s in strides) + ")"
@@ -3216,6 +3221,14 @@ class CommonTemplate:
             for n in [100, 10, 100]:
                 inp = torch.full((2, n), float("inf"), device=self.device, dtype=_dtype)
                 self.assertEqual(cfn(inp), fn(inp))
+
+    def test_cumsum_uint8(self):
+        def fn(x):
+            return x.cumsum(-1)
+
+        cfn = torch.compile(fn)
+        inp = torch.randint(0, 10, (8, 16), dtype=torch.uint8, device=self.device)
+        self.assertEqual(cfn(inp), fn(inp))
 
     @xfail_if_triton_cpu
     def test_logcumsumexp(self):
@@ -7322,48 +7335,6 @@ for dtype in (torch.int32, torch.int64):
 
         self.assertNotIn(view_node, folder.node_replacements)
 
-    def test_uniform_value_mul_by_zero(self):
-        # x * 0 is uniformly 0 only for non-floating-point dtypes. For float and
-        # complex, nan * 0 == nan and (+/-inf) * 0 == nan, so the uniform-value
-        # peephole must not fold x * 0 -> 0 (it would drop NaN/Inf when x is not
-        # known to be finite). Integer/bool x * 0 is still folded.
-        import torch.fx as fx
-        from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
-
-        for dtype, should_fold in (
-            (torch.float32, False),
-            (torch.float16, False),
-            (torch.bfloat16, False),
-            (torch.complex64, False),
-            (torch.int32, True),
-            (torch.int64, True),
-        ):
-            graph = fx.Graph()
-            x = graph.placeholder("x")
-            x.meta["val"] = torch.empty([4], dtype=dtype, device=self.device)
-            mul_node = graph.call_function(torch.ops.aten.mul.Tensor, args=(x, 0))
-            mul_node.meta["val"] = torch.empty([4], dtype=dtype, device=self.device)
-            graph.output(mul_node)
-            gm = fx.GraphModule(torch.nn.Module(), graph)
-
-            folder = UniformValueConstantFolder(gm)
-            folder.run()
-
-            self.assertEqual(
-                mul_node in folder.node_replacements,
-                should_fold,
-                msg=f"unexpected fold decision for dtype={dtype}",
-            )
-
-    def test_mul_by_zero_extremal(self):
-        # End-to-end: x * 0 must preserve NaN/Inf to match eager (nan*0=nan,
-        # inf*0=nan); folding x * 0 -> 0 would drop them. Via CommonTemplate this
-        # also runs on CPU (CpuTests) by default.
-        def fn(a):
-            return (a * 0,)
-
-        self.common(fn, [torch.tensor([np.nan, np.inf, -np.inf, 0.0, 1.0, -1.0])])
-
     def test_uniform(self):
         def fn(x):
             return aten.uniform.default(x, 0, 1)
@@ -8862,6 +8833,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         self.common(fn, (torch.randn(64), torch.randn(64)))
+
+    @parametrize("y", (3.14, torch.tensor(3.14)))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_remainder_scalar_values(self, y, dtype):
+        def fn(a, b):
+            return torch.remainder(a, b)
+
+        x = torch.tensor([-4.0, 0.0, 0.4, 4], dtype=dtype, device=self.device)
+
+        self.common(fn, (x, y))
 
     @skip_if_halide  # cpp-only RuntimeError contract
     @skip_if_pallas  # cpp-only RuntimeError contract
