@@ -556,6 +556,9 @@ const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
 #if ROCM_VERSION >= 70000
     "gfx950"
 #endif
+#if ROCM_VERSION >= 71300
+    "gfx1100", "gfx1101", "gfx1151"
+#endif
   };
   return archs;
 }
