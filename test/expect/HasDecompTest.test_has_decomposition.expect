@@ -410,8 +410,6 @@ aten::_indices
 aten::_indices_copy
 aten::_indices_copy.out
 aten::_int_mm
-aten::_int_mm.dtype
-aten::_int_mm.dtype_out
 aten::_int_mm.out
 aten::_is_all_true
 aten::_is_any_true
@@ -756,8 +754,6 @@ aten::bmm.out
 aten::ccol_indices
 aten::ccol_indices_copy
 aten::ccol_indices_copy.out
-aten::cholesky
-aten::cholesky.out
 aten::cholesky_inverse
 aten::cholesky_inverse.out
 aten::cholesky_solve

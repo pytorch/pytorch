@@ -736,7 +736,8 @@ def full_like(
         return result.to(memory_format=memory_format)
 
     else:
-        assert layout == torch.strided
+        if layout != torch.strided:
+            raise AssertionError(f"expected torch.strided layout, got {layout}")
         shape, permutation = _get_shape_permutation_like(self)
         result = torch.full(
             shape,
@@ -1278,8 +1279,12 @@ def repeat_interleave_Tensor(
         return NotImplemented
     if repeat.device.type == "mps":
         return NotImplemented
-    assert repeat.dtype in [torch.int32, torch.int64]
-    assert repeat.ndim == 1
+    if repeat.dtype not in [torch.int32, torch.int64]:
+        raise AssertionError(
+            f"expected repeat dtype int32 or int64, got {repeat.dtype}"
+        )
+    if repeat.ndim != 1:
+        raise AssertionError(f"expected repeat.ndim == 1, got {repeat.ndim}")
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
     indices = torch.searchsorted(
@@ -1302,9 +1307,8 @@ def conv1d_to_conv2d(
     # input:  (N, C_in, L_in)
     # weight: (C_out, C_in // groups, K)
     # bias:   (C_out,)
-    assert input.dim() == 3 and weight.dim() == 3, (
-        "Expect (N,C_in,L) and (C_out,C_in//groups,K)"
-    )
+    if not (input.dim() == 3 and weight.dim() == 3):
+        raise AssertionError("Expect (N,C_in,L) and (C_out,C_in//groups,K)")
 
     # pyrefly: ignore [bad-assignment]
     stride = stride[0]
@@ -1331,14 +1335,3 @@ def conv1d_to_conv2d(
 
     # Squeeze dummy dimension back out: (N,C_out,L_out,1) -> (N,C_out,L_out)
     return out_2d.squeeze(-1)
-
-
-@register_decomposition(torch.ops.aten._int_mm.dtype)
-def decompose_int_mm_dtype(a, b, out_dtype):
-    torch._check(
-        out_dtype in (torch.float32, torch.bfloat16),
-        lambda: "_int_mm.dtype only supports float32 and bfloat16 outputs",
-    )
-
-    # Canonical form that Inductor understands
-    return torch._int_mm(a, b).to(dtype=out_dtype)
