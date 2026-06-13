@@ -45,6 +45,27 @@ def _no_grad(func: Callable[_P, _R]) -> Callable[_P, _R]:
     return _no_grad_wrapper
 
 
+def _has_mixed_dtensor_meshes(tensors: list[Tensor]) -> bool:
+    """Return True when *tensors* contains DTensors whose DeviceMesh
+    objects are not all equal, or a mix of DTensor and plain tensors.
+    ``_foreach_*`` ops and ``torch.stack`` cannot handle this case."""
+    if not torch.distributed.is_available():
+        return False
+    from torch.distributed.tensor import DTensor
+
+    mesh = None
+    has_plain = False
+    for t in tensors:
+        if isinstance(t, DTensor):
+            if mesh is None:
+                mesh = t.device_mesh
+            elif t.device_mesh != mesh:
+                return True
+        else:
+            has_plain = True
+    return mesh is not None and has_plain
+
+
 @_no_grad
 def _get_total_norm(
     tensors: _tensor_or_tensors,
@@ -101,6 +122,13 @@ def _get_total_norm(
             norms.extend(
                 [torch.linalg.vector_norm(g, norm_type) for g in device_tensors]
             )
+
+    if _has_mixed_dtensor_meshes(norms):
+        from torch.distributed.tensor import DTensor
+
+        norms = [
+            n.full_tensor() if isinstance(n, DTensor) else n for n in norms
+        ]
 
     total_norm = torch.linalg.vector_norm(
         torch.stack([norm.to(first_device) for norm in norms]), norm_type
@@ -167,10 +195,17 @@ def _clip_grads_with_norm_(
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
     for (device, _), ([device_grads], _) in grouped_grads.items():
-        if (foreach is None and _has_foreach_support(device_grads, device)) or (
-            foreach and _device_has_foreach_support(device)
-        ):
-            torch._foreach_mul_(device_grads, clip_coef_clamped.to(device))
+        use_foreach = (
+            foreach is None and _has_foreach_support(device_grads, device)
+        ) or (foreach and _device_has_foreach_support(device))
+        if use_foreach:
+            coef = clip_coef_clamped.to(device)
+            # _foreach_mul_.Tensor tags the scalar with mesh metadata and
+            # fails when grads span different meshes.  Passing a Python float
+            # via .item() avoids the conflict while keeping the foreach path.
+            if _has_mixed_dtensor_meshes(device_grads):
+                coef = coef.item()
+            torch._foreach_mul_(device_grads, coef)
         elif foreach:
             raise RuntimeError(
                 f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
