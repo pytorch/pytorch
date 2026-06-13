@@ -4748,10 +4748,12 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
 
 
 fallback_index_add = fallback_handler(aten.index_add.default, add_to_fallback_set=False)
+fallback_index_add_ = fallback_handler(
+    aten.index_add_.default, add_to_fallback_set=False
+)
 
 
-@register_lowering(aten.index_add, type_promotion_kind=None)
-def index_add(x, dim, index, source, *, alpha=1):
+def index_add_impl(x, dim, index, source, alpha, inplace):
     # index_add bounds-checks index to [0, x.size(dim)) and does not wrap
     # negatives, unlike index_put. Lower through the index_put machinery
     # with wrap_neg=False so the bounds assert is emitted inside the
@@ -4763,7 +4765,8 @@ def index_add(x, dim, index, source, *, alpha=1):
         or torch.are_deterministic_algorithms_enabled()
         or needs_fallback_due_to_atomic_add_limitations(x.get_dtype())
     ):
-        return fallback_index_add(x, dim, index, source, alpha=alpha)
+        fb = fallback_index_add_ if inplace else fallback_index_add
+        return fb(x, dim, index, source, alpha=alpha)
 
     if alpha != 1:
         source = mul(source, alpha)
@@ -4773,15 +4776,27 @@ def index_add(x, dim, index, source, *, alpha=1):
     dim = _validate_dim(x1, dim)
     idx = [None] * dim + [index]
     out = index_put_impl_(
-        clone(x1),
+        x1 if inplace else clone(x1),
         idx,
         source,
         accumulate=True,
         check=True,
-        may_realize=False,
+        may_realize=inplace,
         wrap_neg=False,
     )
-    return view(out, []) if zero_dim else out
+    if zero_dim:
+        out = view(out, [])
+    return x if inplace else out
+
+
+@register_lowering(aten.index_add, type_promotion_kind=None)
+def index_add(x, dim, index, source, *, alpha=1):
+    return index_add_impl(x, dim, index, source, alpha, inplace=False)
+
+
+@register_lowering(aten.index_add_, type_promotion_kind=None)
+def index_add_(x, dim, index, source, *, alpha=1):
+    return index_add_impl(x, dim, index, source, alpha, inplace=True)
 
 
 def index_put_impl_(
