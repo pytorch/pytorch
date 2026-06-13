@@ -76,7 +76,7 @@ from ..utils import (
 )
 from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .lists import ListIteratorVariable, SizeVariable
+from .lists import ListIteratorVariable, SizeVariable, SliceVariable, TupleVariable
 from .script_object import TorchScriptObjectVariable
 from .user_defined import UserDefinedClassVariable
 
@@ -1728,6 +1728,225 @@ class TensorVariable(VariableTracker):
         **kwargs: VariableTracker,
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
+
+        if not tx.output.export:
+            if isinstance(args[0], SymNodeVariable):
+                # Standard indexing will force specialization due to
+                # __index__.  Rewrite as a regular torch op which will
+                # trace fine
+                fn, args = (  # type: ignore[assignment]
+                    torch.select,
+                    [
+                        VariableTracker.build(tx, 0),
+                        args[0],
+                    ],
+                )
+            else:
+                fn = operator.getitem
+
+            proxy = tx.output.create_proxy(
+                "call_function",
+                fn,
+                *proxy_args_kwargs([self] + list(args), kwargs),
+            )
+
+            return wrap_fx_proxy(tx, proxy)
+
+        def slice_step(item: SliceVariable) -> tuple[VariableTracker, int] | None:
+            step = item.items[2]
+            if step.is_constant_none():
+                return ConstantVariable.create(1), 1
+            if not step.is_python_constant():
+                return None
+            step_value = step.as_python_constant()
+            if type(step_value) is not int or step_value <= 0:
+                return None
+            return step, step_value
+
+        def is_constant(item: VariableTracker, value: object) -> bool:
+            return item.is_python_constant() and item.as_python_constant() is value
+
+        def is_basic_integer(item: VariableTracker) -> bool:
+            if isinstance(item, SymNodeVariable):
+                return True
+            if not item.is_python_constant():
+                return False
+            value = item.as_python_constant()
+            return type(value) is int
+
+        def getitem_with_slice_default_stop() -> VariableTracker | None:
+            if len(args) != 1 or kwargs:
+                return None
+            if not self.valid_size():
+                return None
+
+            input_ndim = len(self.size)
+            getitem_count = 1
+            seen_getitems: set[str] = set()
+            for node in tx.output.current_tracer.graph.nodes:
+                torch_fn = node.meta.get("torch_fn")
+                if (
+                    isinstance(torch_fn, tuple)
+                    and len(torch_fn) == 2
+                    and torch_fn[1] == "wrapper_descriptor.__getitem__"
+                ):
+                    seen_getitems.add(torch_fn[0])
+                elif node.op == "call_function" and node.target is operator.getitem:
+                    seen_getitems.add(f"operator.getitem.{node.name}")
+            getitem_count += len(seen_getitems)
+            torch_fn_name = f"__getitem___{getitem_count}"
+            source_name = (
+                "getitem" if getitem_count == 1 else f"getitem_{getitem_count - 1}"
+            )
+
+            def set_getitem_meta(proxy: torch.fx.Proxy) -> None:
+                proxy.node.meta["torch_fn"] = (
+                    torch_fn_name,
+                    "wrapper_descriptor.__getitem__",
+                )
+                proxy.node.meta["source_fn_stack"] = (
+                    tx.output.current_tracer.source_fn_stack
+                    + [(source_name, operator.getitem)]
+                )
+
+            key = args[0]
+            if isinstance(key, SliceVariable):
+                items: list[VariableTracker] = [key]
+            elif isinstance(key, TupleVariable):
+                items = key.items.copy()
+            else:
+                return None
+
+            ellipsis_index = None
+            dim_consuming_items = 0
+            for i, item in enumerate(items):
+                if is_constant(item, Ellipsis):
+                    if ellipsis_index is not None:
+                        return None
+                    ellipsis_index = i
+                elif not is_constant(item, None):
+                    dim_consuming_items += 1
+
+            if ellipsis_index is not None:
+                ellipsis_slices = input_ndim - dim_consuming_items
+                if ellipsis_slices < 0:
+                    return None
+                items[ellipsis_index : ellipsis_index + 1] = [
+                    SliceVariable(
+                        [
+                            ConstantVariable.create(None),
+                            ConstantVariable.create(None),
+                            ConstantVariable.create(None),
+                        ],
+                        tx,
+                    )
+                    for _ in range(ellipsis_slices)
+                ]
+
+            saw_default_stop = False
+            for item in items:
+                if isinstance(item, SliceVariable):
+                    step = slice_step(item)
+                    if step is None:
+                        return None
+                    _, step_value = step
+                    if item.items[1].is_constant_none() and step_value != 1:
+                        saw_default_stop = True
+                elif is_constant(item, None) or is_basic_integer(item):
+                    continue
+                else:
+                    return None
+
+            if not saw_default_stop:
+                return None
+
+            dim = 0
+            current_ndim = input_ndim
+            for item in items:
+                if is_constant(item, None):
+                    current_ndim += 1
+                    dim += 1
+                    continue
+                if dim >= current_ndim:
+                    return None
+                if is_basic_integer(item):
+                    current_ndim -= 1
+                elif isinstance(item, SliceVariable):
+                    dim += 1
+                else:
+                    return None
+
+            result: VariableTracker = self
+            dim = 0
+            current_ndim = input_ndim
+            for item in items:
+                if is_constant(item, None):
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        torch.unsqueeze,
+                        *proxy_args_kwargs([result, ConstantVariable.create(dim)], {}),
+                    )
+                    set_getitem_meta(proxy)
+                    result = wrap_fx_proxy(tx, proxy)
+                    current_ndim += 1
+                    dim += 1
+                    continue
+
+                if dim >= current_ndim:
+                    return None
+
+                if is_basic_integer(item):
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        torch.select,
+                        *proxy_args_kwargs(
+                            [result, ConstantVariable.create(dim), item],
+                            {},
+                        ),
+                    )
+                    set_getitem_meta(proxy)
+                    result = wrap_fx_proxy(tx, proxy)
+                    current_ndim -= 1
+                    continue
+
+                if isinstance(item, SliceVariable):
+                    step = slice_step(item)
+                    if step is None:
+                        return None
+                    step_arg, step_value = step
+                    start, stop, _ = item.items
+                    if (
+                        start.is_constant_none()
+                        and stop.is_constant_none()
+                        and step_value == 1
+                    ):
+                        dim += 1
+                        continue
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        torch.ops.aten.slice.Tensor,
+                        *proxy_args_kwargs(
+                            [
+                                result,
+                                ConstantVariable.create(dim),
+                                start,
+                                stop,
+                                step_arg,
+                            ],
+                            {},
+                        ),
+                    )
+                    set_getitem_meta(proxy)
+                    result = wrap_fx_proxy(tx, proxy)
+                    dim += 1
+                    continue
+
+                return None
+
+            return result
+
+        if (result := getitem_with_slice_default_stop()) is not None:
+            return result
 
         if isinstance(args[0], SymNodeVariable):
             # Standard indexing will force specialization due to
