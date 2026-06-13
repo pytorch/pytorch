@@ -3855,6 +3855,51 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(details3),
         )
 
+    def test_hash_provenance_tracking_to_timeline(self):
+        """
+        Test that provenance_tracking_to_timeline affects hashes.
+        """
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 1,
+                "trace.provenance_tracking_to_timeline": False,
+            }
+        ):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 1,
+                "trace.provenance_tracking_to_timeline": True,
+            }
+        ):
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 0,
+                "trace.provenance_tracking_to_timeline": True,
+            }
+        ):
+            details4 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details4),
+        )
+
     def test_provenance_tracking_level_causes_cache_miss(self):
         """
         Test that changing provenance_tracking_level causes a cache miss.
