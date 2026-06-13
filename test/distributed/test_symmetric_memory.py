@@ -872,6 +872,73 @@ class AsyncTPTest(MultiProcContinuousTest):
             )
         self.assertEqual(outputs[0], outputs[1])
 
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
+    @parametrize("scatter_dim", [0, 1])
+    @parametrize("scaling", ["tensorwise", "rowwise"])
+    def test_fused_scaled_matmul_reduce_scatter_v2(
+        self, scatter_dim: int, scaling: str
+    ) -> None:
+        self._init_process()
+
+        from torch.nn.functional import ScalingType, SwizzleType
+
+        BATCH = 8
+        M = 64
+        N = 16
+        K = 32
+        group = dist.group.WORLD
+        rank = self.rank
+
+        torch.manual_seed(42 + rank)
+        A = torch.rand(BATCH, M, K, device="cuda").to(e4m3_type)
+        B = torch.rand(N, K, device="cuda").to(e4m3_type).T
+
+        if scaling == "rowwise":
+            scale_a = [torch.full((BATCH, M, 1), 0.1, device="cuda")]
+            scale_b = [torch.full((1, N), 0.1, device="cuda")]
+            recipe_a = [ScalingType.RowWise.value]
+            recipe_b = [ScalingType.RowWise.value]
+        else:
+            scale_a = [torch.tensor(0.1, device="cuda")]
+            scale_b = [torch.tensor(0.1, device="cuda")]
+            recipe_a = [ScalingType.TensorWise.value]
+            recipe_b = [ScalingType.TensorWise.value]
+
+        swizzle_a = [SwizzleType.NO_SWIZZLE.value]
+        swizzle_b = [SwizzleType.NO_SWIZZLE.value]
+
+        output_shape = [*A.shape[:-1], B.shape[1]]
+
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(
+                    torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter_v2(
+                        A,
+                        B,
+                        scale_a,
+                        recipe_a,
+                        swizzle_a,
+                        scale_b,
+                        recipe_b,
+                        swizzle_b,
+                        "avg",
+                        scatter_dim,
+                        scatter_dim,
+                        group.group_name,
+                        output_shape,
+                        out_dtype=torch.bfloat16,
+                    )
+                )
+
+        if not (outputs[0].stride() == outputs[1].stride()):
+            raise AssertionError(
+                f"Expected strides to match: {outputs[0].stride()} vs {outputs[1].stride()}"
+            )
+        self.assertEqual(outputs[0], outputs[1])
+
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )

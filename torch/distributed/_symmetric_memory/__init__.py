@@ -15,6 +15,9 @@ from typing_extensions import deprecated
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
+from torch._C import (
+    _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
+)
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
@@ -467,6 +470,19 @@ lib.define(
     "Tensor? bias = None, "
     "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
+    "bool use_fast_accum = False) -> Tensor",
+    tags=[torch._C.Tag.needs_fixed_stride_order],
+)
+lib.define(
+    "fused_scaled_matmul_reduce_scatter_v2("
+    "Tensor A, Tensor B, "
+    "Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, "
+    "Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, "
+    "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, "
+    "str group_name, SymInt[]? output_shape, "
+    "Tensor? bias = None, "
+    "ScalarType? out_dtype = None, "
+    "int[] contraction_dim = [], "
     "bool use_fast_accum = False) -> Tensor",
     tags=[torch._C.Tag.needs_fixed_stride_order],
 )
@@ -1441,6 +1457,75 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     return res
 
 
+def _pipelined_scaled_matmul_reduce_scatter(
+    A_with_scatter_dim_0: torch.Tensor,
+    A_2D_with_scatter_dim_0: torch.Tensor,
+    B: torch.Tensor,
+    chunk_producer: Callable[[int, torch.Tensor], None],
+    group: c10d.ProcessGroup,
+    group_name: c10d.GroupName,
+    out_dtype: torch.dtype | None,
+    reduce_op: str,
+    orig_scatter_dim: int,
+    scatter_dim_after_maybe_reshape: int,
+    output_shape: list[int],
+) -> torch.Tensor:
+    if reduce_op == "sum":
+        reduce_fn = partial(torch.sum, dim=0)
+    elif reduce_op == "avg":
+        reduce_fn = partial(torch.mean, dim=0)
+    else:
+        raise ValueError("reduce_op must be sum or avg")
+
+    # Stacked partials will be the 2D outputs of the pipelined scaled mm, and will
+    # have the shape (A_2D_with_scatter_dim_0.shape[0], B.shape[1]) to align with
+    # the formula: (a*b,c) @ (c,d) = (a*b,d)
+    stacked_partials = A_with_scatter_dim_0.new_empty(
+        A_2D_with_scatter_dim_0.shape[0],
+        B.shape[1],
+        dtype=out_dtype or A_with_scatter_dim_0.dtype,
+    )
+
+    _pipelined_produce_and_all2all(
+        chunk_producer,
+        stacked_partials,
+        group_name,
+    )
+
+    # Transform the *unreduced* stacked 2D partial mm outputs to an *unreduced*
+    # 3D+ output, then reduce-scatter. The *unreduced* 3D+ tensor has dim 0 =
+    # `group_size`, as we have `group_size` instances of stacked partial outputs.
+    # The next dims are A's leading dims (sharded along the original scatter dim).
+    stacked_partials_3D_leading_dims = [group.size()] + list(
+        # Use A from after the dim swap 0<=>scatter_dim, but before the flatten,
+        # to get the leading dims of the 3D+ view of stacked partials.
+        A_with_scatter_dim_0.shape[:-1]
+    )
+
+    # The `group_size` leading dim has been prepended. We need to divide the
+    # sharding/scatter dim by the group size. If the original scatter dim was 0,
+    # then it is now dim 1 since the new `group_size` dim was prepended.
+    stacked_partial_scatter_dim = orig_scatter_dim if orig_scatter_dim > 0 else 1
+    stacked_partials_3D_leading_dims[stacked_partial_scatter_dim] //= group.size()
+
+    # Ensures that the transpose and reduction produce contiguous result
+    # in a single reduction kernel.
+    reduced_out = reduce_fn(
+        # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
+        stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
+        # We originally swapped 0<=>scatter_dim_after_maybe_reshape. Now after
+        # prepending the `group_size` dim, to undo this original swap, we
+        # must swap 1<=>scatter_dim_after_maybe_reshape+1.
+        .movedim(1, scatter_dim_after_maybe_reshape + 1),
+        # Reduce along the `group_size` dim (0).
+        dim=0,
+    )
+
+    scattered_shape = list(output_shape)
+    scattered_shape[orig_scatter_dim] //= group.size()
+    return reduced_out.view(*scattered_shape)
+
+
 def _fused_scaled_matmul_reduce_scatter_impl(
     mm_out_op: torch._ops.OpOverload,
     A: torch.Tensor,
@@ -1465,22 +1550,14 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         raise ValueError("Invalid scatter dim for 3D+ output tensor")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
-        raise ValueError("reduce_op must be sum or avg")
 
     group = c10d._resolve_process_group(group_name)
 
     # Move scatter to first dim, then shard the tensor along the first dim, so the chunk producer
     # can perform matmuls along the first dim.
     A_with_scatter_dim_0 = A.movedim(scatter_dim_after_maybe_reshape, 0)
-
     # To handle case where A is 3D+, reshape to 2D to prepare for mm which requires 2D inputs.
     A_2D_with_scatter_dim_0 = A_with_scatter_dim_0.flatten(0, -2)
-
     # Partition A along the first dim to prepare for sharding across TP process group.
     A_shards = A_2D_with_scatter_dim_0.chunk(group.size())
 
@@ -1517,61 +1594,268 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     else:
         raise ValueError("A_scale cannot be none for scaled_mm")
 
-    # Computing block-wise matmul along the first dim of A
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
         mm_out_op(A_shards[rank], B, scale_a=A_scale_shards[rank], **kwargs, out=out)
 
-    # Stacked partials will be the 2D outputs of the pipelined scaled mm, and will
-    # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
-    # (a*b,c) @ (c,d) = (a*b,d)
-    stacked_partials = A_with_scatter_dim_0.new_empty(
-        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=out_dtype or A.dtype
+    return _pipelined_scaled_matmul_reduce_scatter(
+        A_with_scatter_dim_0,
+        A_2D_with_scatter_dim_0,
+        B,
+        chunk_producer,
+        group,
+        group_name,
+        out_dtype,
+        reduce_op,
+        orig_scatter_dim,
+        scatter_dim_after_maybe_reshape,
+        output_shape,
     )
 
-    # Execute the pipelined mm/scaled_mm.
-    _pipelined_produce_and_all2all(
-        chunk_producer,
-        stacked_partials,
+
+def _shard_v2_scales_for_reduce_scatter(
+    scale_list: list[torch.Tensor],
+    recipe_list: list[int],
+    M: int,
+    group_size: int,
+) -> list[list[torch.Tensor]]:
+    """Shard a list of v2 scale tensors along the M dimension for reduce-scatter.
+
+    Each scale tensor is sharded differently depending on its scaling recipe:
+    - TensorWise: replicated to all shards
+    - RowWise: sharded along dim 0
+    - BlockWise1x16: sharded in 128-row blocks (NVFP4)
+    - BlockWise1x128/128x128: not yet supported
+    """
+    M_shard = M // group_size
+
+    result: list[list[torch.Tensor]] = [[] for _ in range(group_size)]
+    for scale, recipe in zip(scale_list, recipe_list):
+        if recipe == ScalingType.TensorWise.value:
+            for rank in range(group_size):
+                result[rank].append(scale)
+        elif recipe == ScalingType.RowWise.value:
+            shards = list(scale.chunk(group_size))
+            shards = [t if t.data_ptr() % 16 == 0 else t.clone() for t in shards]
+            for rank in range(group_size):
+                result[rank].append(shards[rank])
+        elif recipe == ScalingType.BlockWise1x16.value:
+            if M_shard % 128 != 0:
+                raise ValueError(
+                    f"For BlockWise1x16 scaling, M per shard ({M_shard}) must be "
+                    f"divisible by 128. Total M={M}, group_size={group_size}."
+                )
+            shards = scale.chunk(group_size)
+            for rank in range(group_size):
+                shard = shards[rank]
+                if shard.data_ptr() % 16 != 0:
+                    shard = shard.clone()
+                result[rank].append(shard)
+        elif recipe in (
+            ScalingType.BlockWise1x128.value,
+            ScalingType.BlockWise128x128.value,
+        ):
+            raise NotImplementedError(
+                f"BlockWise scale sharding for recipe {recipe} is not yet "
+                f"supported. Contributions welcome."
+            )
+        else:
+            raise ValueError(f"Unsupported scaling recipe for sharding: {recipe}")
+
+    return result
+
+
+@torch.library.impl(lib, "fused_scaled_matmul_reduce_scatter_v2", "CUDA")
+def _fused_scaled_matmul_reduce_scatter_v2(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    reduce_op: str,
+    orig_scatter_dim: int,
+    scatter_dim_after_maybe_reshape: int,
+    group_name: c10d.GroupName,
+    output_shape: list[int],
+    bias: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+    contraction_dim: list[int] | None = None,
+    use_fast_accum: bool = False,
+) -> torch.Tensor:
+    if _is_test_mode:
+        return _fused_scaled_matmul_reduce_scatter_v2_fallback(
+            A,
+            B,
+            scale_a,
+            recipe_a,
+            swizzle_a,
+            scale_b,
+            recipe_b,
+            swizzle_b,
+            reduce_op,
+            orig_scatter_dim,
+            scatter_dim_after_maybe_reshape,
+            group_name,
+            output_shape,
+            bias,
+            out_dtype,
+            contraction_dim,
+            use_fast_accum,
+        )
+    with torch.profiler.record_function("fused_scaled_matmul_reduce_scatter_v2"):
+        return _fused_scaled_matmul_reduce_scatter_v2_impl(
+            A=A,
+            B=B,
+            scale_a=scale_a,
+            recipe_a=recipe_a,
+            swizzle_a=swizzle_a,
+            scale_b=scale_b,
+            recipe_b=recipe_b,
+            swizzle_b=swizzle_b,
+            out_dtype=out_dtype,
+            reduce_op=reduce_op,
+            orig_scatter_dim=orig_scatter_dim,
+            scatter_dim_after_maybe_reshape=scatter_dim_after_maybe_reshape,
+            group_name=group_name,
+            output_shape=output_shape,
+            bias=bias,
+            contraction_dim=contraction_dim or [],
+            use_fast_accum=use_fast_accum,
+        )
+
+
+@torch.library.impl(lib, "fused_scaled_matmul_reduce_scatter_v2", "Meta")
+def _fused_scaled_matmul_reduce_scatter_v2_fallback(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    reduce_op: str,
+    orig_scatter_dim: int,
+    scatter_dim_after_maybe_reshape: int,
+    group_name: c10d.GroupName,
+    output_shape: list[int],
+    bias: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+    contraction_dim: list[int] | None = None,
+    use_fast_accum: bool = False,
+) -> torch.Tensor:
+    flat_scale_a = [
+        s.flatten(0, -2).contiguous()
+        if r == ScalingType.RowWise.value and s.dim() > 2
+        else s
+        for s, r in zip(scale_a, recipe_a)
+    ]
+    C = torch._scaled_mm_v2(
+        A.flatten(0, -2).contiguous(),
+        B,
+        flat_scale_a,
+        recipe_a,
+        swizzle_a,
+        scale_b,
+        recipe_b,
+        swizzle_b,
+        bias,
+        out_dtype,
+        contraction_dim or [],
+        use_fast_accum,
+    )
+    C = C.view(*output_shape[:-1], B.shape[1])
+    res = funcol.reduce_scatter_tensor(
+        C,
+        reduce_op,
+        orig_scatter_dim,
         group_name,
     )
+    res = funcol.wait_tensor(res)
+    return res
 
-    # We now need to transform the *unreduced* stacked 2D partial mm outputs to an *unreduced* 3D+ output,
-    # then reduce-scatter. To do this, we first need to determine the shape of the unreduced 3D+ output,
-    # to reshape our stacked partials so we can apply the reduce-scatter.
-    #
-    # The *unreduced* 3D+ tensor will have dim 0 = `group_size`, as we have `group_size` instances of
-    # stacked partial outputs. The next dims will be A's leading dims (sharded along the original scatter dim),
-    # as it was the left operand of the mm op. We can use -1 as the final dim of the view to populate the rest.
-    stacked_partials_3D_leading_dims = [group.size()] + list(
-        # We use A from after the dim swap 0<=>scatter_dim, but before the flatten,
-        # to get the leading dims of the 3D+ view of stacked partials.
-        A_with_scatter_dim_0.shape[:-1]
+
+def _fused_scaled_matmul_reduce_scatter_v2_impl(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    out_dtype: torch.dtype | None,
+    reduce_op: str,
+    orig_scatter_dim: int,
+    scatter_dim_after_maybe_reshape: int,
+    group_name: c10d.GroupName,
+    output_shape: list[int],
+    bias: torch.Tensor | None = None,
+    contraction_dim: list[int] | None = None,
+    use_fast_accum: bool = False,
+) -> torch.Tensor:
+    if A.dim() < 2:
+        raise ValueError("A must be at least 2D")
+    if (
+        scatter_dim_after_maybe_reshape < 0
+        or scatter_dim_after_maybe_reshape >= A.dim()
+    ):
+        raise ValueError("Invalid scatter dim for input tensor")
+    if orig_scatter_dim < 0 or orig_scatter_dim >= len(output_shape):
+        raise ValueError("Invalid scatter dim for output tensor")
+    if B.dim() != 2:
+        raise ValueError("B must be a matrix")
+
+    group = c10d._resolve_process_group(group_name)
+
+    A_with_scatter_dim_0 = A.movedim(scatter_dim_after_maybe_reshape, 0)
+    A_2D_with_scatter_dim_0 = A_with_scatter_dim_0.flatten(0, -2)
+    A_shards = A_2D_with_scatter_dim_0.chunk(group.size())
+
+    flat_scale_a = [
+        s.movedim(scatter_dim_after_maybe_reshape, 0).contiguous().flatten(0, -2)
+        if r == ScalingType.RowWise.value and s.dim() > 2
+        else s
+        for s, r in zip(scale_a, recipe_a)
+    ]
+
+    M = A_2D_with_scatter_dim_0.shape[0]
+    scale_a_shards = _shard_v2_scales_for_reduce_scatter(
+        flat_scale_a, recipe_a, M, group.size()
     )
 
-    # The `group_size` leading dim has been prepended to `stacked_partials_3D_leading_dims`,
-    # to capture the partial output from each rank. We need to divide the sharding/scatter dim
-    # by the group size. If the original scatter dim was 0, then it is now dim 1 in this
-    # tensor, since this new `group_size` dim was prepended.
-    stacked_partial_scatter_dim = orig_scatter_dim if orig_scatter_dim > 0 else 1
-    stacked_partials_3D_leading_dims[stacked_partial_scatter_dim] //= group.size()
+    def chunk_producer(rank: int, out: torch.Tensor) -> None:
+        torch.ops.aten._scaled_mm_v2.out(
+            A_shards[rank],
+            B,
+            scale_a_shards[rank],
+            recipe_a,
+            swizzle_a,
+            scale_b,
+            recipe_b,
+            swizzle_b,
+            bias,
+            out_dtype,
+            contraction_dim or [],
+            use_fast_accum,
+            out=out,
+        )
 
-    # Ensures that the transpose and reduction produce contiguous result
-    # in a single reduction kernel.
-    reduced_out = reduce_fn(
-        # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
-        stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
-        # We originally swapped 0<=>scatter_dim_after_maybe_reshape. Now after
-        # prepending the `group_size` dim, to undo this original swap, we
-        # must swap 1<=>scatter_dim_after_maybe_reshape+1.
-        .movedim(1, scatter_dim_after_maybe_reshape + 1),
-        # Reduce along the `group_size` dim (0).
-        dim=0,
+    return _pipelined_scaled_matmul_reduce_scatter(
+        A_with_scatter_dim_0,
+        A_2D_with_scatter_dim_0,
+        B,
+        chunk_producer,
+        group,
+        group_name,
+        out_dtype,
+        reduce_op,
+        orig_scatter_dim,
+        scatter_dim_after_maybe_reshape,
+        output_shape,
     )
-
-    # Output shape must be scattered along original scatter dim as well.
-    output_shape[orig_scatter_dim] //= group.size()
-    out = reduced_out.view(*output_shape)
-    return out
 
 
 def restride_A_for_fused_matmul_reduce_scatter(
