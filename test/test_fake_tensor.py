@@ -3359,6 +3359,15 @@ class FakeTensorDispatchCache(TestCase):
             self.assertTrue(y._is_zerotensor())
             self.assertBypasses("dispatch_key_set mismatch", 2)
 
+    def test_meta_zerotensor_keeps_fake_device(self):
+        with FakeTensorMode(allow_non_fake_inputs=True) as fake_mode:
+            x = fake_mode.from_tensor(torch.ones(3))
+            z = torch._efficientzerotensor(3, device="meta")
+            out = x * z
+            self.assertEqual(out.device.type, "cpu")
+            self.assertEqual(out.shape, (3,))
+            self.assertTrue(out._is_zerotensor())
+
     def test_fft_hfft2_issue145522(self):
         with FakeTensorMode():
             s0 = 5

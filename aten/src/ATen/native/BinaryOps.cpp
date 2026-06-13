@@ -1003,20 +1003,39 @@ Tensor& mul__scalar_sparse_csr(Tensor& self, const Scalar& other) {
 }
 
 static Device correct_out_device(const Tensor& self, const Tensor& other) {
-  if (self.device() == at::kCPU){
-      return other.device();
-  } else {
+  const auto self_is_device_neutral_zero =
+      self._is_zerotensor() && (self.device().is_cpu() || self.device().is_meta());
+  const auto other_is_device_neutral_zero =
+      other._is_zerotensor() && (other.device().is_cpu() || other.device().is_meta());
+  if (self_is_device_neutral_zero && !other_is_device_neutral_zero) {
+    return other.device();
+  } else if (other_is_device_neutral_zero && !self_is_device_neutral_zero) {
     return self.device();
   }
+  if (self.device() == at::kCPU) {
+    return other.device();
+  }
+  return self.device();
 }
 
-static Tensor send_to_meta(const Tensor& self, const Device& device) {
+static Tensor send_to_meta(const Tensor& self) {
   Tensor out_meta;
-  if (self._is_zerotensor() && self.unsafeGetTensorImpl()->is_wrapped_number()) {
-    out_meta = at::_efficientzerotensor(self.sizes(), self.options().device(device));
-    out_meta.unsafeGetTensorImpl()->set_wrapped_number(true);
+  auto options = self.options().device(DeviceType::Meta);
+  // These tensors are only used by meta kernels to compute result metadata;
+  // preserving strides is unnecessary because callers only keep output sizes.
+  // Calling to(meta) here can redispatch efficient ZeroTensors through AD.
+  const auto is_wrapped_number =
+      self.unsafeGetTensorImpl()->is_wrapped_number();
+  if (is_wrapped_number && !self._is_zerotensor()) {
+    return self;
+  }
+  if (self._is_zerotensor() && is_wrapped_number) {
+    out_meta = at::_efficientzerotensor_symint(self.sym_sizes(), options);
   } else {
-    out_meta = self.to(device);
+    out_meta = at::empty_symint(self.sym_sizes(), options);
+  }
+  if (is_wrapped_number) {
+    out_meta.unsafeGetTensorImpl()->set_wrapped_number(true);
   }
   return out_meta;
 }
@@ -1024,10 +1043,9 @@ static Tensor send_to_meta(const Tensor& self, const Device& device) {
 Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
-  auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto self_meta = send_to_meta(self, device_);
-  auto other_meta = send_to_meta(other, device_);
+  auto self_meta = send_to_meta(self);
+  auto other_meta = send_to_meta(other);
   auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self_meta, other_meta);
   return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
 }
@@ -1035,10 +1053,9 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
 Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
-  auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto self_meta = send_to_meta(self, device_);
-  auto other_meta = send_to_meta(other, device_);
+  auto self_meta = send_to_meta(self);
+  auto other_meta = send_to_meta(other);
   auto meta_out = at::_ops::div_Tensor::redispatch(meta_dks, self_meta, other_meta);
 
   if (self._is_zerotensor()) {
@@ -1066,10 +1083,9 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
 static Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
-  auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto self_meta = send_to_meta(self, device_);
-  auto other_meta = send_to_meta(other, device_);
+  auto self_meta = send_to_meta(self);
+  auto other_meta = send_to_meta(other);
   auto meta_out = at::_ops::add_Tensor::redispatch(meta_dks, self_meta, other_meta, alpha);
 
   auto get_out_like = [&] (const Tensor& tensor)
@@ -1104,11 +1120,12 @@ Tensor linalg_cross_zerotensor(
   auto out_device = correct_out_device(input, other);
   // hack to use the TensorIterator to get the correct broadcasting and type
   // promotion logic (see add_zerotensor)
-  auto device = Device(DeviceType::Meta);
+  auto input_meta = send_to_meta(input);
+  auto other_meta = send_to_meta(other);
   auto meta_out = at::_ops::linalg_cross::redispatch(
     c10::DispatchKeySet(at::DispatchKey::Meta),
-    input.to(device),
-    other.to(device),
+    input_meta,
+    other_meta,
     dim);
 
   return at::_efficientzerotensor(

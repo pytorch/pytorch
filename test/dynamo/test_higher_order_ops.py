@@ -3939,6 +3939,17 @@ class GraphModule(torch.nn.Module):
         with torch.device("cpu"):
             self._compile_check(wrapper_fn, (x,))
 
+    def test_nested_hessian_module(self):
+        torch.manual_seed(0)
+        f = nn.Sequential(nn.Linear(3, 3), nn.Tanh(), nn.Linear(3, 2))
+        x = torch.zeros(3)
+        fn = torch.func.hessian(torch.func.hessian(f))
+
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+
     def test_hessian_argnums(self):
         counters.clear()
 
