@@ -7,6 +7,7 @@
 #include <c10/util/Load.h>
 #include <limits>
 #include <cmath>
+#include <utility>
 
 namespace at::native {
 
@@ -56,23 +57,24 @@ __device__ void binary_op_update(const scalar_t lhs, scalar_t& rhs, const idx_t 
  * Each thread block processes one or more sets of contiguous rows (processing multiple rows
  * per thread block is quicker than processing a single row, especially for short rows).
  */
-template<typename scalar_t, class BinaryFunction>
-__global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *self_, scalar_t *values_, int64_t *indices_,
-                                                int num_rows, int row_size,
-                                                const uint32_t num_threads, const uint32_t log_num_threads_x,
-                                                scalar_t init, BinaryFunction binary_op) {
+template<typename scalar_t, typename index_t, class BinaryFunction>
+__global__ void tensor_kernel_scan_innermost_dim_with_indices(
+    const scalar_t *self_, scalar_t *values_, int64_t *indices_,
+    const uint32_t num_rows, const uint32_t row_size,
+    const uint32_t num_threads, const uint32_t log_num_threads_x,
+    scalar_t init, BinaryFunction binary_op) {
   // dynamic memory allocation for vbuf and ibuf
   alignas(sizeof(double)) extern __shared__ char buf[];
   scalar_t* vbuf = reinterpret_cast<scalar_t*>(buf); // the size is num_threads * 2
   int64_t* ibuf = reinterpret_cast<int64_t*>(vbuf + num_threads * 2);
-  const uint32_t num_threads_x = 1 << log_num_threads_x;
+  const index_t num_threads_x = 1 << log_num_threads_x;
   scalar_t* row_buf = vbuf + 2 * num_threads_x * threadIdx.y;
   int64_t* row_idx_buf = ibuf + 2 * num_threads_x * threadIdx.y;
 
-  for (int block_row = blockIdx.x * blockDim.y;
+  for (index_t block_row = blockIdx.x * static_cast<index_t>(blockDim.y);
        block_row < num_rows;
-       block_row += blockDim.y * gridDim.x) {
-    int row = block_row + threadIdx.y;
+       block_row += static_cast<index_t>(blockDim.y) * gridDim.x) {
+    index_t row = block_row + threadIdx.y;
     const scalar_t *row_self = self_ + row * row_size;
     scalar_t *row_values = values_ + row * row_size;
     int64_t *row_indices = indices_ + row * row_size;
@@ -81,10 +83,10 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
     const bool row_exists = row < num_rows;
     // Perform scan on one block at a time, keeping track of the total value of
     // all blocks processed so far.
-    for (int block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
+    for (index_t block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
       // Load data into shared memory (two values per thread).
-      int col1 = block_col + threadIdx.x;
-      int col2 = block_col + num_threads_x + threadIdx.x;
+      index_t col1 = block_col + threadIdx.x;
+      index_t col2 = block_col + num_threads_x + threadIdx.x;
       if (row_exists) {
         if (col1 < row_size) {
           row_buf[threadIdx.x] = c10::load(&row_self[col1]);
@@ -150,14 +152,15 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
  * outer dimensions, which contains several "inner rows").
  * Each thread processes a single inner row at a time.
  */
-template<typename scalar_t, class BinaryFunction>
+template<typename scalar_t, typename index_t, class BinaryFunction>
 __global__ void tensor_kernel_scan_outer_dim_with_indices(const scalar_t *self_, scalar_t *values_, int64_t *indices_,
                   const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size, scalar_t init, BinaryFunction binary_op) {
   for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
-      const scalar_t *self = self_ + orow * row_size * num_irows + irow;
-      scalar_t *values = values_ + orow * row_size * num_irows + irow;
-      int64_t *indices = indices_ + orow * row_size * num_irows + irow;
+      const index_t offset = static_cast<index_t>(orow) * row_size * num_irows + irow;
+      const scalar_t *self = self_ + offset;
+      scalar_t *values = values_ + offset;
+      int64_t *indices = indices_ + offset;
       scalar_t out = init;
       int64_t out_idx = 0;
 
@@ -206,9 +209,15 @@ __host__ void scan_outer_dim_with_indices(
   dim3 threads(std::min(512, int(num_irows)));
   int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int64_t{threads.x})));
-  tensor_kernel_scan_outer_dim_with_indices<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-    self.const_data_ptr<scalar_t>(), values.mutable_data_ptr<scalar_t>(), indices.mutable_data_ptr<int64_t>(),
-    num_orows, num_irows, row_size, init, binary_op);
+  if (std::in_range<uint32_t>(static_cast<size_t>(num_irows) * num_orows * row_size)) {
+    tensor_kernel_scan_outer_dim_with_indices<scalar_t, uint32_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      self.const_data_ptr<scalar_t>(), values.mutable_data_ptr<scalar_t>(), indices.mutable_data_ptr<int64_t>(),
+      num_orows, num_irows, row_size, init, binary_op);
+  } else {
+    tensor_kernel_scan_outer_dim_with_indices<scalar_t, size_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      self.const_data_ptr<scalar_t>(), values.mutable_data_ptr<scalar_t>(), indices.mutable_data_ptr<int64_t>(),
+      num_orows, num_irows, row_size, init, binary_op);
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -216,10 +225,10 @@ template <typename scalar_t, class BinaryFunction>
 __host__ void scan_innermost_dim_with_indices(
     const TensorBase& self, const TensorBase& values, const TensorBase& indices,
     scalar_t init, BinaryFunction binary_op) {
-  int ndim = self.dim();
+  int64_t ndim = self.dim();
   // Treat all outer dimensions as a single dimension.
-  int row_size = self.size(ndim - 1);
-  int num_rows = self.numel() / row_size;
+  int64_t row_size = self.size(ndim - 1);
+  int64_t num_rows = self.numel() / row_size;
 
   // assuming max_num_threads per block is 512
   const uint32_t num_threads = 512;
@@ -227,13 +236,24 @@ __host__ void scan_innermost_dim_with_indices(
   const uint32_t num_threads_x = (1 << log_num_threads_x);
   const uint32_t num_threads_y = num_threads / num_threads_x;
   dim3 threads(num_threads_x, num_threads_y);
-  dim3 grid(std::min(at::cuda::getCurrentDeviceProperties()->maxGridSize[0], ceil_div(num_rows, int(threads.y))));
+  int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+  dim3 grid(std::min(maxGridDim, ceil_div(num_rows, int64_t{threads.y})));
+
+  check_fits_in_unsigned(num_rows, "Number of rows (self.numel()/self.size(self.dim()-1))");
+  check_fits_in_unsigned(row_size, "row_size");
 
   const uint32_t mem_size = 2 * num_threads * (sizeof(scalar_t) + sizeof(int64_t));
-  tensor_kernel_scan_innermost_dim_with_indices<scalar_t><<<grid, threads, mem_size,
+  if (std::in_range<uint32_t>(num_rows * static_cast<size_t>(row_size))) {
+    tensor_kernel_scan_innermost_dim_with_indices<scalar_t, uint32_t><<<grid, threads, mem_size,
+                                                              at::cuda::getCurrentCUDAStream()>>>(
+      self.const_data_ptr<scalar_t>(), values.mutable_data_ptr<scalar_t>(), indices.mutable_data_ptr<int64_t>(),
+      num_rows, row_size, num_threads, log_num_threads_x, init, binary_op);
+  } else {
+    tensor_kernel_scan_innermost_dim_with_indices<scalar_t, size_t><<<grid, threads, mem_size,
                                                             at::cuda::getCurrentCUDAStream()>>>(
-    self.const_data_ptr<scalar_t>(), values.mutable_data_ptr<scalar_t>(), indices.mutable_data_ptr<int64_t>(),
-    num_rows, row_size, num_threads, log_num_threads_x, init, binary_op);
+      self.const_data_ptr<scalar_t>(), values.mutable_data_ptr<scalar_t>(), indices.mutable_data_ptr<int64_t>(),
+      num_rows, row_size, num_threads, log_num_threads_x, init, binary_op);
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -380,7 +400,7 @@ __global__ void tensor_kernel_scan_innermost_dim(
   T* sbuf2 = reinterpret_cast<T*>(sbuf);
   const uint32_t num_threads_x = 1 << log_num_threads_x;
   T* row_buf = reinterpret_cast<T*>(sbuf2 + num_threads_x * 2 * threadIdx.y);
-  if (num_rows * (size_t) row_size <= UINT_MAX) {
+  if (std::in_range<uint32_t>(num_rows * (size_t) row_size)) {
       tensor_kernel_scan_innermost_dim_impl<T, uint32_t>(
           row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op);
   } else {
@@ -409,7 +429,7 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(num_irows, "num_irows");
   check_fits_in_unsigned(num_orows, "num_orows");
   check_fits_in_unsigned(row_size, "row_size");
-  if (static_cast<size_t>(num_irows) * num_orows * row_size <= UINT_MAX) {
+  if (std::in_range<uint32_t>(static_cast<size_t>(num_irows) * num_orows * row_size)) {
   tensor_kernel_scan_outer_dim<scalar_t, uint32_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
     num_orows, num_irows, row_size, init, binary_op);

@@ -1758,6 +1758,28 @@ class TestTorchDeviceType(TestCase):
         cumsum = torch.cumsum(x, dim=1)
         self.assertEqual(cumsum.max().item(), 0., atol=0., rtol=0.)
 
+    @onlyCUDA
+    @largeTensorTest('48GB')
+    def test_cummax_cummin_outer_dim_64bit_indexing(self, device):
+        # https://github.com/pytorch/pytorch/issues/167086
+        # scan_outer_dim_with_indices had uint32 overflow when
+        # num_orows * row_size * num_irows > UINT_MAX.
+        # Use int8 to keep memory within 48GB (input + vals + int64 indices).
+        # 262144 * 16384 = 2^32 = UINT_MAX + 1.
+        x = torch.zeros(262144, 1, 16384, dtype=torch.int8, device=device)
+        # Allocate+free a non-zero tensor so the caching allocator's freed
+        # block contains non-zero values.  If the scan kernel has an OOB
+        # read due to index overflow, stale values will appear in the output.
+        tmp = torch.ones_like(x)
+        del tmp
+        vals, indices = torch.cummax(x, dim=1)
+        self.assertEqual(vals.max().item(), 0)
+        self.assertEqual(indices.max().item(), 0)
+        del vals, indices
+        vals, indices = torch.cummin(x, dim=1)
+        self.assertEqual(vals.min().item(), 0)
+        self.assertEqual(indices.max().item(), 0)
+
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
