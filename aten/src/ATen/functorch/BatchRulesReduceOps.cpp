@@ -381,7 +381,8 @@ static std::tuple<Tensor, std::optional<int64_t>> searchsorted_batch_rule(
       auto self_ = reshape_dim_into(*self_bdim, -1, self);
       auto result = at::searchsorted(buckets, self_, out_int32, right, side, sorter_);
       result = reshape_dim_outof(-1, bdim_size, result);
-      return std::make_tuple(result, result.dim() - 2);
+      auto result_bdim = result.dim() - 2;
+      return std::make_tuple(std::move(result), result_bdim);
     }
     TORCH_INTERNAL_ASSERT(false);
   }

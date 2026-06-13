@@ -33,6 +33,15 @@ OutputType = list[int | torch.Tensor | None]
 ModelType = Callable[[list[InputType]], OutputType]
 
 
+INPUT_STORAGE_MUTATION_TARGETS = (
+    torch.ops.aten.set_.default,
+    torch.ops.aten.set_.source_Storage,
+    torch.ops.aten.set_.source_Storage_storage_offset,
+    torch.ops.aten.set_.source_Tensor,
+    torch.ops.aten.set_.source_Tensor_storage_offset,
+)
+
+
 class CUDAGraphPolicy:
     """Pluggable policy controlling CUDA graph wrapping in Inductor's post_compile.
 
@@ -143,6 +152,12 @@ class PlaceholderInfo:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class InputStorageMutationInfo:
+    input_idxs: OrderedSet[int]
+    stack_trace: str | None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class WrappedFunction:
     """
     Represents a function that you want to record for CUDA graph replay,
@@ -175,6 +190,50 @@ def get_mutating_use_stack_trace_from_node(
 
 def get_mutating_use_stack_trace(placeholder_info: PlaceholderInfo) -> str | None:
     return placeholder_info.mutating_use_stack_trace
+
+
+def get_input_storage_mutation_info(
+    gm: torch.fx.GraphModule,
+) -> InputStorageMutationInfo:
+    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    placeholder_indices = {node: idx for idx, node in enumerate(placeholders)}
+    storage_mutation_input_idxs: OrderedSet[int] = OrderedSet()
+    stack_trace: str | None = None
+
+    for node in gm.graph.nodes:
+        if (
+            node.op != "call_function"
+            or node.target not in INPUT_STORAGE_MUTATION_TARGETS
+        ):
+            continue
+
+        mutated_arg = node.args[0] if node.args else None
+        # Only direct graph-input set_ rebinds the tensor object that lives
+        # outside this graph. set_ on a temporary view/alias does not rebind the
+        # input TensorImpl and is handled by the usual mutation checks.
+        if (
+            isinstance(mutated_arg, torch.fx.Node)
+            and mutated_arg in placeholder_indices
+        ):
+            storage_mutation_input_idxs.add(placeholder_indices[mutated_arg])
+            if stack_trace is None:
+                stack_trace = node.meta.get("stack_trace", None)
+
+    return InputStorageMutationInfo(storage_mutation_input_idxs, stack_trace)
+
+
+def get_input_storage_mutation_reason(
+    storage_mutation_info: InputStorageMutationInfo,
+) -> str | None:
+    storage_mutation_input_idxs = storage_mutation_info.input_idxs
+    if not storage_mutation_input_idxs:
+        return None
+
+    msg = f"input storage mutation ({len(storage_mutation_input_idxs)} instances)"
+    if storage_mutation_info.stack_trace:
+        return f"{msg}. Found from:\n {storage_mutation_info.stack_trace}"
+
+    return msg
 
 
 def to_placeholder_info(placeholder_node: torch.fx.Node) -> PlaceholderInfo:
@@ -244,7 +303,7 @@ def check_for_mutation(
     static_inputs_log.debug(
         "check mutation static input indices: %s", func.static_input_idxs
     )
-    static_inputs_log.debug("check mutation mutation indices: %s", mutation_indices)
+    static_inputs_log.debug("check mutation indices: %s", mutation_indices)
 
     return (
         get_mutation_stack_trace(func.placeholders, mutation_indices)
@@ -334,7 +393,10 @@ class BoxedDeviceIndex:
     value: int | None
 
     def set(self, device_idx: int | None) -> None:
-        assert device_idx is None or isinstance(device_idx, int)
+        if not (device_idx is None or isinstance(device_idx, int)):
+            raise AssertionError(
+                f"expected device_idx to be None or int, got {device_idx!r}"
+            )
         self.value = device_idx
 
 
@@ -411,15 +473,17 @@ def log_data_ptr_mismatch(
     Logs the mismatch between input data pointers and recorded data pointers.
     This checks only idxs in target_idxs.
     """
-    assert len(inputs) == len(recorded_data_ptr) and len(inputs) == len(placeholders), (
-        "length mismatch between inputs, recorded_data_ptr, and placeholders"
-    )
+    if not (len(inputs) == len(recorded_data_ptr) and len(inputs) == len(placeholders)):
+        raise AssertionError(
+            "length mismatch between inputs, recorded_data_ptr, and placeholders"
+        )
 
     t_tensors = [inputs[i] for i in target_idxs]
     t_data_ptrs = [recorded_data_ptr[i] for i in target_idxs]
     error_msg = f"{mismatch}.\n"
     for i, (tensor, data_ptr) in enumerate(zip(t_tensors, t_data_ptrs)):
-        assert isinstance(tensor, torch.Tensor)
+        if not isinstance(tensor, torch.Tensor):
+            raise AssertionError(f"expected torch.Tensor, got {type(tensor)}")
         index = target_idxs[i]
         if tensor.data_ptr() != data_ptr:
             placeholder = placeholders[index]
