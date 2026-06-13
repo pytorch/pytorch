@@ -427,6 +427,21 @@ test_python_smoke() {
   assert_git_not_dirty
 }
 
+test_h100_sdpa() {
+  # Bounded SDPA subset; the full fused attention file is too broad for H100 CI.
+  local sdpa_tests
+  sdpa_tests="test_sdpa_rewriter_1_gpu or "
+  sdpa_tests+="test_sdpa_rewriter_16_inference_gpu or "
+  sdpa_tests+="test_cache_sdpa_constraint_shared_kv_gpu"
+
+  time python test/run_test.py \
+    --include inductor/test_fused_attention \
+    -k "$sdpa_tests" \
+    $PYTHON_TEST_EXTRA_OPTION \
+    --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
 test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
   install_flash_attn_cute
@@ -2362,6 +2377,8 @@ elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
+elif [[ "${TEST_CONFIG}" == h100_sdpa ]]; then
+  test_h100_sdpa
 elif [[ "${TEST_CONFIG}" == smoke_b200 ]]; then
   test_python_smoke_b200
 elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
