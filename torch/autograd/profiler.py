@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import copy
 import logging
 import uuid
 from collections import defaultdict
@@ -258,6 +259,14 @@ class profile:
         self.acc_events = acc_events
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
+        if experimental_config.trace_only and with_stack:
+            warn(
+                "trace_only=True is incompatible with with_stack=True "
+                "(stack traces require event post-processing). "
+                "Disabling trace_only."
+            )
+            experimental_config = copy.copy(experimental_config)
+            experimental_config.trace_only = False
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
@@ -435,7 +444,7 @@ class profile:
 
         # If we plan to accumulate events we should post process the function events
         # right away to retain the state across multiple start/stop calls
-        if self.acc_events:
+        if self.acc_events and not self.experimental_config.trace_only:
             self._ensure_function_events()
         return False
 
@@ -455,6 +464,11 @@ class profile:
 
     def _ensure_function_events(self):
         """Process function events lazily if required"""
+        if self.experimental_config.trace_only:
+            raise RuntimeError(
+                "events() is not available when trace_only=True in "
+                "ExperimentalConfig. Use export_chrome_trace() instead."
+            )
         if self._function_events is not None:
             return
         self._needs_processing = False
@@ -823,7 +837,32 @@ class profile:
 
 
 # pyrefly: ignore [invalid-inheritance]
-class record_function(_ContextDecorator):
+_cupti_monitor_module: Any = None
+_cupti_monitor_checked = False
+
+
+def _maybe_cupti_monitor():
+    # The experimental CUPTI monitor lets record_function regions show up as user
+    # annotations in monitor traces. Cache the optional module once so the
+    # record_function hot path never re-imports it.
+    global _cupti_monitor_module, _cupti_monitor_checked
+    if not _cupti_monitor_checked:
+        _cupti_monitor_checked = True
+        try:
+            from torch.profiler import _cupti_monitor
+
+            _cupti_monitor_module = _cupti_monitor
+        except ModuleNotFoundError:
+            pass
+        except Exception:
+            log.warning(
+                "Unexpected error importing torch.profiler._cupti_monitor",
+                exc_info=True,
+            )
+    return _cupti_monitor_module
+
+
+class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritance]
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
     Label will only appear if CPU activity tracing is enabled.
 
@@ -874,14 +913,29 @@ class record_function(_ContextDecorator):
             Optional["torch.classes.profiler._RecordFunction"],
             None,
         )
+        self._cupti_monitor_external_id: int | None = None
 
     def __enter__(self):
         self.record = torch.ops.profiler._record_function_enter_new(
             self.name, self.args
         )
+        # Guard the CUPTI monitor hookup behind is_scripting() so TorchScript
+        # never compiles _maybe_cupti_monitor (it uses globals/imports).
+        if not torch.jit.is_scripting():
+            monitor = _maybe_cupti_monitor()
+            if monitor is not None:
+                self._cupti_monitor_external_id = monitor.push_user_annotation(
+                    self.name
+                )
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
+        if not torch.jit.is_scripting():
+            if self._cupti_monitor_external_id is not None:
+                monitor = _maybe_cupti_monitor()
+                if monitor is not None:
+                    monitor.pop_user_annotation()
+                self._cupti_monitor_external_id = None
         if not self.run_callbacks_on_exit:
             return
 

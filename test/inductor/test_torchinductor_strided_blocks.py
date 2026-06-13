@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     MI200_ARCH,
     NAVI_ARCH,
     parametrize,
+    skipIfRocm,
     skipIfRocmArch,
     subtest,
 )
@@ -372,7 +373,7 @@ class CommonTemplate:
         input_reader = InputReader()
         load_args(input_reader)
         args = input_reader.args
-        if self.device == "xpu":
+        if self.device == "xpu" or torch.version.hip is not None:
             atol = 1e-7
             rtol = 1e-5
         else:
@@ -1028,6 +1029,7 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/158328")
     @parametrize("reduction_op", [torch.sum, torch.argmax])
     def test_2d_reductions_mixed_indexing(
         self,
@@ -1669,6 +1671,40 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         compiled_fn = torch.compile(fn)
         actual = compiled_fn(t)
         self.assertTrue((actual == 4).all())
+
+    def test_slice_constant_offset_disables_tma(self):
+        """TMA requires 16-byte aligned base; x[1:] with float32 yields 4-byte offset."""
+
+        def fn(x):
+            return x[1:] + 1
+
+        x = torch.randn(1025, device=GPU_TYPE)
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x))
+        self.assertIn("tl.load", code)
+
+    def test_slice_view_dtype_unaligned_buffer(self):
+        offset = 1
+
+        def f(x):
+            return x[2:].view(dtype=torch.float32) + 1
+
+        x = torch.randn((128 + offset) * 2, dtype=torch.bfloat16, device=GPU_TYPE)
+        expected = f(x)
+        actual = torch.compile(f)(x)
+        self.assertEqual(actual, expected)
+
+    def test_bool_dtype_skips_tma(self):
+        """
+        torch.bool maps to Triton tl.int1 which has no CUtensorMapDataType
+        entry, so it should skip TMA.
+        """
+
+        def fn(a):
+            return torch.cumsum(a, -1)
+
+        inp = torch.zeros(16, dtype=torch.bool, device=GPU_TYPE)
+        self._run_and_compare(fn, inp, expected_num_block_pointers=0)
 
 
 test_torchinductor.copy_tests(
