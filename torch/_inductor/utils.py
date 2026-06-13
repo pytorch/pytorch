@@ -55,7 +55,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.analysis.device_info import datasheet_tops
+from torch._inductor.analysis.device_info import datasheet_dram_bw, datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -3160,22 +3160,32 @@ def get_backend_num_stages() -> int:
 
 
 @functools.cache
-def get_device_tflops(dtype: torch.dtype) -> float:
+def get_device_tflops(
+    dtype: torch.dtype,
+    device: torch.device | None = None,
+) -> float:
     """
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
     ds_tops = datasheet_tops(
-        dtype, is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32"
+        dtype,
+        is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32",
+        device=device,
     )
     if ds_tops is not None:
         return ds_tops
 
-    if not torch.cuda.is_available():
+    if device is not None and device.type != "cuda":
         log.warning(
-            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
-            "Returning 0.0; roofline estimates will use memory bandwidth only."
+            "get_device_tflops: no Triton fallback available for non-CUDA device %s, "
+            "returning 0.0.",
+            device,
         )
+        return 0.0
+
+    if not torch.cuda.is_available():
+        log.warning("get_device_tflops: CUDA is not available, returning 0.0.")
         return 0.0
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
@@ -3213,7 +3223,23 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
 
 @functools.cache
-def get_gpu_dram_gbps() -> int:
+def get_gpu_dram_gbps(device: torch.device | None = None) -> float:
+    ds_bw = datasheet_dram_bw(device=device)
+    if ds_bw is not None:
+        return ds_bw
+
+    if device is not None and device.type != "cuda":
+        log.warning(
+            "get_gpu_dram_gbps: no Triton fallback available for non-CUDA device %s, "
+            "returning 0.0.",
+            device,
+        )
+        return 0.0
+
+    if not torch.cuda.is_available():
+        log.warning("get_gpu_dram_gbps: CUDA is not available, returning 0.0.")
+        return 0.0
+
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
