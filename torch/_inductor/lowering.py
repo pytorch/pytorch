@@ -8912,10 +8912,24 @@ def _use_inductor_quack_config_choices(
     concat_layout,
 ) -> bool:
     """Restrict native QUACK config choices to the dense direct-runtime subset."""
-    if gemm_op == torch.ops.aten.addmm.default and epilogue_arg_indices:
+    if (
+        gemm_op
+        in (
+            torch.ops.aten.addmm.default,
+            torch.ops.aten.bmm.default,
+            torch.ops.aten.baddbmm.default,
+        )
+        and epilogue_arg_indices
+    ):
         return False
     return (
-        gemm_op in (torch.ops.aten.mm.default, torch.ops.aten.addmm.default)
+        gemm_op
+        in (
+            torch.ops.aten.mm.default,
+            torch.ops.aten.addmm.default,
+            torch.ops.aten.bmm.default,
+            torch.ops.aten.baddbmm.default,
+        )
         and local_reduce is None
         and aux_output is None
         and main_output_transform is None
@@ -9104,8 +9118,8 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 quack_config_keys = (
                     default_gemm_config_key(
                         layout.device,
-                        mat1.get_size()[0],
-                        mat2.get_size()[1],
+                        mat1.get_size()[-2],
+                        mat2.get_size()[-1],
                     ),
                 )
         else:

@@ -66,6 +66,29 @@ def supported_flex_gemm_op_names(*, quack_only: bool = False) -> str:
 
 
 _SUPPORTED_GEMM_OP_NAMES = supported_flex_gemm_op_names()
+_PRESERVE_FLEX_GEMM_GEMM_OP = "preserve_flex_gemm_gemm_op"
+
+
+def mark_flex_gemm_body_gemm_node(
+    body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
+) -> None:
+    """Preserve the body GEMM op that FlexGEMM lowering matches by identity."""
+    for node in body_graph.graph.nodes:
+        if node.op == "call_function" and node.target == gemm_op:
+            node.meta[_PRESERVE_FLEX_GEMM_GEMM_OP] = True
+
+
+FLEX_GEMM_BODY_GRAPH_PASSES: tuple[
+    Callable[[torch.fx.GraphModule, torch._ops.OpOverload], None], ...
+] = (mark_flex_gemm_body_gemm_node,)
+
+
+def apply_flex_gemm_body_graph_passes(
+    body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
+) -> None:
+    """Apply FlexGEMM body annotations before generic Inductor graph passes."""
+    for graph_pass in FLEX_GEMM_BODY_GRAPH_PASSES:
+        graph_pass(body_graph, gemm_op)
 
 
 @torch.library.custom_op("flex_gemm::mx_e8m0_scale", mutates_args=())
@@ -703,6 +726,7 @@ def flex_gemm_proxy_torch_dispatch_mode(
             return _call_flex_gemm_body(body_fn, flat_body_args, kwargs)
 
         body_graph = reenter_make_fx(tracing_body_fn)(*flat_args)
+        apply_flex_gemm_body_graph_passes(body_graph, gemm_op)
         _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
         proxy_args = pytree.tree_map(

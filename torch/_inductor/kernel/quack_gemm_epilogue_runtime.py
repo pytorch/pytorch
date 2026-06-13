@@ -12,9 +12,11 @@ GemmConfigKey: TypeAlias = tuple[tuple[str, Any], ...]
 
 
 def check_dense_matrix(name: str, tensor: torch.Tensor) -> None:
-    """Require the dense config-key path to see a 2-D CUDA matrix."""
-    if tensor.ndim != 2:
-        raise NotImplementedError(f"QUACK config-key FlexGEMM supports only 2-D {name}")
+    """Require the dense config-key path to see a 2-D or 3-D CUDA tensor."""
+    if tensor.ndim not in (2, 3):
+        raise NotImplementedError(
+            f"QUACK config-key FlexGEMM supports only 2-D or 3-D {name}"
+        )
     if not tensor.is_cuda:
         raise RuntimeError(f"QUACK config-key FlexGEMM requires CUDA {name}")
 
@@ -36,9 +38,25 @@ def check_same_device(a: torch.Tensor, b: torch.Tensor, *rest: torch.Tensor) -> 
         )
 
 
+def check_broadcast_shape(
+    name: str, shape: torch.Size, expected_shape: tuple[int, ...]
+) -> None:
+    """Require a tensor shape to broadcast exactly to the GEMM output shape."""
+    try:
+        broadcast_shape = torch.broadcast_shapes(tuple(shape), expected_shape)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"{name} shape must broadcast to {expected_shape}, got {tuple(shape)}"
+        ) from exc
+    if broadcast_shape != expected_shape:
+        raise RuntimeError(
+            f"{name} shape must broadcast to {expected_shape}, got {tuple(shape)}"
+        )
+
+
 def infer_epilogue_arg_kind(a: torch.Tensor, b: torch.Tensor, arg: torch.Tensor) -> str:
     """Infer a captured epilogue tensor's row/col/tile broadcast kind."""
-    m, n = a.shape[0], b.shape[1]
+    m, n = a.shape[-2], b.shape[-1]
     if tuple(arg.shape) == (m, n):
         return "tile"
     if tuple(arg.shape) == (1, n):
@@ -58,7 +76,7 @@ def validate_epilogue_arg_shape(
     kind: str,
 ) -> None:
     """Require a captured epilogue tensor shape to match its declared kind."""
-    m, n = a.shape[0], b.shape[1]
+    m, n = a.shape[-2], b.shape[-1]
     expected_shapes = {"tile": (m, n), "row": (1, n), "col": (m, 1)}
     if tuple(arg.shape) != expected_shapes[kind]:
         raise RuntimeError(
@@ -108,6 +126,23 @@ def split_epilogue_args(
     return tuple(row_args), tuple(col_args), tuple(tile_args)
 
 
+def normalize_c(
+    C: torch.Tensor | None, expected_shape: tuple[int, ...], beta: float
+) -> torch.Tensor | None:
+    """Return the effective C tensor that QuACK should read for alpha/beta GEMMs."""
+    if C is None:
+        return None
+    check_broadcast_shape("C", C.shape, expected_shape)
+    if beta == 0:
+        return None
+    broadcast_C = (
+        C if tuple(C.shape) == expected_shape else torch.broadcast_to(C, expected_shape)
+    )
+    check_dense_matrix("C", broadcast_C)
+    check_matrix_major_layout("C", broadcast_C)
+    return broadcast_C
+
+
 def run_dense_config_key_gemm_epilogue(
     a: torch.Tensor,
     b: torch.Tensor,
@@ -123,24 +158,26 @@ def run_dense_config_key_gemm_epilogue(
     epilogue_arg_kinds: tuple[str, ...] = (),
     config_key: GemmConfigKey,
 ) -> torch.Tensor:
-    """Run one dense 2-D epilogue with an explicit QuACK config key."""
+    """Run one dense epilogue with an explicit QuACK config key."""
     check_dense_matrix("a", a)
     check_dense_matrix("b", b)
     check_matrix_major_layout("a", a)
     check_matrix_major_layout("b", b)
-    if a.shape[1] != b.shape[0]:
+    if a.ndim != b.ndim:
+        raise RuntimeError(
+            "QUACK config-key FlexGEMM inputs must both be 2-D or both be 3-D"
+        )
+    if a.ndim == 3 and a.shape[0] != b.shape[0]:
+        raise RuntimeError(
+            "QUACK config-key FlexGEMM batched inputs must have the same batch size"
+        )
+    if a.shape[-1] != b.shape[-2]:
         raise RuntimeError(
             f"mat1 and mat2 shapes cannot be multiplied ({a.shape} and {b.shape})"
         )
-    expected_shape = (a.shape[0], b.shape[1])
+    expected_shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
     expected_dtype = a.dtype if out_dtype is None else out_dtype
-    if C is not None:
-        check_dense_matrix("C", C)
-        check_matrix_major_layout("C", C)
-        if tuple(C.shape) != expected_shape:
-            raise RuntimeError(
-                f"C shape must be {expected_shape}, got {tuple(C.shape)}"
-            )
+    effective_C = normalize_c(C, expected_shape, beta)
     if out is not None:
         check_dense_matrix("out", out)
         check_matrix_major_layout("out", out)
@@ -150,7 +187,11 @@ def run_dense_config_key_gemm_epilogue(
             )
         if out.dtype != expected_dtype:
             raise RuntimeError(f"out dtype must be {expected_dtype}, got {out.dtype}")
-    if epilogue_args and C is not None:
+    if a.ndim == 3 and epilogue_args:
+        raise NotImplementedError(
+            "QUACK config-key FlexGEMM batched args are not supported yet"
+        )
+    if epilogue_args and effective_C is not None:
         raise NotImplementedError(
             "QUACK config-key FlexGEMM args cannot be combined with C yet"
         )
@@ -180,12 +221,23 @@ def run_dense_config_key_gemm_epilogue(
     from torch._inductor.template_heuristics.quack_gemm import config_from_key
 
     config = config_from_key(config_key)
+    quack_a = a.unsqueeze(0) if a.ndim == 2 else a
+    quack_b = b.mT.unsqueeze(0) if b.ndim == 2 else b.mT
+    quack_C = (
+        None
+        if effective_C is None
+        else effective_C.unsqueeze(0)
+        if effective_C.ndim == 2
+        else effective_C
+    )
+    quack_out = out.unsqueeze(0) if out.ndim == 2 else out
+
     gemm_act_dispatch(
-        a.unsqueeze(0),
-        b.mT.unsqueeze(0),
+        quack_a,
+        quack_b,
         None,
-        None if C is None else C.unsqueeze(0),
-        out.unsqueeze(0),
+        quack_C,
+        quack_out,
         None,
         None,
         config.tile_m,
