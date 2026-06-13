@@ -925,6 +925,9 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
 )
 def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     """Convert bmm to mm when batch size is 1"""
+    # FlexGEMM lowering matches the captured body GEMM against the HOP-carried gemm_op.
+    if match.output_node().meta.get("preserve_flex_gemm_gemm_op"):
+        return
 
     def repl(a, b):
         return torch.mm(a.squeeze(0), b.squeeze(0)).unsqueeze(0)

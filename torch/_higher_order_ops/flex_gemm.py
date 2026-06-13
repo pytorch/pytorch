@@ -30,10 +30,14 @@ class FlexGemmOpSpec:
 FLEX_GEMM_OP_SPECS = {
     torch.ops.aten.mm.default: FlexGemmOpSpec("mm", 0, 1),
     torch.ops.aten.addmm.default: FlexGemmOpSpec("addmm", 1, 2, bias_index=0),
+    torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1),
+    torch.ops.aten.baddbmm.default: FlexGemmOpSpec("baddbmm", 1, 2, bias_index=0),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
     torch.addmm: torch.ops.aten.addmm.default,
+    torch.bmm: torch.ops.aten.bmm.default,
+    torch.baddbmm: torch.ops.aten.baddbmm.default,
 }
 _SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
 
@@ -41,6 +45,29 @@ _SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
 _SUPPORTED_FLEX_GEMM_OP_NAMES = "/".join(
     spec.name for spec in FLEX_GEMM_OP_SPECS.values()
 )
+_PRESERVE_FLEX_GEMM_GEMM_OP = "preserve_flex_gemm_gemm_op"
+
+
+def mark_flex_gemm_body_gemm_node(
+    body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
+) -> None:
+    """Preserve the body GEMM op that FlexGEMM lowering matches by identity."""
+    for node in body_graph.graph.nodes:
+        if node.op == "call_function" and node.target == gemm_op:
+            node.meta[_PRESERVE_FLEX_GEMM_GEMM_OP] = True
+
+
+FLEX_GEMM_BODY_GRAPH_PASSES: tuple[
+    Callable[[torch.fx.GraphModule, torch._ops.OpOverload], None], ...
+] = (mark_flex_gemm_body_gemm_node,)
+
+
+def apply_flex_gemm_body_graph_passes(
+    body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
+) -> None:
+    """Apply FlexGEMM body annotations before generic Inductor graph passes."""
+    for graph_pass in FLEX_GEMM_BODY_GRAPH_PASSES:
+        graph_pass(body_graph, gemm_op)
 
 
 class FlexGemm(HigherOrderOperator):
@@ -176,6 +203,7 @@ def flex_gemm_proxy_torch_dispatch_mode(
             return body_fn(*flat_body_args)
 
         body_graph = reenter_make_fx(tracing_body_fn)(*flat_args)
+        apply_flex_gemm_body_graph_passes(body_graph, gemm_op)
         _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
         proxy_args = pytree.tree_map(
