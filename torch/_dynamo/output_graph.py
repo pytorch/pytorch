@@ -2902,6 +2902,13 @@ class OutputGraph(OutputGraphCommon):
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
 
+            if not self.export:
+                # Run after every non-export backend compile, not only the
+                # registered backends covered by convert_frame weakref cleanup.
+                # Backends have already consumed the graph, so non-CPU Dynamo
+                # tracing constants no longer need to keep real tensors alive.
+                old_fake_mode.fake_tensor_converter.clear_non_cpu_constants()
+
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
 

@@ -1317,10 +1317,13 @@ def unpack_and_apply_fn(
         (
             variables.ConstDictVariable,
             variables.DictViewVariable,
+            variables.MappingProxyVariable,
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
+            variables.RangeVariable,
             variables.SetVariable,
+            variables.TensorVariable,
             variables.TupleVariable,
         ),
     ):
@@ -1358,6 +1361,21 @@ def is_lru_cache_wrapped_function(
     return isinstance(value, functools._lru_cache_wrapper) and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
+
+
+_lru_cache_wrappers_allowed_to_trace_without_warning: weakref.WeakSet[
+    functools._lru_cache_wrapper[Any]
+] = weakref.WeakSet()
+
+
+def allow_lru_cache_wrapper_trace_without_warning(
+    value: functools._lru_cache_wrapper[Any],
+) -> None:
+    _lru_cache_wrappers_allowed_to_trace_without_warning.add(value)
+
+
+def is_lru_cache_wrapper_trace_without_warning_allowed(value: Any) -> bool:
+    return value in _lru_cache_wrappers_allowed_to_trace_without_warning
 
 
 _FuncTypes: TypeAlias = (
@@ -3244,45 +3262,41 @@ def raise_args_mismatch(
 
 
 def iter_contains(
-    items: Iterable[Any],
-    search: Any,
+    items: Iterable[VariableTracker],
+    search: VariableTracker,
     tx: InstructionTranslatorBase,
-    check_tensor_identity: bool = False,
-) -> Any:
+) -> VariableTracker:
     from .variables import ConstantVariable
+    from .variables.object_protocol import generic_richcompare_bool
 
-    if search.is_python_constant():
+    items = list(items)
+    # CPython's list_contains/set_contains use PyObject_RichCompareBool(item,
+    # search, Py_EQ) with an identity shortcut. The constant fast path is only
+    # valid when every element is a constant too; a non-constant element earlier
+    # in the sequence has an __eq__ that must be honored in order (it may match,
+    # or raise), so fall through to the per-element richcompare loop otherwise.
+    if search.is_python_constant() and all(x.is_python_constant() for x in items):
+        search_val = search.as_python_constant()
         found_const = any(
-            x.is_python_constant()
-            and x.as_python_constant() == search.as_python_constant()
+            x.as_python_constant() is search_val or x.as_python_constant() == search_val
             for x in items
         )
         return ConstantVariable.create(found_const)
-
-    must_check_tensor_id = False
-    if check_tensor_identity and search.is_tensor():
-        must_check_tensor_id = True
-        # Match of Tensor means match of FakeTensor
-        search = _get_fake_tensor(search)
-
     found: VariableTracker | None = None
     for x in items:
-        if must_check_tensor_id:
-            if x.is_tensor():
-                if search is _get_fake_tensor(x):  # Object equivalence
-                    return ConstantVariable.create(True)
+        check = generic_richcompare_bool(tx, x, search, "__eq__")
+        if check.is_constant_match(True):
+            return check
+        if check.is_constant_match(False):
+            continue
+        if found is None:
+            found = check
         else:
             from torch._dynamo.variables.builder import SourcelessBuilder
 
-            check = SourcelessBuilder.create(tx, operator.eq).call_function(
-                tx, [x, search], {}
+            found = SourcelessBuilder.create(tx, operator.or_).call_function(
+                tx, [check, found], {}
             )
-            if found is None:
-                found = check
-            else:
-                found = SourcelessBuilder.create(tx, operator.or_).call_function(
-                    tx, [check, found], {}
-                )
     if found is None:
         found = ConstantVariable.create(False)
     return found
@@ -3726,6 +3740,9 @@ def same(
             ignore_non_fp=ignore_non_fp,
             log_error=log_error,
             use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+            force_max_multiplier=force_max_multiplier,
+            use_iou_for_bool=use_iou_for_bool,
+            iou_threshold=iou_threshold,
         )
     elif type(ref).__name__ in (
         "MaskedLMOutput",
@@ -3755,6 +3772,9 @@ def same(
                 ignore_non_fp=ignore_non_fp,
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+                force_max_multiplier=force_max_multiplier,
+                use_iou_for_bool=use_iou_for_bool,
+                iou_threshold=iou_threshold,
             )
             for key in ref.__dict__
         )
@@ -5748,6 +5768,10 @@ def _make_inlined(
         from torch._dynamo.variables.functions import UserFunctionVariable
 
         with _force_inline():
-            return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+            return tx.inline_user_function_return(
+                UserFunctionVariable(f),
+                list(args),
+                dict(kwargs),
+            )
 
     return inline_call

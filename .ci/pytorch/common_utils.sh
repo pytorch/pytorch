@@ -309,6 +309,12 @@ function install_torchcomms() {
   pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
 }
 
+function install_spmd_types() {
+  local commit
+  commit=$(get_pinned_commit spmd_types)
+  retry pip_build_and_install "git+https://github.com/meta-pytorch/spmd_types.git@${commit}" dist/spmd_types
+}
+
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
   pip_install flash-attn-4==4.0.0b15
@@ -325,8 +331,17 @@ function install_cutlass_dsl() {
   fi
 
   echo "Installing NVIDIA CUTLASS DSL from PyPI..."
-  pip_install nvidia-cutlass-dsl
+  # Pin to a version accepted by torch._native's cutedsl version gate
+  # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
+  # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
+  pip_install nvidia-cutlass-dsl==4.5.2 apache-tvm-ffi==0.1.11
   echo "NVIDIA CUTLASS DSL installation complete."
+}
+
+function install_nvmath() {
+  echo "Installing nvmath-python from PyPI..."
+  pip_install nvmath-python
+  echo "nvmath-python installation complete."
 }
 
 function install_cutlass_api() {

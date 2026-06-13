@@ -2,9 +2,12 @@
 """Metal shader template for flex attention on MPS"""
 
 import itertools
+from collections import namedtuple
+from collections.abc import Sequence
 from typing import Any
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from .. import ir
 
@@ -14,6 +17,25 @@ METAL_DTYPE_MAP = {
     torch.float16: "half",
     torch.bfloat16: "bfloat",
 }
+
+# Captured score_mod/mask_mod buffers may hold more types than q/k/v; elements
+# are always loaded and cast to float for use in the (float-typed) op table.
+# Integer captures (e.g. document ids) are therefore exact only below 2**24,
+# which covers realistic id/index ranges.
+CAPTURE_DTYPE_MAP = {
+    torch.float32: "float",
+    torch.float16: "half",
+    torch.bfloat16: "bfloat",
+    torch.int64: "long",
+    torch.int32: "int",
+    torch.int16: "short",
+    torch.int8: "char",
+    torch.uint8: "uchar",
+    torch.bool: "bool",
+}
+
+# A captured buffer bound as a Metal kernel argument, with its static shape.
+_CapturedBuf = namedtuple("_CapturedBuf", ["name", "sizes", "strides", "dtype"])
 
 
 # FX aten target -> (output C type, Metal format string with positional {} placeholders).
@@ -81,23 +103,43 @@ del aten, prims
 def _fx_graph_to_metal(
     graph_module: torch.fx.GraphModule,
     fixed_inputs: dict[str, str],
+    captured_views: dict[str, _CapturedBuf],
     output_var: str,
     var_prefix: str,
 ) -> str:
     """Compile an FX GraphModule to inline Metal code.
 
-    `fixed_inputs` maps placeholder names to Metal variables; the graph's
-    output is assigned to `output_var`; `var_prefix` namespaces fresh temps.
+    `fixed_inputs` maps scalar placeholder names (score/b/h/q/kv) to Metal
+    variables. `captured_views` maps captured-buffer placeholder names to a
+    `_CapturedBuf`; these are indexed by `aten.index.Tensor` down to a scalar
+    element load. The output is assigned to `output_var`; `var_prefix`
+    namespaces fresh temps.
     """
     var_map: dict[str, str] = {}
+    views: dict[str, tuple] = {}
     code_lines: list[str] = []
     tmp_counter = itertools.count()
+
+    # Only emit nodes the output depends on; this drops dead constant captures
+    output_node = next(n for n in graph_module.graph.nodes if n.op == "output")
+    needed: OrderedSet[str] = OrderedSet()
+    stack = list(output_node.all_input_nodes)
+    while stack:
+        nd = stack.pop()
+        if nd.name not in needed:
+            needed.add(nd.name)
+            stack.extend(nd.all_input_nodes)
 
     def _tmp() -> str:
         return f"{var_prefix}{next(tmp_counter)}"
 
     def _val(node) -> str:
         if isinstance(node, torch.fx.Node):
+            if node.name in views:
+                raise NotImplementedError(
+                    "flex_attention on MPS: captured buffer used without being "
+                    "fully indexed to a scalar"
+                )
             return var_map[node.name]
         if isinstance(node, bool):
             return "true" if node else "false"
@@ -115,54 +157,103 @@ def _fx_graph_to_metal(
 
     for node in graph_module.graph.nodes:
         if node.op == "placeholder":
-            var_map[node.name] = fixed_inputs.get(
-                node.name, f"/* unknown placeholder {node.name} */"
-            )
-
-        elif node.op == "call_function":
-            t = _tmp()
-            target = node.target
-            args = node.args
-
-            if target in _OP_TABLE:
-                out_type, fmt = _OP_TABLE[target]
-                code_lines.append(
-                    f"{out_type} {t} = {fmt.format(*(_val(a) for a in args))};"
-                )
-            elif target == torch.ops.aten.clamp.default:
-                v = _val(args[0])
-                lo = _val(args[1]) if len(args) > 1 and args[1] is not None else None
-                hi = _val(args[2]) if len(args) > 2 and args[2] is not None else None
-                if lo is not None and hi is not None:
-                    code_lines.append(f"float {t} = metal::clamp({v}, {lo}, {hi});")
-                elif lo is not None:
-                    code_lines.append(f"float {t} = metal::max({v}, {lo});")
-                elif hi is not None:
-                    code_lines.append(f"float {t} = metal::min({v}, {hi});")
+            if node.name in fixed_inputs:
+                var_map[node.name] = fixed_inputs[node.name]
+            elif node.name in captured_views:
+                cap = captured_views[node.name]
+                if len(cap.sizes) == 0:
+                    var_map[node.name] = f"(float){cap.name}[0]"
                 else:
-                    code_lines.append(f"float {t} = {v};")
-            elif target in (
-                torch.ops.aten.full_like.default,
-                torch.ops.aten.full.default,
-            ):
-                fill = args[1] if len(args) > 1 else node.kwargs.get("fill_value", 0)
-                code_lines.append(f"float {t} = {_val(fill)};")
+                    views[node.name] = (
+                        cap.name,
+                        "0",
+                        list(cap.sizes),
+                        list(cap.strides),
+                    )
             else:
-                raise NotImplementedError(
-                    f"flex_attention on MPS does not support op {target} in "
-                    f"score_mod/mask_mod yet"
-                )
+                var_map[node.name] = f"/* unknown placeholder {node.name} */"
+            continue
 
-            var_map[node.name] = t
-
-        elif node.op == "get_attr":
-            var_map[node.name] = f"/* get_attr {node.target} */"
-
-        elif node.op == "output":
+        if node.op == "output":
             out_node = node.args[0]
             if isinstance(out_node, (tuple, list)):
                 out_node = out_node[0]
             code_lines.append(f"{output_var} = {_val(out_node)};")
+            continue
+
+        if node.name not in needed:
+            continue
+
+        if node.op == "get_attr":
+            raise NotImplementedError(
+                "flex_attention on MPS does not support constant tensor captures "
+                "in score_mod/mask_mod yet"
+            )
+
+        if node.op != "call_function":
+            continue
+
+        target = node.target
+        args = node.args
+
+        # Index a captured buffer: accumulate a flat offset over the leading
+        # dims, peeling them off; emit a scalar load when fully indexed.
+        if target == torch.ops.aten.index.Tensor:
+            base_node, idx_list = args[0], args[1]
+            if not (isinstance(base_node, torch.fx.Node) and base_node.name in views):
+                raise NotImplementedError(
+                    "flex_attention on MPS only supports indexing captured buffers"
+                )
+            base, offset, sizes, strides = views[base_node.name]
+            if any(ix is None for ix in idx_list) or len(idx_list) > len(sizes):
+                raise NotImplementedError(
+                    "flex_attention on MPS does not support this captured-buffer "
+                    "indexing pattern"
+                )
+            for j, ix in enumerate(idx_list):
+                term = f"(long)({_val(ix)}) * {strides[j]}"
+                offset = term if offset == "0" else f"{offset} + {term}"
+            k = len(idx_list)
+            rem_sizes, rem_strides = sizes[k:], strides[k:]
+            if rem_sizes:
+                views[node.name] = (base, offset, rem_sizes, rem_strides)
+            else:
+                t = _tmp()
+                code_lines.append(f"float {t} = (float){base}[{offset}];")
+                var_map[node.name] = t
+            continue
+
+        t = _tmp()
+        if target in _OP_TABLE:
+            out_type, fmt = _OP_TABLE[target]
+            code_lines.append(
+                f"{out_type} {t} = {fmt.format(*(_val(a) for a in args))};"
+            )
+        elif target == torch.ops.aten.clamp.default:
+            v = _val(args[0])
+            lo = _val(args[1]) if len(args) > 1 and args[1] is not None else None
+            hi = _val(args[2]) if len(args) > 2 and args[2] is not None else None
+            if lo is not None and hi is not None:
+                code_lines.append(f"float {t} = metal::clamp({v}, {lo}, {hi});")
+            elif lo is not None:
+                code_lines.append(f"float {t} = metal::max({v}, {lo});")
+            elif hi is not None:
+                code_lines.append(f"float {t} = metal::min({v}, {hi});")
+            else:
+                code_lines.append(f"float {t} = {v};")
+        elif target in (
+            torch.ops.aten.full_like.default,
+            torch.ops.aten.full.default,
+        ):
+            fill = args[1] if len(args) > 1 else node.kwargs.get("fill_value", 0)
+            code_lines.append(f"float {t} = {_val(fill)};")
+        else:
+            raise NotImplementedError(
+                f"flex_attention on MPS does not support op {target} in "
+                f"score_mod/mask_mod yet"
+            )
+
+        var_map[node.name] = t
 
     return "\n".join(code_lines)
 
@@ -170,6 +261,7 @@ def _fx_graph_to_metal(
 def _compile_subgraph_to_metal(
     graph_module: torch.fx.GraphModule,
     placeholder_metal_names: list[str],
+    captured_meta: list[_CapturedBuf],
     output_var: str,
     var_prefix: str,
 ) -> str:
@@ -177,15 +269,22 @@ def _compile_subgraph_to_metal(
     Bind placeholders by position to Metal variable names and emit parts of Metal .
 
     score_mod placeholders are [score, b, h, q_idx, kv_idx, *captured];
-    mask_mod's are [b, h, q_idx, kv_idx, *captured].
+    mask_mod's are [b, h, q_idx, kv_idx, *captured]. The captured placeholders
+    map positionally to `captured_meta`.
     """
     fixed: dict[str, str] = {}
+    captured_views: dict[str, _CapturedBuf] = {}
+    n_fixed = len(placeholder_metal_names)
     for i, node in enumerate(
         n for n in graph_module.graph.nodes if n.op == "placeholder"
     ):
-        if i < len(placeholder_metal_names):
+        if i < n_fixed:
             fixed[node.name] = placeholder_metal_names[i]
-    return _fx_graph_to_metal(graph_module, fixed, output_var, var_prefix)
+        else:
+            captured_views[node.name] = captured_meta[i - n_fixed]
+    return _fx_graph_to_metal(
+        graph_module, fixed, captured_views, output_var, var_prefix
+    )
 
 
 def _generate_mma_shader(
@@ -196,6 +295,7 @@ def _generate_mma_shader(
     block_m,
     block_n,
     full_kv_params,
+    captured_params,
     scalar_params_str,
     unpack_code,
     score_code,
@@ -314,7 +414,7 @@ kernel void flex_attn_fwd(
     constant {metal_dtype}* V [[buffer(3)]],
     constant int* kv_num_blocks [[buffer(4)]],
     constant int* kv_indices [[buffer(5)]],
-{full_kv_params}{scalar_params_str},
+{full_kv_params}{captured_params}{scalar_params_str},
     uint3 tgpos [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]
 ) {{
@@ -405,8 +505,14 @@ def _generate_metal_shader(
     has_full_blocks: bool,
     block_m: int,
     scale: float,
+    score_captured: Sequence[tuple] = (),
+    mask_captured: Sequence[tuple] = (),
 ) -> str:
-    """Generate the complete Metal shader source for flex attention."""
+    """Generate the complete Metal shader source for flex attention.
+
+    `score_captured` / `mask_captured` are the buffers captured by score_mod /
+    mask_mod, as (sizes, strides, dtype) tuples in placeholder order.
+    """
     metal_dtype = METAL_DTYPE_MAP[dtype]
 
     bytes_per_elem = 4 if dtype == torch.float32 else 2
@@ -441,6 +547,27 @@ def _generate_metal_shader(
         buf_idx += 1
     else:
         full_kv_params = ""
+
+    # Captured tensors follow the (full) kv buffers as extra Metal arguments, in
+    # the order built in lower_mps: score captures first, then mask captures.
+    captured_decls: list[str] = []
+    score_meta: list[_CapturedBuf] = []
+    mask_meta: list[_CapturedBuf] = []
+    for meta_list, caps in ((score_meta, score_captured), (mask_meta, mask_captured)):
+        for sizes, strides, cap_dtype in caps:
+            mtype = CAPTURE_DTYPE_MAP.get(cap_dtype)
+            if mtype is None:
+                raise NotImplementedError(
+                    f"flex_attention on MPS does not support captured buffer "
+                    f"dtype {cap_dtype}"
+                )
+            name = f"capbuf{len(captured_decls)}"
+            captured_decls.append(
+                f"    constant {mtype}* {name} [[buffer({buf_idx})]],"
+            )
+            meta_list.append(_CapturedBuf(name, list(sizes), list(strides), cap_dtype))
+            buf_idx += 1
+    captured_params = "".join(d + "\n" for d in captured_decls)
 
     # Pack scalars into one buffer to stay under Metal's 31-buffer limit.
     scalar_names = [
@@ -493,12 +620,14 @@ def _generate_metal_shader(
     score_code = _compile_subgraph_to_metal(
         graph_module=score_mod_graph,
         placeholder_metal_names=["score_val", "b_idx", "h_idx", "m_idx", "n_idx"],
+        captured_meta=score_meta,
         output_var="score_val",
         var_prefix="_sm",
     )
     mask_code = _compile_subgraph_to_metal(
         graph_module=mask_mod_graph,
         placeholder_metal_names=["b_idx", "h_idx", "m_idx", "n_idx"],
+        captured_meta=mask_meta,
         output_var="mask_result",
         var_prefix="_mm",
     )
@@ -516,6 +645,7 @@ def _generate_metal_shader(
             block_m,
             block_n,
             full_kv_params,
+            captured_params,
             scalar_params_str,
             unpack_code,
             score_code,
@@ -611,7 +741,7 @@ kernel void flex_attn_fwd(
     constant {metal_dtype}* V [[buffer(3)]],
     constant int* kv_num_blocks [[buffer(4)]],
     constant int* kv_indices [[buffer(5)]],
-{full_kv_params}{scalar_params_str},
+{full_kv_params}{captured_params}{scalar_params_str},
     uint3 tgpos [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]
 ) {{
