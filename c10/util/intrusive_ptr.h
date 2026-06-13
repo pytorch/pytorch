@@ -4,6 +4,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <atomic>
 #include <climits>
+#include <compare>
 #include <memory>
 #include <type_traits>
 
@@ -764,12 +765,13 @@ inline void swap(
   lhs.swap(rhs);
 }
 
-// To allow intrusive_ptr inside std::map or std::set, we need operator<
+// Pointer ordering and equality for intrusive_ptr.
+// operator<=> gives us <, >, <=, >=; operator== gives us !=.
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator<(
+inline std::strong_ordering operator<=>(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return lhs.get() < rhs.get();
+  return lhs.get() <=> rhs.get();
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
@@ -784,34 +786,6 @@ inline bool operator==(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     std::nullptr_t) noexcept {
   return lhs.get() == nullptr;
-}
-
-template <class TTarget2, class NullType2>
-inline bool operator==(
-    std::nullptr_t,
-    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return nullptr == rhs.get();
-}
-
-template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator!=(
-    const intrusive_ptr<TTarget1, NullType1>& lhs,
-    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(lhs, rhs);
-}
-
-template <class TTarget1, class NullType1>
-inline bool operator!=(
-    const intrusive_ptr<TTarget1, NullType1>& lhs,
-    std::nullptr_t) noexcept {
-  return !operator==(lhs, nullptr);
-}
-
-template <class TTarget2, class NullType2>
-inline bool operator!=(
-    std::nullptr_t,
-    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(nullptr, rhs);
 }
 template <typename T>
 struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
@@ -1120,7 +1094,7 @@ class weak_intrusive_ptr final {
   }
 
   template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-  friend bool operator<(
+  friend std::strong_ordering operator<=>(
       const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
       const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept;
   template <class TTarget1, class NullType1, class TTarget2, class NullType2>
@@ -1136,12 +1110,12 @@ inline void swap(
   lhs.swap(rhs);
 }
 
-// To allow weak_intrusive_ptr inside std::map or std::set, we need operator<
+// Pointer ordering and equality for weak_intrusive_ptr.
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator<(
+inline std::strong_ordering operator<=>(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return lhs.target_ < rhs.target_;
+  return lhs.target_ <=> rhs.target_;
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
@@ -1149,13 +1123,6 @@ inline bool operator==(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.target_ == rhs.target_;
-}
-
-template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator!=(
-    const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
-    const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(lhs, rhs);
 }
 
 // Alias for documentary purposes, to more easily distinguish
