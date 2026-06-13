@@ -240,6 +240,29 @@ class TestPartitionFunctions:
         a0, a1 = torch.ops.aten.var_mean(a)
         return a0
 
+    @staticmethod
+    def forward19(a, b, c):
+        add = a + b
+        add_1 = add + c
+        add_2 = add_1 + 1
+        return add_2
+
+    @staticmethod
+    def forward20(a, b, c):
+        relu = a.relu()
+        add = relu + b
+        add_1 = relu + c
+        return add, add_1
+
+    @staticmethod
+    def forward21(a, b, c):
+        add = a + b
+        add_1 = c + c
+        relu = add_1.relu()
+        add_2 = add + relu
+        add_3 = add + add_1
+        return add_2, add_3
+
 @torch.fx.wrap
 def _nested_tuple_producer(x):
     """Returns a nested tuple structure: (x+1, (x+2, x+3))"""
@@ -365,6 +388,48 @@ class TestFXGraphPasses(JitTestCase):
         expected = fn(a, b, c, d, e, f)
         result = fused_graph(a, b, c, d, e, f)
         torch.testing.assert_close(expected, result)
+
+    @parametrize("fn, expected_partition", [
+        # Independent supported outputs are horizontal fusion and stay separate.
+        (TestPartitionFunctions.forward17, [["add"], ["add_1"], ["add_2"]]),
+        # Data-dependent chains still fuse vertically.
+        (TestPartitionFunctions.forward19, [["add", "add_1", "add_2"]]),
+        # Consumers of an unsupported producer are not fused horizontally.
+        (TestPartitionFunctions.forward20, [["add"], ["add_1"]]),
+        # Reachability through unsupported nodes still prevents cyclic partitions.
+        (
+            TestPartitionFunctions.forward12,
+            [["add"], ["add_1", "add_3", "add_4"], ["add_2"]],
+        ),
+        # Do not leave two vertical partitions with cross-partition cycles.
+        (TestPartitionFunctions.forward21, [["add_2"], ["add", "add_1", "add_3"]]),
+        # Tuple producer/getitem chains still fuse with their data-dependent user.
+        (TestPartitionFunctions.forward14, [["std_mean", "getitem", "getitem_1", "add"]]),
+    ])
+    def test_partitioner_skip_horizontal_fusion(self, fn, expected_partition):
+        traced = symbolic_trace(fn)
+
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            supported_ops,
+            allows_single_node_partition=True,
+            skip_horizontal_fusion=True,
+        )
+        partitions = partitioner.propose_partitions()
+        partitions_name = [
+            frozenset(node.name for node in partition.nodes)
+            for partition in partitions
+        ]
+        expected = [frozenset(partition) for partition in expected_partition]
+        self.assertEqual(set(partitions_name), set(expected))
+
+        fused_graph = partitioner.fuse_partitions(partitions)
+
+        args = [torch.rand(4) for _ in range(fn.__code__.co_argcount)]
+        expected_result = fn(*args)
+        result = fused_graph(*args)
+        torch.testing.assert_close(expected_result, result)
 
     @parametrize("partition", [
         [['add', 'add_1'], ['add_5', 'add_6']],

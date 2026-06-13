@@ -444,6 +444,14 @@ static void scatter_reduce_dispatch(const Tensor& self,
   if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) {
     return;
   }
+  // sum/prod/mean accumulate via atomics so order matters for floating/complex
+  // dtypes (fp add/mul are non-associative). Integer arithmetic is associative
+  // and stays deterministic
+  const auto dtype = self.scalar_type();
+  if ((reduce == ReductionType::SUM || reduce == ReductionType::PROD || reduce == ReductionType::MEAN) &&
+      (at::isFloatingType(dtype) || at::isComplexType(dtype))) {
+    at::globalContext().alertNotDeterministic("scatter_reduce_mps");
+  }
   // Match CPU: scatter_reduce(mean) isn't defined for bool.
   TORCH_CHECK(reduce != ReductionType::MEAN || self.scalar_type() != ScalarType::Bool,
               "scatter_reduce: reduce='mean' not implemented for 'Bool'");

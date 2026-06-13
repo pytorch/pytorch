@@ -184,6 +184,7 @@ def shutdown_compile_workers() -> None:
 def after_fork():
     """Reset pools to initial state without shutting them down"""
     _pool_set.clear()
+    AsyncCompile._ready_future = None
     AsyncCompile.process_pool.cache_clear()
 
 
@@ -201,6 +202,17 @@ def get_compile_threads() -> int:
     if config.compile_threads is None:
         config.compile_threads = config.decide_compile_threads()
     return config.compile_threads
+
+
+def _process_pool_allowed() -> bool:
+    # Multiprocessing daemons are not allowed to create child processes. This
+    # only applies to direct multiprocessing modes: SubprocPool starts its
+    # sidecar with subprocess.Popen, so the sidecar does not inherit the
+    # multiprocessing daemon flag and can own its own ProcessPoolExecutor.
+    return (
+        config.worker_start_method == "subprocess"
+        or not multiprocessing.current_process().daemon
+    )
 
 
 @clear_on_fresh_cache
@@ -271,7 +283,10 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def pool() -> ThreadPoolExecutor:
-        assert get_compile_threads() > 1
+        if get_compile_threads() <= 1:
+            raise AssertionError(
+                f"expected get_compile_threads() > 1, got {get_compile_threads()}"
+            )
         return ThreadPoolExecutor(get_compile_threads())
 
     @staticmethod
@@ -282,7 +297,18 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
-        assert get_compile_threads() > 1
+        if get_compile_threads() <= 1:
+            raise AssertionError(
+                f"expected get_compile_threads() > 1, got {get_compile_threads()}"
+            )
+        if not _process_pool_allowed():
+            raise RuntimeError(
+                "Inductor async compile process pools are disabled in daemonic "
+                "multiprocessing processes. Set "
+                "torch._inductor.config.worker_start_method = 'subprocess' "
+                "(or TORCHINDUCTOR_WORKER_START=subprocess) to use the "
+                "SubprocPool path, which is not affected by the daemon restriction."
+            )
         AsyncCompile._ready_future = None
         log.info(
             "Creating '%s' pool with %d workers",
@@ -307,18 +333,19 @@ class AsyncCompile:
                 mp_context=ctx,
                 initializer=partial(_async_compile_initializer, os.getpid()),
             )
-            # when this pool is created in a subprocess object, the normal exit handler
-            # doesn't run, and we need to register our own handler.
-            # exitpriority has to be high, because another one of the finalizers will
-            # kill the worker thread that sends the shutdown message to the workers...
-            multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+
+        # When this pool is created in a multiprocessing subprocess, the normal
+        # atexit handler may not run, and we need to register our own handler.
+        # exitpriority has to be high, because another one of the finalizers will
+        # kill the worker thread that sends the shutdown message to the workers.
+        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
         _pool_set.add(pool)
         return pool
 
     @classmethod
     def warm_pool(cls) -> None:
-        if get_compile_threads() <= 1:
+        if get_compile_threads() <= 1 or not _process_pool_allowed():
             return
         _compile_start()
         # Pool is created on first access. Note for a SubprocPool, the sidecar process starts,
@@ -341,7 +368,7 @@ class AsyncCompile:
 
     @classmethod
     def use_process_pool(cls):
-        if get_compile_threads() <= 1:
+        if get_compile_threads() <= 1 or not _process_pool_allowed():
             return False
 
         # Proton instrumentation backend requires compilation to happen in the main
