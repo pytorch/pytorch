@@ -1,5 +1,10 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import json
+import os
+import subprocess
+import sys
+import textwrap
 import unittest
 import weakref
 
@@ -67,6 +72,17 @@ def less_match_verbose_code_parts(expected):
 
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
+    def _run_guard_memo_child(self, source):
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        output = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(source)],
+            env=env,
+            text=True,
+        )
+        return json.loads(output.splitlines()[-1])
+
     def test_global_state_guard(self):
         guard = guards.GLOBAL_STATE(["global_state_check"])
         self.assertTrue(guard(None))
@@ -898,6 +914,217 @@ num_guards_executed=0)
 
             foo = (10.0, 11)
             opt_fn(x, foo, bar)
+
+    def test_guard_partial_memo_hits_stable_self_tree(self):
+        stats = self._run_guard_memo_child(
+            """
+            import json
+            import torch
+            from torch._C._dynamo import guards
+
+            class Child(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("bias", torch.ones(4))
+
+                def forward(self, x):
+                    return x + self.bias
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.child = Child()
+
+                def forward(self, x):
+                    return self.child(x) * 2
+
+            model = Mod()
+            opt_model = torch.compile(model, backend="eager", fullgraph=True)
+            x = torch.randn(4)
+            for _ in range(4):
+                opt_model(x)
+
+            guards.reset_guard_lookup_stats()
+            for _ in range(8):
+                opt_model(x)
+
+            stats = guards.get_guard_lookup_stats()
+            print(json.dumps({
+                "enable": stats["guard_last_success_actual_partial_enable"],
+                "hit": stats["guard_last_success_actual_partial_hit"],
+                "miss": stats["guard_last_success_actual_partial_miss"],
+                "residual_fail": stats[
+                    "guard_last_success_actual_partial_residual_fail"
+                ],
+            }))
+            """
+        )
+        self.assertGreater(stats["enable"], 0)
+        self.assertGreater(stats["hit"], 0)
+        self.assertEqual(stats["miss"], 0)
+        self.assertEqual(stats["residual_fail"], 0)
+
+    def test_guard_partial_memo_preserves_global_residual_guard(self):
+        stats = self._run_guard_memo_child(
+            """
+            import json
+            import torch
+            from torch._C._dynamo import guards
+
+            scale = 2
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("bias", torch.ones(4))
+
+                def forward(self, x):
+                    return (x + self.bias) * scale
+
+            model = Mod()
+            opt_model = torch.compile(model, backend="eager", fullgraph=True)
+            x = torch.randn(4)
+            for _ in range(6):
+                opt_model(x)
+
+            guards.reset_guard_lookup_stats()
+            before = opt_model(x)
+            scale = 3
+            after = opt_model(x)
+
+            stats = guards.get_guard_lookup_stats()
+            print(json.dumps({
+                "before": before.tolist(),
+                "after": after.tolist(),
+                "expected_after": ((x + model.bias) * 3).tolist(),
+                "hit": stats["guard_last_success_actual_partial_hit"],
+            }))
+            """
+        )
+        self.assertGreaterEqual(stats["hit"], 0)
+        self.assertEqual(stats["after"], stats["expected_after"])
+        self.assertNotEqual(stats["before"], stats["after"])
+
+    def test_guard_partial_memo_respects_buffer_replacement(self):
+        stats = self._run_guard_memo_child(
+            """
+            import json
+            import torch
+            from torch._C._dynamo import guards
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("bias", torch.ones(4))
+
+                def forward(self, x):
+                    return x + self.bias
+
+            model = Mod()
+            opt_model = torch.compile(model, backend="eager", fullgraph=True)
+            x = torch.randn(4)
+            for _ in range(6):
+                opt_model(x)
+
+            guards.reset_guard_lookup_stats()
+            model.bias = torch.full((4,), 5.0)
+            out = opt_model(x)
+            stats = guards.get_guard_lookup_stats()
+            print(json.dumps({
+                "out": out.tolist(),
+                "expected": (x + model.bias).tolist(),
+                "hit": stats["guard_last_success_actual_partial_hit"],
+                "residual_fail": stats[
+                    "guard_last_success_actual_partial_residual_fail"
+                ],
+            }))
+            """
+        )
+        self.assertEqual(stats["out"], stats["expected"])
+        self.assertEqual(stats["residual_fail"], 0)
+
+    def test_guard_partial_memo_respects_submodule_replacement(self):
+        stats = self._run_guard_memo_child(
+            """
+            import json
+            import torch
+            from torch._C._dynamo import guards
+
+            class Child(torch.nn.Module):
+                def __init__(self, value):
+                    super().__init__()
+                    self.register_buffer("bias", torch.full((4,), value))
+
+                def forward(self, x):
+                    return x + self.bias
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.child = Child(1.0)
+
+                def forward(self, x):
+                    return self.child(x)
+
+            model = Mod()
+            opt_model = torch.compile(model, backend="eager", fullgraph=True)
+            x = torch.randn(4)
+            for _ in range(6):
+                opt_model(x)
+
+            guards.reset_guard_lookup_stats()
+            model.child = Child(7.0)
+            out = opt_model(x)
+            stats = guards.get_guard_lookup_stats()
+            print(json.dumps({
+                "out": out.tolist(),
+                "expected": (x + model.child.bias).tolist(),
+                "residual_fail": stats[
+                    "guard_last_success_actual_partial_residual_fail"
+                ],
+            }))
+            """
+        )
+        self.assertEqual(stats["out"], stats["expected"])
+        self.assertEqual(stats["residual_fail"], 0)
+
+    def test_guard_partial_memo_does_not_skip_property_accessor(self):
+        stats = self._run_guard_memo_child(
+            """
+            import json
+            import torch
+            from torch._C._dynamo import guards
+
+            class Box:
+                @property
+                def value(self):
+                    return 2
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.box = Box()
+
+                def forward(self, x):
+                    return x * self.box.value
+
+            model = Mod()
+            opt_model = torch.compile(model, backend="eager", fullgraph=True)
+            x = torch.randn(4)
+            for _ in range(10):
+                opt_model(x)
+
+            stats = guards.get_guard_lookup_stats()
+            print(json.dumps({
+                "enable": stats["guard_last_success_actual_partial_enable"],
+                "hit": stats["guard_last_success_actual_partial_hit"],
+                "miss": stats["guard_last_success_actual_partial_miss"],
+            }))
+            """
+        )
+        self.assertEqual(stats["enable"], 0)
+        self.assertEqual(stats["hit"], 0)
+        self.assertEqual(stats["miss"], 0)
 
 
 if __name__ == "__main__":

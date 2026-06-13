@@ -2,6 +2,7 @@
 #include <ATen/autocast_mode.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/util/env.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -29,6 +30,7 @@
 #endif
 
 #include <chrono>
+#include <atomic>
 #include <sstream>
 #include <tuple>
 #include <utility>
@@ -81,6 +83,453 @@ namespace torch::dynamo {
     return;                                 \
   }                                         \
   self.insert_leaf_guard(name);
+
+namespace {
+
+struct GuardLookupStats {
+  std::atomic<uint64_t> lookup_count{0};
+  std::atomic<uint64_t> lookup_total_ns{0};
+  std::atomic<uint64_t> backend_match_ns{0};
+  std::atomic<uint64_t> slow_guard_ns{0};
+  std::atomic<uint64_t> move_to_front_ns{0};
+  std::atomic<uint64_t> cache_entry_count_sum{0};
+  std::atomic<uint64_t> cache_entry_hit_index_sum{0};
+  std::atomic<uint64_t> partial_enable{0};
+  std::atomic<uint64_t> partial_hit{0};
+  std::atomic<uint64_t> partial_miss{0};
+  std::atomic<uint64_t> partial_residual_fail{0};
+};
+
+GuardLookupStats& guard_lookup_stats() {
+  static GuardLookupStats stats;
+  return stats;
+}
+
+uint64_t load_relaxed(const std::atomic<uint64_t>& value) {
+  return value.load(std::memory_order_relaxed);
+}
+
+void add_relaxed(std::atomic<uint64_t>& value, uint64_t delta) {
+  value.fetch_add(delta, std::memory_order_relaxed);
+}
+
+void store_zero(std::atomic<uint64_t>& value) {
+  value.store(0, std::memory_order_relaxed);
+}
+
+bool guard_fast_plan_enabled() {
+  static const bool enabled =
+      c10::utils::check_env("TORCHDYNAMO_GUARD_FAST_PLAN") == true;
+  return enabled;
+}
+
+} // namespace
+
+bool guard_lookup_stats_enabled() {
+  static const bool enabled =
+      c10::utils::check_env("TORCHDYNAMO_GUARD_LOOKUP_STATS") == true;
+  return enabled;
+}
+
+uint64_t guard_lookup_time_ns() {
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
+
+void reset_guard_lookup_stats() {
+  auto& stats = guard_lookup_stats();
+  store_zero(stats.lookup_count);
+  store_zero(stats.lookup_total_ns);
+  store_zero(stats.backend_match_ns);
+  store_zero(stats.slow_guard_ns);
+  store_zero(stats.move_to_front_ns);
+  store_zero(stats.cache_entry_count_sum);
+  store_zero(stats.cache_entry_hit_index_sum);
+  store_zero(stats.partial_enable);
+  store_zero(stats.partial_hit);
+  store_zero(stats.partial_miss);
+  store_zero(stats.partial_residual_fail);
+}
+
+py::dict get_guard_lookup_stats() {
+  auto& stats = guard_lookup_stats();
+  py::dict result;
+  result["lookup_count"] = load_relaxed(stats.lookup_count);
+  result["lookup_total_ns"] = load_relaxed(stats.lookup_total_ns);
+  result["backend_match_ns"] = load_relaxed(stats.backend_match_ns);
+  result["slow_guard_ns"] = load_relaxed(stats.slow_guard_ns);
+  result["move_to_front_ns"] = load_relaxed(stats.move_to_front_ns);
+  result["cache_entry_count_sum"] = load_relaxed(stats.cache_entry_count_sum);
+  result["cache_entry_hit_index_sum"] =
+      load_relaxed(stats.cache_entry_hit_index_sum);
+  result["guard_last_success_actual_partial_enable"] =
+      load_relaxed(stats.partial_enable);
+  result["guard_last_success_actual_partial_hit"] =
+      load_relaxed(stats.partial_hit);
+  result["guard_last_success_actual_partial_miss"] =
+      load_relaxed(stats.partial_miss);
+  result["guard_last_success_actual_partial_residual_fail"] =
+      load_relaxed(stats.partial_residual_fail);
+  return result;
+}
+
+void record_guard_lookup_stats(
+    uint64_t total_ns,
+    uint64_t backend_match_ns,
+    uint64_t slow_guard_ns,
+    uint64_t move_to_front_ns,
+    uint64_t cache_entry_count,
+    uint64_t cache_entry_hit_index) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_lookup_stats();
+  add_relaxed(stats.lookup_count, 1);
+  add_relaxed(stats.lookup_total_ns, total_ns);
+  add_relaxed(stats.backend_match_ns, backend_match_ns);
+  add_relaxed(stats.slow_guard_ns, slow_guard_ns);
+  add_relaxed(stats.move_to_front_ns, move_to_front_ns);
+  add_relaxed(stats.cache_entry_count_sum, cache_entry_count);
+  add_relaxed(stats.cache_entry_hit_index_sum, cache_entry_hit_index);
+}
+
+static uint64_t get_dict_version_unchecked(PyObject* dict);
+
+namespace {
+
+constexpr uint64_t kGuardLastSuccessStablePasses = 3;
+constexpr size_t kGuardLastSuccessMaxTokens = 65536;
+
+enum class GuardMemoTokenKind : uint8_t {
+  Object,
+  Dict,
+  List,
+  Tuple,
+  Tensor,
+};
+
+struct GuardMemoToken;
+
+bool guard_memo_tensor_has_strides(const at::Tensor& tensor) {
+  return tensor.layout() != c10::kSparseCsr &&
+      tensor.layout() != c10::kSparseCsc &&
+      tensor.layout() != c10::kSparseBsc &&
+      tensor.layout() != c10::kSparseBsr;
+}
+
+bool guard_memo_symints_match(
+    const std::vector<c10::SymInt>& expected,
+    const c10::SymIntArrayRef& actual) {
+  if (expected.size() != actual.size()) {
+    return false;
+  }
+  for (auto i : c10::irange(expected.size())) {
+    if (expected[i] != actual[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void guard_memo_record_tensor_strides(
+    GuardMemoToken& token,
+    const at::Tensor& tensor);
+
+struct GuardMemoToken {
+  PyObject* object{nullptr};
+  PyTypeObject* type{nullptr};
+  GuardMemoTokenKind kind{GuardMemoTokenKind::Object};
+  uint64_t version{0};
+  Py_ssize_t size{0};
+  std::vector<PyObject*> list_items;
+  uint64_t tensor_dispatch_key{0};
+  at::ScalarType tensor_dtype{at::ScalarType::Undefined};
+  c10::DeviceIndex tensor_device_index{-1};
+  bool tensor_requires_grad{false};
+  int64_t tensor_dim{0};
+  std::vector<c10::SymInt> tensor_sizes;
+  std::vector<c10::SymInt> tensor_strides;
+  bool has_object_dict{false};
+  PyObject* object_dict{nullptr};
+  uint64_t object_dict_version{0};
+
+  static GuardMemoToken make(PyObject* obj, const LocalState* state) {
+    GuardMemoToken token;
+    token.object = obj;
+    token.type = Py_TYPE(obj);
+    if (PyDict_CheckExact(obj)) {
+      token.kind = GuardMemoTokenKind::Dict;
+      token.version = get_dict_version_unchecked(obj);
+      token.size = PyDict_GET_SIZE(obj);
+      return token;
+    }
+    if (PyList_CheckExact(obj)) {
+      token.kind = GuardMemoTokenKind::List;
+      token.size = PyList_GET_SIZE(obj);
+      token.list_items.reserve(static_cast<size_t>(token.size));
+      for (Py_ssize_t i = 0; i < token.size; ++i) {
+        token.list_items.push_back(PyList_GET_ITEM(obj, i));
+      }
+      return token;
+    }
+    if (PyTuple_CheckExact(obj)) {
+      token.kind = GuardMemoTokenKind::Tuple;
+      token.size = PyTuple_GET_SIZE(obj);
+      return token;
+    }
+    if (state != nullptr &&
+        (THPVariable_CheckExact(obj) || THPVariable_Check(obj))) {
+      const at::Tensor tensor = THPVariable_Unpack(obj);
+      token.kind = GuardMemoTokenKind::Tensor;
+      token.tensor_dispatch_key = state->apply(tensor.key_set()).raw_repr();
+      token.tensor_dtype = tensor.dtype().toScalarType();
+      token.tensor_device_index = tensor.device().index();
+      token.tensor_requires_grad = tensor.requires_grad();
+      token.tensor_dim = tensor.ndimension();
+      token.tensor_sizes.assign(
+          tensor.sym_sizes().begin(), tensor.sym_sizes().end());
+      guard_memo_record_tensor_strides(token, tensor);
+      return token;
+    }
+    PyObject* dict = PyObject_GenericGetDict(obj, nullptr);
+    if (dict != nullptr) {
+      if (PyDict_CheckExact(dict)) {
+        token.has_object_dict = true;
+        token.object_dict = dict;
+        token.object_dict_version = get_dict_version_unchecked(dict);
+      }
+      Py_DECREF(dict);
+    } else {
+      PyErr_Clear();
+    }
+    return token;
+  }
+
+  bool matches_current(const LocalState* state) const {
+    if (object == nullptr || Py_TYPE(object) != type) {
+      return false;
+    }
+    switch (kind) {
+      case GuardMemoTokenKind::Dict:
+        return PyDict_CheckExact(object) &&
+            get_dict_version_unchecked(object) == version &&
+            PyDict_GET_SIZE(object) == size;
+      case GuardMemoTokenKind::List: {
+        if (!PyList_CheckExact(object) || PyList_GET_SIZE(object) != size) {
+          return false;
+        }
+        for (Py_ssize_t i = 0; i < size; ++i) {
+          if (PyList_GET_ITEM(object, i) !=
+              list_items[static_cast<size_t>(i)]) {
+            return false;
+          }
+        }
+        return true;
+      }
+      case GuardMemoTokenKind::Tuple:
+        return PyTuple_CheckExact(object) && PyTuple_GET_SIZE(object) == size;
+      case GuardMemoTokenKind::Tensor: {
+        if (state == nullptr ||
+            (!THPVariable_CheckExact(object) && !THPVariable_Check(object))) {
+          return false;
+        }
+        const at::Tensor tensor = THPVariable_Unpack(object);
+        if (!guard_memo_symints_match(tensor_sizes, tensor.sym_sizes())) {
+          return false;
+        }
+        if (guard_memo_tensor_has_strides(tensor)) {
+          if (!guard_memo_symints_match(
+                  tensor_strides, tensor.sym_strides())) {
+            return false;
+          }
+        } else {
+          if (tensor_strides.size() !=
+              static_cast<size_t>(tensor.ndimension())) {
+            return false;
+          }
+          for (const c10::SymInt& stride : tensor_strides) {
+            if (stride != c10::SymInt(-1)) {
+              return false;
+            }
+          }
+        }
+        return state->apply(tensor.key_set()).raw_repr() ==
+            tensor_dispatch_key &&
+            tensor.dtype().toScalarType() == tensor_dtype &&
+            tensor.device().index() == tensor_device_index &&
+            tensor.requires_grad() == tensor_requires_grad &&
+            tensor.ndimension() == tensor_dim;
+      }
+      case GuardMemoTokenKind::Object:
+        if (!has_object_dict) {
+          return true;
+        }
+        PyObject* dict = PyObject_GenericGetDict(object, nullptr);
+        if (dict == nullptr) {
+          PyErr_Clear();
+          return false;
+        }
+        const bool matches = dict == object_dict && PyDict_CheckExact(dict) &&
+            get_dict_version_unchecked(dict) == object_dict_version;
+        Py_DECREF(dict);
+        return matches;
+    }
+    return false;
+  }
+
+  bool same_as(const GuardMemoToken& other) const {
+    return kind == other.kind && object == other.object &&
+        type == other.type && version == other.version && size == other.size &&
+        list_items == other.list_items &&
+        tensor_dispatch_key == other.tensor_dispatch_key &&
+        tensor_dtype == other.tensor_dtype &&
+        tensor_device_index == other.tensor_device_index &&
+        tensor_requires_grad == other.tensor_requires_grad &&
+        tensor_dim == other.tensor_dim && tensor_sizes == other.tensor_sizes &&
+        tensor_strides == other.tensor_strides &&
+        has_object_dict == other.has_object_dict &&
+        object_dict == other.object_dict &&
+        object_dict_version == other.object_dict_version;
+  }
+};
+
+void guard_memo_record_tensor_strides(
+    GuardMemoToken& token,
+    const at::Tensor& tensor) {
+  if (guard_memo_tensor_has_strides(tensor)) {
+    token.tensor_strides.assign(
+        tensor.sym_strides().begin(), tensor.sym_strides().end());
+  } else {
+    token.tensor_strides.assign(
+        static_cast<size_t>(tensor.ndimension()), c10::SymInt(-1));
+  }
+}
+
+thread_local std::vector<GuardMemoToken>* active_guard_memo_tokens = nullptr;
+thread_local std::vector<std::string>* active_guard_memo_paths = nullptr;
+thread_local const LocalState* active_guard_memo_local_state = nullptr;
+
+struct GuardMemoRecorderScope {
+  GuardMemoRecorderScope(
+      std::vector<GuardMemoToken>* tokens,
+      std::vector<std::string>* paths,
+      const LocalState* local_state)
+      : previous_tokens(active_guard_memo_tokens),
+        previous_paths(active_guard_memo_paths),
+        previous_local_state(active_guard_memo_local_state) {
+    active_guard_memo_tokens = tokens;
+    active_guard_memo_paths = paths;
+    active_guard_memo_local_state = local_state;
+  }
+
+  ~GuardMemoRecorderScope() {
+    active_guard_memo_tokens = previous_tokens;
+    active_guard_memo_paths = previous_paths;
+    active_guard_memo_local_state = previous_local_state;
+  }
+
+  std::vector<GuardMemoToken>* previous_tokens{nullptr};
+  std::vector<std::string>* previous_paths{nullptr};
+  const LocalState* previous_local_state{nullptr};
+};
+
+bool guard_memo_token_vectors_match(
+    const std::vector<GuardMemoToken>& lhs,
+    const std::vector<GuardMemoToken>& rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    if (!lhs[i].same_as(rhs[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool guard_memo_tokens_match_current(
+    const std::vector<GuardMemoToken>& tokens,
+    const LocalState* local_state) {
+  for (const auto& token : tokens) {
+    if (!token.matches_current(local_state)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool is_self_source(const std::string& source) {
+  return source == "L['self']" || source.rfind("L['self'].", 0) == 0 ||
+      source.rfind("L['self'][", 0) == 0;
+}
+
+bool extract_self_tokens(
+    const std::vector<GuardMemoToken>& tokens,
+    const std::vector<std::string>& paths,
+    std::vector<GuardMemoToken>& self_tokens) {
+  if (tokens.size() != paths.size()) {
+    return false;
+  }
+  self_tokens.clear();
+  bool seen_self = false;
+  for (size_t i = 0; i < tokens.size(); ++i) {
+    if (!is_self_source(paths[i])) {
+      if (seen_self) {
+        break;
+      }
+      continue;
+    }
+    seen_self = true;
+    self_tokens.push_back(tokens[i]);
+  }
+  return !self_tokens.empty();
+}
+
+PyObject* guard_memo_self_key() {
+  static PyObject* key = PyUnicode_InternFromString("self");
+  return key;
+}
+
+} // namespace
+
+struct GuardLastSuccessReceipt {
+  void reset() {
+    entry_key = nullptr;
+    root_key = nullptr;
+    self_object = nullptr;
+    self_type = nullptr;
+    shadow_passes = 0;
+    enabled = false;
+    stability_tokens.clear();
+    hot_tokens.clear();
+  }
+
+  void* entry_key{nullptr};
+  void* root_key{nullptr};
+  PyObject* self_object{nullptr};
+  PyTypeObject* self_type{nullptr};
+  uint64_t shadow_passes{0};
+  bool enabled{false};
+  std::vector<GuardMemoToken> stability_tokens;
+  std::vector<GuardMemoToken> hot_tokens;
+};
+
+void* create_guard_last_success_receipt() {
+  return new GuardLastSuccessReceipt();
+}
+
+void destroy_guard_last_success_receipt(void* receipt) {
+  delete static_cast<GuardLastSuccessReceipt*>(receipt);
+}
+
+void reset_guard_last_success_receipt(void* receipt) {
+  if (receipt == nullptr) {
+    return;
+  }
+  static_cast<GuardLastSuccessReceipt*>(receipt)->reset();
+}
 
 TensorCheck::TensorCheck(
     const LocalState& state,
@@ -1384,6 +1833,10 @@ class LeafGuard {
     return check_nopybind((PyObject*)map->to_dict());
   }
 
+  virtual bool supports_guard_memo() const {
+    return false;
+  }
+
   virtual ~LeafGuard() = default;
 
  protected:
@@ -1464,6 +1917,10 @@ class TYPE_MATCH : public LeafGuard {
     return Py_TYPE(value) == (void*)_expected;
   }
 
+  bool supports_guard_memo() const override {
+    return true;
+  }
+
  private:
   // id of the type of the original object.
   intptr_t _expected;
@@ -1479,6 +1936,10 @@ class ID_MATCH : public LeafGuard {
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     return value == (void*)_expected;
+  }
+
+  bool supports_guard_memo() const override {
+    return true;
   }
 
  private:
@@ -1610,6 +2071,10 @@ class LENGTH_CHECK : public LeafGuard {
     return PySequence_Length(value) == _length;
   }
 
+  bool supports_guard_memo() const override {
+    return true;
+  }
+
  private:
   // Length of the guarded list
   Py_ssize_t _length;
@@ -1623,6 +2088,10 @@ class DICT_LENGTH : public LeafGuard {
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return PyDict_Check(value) && PyDict_Size(value) == _length;
+  }
+
+  bool supports_guard_memo() const override {
+    return true;
   }
 
  private:
@@ -2151,11 +2620,15 @@ class GuardAccessor {
     return _guard_manager;
   }
 
+  const std::unique_ptr<GuardManager>& get_guard_manager() const {
+    return _guard_manager;
+  }
+
   bool matches_key(const py::handle& key) const {
     return _accessor_key.equal(key);
   }
 
-  std::string get_source() {
+  std::string get_source() const {
     return _source;
   }
 
@@ -2166,6 +2639,9 @@ class GuardAccessor {
     // throw std::runtime_error("fallback to python");
     // Could fallback to running check on the Python dict (lazily constructed)
     return check_nopybind((PyObject*)map->to_dict(), matches_dict_tag);
+  }
+  virtual bool supports_guard_memo() const {
+    return false;
   }
   virtual GuardDebugInfo check_verbose_nopybind(PyObject* obj) = 0;
   virtual std::string repr() const = 0;
@@ -2373,13 +2849,24 @@ class GuardManager {
   // guards and does not change the fail count. For simplicity, we duplicate
   // the code here.
   template <typename T>
-  bool check_nopybind_template(T* value) { // borrowed ref
+  bool check_nopybind_template(
+      T* value,
+      const std::string* skip_accessor_source = nullptr) { // borrowed ref
+    if constexpr (std::is_same_v<T, PyObject>) {
+      if (C10_UNLIKELY(active_guard_memo_tokens != nullptr)) {
+        active_guard_memo_tokens->push_back(
+            GuardMemoToken::make(value, active_guard_memo_local_state));
+        if (active_guard_memo_paths != nullptr) {
+          active_guard_memo_paths->push_back(_source);
+        }
+      }
+    }
 
     if (!this->check_leaf_guards_nopybind(value)) {
       return false;
     }
 
-    return this->check_accessors_nopybind(value);
+    return this->check_accessors_nopybind(value, skip_accessor_source);
   }
 
   virtual bool check_nopybind(PyObject* value) {
@@ -2388,6 +2875,33 @@ class GuardManager {
 
   virtual bool check_nopybind(FrameLocalsMapping* value) {
     return check_nopybind_template(value);
+  }
+
+  bool supports_guard_memo_recursive() const {
+    for (const auto& guard : _leaf_guards) {
+      if (!guard->supports_guard_memo()) {
+        return false;
+      }
+    }
+    for (const auto& accessor : _accessors) {
+      if (!accessor->supports_guard_memo() ||
+          !accessor->get_guard_manager()->supports_guard_memo_recursive()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool supports_accessor_guard_memo_recursive(
+      const std::string& source) const {
+    for (const auto& accessor : _accessors) {
+      if (accessor->get_source() != source) {
+        continue;
+      }
+      return accessor->supports_guard_memo() &&
+          accessor->get_guard_manager()->supports_guard_memo_recursive();
+    }
+    return false;
   }
 
   template <typename T>
@@ -2405,7 +2919,9 @@ class GuardManager {
   }
 
   template <typename T>
-  bool check_accessors_nopybind(T* value) {
+  bool check_accessors_nopybind(
+      T* value,
+      const std::string* skip_accessor_source = nullptr) {
     bool matches_dict_tag = false;
     uint64_t new_tag = 0;
     if constexpr (std::is_same_v<T, PyObject>) {
@@ -2425,6 +2941,11 @@ class GuardManager {
     bool result = true;
     bool failed_on_first = true;
     for (const auto& accessor : _accessors) {
+      if (skip_accessor_source != nullptr &&
+          accessor->get_source() == *skip_accessor_source) {
+        failed_on_first = false;
+        continue;
+      }
       if (!accessor->check_nopybind(value, matches_dict_tag)) { // early exit
         _fail_count += 1;
         result = false;
@@ -2673,7 +3194,9 @@ class RootGuardManager : public GuardManager {
 
   // Fast check function.
   template <typename T>
-  bool check_nopybind_template(T* value) { // borrowed ref
+  bool check_nopybind_template(
+      T* value,
+      const std::string* skip_accessor_source = nullptr) { // borrowed ref
     // Check [Note on GIL interaction with mutex lock] for details on why we
     // need mutex and its interactions wth GIL.
     PyThreadState* _save = nullptr;
@@ -2701,7 +3224,8 @@ class RootGuardManager : public GuardManager {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ALL_DISABLED);
 
-    if (!GuardManager::check_accessors_nopybind(value)) {
+    if (!GuardManager::check_accessors_nopybind(
+            value, skip_accessor_source)) {
       at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return false;
@@ -2727,6 +3251,12 @@ class RootGuardManager : public GuardManager {
 
   bool check_nopybind(FrameLocalsMapping* value) override {
     return check_nopybind_template(value);
+  }
+
+  bool check_nopybind_skipping_source(
+      FrameLocalsMapping* value,
+      const std::string& skip_accessor_source) {
+    return check_nopybind_template(value, &skip_accessor_source);
   }
 
   // Fast check_verbose function.
@@ -3373,6 +3903,10 @@ class TENSOR_MATCH : public LeafGuard {
         _root_guard_manager->_local_state, THPVariable_Unpack(value));
   }
 
+  bool supports_guard_memo() const override {
+    return true;
+  }
+
   GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
 
@@ -3445,6 +3979,10 @@ class GetAttrGuardAccessor : public GuardAccessor {
     return result;
   }
 
+  // Do not support guard memo here: PyObject_GetAttr can invoke descriptors or
+  // user-defined Python code, so a token for a previously returned object is
+  // not enough to prove a later accessor evaluation would return the same
+  // value.
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     PyObject* x = PyObject_GetAttr(obj, _attr_name); // new ref
@@ -3522,6 +4060,8 @@ class GenericGetAttrGuardAccessor : public GuardAccessor {
     return result;
   }
 
+  // Do not support guard memo here for the same reason as GetAttrGuardAccessor:
+  // generic attribute lookup can run descriptor logic.
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     PyObject* x = PyObject_GenericGetAttr(obj, _attr_name); // new ref
@@ -3600,6 +4140,10 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
     return result;
   }
 
+  bool supports_guard_memo() const override {
+    return true;
+  }
+
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
@@ -3669,6 +4213,8 @@ class GetItemGuardAccessor : public GuardAccessor {
     return result;
   }
 
+  // Do not support guard memo here: PyObject_GetItem can invoke user-defined
+  // __getitem__. Specialized dict/list/tuple accessors below are memo-safe.
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     PyObject* x = PyObject_GetItem(obj, _attr_name); // new ref
@@ -3779,6 +4325,10 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
     return result;
   }
 
+  bool supports_guard_memo() const override {
+    return true;
+  }
+
   // If we've reached here, it means the guard failed - `obj` should be the
   // FrameLocalsMapping converted into a Python dict and we should
   // behave like DictGetItemGuardAccessor.
@@ -3878,6 +4428,10 @@ class DictGetItemGuardAccessor : public GuardAccessor {
     return result;
   }
 
+  bool supports_guard_memo() const override {
+    return true;
+  }
+
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
@@ -3956,6 +4510,10 @@ class ListGetItemGuardAccessor : public GuardAccessor {
     return result;
   }
 
+  bool supports_guard_memo() const override {
+    return true;
+  }
+
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     PyObject* x = PyList_GetItem(obj, _index); // borrowed ref
@@ -4026,6 +4584,10 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
     }
     bool result = _guard_manager->check_nopybind(x);
     return result;
+  }
+
+  bool supports_guard_memo() const override {
+    return true;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -4590,6 +5152,10 @@ class TypeGuardAccessor : public GuardAccessor {
       override { // borrowed ref
     PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
     return _guard_manager->check_nopybind(x);
+  }
+
+  bool supports_guard_memo() const override {
+    return true;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -5226,6 +5792,112 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
   }
 }
 
+bool run_root_guard_manager_with_last_success_receipt(
+    void* receipt,
+    void* entry_key,
+    void* root,
+    FrameLocalsMapping* f_locals,
+    bool is_skip_guard_eval_unsafe) {
+  if (!guard_fast_plan_enabled() || is_skip_guard_eval_unsafe ||
+      receipt == nullptr || root == nullptr) {
+    return run_root_guard_manager(root, f_locals);
+  }
+
+  auto* state = static_cast<GuardLastSuccessReceipt*>(receipt);
+  auto* root_mgr = static_cast<RootGuardManager*>(root);
+  static const std::string self_source = "L['self']";
+
+  if (state->enabled && state->entry_key == entry_key &&
+      state->root_key == root) {
+    PyObject* current_self =
+        PyDict_GetItem((PyObject*)f_locals->to_dict(), guard_memo_self_key());
+    LocalState local_state;
+    const bool tokens_match = current_self != nullptr &&
+        current_self == state->self_object &&
+        Py_TYPE(current_self) == state->self_type &&
+        guard_memo_tokens_match_current(state->hot_tokens, &local_state);
+    if (tokens_match) {
+      const bool residual_result =
+          root_mgr->check_nopybind_skipping_source(f_locals, self_source);
+      if (guard_lookup_stats_enabled()) {
+        auto& stats = guard_lookup_stats();
+        if (residual_result) {
+          add_relaxed(stats.partial_hit, 1);
+        } else {
+          add_relaxed(stats.partial_residual_fail, 1);
+        }
+      }
+      if (!residual_result) {
+        state->reset();
+      }
+      return residual_result;
+    }
+
+    if (guard_lookup_stats_enabled()) {
+      add_relaxed(guard_lookup_stats().partial_miss, 1);
+    }
+    state->reset();
+  }
+
+  if (!root_mgr->supports_accessor_guard_memo_recursive(self_source)) {
+    state->reset();
+    return run_root_guard_manager(root, f_locals);
+  }
+
+  std::vector<GuardMemoToken> tokens;
+  std::vector<std::string> paths;
+  {
+    GuardMemoRecorderScope recorder(&tokens, &paths, &root_mgr->_local_state);
+    const bool result = run_root_guard_manager(root, f_locals);
+    if (!result) {
+      state->reset();
+      return false;
+    }
+  }
+
+  if (tokens.size() > kGuardLastSuccessMaxTokens) {
+    state->reset();
+    return true;
+  }
+
+  std::vector<GuardMemoToken> self_tokens;
+  if (!extract_self_tokens(tokens, paths, self_tokens)) {
+    state->reset();
+    return true;
+  }
+
+  PyObject* current_self =
+      PyDict_GetItem((PyObject*)f_locals->to_dict(), guard_memo_self_key());
+  if (current_self == nullptr || self_tokens[0].object != current_self) {
+    state->reset();
+    return true;
+  }
+
+  if (state->entry_key == entry_key && state->root_key == root &&
+      !state->stability_tokens.empty() &&
+      guard_memo_token_vectors_match(self_tokens, state->stability_tokens)) {
+    state->shadow_passes += 1;
+  } else {
+    state->entry_key = entry_key;
+    state->root_key = root;
+    state->self_object = current_self;
+    state->self_type = Py_TYPE(current_self);
+    state->stability_tokens = self_tokens;
+    state->hot_tokens = std::move(self_tokens);
+    state->shadow_passes = 1;
+    state->enabled = false;
+  }
+
+  if (!state->enabled &&
+      state->shadow_passes >= kGuardLastSuccessStablePasses) {
+    state->enabled = true;
+    if (guard_lookup_stats_enabled()) {
+      add_relaxed(guard_lookup_stats().partial_enable, 1);
+    }
+  }
+  return true;
+}
+
 PyObject* torch_c_dynamo_guards_init() {
   // initialize TensorGuardsType
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
@@ -5297,6 +5969,9 @@ PyObject* torch_c_dynamo_guards_init() {
       .def_readonly("verbose_code_parts", &GuardDebugInfo::verbose_code_parts)
       .def_readonly(
           "num_guards_executed", &GuardDebugInfo::num_guards_executed);
+
+  py_m.def("reset_guard_lookup_stats", &reset_guard_lookup_stats);
+  py_m.def("get_guard_lookup_stats", &get_guard_lookup_stats);
 
   // Leaf Guards
   py::class_<LeafGuard, std::shared_ptr<LeafGuard>>(py_m, "LeafGuard")
