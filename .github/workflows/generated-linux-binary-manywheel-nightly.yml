@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng", "module: rocm", "module: xpu"]
 # @generated DO NOT EDIT MANUALLY
 
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
@@ -75,6 +76,10 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
+          # Fetch tags so binary_populate_env.sh can detect the release tag via
+          # `git describe --tags --exact`; without this a tag-triggered build is
+          # mistaken for a dev build and pins triton to a +git<hash> version.
+          fetch-tags: true
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -161,6 +166,10 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
+          # Fetch tags so binary_populate_env.sh can detect the release tag via
+          # `git describe --tags --exact`; without this a tag-triggered build is
+          # mistaken for a dev build and pins triton to a +git<hash> version.
+          fetch-tags: true
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -247,6 +256,10 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
+          # Fetch tags so binary_populate_env.sh can detect the release tag via
+          # `git describe --tags --exact`; without this a tag-triggered build is
+          # mistaken for a dev build and pins triton to a +git<hash> version.
+          fetch-tags: true
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -333,6 +346,10 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
+          # Fetch tags so binary_populate_env.sh can detect the release tag via
+          # `git describe --tags --exact`; without this a tag-triggered build is
+          # mistaken for a dev build and pins triton to a +git<hash> version.
+          fetch-tags: true
           submodules: recursive
           show-progress: false
       - name: Populate binary env
