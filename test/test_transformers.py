@@ -1794,6 +1794,27 @@ class TestSDPAFailureModes(NNTestCase):
                                                    is_causal=False, enable_gqa=True)
 
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+                     "Test requires that at least one fused backend exists to fall back from.")
+    def test_enable_gqa_silent_math_fallback_warns(self, device):
+        # When enable_gqa=True but no fused kernel accepts the config (e.g. fp32
+        # inputs: FLASH requires fp16/bf16 and mem_efficient/cuDNN do not support
+        # GQA broadcast), the dispatcher falls back to the MATH backend. MATH is
+        # correct but unfused and often 2x+ slower. This used to be silent. We
+        # now emit a one-time UserWarning. See pytorch/pytorch#154363.
+        # Note: TORCH_WARN_ONCE deduplicates per call site within a process, so
+        # this test relies on running before any other test that hits the same
+        # warning site.
+        rand_query = torch.rand(2, 8, 64, 16, device=device, dtype=torch.float32)
+        rand_key = torch.rand(2, 4, 64, 16, device=device, dtype=torch.float32)
+        rand_value = torch.rand(2, 4, 64, 16, device=device, dtype=torch.float32)
+        with self.assertWarnsRegex(UserWarning, "dispatched to the MATH backend"):
+            F.scaled_dot_product_attention(
+                rand_query, rand_key, rand_value,
+                dropout_p=0.0, is_causal=False, enable_gqa=True,
+            )
+
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not flash_attention fused scaled dot product attention")
     @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
     def test_invalid_fused_inputs_head_dim(self, device, kernel: SDPBackend):
