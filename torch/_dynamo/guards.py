@@ -52,6 +52,7 @@ from torch._C._dynamo.guards import (
     check_type_id,
     ClosureGuardAccessor,
     CodeGuardAccessor,
+    compute_overlapping_tensors,
     dict_version,
     DictGetItemGuardAccessor,
     DictGuardManager,
@@ -98,6 +99,7 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
+    StorageOverlapPartition,
 )
 from torch._inductor.utils import IndentedBuffer
 from torch._library.fake_class_registry import FakeScriptObject
@@ -111,6 +113,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SYMPY_INTERP,
 )
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
@@ -740,6 +743,64 @@ def from_numpy(a: Any) -> torch.Tensor:
         return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
 
 
+def _storage_overlaps(a: torch.Tensor, b: torch.Tensor) -> bool:
+    return len(compute_overlapping_tensors([a, b], symbolic=False)) == 2
+
+
+def _storage_overlap_partition(
+    args: list[object],
+) -> tuple[tuple[int, ...], ...]:
+    storage_ref_to_indices: dict[StorageWeakRef, list[int]] = collections.defaultdict(
+        list
+    )
+    tensors: dict[int, torch.Tensor] = {}
+    for i, arg in enumerate(args):
+        if isinstance(arg, torch.Tensor):
+            storage_ref_to_indices[StorageWeakRef(arg.untyped_storage())].append(i)
+            tensors[i] = arg
+
+    overlapping_groups: list[tuple[int, ...]] = []
+    for indices in storage_ref_to_indices.values():
+        if len(indices) <= 1:
+            continue
+
+        parents = {i: i for i in indices}
+
+        def find(i: int) -> int:
+            while parents[i] != i:
+                parents[i] = parents[parents[i]]
+                i = parents[i]
+            return i
+
+        def union(i: int, j: int) -> None:
+            root_i = find(i)
+            root_j = find(j)
+            if root_i != root_j:
+                parents[root_j] = root_i
+
+        for pos, i in enumerate(indices):
+            for j in indices[pos + 1 :]:
+                if _storage_overlaps(tensors[i], tensors[j]):
+                    union(i, j)
+
+        components: dict[int, list[int]] = collections.defaultdict(list)
+        for i in indices:
+            components[find(i)].append(i)
+        overlapping_groups.extend(
+            tuple(sorted(component))
+            for component in components.values()
+            if len(component) > 1
+        )
+
+    return tuple(sorted(overlapping_groups))
+
+
+def check_storage_overlap_partition(
+    args: list[object], expected_partition: tuple[tuple[int, ...], ...]
+) -> bool:
+    return _storage_overlap_partition(args) == expected_partition
+
+
 # For user stack printing
 @functools.cache
 def uninteresting_files() -> set[str]:
@@ -784,6 +845,7 @@ def _get_closure_vars() -> dict[str, object]:
             "utils_device": torch.utils._device,
             "device": torch.device,
             "___from_numpy": from_numpy,
+            "___check_storage_overlap_partition": check_storage_overlap_partition,
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
@@ -4922,6 +4984,17 @@ class CheckFunctionManager:
                     non_overlapping_guard_managers,
                     [code_part],
                     None,
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOverlapPartition):
+                code_part = (
+                    "___check_storage_overlap_partition("
+                    f"[{', '.join(source.name for source in guard.input_sources)}], "
+                    f"{guard.overlapping_indices})"
+                )
+                builder.add_python_lambda_leaf_guard_to_root(
+                    [code_part],
+                    [code_part],
                 )
                 add_code_part(code_part, None, True)
             else:

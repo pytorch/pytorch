@@ -18,7 +18,12 @@ from torch._dynamo.testing import (
     rand_strided,
 )
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
-from torch._guards import CompileContext, StorageOverlap, TracingContext
+from torch._guards import (
+    CompileContext,
+    StorageOverlap,
+    StorageOverlapPartition,
+    TracingContext,
+)
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile
@@ -1570,7 +1575,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         )
         self.assertExpectedInline(
             guard_failure,
-            """0/0: check_overlapping(overlapping=[args[1], args[2]], non_overlapping=[args[0]])""",
+            """0/0: ___check_storage_overlap_partition([args[0], args[1], args[2]], ((1, 2),))""",
         )
 
     def test_different_inputs_overlapping_set_with_mutation(self):
@@ -1593,13 +1598,14 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         )
         self.assertExpectedInline(
             guard_failure,
-            """0/0: check_overlapping(overlapping=[a, b], non_overlapping=[c, d])""",
+            """0/0: ___check_storage_overlap_partition([a, b, c, d], ((0, 1),))""",
         )
 
-    def _test_no_storage_overlap_guards(self, f, argsfn):
+    def _test_storage_overlap_partition_guards(
+        self, f, argsfn, *, expect_partition_guard
+    ):
         # Compile f with aot_eager backend, and run it with the argument set returned by
-        # argsfn function. Meanwhile, keep track of the aotautograd_gurads, so as to make
-        # sure no StorageOverlap guard was added.
+        # argsfn function. Meanwhile, keep track of the AOTAutograd guards.
 
         class Compiler:
             def __init__(self):
@@ -1607,7 +1613,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
             def __call__(self, *args, **kwargs):
                 # Instead of checking here, we need to check afterwards, since the
-                # StorageOverlap guard is only added later.
+                # storage overlap partition guard is only added later.
                 self.guards = TracingContext.get().guards_context.aotautograd_guards
                 return self.counter(*args, **kwargs)
 
@@ -1622,9 +1628,13 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         self.assertEqual(compiler.counter.frame_count, 1)
 
-        # Check none of the AOTAutograd guards are StorageOverlap guards.
+        # The original same-storage StorageOverlap guard should not be emitted.
         for g in compiler.guards:
             self.assertNotIsInstance(g, StorageOverlap)
+        partition_guards = [
+            g for g in compiler.guards if isinstance(g, StorageOverlapPartition)
+        ]
+        self.assertEqual(len(partition_guards), 1 if expect_partition_guard else 0)
 
     def test_no_storage_overlap_guards_no_mutation(self):
         def f(a, b):
@@ -1633,9 +1643,11 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         def overlapping_args(input):
             return input[:10], input[5:15]
 
-        self._test_no_storage_overlap_guards(f, overlapping_args)
+        self._test_storage_overlap_partition_guards(
+            f, overlapping_args, expect_partition_guard=False
+        )
 
-    def test_no_storage_overlap_guards_no_aliasing(self):
+    def test_storage_overlap_partition_guard_no_aliasing(self):
         def f(a, b):
             a.add_(1)
             b.add_(1)
@@ -1644,7 +1656,82 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         def non_overlapping_args(input):
             return input[:10], torch.arange(20)[5:15]
 
-        self._test_no_storage_overlap_guards(f, non_overlapping_args)
+        self._test_storage_overlap_partition_guards(
+            f, non_overlapping_args, expect_partition_guard=True
+        )
+
+    def test_input_mutation_storage_overlap_recompiles(self):
+        def f(x, y):
+            x.mul_(2)
+            return x + y
+
+        for dynamic in (False, True):
+            for first_call in ("different_storage", "same_storage_no_overlap"):
+                with self.subTest(dynamic=dynamic, first_call=first_call):
+                    torch._dynamo.reset()
+                    compiler = CompileCounterWithBackend("aot_eager")
+                    opt_f = torch.compile(f, backend=compiler, dynamic=dynamic)
+
+                    # First call compiles under the assumption that the
+                    # mutated input does not overlap any other input.
+                    if first_call == "different_storage":
+                        opt_f(torch.ones(4), torch.ones(4))
+                    else:
+                        base = torch.ones(8)
+                        opt_f(base[:4], base[4:8])
+
+                    base = torch.ones(8)
+                    opt_out = opt_f(base[:4], base[2:6])
+
+                    base_ref = torch.ones(8)
+                    ref_out = f(base_ref[:4], base_ref[2:6])
+
+                    self.assertEqual(opt_out, ref_out)
+                    self.assertEqual(base, base_ref)
+                    self.assertEqual(compiler.frame_count, 2)
+
+    def test_input_mutation_storage_overlap_uses_single_partition_guard(self):
+        class ManyParams(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    torch.nn.Linear(4, 4) for _ in range(10)
+                )
+
+            def forward(self, x, y):
+                x.add_(1)
+                out = x + y
+                for layer in self.layers:
+                    out = out + layer.weight.sum() * 0 + layer.bias.sum() * 0
+                return out
+
+        class Compiler:
+            def __init__(self):
+                self.counter = CompileCounterWithBackend("aot_eager")
+                self.guards = []
+
+            def __call__(self, *args, **kwargs):
+                self.guards = TracingContext.get().guards_context.aotautograd_guards
+                return self.counter(*args, **kwargs)
+
+        mod = ManyParams()
+        compiler = Compiler()
+        opt_mod = torch.compile(mod, backend=compiler)
+
+        opt_out = opt_mod(torch.ones(4), torch.ones(4))
+
+        ref_mod = copy.deepcopy(mod)
+        ref_out = ref_mod(torch.ones(4), torch.ones(4))
+        self.assertEqual(opt_out, ref_out)
+
+        partition_guards = [
+            guard
+            for guard in compiler.guards
+            if isinstance(guard, StorageOverlapPartition)
+        ]
+        self.assertEqual(len(partition_guards), 1)
+        self.assertEqual(partition_guards[0].overlapping_indices, ())
+        self.assertGreater(len(partition_guards[0].input_sources), 2)
 
     def test_inputs_overlapping_with_mutation_stress(self):
         # Stress test for StorageOverlap guard.
