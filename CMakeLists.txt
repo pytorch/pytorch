@@ -1,3 +1,4 @@
+
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
 cmake_policy(SET CMP0126 OLD)
@@ -874,6 +875,13 @@ if(NOT CMAKE_BUILD_TYPE)
         FORCE)
 endif()
 
+# Enable IPO for Release builds if not explicitly set
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+  if(NOT MSVC AND NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)"))
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)  # turns CMake LTO for OSS builds on Clang and GCC except aarch64
+  endif()
+endif()
+
 # The below means we are cross compiling for arm64 or x86_64 on MacOSX
 if(NOT IOS
    AND CMAKE_SYSTEM_NAME STREQUAL "Darwin"
@@ -1199,6 +1207,11 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
+  if(CMAKE_COMPILER_IS_GNUCXX)
+    # Remove below when XNNPack/oneDNN/FBGEMM fix their GNU LTO warnings.
+    append_cxx_flag_if_supported("-Wno-error=lto-type-mismatch" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-error=odr" CMAKE_CXX_FLAGS)
+  endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
@@ -1237,6 +1250,13 @@ else()
   append_cxx_flag_if_supported("/wd4804" CMAKE_CXX_FLAGS)
   # inconsistent dll linkage
   append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
+  if(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+    # Limit LTCG parallelism to reduce peak linker memory usage for large
+    # Windows targets such as torch_cpu.dll.
+    string(APPEND CMAKE_SHARED_LINKER_FLAGS_RELEASE " /CGTHREADS:1")
+    string(APPEND CMAKE_MODULE_LINKER_FLAGS_RELEASE " /CGTHREADS:1")
+    string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " /CGTHREADS:1")
+  endif()
 endif()
 
 # Add code coverage flags to supported compilers

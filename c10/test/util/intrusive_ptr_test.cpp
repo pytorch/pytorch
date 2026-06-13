@@ -37,6 +37,15 @@ class SomeClass2Parameters : public intrusive_ptr_target {
   int param2;
 };
 using SomeClass = SomeClass0Parameters;
+
+template <class T>
+static C10_NOINLINE T* opaque_ptr(T* ptr) {
+#if defined(__GNUC__)
+  asm volatile("" : "+r"(ptr));
+#endif
+  return ptr;
+}
+
 struct SomeBaseClass : public intrusive_ptr_target {
   SomeBaseClass(int v_) : v(v_) {}
   int v;
@@ -3531,9 +3540,11 @@ TEST(WeakIntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
   weak_intrusive_ptr<SomeClass> ptr = make_invalid_weak<SomeClass>();
 #ifdef NDEBUG
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  EXPECT_NO_THROW(ptr = weak_intrusive_ptr<SomeClass>::reclaim(&obj));
+  EXPECT_NO_THROW(
+      ptr = weak_intrusive_ptr<SomeClass>::reclaim(opaque_ptr(&obj)));
 #else
-  EXPECT_ANY_THROW(ptr = weak_intrusive_ptr<SomeClass>::reclaim(&obj));
+  EXPECT_ANY_THROW(
+      ptr = weak_intrusive_ptr<SomeClass>::reclaim(opaque_ptr(&obj)));
 #endif
 }
 

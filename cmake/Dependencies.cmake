@@ -587,6 +587,20 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG ${CMAKE_POSITION_INDEPENDENT_CODE})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64"
+       AND NOT USE_NATIVE_ARCH)
+      # GCC LTO rejects mixing oneDNN's -mcpu=generic with XNNPACK's
+      # armv8.2-a+fp16 target flags, so configure XNNPACK without IPO here.
+      if(DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+        set(_xnnpack_saved_ipo ${CMAKE_INTERPROCEDURAL_OPTIMIZATION})
+        set(_xnnpack_had_ipo TRUE)
+      else()
+        set(_xnnpack_had_ipo FALSE)
+      endif()
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
+
     if(WIN32)
       # Disable libm dependency explicitly to avoid symbol conflict for XNNPACK as
       # Windows runtime has provided the math functions - #134989
@@ -601,6 +615,16 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       foreach(xnn_tgt IN ITEMS XNNPACK microkernels-prod microkernels-all)
           target_compile_options(${xnn_tgt} PRIVATE -Wno-error=incompatible-pointer-types)
       endforeach()
+    endif()
+
+    if(DEFINED _xnnpack_had_ipo)
+      if(_xnnpack_had_ipo)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ${_xnnpack_saved_ipo})
+        unset(_xnnpack_saved_ipo)
+      else()
+        unset(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+      endif()
+      unset(_xnnpack_had_ipo)
     endif()
 
     # Revert to whatever it was before
@@ -708,7 +732,44 @@ if(USE_FBGEMM)
     set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
     set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64"
+       AND NOT USE_NATIVE_ARCH)
+      # GCC LTO rejects mixing oneDNN's -mcpu=generic with FBGEMM's
+      # armv8.2-a+fp16 target flags, so configure FBGEMM without IPO here.
+      if(DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+        set(_fbgemm_saved_ipo ${CMAKE_INTERPROCEDURAL_OPTIMIZATION})
+        set(_fbgemm_had_ipo TRUE)
+      else()
+        set(_fbgemm_had_ipo FALSE)
+      endif()
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
     add_subdirectory("${FBGEMM_SOURCE_DIR}")
+    if(DEFINED _fbgemm_had_ipo)
+      if(_fbgemm_had_ipo)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ${_fbgemm_saved_ipo})
+        unset(_fbgemm_saved_ipo)
+      else()
+        unset(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+      endif()
+      unset(_fbgemm_had_ipo)
+    endif()
+
+    # Fix LTO bug
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT MSVC)
+      set_source_files_properties(
+        "${FBGEMM_SOURCE_DIR}/src/FbgemmFP16UKernelsAvx2.cc"
+        "${FBGEMM_SOURCE_DIR}/src/FbgemmFP16UKernelsAvx512.cc"
+        "${FBGEMM_SOURCE_DIR}/src/FbgemmFP16UKernelsAvx512_256.cc"
+        "${FBGEMM_SOURCE_DIR}/src/fp32/FbgemmFP32UKernelsAvx2.cc"
+        "${FBGEMM_SOURCE_DIR}/src/fp32/FbgemmFP32UKernelsAvx512.cc"
+        "${FBGEMM_SOURCE_DIR}/src/fp32/FbgemmFP32UKernelsAvx512_256.cc"
+        DIRECTORY "${FBGEMM_SOURCE_DIR}"
+        PROPERTIES
+          COMPILE_OPTIONS "-masm=intel;-fno-lto"
+      )
+    endif()
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       target_compile_options_if_supported(asmjit -Wno-extra-semi)
@@ -1570,7 +1631,31 @@ if(NOT INTERN_BUILD_MOBILE)
     endif()
   endif()
   if(USE_MKLDNN)
+    # Disable IPO while the oneDNN subdirectory is configuring so its object
+    # libraries are created without whole-program optimization. MSVC LTO breaks
+    # the oneDNN static library build, and GNU AArch64 LTO rejects oneDNN's
+    # -mcpu=generic objects when they are merged with more specialized ISA
+    # objects elsewhere in the build.
+    # See https://github.com/uxlfoundation/oneDNN/issues/3383.
+    if(MSVC OR (CMAKE_COMPILER_IS_GNUCXX AND CPU_AARCH64 AND NOT USE_NATIVE_ARCH))
+      if(DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+        set(_mkldnn_saved_ipo ${CMAKE_INTERPROCEDURAL_OPTIMIZATION})
+        set(_mkldnn_had_ipo TRUE)
+      else()
+        set(_mkldnn_had_ipo FALSE)
+      endif()
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
     include(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
+    if(MSVC OR (CMAKE_COMPILER_IS_GNUCXX AND CPU_AARCH64 AND NOT USE_NATIVE_ARCH))
+      if(_mkldnn_had_ipo)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ${_mkldnn_saved_ipo})
+        unset(_mkldnn_saved_ipo)
+      else()
+        unset(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+      endif()
+      unset(_mkldnn_had_ipo)
+    endif()
     if(MKLDNN_FOUND)
       set(AT_MKLDNN_ENABLED 1)
       include_directories(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
@@ -1588,7 +1673,29 @@ if(NOT INTERN_BUILD_MOBILE)
     set(AT_KLEIDIAI_ENABLED 1)
     set(KLEIDIAI_BUILD_TESTS OFF) # Disable building KLEIDIAI tests
     set(KLEIDIAI_SRC "${PROJECT_SOURCE_DIR}/third_party/kleidiai")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64"
+       AND NOT USE_NATIVE_ARCH)
+      # GCC LTO rejects mixing oneDNN's -mcpu=generic with KleidiAI's
+      # armv8.2-a+fp16 target flags, so configure KleidiAI without IPO here.
+      if(DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+        set(_kleidiai_saved_ipo ${CMAKE_INTERPROCEDURAL_OPTIMIZATION})
+        set(_kleidiai_had_ipo TRUE)
+      else()
+        set(_kleidiai_had_ipo FALSE)
+      endif()
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
     add_subdirectory(${KLEIDIAI_SRC})
+    if(DEFINED _kleidiai_had_ipo)
+      if(_kleidiai_had_ipo)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ${_kleidiai_saved_ipo})
+        unset(_kleidiai_saved_ipo)
+      else()
+        unset(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+      endif()
+      unset(_kleidiai_had_ipo)
+    endif()
     list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
     # Recover build options.
     set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
@@ -1659,8 +1766,9 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 # shouldn't be too bad to just disable the checks.
 set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
-# Keep fmt's header-only type layout stable across mixed C++ modes by forcing
-# one no_unique_address spelling for all translation units.
+# Keep fmt's header-only type layout stable across mixed C++ modes. Otherwise
+# LTO can diagnose ODR violations when some TUs enable [[no_unique_address]]
+# and others don't.
 if(MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set(_fmt_no_unique_address "[[msvc::no_unique_address]]")
 else()
