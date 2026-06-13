@@ -38,6 +38,8 @@ class FlexGemmEpilogueConfig:
     beta: float
     out_dtype: Any | None = None
     quack_config_key: tuple[Any, ...] | None = None
+    epilogue_arg_indices: tuple[int, ...] = ()
+    epilogue_arg_kinds: tuple[str, ...] = ()
 
 
 class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
@@ -70,9 +72,11 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         quack_cache_dir_param = f"quack_cache_dir={inductor_quack_cache_dir()!r}"
         params.append(quack_cache_dir_param)
 
-        call_args, call_kwargs = self._gemm_call_args(
-            [arg_name for arg_name, _ in self._template_input_args], config
-        )
+        template_input_arg_names = [
+            arg_name for arg_name, _ in self._template_input_args
+        ]
+        call_args, call_kwargs = self._gemm_call_args(template_input_arg_names, config)
+        call_kwargs += self._epilogue_kwargs(template_input_arg_names, config)
         call_kwargs += (
             f", out={self.get_output()}, "
             "device_capacity_override=device_capacity_override, "
@@ -82,9 +86,6 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             call_kwargs += f", config_key={tuple(config.quack_config_key)!r}"
 
         output_name = self.get_output()
-        template_input_arg_names = [
-            arg_name for arg_name, _ in self._template_input_args
-        ]
 
         code = IndentedBuffer()
         code.splice(
@@ -153,6 +154,15 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         return call_args, (
             f", C={input_args[op.bias_index]}, alpha={config.alpha!r}, beta={config.beta!r}"
             f"{out_dtype}"
+        )
+
+    def _epilogue_kwargs(self, input_args, config):
+        epilogue_args = [input_args[index] for index in config.epilogue_arg_indices]
+        if not epilogue_args:
+            return ""
+        return (
+            f", epilogue_args=({', '.join(epilogue_args)},), "
+            f"epilogue_arg_kinds={config.epilogue_arg_kinds!r}"
         )
 
 
