@@ -7207,6 +7207,59 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(foo, (inp, weight), check_lowp=False)
 
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_layer_norm_numerics_under_autocast(self):
+        # https://github.com/pytorch/pytorch/issues/168126
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("Only validated on CPU/CUDA")
+
+        torch.manual_seed(42)
+        norm = torch.nn.LayerNorm(128, eps=1e-5, device=self.device)
+        linear = torch.nn.Linear(128, 128, bias=False, device=self.device)
+
+        def fn(x):
+            return linear(norm(x))
+
+        compiled_fn = torch.compile(fn, fullgraph=True)
+
+        with torch.autocast(device_type=self.device, dtype=torch.bfloat16):
+            x = torch.randn(4, 32, 32, 128, device=self.device)
+            expected = fn(x)
+            actual = compiled_fn(x)
+
+        torch.testing.assert_close(actual, expected)
+
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_autocast_low_precision_pointwise_barrier(self):
+        # https://github.com/pytorch/pytorch/issues/168126
+        if self.device != "cuda":
+            raise unittest.SkipTest("Only validated on CUDA")
+
+        class Repro(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.p_in = torch.nn.Linear(128, 256, bias=False)
+                self.g_in = torch.nn.Linear(128, 256, bias=False)
+
+            def forward(self, x):
+                x = self.p_in(x) * self.g_in(x).sigmoid()
+                a, b = torch.chunk(x.float(), 2, dim=-1)
+                return a + b
+
+        torch.manual_seed(42)
+        eager = Repro().to(self.device).eval()
+        compiled = torch.compile(Repro().to(self.device).eval(), fullgraph=True)
+        with torch.no_grad():
+            for param, ref_param in zip(compiled.parameters(), eager.parameters()):
+                param.copy_(ref_param)
+
+        with torch.autocast(device_type=self.device, dtype=torch.bfloat16):
+            x = torch.randn(1, 16, 16, 128, device=self.device)
+            expected = eager(x)
+            actual = compiled(x)
+
+        torch.testing.assert_close(actual, expected)
+
     def test_transpose_add(self):
         def fn(a, b):
             return a.t() + b
@@ -19953,8 +20006,20 @@ if RUN_GPU:
             # The cpp_wrapper code is significantly more complex, so skip checking for exact
             # code lines.
             if not config.cpp_wrapper:
+                self.assertTrue(
+                    re.search(
+                        r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse",
+                        code[1],
+                    )
+                    or re.search(
+                        r"empty_strided_cuda\(\(1024, 50264\), \(50304, 1\), "
+                        r"torch\.bfloat16\)\.as_strided\(\(1024, 50257\), "
+                        r"\(50304, 1\)\)",
+                        code[1],
+                    )
+                )
                 FileCheck().check_regex(
-                    r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
+                    r"reinterpret_tensor\(.*, \(1, 1024, 3072\).*# reuse"
                 ).run(code[1])
 
         @unittest.skipIf(
