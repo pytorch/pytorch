@@ -343,14 +343,6 @@ inductor_gradient_expected_failures_single_sample["xpu"] = {}
 if not TEST_MKL:
     inductor_expected_failures_single_sample["cpu"].update({})
 
-if IS_LINUX and IS_ARM64:
-    inductor_expected_failures_single_sample["cpu"].update(
-        {
-            "polygamma.polygamma_n_0": {f16},
-            "special.polygamma.special_polygamma_n_0": {f16},
-        }
-    )
-
 inductor_should_fail_with_exception = defaultdict(dict)
 inductor_should_fail_with_exception["cpu"] = {}
 inductor_should_fail_with_exception["cuda"] = {}
@@ -368,6 +360,10 @@ if IS_MACOS:
 
 if IS_LINUX and IS_ARM64:
     inductor_should_fail_with_exception["cpu"]["remainder"] = {
+        i32: "ZeroDivisionError",
+        i64: "ZeroDivisionError",
+    }
+    inductor_should_fail_with_exception["cpu"]["__rmod__"] = {
         i32: "ZeroDivisionError",
         i64: "ZeroDivisionError",
     }
@@ -454,6 +450,7 @@ inductor_override_kwargs["cpu"] = {
 if IS_LINUX and IS_ARM64:
     inductor_override_kwargs["cpu"].update(
         {
+            ("nn.functional.conv1d", f16): {"atol": 0.012, "rtol": 0.008},
             ("nn.functional.conv2d", f16): {"atol": 0.13, "rtol": 0.002},
         }
     )
