@@ -629,7 +629,7 @@ struct AutocastState {
     if (cache_enabled != o.cache_enabled) {
       os << "autocast_cache_enabled ";
     }
-    return std::move(os).str();
+    return os.str();
   }
 
   template <typename T>
@@ -722,7 +722,7 @@ struct GlobalStateGuard {
       os << "num_threads ";
     if (_default_dtype != at::get_default_dtype())
       os << "default_dtype ";
-    return std::move(os).str();
+    return os.str();
   }
 
   template <typename T>

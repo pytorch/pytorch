@@ -1303,7 +1303,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       }
       oss << devices[idx];
     }
-    return std::move(oss).str();
+    return oss.str();
   }
 
   static c10::DeviceType getTypeOfDevices(

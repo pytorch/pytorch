@@ -5,7 +5,7 @@ namespace c10 {
 std::string toString(const OperatorName& opName) {
   std::ostringstream oss;
   oss << opName;
-  return std::move(oss).str();
+  return oss.str();
 }
 
 std::ostream& operator<<(std::ostream& os, const OperatorName& opName) {

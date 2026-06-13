@@ -628,7 +628,7 @@ TORCH_API std::ostream& operator<<(std::ostream& out, const FunctionSchema& sche
 inline std::string toString(const FunctionSchema& schema) {
   std::ostringstream str;
   str << schema;
-  return std::move(str).str();
+  return str.str();
 }
 
 } // namespace c10

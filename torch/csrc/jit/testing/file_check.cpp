@@ -327,7 +327,7 @@ struct FileCheckImpl {
         SourceRange(source, start, start + 1).highlight(ss);
         ss << "Check for bad input.";
         has_run = true;
-        throw std::runtime_error(std::move(ss).str());
+        throw std::runtime_error(ss.str());
       }
       start = findNextStart(source, start);
     }

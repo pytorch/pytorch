@@ -151,8 +151,9 @@ struct C10_API TensorOptions {
 
   /// Constructs a `TensorOptions` object with the given device.
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
-  template <typename T>
-  requires std::is_same_v<std::decay_t<T>, Device>
+  template <
+      typename T,
+      typename = std::enable_if_t<std::is_same_v<std::decay_t<T>, Device>>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -165,8 +166,9 @@ struct C10_API TensorOptions {
   /// NB: Ideally we only allow implicit constructors here. But there is no easy
   ///     way to detect them. So we have this one that allows explicit
   ///     constructors too.
-  template <typename... Args>
-  requires std::is_constructible_v<Device, Args&&...>
+  template <
+      typename... Args,
+      typename = std::enable_if_t<std::is_constructible_v<Device, Args&&...>>>
   /* implicit */ TensorOptions(Args&&... args)
       : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
@@ -621,7 +623,7 @@ inline TensorOptions dtype() {
 inline std::string toString(const TensorOptions& options) {
   std::ostringstream stream;
   stream << options;
-  return std::move(stream).str();
+  return stream.str();
 }
 
 // This is intended to be a centralized location by which we can determine

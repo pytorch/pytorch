@@ -45,7 +45,7 @@ std::string KernelFunction::dumpState() const {
   if (unboxed_kernel_func_) {
     oss << "unboxed ";
   }
-  return std::move(oss).str();
+  return oss.str();
 }
 
 bool KernelFunction::_equalsBoxedAndUnboxed(const KernelFunction& other) const {

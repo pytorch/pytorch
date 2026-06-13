@@ -934,7 +934,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (get_cpp_stacktraces_enabled()) {
         ss << e.what() << '\n';
       }
-      throw std::runtime_error(std::move(ss).str());
+      throw std::runtime_error(ss.str());
     }
   }
 

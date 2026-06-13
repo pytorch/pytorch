@@ -1165,7 +1165,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ", pci_domain_id=" << prop.pciDomainID
                << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
                << "MB)";
-        return std::move(stream).str();
+        return stream.str();
       });
 
   m.def(

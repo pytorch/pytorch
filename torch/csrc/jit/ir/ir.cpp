@@ -170,7 +170,7 @@ static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
     // TODO: This is awful code.  Also it doesn't work on Windows.
     std::ostringstream tensor_ss;
     tensor_ss << tensor;
-    std::string tensor_s{std::move(tensor_ss).str()};
+    std::string tensor_s{tensor_ss.str()};
     // Remove newlines
     std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
     out << tensor_s;
@@ -1975,7 +1975,7 @@ Value* Graph::insertConstant(
 std::string Graph::toString(bool print_source_locations) const {
   std::ostringstream oss;
   print(oss, print_source_locations);
-  return std::move(oss).str();
+  return oss.str();
 }
 
 Graph::~Graph() {
