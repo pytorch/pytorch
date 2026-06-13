@@ -651,10 +651,7 @@ class IRNode:
         self._post_init_setattr("origin_node", self._current_primary_node)
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self._post_init_setattr("annotations", {})
-        self._post_init_setattr("stream_idx", self._current_stream_idx)
-        log.debug(
-            "[fqn_trace] IRNode.__post_init__: type=%s origin_node=%s origins=[%s]",
-            type(self).__name__,
+        self._post_init_setattr("stream_idx", self._current_stream_idx).__name__,
             self._current_primary_node.name if self._current_primary_node is not None else None,
             ", ".join(
                 f"{o.name}:{list(o.meta['nn_module_stack'].values()) if o.meta.get('nn_module_stack') else 'no_stack'}"

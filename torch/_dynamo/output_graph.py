@@ -3963,10 +3963,7 @@ class SubgraphTracer(fx.Tracer):
             _innermost_clean = f"L.{_suffix}" if _suffix else "L"
             _stripped_name = re.sub(r"_\d+$", "", rv.node.name)
             _derived_fqn = f"{_innermost_clean}.{_stripped_name}"
-            _stack_entries = list(nn_module_stack.values())
-            log.debug(
-                "[fqn_trace] nn_module_stack assigned: node=%s derived_fqn=%s\n"
-                "  full stack (%d entries, outermost->innermost):\n%s",
+            _stack_entries = list(nn_module_stack.values()):\n%s",
                 rv.node.name,
                 _derived_fqn,
                 len(_stack_entries),
@@ -4019,11 +4016,7 @@ class SubgraphTracer(fx.Tracer):
             if "nn_module_stack" not in rv.node.meta:
                 nn_module_stack = tx.nn_module_stack
                 if nn_module_stack:
-                    rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
-                    log.debug(
-                        "[fqn_trace] nn_module_stack assigned (retracing path): node=%s stack=%s",
-                        rv.node.name,
-                        {k: v for k, v in nn_module_stack.items()},
+                    rv.node.meta["nn_module_stack"] = nn_module_stack.copy()},
                     )
 
             if "source_fn_stack" not in rv.node.meta:
