@@ -5671,6 +5671,16 @@
       ]
     }
   ],
+  "GB9958": [
+    {
+      "Gb_type": "Missing attribute on torch.autograd.Function subclass",
+      "Context": "{self.fn_cls.__qualname__}.{name}",
+      "Explanation": "Dynamo could not statically resolve an attribute access on a torch.autograd.Function subclass.",
+      "Hints": [
+        "Define the missing autograd.Function attribute before compiling."
+      ]
+    }
+  ],
   "GB0373": [
     {
       "Gb_type": "autograd.grad with compiled autograd",
