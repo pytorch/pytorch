@@ -239,19 +239,7 @@ class ManualOverlapScheduler(OverlapScheduler):
     ):
         # Manual overlap historically used "custom_ops" mode for bucketing
         bucket_mode = bucket_mode or "custom_ops"
-        # ManualOverlapScheduler is plan-driven rather than estimation-driven.
-        # If the caller does not provide an estimator, use a no-op estimator so
-        # manual scheduling does not fall into CUDA/NCCL analytical estimation paths
-        # on non-CUDA devices or compile-on-one-rank graphs.
-        if custom_runtime_estimation is None:
 
-            def default_custom_runtime_estimation(
-                node: fx.Node,
-                size: int | None,
-            ) -> float | None:
-                return 0.0
-
-            custom_runtime_estimation = default_custom_runtime_estimation
         super().__init__(
             gm,
             max_in_flight_gb=0.0,
@@ -260,12 +248,8 @@ class ManualOverlapScheduler(OverlapScheduler):
             insert_overlap_deps=insert_overlap_deps,
             compute_overlap_multipler=0.0,
             max_coll_distance=0,
-            # ManualOverlapScheduler doesn't use runtime estimates (it
-            # hardcodes estimated_time_ms=0 in _identify_collectives and
-            # schedules purely from module_bucket_plans). Providing a
-            # no-op estimator avoids the analytical NCCL path, which
-            # crashes in compile-on-one-rank graphs where group_name is
-            # an FX Node and the distributed runtime may not be available.
+            # ManualOverlapScheduler schedules from module_bucket_plans and
+            # overrides _identify_collectives() to assign zero collective cost.
             custom_runtime_estimation=custom_runtime_estimation,
             collective_estimator=collective_estimator,
             compute_estimator=compute_estimator,

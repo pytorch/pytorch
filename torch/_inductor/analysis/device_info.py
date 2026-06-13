@@ -30,7 +30,8 @@ class DeviceInfo:
     tops_sparsity_factor: int = 1
 
 
-# Indexing is based on `torch.cuda.get_device_name()`, normalized to upper-case.
+# Indexing is based on device names returned by torch.cuda.get_device_name()
+# or torch.xpu.get_device_name(), normalized to upper-case.
 # TODO investigate profiler support for tf32 and allow device to report correct number when it's turned on.
 _device_mapping: dict[str, DeviceInfo] = {
     # Source:
@@ -156,6 +157,28 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_bw_gbs=5300.0,
         dram_gb=192.0,
     ),
+    # Intel Data Center GPU Max 1550 / PVC
+    # Sources:
+    # - Intel ARK lists Max 1550 as Xe-HPC / Ponte Vecchio with:
+    #   128 Xe-cores, 1600 MHz max dynamic clock, 128 GB HBM2e,
+    #   and 3276.8 GB/s memory bandwidth.
+    # - Intel Xe-HPC architecture guide lists Data Center GPU Max 1550
+    #   device-level throughput as:
+    #     FP32 MAD: 16384 * 2 FLOPs/clk
+    #     FP64 MAD: 16384 * 2 FLOPs/clk
+    "INTEL DATA CENTER GPU MAX 1550": DeviceInfo(
+        tops={
+            torch.float64: 52.43,
+            torch.float32: 52.43,
+            # XPU does not use NVIDIA TF32; fall back to FP32 throughput.
+            "torch.tf32": 52.43,
+            torch.bfloat16: 838.86,
+            torch.float16: 838.86,
+            torch.int8: 1677.72,
+        },
+        dram_bw_gbs=3276.8,
+        dram_gb=128,
+    ),
     # Source:
     # @lint-ignore https://www.amd.com/content/dam/amd/\
     # en/documents/instinct-business-docs/product-briefs/instinct-mi210-brochure.pdf
@@ -184,7 +207,9 @@ _device_mapping: dict[str, DeviceInfo] = {
 _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
 _device_mapping["AMD INSTINCT MI210X"] = _device_mapping["AMD MI210X"]
-
+_device_mapping["Intel(R) Data Center GPU Max 1550"] = _device_mapping[
+    "INTEL DATA CENTER GPU MAX 1550"
+]
 # Enforce the upper-case-key invariant so entries cannot silently miss
 # `lookup_device_info` (which upper-cases the query before lookup).
 _device_mapping = {k.upper(): v for k, v in _device_mapping.items()}
@@ -211,10 +236,10 @@ def _get_device_name(device: torch.device | None = None) -> str | None:
         else:
             return None
 
-    if device.type == "cuda":
+    if device.type == "cuda" and torch.cuda.is_available():
         return torch.cuda.get_device_name(device)
 
-    if device.type == "xpu" and hasattr(torch, "xpu"):
+    if device.type == "xpu" and hasattr(torch, "xpu") and torch.xpu.is_available():
         get_name = getattr(torch.xpu, "get_device_name", None)
         if get_name is not None:
             if device.index is None:
@@ -222,6 +247,20 @@ def _get_device_name(device: torch.device | None = None) -> str | None:
             return get_name(device.index)
 
     return None
+
+
+def datasheet_dram_bw(device: torch.device | None = None) -> float | None:
+    name = _get_device_name(device)
+    if name is None:
+        log.info("No datasheet device name found for %s, returning None", device)
+        return None
+
+    device_info = lookup_device_info(name)
+    if device_info is None:
+        log.info("Device %s not in datasheet, returning None", name)
+        return None
+
+    return device_info.dram_bw_gbs
 
 
 def datasheet_tops(

@@ -126,18 +126,6 @@ def get_group_name(n: fx.Node) -> str:
     return _resolve_group_name(kwargs["group_name"])
 
 
-def get_custom_estimation(
-    n: fx.Node,
-    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
-    | None = None,
-    override_size: int | None = None,
-) -> float | None:
-    if custom_runtime_estimation is None:
-        return None
-
-    return custom_runtime_estimation(n, override_size)
-
-
 def estimate_collective_time(
     n: fx.Node,
     override_size: int | None = None,
@@ -146,10 +134,10 @@ def estimate_collective_time(
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
 ) -> float:
     """Estimate the runtime of a collective operation, optionally with an overridden size."""
-    if (
-        est := get_custom_estimation(n, custom_runtime_estimation, override_size)
-    ) is not None:
-        return est
+    if custom_runtime_estimation is not None:
+        est = custom_runtime_estimation(n, override_size)
+        if est is not None:
+            return est
 
     if collective_estimator == "benchmark":
         from torch._inductor.fx_passes.node_runtime_estimation import (
@@ -319,11 +307,11 @@ def benchmark_node_with_cache_key(
         if unbacked_tensor:
             return 0, key
 
-        if (
-            est := get_custom_estimation(n, custom_runtime_estimation, None)
-        ) is not None:
-            set_cached_node_time(key, est)
-            return est, key
+        if custom_runtime_estimation is not None:
+            est = custom_runtime_estimation(n, None)
+            if est is not None:
+                set_cached_node_time(key, est)
+                return est, key
 
         bench = get_collective_do_bench()
         out = bench(lambda: n.target(*args, **kwargs))  # type: ignore[operator]
@@ -772,11 +760,9 @@ class OverlapScheduler:
 
         for n in self.compute_nodes:
             # Prefer caller-provided estimation before falling back to roofline.
-            val_analytical = get_custom_estimation(
-                n,
-                self.custom_runtime_estimation,
-                None,
-            )
+            val_analytical = None
+            if self.custom_runtime_estimation is not None:
+                val_analytical = self.custom_runtime_estimation(n, None)
             if val_analytical is None:
                 val_analytical = estimate_roofline_runtime_ms(n)
             runtime_estimations_analytical.append(val_analytical)
@@ -823,11 +809,10 @@ class OverlapScheduler:
             # Benchmark CUDA events (non-deterministic, needs alignment)
             # Skip collectives with custom estimation
             for n in collective_nodes:
-                if (
-                    get_custom_estimation(n, self.custom_runtime_estimation, None)
-                    is not None
-                ):
-                    continue
+                if self.custom_runtime_estimation is not None:
+                    est = self.custom_runtime_estimation(n, None)
+                    if est is not None:
+                        continue
 
                 # Benchmark actual size
                 cuda_val, cuda_key = benchmark_collective_with_cuda_events(n, nruns=5)
@@ -898,33 +883,18 @@ class OverlapScheduler:
                 collective_medians.append(median_runtime_estimation)
 
         # Log benchmarks with analytical comparisons
-        if self.log_runtime_estimations:
-            if collective_keys:
-                from torch._inductor.fx_passes.node_runtime_estimation import (
-                    _log_collective_benchmarks,
-                )
+        if self.log_runtime_estimations and collective_keys:
+            from torch._inductor.fx_passes.node_runtime_estimation import (
+                _log_collective_benchmarks,
+            )
 
-                _log_collective_benchmarks(
-                    benchmarked_collective_nodes,
-                    collective_keys,
-                    collective_medians,
-                    world_size,
-                    "fx_collectives_node_runtime_estimation",
-                )
-            else:
-                from torch._inductor.fx_passes.node_runtime_estimation import (
-                    _log_collective_benchmarks,
-                )
-
-                all_collective_nodes = [
-                    info.start_node for info in self.collective_info.values()
-                ]
-                if all_collective_nodes:
-                    _log_collective_benchmarks(
-                        all_collective_nodes,
-                        artifact_name="fx_collectives_analytical_estimation",
-                    )
-
+            _log_collective_benchmarks(
+                benchmarked_collective_nodes,
+                collective_keys,
+                collective_medians,
+                world_size,
+                "fx_collectives_node_runtime_estimation",
+            )
         log.info("Overlap scheduling: Runtime estimations aligned")
 
     def _get_next_nodes(self) -> list[fx.Node]:
@@ -1762,29 +1732,24 @@ def gather_node_runtime_estimations(
 
     for node in nodes:
         if is_compute_node(node):
-            custom_est = get_custom_estimation(
-                node,
-                custom_runtime_estimation,
-                None,
-            )
-            if custom_est is not None:
-                est = custom_est
-            else:
-                est = estimate_roofline_runtime_ms(node)
+            if custom_runtime_estimation is not None:
+                est = custom_runtime_estimation(node, None)
+                if est is not None:
+                    estimations[node] = est
+                    compute_nodes.append(node)
+                    compute_analytical.append(est)
+                    continue
 
+            est = estimate_roofline_runtime_ms(node)
             estimations[node] = est
             compute_nodes.append(node)
             compute_analytical.append(est)
 
         elif node.op == "call_function" and node not in estimations:
-            custom_est = get_custom_estimation(
-                node,
-                custom_runtime_estimation,
-                None,
-            )
-            if custom_est is not None:
-                estimations[node] = custom_est
-
+            if custom_runtime_estimation is not None:
+                est = custom_runtime_estimation(node, None)
+                if est is not None:
+                    estimations[node] = est
             elif custom_runtime_estimation is None:
                 est = estimate_roofline_runtime_ms(node)
                 if est > 0:

@@ -1,4 +1,5 @@
 import torch
+import torch.utils._pytree as pytree
 from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
 from torch.fx.experimental.symbolic_shapes import (
     optimization_hint,
@@ -75,21 +76,10 @@ _IGNORE_OPS = _VIEW_OPS | _CREATE_OPS
 
 
 def _get_device_from_value(value) -> torch.device | None:  # type: ignore[no-untyped-def]
-    if isinstance(value, torch.Tensor):
-        return value.device
-
-    if isinstance(value, (list, tuple)):
-        for item in value:
-            device = _get_device_from_value(item)
-            if device is not None:
-                return device
-
-    if isinstance(value, dict):
-        for item in value.values():
-            device = _get_device_from_value(item)
-            if device is not None:
-                return device
-
+    flat_values, _ = pytree.tree_flatten(value)
+    for item in flat_values:
+        if isinstance(item, torch.Tensor):
+            return item.device
     return None
 
 
@@ -172,13 +162,17 @@ def get_transfer_time(flat_args_kwargs, flat_outs) -> float:  # type: ignore[no-
     Estimates the memory transfer time of input and output tensors.
 
     Args:
-        flat_args_kwargs (List[torch.Tensor]): The flat list of arguments and keyword arguments.
-        flat_outs (List[torch.Tensor]): The flat list of outputs.
+        flat_args_kwargs: The flat list of arguments and keyword arguments.
+        flat_outs: The flat list of outputs.
 
     Returns:
         float: The estimated memory transfer time in nanoseconds.
     """
-    gpu_memory_bandwidth = get_gpu_dram_gbps()
+    device = _get_device_from_value((flat_args_kwargs, flat_outs))
+    gpu_memory_bandwidth = get_gpu_dram_gbps(device=device)
+    if gpu_memory_bandwidth <= 0:
+        return 0.0
+
     read_bytes = sum(
         get_num_bytes(t) for t in flat_args_kwargs if isinstance(t, torch.Tensor)
     )
@@ -186,6 +180,6 @@ def get_transfer_time(flat_args_kwargs, flat_outs) -> float:  # type: ignore[no-
         get_num_bytes(t) for t in flat_outs if isinstance(t, torch.Tensor)
     )
     counted_bytes = read_bytes + write_bytes
-    # The GPU memory bandwidth is in GB/s so the transfer time is in nanoseconds
-    transfer_time = counted_bytes / gpu_memory_bandwidth
-    return transfer_time
+
+    # gpu_memory_bandwidth is GB/s. bytes / GB/s gives nanoseconds.
+    return counted_bytes / gpu_memory_bandwidth
