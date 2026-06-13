@@ -2260,6 +2260,7 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
     dynamic_strides: DimList[DimDynamic] = None  # type: ignore[assignment]
     constraint_sizes: DimList[DimConstraint] = None  # type: ignore[assignment]
     constraint_strides: DimList[DimConstraint] = None  # type: ignore[assignment]
+    specialize_one: DimList[bool] | None = None
     specialize_on: list[list[Callable[_P1, _T1]]] | None = None
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
@@ -2292,6 +2293,12 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
             object.__setattr__(
                 self, "constraint_strides", [None] * len(self.dynamic_sizes)
             )
+        specialize_one = self.specialize_one
+        if specialize_one is None:
+            specialize_one = [True] * len(self.dynamic_sizes)
+            object.__setattr__(self, "specialize_one", specialize_one)
+        if len(specialize_one) != len(self.dynamic_sizes):
+            raise AssertionError(f"{len(specialize_one)} != {len(self.dynamic_sizes)}")
         if not all(
             stride in (DimDynamic.INFER_STRIDE, DimDynamic.DYNAMIC, DimDynamic.DUCK)
             for stride in self.dynamic_strides
@@ -4730,16 +4737,20 @@ class ShapeEnv:
 
         _assert_symbol_context(symbolic_context)
         dynamic_dims = symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
+        specialize_one = symbolic_context.specialize_one  # type: ignore[attr-defined]
 
         constraint_dims = symbolic_context.constraint_sizes  # type: ignore[attr-defined]
         size: list[sympy.Expr] = []
         for i, val in enumerate(tensor_size):
+            do_not_specialize_zero_one = config.backed_size_oblivious
+            do_not_specialize_one = not specialize_one[i]
             sym = self.create_symbol(
                 hint_overrides.get(i, val),
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
                 constraint_dims[i],
-                do_not_specialize_zero_one=config.backed_size_oblivious,
+                do_not_specialize_zero_one=do_not_specialize_zero_one,
+                do_not_specialize_one=do_not_specialize_one,
                 symbolic_context=symbolic_context,
             )
             if (
@@ -4754,7 +4765,7 @@ class ShapeEnv:
                         )
                     )
             if (
-                config.backed_size_oblivious
+                (do_not_specialize_zero_one or do_not_specialize_one)
                 and isinstance(sym, sympy.Symbol)  # could be static
                 and symbol_is_type(sym, SymT.SIZE)
             ):
@@ -5498,6 +5509,7 @@ class ShapeEnv:
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: bool | None = True,
         do_not_specialize_zero_one: bool = False,
+        do_not_specialize_one: bool = False,
         symbolic_context: SymbolicContext | None = None,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
@@ -5601,10 +5613,13 @@ class ShapeEnv:
                 ] = out
             return out
 
-        if do_not_specialize_zero_one:
-            specialize_zero_one = False
-        else:
-            specialize_zero_one = self.specialize_zero_one
+        specialize_zero = self.specialize_zero_one and not do_not_specialize_zero_one
+        specialize_one = self.specialize_zero_one and not (
+            do_not_specialize_zero_one or do_not_specialize_one
+        )
+        do_not_specialize_zero_or_one = (
+            do_not_specialize_zero_one or do_not_specialize_one
+        )
 
         if not isinstance(source, Source):
             raise AssertionError(f"{type(source)} {source}")
@@ -5635,11 +5650,10 @@ class ShapeEnv:
 
         sloc = self._get_sloc()
 
-        if val in (0, 1) and specialize_zero_one:
-            if val == 0:
-                return sympy.S.Zero
-            else:
-                return sympy.S.One
+        if val == 0 and specialize_zero:
+            return sympy.S.Zero
+        if val == 1 and specialize_one:
+            return sympy.S.One
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
@@ -5677,19 +5691,31 @@ class ShapeEnv:
 
             if isinstance(val, int):
                 if positive:
-                    # Add assertions for the newly created symbols
-                    self._add_assertion(sympy_expr > 1)
-
-                    # Apply default range, which assumes not zero-one
-                    self.var_to_range[sympy_expr] = self._default_value_range(
-                        do_not_specialize_zero_one
+                    # Apply default range, respecting which of zero/one remain
+                    # specialized for this symbol.
+                    default_range = self._default_value_range(
+                        do_not_specialize_zero_one, do_not_specialize_one
                     )
+                    self.var_to_range[sympy_expr] = default_range
+                    # Add assertions for the newly created symbols.  Keep the
+                    # same strict form as the old positive-size axiom so
+                    # deferred runtime asserts do not get folded away by the
+                    # lightweight non-negative comparison fast path.
+                    if default_range.lower > 0:
+                        self._add_assertion(
+                            sympy.Gt(sympy_expr, default_range.lower - 1)
+                        )
+                    else:
+                        self._add_assertion(
+                            sympy.Le(default_range.lower, sympy_expr, evaluate=False)
+                        )
                     self.var_to_range_sloc[sympy_expr] = ValueRangesSLoc(
                         self._get_sloc(
                             "user code shown is first use of this value--the guard itself is not "
                             "due user code but due to 0/1 specialization in the framework; to "
                             "avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim)"
                             if self.specialize_zero_one
+                            and not do_not_specialize_zero_or_one
                             else None
                         ),
                         sloc,
@@ -7934,9 +7960,16 @@ class ShapeEnv:
 
     # See: Note - On 0/1 specialization
     def _default_value_range(
-        self, do_not_specialize_zero_one: bool = False
+        self,
+        do_not_specialize_zero_one: bool = False,
+        do_not_specialize_one: bool = False,
     ) -> ValueRanges[sympy.Expr]:
-        lower = 0 if (do_not_specialize_zero_one or not self.specialize_zero_one) else 2
+        if do_not_specialize_zero_one or not self.specialize_zero_one:
+            lower = 0
+        elif do_not_specialize_one:
+            lower = 1
+        else:
+            lower = 2
         return ValueRanges(lower, int_oo)
 
     def _default_unspecified_value_range(self) -> ValueRanges[sympy.Expr]:
@@ -8689,25 +8722,32 @@ class ShapeEnv:
         # TODO: split conjunctions and evaluate them separately
         # Try to quickly evaluate trivially true/false comparisons
         # using var_to_range, before calling expensive _maybe_evaluate_static.
-        fast_result = self._maybe_fast_eval_comparison(expr)
-        if fast_result is not None:
-            return bool(fast_result)
+        defer_backed_runtime_assert = (
+            self.prefer_deferred_runtime_asserts_over_guards
+            and expr.free_symbols
+            and expr.free_symbols <= self.backed_var_to_val.keys()
+        )
+        new_expr = expr
+        if not defer_backed_runtime_assert:
+            fast_result = self._maybe_fast_eval_comparison(expr)
+            if fast_result is not None:
+                return bool(fast_result)
 
-        if self._should_skip_static_eval(expr):
-            new_expr = expr
-        else:
-            static_expr = self._maybe_evaluate_static(expr)
-            if static_expr is not None:
-                self.log.debug(
-                    "runtime_assert %s == %s [statically known]", orig_expr, static_expr
-                )
-                # TODO: assert bool(static_expr)
-                return bool(static_expr)
+            if not self._should_skip_static_eval(expr):
+                static_expr = self._maybe_evaluate_static(expr)
+                if static_expr is not None:
+                    self.log.debug(
+                        "runtime_assert %s == %s [statically known]",
+                        orig_expr,
+                        static_expr,
+                    )
+                    # TODO: assert bool(static_expr)
+                    return bool(static_expr)
 
-            # Attempt to eliminate the unbacked SymInt
-            new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
-            if new_expr is None:
-                raise AssertionError("new_expr must not be None")
+                # Attempt to eliminate the unbacked SymInt
+                new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+                if new_expr is None:
+                    raise AssertionError("new_expr must not be None")
         if (
             not self.prefer_deferred_runtime_asserts_over_guards
             and new_expr.free_symbols <= self.backed_var_to_val.keys()

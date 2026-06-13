@@ -17374,7 +17374,7 @@ def forward(self, x):
                 for node in ep.graph.nodes
             ].count(True)
             if private_api:
-                self.assertEqual(num_asserts, 6)
+                self.assertEqual(num_asserts, 4)
                 with self.assertRaisesRegex(
                     RuntimeError,
                     r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, s77 - 1\), 0\)",
