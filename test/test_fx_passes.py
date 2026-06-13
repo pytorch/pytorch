@@ -538,6 +538,68 @@ class TestFXGraphPasses(JitTestCase):
         self.assertEqual(sorted_names_reversed[2], "add_2")
         self.assertEqual(sorted_names_reversed[3], "add_3")
 
+    def test_fuse_preserves_original_placeholder_input_order(self):
+        class M(torch.nn.Module):
+            def forward(self, input_ids, attention_mask):
+                mask = attention_mask + 1
+                ids = input_ids * 2
+                return mask + ids
+
+        gm = symbolic_trace(M())
+        partition = {
+            node: None
+            for node in gm.graph.nodes
+            if node.op not in ("placeholder", "output")
+        }
+
+        fused_graph = fuse_by_partitions(gm, [partition])
+        fused_submodule = fused_graph.get_submodule("fused_0")
+        submodule_inputs = [
+            node.name for node in fused_submodule.graph.nodes if node.op == "placeholder"
+        ]
+        self.assertEqual(submodule_inputs, ["input_ids", "attention_mask"])
+
+        fused_node = next(
+            node for node in fused_graph.graph.nodes if node.op == "call_module"
+        )
+        self.assertEqual([node.name for node in fused_node.args], submodule_inputs)
+
+        input_ids, attention_mask = torch.rand(4), torch.rand(4)
+        torch.testing.assert_close(
+            M()(input_ids, attention_mask),
+            fused_graph(input_ids, attention_mask),
+        )
+
+    def test_fuse_preserves_original_intermediate_input_order(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x + 1
+                b = y + 1
+                c = b * a
+                return c + 1
+
+        gm = symbolic_trace(M())
+        nodes_by_name = {node.name: node for node in gm.graph.nodes}
+        partition = {
+            nodes_by_name["mul"]: None,
+            nodes_by_name["add_2"]: None,
+        }
+
+        fused_graph = fuse_by_partitions(gm, [partition])
+        fused_submodule = fused_graph.get_submodule("fused_0")
+        submodule_inputs = [
+            node.name for node in fused_submodule.graph.nodes if node.op == "placeholder"
+        ]
+        self.assertEqual(submodule_inputs, ["add", "add_1"])
+
+        fused_node = next(
+            node for node in fused_graph.graph.nodes if node.op == "call_module"
+        )
+        self.assertEqual([node.name for node in fused_node.args], submodule_inputs)
+
+        x, y = torch.rand(4), torch.rand(4)
+        torch.testing.assert_close(M()(x, y), fused_graph(x, y))
+
     def test_partitioner_nested_getitem_chains(self):
         """Test that nested getitem chains are properly reassigned to producer's partition.
 
