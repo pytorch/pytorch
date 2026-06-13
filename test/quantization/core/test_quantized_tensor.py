@@ -47,7 +47,8 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     min_val = min(0.0, min_val)
     max_val = max(0.0, max_val)
     scale = (np.float64(max_val) - min_val) / (qmax - qmin)
-    if scale == 0.0 or math.isinf(1.0 / scale):
+    # Match C++ ChooseQuantizationParams: use float32 when checking overflow.
+    if float(scale) == 0.0 or math.isinf(1.0 / float(scale)):
         scale = np.float64(0.1)
         zero_point = 0
 
@@ -1553,6 +1554,16 @@ class TestQuantizedTensor(TestCase):
         )
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
         self.assertEqual(dequantized_X, dequantized_decomposed_X)
+
+    def test_choose_qparams_degenerate_tiny_tensor(self):
+        tiny = np.float32(np.finfo(np.float32).tiny)
+        X = torch.full((4, 4), tiny, dtype=torch.float32)
+        expected_scale, expected_zero_point = _calculate_dynamic_qparams(
+            X.numpy(), torch.quint8, reduce_range=False
+        )
+        scale, zero_point = torch._choose_qparams_per_tensor(X, False)
+        self.assertAlmostEqual(expected_scale, scale, places=6)
+        self.assertEqual(expected_zero_point, zero_point)
 
     def test_decomposed_quantize_per_channel(self):
         # register the ops
