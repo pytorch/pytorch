@@ -20478,6 +20478,53 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        @config.patch(
+            {
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
+            }
+        )
+        def test_tma_descriptor_no_x_dim_split_scan(self):
+            # Regression test: split_scan kernels have no_x_dim=True (XBLOCK
+            # hardcoded to 1). TMA descriptors require >= 16 bytes in the
+            # innermost dimension, so TMA must be rejected when the innermost
+            # block is XBLOCK and XBLOCK is fixed at 1.
+            def fn(x, b):
+                return torch.cumsum(x + b, dim=1)
+
+            x = torch.randn(1, 129, 64, device=GPU_TYPE)
+            b = torch.randn(64, device=GPU_TYPE)
+            actual = torch.compile(fn)(x, b)
+            expected = fn(x, b)
+            torch.testing.assert_close(actual, expected)
+
+        @config.patch(
+            {
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
+                "combo_kernels": True,
+            }
+        )
+        def test_tma_descriptor_combo_kernel_shared_xblock(self):
+            # Regression test: in combo kernels without per_subkernel_blocks,
+            # XBLOCK is shared across sub-kernels. If one sub-kernel has
+            # xnumel=1 (forcing XBLOCK=1), tensor descriptors in sibling
+            # sub-kernels with block_shape containing XBLOCK will violate
+            # the TMA 16-byte minimum. TMA must be rejected for such cases.
+            def fn(x):
+                return (
+                    x.mean(),
+                    x.mean(-1),
+                    torch.mean(x, -2, keepdim=True),
+                    x.mean([0, 1]),
+                )
+
+            x = torch.randn(1, 2, 4, 8, device=GPU_TYPE)
+            actual = torch.compile(fn)(x)
+            expected = fn(x)
+            for a, e in zip(actual, expected):
+                torch.testing.assert_close(a, e)
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 
