@@ -4864,9 +4864,16 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.LogSigmoid,
                module_inputs_func=module_inputs_torch_nn_LogSigmoid,
-               skips=(
-                   # See #119108: tolerance issue
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward", device_type='mps', dtypes=[torch.float16]),)
+               decorators=(
+                   # The test's reference_fn is `i.sigmoid().log()`, which in fp16
+                   # loses precision as sigmoid(x) saturates near 1 for moderate x.
+                   # log_sigmoid uses the stable `min(0,x) - log1p(exp(-|x|))`
+                   # in fp32, so it can differ from the naive reference by up to
+                   # ~1 ULP of sigmoid(x) (~4e-3 for x in fp16's mid-range).
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
+                                "TestModule", "test_forward",
+                                device_type='mps', dtypes=[torch.float16]),
+               ),
                ),
     ModuleInfo(torch.nn.SiLU,
                module_inputs_func=module_inputs_torch_nn_SiLU,
