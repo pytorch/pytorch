@@ -556,7 +556,21 @@ class FakeTensorConverter:
             # observable way without hitting UB.
             and t.dtype
             in [torch.int64, torch.int32, torch.int16, torch.int8, torch.float64]
-            and source is not None
+            # Dynamo may pass shape_env=None for static fakification while
+            # the mode still owns a ShapeEnv. In that case, do not install a
+            # concrete Python scalar where Dynamo expects a SymNode-like memo.
+            #
+            # Similarly, compiler tracing can use a FakeTensorMode without a
+            # ShapeEnv; keep concrete memos limited to truly manual/plain
+            # FakeTensorMode usage so _local_scalar_dense tracing semantics do
+            # not change under AOT/Inductor.
+            and (
+                source is not None
+                or (
+                    fake_mode.shape_env is None
+                    and torch._guards.TracingContext.try_get() is None
+                )
+            )
             # Impede setting up item() on things coming from random.  These
             # are not "real" item() calls, instead UnspecializedPythonVariable
             # is unsafely pretending an int is a tensor, which can sometimes
@@ -574,11 +588,11 @@ class FakeTensorConverter:
             #
             #   PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py -k
             #   TestReductionsCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
-            and not isinstance(source, RandomValueSource)
+            and (source is None or not isinstance(source, RandomValueSource))
             # In Dynamo, shape_env is never none (even with static shapes).
             # However, FakeTensorMode can be used by hand and in some cases
             # ShapeEnv is not allocated.
-            and shape_env is not None
+            and (source is None or shape_env is not None)
         ):
             from torch._dynamo.source import CallMethodItemSource, FloatTensorSource
             from torch.fx.experimental.symbolic_shapes import DimDynamic
@@ -586,31 +600,38 @@ class FakeTensorConverter:
             with no_dispatch():
                 value = t.item()
             if not math.isnan(value) and not math.isinf(value):
-                # Peephole strip out unnecessary torch.as_tensor(x).item()
-                if isinstance(source, FloatTensorSource):
-                    item_source = source.base
+                if source is None:
+                    # Plain FakeTensorMode may not have a ShapeEnv. Preserve
+                    # the concrete scalar memo for real 0-D tensor inputs.
+                    out.item_memo = value
                 else:
-                    item_source = CallMethodItemSource(source)
-                symbol = shape_env.create_unspecified_symbol(
-                    value,
-                    source=item_source,
-                    dynamic_dim=DimDynamic.DYNAMIC,
-                    symbolic_context=symbolic_context,
-                )
-                # NB: reusing item_memo here ensures that we invalidate on
-                # mutation
-                if t.dtype == torch.int64:
-                    out.item_memo = shape_env.create_symintnode(
-                        symbol,
-                        hint=value,
+                    if shape_env is None:
+                        raise AssertionError("shape_env unexpectedly missing")
+                    # Peephole strip out unnecessary torch.as_tensor(x).item()
+                    if isinstance(source, FloatTensorSource):
+                        item_source = source.base
+                    else:
+                        item_source = CallMethodItemSource(source)
+                    symbol = shape_env.create_unspecified_symbol(
+                        value,
                         source=item_source,
+                        dynamic_dim=DimDynamic.DYNAMIC,
+                        symbolic_context=symbolic_context,
                     )
-                elif t.dtype == torch.float64:
-                    out.item_memo = shape_env.create_symfloatnode(
-                        symbol,
-                        hint=value,
-                        source=item_source,
-                    )
+                    # NB: reusing item_memo here ensures that we invalidate on
+                    # mutation
+                    if t.dtype == torch.int64:
+                        out.item_memo = shape_env.create_symintnode(
+                            symbol,
+                            hint=value,
+                            source=item_source,
+                        )
+                    elif t.dtype == torch.float64:
+                        out.item_memo = shape_env.create_symfloatnode(
+                            symbol,
+                            hint=value,
+                            source=item_source,
+                        )
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
@@ -732,15 +753,18 @@ class SymNumberMemoDescriptor:
         if (r := getattr(obj, self._memo(obj))) is None:
             return None
 
-        # If backed, it's ok to preserve memo since we know it won't renumber.
+        # Version counter based tracking isn't 100% sound but it's close
+        # enough
+        if not self._is_nested_int and getattr(obj, self._memo_vc(obj)) != obj._version:
+            setattr(obj, self._memo(obj), None)
+            return None
+
+        # Backed SymFloats are stable across retracing epochs. Keep this after
+        # the version check so tensor mutation still invalidates the memo.
         if isinstance(r, torch.SymFloat) and r.node.hint is not None:
             return r
 
-        # Version counter based tracking isn't 100% sound but it's close
-        # enough
         if (
-            not self._is_nested_int and getattr(obj, self._memo_vc(obj)) != obj._version
-        ) or (
             not self._is_nested_int
             and getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
         ):
@@ -3327,6 +3351,15 @@ class FakeTensorMode(TorchDispatchMode):
         symbolic_context: SymbolicContext | None = None,
         trace: bool = True,
     ) -> FakeTensor:
+        if (
+            isinstance(tensor, FakeTensor)
+            and tensor.fake_mode is self
+            and static_shapes is None
+            and source is None
+            and symbolic_context is None
+        ):
+            return tensor
+
         shape_env: ShapeEnv | None = self.shape_env
         if static_shapes is None:
             static_shapes = self.static_shapes
@@ -3560,41 +3593,25 @@ def _maybe_extract_fake_view_from_functional_base(
     FunctionalTensor. If that FunctionalTensor wraps one of our FakeTensors, the
     plain view still represents fake data and should be validated as such.
     """
-    from torch._subclasses.functional_tensor import FunctionalTensor
-
-    base = x._base
-    if isinstance(base, FunctionalTensor):
-        functional_base = base.elem
-    elif isinstance(base, Tensor) and torch._is_functional_tensor(base):
-        functional_base = base
-    else:
-        return None
-    if not torch._is_functional_tensor(functional_base):
-        return None
-
-    inner = torch._from_functional_tensor(functional_base)
-    if not fake_mode.is_our_fake(inner):
-        return None
-
-    can_use_unsafe_view = (
-        inner.is_contiguous()
-        and x.is_contiguous()
-        and inner.numel() == x.numel()
-        and inner.storage_offset() == x.storage_offset()
+    # Keep this local to avoid an import cycle: functional_tensor imports
+    # FakeTensor from torch._subclasses at runtime.
+    from torch._subclasses.functional_tensor import (
+        can_replay_functional_tensor_view,
+        maybe_get_inner_functional_tensor_view_base,
+        replay_functional_tensor_view,
     )
-    out = (
-        torch.ops.aten._unsafe_view.default(inner, list(x.shape))
-        if can_use_unsafe_view
-        else torch.ops.aten.as_strided.default(
-            inner, x.shape, x.stride(), x.storage_offset()
-        )
-    )
+
+    inner = maybe_get_inner_functional_tensor_view_base(x)
+    if (
+        inner is None
+        or not fake_mode.is_our_fake(inner)
+        or not can_replay_functional_tensor_view(inner, x)
+    ):
+        return None
+
+    out = replay_functional_tensor_view(inner, x)
     if fake_mode.is_our_fake(out):
         return out
-    if out.device.type == "meta":
-        return fake_mode.fake_tensor_converter.from_meta_and_device(
-            fake_mode, out, inner.fake_device
-        )
     return None
 
 

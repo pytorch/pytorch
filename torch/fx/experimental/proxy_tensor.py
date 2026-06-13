@@ -58,7 +58,13 @@ from torch._subclasses.fake_tensor import (
     is_fake,
     unset_fake_temporarily,
 )
-from torch._subclasses.functional_tensor import FunctionalTensor
+from torch._subclasses.functional_tensor import (
+    can_replay_functional_tensor_view,
+    can_replay_functional_tensor_view_with_unsafe_view,
+    FunctionalTensor,
+    maybe_get_inner_functional_tensor_view_base,
+    replay_functional_tensor_view,
+)
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import GraphModule, Proxy, Tracer
 from torch.fx.graph_module import _assign_attr
@@ -1025,18 +1031,10 @@ def _maybe_get_proxy_view_from_functional_base(
     tracer: _ProxyTracer, t: Tensor
 ) -> _ProxyTensor | None:
     base = t._base
-    if isinstance(base, FunctionalTensor):
-        functional_base = base.elem
-    elif isinstance(base, Tensor) and torch._is_functional_tensor(base):
-        functional_base = base
-    else:
-        return None
-
-    if not torch._is_functional_tensor(functional_base):
-        return None
-
-    inner = torch._from_functional_tensor(functional_base)
-    if not isinstance(inner, FakeTensor):
+    inner = maybe_get_inner_functional_tensor_view_base(t)
+    if not isinstance(inner, FakeTensor) or not can_replay_functional_tensor_view(
+        inner, t
+    ):
         return None
 
     inner_proxy = get_proxy_slot(inner, tracer, None)
@@ -1048,18 +1046,9 @@ def _maybe_get_proxy_view_from_functional_base(
     def proxy_arg(e: object) -> object:
         return fetch_sym_proxy(tracer)(e) if isinstance(e, py_sym_types) else e
 
-    can_use_unsafe_view = (
-        inner.is_contiguous()
-        and t.is_contiguous()
-        and inner.numel() == t.numel()
-        and inner.storage_offset() == t.storage_offset()
-    )
+    can_use_unsafe_view = can_replay_functional_tensor_view_with_unsafe_view(inner, t)
     with disable_proxy_modes_tracing():
-        fake_view = (
-            aten._unsafe_view.default(inner, list(t.shape))
-            if can_use_unsafe_view
-            else aten.as_strided.default(inner, t.shape, t.stride(), t.storage_offset())
-        )
+        fake_view = replay_functional_tensor_view(inner, t)
     if not isinstance(fake_view, FakeTensor):
         return None
 
@@ -3125,7 +3114,7 @@ def make_fx(
         _allow_fake_constant,
         _error_on_data_dependent_ops,
         record_stack_traces=record_stack_traces
-        or config.trace.provenance_tracking_level == 1,
+        or config.effective_provenance_tracking_level() == 1,
         proxy_module_inputs=proxy_module_inputs,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
