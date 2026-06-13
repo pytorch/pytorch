@@ -215,6 +215,35 @@ getStreamFromPool(const int priority, DeviceIndex device = -1);
 C10_CUDA_API CUDAStream
 getStreamFromExternal(cudaStream_t ext_stream, DeviceIndex device_index);
 
+#ifdef USE_ROCM
+/**
+ * Take a reference on a stream that getStreamFromPool created in non-pooled
+ * debug mode (PYTORCH_HIP_NO_STREAM_POOL=1, see
+ * Note [HIP Non-pooled Streams]). Returns true if a reference was taken;
+ * false if the mode is disabled or the stream is not a live non-pooled
+ * stream (e.g. pool, default, external, or already-destroyed streams). The
+ * caller must pair a successful retain with releaseNonPooledStream.
+ */
+C10_CUDA_API bool retainNonPooledStream(CUDAStream stream);
+
+/**
+ * Drop a reference to a stream that getStreamFromPool created in non-pooled
+ * debug mode; the stream is synchronized and destroyed when its last
+ * reference drops. No-op if the mode is disabled or the stream was not
+ * created by that mode, so it is safe to call unconditionally from owner
+ * teardown paths.
+ */
+C10_CUDA_API void releaseNonPooledStream(CUDAStream stream);
+
+/**
+ * True if the stream's handle was destroyed by non-pooled debug mode.
+ * Consumers that cache streams and later record events against them (the
+ * caching allocators) use this to skip destroyed handles; the destroy-time
+ * synchronize makes that safe. See Note [HIP Non-pooled Streams].
+ */
+C10_CUDA_API bool isDestroyedNonPooledStream(CUDAStream stream);
+#endif
+
 /**
  * Get the default CUDA stream, for the passed CUDA device, or for the
  * current device if no device index is passed.  The default stream is

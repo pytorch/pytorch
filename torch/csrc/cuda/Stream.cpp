@@ -75,6 +75,8 @@ static PyObject* THCPStream_pynew(
     TORCH_CHECK(
         priority == 0, "Priority was explicitly set for an external stream")
   }
+  const bool from_pool =
+      !(stream_id || device_index || device_type) && !stream_ptr_provided;
   at::cuda::CUDAStream stream = (stream_id || device_index || device_type)
       ? at::cuda::CUDAStream::unpack3(
             stream_id,
@@ -92,6 +94,15 @@ static PyObject* THCPStream_pynew(
   self->device_index = static_cast<int64_t>(stream.device_index());
   self->device_type = static_cast<int64_t>(stream.device_type());
   new (&self->cuda_stream) at::cuda::CUDAStream(stream);
+  self->holds_non_pooled_stream_ref = from_pool;
+#ifdef USE_ROCM
+  // See Note [HIP Non-pooled Streams]: the pool branch transfers the
+  // creator's reference to this object; wrappers take their own.
+  if (!from_pool) {
+    self->holds_non_pooled_stream_ref =
+        c10::cuda::retainNonPooledStream(stream);
+  }
+#endif
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
