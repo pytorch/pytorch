@@ -89,10 +89,10 @@ namespace at::functorch {
 namespace{
 
 std::tuple<Tensor, std::optional<int64_t>> clone_batch_rule_result(
-    Tensor result,
+    const Tensor& result,
     std::optional<int64_t> result_bdim) {
   return std::make_tuple(
-      std::move(result).clone(at::MemoryFormat::Contiguous), result_bdim);
+      result.clone(at::MemoryFormat::Contiguous), result_bdim);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> unsqueeze_batch_rule(
@@ -110,7 +110,7 @@ std::tuple<Tensor, std::optional<int64_t>> unsqueeze_copy_batch_rule(
     std::optional<int64_t> self_bdim,
     int64_t dim) {
   auto [result, result_bdim] = unsqueeze_batch_rule(self, self_bdim, dim);
-  return clone_batch_rule_result(std::move(result), result_bdim);
+  return clone_batch_rule_result(result, result_bdim);
 }
 
 // NB: repeat is not actually a view, but it is in this file
@@ -238,7 +238,7 @@ std::tuple<Tensor, std::optional<int64_t>> squeeze_copy_batch_rule(
     const Tensor& self,
     std::optional<int64_t> bdim) {
   auto [result, result_bdim] = squeeze_batch_rule(self, bdim);
-  return clone_batch_rule_result(std::move(result), result_bdim);
+  return clone_batch_rule_result(result, result_bdim);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> squeeze_dims_batch_rule(
@@ -276,7 +276,7 @@ std::tuple<Tensor, std::optional<int64_t>> squeeze_dims_batch_rule(
 std::tuple<Tensor, std::optional<int64_t>> squeeze_copy_dims_batch_rule(
     const Tensor& self, std::optional<int64_t> bdim, IntArrayRef dims) {
   auto [result, result_bdim] = squeeze_dims_batch_rule(self, bdim, dims);
-  return clone_batch_rule_result(std::move(result), result_bdim);
+  return clone_batch_rule_result(result, result_bdim);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> squeeze_dim_batch_rule(
@@ -411,7 +411,7 @@ transpose_copy_int_batch_rule(
     int64_t dim1) {
   auto [result, result_bdim] =
       transpose_int_batch_rule(self, self_bdim, dim0, dim1);
-  return clone_batch_rule_result(std::move(result), result_bdim);
+  return clone_batch_rule_result(result, result_bdim);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> permute_batching_rule(
@@ -436,7 +436,7 @@ std::tuple<Tensor, std::optional<int64_t>> permute_copy_batching_rule(
     const Tensor &self, std::optional<int64_t> self_bdim, IntArrayRef dims)
 {
   auto [result, result_bdim] = permute_batching_rule(self, self_bdim, dims);
-  return clone_batch_rule_result(std::move(result), result_bdim);
+  return clone_batch_rule_result(result, result_bdim);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> t_copy_batching_rule(
@@ -450,7 +450,11 @@ std::tuple<Tensor, std::optional<int64_t>> t_copy_batching_rule(
       "D");
   if (logical_rank < 2) {
     auto self_ = moveBatchDimToFront(self, self_bdim);
-    return clone_batch_rule_result(std::move(self_), 0);
+    std::optional<int64_t> result_bdim;
+    if (self_bdim.has_value()) {
+      result_bdim = 0;
+    }
+    return clone_batch_rule_result(self_, result_bdim);
   }
   return transpose_copy_int_batch_rule(self, self_bdim, 0, 1);
 }
