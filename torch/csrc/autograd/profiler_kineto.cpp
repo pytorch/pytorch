@@ -204,14 +204,18 @@ struct MetadataBase {
     }
   }
 
-  void addMetadata(const std::string& key, const std::string& value) {
+  void addMetadata(
+      const std::string& key,
+      const std::string& value,
+      bool quote = false) {
     if (kinetoActivity_ && !value.empty() && value != "\"\"") {
       torch::profiler::impl::kineto::addMetadata(
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<torch::profiler::impl::kineto::activity_t*>(
               kinetoActivity_),
           key,
-          value);
+          value,
+          quote);
     }
   }
 
@@ -244,6 +248,12 @@ struct AddTensorboardFields : public MetadataBase {
         parent = parent->parent_.lock();
       }
       this->addMetadata("Python parent id", parent_id.value_or("null"));
+      if (i.caller_.line_no_ > 0) {
+        this->addMetadata(
+            "CallFrom",
+            fmt::format("{}:{}", i.caller_.filename_.str(), i.caller_.line_no_),
+            /*quote=*/true);
+      }
     });
   }
 
