@@ -107,8 +107,24 @@ class TestStorageWriter(StorageWriter):
         return True
 
 
+def _reset_checkpoint_process() -> None:
+    import torch.distributed.checkpoint._async_process_executor as cp_executor
+
+    prev = cp_executor._CHECKPOINT_PROCESS
+    cp_executor._CHECKPOINT_PROCESS = None
+    del prev
+
+
 class TestAsyncProcessExecutor(DTensorTestBase):
     """Test suite for async checkpoint process executor error handling using public APIs."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        _reset_checkpoint_process()
+
+    def tearDown(self) -> None:
+        _reset_checkpoint_process()
+        super().tearDown()
 
     @with_comms
     def test_checkpoint_save_failure_continues_serving(self) -> None:
@@ -123,12 +139,14 @@ class TestAsyncProcessExecutor(DTensorTestBase):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("DCP_USE_PREFIX_STORE", None)
 
-            # 1. Simulate a failure in creating PG in background process.
+            # 1. Simulate a failure in creating the checkpoint daemon process.
+            # Mock the constructor to raise directly instead of using an invalid
+            # port, which causes a 30-minute GLOO timeout in multi-GPU CI.
             with patch(
-                "torch.distributed.checkpoint._async_process_executor.get_free_port",
-                return_value=-1,
+                "torch.distributed.checkpoint._async_process_executor._AsyncCheckpointProcess",
+                side_effect=RuntimeError("Simulated checkpoint process init failure"),
             ):
-                with self.assertRaises(ValueError) as _:
+                with self.assertRaises(RuntimeError):
                     proc_executor = _ProcessBasedAsyncCheckpointExecutor()
                     fut = proc_executor.execute_save(
                         staging_future_or_state_dict=test_state_dict,
@@ -169,6 +187,14 @@ class TestAsyncProcessExecutor(DTensorTestBase):
 
 
 class TestAsyncProcessExecutorPrefixStore(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        _reset_checkpoint_process()
+
+    def tearDown(self) -> None:
+        _reset_checkpoint_process()
+        super().tearDown()
+
     @skip_if_win32()
     @retry_on_connect_failures
     def test_checkpoint_save_with_prefix_store_enabled(self) -> None:
