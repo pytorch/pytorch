@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: Claude Issue Triage Run
 
 on:
