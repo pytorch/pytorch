@@ -382,6 +382,8 @@ class FunctionalTensor(torch.Tensor):
         *,
         masked_grad: builtins.bool | None = None,
     ) -> torch.Tensor:
+        if self.layout == torch.strided:
+            return self.to(dtype=dtype) if dtype is not None else self
         return torch.ops.aten.to_dense.default(
             self, dtype=dtype, masked_grad=masked_grad
         )
