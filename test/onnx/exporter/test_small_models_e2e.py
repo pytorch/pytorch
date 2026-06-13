@@ -80,6 +80,37 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_testing.assert_onnx_program(onnx_program)
         self.assertNotIn("Cast", [node.op_type for node in onnx_program.model.graph])
 
+    def test_export_aten_trilinear(self):
+        class Model(torch.nn.Module):
+            def forward(self, x1, weight, x2):
+                return torch.ops.aten._trilinear.default(
+                    x1, weight, x2, [1, 3], [0], [1, 2], [2, 3]
+                )
+
+        x1 = torch.randn(2, 4)
+        weight = torch.randn(3, 4, 5)
+        x2 = torch.randn(2, 5)
+
+        onnx_program = self.export(Model(), (x1, weight, x2))
+        self.assertIn("Einsum", [node.op_type for node in onnx_program.model.graph])
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_export_nn_bilinear(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bilinear = torch.nn.Bilinear(4, 5, 3)
+
+            def forward(self, x1, x2):
+                return self.bilinear(x1, x2)
+
+        x1 = torch.randn(2, 3, 4)
+        x2 = torch.randn(2, 3, 5)
+
+        onnx_program = self.export(Model(), (x1, x2))
+        self.assertIn("MatMul", [node.op_type for node in onnx_program.model.graph])
+        onnx_testing.assert_onnx_program(onnx_program)
+
     def test_onnx_export_conditional(self):
         class CondModel(torch.nn.Module):
             def forward(self, x):
