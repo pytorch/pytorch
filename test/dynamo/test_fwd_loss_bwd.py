@@ -89,6 +89,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, (l_mod_parameters_weight_, l_mod_parameters_bias_));  l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -291,6 +292,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+
         getitem: "f32[4, 4]" = grad[0];  grad = None
 
         detach: "f32[]" = loss.detach();  loss = None
@@ -1207,6 +1209,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = y.sum();  y = None
 
         grad = torch.autograd.grad(loss, [w]);  loss = w = None
+
         grad_1: "f32[4, 4]" = grad[0];  grad = None
         return (grad_1,)
 """,

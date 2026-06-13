@@ -4624,6 +4624,7 @@ class GraphModule(torch.nn.Module):
         clone: "f64[s64, s55]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
 
         cat: "f64[s64, 2*s55]" = torch.ops.aten.cat.default([clone, clone], 1);  clone = None
+
         add_2: "Sym(2*s55)" = primals_10 + primals_10
         return (
             cat,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_values')
