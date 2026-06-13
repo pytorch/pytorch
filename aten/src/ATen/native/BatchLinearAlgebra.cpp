@@ -41,10 +41,8 @@
 #include <ATen/ops/all.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/cat.h>
-#include <ATen/ops/cholesky.h>
 #include <ATen/ops/cholesky_inverse.h>
 #include <ATen/ops/cholesky_inverse_native.h>
-#include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/cholesky_solve.h>
 #include <ATen/ops/cholesky_solve_native.h>
 #include <ATen/ops/clone.h>
@@ -107,6 +105,7 @@
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/orgqr_native.h>
 #include <ATen/ops/ormqr_native.h>
+#include <ATen/ops/qr_native.h>
 #include <ATen/ops/real.h>
 #include <ATen/ops/resize_as_native.h>
 #include <ATen/ops/sum.h>
@@ -1760,62 +1759,6 @@ Tensor& cholesky_solve_out(const Tensor& self, const Tensor& A, bool upper, Tens
 
 DEFINE_DISPATCH(cholesky_stub);
 
-Tensor cholesky(const Tensor &self, bool upper) {
-   TORCH_WARN_ONCE(
-    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
-    "removed in a future PyTorch release.\n",
-    "L = torch.cholesky(A)\n",
-    "should be replaced with\n",
-    "L = torch.linalg.cholesky(A)\n",
-    "and\n"
-    "U = torch.cholesky(A, upper=True)\n",
-    "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH\n"
-    "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
-  );
-  if (self.numel() == 0) {
-    return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  squareCheckInputs(self, "cholesky");
-
-  auto raw_cholesky_output = cloneBatchedColumnMajor(self);
-  auto info_shape = IntArrayRef(
-      self.sizes().cbegin(), self.sizes().cend() - 2); // self.shape[:-2]
-  auto info = at::empty({info_shape}, self.options().dtype(kInt));
-
-  // fill the raw_cholesky_output with the result
-  cholesky_stub(self.device().type(), raw_cholesky_output, info, upper);
-
-  at::_linalg_check_errors(info, "cholesky", self.dim() == 2);
-
-  if (upper) {
-    return raw_cholesky_output.triu_();
-  } else {
-    return raw_cholesky_output.tril_();
-  }
-}
-
-Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
-   TORCH_WARN_ONCE(
-    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
-    "removed in a future PyTorch release.\n",
-    "L = torch.cholesky(A)\n",
-    "should be replaced with\n",
-    "L = torch.linalg.cholesky(A)\n",
-    "and\n"
-    "U = torch.cholesky(A, upper=True)\n",
-    "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH\n"
-    "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
-  );
-  checkSameDevice("cholesky", result, self);
-  checkLinalgCompatibleDtype("cholesky", result, self);
-  Tensor result_tmp = at::cholesky(self, upper);
-  at::native::resize_output(result, result_tmp.sizes());
-  result.copy_(result_tmp);
-  return result;
-}
-
 TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
                                         bool upper,
                                         bool check_errors,
@@ -2499,6 +2442,30 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
   }
 }
 
+
+std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
+  TORCH_WARN_ONCE(
+    "torch.qr is deprecated in favor of torch.linalg.qr and will be removed in a future PyTorch release.\n",
+    "The boolean parameter 'some' has been replaced with a string parameter 'mode'.\n",
+    "Q, R = torch.qr(A, some)\n",
+    "should be replaced with\n",
+    "Q, R = torch.linalg.qr(A, 'reduced' if some else 'complete')"
+  );
+  const char* mode = some ? "reduced" : "complete";
+  return at::linalg_qr(self, mode);
+}
+
+std::tuple<Tensor&,Tensor&> qr_out(const Tensor& self, bool some, Tensor& Q, Tensor& R) {
+  TORCH_WARN_ONCE(
+    "torch.qr is deprecated in favor of torch.linalg.qr and will be removed in a future PyTorch release.\n",
+    "The boolean parameter 'some' has been replaced with a string parameter 'mode'.\n",
+    "Q, R = torch.qr(A, some)\n",
+    "should be replaced with\n",
+    "Q, R = torch.linalg.qr(A, 'reduced' if some else 'complete')"
+  );
+  const char* mode = some ? "reduced" : "complete";
+  return at::linalg_qr_out(Q, R, self, mode);
+}
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

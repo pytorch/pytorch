@@ -321,7 +321,7 @@ struct CRecursionLimitRAII {
       ss << "new c_recursion limit (" << limit
          << ") is lower than thread's current c_recursion_remaining ("
          << remaining << ").";
-      PyErr_WarnEx(PyExc_RuntimeWarning, ss.str().c_str(), 1);
+      PyErr_WarnEx(PyExc_RuntimeWarning, std::move(ss).str().c_str(), 1);
     }
     remaining = limit;
   }

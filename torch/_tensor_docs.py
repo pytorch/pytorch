@@ -1051,15 +1051,6 @@ In-place version of :meth:`~Tensor.ceil`
 )
 
 add_docstr_all(
-    "cholesky",
-    r"""
-cholesky(upper=False) -> Tensor
-
-See :func:`torch.cholesky`
-""",
-)
-
-add_docstr_all(
     "cholesky_solve",
     r"""
 cholesky_solve(input2, upper=False) -> Tensor
@@ -3803,6 +3794,15 @@ put(input, index, source, accumulate=False) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.put_`.
 `input` corresponds to `self` in :meth:`torch.Tensor.put_`.
+""",
+)
+
+add_docstr_all(
+    "qr",
+    r"""
+qr(some=True) -> (Tensor, Tensor)
+
+See :func:`torch.qr`
 """,
 )
 

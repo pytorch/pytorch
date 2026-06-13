@@ -71,6 +71,17 @@ def symeig(A: Tensor, largest: bool | None = False) -> tuple[Tensor, Tensor]:
 
 # These functions were deprecated and removed
 # This nice error message can be removed in version 1.13+
+def cholesky(input: Tensor, upper: bool = False, *, out=None) -> Tensor:
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed. "
+        "`torch.cholesky` is deprecated in favor of `torch.linalg.cholesky`.\n"
+        "L = torch.cholesky(A) should be replaced with:\n"
+        "L = torch.linalg.cholesky(A)\n"
+        "U = torch.cholesky(A, upper=True) should be replaced with:\n"
+        "U = torch.linalg.cholesky(A).mH"
+    )
+
+
 def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed.\n"
@@ -147,26 +158,4 @@ def eig(
         "L, V = torch.eig(A, eigenvectors=True) "
         "should be replaced with:\n"
         "L_complex, V_complex = torch.linalg.eig(A)"
-    )
-
-
-def qr(
-    input: Tensor,
-    some: bool = True,
-    *,
-    out=None,
-) -> tuple[Tensor, Tensor]:
-    reduced = "reduced" if some else "complete"
-    raise RuntimeError(
-        "This function was deprecated since version 1.9 and is now removed. "
-        "`torch.qr` is deprecated in favor of `torch.linalg.qr` and the boolean parameter "
-        "`some` has been replaced with a string parameter `mode`.\n\n"
-        "Q, R = torch.qr(A) "
-        "should be replaced with:\n"
-        "Q, R = torch.linalg.qr(A, mode='reduced')\n\n"
-        "and\n\n"
-        "Q, R = torch.qr(A, some=False) "
-        "should be replaced with:\n"
-        "Q, R = torch.linalg.qr(A, mode='complete')\n\n"
-        f"Since `some` was set to {some}, use mode='{reduced}'."
     )
