@@ -220,7 +220,8 @@ class SIMDKernelFeatures:
 
     @staticmethod
     def reduction_hint(node: Any) -> ReductionHint:
-        assert node.is_reduction()
+        if not node.is_reduction():
+            raise AssertionError("expected node to be a reduction")
         if node.node.data.reduction_hint != ReductionHint.INNER and all(
             dep.is_contiguous()
             for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)
@@ -297,7 +298,8 @@ class MemoryEstimator:
                 self.kernel_sizes = kernel_size_inside_loop
                 self.loops.append(MemoryEstimate())
                 continue
-            assert isinstance(node, SchedulerNode)
+            if not isinstance(node, SchedulerNode):
+                raise AssertionError(f"expected SchedulerNode, got {type(node)}")
             rw = extract_loop_body_with_args(
                 node._body,
                 SIMDKernel.map_kernel_groups_to_node_sizes(
@@ -369,7 +371,11 @@ class MemoryEstimator:
         return False
 
     def set_ranges(self, *lengths: list[list[sympy.Expr]]) -> list[list[sympy.Expr]]:
-        assert len(self.kernel_sizes) == len(lengths)
+        if len(self.kernel_sizes) != len(lengths):
+            raise AssertionError(
+                f"expected len(kernel_sizes) == len(lengths), got "
+                f"{len(self.kernel_sizes)} != {len(lengths)}"
+            )
         return [
             self.make_flat_range(sym, numel, length)
             for sym, numel, length in zip(self.symbols, self.kernel_sizes, lengths)
@@ -508,8 +514,16 @@ class StatsForReadsOrWrites:
     bytes_non_contiguous: sympy.Expr = sympy.S.Zero
 
     def __add__(self, other: typing.Self) -> StatsForReadsOrWrites:
-        assert len(self.dim) == len(other.dim)
-        assert len(self.loop) == len(other.loop)
+        if len(self.dim) != len(other.dim):
+            raise AssertionError(
+                f"expected len(self.dim) == len(other.dim), got "
+                f"{len(self.dim)} != {len(other.dim)}"
+            )
+        if len(self.loop) != len(other.loop):
+            raise AssertionError(
+                f"expected len(self.loop) == len(other.loop), got "
+                f"{len(self.loop)} != {len(other.loop)}"
+            )
         return StatsForReadsOrWrites(
             dim=[a + b for a, b in zip(self.dim, other.dim)],
             loop=[a + b for a, b in zip(self.loop, other.loop)],
@@ -541,7 +555,8 @@ class StatsForReadsOrWrites:
         for dep_group in loop_deps:
             result.loop.append(loop_stats := StatsForLoop())
             for name, deps in dep_group.items():
-                assert deps
+                if not deps:
+                    raise AssertionError(f"expected non-empty deps for {name}")
                 contiguous_or_broadcast = [True] * ndim
                 numel = sympy.S.Zero
                 itemsize = V.graph.get_dtype(name).itemsize

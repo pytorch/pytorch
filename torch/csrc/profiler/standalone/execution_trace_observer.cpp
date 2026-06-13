@@ -19,6 +19,7 @@
 #include <mutex>
 #include <sstream>
 #include <stack>
+#include <unordered_map>
 #include <vector>
 
 #include <ATen/core/TensorBody.h>
@@ -109,11 +110,11 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   using ID = size_t;
 
   // Mapping of each thread to its own operator stack
-  std::map<size_t, std::stack<ID>> opStack;
+  std::unordered_map<size_t, std::stack<ID>> opStack;
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
 
-  std::map<const void*, ID> objectId;
+  std::unordered_map<const void*, ID> objectId;
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
@@ -170,7 +171,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // RecordFunction callback in sync with the state.
   RunState state_{RunState::uninitialized};
 
-  // All tensors and operators have an unique id assigned. Increment id for each
+  // All tensors and operators have a unique id assigned. Increment id for each
   // new tensor or operator node.
   // 0 -> uninitialized
   // 1 -> root ID
@@ -216,7 +217,7 @@ struct FunctionCallContext : public ObserverContext { // NOLINT
       }
       i++;
     }
-    result += "}";
+    result += '}';
     return result;
   }
 };
@@ -381,13 +382,10 @@ static ExecutionTraceObserver::ID getObjectID(
     const void* t) {
   const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
 
-  auto iter = ob.objectId.find(t);
-  if (iter == ob.objectId.end()) {
-    ExecutionTraceObserver::ID objectId = ob.getNewID();
-    ob.objectId[t] = objectId;
-    return objectId;
+  auto [iter, inserted] = ob.objectId.try_emplace(t);
+  if (inserted) {
+    iter->second = ob.getNewID();
   }
-
   return iter->second;
 }
 
