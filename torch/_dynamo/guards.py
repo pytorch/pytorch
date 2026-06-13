@@ -3479,6 +3479,9 @@ class GuardBuilder(GuardBuilderBase):
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
 
+            if pytype is torch.nn.Parameter:
+                pytype = torch.Tensor
+
             if config.log_compilation_metrics and isinstance(value, torch.nn.Parameter):
                 metrics_context = get_metrics_context()
                 if metrics_context.in_progress():
