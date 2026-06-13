@@ -37,8 +37,9 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, TypeVar
 from collections.abc import Callable
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -169,6 +170,17 @@ def my_decorator(f):
         return f(*args, **kwargs)
 
     return wrapper_inside_decorator
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _passthrough_decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    @functools.wraps(func)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        return func(*args, **kwargs)
+    return wrapper
 
 
 @wrap
@@ -2457,6 +2469,54 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(f)
         x, w = torch.rand(3, 4), torch.rand(4, 4)
         self.assertTrue(any(n.target == torch.relu for n in traced.graph.nodes))
+
+    def test_wrapped_method_with_kwargs(self):
+        class MyModule(torch.nn.Module):
+            @_passthrough_decorator
+            def forward(self, x, a, **kwargs):
+                return torch.relu(x + a)
+
+        tracer = torch.fx.Tracer()
+        model = MyModule()
+        graph = tracer.trace(model)
+        gm = torch.fx.GraphModule(tracer.root, graph)
+        x, a = torch.rand(3), torch.rand(3)
+        self.assertEqual(gm(x, a), torch.relu(x + a))
+        self.assertEqual(gm(x, a, extra=1), torch.relu(x + a))
+
+    def test_wrapped_method_with_varargs(self):
+        class MyModule(torch.nn.Module):
+            @_passthrough_decorator
+            def forward(self, x, *args):
+                return torch.relu(x)
+
+        tracer = torch.fx.Tracer()
+        model = MyModule()
+        graph = tracer.trace(model)
+        gm = torch.fx.GraphModule(tracer.root, graph)
+        x = torch.rand(3)
+        self.assertEqual(gm(x), torch.relu(x))
+        self.assertEqual(gm(x, torch.rand(3)), torch.relu(x))
+
+    def test_wrapped_method_with_kwargs_wrapper_not_traced(self):
+        def wrap_with_relu(fn):
+            @functools.wraps(fn)
+            def wrapper(self, *args, **kwargs):
+                return torch.relu(fn(self, *args, **kwargs))
+            return wrapper
+
+        class MyModule(torch.nn.Module):
+            @wrap_with_relu
+            def forward(self, x, a, **kwargs):
+                return x + a
+
+        tracer = torch.fx.Tracer()
+        model = MyModule()
+        graph = tracer.trace(model)
+        gm = torch.fx.GraphModule(tracer.root, graph)
+        x, a = torch.rand(3), torch.rand(3)
+        self.assertEqual(gm(x, a), x + a)
+        self.assertFalse(any(n.target == torch.relu for n in gm.graph.nodes))
 
     def test_empty_graph_codegen(self):
         graph = torch.fx.Graph()
