@@ -1209,6 +1209,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = y.sum();  y = None
 
         grad = torch.autograd.grad(loss, [w]);  loss = w = None
+
         grad_1: "f32[4, 4]" = grad[0];  grad = None
         return (grad_1,)
 """,
