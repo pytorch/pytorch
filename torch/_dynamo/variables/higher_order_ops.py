@@ -42,6 +42,7 @@ from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.script_object import TorchScriptObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
 from torch._guards import Source
+from torch._higher_order_ops.flex_gemm import FLEX_GEMM_OP_ALIASES
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 from torch._ops import HigherOrderOperator
 from torch.fx.graph_module import GraphModule
@@ -510,6 +511,67 @@ def get_tensor_storages(tensor: torch.Tensor) -> set[StorageWeakRef]:
     return storages
 
 
+def subgraph_mutated_input_storages(
+    subgraph: torch.fx.Graph, mutated_input_indices: Iterable[int]
+) -> set[StorageWeakRef]:
+    """Map subgraph placeholder indices flagged as mutated to their tensor storages.
+
+    Used by HigherOrderVariable subclasses to translate
+    ``_dynamo_mutated_input_indices`` into a parent-side storage set,
+    which is then matched against the parent's full input list to recover
+    the parent-side mutated index list passed as a HOP kwarg.
+    """
+    placeholders = [node for node in subgraph.nodes if node.op == "placeholder"]
+    storages: set[StorageWeakRef] = set()
+    for idx in mutated_input_indices:
+        if idx >= len(placeholders):
+            raise AssertionError(
+                f"mutated input index {idx} out of range for {len(placeholders)} placeholders"
+            )
+        placeholder = placeholders[idx]
+        example_value = placeholder.meta.get(
+            "example_value", placeholder.meta.get("val", None)
+        )
+        if not isinstance(example_value, torch.Tensor):
+            raise AssertionError("The mutated input must be a tensor")
+        storages |= get_tensor_storages(example_value)
+    return storages
+
+
+def parent_mutated_input_indices(
+    parent_inputs: Sequence["VariableTracker | Proxy"],
+    mutated_input_storages: set[StorageWeakRef],
+) -> list[int]:
+    """Walk a HOP's full parent-side input list and return the indices whose
+    tensor storage matches one of the storages mutated inside any of the
+    subgraphs.
+
+    If no subgraph mutation was detected, returns the empty list without
+    inspecting any storages. Some inputs (e.g. BatchedTensor under vmap)
+    deliberately refuse storage access; we must not trip on those when
+    there's nothing to match against.
+    """
+    if not mutated_input_storages:
+        return []
+    mutated: list[int] = []
+    for idx, inp in enumerate(parent_inputs):
+        example_value = None
+        if isinstance(inp, VariableTracker):
+            if inp.is_tensor():
+                example_value = inp.as_proxy().node.meta.get("example_value", None)
+        else:
+            if not isinstance(inp, Proxy):
+                raise AssertionError("Expected inp to be a Proxy")
+            example_value = inp.node.meta.get("example_value", inp.node.meta.get("val"))
+
+        if isinstance(example_value, torch.Tensor):
+            for storage in get_tensor_storages(example_value):
+                if storage in mutated_input_storages:
+                    mutated.append(idx)
+                    break
+    return mutated
+
+
 class StorageAliasingTracker:
     """
     Tracks storage references to detect aliasing between tensors.
@@ -880,28 +942,9 @@ def _call_while_loop(
     cond_mutated_inputs = set(getattr(cond_graph, "_dynamo_mutated_input_indices", ()))
     body_mutated_inputs = set(getattr(body_graph, "_dynamo_mutated_input_indices", ()))
 
-    def _mutated_tensor_storages(
-        graph: torch.fx.Graph, mutated_input_indices: set[int]
-    ) -> set[StorageWeakRef]:
-        placeholders = [node for node in graph.nodes if node.op == "placeholder"]
-        storages: set[StorageWeakRef] = set()
-        for idx in mutated_input_indices:
-            if idx >= len(placeholders):
-                raise AssertionError(
-                    f"mutated input index {idx} out of range for {len(placeholders)} placeholders"
-                )
-            placeholder = placeholders[idx]
-            example_value = placeholder.meta.get(
-                "example_value", placeholder.meta.get("val", None)
-            )
-            if not isinstance(example_value, torch.Tensor):
-                raise AssertionError("The mutated input must be a tensor")
-            storages |= get_tensor_storages(example_value)
-        return storages
-
-    mutated_input_storages = _mutated_tensor_storages(
+    mutated_input_storages = subgraph_mutated_input_storages(
         cond_graph, cond_mutated_inputs
-    ) | _mutated_tensor_storages(body_graph, body_mutated_inputs)
+    ) | subgraph_mutated_input_storages(body_graph, body_mutated_inputs)
 
     # We set include contiguity=False because we have vmap x HOP tests, where if
     # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
@@ -940,22 +983,9 @@ def _call_while_loop(
         + list(additional_inputs_seq)
         + list(additional_lifted_inputs)
     )
-    mutated_inputs = []
-    for idx, inp in enumerate(all_while_loop_inputs):
-        example_value = None
-        if isinstance(inp, VariableTracker):
-            if inp.is_tensor():
-                example_value = inp.as_proxy().node.meta.get("example_value", None)
-        else:
-            if not isinstance(inp, Proxy):
-                raise AssertionError("Expected inp to be a Proxy")
-            example_value = inp.node.meta.get("example_value", inp.node.meta.get("val"))
-
-        if isinstance(example_value, torch.Tensor):
-            for storage in get_tensor_storages(example_value):
-                if storage in mutated_input_storages:
-                    mutated_inputs.append(idx)
-                    break
+    mutated_inputs = parent_mutated_input_indices(
+        all_while_loop_inputs, mutated_input_storages
+    )
 
     mutated_arg_indices = ",".join(str(i) for i in mutated_inputs)
 
@@ -2969,6 +2999,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from torch._higher_order_ops.scan import _extract_carry_and_out
         from torch._higher_order_ops.utils import first_slice_copy
 
+        self.supports_input_mutation = not torch.is_grad_enabled()
+
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         # combine_fn input check
@@ -3115,6 +3147,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             supports_aliasing=self.supports_aliasing,
         )
 
+        combine_mutated_inputs = set(
+            getattr(combine_graph, "_dynamo_mutated_input_indices", ())
+        )
+
         # Ensure that the output of scan is a flattened list of elements,
         # because downstream operations assume that the output of HOPs
         # is flattened
@@ -3180,6 +3216,59 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             combine_freevars_proxy
         )
 
+        # Mutation handling: scan allows in-place writes only to
+        # additional_inputs (lifted, loop-invariant tensors). Mutations of
+        # init / xs are unsafe (see ScanOp.gen_schema for the contract) so
+        # we graph-break here with a precise message. The remaining indices
+        # are mapped through the parent-side input list to produce a
+        # comma-joined ``mutated_arg_indices`` kwarg for the HOP call,
+        # mirroring while_loop.
+        n_init = len(init_vars)
+        n_xs = len(xs_vars)
+
+        disallowed = sorted(i for i in combine_mutated_inputs if i < n_init + n_xs)
+        if disallowed:
+            init_part = [i for i in disallowed if i < n_init]
+            xs_part = [i - n_init for i in disallowed if n_init <= i]
+            unimplemented(
+                gb_type="torch.scan: combine_fn mutates init or xs",
+                context=f"init={init_part}, xs={xs_part}",
+                explanation=(
+                    "scan only supports in-place mutation of additional_inputs "
+                    "(loop-invariant tensors). init is the *initial* carry only -- "
+                    "from step 1 on the driver feeds combine_fn's returned carry, "
+                    "so an in-place write to init would only affect step 0. "
+                    "xs[t] is a fresh, storage-disjoint slice each step, so a "
+                    "mutation cannot be observed by step t+1. Update the carry "
+                    "via the combine_fn return value; for in-place lifted buffers "
+                    "use additional_inputs."
+                ),
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
+
+        # additional_inputs (subgraph indices [n_init+n_xs, ...)) plus any
+        # lifted freevars (indices >= n_init+n_xs+n_additional). Both are
+        # carried as additional_inputs at the HOP-call layer.
+        all_scan_inputs: list[VariableTracker | Proxy] = (
+            list(init_vars)
+            + list(xs_vars)
+            + list(additional_inputs_vars)
+            + list(combine_freevars_proxy)
+        )
+        # Build a parent-storage set from the subgraph placeholders that were
+        # detected as mutated, then re-map through ``all_scan_inputs`` so we
+        # cover both regular additional_inputs and lifted freevars.
+        mutated_input_storages = subgraph_mutated_input_storages(
+            combine_graph,
+            {i for i in combine_mutated_inputs if i >= n_init + n_xs},
+        )
+        mutated_inputs = parent_mutated_input_indices(
+            all_scan_inputs, mutated_input_storages
+        )
+        mutated_arg_indices = ",".join(str(i) for i in mutated_inputs)
+
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)
 
@@ -3189,12 +3278,15 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             xs_proxy,
             additional_inputs_proxy,
         )
+        hop_kwargs = (
+            {"mutated_arg_indices": mutated_arg_indices} if mutated_arg_indices else {}
+        )
 
         return _call_function_and_unflatten_output(
             tx,
             torch.ops.higher_order.scan,
             p_args,
-            {},
+            hop_kwargs,
             None,
             _combine_spec,
             None,
@@ -3787,6 +3879,90 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         return _call_function_and_unflatten_output(
             tx, self.value, proxy_args, {}, example_value, treespec, body_r
+        )
+
+
+class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
+    _HOP_NAME = "torch.ops.higher_order.flex_gemm"
+    _ALLOW_FALLBACK_TO_EAGER = False
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if kwargs:
+            unimplemented(
+                gb_type="flex_gemm: unexpected kwargs",
+                context=f"args: {args}, kwargs: {kwargs}",
+                explanation="flex_gemm internal HOP expects positional args only.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        if (
+            len(args) != 5
+            or not isinstance(args[2], (ListVariable, TupleVariable))
+            or not isinstance(args[3], ConstDictVariable)
+            or not isinstance(args[4], ConstDictVariable)
+        ):
+            unimplemented(
+                gb_type="flex_gemm: improper args/kwargs",
+                context=f"args: {args}, kwargs: {kwargs}",
+                explanation=(
+                    "flex_gemm expects 5 positional arguments: "
+                    "gemm_op, body_fn, args, kwargs, kernel_options. args is "
+                    "expected to be list/tuple and kwargs/kernel_options are "
+                    "expected to be dicts."
+                ),
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        _check_supported_callable_arg(tx, args[1], "body_fn")
+        operands = args[2].unpack_var_sequence(tx)
+        fn_kwargs = args[3].as_python_constant()
+        kernel_options = args[4].as_python_constant()
+        if self._HOP_NAME is None:
+            raise AssertionError("_HOP_NAME must be set")
+        (
+            p_args,
+            _,
+            example_value,
+            body_r,
+            _,
+            _,
+            body_graph_output_vts,
+            _,
+        ) = self.create_wrapped_node(
+            tx,
+            args[1],
+            operands,
+            {},
+            self._HOP_NAME,
+            subgraph_name="flex_gemm_body",
+        )
+
+        body_node = p_args[0]
+        gemm_op = args[0].as_python_constant()
+        p_args = (
+            FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op),
+            body_node,
+            tuple(p_args[1:]),
+            fn_kwargs,
+            kernel_options,
+        )
+
+        return cast(
+            VariableTracker,
+            _call_function_with_auto_output_flattening(
+                tx,
+                self.value,
+                p_args,
+                {},
+                example_value,
+                body_r,
+                body_graph_output_vts,
+            ),
         )
 
 
@@ -5967,6 +6143,7 @@ _hop_name_to_variable_class = {
     "out_dtype": OutDtypeHigherOrderVariable,
     "wrap": WrapHigherOrderVariable,
     "hints_wrapper": HintsWrapperHigherOrderVariable,
+    "flex_gemm": FlexGemmHigherOrderVariable,
     "flex_attention": FlexAttentionHigherOrderVariable,
     "flex_attention_backward": FlexAttentionBackwardHighOrderVariable,
     "wrap_activation_checkpoint": CheckpointHigherOrderVariable,
