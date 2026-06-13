@@ -139,7 +139,7 @@ uint64_t TORCH_API computeFlops(
 std::string shapeToStr(const std::vector<int64_t>& shape);
 
 template <typename T>
-class TORCH_API GlobalStateManager {
+class GlobalStateManager {
  public:
   static GlobalStateManager& singleton() {
     /* library-local */ static GlobalStateManager singleton_;
