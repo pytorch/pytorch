@@ -2463,6 +2463,29 @@ class TestFX(JitTestCase):
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
         self.assertEqual(gm(), None)
 
+    def test_complex_constant_codegen_preserves_signed_zero(self):
+        values = [
+            complex(-0.0, -1e-28),
+            complex(-0.0, 1e-28),
+            complex(0.0, -1e-28),
+            complex(1.0, -0.0),
+            complex(0.0, -0.0),
+        ]
+
+        graph = torch.fx.Graph()
+        tensor = graph.call_function(
+            torch.tensor, args=(values,), kwargs={"dtype": torch.complex64}
+        )
+        graph.output(tensor)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        expected = torch.tensor(values, dtype=torch.complex64)
+        result = gm()
+        self.assertEqual(result, expected)
+        self.assertEqual(torch.signbit(result.real), torch.signbit(expected.real))
+        self.assertEqual(torch.signbit(result.imag), torch.signbit(expected.imag))
+        self.assertIn("complex(-0.0, -1e-28)", gm.code)
+
     def test_sequential(self):
         m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1))
         gm = torch.fx.symbolic_trace(m)
