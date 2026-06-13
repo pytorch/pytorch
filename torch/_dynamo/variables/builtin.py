@@ -3407,8 +3407,6 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     )
                 elif name == "data":
                     # [Note: set_data_on_scoped_tensor]
-                    # TODO(azahed98): The plan of record is to introduce a set_data op, entirely subsume the
-                    # operation into a call_function in the fx graph, and let aot_autograd handle it.
                     if obj.source is None:
                         unimplemented(
                             gb_type="Failed to mutate tensor data attribute",
@@ -3431,12 +3429,29 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                                 "the mutation out of `torch.compile` region",
                             ],
                         )
+                    elif obj.device != val.device:  # type: ignore[attr-defined]
+                        obj_fake = get_fake_value(obj.as_proxy().node, tx)
+                        val_fake = get_fake_value(val.as_proxy().node, tx)
+                        if (
+                            obj_fake.shape != val_fake.shape
+                            or obj_fake.stride() != val_fake.stride()
+                        ):
+                            unimplemented(
+                                gb_type="Failed to mutate tensor data attribute across devices with different shape/strides",
+                                context=f"setattr({obj}, {name}, {val})",
+                                explanation="Dynamo only supports cross-device `.data`"
+                                " mutation when shape and strides match",
+                                hints=[
+                                    "Don't mutate `.data` on this tensor, or move "
+                                    "the mutation out of `torch.compile` region",
+                                ],
+                            )
 
-                    # Remove the old reference in tracked fakes - if we don't do this
-                    # new .data value size and shape differences will cause
-                    # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
-                    # coming out of set_() below will be a new one, and get
-                    # installed in tracked fakes.
+                    # Remove the old reference in tracked fakes - if we don't
+                    # do this, .data value size/shape differences cause
+                    # tracked fakes to produce incorrect guards. Sound
+                    # because the TensorVariable from shallow_copy_data_
+                    # below is new and gets installed in tracked fakes.
                     to_remove = [
                         tf for tf in tx.output.tracked_fakes if tf.source == obj.source
                     ]
@@ -3445,36 +3460,25 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
 
                     # Step 1 - disable grads
                     with dynamo_disable_grad(tx), torch.no_grad():
-                        # Step 2 - call `set_`
+                        # Step 2 - call shallow_copy_data_
+                        # (shallow_copy_from, matching eager .data = behavior)
                         out = wrap_fx_proxy(
                             tx,
                             tx.output.create_proxy(
                                 "call_function",
-                                torch.Tensor.set_,
+                                torch.ops.aten.shallow_copy_data_,
                                 *proxy_args_kwargs([obj, val], {}),
                             ),
                         )
 
-                    # Step 3 - drop the version counter - this is a step required to get
-                    # .data setting to play correctly with the autograd engine.
-                    # Essentially, dynamo is trying to faithfully preserve the (absurd)
-                    # behavior of .data= from eager mode
-                    def _lower_version_count_by_1(x: torch.Tensor) -> torch.Tensor:
-                        version = x._version
-                        if version > 0:
-                            version = version - 1
-                        torch._C._autograd._unsafe_set_version_counter((x,), (version,))
-                        return x
-
-                    tx.output.create_proxy(
-                        "call_function",
-                        _lower_version_count_by_1,
-                        (out.as_proxy(),),
-                        {},
-                    )
-                    _lower_version_count_by_1(obj.as_proxy().node.meta["example_value"])
-                    # This handles options prop, guards and ends with a clone
-                    # Step 4 - replace all reference to the current object with the new one
+                    # Note: shallow_copy_data_ mutates the input
+                    # FakeTensor's device in-place. For cross-device
+                    # mutations this corrupts the placeholder's device
+                    # annotation since the placeholder and output share
+                    # the same FakeTensor. This is cosmetic; AOTAutograd
+                    # and Inductor handle it via device save/restore
+                    # workarounds in graph_capture.py and compile_fx.py.
+                    # TODO(#186860): fix in ProxyTensor dispatch.
                     return out
                 elif name in ("_grad", "grad"):
                     # NOTE: [Tensor "grad" and "_grad" attr]
