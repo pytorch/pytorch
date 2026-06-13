@@ -15,6 +15,15 @@
       "Context": "{self}.as_subclass({cls})",
       "Explanation": "Currently not supported",
       "Hints": [
+        "Avoid this call or move it outside `torch.compile` region",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Argument of `as_subclass` must be a non-dispatcher-style tensor subclass",
+      "Context": "{self}.as_subclass({cls})",
+      "Explanation": "Currently not supported",
+      "Hints": [
         "Avoid this call or move it outside `torch.compile` regione",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -325,6 +334,16 @@
     }
   ],
   "GB0026": [
+    {
+      "Gb_type": "Calling subclass default constructor with more than tensor argument",
+      "Context": "{self.value}(args={args}, kwargs={kwargs})",
+      "Explanation": "Currently not supported",
+      "Hints": [
+        "Avoid this constructor call or move it outside ",
+        "`torch.compile` region",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Calling subclass default constructor with more than tensor argument",
       "Context": "{self.value}(args={args}, kwargs={kwargs})",
