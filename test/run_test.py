@@ -7,7 +7,6 @@ import glob
 import json
 import os
 import platform
-import re
 import shutil
 import signal
 import subprocess
@@ -99,6 +98,43 @@ except ImportError:
 
 # Make sure to remove REPO_ROOT after import is done
 sys.path.remove(str(REPO_ROOT))
+
+
+def install_subprocess_debug() -> None:
+    test_dir = str(REPO_ROOT / "test")
+    python_path = os.environ.get("PYTHONPATH", "")
+    paths = [path for path in python_path.split(os.pathsep) if path]
+    if test_dir not in paths:
+        os.environ["PYTHONPATH"] = os.pathsep.join([test_dir, *paths])
+    if test_dir not in sys.path:
+        sys.path.insert(0, test_dir)
+    try:
+        import subprocess_debug
+
+        subprocess_debug.install()
+    except Exception:
+        pass
+
+
+def dump_subprocess_log_files(reason: str) -> None:
+    try:
+        import subprocess_debug
+
+        subprocess_debug.dump_recent_subprocess_traces(reason)
+    except Exception:
+        pass
+
+    try:
+        from torch.testing._internal.common_utils import (
+            dump_subprocess_log_files as dump_common_utils_logs,
+        )
+
+        dump_common_utils_logs(reason)
+    except Exception:
+        pass
+
+
+install_subprocess_debug()
 
 
 HAVE_TEST_SELECTION_TOOLS = True
@@ -1239,22 +1275,10 @@ def handle_log_file(
     )
     os.rename(file_path, REPO_ROOT / new_file)
 
-    if not failed and not was_rerun and "=== RERUNS ===" not in full_text:
-        # If success + no retries (idk how else to check for test level retries
-        # other than reparse xml), print only what tests ran
-        print_to_stderr(
-            f"\n{test} was successful, full logs can be found in artifacts with path {new_file}"
-        )
-        for line in full_text.splitlines():
-            if re.search("Running .* items in this shard:", line):
-                print_to_stderr(line.rstrip())
-        print_to_stderr("")
-        return
-
-    # otherwise: print entire file
-    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
-    print_to_stderr(full_text)
-    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
+    if failed or was_rerun:
+        print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
+        print_to_stderr(full_text)
+        print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
 def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
@@ -2129,6 +2153,10 @@ def run_tests(
                 and not options.continue_through_error
                 and not RERUN_DISABLED_TESTS
             ):
+                try:
+                    dump_subprocess_log_files("run_tests.pool.terminate")
+                except Exception:
+                    pass
                 pool.terminate()
 
         for test in selected_tests_parallel:
@@ -2147,6 +2175,10 @@ def run_tests(
 
     finally:
         if pool:
+            try:
+                dump_subprocess_log_files("run_tests.finally.pool.terminate")
+            except Exception:
+                pass
             pool.terminate()
             pool.join()
 

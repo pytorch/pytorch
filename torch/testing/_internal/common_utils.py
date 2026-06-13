@@ -1069,6 +1069,101 @@ def parse_cmd_line_args():
     set_rng_seed()
 
 
+# Set by install_fault_handler(); _dump_subprocess_stacks() no-ops unless True
+# so non-test consumers of wait_for_process don't gain a SIGUSR1 side effect.
+_fault_handler_installed = False
+
+
+def install_fault_handler() -> None:
+    # Dump Python stacks from every thread when this process receives SIGUSR1
+    # or when faulthandler detects a fatal signal (SEGV, etc.). Used to
+    # diagnose flaky CI hangs: test/run_test.py's outer timeout sends SIGUSR1
+    # to the whole process tree before SIGKILL so we capture stacks in the log.
+    #
+    # Use sys.__stderr__ (the real fd 2, not the pytest capture proxy) so the
+    # dump works under pytest's default --capture=sys.
+    import faulthandler
+
+    stderr = sys.__stderr__ or sys.stderr
+    faulthandler.enable(file=stderr, all_threads=True)
+    if hasattr(faulthandler, "register"):  # not on Windows
+        faulthandler.register(
+            signal.SIGUSR1, file=stderr, all_threads=True, chain=False
+        )
+    global _fault_handler_installed
+    _fault_handler_installed = True
+
+
+def _dump_subprocess_stacks(pid):
+    # Request Python stack dumps from `pid` and all its descendants via SIGUSR1
+    # (handler installed by install_fault_handler() and in inductor compile
+    # workers). Used on CI timeout to capture diagnostics before the
+    # SIGINT/SIGKILL sequence destroys in-process state.
+    if not _fault_handler_installed or not hasattr(signal, "SIGUSR1"):
+        return
+    try:
+        import psutil
+        pids = [pid, *(c.pid for c in psutil.Process(pid).children(recursive=True))]
+    except Exception:
+        pids = [pid]
+    for target in pids:
+        try:
+            os.kill(target, signal.SIGUSR1)
+        except OSError:
+            pass
+    # Give handlers a few seconds to run and flush stderr to the CI log.
+    time.sleep(3)
+
+
+def dump_subprocess_log_files(reason: str, max_age_seconds: float = 1800.0) -> None:
+    # MI355 hang debug: cat every recently-touched subprocess stdio capture
+    # file to sys.__stderr__ so it lands in the CI log. Covers:
+    #   - test/test-reports/*_toprint.log (run_test.py --pipe-logs tempfiles
+    #     that hold each test subprocess's combined stdout+stderr; normally
+    #     only printed via handle_log_file() on failure, lost on kill paths)
+    #   - inductor compile worker log files under /tmp/torchinductor_*
+    # Best-effort and idempotent; swallows all exceptions.
+    import glob
+
+    stderr = sys.__stderr__ or sys.stderr
+    cutoff = time.time() - max_age_seconds
+
+    patterns = [
+        os.path.join(os.getcwd(), "test", "test-reports", "*_toprint.log"),
+        # In case cwd is already the test/ dir.
+        os.path.join(os.getcwd(), "test-reports", "*_toprint.log"),
+        "/tmp/torchinductor_*/sub_proc_pool*.log",
+        "/tmp/torchinductor_*/compile_worker*.log",
+        "/tmp/torchinductor_*/*worker*.log",
+    ]
+    seen: set[str] = set()
+    for pat in patterns:
+        try:
+            for path in glob.glob(pat):
+                if path in seen:
+                    continue
+                seen.add(path)
+                try:
+                    if os.path.getmtime(path) < cutoff:
+                        continue
+                    with open(path, errors="replace") as f:
+                        content = f.read()
+                    print(
+                        f"\n===== PYTORCH SUBPROC LOG DUMP BEGIN path={path} reason={reason} =====",
+                        file=stderr,
+                    )
+                    print(content, file=stderr)
+                    print(
+                        f"===== PYTORCH SUBPROC LOG DUMP END path={path} =====\n",
+                        file=stderr,
+                        flush=True,
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
 def wait_for_process(p, timeout=None):
     try:
         return p.wait(timeout=timeout)
@@ -1082,6 +1177,25 @@ def wait_for_process(p, timeout=None):
             p.kill()
             raise
     except subprocess.TimeoutExpired:
+        # Capture Python stacks from the child (and any inductor compile
+        # workers it spawned) before SIGINT/SIGKILL wipes them. SIGUSR1 is not
+        # masked by CUDA/Triton runtimes, unlike SIGINT.
+        try:
+            _dump_subprocess_stacks(p.pid)
+        except Exception:
+            pass
+        try:
+            import subprocess_debug
+
+            subprocess_debug.dump_recent_subprocess_traces(
+                "wait_for_process.timeout"
+            )
+        except Exception:
+            pass
+        try:
+            dump_subprocess_log_files("wait_for_process.timeout")
+        except Exception:
+            pass
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
         exit_status = None

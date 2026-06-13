@@ -56,7 +56,20 @@ def _async_compile_initializer(orig_ppid: int) -> None:
     # Install a crash handler to print out the stacktrace for SEGV
     torch._C._initCrashHandler()
 
-    _pin_triton_worker_driver()
+    # SIGUSR1 stack dumper for CI hang diagnosis. The default-mode SubprocPool
+    # sidecar is started via subprocess.Popen (fresh Python), so the parent
+    # test process's faulthandler/SIGUSR1 registration does not propagate;
+    # install locally. Mirrors common_utils.install_fault_handler — kept
+    # inline to avoid pulling the testing module into worker startup.
+    import faulthandler
+    import sys
+
+    stderr = sys.__stderr__ or sys.stderr
+    faulthandler.enable(file=stderr, all_threads=True)
+    if hasattr(faulthandler, "register"):
+        faulthandler.register(
+            signal.SIGUSR1, file=stderr, all_threads=True, chain=False
+        )
 
     # Set a bit to distinguish async_compile subprocesses from the toplevel process.
     global _IN_TOPLEVEL_PROCESS
