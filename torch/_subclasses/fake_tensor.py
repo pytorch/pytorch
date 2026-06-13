@@ -3178,6 +3178,11 @@ class FakeTensorMode(TorchDispatchMode):
                     else fake_tensor_tls.allow_non_fake_inputs_override
                 )
                 if not allow_non_fake_inputs:
+                    fake_view = _maybe_extract_fake_view_from_functional_base(x, self)
+                    if fake_view is not None:
+                        flat_arg_fake_tensors.append(fake_view)
+                        return fake_view
+
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError(
                             f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
@@ -3577,6 +3582,37 @@ def _device_handler(args: Sequence[object]) -> torch.device:
         return torch.device("meta")
     else:
         return args[0].fake_device
+
+
+def _maybe_extract_fake_view_from_functional_base(
+    x: Tensor, fake_mode: FakeTensorMode
+) -> FakeTensor | None:
+    """Recover fake views that bypassed FunctionalTensorMode wrapping.
+
+    The C++ autograd engine can produce a plain Tensor view whose base is a
+    FunctionalTensor. If that FunctionalTensor wraps one of our FakeTensors, the
+    plain view still represents fake data and should be validated as such.
+    """
+    # Keep this local to avoid an import cycle: functional_tensor imports
+    # FakeTensor from torch._subclasses at runtime.
+    from torch._subclasses.functional_tensor import (
+        can_replay_functional_tensor_view,
+        maybe_get_inner_functional_tensor_view_base,
+        replay_functional_tensor_view,
+    )
+
+    inner = maybe_get_inner_functional_tensor_view_base(x)
+    if (
+        inner is None
+        or not fake_mode.is_our_fake(inner)
+        or not can_replay_functional_tensor_view(inner, x)
+    ):
+        return None
+
+    out = replay_functional_tensor_view(inner, x)
+    if fake_mode.is_our_fake(out):
+        return out
+    return None
 
 
 # [subclass inputs]

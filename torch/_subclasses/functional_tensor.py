@@ -96,6 +96,56 @@ def _assert_functionalize_not_active(msg: str) -> None:
         raise AssertionError(msg)
 
 
+def maybe_get_inner_functional_tensor_view_base(
+    view: torch.Tensor,
+) -> torch.Tensor | None:
+    base = view._base
+    if isinstance(base, FunctionalTensor):
+        functional_base = base.elem
+    elif isinstance(base, torch.Tensor) and torch._is_functional_tensor(base):
+        functional_base = base
+    else:
+        return None
+
+    if not torch._is_functional_tensor(functional_base):
+        return None
+
+    return torch._from_functional_tensor(functional_base)
+
+
+def can_replay_functional_tensor_view_with_unsafe_view(
+    inner: torch.Tensor, view: torch.Tensor
+) -> bool:
+    return (
+        inner.is_contiguous()
+        and view.is_contiguous()
+        and inner.numel() == view.numel()
+        and inner.storage_offset() == view.storage_offset()
+    )
+
+
+def can_replay_functional_tensor_view(inner: torch.Tensor, view: torch.Tensor) -> bool:
+    return (
+        inner.layout == torch.strided
+        and view.layout == torch.strided
+        and inner.dtype == view.dtype
+        and inner.is_conj() == view.is_conj()
+        and inner.is_neg() == view.is_neg()
+    )
+
+
+def replay_functional_tensor_view(
+    inner: torch.Tensor, view: torch.Tensor
+) -> torch.Tensor:
+    if not can_replay_functional_tensor_view(inner, view):
+        raise RuntimeError("Cannot replay non-strided functional tensor view")
+    if can_replay_functional_tensor_view_with_unsafe_view(inner, view):
+        return torch.ops.aten._unsafe_view.default(inner, list(view.shape))
+    return torch.ops.aten.as_strided.default(
+        inner, view.shape, view.stride(), view.storage_offset()
+    )
+
+
 # NOTE Some special handling for tensor conversion during export is needed.
 # Normally, when tracing through the model with tensor.to(), the maybe-aliasing
 # relationship between input and output tensors will be baked into the graph.
