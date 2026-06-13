@@ -738,6 +738,30 @@ def full_like(
     else:
         if layout != torch.strided:
             raise AssertionError(f"expected torch.strided layout, got {layout}")
+        if utils.is_non_overlapping_and_dense_or_false(self):
+            result = torch.full(
+                self.shape,
+                fill_value,
+                dtype=dtype,
+                layout=layout,
+                device=device,
+                pin_memory=pin_memory,
+                requires_grad=False,
+            )
+            if result.stride() != self.stride():
+                empty = torch.empty_strided(
+                    self.shape,
+                    self.stride(),
+                    dtype=dtype,
+                    layout=layout,
+                    device=device,
+                    pin_memory=pin_memory,
+                )
+                result = torch.ops.aten.copy.default(empty, result)
+            if requires_grad:
+                result.requires_grad_(True)
+            return result
+
         shape, permutation = _get_shape_permutation_like(self)
         result = torch.full(
             shape,

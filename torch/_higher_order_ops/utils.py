@@ -990,7 +990,9 @@ def first_slice_copy_with_grad(li: Iterable[Any]) -> list[Any]:
 
 # Reports the difference between meta of two tensors in a string
 def diff_tensor_meta(
-    meta1: TensorMetadata, meta2: TensorMetadata, check_grad=True
+    meta1: TensorMetadata,
+    meta2: TensorMetadata,
+    check_grad: bool = True,
 ) -> list[str]:
     from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 

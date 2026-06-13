@@ -1322,6 +1322,65 @@ class WhileLoopTests(TestCase):
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
     @requires_gpu
+    def test_while_loop_size_one_stride_after_joint_graph_passes(self):
+        def cond_fn(a, b):
+            return torch.tensor(False, device=a.device)
+
+        def body_fn(a, b):
+            return torch.ones_like(a), torch.ones_like(b)
+
+        def f(A, use_empty_like_copy):
+            Q, R = torch.linalg.qr(A)
+            rhs = torch.ones(Q.shape[0], 1, device=A.device)
+            a = torch.linalg.solve_triangular(R, Q.T @ rhs, upper=True)
+            if use_empty_like_copy:
+                a = torch.empty_like(a).copy_(a)
+            else:
+                a = a.flatten().reshape(-1, 1)
+            out, _ = torch.while_loop(
+                cond_fn, body_fn, (a, torch.ones(3, device=A.device))
+            )
+            return out
+
+        A = torch.rand(5, 5, device=GPU_TYPE)
+        for use_empty_like_copy, expected_stride in (
+            (True, (1, 5)),
+            (False, (1, 1)),
+        ):
+            out = torch.compile(f, fullgraph=True)(A, use_empty_like_copy)
+            self.assertEqual(out.shape, (5, 1))
+            self.assertEqual(out.stride(), expected_stride)
+
+    @requires_gpu
+    @torch._inductor.config.patch(force_shape_pad=True)
+    def test_while_loop_body_stride_after_shape_padding(self):
+        class M(torch.nn.Module):
+            def cond_fn(self, iter_count: torch.Tensor, x: torch.Tensor) -> bool:
+                return iter_count.sum() > 0
+
+            def body_fn(
+                self, iter_count: torch.Tensor, x: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                nums = torch.arange(
+                    x.numel(), device=x.device, dtype=x.dtype
+                ).reshape_as(x)
+                return iter_count - 1, x @ nums.T @ nums
+
+            def forward(
+                self, init_iter: torch.Tensor, init_x: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                return torch.while_loop(self.cond_fn, self.body_fn, (init_iter, init_x))
+
+        i = torch.tensor([2], device=GPU_TYPE)
+        x = torch.ones((5, 11), device=GPU_TYPE)
+        expected = M()(i, x)
+        actual = torch.compile(M(), fullgraph=True)(i, x)
+        _, out = actual
+        self.assertEqual(actual, expected)
+        self.assertEqual(out.shape, x.shape)
+        self.assertEqual(out.stride(), x.stride())
+
+    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     @parametrize("autograd", [False, True])
