@@ -911,6 +911,11 @@ class FileSystemReader(StorageReader):
                             raise AssertionError(
                                 f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
                             )
+                        if target_tensor.dtype != tensor.dtype:
+                            raise RuntimeError(
+                                f"req {req.storage_index} dtype mismatch: template has {target_tensor.dtype}, "
+                                f"but checkpoint has {tensor.dtype}. Silent casting is not allowed to prevent precision loss."
+                            )
                         target_tensor.copy_(tensor)
                         planner.commit_tensor(req, target_tensor)
 
