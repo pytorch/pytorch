@@ -326,7 +326,7 @@ class AllgatherBaseNCCLTest : public NCCLTest {
     // contains at least one element otherwise wouldn't run.
     // this is a flattened allgather, hence one rank contributes
     // only 1 tensor, regardless of number of devices
-    return pg_->_allgather_base(output_tensor_, tensors_[0]);
+    return pg_->all_gather_single(output_tensor_, tensors_[0]);
   }
 
   at::Tensor getOutputTensor() {
@@ -381,7 +381,7 @@ class ReduceScatterBaseNCCLTest : public NCCLTest {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     launchDeviceSleep();
-    return pg_->_reduce_scatter_base(output_tensor_, input_tensor_);
+    return pg_->reduce_scatter_single(output_tensor_, input_tensor_);
   }
 
   at::Tensor getOutputTensor() {

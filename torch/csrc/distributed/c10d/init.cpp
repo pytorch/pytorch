@@ -3301,8 +3301,18 @@ Arguments:
               py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "all_gather_single",
+              &::c10d::Backend::all_gather_single,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          // Deprecated alias of all_gather_single, kept for backward
+          // compatibility. Bound to all_gather_single to avoid referencing the
+          // deprecated C++ method.
+          .def(
               "_allgather_base",
-              &::c10d::Backend::_allgather_base,
+              &::c10d::Backend::all_gather_single,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -3415,15 +3425,37 @@ Arguments:
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "reduce_scatter_single",
+              &::c10d::Backend::reduce_scatter_single,
+              py::arg("outputTensor"),
+              py::arg("inputTensor"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          // Deprecated alias of reduce_scatter_single, kept for backward
+          // compatibility. Bound to reduce_scatter_single to avoid referencing
+          // the deprecated C++ method.
+          .def(
               "_reduce_scatter_base",
-              &::c10d::Backend::_reduce_scatter_base,
+              &::c10d::Backend::reduce_scatter_single,
               py::arg("outputTensor"),
               py::arg("inputTensor"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "all_to_all_single",
+              &::c10d::Backend::all_to_all_single,
+              py::arg("output_tensor"),
+              py::arg("input_tensor"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::arg("opts") = ::c10d::AllToAllOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          // Deprecated alias of all_to_all_single, kept for backward
+          // compatibility. Bound to all_to_all_single to avoid referencing the
+          // deprecated C++ method.
+          .def(
               "alltoall_base",
-              &::c10d::Backend::alltoall_base,
+              &::c10d::Backend::all_to_all_single,
               py::arg("output_tensor"),
               py::arg("input_tensor"),
               py::arg("output_split_sizes"),
@@ -3440,7 +3472,7 @@ Arguments:
                  std::chrono::milliseconds timeout) {
                 ::c10d::AllToAllOptions opts;
                 opts.timeout = timeout;
-                return self.alltoall_base(
+                return self.all_to_all_single(
                     output, input, outputSplitSizes, inputSplitSizes, opts);
               },
               py::arg("output"),
