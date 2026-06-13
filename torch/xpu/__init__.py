@@ -150,7 +150,7 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     """
     try:
         import pyzes  # type: ignore[import]
-    except ImportError:
+    except Exception:
         return -1
 
     global _cached_zes_device_infos
@@ -804,8 +804,12 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
         import pyzes  # type: ignore[import]
     except ImportError:
         raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
+            "pyzes is required; install it with 'pip install pyzes'."
         ) from None
+    except Exception as err:
+        raise RuntimeError(
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
+        ) from err
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -901,8 +905,12 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
         import pyzes  # type: ignore[import]
     except ImportError:
         raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
+            "pyzes is required; install it with 'pip install pyzes'."
         ) from None
+    except Exception as err:
+        raise RuntimeError(
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
+        ) from err
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -972,8 +980,12 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
         import pyzes  # type: ignore[import]
     except ImportError:
         raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
+            "pyzes is required; install it with 'pip install pyzes'."
         ) from None
+    except Exception as err:
+        raise RuntimeError(
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
+        ) from err
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -1068,8 +1080,12 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
         import pyzes  # type: ignore[import]
     except ImportError:
         raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
+            "pyzes is required; install it with 'pip install pyzes'."
         ) from None
+    except Exception as err:
+        raise RuntimeError(
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
+        ) from err
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -1187,8 +1203,12 @@ def _zes_get_memory_handle(device: Device = None) -> c_void_p:
         import pyzes  # type: ignore[import]
     except ImportError:
         raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
+            "pyzes is required; install it with 'pip install pyzes'."
         ) from None
+    except Exception as err:
+        raise RuntimeError(
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
+        ) from err
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
