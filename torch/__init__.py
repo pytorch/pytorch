@@ -2742,8 +2742,8 @@ def compile(
     import sysconfig
 
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 15):
-        raise RuntimeError("torch.compile is not supported on Python 3.15+")
+    if sys.version_info >= (3, 16):
+        raise RuntimeError("torch.compile is not supported on Python 3.16+")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
