@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import builtins
 import contextlib
-import copy
 import functools
 import inspect
 import logging
@@ -387,8 +386,7 @@ def _override_builtin_ops():
     original_max = builtins.max
     original_min = builtins.min
     original_pow = math.pow
-    copy_dispatch = copy._copy_dispatch  # pyrefly: ignore[missing-attribute]
-    original_fake_tensor_copy = copy_dispatch.get(FakeTensor)
+    original_fake_tensor_copy = FakeTensor.__dict__.get("__copy__")
 
     # pyrefly: ignore [bad-assignment]
     builtins.max = functools.partial(
@@ -401,7 +399,7 @@ def _override_builtin_ops():
     )
 
     math.pow = lambda x, y: x**y  # type: ignore[operator]
-    copy_dispatch[FakeTensor] = _copy_fake_tensor_for_export
+    FakeTensor.__copy__ = _copy_fake_tensor_for_export  # type: ignore[attr-defined]
 
     try:
         yield
@@ -410,9 +408,9 @@ def _override_builtin_ops():
         builtins.min = original_min
         math.pow = original_pow
         if original_fake_tensor_copy is None:
-            copy_dispatch.pop(FakeTensor, None)
+            del FakeTensor.__copy__  # type: ignore[attr-defined]
         else:
-            copy_dispatch[FakeTensor] = original_fake_tensor_copy
+            FakeTensor.__copy__ = original_fake_tensor_copy  # type: ignore[attr-defined]
 
 
 def make_fake_inputs(
