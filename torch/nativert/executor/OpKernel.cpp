@@ -67,7 +67,7 @@ std::string readableArgs(
     }
     ss << '\n';
   }
-  return ss.str();
+  return std::move(ss).str();
 }
 
 const bool OpKernel::blockingEnabled_ =
