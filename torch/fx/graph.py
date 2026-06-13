@@ -616,6 +616,12 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
+            elif isinstance(arg, complex):
+                if arg.real == 0.0 or arg.imag == 0.0:
+                    # complex.__repr__ is not a safe source representation for
+                    # signed zero components, e.g. eval("(-0-1j)") loses the sign.
+                    return f"complex({_get_repr(arg.real)}, {_get_repr(arg.imag)})"
+                return blue(repr(arg))
             elif isinstance(arg, torch.Tensor):
                 size = list(arg.size())
                 dtype = str(arg.dtype).split(".")[-1]
