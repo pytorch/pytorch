@@ -184,7 +184,7 @@ else:
         This method redirects the underlying std file descriptor (not just python's ``sys.stdout|stderr``).
         See usage for details.
 
-        Directory of ``dst_filename`` is assumed to exist and the destination file
+        Directory of ``to_file`` is assumed to exist and the destination file
         is overwritten if it already exists.
 
         .. note:: Due to buffering cross source writes are not guaranteed to
