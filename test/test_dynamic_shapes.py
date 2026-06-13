@@ -8,7 +8,6 @@ import operator
 import unittest
 
 import numpy as np
-import pytest
 import sympy
 
 import torch
@@ -16,7 +15,11 @@ import torch.fx
 import torch.nn.functional as F
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
-from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    CompileCounter,
+    CompileCounterWithBackend,
+)
 from torch._inductor.utils import fresh_cache
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -35,6 +38,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     has_free_symbols,
     is_symbolic,
+    rebind_unbacked,
     ShapeEnv,
     StatelessSymbolicContext,
     statically_known_false,
@@ -3450,6 +3454,33 @@ class TestGuardsExpressions(TestCase):
             shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s2)])
         )
 
+    def test_guards_expression_source_info(self):
+        from torch._guards import ShapeGuard, SLoc
+
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 6)
+        guard_bool(s0 * s0 < 40)
+
+        sloc = SLoc("_inductor/codegen/simd.py:2011 in can_use_32bit_indexing", None)
+        guard = shape_env.guards[-1]
+        shape_env.guards[-1] = ShapeGuard(guard.expr, sloc, guard.size_oblivious)
+
+        guards, guards_with_source = (
+            shape_env.produce_guards_expression_with_source_info([s0])
+        )
+        self.assertIsNotNone(guards)
+        self.assertIsNotNone(guards_with_source)
+        self.assertIn(str(sloc), {str(g.sloc) for g in guards_with_source})
+
+        new_shape_env = ShapeEnv()
+        new_s0 = create_symint(new_shape_env, 6)
+        self.assertTrue(
+            new_shape_env.evaluate_guards_expression_with_source_info(
+                guards_with_source, [new_s0]
+            )
+        )
+        self.assertIn(str(sloc), {str(g.sloc) for g in new_shape_env.guards})
+
     def test_guards_float_print(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 3)
@@ -3731,6 +3762,27 @@ def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
 
 
 class TestUnbacked(TestCase):
+    def test_rebind_unbacked_to_symbolic_expression(self):
+        shape_env = ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            allow_non_fake_inputs=True, shape_env=shape_env
+        )
+        graph = torch.fx.Graph()
+        node = graph.call_function(operator.add, args=(1, 1))
+
+        with fake_mode:
+            old = shape_env.create_unbacked_symint()
+            base = shape_env.create_unbacked_symint()
+            result = (base + 1) // 2
+
+        old_expr = old.node.expr
+        result_expr = result.node.expr
+        node.meta["unbacked_bindings"] = {old_expr: ()}
+
+        rebind_unbacked(shape_env, node, result)
+
+        self.assertEqual(shape_env.replacements[old_expr], result_expr)
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
@@ -3744,6 +3796,36 @@ class TestUnbacked(TestCase):
 
         with self.assertRaises(RuntimeError):
             func(torch.tensor([5]))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_symfloat_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
+        def func(a, b):
+            torch._check(b.item() * 2 == 11)
+            return b * 10
+
+        with fresh_cache():
+            self.assertEqual(
+                func(torch.tensor([100]), torch.tensor([5.5])), torch.tensor([55.0])
+            )
+            with self.assertRaisesRegex(RuntimeError, r"Eq\(2\.0\*zuf\d+, 11\.0\)"):
+                func(torch.tensor([5]), torch.tensor([1.8]))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_symfloat_eq_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
+        def func(a, b):
+            torch._check(b.item() == 5.5)
+            return a * 10
+
+        with fresh_cache():
+            self.assertEqual(
+                func(torch.tensor([5]), torch.tensor([5.5])), torch.tensor([50])
+            )
+            with self.assertRaisesRegex(RuntimeError, r"zuf\d+ >= 5\.5"):
+                func(torch.tensor([100]), torch.tensor([1.5]))
 
     # Test a situation where we generate a runtime assert i.e: u1==s1, then we specialize s1
     # later on to a constant.
@@ -3866,7 +3948,6 @@ class TestUnbacked(TestCase):
         or IS_WINDOWS,
         "https://github.com/pytorch/pytorch/issues/163953",
     )
-    @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_do_not_guard_unbacked_inputs(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
@@ -4174,27 +4255,18 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(u2)", 
         x = torch.arange(100)
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
-        log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
-        )
-        with ctx():
-            compiled_result = compiled_func(x, torch.tensor([10]))
-            eager_result = func(x, torch.tensor([10]))
-            self.assertEqual(compiled_result, eager_result)
-            self.assertEqual(cnt.frame_count, 1)
-
-        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
-        self.assertExpectedInline(
-            aot_graphs,
-            """""",
-            ignore_comments=True,
-            ignore_empty_lines=True,
-        )
+        compiled_result = compiled_func(x, torch.tensor([10]))
+        eager_result = func(x, torch.tensor([10]))
+        self.assertEqual(compiled_result, eager_result)
+        # reshape aliases contiguous inputs but copies non-contiguous
+        # inputs, so switching to a contiguous input must recompile.
+        self.assertEqual(cnt.frame_count, 2)
 
         x = torch.arange(25)
         compiled_result = compiled_func(x, torch.tensor([5]))
         eager_result = func(x, torch.tensor([5]))
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(compiled_result, eager_result)
+        self.assertEqual(cnt.frame_count, 2)
 
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -4276,38 +4348,62 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(result_compiled, result_eager)
         self.assertEqual(cnt.frame_count, 1)
 
-        # Pass a contiguous tensor. The unbacked strides keep this on the
-        # non-contiguous graph instead of specializing on stride 1.
-        log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
-        )
-        with ctx():
-            # This used to hit could guard on data-dependent expression Eq(10, u3) x.stride[0]==10. and x.size()=[u2, u3].
-            # but not anymore since we use  contiguous_or_false .
-            x = torch.randn(10, 10)
-            torch._dynamo.decorators.mark_unbacked(x, 0)
-            torch._dynamo.decorators.mark_unbacked(x, 1)
-
-        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
-        self.assertExpectedInline(
-            aot_graphs,
-            """""",
-            ignore_comments=True,
-            ignore_empty_lines=True,
-        )
+        # Pass a contiguous tensor. reshape aliases contiguous inputs but
+        # copies non-contiguous inputs, so switching layouts must recompile.
+        x = torch.randn(10, 10)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
 
         result_compiled = compiled_func(x, torch.tensor([2, 50]))
         result_eager = func(x, torch.tensor([2, 50]))
 
         self.assertEqual(result_compiled, result_eager)
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 2)
 
         x = torch.randn(4, 4)
 
         result_eager = func(x, torch.tensor([2, 8]))
         result_compiled = compiled_func(x, torch.tensor([2, 8]))
         self.assertEqual(result_compiled, result_eager)
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @fresh_cache()
+    @skipIfTorchDynamo("test inspects inner torch.compile/AOT backend graph")
+    def test_user_check_input_shape_bound_preserved_in_aot_graph(self):
+        def f(x):
+            torch._check(x.shape[0] <= 5, lambda: "custom shape check failed")
+            return x + 1
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_f = torch.compile(f, fullgraph=True, dynamic=True, backend=backend)
+        x = torch.ones(4)
+        self.assertEqual(compiled_f(x), f(x))
+
+        self.assertEqual(len(backend.fw_graphs), 1)
+        fw_graph = backend.fw_graphs[0]
+        assert_nodes = [
+            node
+            for node in fw_graph.graph.nodes
+            if node.target is torch.ops.aten._assert_scalar.default
+        ]
+        self.assertEqual(len(assert_nodes), 1)
+        self.assertEqual(assert_nodes[0].args[1], "custom shape check failed")
+        self.assertEqual(fw_graph(4, x)[0], f(x))
+
+        with self.assertRaisesRegex(RuntimeError, "custom shape check failed"):
+            fw_graph(6, torch.ones(6))
+
+        def g(x):
+            def lazy_message():
+                raise RuntimeError("message should be lazy")
+
+            torch._check(x.shape[0] <= 5, lazy_message)
+            return x + 1
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_g = torch.compile(g, fullgraph=True, dynamic=True, backend=backend)
+        x = torch.ones(4)
+        self.assertEqual(compiled_g(x), g(x))
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -6501,6 +6597,32 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(u2)", 
 
     @fresh_cache()
     @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_mark_unbacked_view_base_metadata_observed_recompiles(self):
+        cnt = CompileCounterWithBackend("eager")
+
+        def fn(x):
+            return x + x._base.size(0)
+
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            dynamic=True,
+            backend=cnt,
+        )
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        self.assertEqual(compiled_fn(x), fn(x))
+
+        y = torch.zeros(5, 5).t()
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        self.assertEqual(compiled_fn(y), fn(y))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @fresh_cache()
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_mark_unbacked_intermediate_base_observed(self):
         cnt = CompileCounterWithBackend("eager")
 
@@ -6537,6 +6659,127 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(u2)", 
         torch._dynamo.decorators.mark_unbacked(y, 1)
         self.assertEqual(compiled_fn(y), fn(y))
         self.assertEqual(cnt.frame_count, 2)
+
+    @fresh_cache()
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    def test_unbacked_contiguous_identity_observation_recompiles(self):
+        cnt = CompileCounterWithBackend("eager")
+
+        def fn(x):
+            y = x.contiguous()
+            return torch.tensor(1.0) if y is x else torch.tensor(0.0)
+
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            dynamic=True,
+            backend=cnt,
+        )
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        self.assertEqual(compiled_fn(x), fn(x))
+
+        y = torch.zeros(3, 3)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        self.assertEqual(compiled_fn(y), fn(y))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @fresh_cache()
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    def test_unbacked_alias_or_copy_mutation_recompiles(self):
+        def reshape_fn(x):
+            y = x.reshape(-1)
+            y.add_(1)
+            return x.sum()
+
+        def flatten_fn(x):
+            y = x.flatten()
+            y.add_(1)
+            return x.sum()
+
+        def iadd_fn(x):
+            y = x.contiguous()
+            x += 1
+            return y + 1
+
+        for name, fn in (
+            ("reshape", reshape_fn),
+            ("flatten", flatten_fn),
+            ("iadd", iadd_fn),
+        ):
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                cnt = CompileCounterWithBackend("eager")
+                compiled_fn = torch.compile(
+                    fn,
+                    fullgraph=True,
+                    dynamic=True,
+                    backend=cnt,
+                )
+
+                x = torch.zeros(3, 3).t()
+                torch._dynamo.decorators.mark_unbacked(x, 0)
+                torch._dynamo.decorators.mark_unbacked(x, 1)
+                self.assertEqual(compiled_fn(x), fn(torch.zeros(3, 3).t()))
+                self.assertEqual(cnt.frame_count, 1)
+
+                y = torch.zeros(3, 3)
+                torch._dynamo.decorators.mark_unbacked(y, 0)
+                torch._dynamo.decorators.mark_unbacked(y, 1)
+                eager_y = torch.zeros(3, 3)
+                self.assertEqual(compiled_fn(y), fn(eager_y))
+                self.assertEqual(y, eager_y)
+                self.assertEqual(cnt.frame_count, 2)
+
+    @fresh_cache()
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    def test_unbacked_sourceless_alias_or_copy_fails_closed(self):
+        from torch._dynamo.exc import Unsupported
+
+        def fn(x):
+            z = x[0]
+            y = z.contiguous()
+            y.add_(1)
+            return x.sum()
+
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            dynamic=True,
+            backend="eager",
+        )
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        with self.assertRaisesRegex(Unsupported, "sourceless tensor"):
+            compiled_fn(x)
+
+    @fresh_cache()
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    def test_unbacked_reshape_as_fails_closed(self):
+        from torch._dynamo.exc import Unsupported
+
+        def fn(x):
+            y = x.reshape_as(x)
+            y.add_(1)
+            return x.sum()
+
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            dynamic=True,
+            backend="inductor",
+        )
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        with self.assertRaisesRegex(Unsupported, "reshape_as"):
+            compiled_fn(x)
 
 
 instantiate_parametrized_tests(TestUnbacked)

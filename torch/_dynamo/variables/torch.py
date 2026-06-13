@@ -1672,6 +1672,47 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return empty_result.call_method(tx, "fill_", [fill_value], {})
             return None
 
+        @register(torch.tensor_split)
+        def handle_tensor_split(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            indices_or_sections = (
+                args[1] if len(args) >= 2 else kwargs.get("indices_or_sections")
+            )
+            if not isinstance(indices_or_sections, TensorVariable):
+                return None
+
+            example_value = indices_or_sections.as_proxy().node.meta.get(
+                "example_value"
+            )
+            if (
+                example_value is None
+                or example_value.dim() != 0
+                or example_value.device.type != "cpu"
+                or example_value.dtype != torch.int64
+                or (item_memo := example_value.item_memo) is None
+            ):
+                return None
+
+            sections = torch.fx.experimental.symbolic_shapes.guard_scalar(item_memo)
+            if not isinstance(sections, int):
+                return None
+
+            # tensor_split's scalar-tensor overload needs a concrete output
+            # arity. Guard the memoized value here so downstream AOT tracing
+            # does not re-read the 0-D tensor as a fresh unbacked scalar.
+            sections_vt = ConstantVariable.create(sections)
+            if len(args) >= 2:
+                args = (args[0], sections_vt, *args[2:])
+            else:
+                kwargs["indices_or_sections"] = sections_vt
+            return TorchInGraphFunctionVariable(torch.tensor_split).call_function(
+                tx, list(args), kwargs
+            )
+
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
             _: Any,
@@ -2461,6 +2502,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     f"{self.value.__name__}() missing 1 required positional argument: 'cond'",
                 )
 
+            if predicate_vt.is_tensor():
+                raise_type_error(
+                    tx,
+                    "cond must be a bool, but got a Tensor. "
+                    "For tensor conditions, use torch._check_tensor_all() "
+                    "to assert that all elements are true.",
+                )
+
             message_eager = None
             message_graph_proxy = None
             if message_vt is not None:
@@ -3212,12 +3261,26 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
             )
 
-        if fn_ == torch.ops.aten.contiguous.default and args:
+        if (
+            fn_
+            in (
+                torch.ops.aten.contiguous.default,
+                torch.ops.aten.reshape.default,
+                torch.ops.aten.flatten.using_ints,
+                torch.reshape,
+                torch.flatten,
+                torch.ravel,
+            )
+            and args
+        ):
             from .tensor import TensorVariable
 
             if isinstance(args[0], TensorVariable) and tensor_variable.is_tensor():
-                args[0]._install_unbacked_contiguous_alias_guard(
-                    tx, tensor_variable.as_proxy().node, args[1:], kwargs
+                guard_args = (
+                    args[1:] if fn_ == torch.ops.aten.contiguous.default else []
+                )
+                args[0]._install_unbacked_alias_or_copy_guard(
+                    tx, tensor_variable.as_proxy().node, guard_args, kwargs
                 )
 
         # Handle e.g., `torch.ones(10, requires_grad=True)`

@@ -173,46 +173,96 @@ type_implements_mp_length = partial(
 )
 
 
-def type_implements_nb_bool(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_bool slot (i.e. has __bool__ or __len__)."""
+def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the nb slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_BOOL)
+    return has_slot(number_slots, slot)
 
 
-def type_implements_nb_int(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_int slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_INT)
-
-
-def type_implements_nb_index(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_index slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_INDEX)
-
-
-def type_implements_nb_float(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_float slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_FLOAT)
-
-
-def type_implements_nb_negative(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_negative slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_NEGATIVE)
-
-
-def type_implements_nb_positive(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_positive slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_POSITIVE)
-
-
-def type_implements_nb_absolute(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_absolute slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_ABSOLUTE)
+type_implements_nb_add = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_ADD)
+type_implements_nb_subtract = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_SUBTRACT
+)
+type_implements_nb_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_MULTIPLY
+)
+type_implements_nb_remainder = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_REMAINDER
+)
+type_implements_nb_power = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_POWER)
+type_implements_nb_negative = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_NEGATIVE
+)
+type_implements_nb_positive = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_POSITIVE
+)
+type_implements_nb_absolute = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_ABSOLUTE
+)
+type_implements_nb_bool = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_BOOL)
+type_implements_nb_invert = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INVERT
+)
+type_implements_nb_lshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_LSHIFT
+)
+type_implements_nb_rshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_RSHIFT
+)
+type_implements_nb_and = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_AND)
+type_implements_nb_xor = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_XOR)
+type_implements_nb_or = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_OR)
+type_implements_nb_int = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_INT)
+type_implements_nb_float = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_FLOAT)
+type_implements_nb_inplace_add = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_ADD
+)
+type_implements_nb_inplace_subtract = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_SUBTRACT
+)
+type_implements_nb_inplace_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_MULTIPLY
+)
+type_implements_nb_inplace_remainder = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_REMAINDER
+)
+type_implements_nb_inplace_power = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_POWER
+)
+type_implements_nb_inplace_lshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_LSHIFT
+)
+type_implements_nb_inplace_rshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_RSHIFT
+)
+type_implements_nb_inplace_and = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_AND
+)
+type_implements_nb_inplace_xor = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_XOR
+)
+type_implements_nb_inplace_or = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_OR
+)
+type_implements_nb_floor_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_FLOOR_DIVIDE
+)
+type_implements_nb_true_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_TRUE_DIVIDE
+)
+type_implements_nb_inplace_floor_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_FLOOR_DIVIDE
+)
+type_implements_nb_inplace_true_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_TRUE_DIVIDE
+)
+type_implements_nb_index = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_INDEX)
+type_implements_nb_matrix_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_MATRIX_MULTIPLY
+)
+type_implements_nb_inplace_matrix_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY
+)
 
 
 def type_implements_tp_iter(obj_type: type) -> bool:
@@ -231,10 +281,10 @@ def type_implements_tp_repr(obj_type: type) -> bool:
     return has_slot(type_slot, PyTypeSlots.TP_REPR)
 
 
-def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
-    """Check whether obj_type implements the nb slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, slot)
+def type_implements_tp_str(obj_type: type) -> bool:
+    """Check whether obj_type implements the tp_str slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_STR)
 
 
 def pyiter_check(obj_type: type) -> bool:
@@ -400,6 +450,36 @@ def generic_repr(
         return result
 
     raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
+
+
+def generic_str(
+    tx: "InstructionTranslatorBase", obj: "VariableTracker"
+) -> "VariableTracker":
+    """Mirrors PyObject_Str semantics in Dynamo.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L781-L829
+
+    Resolution order: str identity check -> tp_str (str_impl) -> tp_repr fallback.
+    """
+    if maybe_get_python_type(obj) is str:
+        return obj
+
+    obj_type = maybe_get_python_type(obj)
+    if (
+        type_implements_tp_str(obj_type)
+        and type(obj).str_impl is not VariableTracker.str_impl
+    ):
+        result = obj.str_impl(tx)
+    else:
+        result = generic_repr(tx, obj)
+
+    result_type = maybe_get_python_type(result)
+    if not issubclass(result_type, str):
+        raise_type_error(
+            tx,
+            f"__str__ returned non-string (type {result_type.__name__})",
+        )
+    return result
 
 
 def vt_getitem(
@@ -804,6 +884,19 @@ NB_SLOT_MAPPING = {
     "nb_inplace_add": PyNumberSlots.NB_INPLACE_ADD,
     "nb_multiply": PyNumberSlots.NB_MULTIPLY,
     "nb_inplace_multiply": PyNumberSlots.NB_INPLACE_MULTIPLY,
+    "nb_and": PyNumberSlots.NB_AND,
+    "nb_inplace_and": PyNumberSlots.NB_INPLACE_AND,
+    "nb_xor": PyNumberSlots.NB_XOR,
+    "nb_inplace_xor": PyNumberSlots.NB_INPLACE_XOR,
+    "nb_floor_divide": PyNumberSlots.NB_FLOOR_DIVIDE,
+    "nb_inplace_floor_divide": PyNumberSlots.NB_INPLACE_FLOOR_DIVIDE,
+    "nb_true_divide": PyNumberSlots.NB_TRUE_DIVIDE,
+    "nb_inplace_true_divide": PyNumberSlots.NB_INPLACE_TRUE_DIVIDE,
+    "nb_remainder": PyNumberSlots.NB_REMAINDER,
+    "nb_inplace_remainder": PyNumberSlots.NB_INPLACE_REMAINDER,
+    "nb_divmod": PyNumberSlots.NB_DIVMOD,
+    "nb_power": PyNumberSlots.NB_POWER,
+    "nb_inplace_power": PyNumberSlots.NB_INPLACE_POWER,
 }
 
 
@@ -916,6 +1009,91 @@ def binary_op(
     if is_nb_not_implemented(result):
         binop_type_error(tx, v, w, op_symbol)
     return result
+
+
+def ternary_op(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+    z: VariableTracker | None,
+    op_slot: str,
+    op_name: str,
+) -> VariableTracker:
+    impl_attr = f"{op_slot}_impl"
+    nb_slot_bit = NB_SLOT_MAPPING[op_slot]
+
+    v_type = maybe_get_python_type(v)
+    w_type = maybe_get_python_type(w)
+
+    v_slot = (
+        getattr(type(v), impl_attr, None)
+        if type_implements_nb_slot(v_type, nb_slot_bit)
+        else None
+    )
+
+    w_slot = (
+        getattr(type(w), impl_attr, None)
+        if type_implements_nb_slot(w_type, nb_slot_bit)
+        else None
+    )
+
+    if v_slot is w_slot:
+        w_slot = None
+
+    if v_slot:
+        if w_slot and is_python_subtype(w, v):
+            result = w_slot(w, tx, v, z, True)
+            if not is_nb_not_implemented(result):
+                return result
+            w_slot = None
+        result = v_slot(v, tx, w, z, False)
+        if not is_nb_not_implemented(result):
+            return result
+    if w_slot:
+        result = w_slot(w, tx, v, z, True)
+        if not is_nb_not_implemented(result):
+            return result
+
+    if z:
+        z_type = maybe_get_python_type(z)
+        if type_implements_nb_slot(z_type, nb_slot_bit):
+            z_impl_attr = f"{op_slot}_z_impl"
+            z_slot = getattr(type(z), z_impl_attr, None)
+            if z_slot in (v_slot, w_slot):
+                z_slot = None
+            if z_slot:
+                result = z_slot(z, tx, v, w)
+                if not is_nb_not_implemented(result):
+                    return result
+
+    if z is None:
+        binop_type_error(tx, v, w, op_name)
+    else:
+        raise_type_error(
+            tx,
+            f"unsupported operand type(s) for {op_name}: "
+            f"'{v.python_type_name()}', '{w.python_type_name()}', '{z.python_type_name()}'",
+        )
+
+
+def ternary_iop(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+    z: VariableTracker | None,
+    iop_slot: str,
+    op_slot: str,
+    op_name: str,
+) -> VariableTracker:
+    v_type = maybe_get_python_type(v)
+    if type_implements_nb_slot(v_type, NB_SLOT_MAPPING[iop_slot]):
+        impl_attr = f"{iop_slot}_impl"
+        slot = getattr(type(v), impl_attr)
+        result = slot(v, tx, w, z)
+        if not is_nb_not_implemented(result):
+            return result
+
+    return ternary_op(tx, v, w, z, op_slot, op_name)
 
 
 #  Binary in-place operators
@@ -1039,6 +1217,7 @@ def sequence_repeat(
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
         )
     count = n.nb_index_impl(tx)
+    validate_sequence_repeat_count(tx, count)
     return seq.sq_repeat_impl(tx, count)
 
 
@@ -1059,7 +1238,21 @@ def sequence_inplace_repeat(
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
         )
     count = n.nb_index_impl(tx)
+    validate_sequence_repeat_count(tx, count)
     return seq.sq_inplace_repeat_impl(tx, count)
+
+
+def validate_sequence_repeat_count(
+    tx: "InstructionTranslatorBase",
+    count: VariableTracker,
+) -> None:
+    n = count.as_python_constant()
+    if n < -sys.maxsize - 1 or n > sys.maxsize:
+        raise_observed_exception(
+            OverflowError,
+            tx,
+            args=["cannot fit 'int' into an index-sized integer"],
+        )
 
 
 def generic_multiply(

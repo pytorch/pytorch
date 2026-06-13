@@ -164,6 +164,30 @@ _ALIASING_FUNCTION_NAMES = {
     "_get_data_attr",
 }
 
+_INPLACE_OPERATOR_FUNCTIONS = {
+    operator.iadd,
+    operator.iand,
+    operator.ifloordiv,
+    operator.ilshift,
+    operator.imatmul,
+    operator.imod,
+    operator.imul,
+    operator.ior,
+    operator.ipow,
+    operator.irshift,
+    operator.isub,
+    operator.itruediv,
+    operator.ixor,
+}
+
+_UNBACKED_ALIAS_OR_COPY_METHODS = {
+    "contiguous",
+    "flatten",
+    "ravel",
+    "reshape",
+    "reshape_as",
+}
+
 _MISSING = object()
 
 
@@ -205,6 +229,7 @@ def _call_function_mutates_alias_arg(
     if (
         (
             getattr(node.target, "__name__", "").endswith("_")
+            or node.target in _INPLACE_OPERATOR_FUNCTIONS
             or node.kwargs.get("inplace") is True
         )
         and first_tensor_arg is not _MISSING
@@ -631,28 +656,77 @@ class TensorVariable(VariableTracker):
         except NotImplementedError:
             return None
 
-    def _install_unbacked_contiguous_alias_guard(
+    def _install_unbacked_alias_or_copy_guard(
         self,
         tx: "InstructionTranslatorBase",
-        contiguous_node: torch.fx.Node,
+        alias_or_copy_node: torch.fx.Node,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> None:
-        if self.source is None or not self._has_marked_unbacked_dims():
+        if not self._has_marked_unbacked_dims():
             return
 
-        memory_format = self._contiguous_memory_format_arg(args, kwargs)
+        memory_format = (
+            self._contiguous_memory_format_arg(args, kwargs)
+            if _is_contiguous_fx_node(alias_or_copy_node)
+            else torch.contiguous_format
+        )
         if memory_format is None:
-            return
+            unimplemented(
+                gb_type="unbacked alias-or-copy op with dynamic memory format",
+                context=f"{alias_or_copy_node.target} on marked-unbacked tensor",
+                explanation="Dynamo cannot safely cache an alias-or-copy branch "
+                "for a marked-unbacked tensor without a concrete memory format.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        if self.source is None:
+            unimplemented(
+                gb_type="unbacked alias-or-copy op on sourceless tensor",
+                context=f"{alias_or_copy_node.target} on marked-unbacked tensor",
+                explanation="Dynamo cannot safely cache an alias-or-copy branch "
+                "for a marked-unbacked intermediate tensor without a guardable "
+                "source.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         source = self.source
+        if source is None:
+            raise AssertionError("unreachable after sourceless tensor check")
+        alias_or_copy_node.meta["_dynamo_unbacked_alias_or_copy_guard"] = (
+            source,
+            memory_format,
+        )
+
+        if alias_or_copy_node.target == "reshape_as":
+            unimplemented(
+                gb_type="unbacked reshape_as alias-or-copy op",
+                context="reshape_as on marked-unbacked tensor",
+                explanation="Dynamo cannot safely cache or functionalize "
+                "reshape_as for marked-unbacked tensors because its "
+                "alias-or-copy behavior depends on layout.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        if not _is_contiguous_fx_node(alias_or_copy_node):
+            install_guard(
+                source.make_guard(
+                    functools.partial(
+                        GuardBuilder.TENSOR_CONTIGUITY_MATCH,
+                        memory_format=memory_format,
+                    )
+                )
+            )
+            return
+
         output = tx.output
 
         def install_contiguity_guard_if_aliasing_observable(
             gm: torch.fx.GraphModule,
         ) -> None:
-            if contiguous_node.graph is gm.graph and _contiguous_aliasing_is_observable(
-                contiguous_node
+            if (
+                alias_or_copy_node.graph is gm.graph
+                and _contiguous_aliasing_is_observable(alias_or_copy_node)
             ):
                 output.guards.add(
                     source.make_guard(
@@ -667,7 +741,7 @@ class TensorVariable(VariableTracker):
             for node in gm.graph.nodes:
                 if (
                     _is_contiguous_fx_node(node)
-                    and node.args == contiguous_node.args
+                    and node.args == alias_or_copy_node.args
                     and _contiguous_aliasing_is_observable(node)
                 ):
                     output.guards.add(
@@ -962,6 +1036,11 @@ class TensorVariable(VariableTracker):
     ) -> VariableTracker | None:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, "grad"):
             return tx.output.side_effects.load_attr(self, "grad")
+        if (
+            isinstance(self.mutation_type, AttributeMutationNew)
+            and not self.has_grad_fn
+        ):
+            return ConstantVariable.create(None)
         # None tells var_getattr to use default .grad handling
         return None
 
@@ -1106,7 +1185,7 @@ class TensorVariable(VariableTracker):
                             AttrSource(self.source, "_base").make_guard(
                                 GuardBuilder.NONE_MATCH
                                 if base_value is None
-                                else GuardBuilder.NOT_NONE_MATCH
+                                else GuardBuilder.TENSOR_MATCH
                             )
                         )
                     return wrap_fx_proxy(
@@ -1404,8 +1483,8 @@ class TensorVariable(VariableTracker):
                 from_exc=e,
             )
 
-        if name == "contiguous":
-            self._install_unbacked_contiguous_alias_guard(tx, proxy.node, args, kwargs)
+        if name in _UNBACKED_ALIAS_OR_COPY_METHODS:
+            self._install_unbacked_alias_or_copy_guard(tx, proxy.node, args, kwargs)
 
         # [Note: Inplace ops and VariableTracker metadata]
         # For inplace operations, we need to propagate tensor metadata from the
@@ -2692,15 +2771,16 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
         if not other.is_symnode_like():
             return VariableTracker.build(tx, NotImplemented)
-        args = [other, self] if reverse else [self, other]
-        return SymNodeVariable.create(
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
-                "call_function", operator.lshift, *proxy_args_kwargs(args, {})
+                "call_function", operator.lshift, *proxy_args_kwargs([lhs, rhs], {})
             ),
-            sym_num=None,
         )
 
     def nb_rshift_impl(
@@ -2709,15 +2789,16 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
         if not other.is_symnode_like():
             return VariableTracker.build(tx, NotImplemented)
-        args = [other, self] if reverse else [self, other]
-        return SymNodeVariable.create(
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
-                "call_function", operator.rshift, *proxy_args_kwargs(args, {})
+                "call_function", operator.rshift, *proxy_args_kwargs([lhs, rhs], {})
             ),
-            sym_num=None,
         )
 
     def nb_or_impl(
@@ -2726,14 +2807,52 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
         if not other.is_symnode_like():
             return VariableTracker.build(tx, NotImplemented)
-        return SymNodeVariable.create(
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
-                "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+                "call_function", operator.or_, *proxy_args_kwargs([lhs, rhs], {})
             ),
-            sym_num=None,
+        )
+
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.and_, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.xor, *proxy_args_kwargs([lhs, rhs], {})
+            ),
         )
 
     def nb_multiply_impl(
@@ -2752,6 +2871,69 @@ class TensorVariable(VariableTracker):
             tx,
             tx.output.create_proxy(
                 "call_function", operator.mul, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__floordiv__(x)`` calls — the
+        # ``operator.floordiv`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.floordiv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__truediv__(x)`` calls — the
+        # ``operator.truediv`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.truediv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__mod__(x)`` calls — the
+        # ``operator.mod`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.mod, *proxy_args_kwargs([lhs, rhs], {})
             ),
         )
 
@@ -2778,6 +2960,28 @@ class TensorVariable(VariableTracker):
                 "call_function", operator.sub, *proxy_args_kwargs(args, {})
             ),
             sym_num=None,
+        )
+
+    def nb_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__pow__(x)`` calls — the
+        # ``operator.pow`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)) or z:
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.pow, *proxy_args_kwargs([lhs, rhs], {})
+            ),
         )
 
     def is_python_equal(self, other: object) -> bool:
@@ -2994,6 +3198,38 @@ class SymNodeVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.and_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.xor, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
     def nb_lshift_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -3064,6 +3300,57 @@ class SymNodeVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.floordiv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.truediv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.mod, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
     def nb_float_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -3126,6 +3413,26 @@ class SymNodeVariable(VariableTracker):
         return SymNodeVariable.create(
             tx,
             operator.abs(self.as_proxy()),
+            sym_num=None,
+        )
+
+    def nb_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if z is not None:
+            return VariableTracker.build(tx, NotImplemented)
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.pow, *proxy_args_kwargs([lhs, rhs], {})
+            ),
             sym_num=None,
         )
 
