@@ -1355,8 +1355,7 @@ kernel void gemv_t(
   }
 }
 
-// Same geometry as gemv_t, but with a wider inner-loop unroll. This is useful
-// for M2 bf16 small-N cases where loop overhead is visible.
+// gemv_t with a wider inner-loop unroll; wins on M2 bf16 small-N where loop overhead shows.
 template <typename DT, int NSIMD, int VEC, GemmEpilogue EPI>
 kernel void gemv_t_u8(
     device const DT* B [[buffer(0)]],
@@ -1455,12 +1454,9 @@ kernel void gemv_t_u8(
   }
 }
 
-// gemv_t with a 2D lane layout: lanes split into KQ k-sublanes x C=32/KQ
-// column groups, each lane loading a full 16-byte vector per step. Compared to
-// gemv_t this issues up to 8x fewer (and maximally wide) loads for the same
-// bytes, which holds up much better when the GPU runs at reduced clocks, at
-// the cost of a small shuffle butterfly before the cross-simdgroup reduce.
-// Requires ld and storage offset to be VEC-aligned (host checks).
+// gemv_t with a 2D lane layout (KQ k-sublanes x C=32/KQ column groups), each
+// lane loading a full 16-byte vector: up to 8x fewer/wider loads, which holds
+// up under reduced GPU clocks. Requires ld and offset VEC-aligned (host checks).
 template <typename DT, int NSIMD, int KQ, GemmEpilogue EPI>
 kernel void gemv_t2d(
     device const DT* B [[buffer(0)]],
