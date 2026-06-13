@@ -11,6 +11,10 @@
 #include <sleef.h>
 #endif
 
+#if defined(CPU_CAPABILITY_SVE128)
+#include <ATen/cpu/vec/sve/vec_float.h>
+#endif
+
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 
 // Sleef offers vectorized versions of some transcedentals
@@ -43,7 +47,7 @@ inline namespace CPU_CAPABILITY {
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
-#if defined(CPU_CAPABILITY_SVE128) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#if defined(CPU_CAPABILITY_SVE128)
 // With -msve-vector-bits=128, svfloat32_t and float32x4_t have identical layout
 // so these conversions compile to zero instructions.
 static inline svfloat32_t neon_to_sve(float32x4_t v) {
@@ -371,6 +375,24 @@ class Vectorized<float> {
 
     return vfmaq_f32(scale, poly, scale);
   }
+#if defined(CPU_CAPABILITY_SVE128)
+  // SVE128 uses the ASIMD wrapper type, but can still reuse the SVE exp
+  // helpers.
+  Vectorized<float> exp_u20() const {
+    // special case to handle special inputs that are too large or too small
+    // i.e. where there's at least one element x, s.t. |x| >= 87.3...
+    svfloat32_t sve_values = neon_to_sve(values);
+    svbool_t is_special_case =
+        svacgt(svptrue_b32(), sve_values, 0x1.5d5e2ap+6f);
+    if (svptest_any(svptrue_b32(), is_special_case)) {
+      return exp();
+    }
+    return sve_to_neon(at::vec::exp_u20_fast_path(sve_values));
+  }
+  Vectorized<float> fexp_u20() const {
+    return sve_to_neon(at::vec::fexp_u20(neon_to_sve(values)));
+  }
+#else
   Vectorized<float> exp_u20() const {
     return vexpq_f32_u20();
   }
@@ -417,6 +439,7 @@ class Vectorized<float> {
     y = vbslq_f32(gt_upper, vdupq_n_f32(INFINITY), y);
     return y;
   }
+#endif
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
       fmod,
       Sleef_fmodf4)
