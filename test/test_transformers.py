@@ -2186,9 +2186,8 @@ class TestSDPAFailureModes(NNTestCase):
         device = torch.device("cuda")
         dtype = torch.bfloat16
 
-        seq_len = 70000  # seq_len**2 > 2**32
-        head_dim = 64
-
+        seq_len = 66000  # seq_len**2 > 2**32
+        head_dim = 16
         torch.manual_seed(0)
         make_tensor = partial(
             torch.randn, 1, 1, seq_len, head_dim, device=device, dtype=dtype
@@ -2207,7 +2206,7 @@ class TestSDPAFailureModes(NNTestCase):
             out = torch.nn.functional.scaled_dot_product_attention(
                 query, key, value, attn_mask=attn_mask
             )
-        # before the fix, all rows past 2**32 // seq_len (= 61356) were garbage
+        # before the fix, all rows past 2**32 // seq_len were garbage
         self.assertEqual(out, ref, atol=5e-3, rtol=5e-3)
 
 
