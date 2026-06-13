@@ -837,6 +837,38 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_retrace_inference_mode(self):
+        # Recompile trick doesn't work with dynamic shapes
+        if check_dynamic_shape_capture():
+            return
+
+        def f(x):
+            with torch.inference_mode():
+                y = x + 1
+            return y
+
+        x = torch.randn(2, 2)
+        eager = EagerAndRecordGraphs()
+        opt_f = torch.compile(f, backend=eager, fullgraph=True)
+        out = f(x)
+        opt_out = opt_f(x)
+        self.assertEqual(out, opt_out)
+        self.assertFalse(torch.is_inference_mode_enabled())
+
+        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
+        self.assertIn(
+            "torch.autograd.grad_mode._enter_inference_mode(True)", first_graph
+        )
+        self.assertIn("torch.autograd.grad_mode._exit_inference_mode", first_graph)
+
+        d = {}
+        exec(first_graph, globals(), d)
+        eager = EagerAndRecordGraphs()
+        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
+        retraced_out = retraced()(x)[0]
+        self.assertEqual(out, retraced_out)
+        self.assertFalse(torch.is_inference_mode_enabled())
+
     @parametrize(
         "Ctx",
         [CustomizedCtxManagerWithGraphBreak, customized_ctx_manager_with_graph_break],
@@ -2023,6 +2055,25 @@ class GraphModule(torch.nn.Module):
 
 
 class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
+    def test_cuda_use_mem_pool_fx_cse_preserves_distinct_contexts(self):
+        from torch._functorch.compile_utils import fx_graph_cse
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        add_a = graph.call_function(torch.ops.aten.add.Tensor, (x, 1))
+        add_a.meta["custom"] = {"mempool": 0, "mempool_device": 0}
+        add_b = graph.call_function(torch.ops.aten.add.Tensor, (x, 1))
+        add_b.meta["custom"] = {"mempool": 1, "mempool_device": 0}
+        graph.output((add_a, add_b))
+
+        cse_graph = fx_graph_cse(graph)
+        add_nodes = [
+            node
+            for node in cse_graph.nodes
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor
+        ]
+        self.assertEqual(len(add_nodes), 2)
+
     def _check_cuda_use_mem_pool(self, backend=None):
         torch.cuda.empty_cache()
 
@@ -2151,6 +2202,49 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertGreater(len(torch.cuda.memory.memory_snapshot(inner_pool.id)), 0)
         self.assertEqual(outer_pool.use_count(), 1)
         self.assertEqual(inner_pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_distinct_pools_not_cse_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool_a, pool_b, inp):
+            with torch.cuda.use_mem_pool(pool_a):
+                a = inp + 1
+            with torch.cuda.use_mem_pool(pool_b):
+                b = inp + 1
+            return a + b
+
+        pool_a = torch.cuda.MemPool()
+        pool_b = torch.cuda.MemPool()
+        inp = torch.ones(16, device="cuda")
+        res = torch.compile(fn, fullgraph=True)(pool_a, pool_b, inp)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((16,), 4.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool_a.id)), 0)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool_b.id)), 0)
+        self.assertEqual(pool_a.use_count(), 1)
+        self.assertEqual(pool_b.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_reduce_overhead_cudagraph_asserts_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, x, w):
+            with torch.cuda.use_mem_pool(pool):
+                return (x @ w).relu()
+
+        pool = torch.cuda.MemPool()
+        x = torch.randn(64, 64, device="cuda")
+        w = torch.randn(64, 64, device="cuda")
+        with torch._inductor.config.patch({"triton.slow_path_cudagraph_asserts": True}):
+            opt_fn = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+            res = opt_fn(pool, x, w)
+            res_second = opt_fn(pool, x, w)
+        torch.cuda.synchronize()
+        self.assertEqual(res, (x @ w).relu(), atol=1e-4, rtol=1e-4)
+        self.assertEqual(res_second, res)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
 
     @requires_cuda_and_triton
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires multiple cuda devices")
@@ -3157,6 +3251,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    # autocast with float64 not support on XPU
     @onlyCUDA
     def test_amp_autocast(self, device):
         device_type = torch.device(device).type

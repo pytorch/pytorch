@@ -15,7 +15,7 @@ from .ctx_manager import ContextWrappingVariable
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from ..codegen import PyCodegen
 
@@ -87,7 +87,9 @@ class CUDAMemPoolVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if name == "id":
             if self.source:
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
@@ -126,7 +128,7 @@ class CUDAMemPoolContextVariable(ContextWrappingVariable):
 
     @staticmethod
     def create(
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         mempool: VariableTracker,
         device: VariableTracker | None = None,
         **kwargs: Any,
@@ -158,7 +160,7 @@ class CUDAMemPoolContextVariable(ContextWrappingVariable):
 
         return CUDAMemPoolContextVariable(mempool, device_index, **kwargs)
 
-    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
+    def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         stack = ExitStack()
         stack.enter_context(
             torch.fx.traceback.annotate(
@@ -179,7 +181,7 @@ class CUDAMemPoolContextVariable(ContextWrappingVariable):
         return ConstantVariable.create(None)
 
     def exit(
-        self, tx: "InstructionTranslator", *args: VariableTracker
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         tx.output.create_proxy(
             "call_function",

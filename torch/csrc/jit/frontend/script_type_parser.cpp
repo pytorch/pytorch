@@ -293,7 +293,7 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
       }
     }
 
-    throw ErrorReport(expr) << "Unknown type name '" << type_name << "'";
+    throw ErrorReport(expr) << "Unknown type name '" << type_name << '\'';
   } else if (auto name = parseBaseTypeName(expr)) {
     auto itr = string_to_type_lut().find(*name);
     if (itr != string_to_type_lut().end()) {
@@ -309,7 +309,7 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
       return custom_class_type;
     }
 
-    throw ErrorReport(expr) << "Unknown type name '" << *name << "'";
+    throw ErrorReport(expr) << "Unknown type name '" << *name << '\'';
   }
   throw ErrorReport(expr.range())
       << "Expression of type " << kindToString(expr.kind())

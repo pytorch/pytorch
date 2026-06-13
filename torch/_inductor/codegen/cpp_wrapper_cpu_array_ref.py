@@ -44,7 +44,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
     def __init__(self):
         super().__init__()
-        assert self.device == "cpu", "ArrayRefTensor only supported on CPU!"
+        if self.device != "cpu":
+            raise AssertionError("ArrayRefTensor only supported on CPU!")
         self.allow_stack_allocation = config.aot_inductor.allow_stack_allocation
         self.stack_allocated_buffers: dict[BufferName, BufferLike] = {}
         self.v2_raw_wrapper_body = IndentedBuffer()
@@ -63,13 +64,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
     @staticmethod
     def get_input_cpp_type(input):
-        assert config.aot_inductor.use_minimal_arrayref_interface
+        if not config.aot_inductor.use_minimal_arrayref_interface:
+            raise AssertionError(
+                "expected config.aot_inductor.use_minimal_arrayref_interface to be set"
+            )
 
         if isinstance(input, sympy.Expr):
             from ..graph import may_get_constant_buffer_dtype
 
             dtype = may_get_constant_buffer_dtype(input)
-            assert dtype is not None, f"Failed to get the dtype of sympy.Expr: {input}"
+            if dtype is None:
+                raise AssertionError(f"Failed to get the dtype of sympy.Expr: {input}")
             return DTYPE_TO_CPP[dtype]
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
@@ -79,18 +84,21 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             from ..graph import may_get_constant_buffer_dtype
 
             dtype = may_get_constant_buffer_dtype(input)
-            assert dtype is not None, f"Failed to get the dtype of sympy.Expr: {input}"
+            if dtype is None:
+                raise AssertionError(f"Failed to get the dtype of sympy.Expr: {input}")
             return DTYPE_TO_CPP[dtype]
         return DTYPE_TO_CPP[input.get_dtype()]
 
     @staticmethod
     def get_device_include_path_jit(device: str) -> str:
-        assert device == "cpu", "ArrayRef only supported on CPU!"
+        if device != "cpu":
+            raise AssertionError("ArrayRef only supported on CPU!")
         return "#include <torch/csrc/inductor/cpp_wrapper/array_ref.h>"
 
     @staticmethod
     def get_device_include_path_aot(device: str) -> str:
-        assert device == "cpu", "ArrayRef only supported on CPU!"
+        if device != "cpu":
+            raise AssertionError("ArrayRef only supported on CPU!")
         return "#include <torch/csrc/inductor/aoti_include/array_ref.h>"
 
     def codegen_input_numel_asserts(self, indented_buffer=None):
@@ -127,7 +135,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 from ..graph import may_get_constant_buffer_dtype
 
                 dtype = may_get_constant_buffer_dtype(input_value)
-                assert dtype is not None, "Fails to get the dtype of the sympy.Expr"
+                if dtype is None:
+                    raise AssertionError("Fails to get the dtype of the sympy.Expr")
                 input_tensor = f"{input_key}_arrayref_tensor"
                 code.writeline(
                     f"auto {input_tensor} = torch::aot_inductor::c_to_arrayref_tensor<{input_cpp_type}>(c_inputs[{idx}]);"
@@ -168,9 +177,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def _codegen_v2_raw_prelude(self, code: IndentedBuffer):
         self._codegen_v2_raw_input_bindings(code)
 
-        assert all(
+        if not all(
             isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
-        ), "Expect all constants to be Tensor"
+        ):
+            raise AssertionError("Expect all constants to be Tensor")
         for idx, constants_key in enumerate(V.graph.constants.keys()):
             code.writeline(f"""auto {constants_key} = constants_->at({idx});""")
 
@@ -204,7 +214,11 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
-                assert isinstance(output_storage, (ir.BaseView, ir.MutableBox))
+                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
+                    raise AssertionError(
+                        f"expected output_storage to be BaseView or MutableBox, got "
+                        f"{type(output_storage).__name__}"
+                    )
                 if isinstance(output_storage.data, ir.ConstantBuffer):
                     is_constant_buffer = True
 
@@ -250,7 +264,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 code.splice(
                     f"""
                     thread_local ThreadLocalCachedOutputArray<std::decay_t<decltype({output})>>
-                        {cached_output_name}({output});
+                        {cached_output_name}{{{output}}};
                     {cached_output_name}.copy_data_from({output});
                     using {output_arrayref_type} = std::tuple_element_t<{idx}, AOTInductorModelOutputs>;
                     using {output_element_type} = typename {output_arrayref_type}::value_type;
@@ -298,12 +312,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        assert not triton, (
-            "CppWrapperCpuArrayRef.generate_kernel_call does not support GPU"
-        )
-        assert arg_types is not None and len(call_args) == len(arg_types), (
-            "Mismatch call_args and arg_types in generate_kernel_call"
-        )
+        if triton:
+            raise AssertionError(
+                "CppWrapperCpuArrayRef.generate_kernel_call does not support GPU"
+            )
+        if not (arg_types is not None and len(call_args) == len(arg_types)):
+            raise AssertionError(
+                "Mismatch call_args and arg_types in generate_kernel_call"
+            )
         new_args = []
         for idx, arg in enumerate(call_args):
             if "*" in arg_types[idx]:
@@ -352,10 +368,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if V.graph.const_module:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
 
-                assert V.graph.const_wrapper_code is not None
+                if V.graph.const_wrapper_code is None:
+                    raise AssertionError(
+                        "expected V.graph.const_wrapper_code to be set"
+                    )
                 self.prefix.splice(V.graph.const_wrapper_code)
 
-                assert V.graph.const_kernel_code is not None
+                if V.graph.const_kernel_code is None:
+                    raise AssertionError("expected V.graph.const_kernel_code to be set")
                 self.kernel_declarations.splice(V.graph.const_kernel_code)
 
             if V.graph.is_const_graph:
@@ -542,9 +562,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         dtype = may_get_constant_buffer_dtype(
                             V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
                         )
-                        assert dtype is not None, (
-                            "Fails to get the dtype of the sympy.Expr"
-                        )
+                        if dtype is None:
+                            raise AssertionError(
+                                "Fails to get the dtype of the sympy.Expr"
+                            )
                         self.codegen_tensor_item(
                             dtype, f"inputs[{idx}]", input_key, self.prefix
                         )
@@ -553,9 +574,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                             f"auto {input_key} = std::move(inputs[{idx}]);"
                         )
 
-            assert all(
+            if not all(
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
-            ), "Expect all constants to be Tensor"
+            ):
+                raise AssertionError("Expect all constants to be Tensor")
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
                     # Weights are stored in constants_ and owned by RAIIAtenTensorHandle there.
@@ -600,7 +622,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             cache_type = "Array" if arr_iface else "Tensor"
             self.wrapper_call.writeline(
                 f"thread_local ThreadLocalCachedOutput{cache_type}<std::decay_t<decltype({output})>> "
-                f"{cached_output_name}({output});"
+                f"{cached_output_name}{{{output}}};"
             )
             if arr_iface:
                 self.wrapper_call.writeline(
@@ -637,7 +659,11 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
-                assert isinstance(output_storage, (ir.BaseView, ir.MutableBox))
+                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
+                    raise AssertionError(
+                        f"expected output_storage to be BaseView or MutableBox, got "
+                        f"{type(output_storage).__name__}"
+                    )
                 if isinstance(output_storage.data, ir.ConstantBuffer):
                     is_constant_buffer = True
 
@@ -773,7 +799,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             elif isinstance(line, ExitSubgraphLine):
                 past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
-        assert len(planning_states) == 0
+        if len(planning_states) != 0:
+            raise AssertionError(
+                f"expected planning_states to be empty, got {len(planning_states)}"
+            )
 
         # conservatively use the sum of all allocated buffer sizes
         # in potentially nested scopes as the total allocated size
@@ -849,7 +878,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             graph=self.get_codegened_graph(),
         )
         device_type, device_id = device_str.split(",")
-        device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
+        device_idx = self.codegen_device_idx(device, device_id)
         if buffer_if_can_stack_allocate is not None:
             self.stack_allocated_buffers[name] = buffer_if_can_stack_allocate
             cpp_type = DTYPE_TO_CPP[dtype]
@@ -884,7 +913,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         return f"RAIIAtenTensorHandle {name}({name}_handle);"
 
     def make_buffer_reuse(self, old: BufferLike, new: BufferLike, delete_old: bool):
-        assert old.get_dtype() == new.get_dtype()
+        if old.get_dtype() != new.get_dtype():
+            raise AssertionError(
+                f"expected matching dtypes, got {old.get_dtype()} and {new.get_dtype()}"
+            )
         old_name = old.get_name()
         new_name = new.get_name()
         del_line = ";"
@@ -913,16 +945,21 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # certain that the shim function cannot return an alias of a
         # borrowed argument, or 2) be certain that the returned Tensor from
         # the shim function cannot escape.
-        assert self.is_safe_to_use_borrow_arrayref_tensor_as_tensor(), (
-            "borrowing arguments to shim functions is unsafe with "
-            "stack allocation on! (see comment above this assertion)"
-        )
+        if not self.is_safe_to_use_borrow_arrayref_tensor_as_tensor():
+            raise AssertionError(
+                "borrowing arguments to shim functions is unsafe with "
+                "stack allocation on! (see comment above this assertion)"
+            )
 
     def is_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
         return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
-        assert len(subgraph.graph.graph_inputs) == len(outer_inputs)
+        if len(subgraph.graph.graph_inputs) != len(outer_inputs):
+            raise AssertionError(
+                f"expected {len(outer_inputs)} subgraph inputs, got "
+                f"{len(subgraph.graph.graph_inputs)}"
+            )
 
         for (inner_input, inner_input_val), outer_input in zip(
             subgraph.graph.graph_inputs.items(), outer_inputs
@@ -960,6 +997,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         outer_additional_inputs = [
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
+        carried_output_names = self._get_while_loop_carried_output_names(while_loop)
         cond_result_name = f"{name}_cond_result"
         if is_bool_pred:
             self.writeline(f"bool {cond_result_name};")
@@ -967,8 +1005,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
 
         cond_outer_inputs = []
-        for inp, out in zip(outer_carried_inputs, while_loop.outputs):
-            out_name = out.get_name()
+        for inp, out_name in zip(outer_carried_inputs, carried_output_names):
             self.writeline(f"AtenTensorHandle {out_name}_handle;")
             self.writeline(
                 "AOTI_TORCH_ERROR_CODE_CHECK("
@@ -1069,9 +1106,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 if reduce:
                     line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
             else:
-                assert reduce is None, (
-                    "Expect reduce to be None for aten.scatter_ with scalar src"
-                )
+                if reduce is not None:
+                    raise AssertionError(
+                        "Expect reduce to be None for aten.scatter_ with scalar src"
+                    )
         line += ");"
         self.writeline(line)
 
