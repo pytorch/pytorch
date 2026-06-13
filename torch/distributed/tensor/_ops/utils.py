@@ -466,7 +466,14 @@ def expand_to_full_mesh_op_strategy(
         # (e.g., philox_seed/offset in SDPA are scalar tensors without OpStrategy)
         input_strategy_counter = 0
         for position, specs in enumerate(zip(*strategy_comb, strict=True)):
-            if specs[0] is not None:
+            if any(spec is None for spec in specs):
+                if any(spec is not None for spec in specs):
+                    raise AssertionError(
+                        f"{op_schema.op}: strategy position {position} mixes None "
+                        f"with placements across mesh dims: {specs}"
+                    )
+                spec_list.append(None)
+            else:
                 # Populate tensor_meta field for both output and input specs,
                 # including for tuple output cases
                 tensor_meta = None
@@ -505,8 +512,6 @@ def expand_to_full_mesh_op_strategy(
                         use_strided_shard_as_shard_order=use_strided,
                     )
                 )
-            else:
-                spec_list.append(None)
 
         # Skip strategy combinations that would create mixed partial types
         # (except sum+avg which commute with each other).
