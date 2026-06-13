@@ -330,8 +330,64 @@ def create_synthetic_base_metadata(
     )
 
 
+def input_has_symbolic_metadata(fwd_input: Any) -> bool:
+    return any(
+        isinstance(x, torch.SymInt)
+        for x in [
+            *fwd_input.shape,
+            *fwd_input.stride(),
+            fwd_input.storage_offset(),
+        ]
+    )
+
+
+def _append_storage_overlap_guard(
+    aot_config: AOTConfig,
+    input_indices: list[int],
+    overlapping_indices: set[int],
+) -> None:
+    tracing_context = torch._guards.TracingContext.try_get()
+    if (
+        tracing_context is None
+        or len(input_indices) <= 1
+        or not aot_config.aot_autograd_arg_pos_to_source
+    ):
+        return
+
+    input_sources = []
+    for i in input_indices:
+        source = aot_config.aot_autograd_arg_pos_to_source[i]
+        if source is None:
+            return
+        input_sources.append(source)
+
+    source_by_idx = dict(zip(input_indices, input_sources))
+    overlapping_sources = [
+        source_by_idx[i] for i in input_indices if i in overlapping_indices
+    ]
+    non_overlapping_sources = [
+        source_by_idx[i] for i in input_indices if i not in overlapping_indices
+    ]
+
+    tracing_context.guards_context.aotautograd_guards.append(
+        StorageOverlap(overlapping_sources, non_overlapping_sources)
+    )
+
+
+def add_no_storage_overlap_guard(
+    aot_config: AOTConfig,
+    input_indices: list[int],
+) -> None:
+    _append_storage_overlap_guard(aot_config, input_indices, set())
+
+
 def compute_overlapping_inputs(
-    aot_config: AOTConfig, fwd_inputs: list[Any], aliased_input_indices: list[int]
+    aot_config: AOTConfig,
+    fwd_inputs: list[Any],
+    aliased_input_indices: list[int],
+    *,
+    emit_guard: bool = True,
+    check_many_aliases: bool = True,
 ) -> set[int]:
     num_aliases = len(aliased_input_indices)
 
@@ -348,21 +404,13 @@ def compute_overlapping_inputs(
         if aot_config.aot_autograd_arg_pos_to_source and shape_env is not None:
             maybe_suppress_guards = shape_env.suppress_guards  # type: ignore[assignment]
 
-    # Check whether there are any symbolic values being used.
-    # We do this for 2 reasons:
-    #   1. StorageOverlap guard is only issued whenever dynamic shapes is turned on
-    #   2. Triggers the fast-path for computing storage overlapping
+    # Check whether there are any symbolic values being used. This triggers the
+    # fast-path for computing storage overlapping.
     symbolic = any(
-        isinstance(x, torch.SymInt)
-        for i in aliased_input_indices
-        for x in [
-            *fwd_inputs[i].shape,
-            *fwd_inputs[i].stride(),
-            fwd_inputs[i].storage_offset(),
-        ]
+        input_has_symbolic_metadata(fwd_inputs[i]) for i in aliased_input_indices
     )
 
-    if torch._inductor.config.is_fbcode():
+    if check_many_aliases and torch._inductor.config.is_fbcode():
         if symbolic and num_aliases > 400:
             from torch._subclasses.fake_tensor import (
                 UnsupportedMutationAliasingException,
@@ -384,28 +432,9 @@ def compute_overlapping_inputs(
             for i in compute_overlapping_tensors(aliased_fwd_inputs, symbolic=symbolic)
         }
 
-    # Add the StorageOverlap AOTAutograd guard only if we are actually keeping track of
-    # dynamo sources inside AOTAutograd.
-    if (
-        tracing_context is not None
-        # Make sure dynamic shapes is currently being used.
-        and symbolic
-        # We check that we have more than 1 aliased tensor, which should be true at
-        # this point, anyway.
-        and num_aliases > 1
-        and aot_config.aot_autograd_arg_pos_to_source
-    ):
-        no_overlap_indices = list(set(aliased_input_indices) - actual_aliased_indices)
-
-        overlapping_sources = [
-            aot_config.aot_autograd_arg_pos_to_source[i] for i in actual_aliased_indices
-        ]
-        non_overlapping_sources = [
-            aot_config.aot_autograd_arg_pos_to_source[i] for i in no_overlap_indices
-        ]
-
-        tracing_context.guards_context.aotautograd_guards.append(
-            StorageOverlap(overlapping_sources, non_overlapping_sources)
+    if emit_guard:
+        _append_storage_overlap_guard(
+            aot_config, aliased_input_indices, actual_aliased_indices
         )
 
     return actual_aliased_indices

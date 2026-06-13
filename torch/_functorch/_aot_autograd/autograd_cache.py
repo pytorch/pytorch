@@ -22,6 +22,7 @@ from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
+from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
@@ -33,6 +34,7 @@ from torch._dynamo.utils import (
     warn_once,
 )
 from torch._functorch import config
+from torch._guards import DuplicateInputs, StorageOverlap, TracingContext
 from torch._inductor.codecache import (
     _ident,
     add_ephemeral_timeout_increase_for_distributed,
@@ -79,6 +81,7 @@ from .aot_autograd_result import (
     GenericAOTAutogradResult,
     SerializedGraphModule,
 )
+from .input_output_analysis import input_has_symbolic_metadata
 from .runtime_wrappers import (
     CompilerWrapper,
     SerializableCompiledFunction,
@@ -88,6 +91,7 @@ from .schemas import (
     AOTAutogradCacheInfo,
     AOTConfig,
     CacheableAOTConfig,
+    InputAliasInfo,
     ViewAndMutationMeta,
 )
 
@@ -392,6 +396,75 @@ def _collect_saved_tensors_hooks_fx_wrap_cache_hashes(
     )
 
 
+def _collect_input_tensor_alias_info(
+    example_inputs: Sequence[Any],
+) -> tuple[list[int], tuple[tuple[int, ...], ...], tuple[tuple[int, int], ...]]:
+    tensor_input_positions: list[int] = []
+    tensor_inputs: list[torch.Tensor] = []
+    object_id_to_input_positions: dict[int, list[int]] = {}
+    for pos, example_input in enumerate(example_inputs):
+        if not isinstance(example_input, torch.Tensor):
+            continue
+        tensor_input_positions.append(pos)
+        tensor_inputs.append(example_input)
+        object_id_to_input_positions.setdefault(id(example_input), []).append(pos)
+
+    duplicate_input_groups = tuple(
+        tuple(input_positions)
+        for input_positions in object_id_to_input_positions.values()
+        if len(input_positions) > 1
+    )
+
+    storage_overlapping_input_pairs: list[tuple[int, int]] = []
+    for left_pos, left_tensor in enumerate(tensor_inputs):
+        for right_pos, right_tensor in enumerate(tensor_inputs[:left_pos]):
+            symbolic = input_has_symbolic_metadata(
+                left_tensor
+            ) or input_has_symbolic_metadata(right_tensor)
+            if compute_overlapping_tensors(
+                [right_tensor, left_tensor], symbolic=symbolic
+            ):
+                storage_overlapping_input_pairs.append(
+                    (
+                        tensor_input_positions[right_pos],
+                        tensor_input_positions[left_pos],
+                    )
+                )
+
+    return (
+        tensor_input_positions,
+        duplicate_input_groups,
+        tuple(storage_overlapping_input_pairs),
+    )
+
+
+def _compute_input_tensor_alias_cache_key(
+    example_inputs: Sequence[Any],
+) -> tuple[tuple[tuple[int, ...], ...], tuple[tuple[int, int], ...]]:
+    _, duplicate_input_groups, storage_overlapping_input_pairs = (
+        _collect_input_tensor_alias_info(example_inputs)
+    )
+    return duplicate_input_groups, storage_overlapping_input_pairs
+
+
+def _get_input_sources(
+    aot_config: AOTConfig,
+    input_positions: Sequence[int],
+) -> list[torch._guards.Source] | None:
+    if not aot_config.aot_autograd_arg_pos_to_source:
+        return None
+
+    input_sources = []
+    for input_position in input_positions:
+        if input_position >= len(aot_config.aot_autograd_arg_pos_to_source):
+            return None
+        input_source = aot_config.aot_autograd_arg_pos_to_source[input_position]
+        if input_source is None:
+            return None
+        input_sources.append(input_source)
+    return input_sources
+
+
 def _get_custom_estimator_solver_uuids(
     autograd_config: Any,
 ) -> tuple[object | None, object | None]:
@@ -510,6 +583,9 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             _collect_saved_tensors_hooks_fx_wrap_cache_hashes(gm)
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
+        self.input_tensor_alias_cache_key = _compute_input_tensor_alias_cache_key(
+            example_inputs
+        )
 
         # region_activation_memory_budget is graph-wide (the partitioner enforces
         # a single value across the graph) and propagates to every node, so the
@@ -979,6 +1055,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     FXGraphCache uses those symints and its saved guards to repopulate the ShapeEnv with guards.
     **No new guards are generated into the shape env after inductor finishes compiling**, so the guards
     saved by inductor are sufficient for correctness for both AOTAutograd and Inductor's caches.
+
+    AOTAutograd can also generate Dynamo GuardEnvExpr guards for input aliasing
+    relationships that affect its runtime calling convention. These are not
+    ShapeEnv guards, so AOTAutogradCache includes the alias relationship in its
+    cache key and replays the corresponding guards into Dynamo on cache hits.
     """
 
     @staticmethod
@@ -1020,6 +1101,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 (entry, pickled_content) = result
                 fx_config = create_fx_config(compiler_config_extra, compile_region_name)
                 compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
+                AOTAutogradCache._install_cache_hit_guards(
+                    args, aot_config, entry.runtime_metadata.input_info
+                )
                 # Make the compiled_fn serializable, where the serialize function just
                 # makes a copy of the original entry before post compile via the pickled content
                 compiled_fn = SerializableCompiledFunction(
@@ -1209,6 +1293,74 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             raise AssertionError("shape_env must not be None")
         result = shape_env.evaluate_guards_expression(guard_expr, hints)
         return result
+
+    @staticmethod
+    def _install_cache_hit_guards(
+        args: Sequence[Any],
+        aot_config: AOTConfig,
+        input_info: Sequence[InputAliasInfo],
+    ) -> None:
+        tracing_context = TracingContext.try_get()
+        if tracing_context is None:
+            return
+
+        (
+            tensor_input_positions,
+            duplicate_input_groups,
+            storage_overlapping_input_pairs,
+        ) = _collect_input_tensor_alias_info(args)
+
+        for duplicate_input_group in duplicate_input_groups:
+            duplicate_input_sources = _get_input_sources(
+                aot_config, duplicate_input_group
+            )
+            if duplicate_input_sources is None:
+                continue
+            kept_arg_source = duplicate_input_sources[0]
+            for dupe_arg_source in duplicate_input_sources[1:]:
+                tracing_context.guards_context.aotautograd_guards.append(
+                    DuplicateInputs(kept_arg_source, dupe_arg_source)
+                )
+
+        if len(tensor_input_positions) <= 1 or not any(
+            info.mutates_data for info in input_info
+        ):
+            return
+
+        tensor_input_sources = _get_input_sources(aot_config, tensor_input_positions)
+        if tensor_input_sources is None:
+            return
+
+        source_by_input_position = dict(
+            zip(tensor_input_positions, tensor_input_sources)
+        )
+        overlapping_input_pairs = set(storage_overlapping_input_pairs)
+        input_info_matches_args = len(input_info) == len(args)
+        for left_pos, left_input_position in enumerate(tensor_input_positions):
+            for right_input_position in tensor_input_positions[left_pos + 1 :]:
+                if input_info_matches_args:
+                    has_data_mutation = (
+                        input_info[left_input_position].mutates_data
+                        or input_info[right_input_position].mutates_data
+                    )
+                else:
+                    # Cache entries store metadata after synthetic-base rewriting,
+                    # while args are still in the original user calling convention.
+                    # If those arities differ, replay conservatively.
+                    has_data_mutation = True
+                if not has_data_mutation:
+                    continue
+                input_pair = (left_input_position, right_input_position)
+                input_sources = [
+                    source_by_input_position[left_input_position],
+                    source_by_input_position[right_input_position],
+                ]
+                tracing_context.guards_context.aotautograd_guards.append(
+                    StorageOverlap(
+                        input_sources if input_pair in overlapping_input_pairs else [],
+                        [] if input_pair in overlapping_input_pairs else input_sources,
+                    )
+                )
 
     @staticmethod
     def _lookup(

@@ -1352,6 +1352,9 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
   if (x.is_same(y)) {
     return false;
   }
+  if (!x.is_alias_of(y)) {
+    return true;
+  }
   if (Meta::numel(x) == 0 || Meta::numel(y) == 0) {
     return true;
   }
@@ -1520,9 +1523,10 @@ class StorageOverlapChecker {
    * an `overlapping` tensor or not.
    */
   void add(PyObject* obj, bool overlapping) {
-    // Just check that `obj` is actually a tensor, so that we can keep it alive
-    // by incrementing its ref-count.
-    TORCH_CHECK(THPVariable_CheckExact(obj) || THPVariable_Check(obj));
+    if (!(THPVariable_CheckExact(obj) || THPVariable_Check(obj))) {
+      _get_ignored(overlapping)++;
+      return;
+    }
     Py_INCREF(obj);
     _get(overlapping).push_back(obj);
   }
@@ -1533,6 +1537,7 @@ class StorageOverlapChecker {
       Py_DECREF(item);
     }
     vec.clear();
+    _get_ignored(overlapping) = 0;
   }
 
   /**
@@ -1542,15 +1547,16 @@ class StorageOverlapChecker {
    * sure it has collected all expected tensors.
    */
   bool maybe_check() {
-    TORCH_CHECK(_expected_overlapping >= _overlapping.size());
-    TORCH_CHECK(_expected_non_overlapping >= _non_overlapping.size());
-    if (_expected_overlapping == _overlapping.size() &&
-        _expected_non_overlapping == _non_overlapping.size()) {
+    const auto actual_overlapping = _overlapping.size() + _ignored_overlapping;
+    const auto actual_non_overlapping =
+        _non_overlapping.size() + _ignored_non_overlapping;
+    TORCH_CHECK(_expected_overlapping >= actual_overlapping);
+    TORCH_CHECK(_expected_non_overlapping >= actual_non_overlapping);
+    if (_expected_overlapping == actual_overlapping &&
+        _expected_non_overlapping == actual_non_overlapping) {
       // Transform each list of PyObject* into an actual list of Tensors.
-      auto overlapping_tensors =
-          _tensors_from(_overlapping, _expected_overlapping);
-      auto non_overlapping_tensors =
-          _tensors_from(_non_overlapping, _expected_non_overlapping);
+      auto overlapping_tensors = _tensors_from(_overlapping);
+      auto non_overlapping_tensors = _tensors_from(_non_overlapping);
       return check_overlapping(overlapping_tensors, non_overlapping_tensors);
     } else {
       // If we haven't collected them all yet, keep on running.
@@ -1567,14 +1573,16 @@ class StorageOverlapChecker {
     return overlapping ? _overlapping : _non_overlapping;
   }
 
+  size_t& _get_ignored(bool overlapping) {
+    return overlapping ? _ignored_overlapping : _ignored_non_overlapping;
+  }
+
   /**
    * Transforms a given list of PyObject* into a list of Tensor.
    */
-  std::vector<Tensor> _tensors_from(
-      const std::vector<PyObject*>& objects,
-      size_t size) {
+  std::vector<Tensor> _tensors_from(const std::vector<PyObject*>& objects) {
     std::vector<Tensor> tensors;
-    tensors.reserve(size);
+    tensors.reserve(objects.size());
     std::ranges::transform(
         objects, std::back_inserter(tensors), [](PyObject* obj) {
           return THPVariable_Unpack(obj);
@@ -1587,9 +1595,12 @@ class StorageOverlapChecker {
   // Expected number of non-overlapping tensors.
   size_t _expected_non_overlapping;
   // Collected possibly overlapping tensors.
-  std::vector<PyObject*> _overlapping;
+  std::vector<PyObject*> _overlapping{};
   // Collected non-overlapping tensors.
-  std::vector<PyObject*> _non_overlapping;
+  std::vector<PyObject*> _non_overlapping{};
+  // Sources that are not tensors for the current guard run.
+  size_t _ignored_overlapping{0};
+  size_t _ignored_non_overlapping{0};
 };
 
 /**

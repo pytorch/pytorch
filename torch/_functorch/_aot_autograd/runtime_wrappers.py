@@ -63,6 +63,7 @@ from .descriptors import (
 from .functional_utils import gen_alias_from_base
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
+    add_no_storage_overlap_guard,
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
     remove_dupe_metadata,
@@ -2123,6 +2124,23 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
 #   b_base = torch.Tensor(b.storage())
 #   c_base = torch.Tensor(c.storage())
 #   f(c_base, b_base, a, d)
+def _guard_unaliased_mutated_input_pairs(
+    aot_config: AOTConfig,
+    storage_ref_to_idx: dict[StorageWeakRef, list[int]],
+    mutated_input_info: list[InputAliasInfo],
+) -> None:
+    storage_groups = list(storage_ref_to_idx.values())
+    for left_pos, left_indices in enumerate(storage_groups):
+        for right_indices in storage_groups[left_pos + 1 :]:
+            for left_idx in left_indices:
+                for right_idx in right_indices:
+                    if (
+                        mutated_input_info[left_idx].mutates_data
+                        or mutated_input_info[right_idx].mutates_data
+                    ):
+                        add_no_storage_overlap_guard(aot_config, [left_idx, right_idx])
+
+
 def merge_view_inputs(
     aot_config: AOTConfig,
     fwd_inputs: list[Any],
@@ -2189,6 +2207,11 @@ def merge_view_inputs(
         else:
             other_args.append(inpt)
             other_args_descs.append(source)
+
+    _guard_unaliased_mutated_input_pairs(
+        aot_config, storage_ref_to_idx, mutated_input_info
+    )
+
     # Note [Synthetic Base Info Metadata]
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:
