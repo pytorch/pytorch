@@ -17,6 +17,7 @@ from torch.testing._internal.common_dtype import (
     floating_types_and,
     integral_types,
 )
+from torch.testing._internal.common_utils import NoncontiguousType
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
     gradcheck_wrapper_masked_operation,
@@ -820,6 +821,19 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
+            # Exception('view size is not compatible with input tensor's size and stride')
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+                active_if=lambda kwargs: kwargs.get("format")
+                in (
+                    NoncontiguousType.SLICED,
+                    NoncontiguousType.CHANNELS_LAST,
+                    NoncontiguousType.CHANNELS_LAST_SLICED,
+                ),
+            ),
             # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -854,6 +868,19 @@ op_db: list[OpInfo] = [
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
+            ),
+            # Exception('view size is not compatible with input tensor's size and stride')
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+                active_if=lambda kwargs: kwargs.get("format")
+                in (
+                    NoncontiguousType.SLICED,
+                    NoncontiguousType.CHANNELS_LAST,
+                    NoncontiguousType.CHANNELS_LAST_SLICED,
+                ),
             ),
             # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
             DecorateInfo(

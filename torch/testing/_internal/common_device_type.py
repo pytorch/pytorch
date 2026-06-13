@@ -535,6 +535,13 @@ class DeviceTypeTestBase(TestCase):
                     device_arg = cls.get_all_devices()
                 _update_param_kwargs(param_kwargs, "device", device_arg)
 
+            # Wrap `test` in a fresh function so in-place decorator mutations don't leak across parametrizations.
+            @wraps(test)
+            def test_fresh(*args, _test=test, **kwargs):
+                return _test(*args, **kwargs)
+
+            test = test_fresh
+
             # Apply decorators based on param kwargs.
             for decorator in decorator_fn(param_kwargs):
                 test = decorator(test)
