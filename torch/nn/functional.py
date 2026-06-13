@@ -7236,6 +7236,7 @@ def scaled_grouped_mm(
     output_dtype: torch.dtype | None = torch.bfloat16,
     contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
+    out: Tensor | None = None,
 ) -> Tensor:
     r"""
     scaled_grouped_mm(mat_a, mat_b, scale_a, scale_recipe_a, scale_b, scale_recipe_b, swizzle_a, swizzle_b, bias, offs,
@@ -7256,6 +7257,7 @@ def scaled_grouped_mm(
         output_dtype: dtype used for the output tensor
         contraction_dim: describe which dimensions are :math:`K` in the matmul.
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+        out: optional output tensor to write the result to. If not provided, a new tensor will be allocated.
     """
 
     scale_a = _expand_single_value(scale_a)
@@ -7279,6 +7281,7 @@ def scaled_grouped_mm(
         output_dtype,
         contraction_dim,
         use_fast_accum,
+        out,
     )
 
     return out
