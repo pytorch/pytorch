@@ -149,6 +149,21 @@ def insert_deferred_runtime_asserts(
             )
         )
 
+    existing_assert_messages: dict[sympy.Expr, str] = {}
+    for node in graph.nodes:
+        if node.target is not torch.ops.aten._assert_scalar.default:
+            continue
+        if not node.args:
+            continue
+        cond, *rest = node.args
+        if (
+            isinstance(cond, fx.Node)
+            and rest
+            and isinstance(message := rest[0], str)
+            and (assert_expr := _get_sym_val(cond)) is not None
+        ):
+            existing_assert_messages.setdefault(assert_expr, message)
+
     # Figure out what key to use, val or example_value
     val_key = "val"
     for node in graph.nodes:
@@ -349,6 +364,101 @@ def insert_deferred_runtime_asserts(
                 if assert_expr is not None:
                     user_assert_exprs.add(assert_expr)
 
+    def is_generated_assert_message(message: str) -> bool:
+        return message.startswith("Runtime assertion failed for expression ")
+
+    def render_assert_message(
+        ra: RuntimeAssert, node: fx.Node, *, prefer_node_expr: bool = False
+    ) -> str:
+        if ra.error_message is None:
+            node_expr = _get_sym_val(node)
+            if isinstance(node_expr, sympy.logic.boolalg.BooleanAtom):
+                node_expr = None
+            if (message := existing_assert_messages.get(ra.expr)) is not None and not (
+                prefer_node_expr and is_generated_assert_message(message)
+            ):
+                return message
+            if (
+                node_expr is not None
+                and (message := existing_assert_messages.get(node_expr)) is not None
+                and not (prefer_node_expr and is_generated_assert_message(message))
+            ):
+                return message
+            expr = node_expr if prefer_node_expr and node_expr is not None else ra.expr
+            return f"Runtime assertion failed for expression {expr} on node '{node}'"
+        return str(ra.error_message)
+
+    def matches_bound_assert(
+        expr: sympy.Expr,
+        symbol: sympy.Symbol,
+        *,
+        lower: int | float | None = None,
+        upper: int | float | None = None,
+    ) -> bool:
+        if not isinstance(
+            expr,
+            (
+                sympy.GreaterThan,
+                sympy.StrictGreaterThan,
+                sympy.LessThan,
+                sympy.StrictLessThan,
+            ),
+        ):
+            return False
+        lhs, rhs = expr.args
+        if lower is not None:
+            return (
+                (isinstance(expr, sympy.GreaterThan) and lhs == symbol and rhs == lower)
+                or (isinstance(expr, sympy.LessThan) and lhs == lower and rhs == symbol)
+                or (
+                    isinstance(expr, sympy.StrictGreaterThan)
+                    and lhs == symbol
+                    and rhs == lower - 1
+                )
+                or (
+                    isinstance(expr, sympy.StrictLessThan)
+                    and lhs == lower - 1
+                    and rhs == symbol
+                )
+            )
+        if upper is not None:
+            return (
+                (isinstance(expr, sympy.LessThan) and lhs == symbol and rhs == upper)
+                or (
+                    isinstance(expr, sympy.GreaterThan)
+                    and lhs == upper
+                    and rhs == symbol
+                )
+                or (
+                    isinstance(expr, sympy.StrictLessThan)
+                    and lhs == symbol
+                    and rhs == upper + 1
+                )
+                or (
+                    isinstance(expr, sympy.StrictGreaterThan)
+                    and lhs == upper + 1
+                    and rhs == symbol
+                )
+            )
+        raise AssertionError("expected lower or upper bound")
+
+    def render_bound_assert_message(
+        ras: list[RuntimeAssert],
+        bound_expr: sympy.Expr,
+        node: fx.Node,
+        symbol: sympy.Symbol,
+        *,
+        lower: int | float | None = None,
+        upper: int | float | None = None,
+    ) -> str:
+        for ra in ras:
+            if matches_bound_assert(ra.expr, symbol, lower=lower, upper=upper):
+                return render_assert_message(ra, node, prefer_node_expr=True)
+        expr = _get_sym_val(node)
+        if expr is None or isinstance(expr, sympy.logic.boolalg.BooleanAtom):
+            expr = bound_expr
+        return f"Runtime assertion failed for expression {expr} on node '{node}'"
+
     def add_runtime_asserts(ras: list[RuntimeAssert]) -> None:
         for ra in ras:
             if ra.expr in user_assert_exprs:
@@ -396,12 +506,7 @@ def insert_deferred_runtime_asserts(
 
                     graph.call_function(
                         torch.ops.aten._assert_scalar.default,
-                        # TODO: use ra.msg here, but it's pretty
-                        # useless right now
-                        (
-                            res,
-                            f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
-                        ),
+                        (res, render_assert_message(ra, res)),
                     )
                 added_asserts.add(ra.expr)
 
@@ -711,7 +816,9 @@ def insert_deferred_runtime_asserts(
                                     torch.ops.aten._assert_scalar.default,
                                     (
                                         ge,
-                                        f"Runtime assertion failed for expression {ge_expr} on node '{ge}'",
+                                        render_bound_assert_message(
+                                            ras, ge_expr, ge, i0, lower=min_val
+                                        ),
                                     ),
                                 )
                                 added_asserts.add(ge_expr)
@@ -725,7 +832,9 @@ def insert_deferred_runtime_asserts(
                                     torch.ops.aten._assert_scalar.default,
                                     (
                                         le,
-                                        f"Runtime assertion failed for expression {le_expr} on node '{le}'",
+                                        render_bound_assert_message(
+                                            ras, le_expr, le, i0, upper=max_val
+                                        ),
                                     ),
                                 )
                                 added_asserts.add(le_expr)

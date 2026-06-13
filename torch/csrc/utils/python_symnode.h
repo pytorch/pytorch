@@ -36,6 +36,7 @@ namespace impl {
 // this is just an adapter so C++ calls can get to the object.
 class PythonSymNodeImpl : public c10::SymNodeImpl {
  public:
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   PythonSymNodeImpl(py::object pyobj) : c10::SymNodeImpl() {
     pyobj_ = std::make_shared<c10::SafePyObject>(
         pyobj.release().ptr(), getPyInterpreter());
@@ -126,6 +127,17 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
 
   bool expect_true(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
+    return getPyObj().attr("expect_true")(file, line).cast<bool>();
+  }
+
+  bool expect_true(const char* file, int64_t line, const char* error_message)
+      override {
+    py::gil_scoped_acquire acquire;
+    if (error_message != nullptr) {
+      return getPyObj()
+          .attr("expect_true")(file, line, error_message)
+          .cast<bool>();
+    }
     return getPyObj().attr("expect_true")(file, line).cast<bool>();
   }
 
