@@ -515,6 +515,11 @@ releases all **unused** cached memory from PyTorch so that those can be used
 by other GPU applications. However, the occupied GPU memory by tensors will not
 be freed so it can not increase the amount of GPU memory available for PyTorch.
 
+To query the free and total GPU memory as reported by the driver (outside of
+PyTorch's caching allocator), use {meth}`~torch.cuda.memory.mem_get_info`.
+Note that the first call to this function may be slow (several seconds) due to
+CUDA initialization overhead; subsequent calls are fast.
+
 To better understand how CUDA memory is being used over time,
 {ref}`torch_cuda_memory` describes tools for capturing and visualizing traces of memory use.
 
