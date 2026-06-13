@@ -983,7 +983,7 @@ class Module:
                         param_applied,
                         requires_grad=param.requires_grad,
                     )
-                    torch.utils.swap_tensors(param, param_applied)
+                    torch.utils.swap_tensors(param, param_applied, allow_weakrefs=True)
                 except Exception as e:
                     if param_grad is not None:
                         param.grad = param_grad
@@ -1012,7 +1012,7 @@ class Module:
                 if p_should_use_swap_tensors:
                     grad_applied.requires_grad_(param_grad.requires_grad)
                     try:
-                        torch.utils.swap_tensors(param_grad, grad_applied)
+                        torch.utils.swap_tensors(param_grad, grad_applied, allow_weakrefs=True)
                     except Exception as e:
                         raise RuntimeError(
                             f"_apply(): Couldn't swap {self._get_name()}.{key}.grad"
@@ -2479,7 +2479,7 @@ class Module:
                                     )
                                 else:
                                     new_input_param.requires_grad_(param.requires_grad)
-                            torch.utils.swap_tensors(param, new_input_param)
+                            torch.utils.swap_tensors(param, new_input_param, allow_weakrefs=True)
                             del new_input_param
                         elif assign_to_params_buffers:
                             # Shape checks are already done above
