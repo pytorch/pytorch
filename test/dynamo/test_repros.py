@@ -6167,6 +6167,21 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
 
+    def test_compile_complex_tensor_constant_signed_zero(self):
+        def f(x):
+            y = torch.tensor([1e28 + 2j, -1e-28j])
+            return y.cos(), str(y)
+
+        x = torch.tensor([1e28 + 2j, -1e-28j])
+        expected_cos, expected_str = f(x)
+        actual_cos, actual_str = torch.compile(f, backend="eager")(x)
+
+        self.assertEqual(actual_cos, expected_cos)
+        self.assertEqual(
+            torch.signbit(actual_cos.imag), torch.signbit(expected_cos.imag)
+        )
+        self.assertEqual(actual_str, expected_str)
+
     @unittest.skipIf(
         not SM70OrLater,
         "Triton only supports devices of CUDA capability >= 7.0",
