@@ -1227,7 +1227,7 @@ def _schedule_for_comm(
         The new schedule order.
 
     Some notes on the synergy between different options:
-        - `raise_comms` provides more overlapping oppurtunies for `reorder_compute_for_overlap`.
+        - `raise_comms` provides more overlapping opportunities for `reorder_compute_for_overlap`.
         - When both `raise_comms` and `sink_waits` is `True`, `raise_comms` is prioritized.
     """
     # We assign each node a tuple of scores (score_0, score_1, score_2),

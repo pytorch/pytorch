@@ -192,7 +192,7 @@ _BACKEND_KEYS_TO_OVERRIDE = [
 def _override_composite_implicit_decomp(cia_ops_to_callable):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
-    # ALL composite ops but today's C++ functinalization relies on
+    # ALL composite ops but today's C++ functionalization relies on
     # the fact that it is working with the opset after decomp is run.
     # Hence we can only do it for functional ops. One caveat is that
     # there are some composite ops that lie about their schema (claimed to be
@@ -505,7 +505,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 new_graph_signature = aten_export_artifact.sig
 
                 # In the previous step, we assume constants as buffers for AOTDispatcher to
-                # functianalize properly, so undo that here
+                # functionalize properly, so undo that here
                 new_graph_signature = (
                     _override_graph_signature_for_temp_registered_constants(
                         new_graph_signature, temp_registered_constants

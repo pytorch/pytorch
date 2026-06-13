@@ -1546,7 +1546,7 @@ class FxGraphHashDetails:
             config._fuse_ddp_communication_passes
         )
 
-        # Register indcutor backends and custom passes and get their UUIDs.
+        # Register inductor backends and custom passes and get their UUIDs.
         init_backend_registration()
         self.custom_backend_passes = tuple(
             map(self._get_custom_pass_detail, custom_backend_passes.values())

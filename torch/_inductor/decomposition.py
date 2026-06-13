@@ -1293,7 +1293,7 @@ def repeat_interleave_Tensor(
     return torch.clamp(indices, max=repeat.size(0) - 1)
 
 
-# intentionally not regiestered
+# intentionally not registered
 def conv1d_to_conv2d(
     input: torch.Tensor,
     weight: torch.Tensor,

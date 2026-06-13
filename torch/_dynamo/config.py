@@ -258,7 +258,7 @@ prepare_freezing = os.environ.get("TORCHDYNAMO_PREPARE_FREEZING", "0") == "1"
 # NOTE this has been deprecated, it does nothing now.
 traceable_tensor_subclasses: set[type[Any]] = set()
 
-# If a tensor subclass is put into this set, Dynamo will model its instasnces in
+# If a tensor subclass is put into this set, Dynamo will model its instances in
 # a very conservative and limited way (most likely causing lots of graph breaks
 # if one apply tensor ops on these instances). This is useful if you encounter
 # internal compiler errors from Dynamo which are caused by tensor subclasses,
@@ -882,7 +882,7 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
 )
 
 # Does not graph break on torch.autograd._profiler_enabled if set to True. We
-# want this flag to be True by default, but there is an unsolbed bug that causes
+# want this flag to be True by default, but there is an unsolved bug that causes
 # distributed jobs to timeout with Kineto profiler when this is set to True.
 constant_fold_autograd_profiler_enabled = False
 

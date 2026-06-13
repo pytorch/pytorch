@@ -438,7 +438,7 @@ def run_functionalized_fw_and_collect_metadata(
         #     return out
         #
         # In this scenario, 'x' and 'out' have different shapes and are stored at different memory addresses, aka no aliasing.
-        # However, due to how set_() and more specificlaly, set is functionalized, is defined to preserve eager semantics,
+        # However, due to how set_() and more specifically, set is functionalized, is defined to preserve eager semantics,
         # the autograd engine mistakenly assumes that 'x' and 'out' are aliased, treating 'x' as 'out._base'.
         # This misinterpretation leads to an 'alias_of_input' flag, causing an unnecessary as_strided() call to be generated,
         # which could lead to issues later in the code.
@@ -654,7 +654,7 @@ from a multi-output view call"
                 #    (iii) alias_of_intermediate_base_is_user_output.
                 #
                 # No need to worry about in-place view operations here, since
-                # this functionalization step elimitates mutations.
+                # this functionalization step eliminates mutations.
                 #
                 # i.e. we have access to the actual base tensor, before the
                 # in-place operation was applied.
