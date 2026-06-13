@@ -663,6 +663,40 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(AssertionError, "Invalid function schema: foo"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(")
 
+    def test_plain_int_schema_arg_types(self):
+        self.assertEqual(
+            torch.library._plain_int_schema_arg_types(
+                "foo(Tensor w, int x = 2, *, SymInt y, int[][] z) -> Tensor"
+            ),
+            {"x": "int", "z": "int[][]"},
+        )
+        self.assertEqual(
+            torch.library._plain_int_schema_arg_types(
+                "foo(Dict(str, Tensor) values, int dim) -> Tensor"
+            ),
+            {"dim": "int"},
+        )
+        self.assertEqual(
+            torch.library._plain_int_schema_arg_types(
+                "foo((int, int) coords, int dim) -> Tensor"
+            ),
+            {"dim": "int"},
+        )
+
+        type_name = "torch.testing.OpaqueObjectForPlainIntSchemaTest"
+        if torch._C._is_opaque_type_registered(type_name):
+            torch._C._unregister_opaque_type(type_name)
+        torch._C._register_opaque_type(type_name)
+        try:
+            self.assertEqual(
+                torch.library._plain_int_schema_arg_types(
+                    f"foo({type_name} mesh, int dim) -> Tensor"
+                ),
+                {"dim": "int"},
+            )
+        finally:
+            torch._C._unregister_opaque_type(type_name)
+
     def test_invalid_qualname(self):
         with self.assertRaisesRegex(ValueError, "overload"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo.Tensor", "() -> ()")
