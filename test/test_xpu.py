@@ -511,7 +511,7 @@ print(match1, match0)
         )
         self.assertEqual("True True", r)
 
-    def test_device_info_api_handles_missing_ze_loader(self):
+    def test_device_telemetry_api_without_ze_loader(self):
         # Simulate libze_loader.so.1 missing: pyzes raises OSError at import
         # time. Discovery must degrade gracefully; query APIs must surface a
         # RuntimeError (not leak OSError).
