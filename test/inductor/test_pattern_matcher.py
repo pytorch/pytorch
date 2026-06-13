@@ -8,11 +8,13 @@ import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
+import torch._inductor.pattern_matcher as pattern_matcher
 import torch.nn.functional as F
-from torch._dynamo.utils import count_calls, counters
+from torch._dynamo.utils import count_calls, counters, detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
+from torch._inductor.fx_passes.replace_random import replace_random_passes
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -867,7 +869,9 @@ class TestPatternMatcher(TestCase):
     @parametrize(
         "input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls",
         [
-            (torch.float32, torch.float16, False, 1),
+            (torch.float32, torch.float16, False, 2),
+            (torch.float32, torch.bfloat16, False, 2),
+            (torch.float32, torch.float64, False, 1),
             (torch.float32, torch.float16, True, 2),
             (torch.float16, torch.float32, True, 1),
         ],
@@ -1265,6 +1269,175 @@ class TestPatternMatcher(TestCase):
             nodes_by_target[aten.cos.default].meta["mutation_region_id"], 1
         )
 
+    def test_pure_replacement_skips_mutation_region_refresh(self):
+        pure_replacement_pass = PatternMatcherPass()
+
+        def pattern(x):
+            return torch.sin(x)
+
+        def replacement(x):
+            return torch.cos(x)
+
+        register_replacement(
+            pattern,
+            replacement,
+            [torch.randn(4)],
+            fwd_only,
+            pure_replacement_pass,
+        )
+
+        gm = make_fx(pattern)(torch.randn(4))
+        with unittest.mock.patch.object(
+            pattern_matcher,
+            "_mutation_region_refresh",
+            side_effect=AssertionError("pure replacements should not refresh"),
+        ):
+            self.assertEqual(pure_replacement_pass.apply(gm.graph), 1)
+
+    def test_pure_graph_pattern_skips_mutation_region_refresh(self):
+        pure_graph_pass = PatternMatcherPass()
+
+        @register_graph_pattern(
+            CallFunction(aten.sin.default, KeywordArg("x")),
+            pass_dict=pure_graph_pass,
+        )
+        def pure_graph_pattern(match: Match, x):
+            pass
+
+        def fn(x):
+            return torch.sin(x)
+
+        gm = make_fx(fn)(torch.randn(4))
+        pattern_matcher.compute_mutation_region_ids(gm.graph)
+        with unittest.mock.patch.object(
+            pattern_matcher,
+            "compute_mutation_region_ids",
+            side_effect=AssertionError("pure graph patterns should not refresh"),
+        ):
+            self.assertEqual(pure_graph_pass.apply(gm.graph), 1)
+
+    def test_mutating_register_replacement_refreshes_mutation_regions(self):
+        insert_mutation_pass = PatternMatcherPass()
+
+        def pattern(x):
+            return torch.sin(x)
+
+        def replacement(x):
+            y = torch.sin(x)
+            x.copy_(x)
+            return y
+
+        register_replacement(
+            pattern,
+            replacement,
+            [torch.randn(4)],
+            fwd_only,
+            insert_mutation_pass,
+        )
+
+        later_pass = PatternMatcherPass()
+        later_matches = 0
+
+        @register_graph_pattern(
+            CallFunction(
+                aten.cos.default,
+                CallFunction(aten.sin.default, KeywordArg("x")),
+            ),
+            pass_dict=later_pass,
+        )
+        def match_across_mutation(match: Match, x):
+            nonlocal later_matches
+            later_matches += 1
+
+        def fn(x):
+            y = torch.sin(x)
+            return torch.cos(y)
+
+        gm = make_fx(fn)(torch.randn(4))
+        graph = gm.graph
+
+        self.assertEqual(insert_mutation_pass.apply(graph), 1)
+        self.assertEqual(later_pass.apply(graph), 0)
+        self.assertEqual(later_matches, 0)
+
+        nodes_by_target = {
+            node.target: node for node in graph.nodes if node.op == "call_function"
+        }
+        self.assertEqual(
+            nodes_by_target[aten.sin.default].meta["mutation_region_id"], 0
+        )
+        self.assertEqual(
+            nodes_by_target[aten.copy_.default].meta["mutation_region_id"], 1
+        )
+        self.assertEqual(
+            nodes_by_target[aten.cos.default].meta["mutation_region_id"], 1
+        )
+
+    def test_graph_pattern_mutation_before_match_refreshes_full_graph(self):
+        insert_mutation_pass = PatternMatcherPass()
+
+        @register_graph_pattern(
+            CallFunction(
+                aten.relu.default,
+                CallFunction(aten.neg.default, KeywordArg("z")),
+            ),
+            pass_dict=insert_mutation_pass,
+        )
+        def insert_mutation_before_match(match: Match, z):
+            sin_node = z.args[0]
+            x = sin_node.args[0]
+            with match.graph.inserting_before(z):
+                match.graph.call_function(aten.copy_.default, (x, x))
+
+        later_pass = PatternMatcherPass()
+        later_matches = 0
+
+        @register_graph_pattern(
+            CallFunction(
+                aten.relu.default,
+                CallFunction(
+                    aten.neg.default,
+                    CallFunction(
+                        aten.cos.default,
+                        CallFunction(aten.sin.default, KeywordArg("x")),
+                    ),
+                ),
+            ),
+            pass_dict=later_pass,
+        )
+        def match_across_mutation(match: Match, x):
+            nonlocal later_matches
+            later_matches += 1
+
+        def fn(x):
+            return torch.relu(torch.neg(torch.cos(torch.sin(x))))
+
+        gm = make_fx(fn)(torch.randn(4))
+        graph = gm.graph
+
+        self.assertEqual(insert_mutation_pass.apply(graph), 1)
+        self.assertEqual(later_pass.apply(graph), 0)
+        self.assertEqual(later_matches, 0)
+
+        nodes_by_target = {
+            node.target: node for node in graph.nodes if node.op == "call_function"
+        }
+        self.assertEqual(
+            nodes_by_target[aten.sin.default].meta["mutation_region_id"], 0
+        )
+        self.assertEqual(
+            nodes_by_target[aten.copy_.default].meta["mutation_region_id"], 1
+        )
+        self.assertEqual(
+            nodes_by_target[aten.cos.default].meta["mutation_region_id"], 1
+        )
+        self.assertEqual(
+            nodes_by_target[aten.neg.default].meta["mutation_region_id"], 1
+        )
+        self.assertEqual(
+            nodes_by_target[aten.relu.default].meta["mutation_region_id"], 1
+        )
+
     def test_remove_pointless_clones(self):
         @torch.compile(fullgraph=True)
         def fn(a, b):
@@ -1356,6 +1529,10 @@ class TestPatternMatcher(TestCase):
             "fx_graph_remote_cache": False,
             "keep_addmm_fused_for_half_dtypes": True,
         }
+    )
+    @unittest.skipIf(
+        GPU_TYPE != "xpu",
+        "narrowing-cast unfuse is XPU-only; CUDA/ROCm keep addmm fused",
     )
     def test_unfuse_bias_addmm_half_dtypes_narrowing_cast(self, dtype):
         # When bias is fp32 and cast to a half dtype (e.g. AMP), unfusing
@@ -2459,6 +2636,68 @@ class TestPatternMatcher(TestCase):
                 node.meta["_numeric_debug_handle"] = 42
                 node.meta["custom"] = {"test_key": "test_value"}
 
+    def test_replace_random_pass_preserves_stack_trace_on_rng_prims(self):
+        def fn(x):
+            return x + torch.randn(x.shape, device=x.device)
+
+        gm = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+
+        fake_inputs = [
+            node.meta.get("val") for node in gm.graph.nodes if node.op == "placeholder"
+        ]
+        fake_mode = detect_fake_mode(fake_inputs)
+        self.assertIsNotNone(fake_mode)
+
+        stack_trace = '  File "test_replace_random.py", line 1, in fn\n'
+        source_fn_stack = [("randn", torch.randn)]
+
+        randn_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.randn.default
+        )
+        randn_node.meta["stack_trace"] = stack_trace
+        randn_node.meta["source_fn_stack"] = source_fn_stack
+
+        with V.set_fake_mode(fake_mode):
+            replace_random_passes(gm)
+        gm.graph.lint()
+
+        for target in (
+            torch.ops.prims.inductor_seeds.default,
+            torch.ops.prims.inductor_lookup_seed.default,
+            torch.ops.prims.inductor_random.default,
+        ):
+            node = next(node for node in gm.graph.nodes if node.target == target)
+            self.assertEqual(
+                node.meta.get("stack_trace"), stack_trace, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta.get("source_fn_stack"),
+                source_fn_stack,
+                msg=f"{target}: {node.meta}",
+            )
+
+        expected_metadata = {
+            torch.ops.prims.inductor_seeds.default: (torch.Size([1]), torch.int64),
+            torch.ops.prims.inductor_lookup_seed.default: (torch.Size([]), torch.int64),
+            torch.ops.prims.inductor_random.default: (torch.Size([4]), torch.float32),
+        }
+        for target, (shape, dtype) in expected_metadata.items():
+            node = next(node for node in gm.graph.nodes if node.target == target)
+            self.assertEqual(
+                node.meta["val"].shape, shape, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta["val"].dtype, dtype, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta["tensor_meta"].shape, shape, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta["tensor_meta"].dtype, dtype, msg=f"{target}: {node.meta}"
+            )
+
     def test_metadata_propagation_register_replacement(self):
         """Verify metadata from matched nodes transfers to replacement nodes."""
 
@@ -2675,6 +2914,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(counter, 1)
 
 
+@inductor_config.patch(fx_graph_cache=False)
 class TestPatternMatcherLogging(LoggingTestCase):
     device_type = GPU_TYPE
 
@@ -2885,65 +3125,63 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
     def test_per_pattern_counter(self):
         """Test that per-pattern counters track individual pattern matches"""
-        with inductor_config.patch(fx_graph_cache=False):
-            with unittest.mock.patch.dict(
-                os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
-            ):
-                counters.clear()
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
+        ):
+            counters.clear()
 
-                def fn(x, y):
-                    return torch.bmm(x, y)
+            def fn(x, y):
+                return torch.bmm(x, y)
 
-                x = torch.randn(4, 10, 10, device=GPU_TYPE)
-                y = torch.randn(4, 10, 10, device=GPU_TYPE)
+            x = torch.randn(4, 10, 10, device=GPU_TYPE)
+            y = torch.randn(4, 10, 10, device=GPU_TYPE)
 
-                compiled = torch.compile(fn)
-                compiled(x, y)
+            compiled = torch.compile(fn)
+            compiled(x, y)
 
-                counter_key = "inductor_pattern_matcher_per_pattern"
-                per_pattern = counters.get(counter_key, None)
+            counter_key = "inductor_pattern_matcher_per_pattern"
+            per_pattern = counters.get(counter_key, None)
 
-                self.assertIsInstance(per_pattern, dict)
-                self.assertGreater(len(per_pattern), 0)
-                self.assertIn("CallFunction_aten.bmm.default", per_pattern)
-                self.assertEqual(per_pattern["CallFunction_aten.bmm.default"], 1)
+            self.assertIsInstance(per_pattern, dict)
+            self.assertGreater(len(per_pattern), 0)
+            self.assertIn("CallFunction_aten.bmm.default", per_pattern)
+            self.assertEqual(per_pattern["CallFunction_aten.bmm.default"], 1)
 
     def test_per_pattern_counter_accumulation(self):
         """Test that per-pattern counters accumulate across compilations"""
-        with inductor_config.patch(fx_graph_cache=False):
-            with unittest.mock.patch.dict(
-                os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
-            ):
-                counter_key = "inductor_pattern_matcher_per_pattern"
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
+        ):
+            counter_key = "inductor_pattern_matcher_per_pattern"
 
-                counters.clear()
+            counters.clear()
 
-                x = torch.randn(2, 10, 10, device=GPU_TYPE)
-                y = torch.randn(2, 10, 10, device=GPU_TYPE)
+            x = torch.randn(2, 10, 10, device=GPU_TYPE)
+            y = torch.randn(2, 10, 10, device=GPU_TYPE)
 
-                def fn1(a, b):
-                    return torch.bmm(a, b)
+            def fn1(a, b):
+                return torch.bmm(a, b)
 
-                compiled1 = torch.compile(fn1)
-                compiled1(x, y)
-                count1 = sum(counters.get(counter_key, {}).values())
+            compiled1 = torch.compile(fn1)
+            compiled1(x, y)
+            count1 = sum(counters.get(counter_key, {}).values())
 
-                # Compile second function without clearing counters
-                def fn2(a, b):
-                    return torch.bmm(a, b) * 2
+            # Compile second function without clearing counters
+            def fn2(a, b):
+                return torch.bmm(a, b) * 2
 
-                compiled2 = torch.compile(fn2)
-                compiled2(x, y)
-                accumulated_count = sum(counters.get(counter_key, {}).values())
+            compiled2 = torch.compile(fn2)
+            compiled2(x, y)
+            accumulated_count = sum(counters.get(counter_key, {}).values())
 
-                # Verify accumulation
-                counters.clear()
-                torch._dynamo.reset()
-                compiled2 = torch.compile(fn2)
-                compiled2(x, y)
-                count2 = sum(counters.get(counter_key, {}).values())
+            # Verify accumulation
+            counters.clear()
+            torch._dynamo.reset()
+            compiled2 = torch.compile(fn2)
+            compiled2(x, y)
+            count2 = sum(counters.get(counter_key, {}).values())
 
-                self.assertEqual(accumulated_count, count1 + count2)
+            self.assertEqual(accumulated_count, count1 + count2)
 
     def test_list_tensor_pattern_replacement(self):
         with torch.library._scoped_library("_test_pm_list", "FRAGMENT") as lib:
