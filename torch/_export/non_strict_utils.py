@@ -111,7 +111,9 @@ class _KeyPathTrie:
         return node, kp
 
 
-def make_sourced_prefixes(nn_module, args, kwargs) -> _KeyPathTrie:
+def make_sourced_prefixes(
+    nn_module, args, kwargs, *, source_is_input: bool = False
+) -> _KeyPathTrie:
     kp_args, kp_kwargs = tree_map_with_path(
         lambda kp, _: _KeyPath(kp),
         (tuple(None for _ in args), {k: None for k in kwargs}),  # noqa: C420
@@ -120,7 +122,7 @@ def make_sourced_prefixes(nn_module, args, kwargs) -> _KeyPathTrie:
 
     sourced_prefixes = _KeyPathTrie()
     for name, struct in kp_combined_args.items():
-        src = LocalSource(name)
+        src = LocalSource(name, is_input=source_is_input)
 
         if isinstance(struct, _KeyPath):
             sourced_prefixes.add(struct.kp, src)
@@ -402,6 +404,7 @@ def make_fake_inputs(
     kwargs,
     dynamic_shapes,
     prefer_deferred_runtime_asserts_over_guards=False,
+    source_is_input=False,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -478,7 +481,9 @@ def make_fake_inputs(
     with fake_mode:
         original_signature = inspect.signature(nn_module.forward)
         sources: dict[tuple[int, int], list[Source]] = defaultdict(list)
-        sourced_prefixes = make_sourced_prefixes(nn_module, args, kwargs)
+        sourced_prefixes = make_sourced_prefixes(
+            nn_module, args, kwargs, source_is_input=source_is_input
+        )
         fake_args, fake_kwargs = tree_map_with_path(
             lambda kp, val: fakify(
                 fake_mode,
@@ -740,32 +745,37 @@ def make_constraints(
             )
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
     flat_dynamic_shapes = _flatten_dynamic_shapes(combined_args, dynamic_shapes)
+    flat_input_specs = [
+        (path, arg, shape)
+        for path, arg, shape in zip(flat_paths, flat_args, flat_dynamic_shapes)
+        if not _is_constant_argument(arg) and not isinstance(arg, CustomObjArgument)
+    ]
+    if flat_input_specs:
+        flat_paths, flat_args, flat_dynamic_shapes = zip(*flat_input_specs)
+    else:
+        flat_paths, flat_args, flat_dynamic_shapes = (), (), ()
 
     # check number of shapes vs. number of inputs
-    num_placeholders = [node.op == "placeholder" for node in gm.graph.nodes].count(True)
-    if len(flat_dynamic_shapes) != num_placeholders - num_lifted_inputs:
+    user_placeholders = [
+        node
+        for node in gm.graph.find_nodes(op="placeholder")[num_lifted_inputs:]
+        if node.meta.get("val") is not None
+        and not _is_constant_argument(node.meta.get("val"))
+        and not isinstance(node.meta.get("val"), CustomObjArgument)
+    ]
+    if len(flat_dynamic_shapes) != len(user_placeholders):
         raise AssertionError(
-            f"expected {num_placeholders - num_lifted_inputs} shapes, got {len(flat_dynamic_shapes)}"
+            f"expected {len(user_placeholders)} shapes, got {len(flat_dynamic_shapes)}"
         )
 
     free_symbols = set()
     range_violations = []
-    for input_index, node in enumerate(gm.graph.nodes):
+    for user_input_index, node in enumerate(user_placeholders):
         meta_val = node.meta.get("val")
 
-        if (
-            input_index < num_lifted_inputs
-            or node.op != "placeholder"
-            or meta_val is None
-        ):
-            continue
-
-        elif _is_constant_argument(meta_val) or isinstance(meta_val, CustomObjArgument):
-            continue
-
-        shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
-        keypath = flat_paths[input_index - num_lifted_inputs]
-        flat_arg = flat_args[input_index - num_lifted_inputs]
+        shape_spec = flat_dynamic_shapes[user_input_index]
+        keypath = flat_paths[user_input_index]
+        flat_arg = flat_args[user_input_index]
 
         if isinstance(meta_val, int) or (
             isinstance(meta_val, torch.SymInt) and meta_val.node.expr.is_number

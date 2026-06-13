@@ -436,6 +436,9 @@ do_not_emit_runtime_asserts: bool = (
     os.environ.get("TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS", "0") == "1"
 )
 
+# Lift basic input shape symbols as graph inputs during functional export capture.
+lift_export_input_symbols = False
+
 # Skip tracing the torchrec files added to trace_rules.FBCODE_SKIP_DIRS
 skip_torchrec = True
 

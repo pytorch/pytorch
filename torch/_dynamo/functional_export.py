@@ -447,7 +447,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
 
 def _suggest_or_raise_constraint_violation(
-    module_to_trace: torch.nn.Module,
+    module_to_trace: Any,
     orig_callable: Callable[..., Any],
     fake_mode: FakeTensorMode | None,
     graph_capture_output: CaptureOutput,
@@ -467,7 +467,7 @@ def _suggest_or_raise_constraint_violation(
         (shape_env := getattr(fake_mode, "shape_env", None)) is not None
         and (dim_constraints := shape_env.dim_constraints) is not None
         and not isinstance(
-            module_to_trace.forward,
+            getattr(module_to_trace, "forward", module_to_trace),
             torch._ops.OpOverloadPacket | torch._ops.OpOverload,
         )
     ):
@@ -525,7 +525,43 @@ def _normalize_shuffle_graph(shuffle_gm: torch.fx.GraphModule) -> None:
 def normalize_graph_module(gm: torch.fx.GraphModule) -> None:
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            node.meta["val"] = node.meta["example_value"]
+            if "example_value" in node.meta:
+                node.meta["val"] = node.meta["example_value"]
+            elif "val" not in node.meta:
+                raise KeyError(
+                    f"Placeholder node {node.name!r} has neither "
+                    "'example_value' nor 'val' metadata"
+                )
+
+
+def restore_get_attr_targets(graph_module: torch.fx.GraphModule) -> None:
+    flat_name_to_original_fqn = graph_module.meta.get(
+        "dynamo_flat_name_to_original_fqn"
+    )
+    if not flat_name_to_original_fqn:
+        return
+
+    matched = False
+    changed = False
+    for node in graph_module.graph.nodes:
+        if node.op != "get_attr" or node.target not in flat_name_to_original_fqn:
+            continue
+
+        matched = True
+        original_fqn = flat_name_to_original_fqn[node.target]
+        try:
+            torch.fx.graph_module._get_attr(graph_module, original_fqn)
+        except AttributeError:
+            continue
+        node.target = original_fqn
+        changed = True
+
+    if changed:
+        graph_module.recompile()
+    elif not matched:
+        log.debug("No get_attr nodes matched dynamo_flat_name_to_original_fqn metadata")
+    else:
+        log.debug("No get_attr targets could be restored to original FQNs")
 
 
 class InputProcessor:
@@ -719,12 +755,20 @@ def create_fx_graph_from_captured_output(
     dynamo_bytecode_flatten = DynamoBytecodeFlatten(input_processor, out, f_globals)
     dynamo_bytecode_unflatten = DynamoBytecodeUnflatten(input_processor, out, f_globals)
 
-    graph_module.graph._codegen = _DynamoBytecodeCodeGen(
+    dynamo_bytecode_codegen = _DynamoBytecodeCodeGen(
         argument_names(inspect.signature(mod), args, kwargs),
         dynamo_bytecode_flatten,
         dynamo_bytecode_unflatten,
-    )  # type: ignore[attr-defined]
+    )
+    graph_module.graph._codegen = dynamo_bytecode_codegen  # type: ignore[attr-defined]
     normalize_graph_module(graph_module)
+    restore_get_attr_targets(graph_module)
+    dynamo_bytecode_codegen.set_flat_placeholder_values(
+        tuple(
+            node.meta.get("val")
+            for node in graph_module.graph.find_nodes(op="placeholder")
+        )
+    )
     if hasattr(graph_module, "_dynamo_bytecode_flatten"):
         raise AssertionError(
             "graph_module already has _dynamo_bytecode_flatten attribute"
@@ -767,9 +811,35 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
         self.dynamo_bytecode_unflatten = dynamo_bytecode_unflatten
         self.wrap_tuple = False
         self._inputs: tuple[Any, ...] | None = None
+        self._flat_placeholder_values: tuple[Any, ...] = ()
+        self._inputs_already_flattened = False
+
+    def set_flat_placeholder_values(self, values: tuple[Any, ...]) -> None:
+        self._flat_placeholder_values = values
 
     def process_inputs(self, *inputs: Any) -> Any:
         self._inputs = inputs
+        has_recoverable_symbolic_placeholders = any(
+            inp is None and isinstance(meta_value, torch.SymInt)
+            for inp, meta_value in zip(inputs, self._flat_placeholder_values)
+        )
+        self._inputs_already_flattened = len(inputs) == len(
+            self._flat_placeholder_values
+        ) and (
+            len(self._flat_placeholder_values) != len(self.orig_arg_names)
+            or has_recoverable_symbolic_placeholders
+        )
+        if self._inputs_already_flattened:
+            # AOTAutograd's FX interpreter calls with graph placeholders,
+            # not the original public pytree signature. Symbolic placeholders
+            # arrive as None, so recover their captured SymInt metadata.
+            return tuple(
+                meta_value
+                if inp is None and isinstance(meta_value, torch.SymInt)
+                else inp
+                for inp, meta_value in zip(inputs, self._flat_placeholder_values)
+            )
+
         results = self.dynamo_bytecode_flatten(*inputs)
         fake_mode = detect_fake_mode()
         if fake_mode is not None and pytree.tree_any(
@@ -786,6 +856,13 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
         return results
 
     def process_outputs(self, outputs: Any) -> Any:
+        if self._inputs_already_flattened:
+            if self.wrap_tuple:
+                outputs = (outputs,)
+            self._inputs = None
+            self._inputs_already_flattened = False
+            return outputs
+
         results = self.dynamo_bytecode_unflatten(outputs, self._inputs)
         if self.wrap_tuple:
             results = (results,)
@@ -861,6 +938,10 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
 def dynamo_graph_capture_for_export(
     fn: Callable[..., Any],
     constraints: list[Constraint] | None = None,
+    *,
+    export: bool = False,
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
+    disable_constraint_solver: bool = False,
 ) -> Callable[..., Any]:
     if isinstance(fn, torch._ops.OpOverload):
 
@@ -890,7 +971,9 @@ def op_overload_wrapper({", ".join(arg_list)}):
         with (
             _compiling_state_context(),
             torch._dynamo.config.patch(
-                replay_side_effects=False, side_effect_replay_policy="warn"
+                replay_side_effects=False,
+                side_effect_replay_policy="warn",
+                lift_export_input_symbols=export,
             ),
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
@@ -900,6 +983,19 @@ def op_overload_wrapper({", ".join(arg_list)}):
                 args,
                 kwargs,
                 constraints=constraints,
+                _is_export_deprecated_do_not_use=export,
+            )
+        if export and not disable_constraint_solver and (constraints or dynamic_shapes):
+            fake_mode = out.backend_input.fake_mode if out.backend_input else None
+            orig_callable = fn.forward if isinstance(fn, torch.nn.Module) else fn
+            _suggest_or_raise_constraint_violation(
+                fn,
+                orig_callable,
+                fake_mode,
+                out,
+                args,
+                kwargs,
+                dynamic_shapes,
             )
         graph_module = create_fx_graph_from_captured_output(out, fn, args, kwargs)
         return graph_module
