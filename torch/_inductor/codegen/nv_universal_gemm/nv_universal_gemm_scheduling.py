@@ -115,7 +115,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         node: BaseSchedulerNode, require_epilogue_fusion: bool = False
     ) -> NVUniversalGemmBuffer:
         """Extract NVUniversalGemmBuffer from node (direct or via MultiTemplateBuffer)."""
-        assert isinstance(node, SchedulerNode)
+        assert isinstance(node, SchedulerNode)  # noqa: S101
         ir_node = node.node
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
@@ -415,18 +415,18 @@ class NVUniversalGemmScheduling(BaseScheduling):
             [n.get_name() for n in epilogue_nodes] if epilogue_nodes else [],
             [n.get_name() for n in prologue_nodes] if prologue_nodes else [],
         )
-        assert self.is_nv_universal_gemm_template(template_node), (
+        assert self.is_nv_universal_gemm_template(template_node), (  # noqa: S101
             "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
             "SchedulerNode that wraps a NVUniversalGemmBuffer or MultiTemplateBuffer with NVGEMM choice"
         )
-        assert not prologue_nodes, (
+        assert not prologue_nodes, (  # noqa: S101
             "NVIDIA Universal GEMM doesn't support prologue fusion yet"
         )
 
         template_node = cast(SchedulerNode, template_node)
 
         original_ir_node = template_node.node
-        assert isinstance(original_ir_node, Buffer)
+        assert isinstance(original_ir_node, Buffer)  # noqa: S101
         original_buffer_name = original_ir_node.get_name()
 
         ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(
@@ -496,7 +496,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 log.warning("NVGEMM epilogue codegen failed unexpectedly: %s", e)
                 raise
 
-        assert ctb.make_kernel_render is not None
+        assert ctb.make_kernel_render is not None  # noqa: S101 # noqa: S101
         kernel, render = ctb.make_kernel_render(
             ctb,
             epilogue_fn_code=epilogue_fn_code,
@@ -623,7 +623,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         epilogue_reads: list[str] = []
         if epilogue:
             template_sn = cast(SchedulerNode, template)
-            assert isinstance(template_sn.node, Buffer)
+            assert isinstance(template_sn.node, Buffer)  # noqa: S101
             original_buffer_name = template_sn.node.get_name()
             removed_buffers_with_gemm = V.graph.removed_buffers | OrderedSet(
                 [original_buffer_name]
@@ -646,7 +646,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 only_gen_src_code=True,
             )
 
-        assert src_code is not None
+        assert src_code is not None  # noqa: S101 # noqa: S101
         src_code = src_code.replace(
             str(Placeholder.KERNEL_NAME), _BENCHMARK_KERNEL_PREFIX
         )
