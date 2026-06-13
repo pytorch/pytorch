@@ -14,7 +14,7 @@ from torch.utils._pytree import tree_flatten
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Hashable
 
     from torch._ops import OpOverloadPacket
     from torch.utils._pytree import TreeSpec
@@ -48,15 +48,20 @@ rand_ops = [
 
 
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
-def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
+def fx_graph_cse(
+    fx_g: torch.fx.graph.Graph,
+    extra_node_key: Callable[[fx.Node], Hashable] | None = None,
+) -> fx.Graph:
     new_graph = fx.Graph()
     env: dict[
         fx.Node, fx.Node
     ] = {}  # map from node in the old graph to node in the new graph
     hash_env: dict[
-        tuple[str, int], fx.Node
+        tuple[Any, Hashable | None, int], fx.Node
     ] = {}  # map from hash to a node in the new graph
-    token_map: dict[tuple[str, int], dict[str, Any]] = {}  # map from hash to token
+    token_map: dict[
+        tuple[Any, Hashable | None, int], dict[str, Any]
+    ] = {}  # map from hash to token
 
     from torch._inductor.pattern_matcher import (
         compute_mutation_region_ids,
@@ -148,8 +153,10 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
 
             # each token corresponds to a unique node
             # nodes with the same token can be substituted
+            extra_key = extra_node_key(n) if extra_node_key is not None else None
             token = {
                 "target": n.target,
+                "extra_key": extra_key,
                 "args": args,
                 "args_spec": args_spec,
                 "kwargs": kwargs,
@@ -162,7 +169,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             hash_arg = hash(
                 (tuple((a, type(a)) for a in args), tuple((a, type(a)) for a in kwargs))
             )
-            hash_val = (n.target, hash_arg)
+            hash_val = (n.target, extra_key, hash_arg)
 
             # check if a node has a substitute and can be eliminated
             hash_val_in_hash_env = hash_val in hash_env
