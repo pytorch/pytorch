@@ -133,7 +133,7 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
-  if (std::none_of(orig_arguments.begin(), orig_arguments.end(), ivalueParticipatesInCurrentLevel)) {
+  if (std::ranges::none_of(orig_arguments, ivalueParticipatesInCurrentLevel)) {
     op.callBoxed(stack);
     return;
   }
@@ -249,7 +249,7 @@ inline void boxed_existing_bdim_all_batch_rule(
   vmap_check_escaped(maybe_layer, "boxed_existing_bdim_all_batch_rule");
 
   const auto arguments = torch::jit::last(stack, num_arguments);
-  if (std::none_of(arguments.begin(), arguments.end(), ivalueParticipatesInCurrentLevel)) {
+  if (std::ranges::none_of(arguments, ivalueParticipatesInCurrentLevel)) {
     op.callBoxed(stack);
     return;
   }
@@ -303,7 +303,7 @@ inline void boxed_all_tensors_have_optional_bdim(
   int64_t cur_level = maybe_layer->layerId();
 
   const auto arguments = torch::jit::last(stack, num_arguments);
-  if (std::none_of(arguments.begin(), arguments.end(), ivalueParticipatesInCurrentLevel)) {
+  if (std::ranges::none_of(arguments, ivalueParticipatesInCurrentLevel)) {
     op.callBoxed(stack);
     return;
   }
@@ -415,6 +415,28 @@ template <typename F, F Method, typename... ExtraArgs>
 Tensor& unary_inplace_batch_rule(Tensor& self, std::optional<int64_t> /*unused*/, ExtraArgs... extra_args) {
   INVOKE(self, Method)(std::forward<ExtraArgs>(extra_args)...);
   return self;
+}
+
+inline int64_t get_bdim_size6(
+    const Tensor& a_value, std::optional<int64_t> a_bdim,
+    const Tensor& b_value, std::optional<int64_t> b_bdim,
+    const Tensor& c_value, std::optional<int64_t> c_bdim,
+    const Tensor& d_value, std::optional<int64_t> d_bdim,
+    const Tensor& e_value, std::optional<int64_t> e_bdim,
+    const Tensor& f_value, std::optional<int64_t> f_bdim) {
+  if (a_bdim)
+    return a_value.size(*a_bdim);
+  if (b_bdim)
+    return b_value.size(*b_bdim);
+  if (c_bdim)
+    return c_value.size(*c_bdim);
+  if (d_bdim)
+    return d_value.size(*d_bdim);
+  if (e_bdim)
+    return e_value.size(*e_bdim);
+  if (f_bdim)
+    return f_value.size(*f_bdim);
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 inline int64_t get_bdim_size4(
