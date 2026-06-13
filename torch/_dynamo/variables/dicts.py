@@ -1423,6 +1423,8 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             return {}
         elif isinstance(vt, variables.LocalGeneratorFunctionVariable):
             return SideEffectsProxyDict.get_example_value_dict(vt.vt)
+        elif isinstance(vt, variables.UserMethodVariable):
+            return object.__getattribute__(vt.fn, "__dict__")
         else:
             value = vt.get_real_python_backed_value()
             if value is not NO_SUCH_SUBOBJ:
