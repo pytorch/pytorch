@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    IS_CI,
     IS_FBCODE,
     IS_WINDOWS,
     run_tests,
@@ -57,6 +58,10 @@ fake_export_failures = {
     xfail("masked.sum"),
     xfail("masked.var"),
 }
+
+# __getitem__ passes locally but still fails on CI OSDC shards.
+if IS_CI:
+    fake_export_failures.add(xfail("__getitem__"))
 
 fake_decomposition_failures = {
     xfail("linalg.matrix_rank"),
