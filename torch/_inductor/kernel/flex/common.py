@@ -50,11 +50,46 @@ from ...utils import load_template
 SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
 
 
+def _flex_kernel_options_example(kind: str) -> str:
+    match kind:
+        case "backward":
+            return (
+                "kernel_options={'bwd_BLOCK_M1': 32, 'bwd_BLOCK_N1': 32, "
+                "'bwd_BLOCK_M2': 32, 'bwd_BLOCK_N2': 32, "
+                "'bwd_num_stages': 1, 'bwd_num_warps': 4}"
+            )
+        case _:
+            return (
+                "kernel_options={'fwd_BLOCK_M': 32, 'fwd_BLOCK_N': 64, "
+                "'fwd_num_stages': 1, 'fwd_num_warps': 4}"
+            )
+
+
+def _flex_kernel_tuning_options(kind: str) -> str:
+    match kind:
+        case "backward":
+            return (
+                "BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2, num_warps, and "
+                "num_stages; use the bwd_ prefix to set backward-only options"
+            )
+        case "decode":
+            return (
+                "BLOCK_M, BLOCK_N, num_warps, and num_stages; use the fwd_ "
+                "prefix to set decode-only options"
+            )
+        case _:
+            return (
+                "BLOCK_M, BLOCK_N, num_warps, and num_stages; use the fwd_ "
+                "prefix to set forward-only options"
+            )
+
+
 def zeros_and_scatter_lowering(shape: list[int], indices, values):
     """To support backwards on captured buffers we register a specific lowering for our specific custom up"""
     # Always accumulate into fp32 then cast
     grad = _full(0, values.get_device(), torch.float32, shape)
-    assert isinstance(grad, TensorBox)
+    if not isinstance(grad, TensorBox):
+        raise AssertionError(f"Expected TensorBox, got {type(grad)}")
     grad.realize()
     x_size = grad.get_size()
     values = to_dtype(values, grad.get_dtype())
@@ -77,7 +112,8 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
 
     values = expand(values, expected_vals_size)
     device = grad.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError("device must not be None")
     scatter = Scatter(
         device=device,
         dtype=grad.get_dtype(),
@@ -141,16 +177,17 @@ def build_subgraph_module_buffer(
         if isinstance(output_buffer, ComputedBuffer):
             # These nodes are coming from the output of zeros_and_scatter
             return output_buffer
-        assert isinstance(output_buffer, TensorBox), (
-            "The output node for flex attention's subgraph must be a TensorBox, but got: ",
-            type(output_buffer),
-        )
-        assert isinstance(output_buffer.data, StorageBox), (
-            "The output node for the flex attention subgraph must be a StorageBox, but got: ",
-            type(output_buffer),
-        )
+        if not isinstance(output_buffer, TensorBox):
+            raise AssertionError(
+                f"The output node for flex attention's subgraph must be a TensorBox, but got: {type(output_buffer)}"
+            )
+        if not isinstance(output_buffer.data, StorageBox):
+            raise AssertionError(
+                f"The output node for the flex attention subgraph must be a StorageBox, but got: {type(output_buffer.data)}"
+            )
         device = output_buffer.data.get_device()
-        assert device is not None
+        if device is None:
+            raise AssertionError("device must not be None for output buffer")
         subgraph_buffer = ComputedBuffer(
             name=None,
             layout=FlexibleLayout(
@@ -294,9 +331,8 @@ def construct_strides(
 ) -> Sequence[_IntLike]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
-    assert len(sizes) == len(fill_order), (
-        "Length of sizes must match the length of the fill order"
-    )
+    if len(sizes) != len(fill_order):
+        raise AssertionError("Length of sizes must match the length of the fill order")
     strides: list[_IntLike] = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension
@@ -362,39 +398,52 @@ def create_num_blocks_fake_generator(sparse_indices):
     does work.
     """
 
-    def get_real_num_blocks(x) -> torch.Tensor | None:
+    def get_real_num_blocks(x, size: Sequence[int]) -> torch.Tensor | None:
+        def valid_real_num_blocks(real_num_blocks: Any) -> torch.Tensor | None:
+            if (
+                isinstance(real_num_blocks, torch.Tensor)
+                and not isinstance(real_num_blocks, FakeTensor)
+                and list(real_num_blocks.shape) == list(size)
+            ):
+                return real_num_blocks
+            return None
+
         name = x.get_name()
-        if name in V.graph.constants and not isinstance(
-            V.graph.constants[name], FakeTensor
-        ):
-            return V.graph.constants[name]
+        if name in V.graph.constants:
+            return valid_real_num_blocks(V.graph.constants[name])
 
         graph_input_names = V.graph.graph_input_names
         if name not in graph_input_names:
             return None
 
         idx = list(graph_input_names).index(name)
-        input_sources: tuple[Any, ...] = (
-            V.real_inputs,
-            V.graph.example_inputs,
-        )
-        for input_source in input_sources:
-            if not isinstance(input_source, Sequence):
-                continue
-            if (
-                idx < len(input_source)
-                and isinstance(input_source[idx], torch.Tensor)
-                and not isinstance(input_source[idx], FakeTensor)
-            ):
-                return input_source[idx]
-        return None
+        example_inputs = V.graph.example_inputs
+        if isinstance(example_inputs, Sequence) and idx < len(example_inputs):
+            real_num_blocks = valid_real_num_blocks(example_inputs[idx])
+            if real_num_blocks is not None:
+                return real_num_blocks
+
+        real_inputs = V.real_inputs
+        if not isinstance(real_inputs, Sequence):
+            return None
+
+        if len(real_inputs) == len(graph_input_names):
+            real_input_idx = idx
+        else:
+            # Lifted params/buffers are prepended to graph inputs, but not to
+            # V.real_inputs. Align the real runtime inputs as the suffix.
+            real_input_idx = idx - (len(graph_input_names) - len(real_inputs))
+
+        if real_input_idx < 0 or real_input_idx >= len(real_inputs):
+            return None
+        return valid_real_num_blocks(real_inputs[real_input_idx])
 
     def create_num_blocks_fake(x) -> torch.Tensor:
         num_blocks_for_autotuning = V.graph.sizevars.optimization_hint(
             sparse_indices.shape[-1]
         )
         size = V.graph.sizevars.optimization_hints(x.get_size())
-        real_num_blocks = get_real_num_blocks(x)
+        real_num_blocks = get_real_num_blocks(x, size)
         if real_num_blocks is not None:
             return (
                 real_num_blocks.detach()

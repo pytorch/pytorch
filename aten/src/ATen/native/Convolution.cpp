@@ -767,8 +767,8 @@ static void check_shape_forward(const at::Tensor& input,
         separator = " x ";
       }
 
-      TORCH_CHECK(false, "Calculated padded input size per channel: (", input_ss.str(), "). "
-               "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
+      TORCH_CHECK(false, "Calculated padded input size per channel: (", std::move(input_ss).str(), "). "
+               "Kernel size: (", std::move(kernel_ss).str(), "). Kernel size can't be greater than actual input size");
     }
   } else { // transposed
     for (const auto i : c10::irange(2, k)) {
