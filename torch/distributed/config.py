@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from torch.utils._config_module import Config, install_config_module
 
 
-__all__ = ["compile_on_one_rank", "use_torchcomms"]
+__all__ = ["compile_on_one_rank", "dtensor_use_symmetric_memory", "use_torchcomms"]
 
 # When enabled, coordinates are computed at runtime via a custom op rather
 # than being baked in at compile time. This allows compiling on one rank
@@ -25,6 +25,14 @@ compile_on_one_rank: bool = bool(
 use_torchcomms: bool = Config(
     default=False,
     env_name_default="TORCH_DISTRIBUTED_USE_TORCHCOMMS",
+)
+
+# When enabled, DTensor construction APIs allocate eligible CUDA local tensors
+# from SymmetricMemory. This is intended for one-sided communication algorithms
+# that need DTensor local shards to be remotely addressable.
+dtensor_use_symmetric_memory: bool = Config(
+    default=False,
+    env_name_default="TORCH_DTENSOR_USE_SYMMETRIC_MEMORY",
 )
 
 
