@@ -59,7 +59,6 @@ broadcast_to, view/reshape
 cat, view/reshape
 block_diag, view/reshape
 ceil, primitive pointwise
-chain_matmul, alias
 unsafe_chunk, view/reshape
 chunk, view/reshape
 tensor_split, view/reshape

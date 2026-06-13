@@ -159,3 +159,10 @@ def eig(
         "should be replaced with:\n"
         "L_complex, V_complex = torch.linalg.eig(A)"
     )
+
+
+def chain_matmul(*matrices, out=None):
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed. "
+        "Please use the `torch.linalg.multi_dot` function instead."
+    )
