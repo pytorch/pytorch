@@ -13,9 +13,11 @@ import os.path
 import re
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from typing import Any, TYPE_CHECKING
+
+import sympy
 
 import torch
 import torch._inductor.inductor_prims
@@ -33,17 +35,20 @@ from torch._inductor.custom_graph_pass import (
     CustomRuntimeEstimator,
 )
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import is_builtin
 from torch._logging import LazyString, trace_structured
 from torch._logging._internal import trace_log
 from torch._subclasses.fake_tensor import extract_tensor_metadata
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator, SymNode
 from torch.fx.experimental.symbolic_shapes import (
+    _get_placeholder_expr,
     find_symbol_binding_fx_nodes,
-    free_symbols,
     is_symbol_binding_fx_node,
+    is_symbolic,
     optimization_hint,
     statically_known_false,
     statically_known_true,
@@ -84,7 +89,6 @@ from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 if TYPE_CHECKING:
     import networkx as nx
-    import sympy
 
 
 AOT_PARTITIONER_DEBUG: bool = config.debug_partitioner
@@ -458,6 +462,46 @@ def _must_be_in_backward(node: fx.Node) -> bool:
         and node.target._schema.is_mutable
     )
     return _has_tag_is_backward(node) and is_mutable
+
+
+def _iter_input_exprs_without_replacements(val: Any) -> Iterator[sympy.Basic]:
+    # Keep this traversal in sync with symbolic_shapes._iterate_exprs.
+    if isinstance(val, py_sym_types):
+        if is_symbolic(val):
+            yield _get_placeholder_expr(val.node)
+    elif isinstance(val, SymNode):
+        yield _get_placeholder_expr(val)
+    elif isinstance(val, sympy.Basic):
+        yield val
+    elif isinstance(val, (int, float, bool, str)):
+        pass
+    elif isinstance(val, (tuple, list)):
+        for s in val:
+            yield from _iter_input_exprs_without_replacements(s)
+    elif isinstance(val, dict):
+        for s in itertools.chain(val.keys(), val.values()):
+            yield from _iter_input_exprs_without_replacements(s)
+    elif is_sparse_any(val):
+        yield from _iter_input_exprs_without_replacements(val.size())
+    elif isinstance(val, torch.Tensor):
+        yield from _iter_input_exprs_without_replacements(val.size())
+        yield from _iter_input_exprs_without_replacements(val.stride())
+        yield from _iter_input_exprs_without_replacements(val.storage_offset())
+    elif val is None:
+        pass
+    elif isinstance(val, torch.Generator) or is_opaque_value(val):
+        pass
+    elif isinstance(val, FakeScriptObject):
+        pass
+    else:
+        raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
+
+
+def _free_symbols_without_replacements(val: Any) -> OrderedSet[sympy.Symbol]:
+    symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+    for expr in _iter_input_exprs_without_replacements(val):
+        symbols.update(expr.free_symbols)
+    return symbols
 
 
 def _extract_fwd_bwd_outputs(
@@ -1106,7 +1150,9 @@ def _extract_fwd_bwd_modules(
     for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
         if "val" not in node.meta:
             continue
-        new_symbols = free_symbols(node.meta["val"]) - saved_symbols
+        new_symbols = (
+            _free_symbols_without_replacements(node.meta["val"]) - saved_symbols
+        )
         # NB: Deterministic order please!
         for s in sorted(new_symbols, key=lambda s: s.name):
             # NB: For well formed graphs, the symbol should always be present,
