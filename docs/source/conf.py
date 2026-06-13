@@ -2372,6 +2372,20 @@ def coverage_post_process(app, exception):
                 f.write(o)
 
 
+TORCH_CONSTANT_DOCSTRINGS = {
+    "torch.e": [
+        "Euler's number, the base of natural logarithms.",
+        "",
+        "This constant is an alias for :data:`math.e`.",
+    ],
+    "torch.pi": [
+        "The ratio of a circle's circumference to its diameter.",
+        "",
+        "This constant is an alias for :data:`math.pi`.",
+    ],
+}
+
+
 def process_docstring(app, what_, name, obj, options, lines):
     """
     Custom process to transform docstring lines Remove "Ignore" blocks
@@ -2398,6 +2412,10 @@ def process_docstring(app, what_, name, obj, options, lines):
         https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
     """
     import re
+
+    if name in TORCH_CONSTANT_DOCSTRINGS:
+        lines[:] = TORCH_CONSTANT_DOCSTRINGS[name] + [""]
+        return
 
     remove_directives = [
         # Remove all xdoctest directives
