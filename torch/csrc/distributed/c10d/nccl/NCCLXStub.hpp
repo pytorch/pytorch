@@ -50,11 +50,11 @@ class NCCLXStub : public Backend {
     return nccl_->allgather(outputTensors, inputTensors, opts);
   }
 
-  c10::intrusive_ptr<Work> _allgather_base(
+  c10::intrusive_ptr<Work> all_gather_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override {
-    return nccl_->_allgather_base(outputBuffer, inputBuffer, opts);
+    return nccl_->all_gather_single(outputBuffer, inputBuffer, opts);
   }
 
   c10::intrusive_ptr<Work> barrier(
