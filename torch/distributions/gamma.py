@@ -11,8 +11,8 @@ from torch.types import _Number, _size
 __all__ = ["Gamma"]
 
 
-def _standard_gamma(concentration):
-    return torch._standard_gamma(concentration)
+def _standard_gamma(concentration,generator=None):
+    return torch._standard_gamma(concentration,generator=generator)
 
 
 class Gamma(ExponentialFamily):
@@ -76,9 +76,9 @@ class Gamma(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(),generator:torch.Generator|None=None) -> Tensor:
         shape = self._extended_shape(sample_shape)
-        value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(
+        value = _standard_gamma(self.concentration.expand(shape), generator=generator) / self.rate.expand(
             shape
         )
         value.detach().clamp_(
