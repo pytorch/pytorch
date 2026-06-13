@@ -362,6 +362,45 @@ def vt_identity_compare(
             return None
         return var.source.base, base, descriptor_source, descriptor
 
+    def fresh_builtin_classmethod_getattr_info(
+        var: VariableTracker,
+    ) -> tuple[object, Source | None] | None:
+        if not isinstance(var, GetAttrVariable):
+            return None
+        base_source = None
+        if var.source is not None:
+            if not isinstance(var.source, AttrSource) or var.source.member != var.name:
+                return None
+            base_source = var.source.base
+            base = tx.output.resolve_source_value(base_source)
+        else:
+            try:
+                base = var.obj.as_python_constant()
+            except NotImplementedError:
+                return None
+        if not isinstance(base, type) or base.__module__ != "builtins":
+            return None
+
+        descriptor = inspect.getattr_static(base, var.name, NO_SUCH_SUBOBJ)
+        if not isinstance(descriptor, types.ClassMethodDescriptorType):
+            return None
+        resolved = getattr(base, var.name)
+        if not isinstance(resolved, types.BuiltinMethodType):
+            return None
+        return descriptor, base_source
+
+    def install_builtin_classmethod_getattr_guard(
+        info: tuple[object, Source | None],
+    ) -> bool:
+        _, base_source = info
+        if base_source is None:
+            return True
+        try:
+            install_guard(base_source.make_guard(GuardBuilder.ID_MATCH))
+        except NotImplementedError:
+            return False
+        return True
+
     def install_descriptor_getattr_guards(
         info: tuple[Source, object, Source, object],
         name: str,
@@ -420,12 +459,16 @@ def vt_identity_compare(
 
     left_getattr_info = fresh_descriptor_getattr_info(left)
     right_getattr_info = fresh_descriptor_getattr_info(right)
+    left_builtin_classmethod_getattr = fresh_builtin_classmethod_getattr_info(left)
+    right_builtin_classmethod_getattr = fresh_builtin_classmethod_getattr_info(right)
     bound_method_types = (UserMethodVariable, BoundBuiltinMethodVariable)
     if (
         isinstance(left, bound_method_types)
         or isinstance(right, bound_method_types)
         or left_getattr_info is not None
         or right_getattr_info is not None
+        or left_builtin_classmethod_getattr is not None
+        or right_builtin_classmethod_getattr is not None
     ):
         if isinstance(
             left, UserMethodVariable
@@ -454,14 +497,30 @@ def vt_identity_compare(
         ):
             return None
         if (
+            left_builtin_classmethod_getattr is not None
+            and not install_builtin_classmethod_getattr_guard(
+                left_builtin_classmethod_getattr
+            )
+        ):
+            return None
+        if (
+            right_builtin_classmethod_getattr is not None
+            and not install_builtin_classmethod_getattr_guard(
+                right_builtin_classmethod_getattr
+            )
+        ):
+            return None
+        if (
             not isinstance(left, bound_method_types)
             and left_getattr_info is None
+            and left_builtin_classmethod_getattr is None
             and not install_known_value_guard(left)
         ):
             return None
         if (
             not isinstance(right, bound_method_types)
             and right_getattr_info is None
+            and right_builtin_classmethod_getattr is None
             and not install_known_value_guard(right)
         ):
             return None
