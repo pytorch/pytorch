@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import functools
-import unittest
 
 import torch
 from functorch.experimental.control_flow import map
@@ -17,7 +16,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import make_tensor
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch.testing._internal.common_dtype import all_types_and, custom_types, empty_types
-from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
+from torch.testing._internal.opinfo.core import OpInfo, SampleInput
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 from torch._higher_order_ops import InvokeQuant, invoke_quant_packed
 from torch._higher_order_ops.register_hook import register_hook_op
@@ -568,13 +567,6 @@ hop_db = [
         # passthrough autograd stub (CompositeExplicitAutograd-style) that
         # is not sufficient for HOP-level backward tests.
         supports_autograd=False,
-        # Export serialization needs SwitchOp.gen_schema, which lands in
-        # PR 4. Remove this xfail once that PR merges.
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_serialize_export"
-            ),
-        ),
     ),
     OpInfo(
         name="invoke_quant",
