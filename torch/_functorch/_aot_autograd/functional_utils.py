@@ -518,6 +518,18 @@ class ViewMetaSequence:
             return None
         return self
 
+    @classmethod
+    def _from_parts(
+        cls, sequence: list[object], metadata: MetadataKey
+    ) -> ViewMetaSequence:
+        # Rebuild a ViewMetaSequence directly from its parts, bypassing the
+        # FunctionalTensor-based __init__. Used by standalone-artifact codegen to
+        # reconstruct this recipe as plain source instead of embedding a pickle.
+        self = cls.__new__(cls)
+        self.sequence = sequence  # type: ignore[assignment]
+        self.metadata = metadata
+        return self
+
 
 def _view_meta_signature(
     view_meta_sequence: ViewMetaSequence,
