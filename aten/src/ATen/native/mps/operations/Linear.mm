@@ -219,8 +219,6 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
   TORCH_CHECK(supportedFloatingOrComplexType(grad_output),
               "MPS device does not support linear backward for non-float inputs");
 
-  const Tensor weight_reshaped = weight.is_contiguous() ? weight : weight.contiguous();
-
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* weightTensor_ = nil;
@@ -237,9 +235,9 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    std::string key = "mps_linear_backward_input" + getTensorsStringKey({grad_output, weight_reshaped});
+    std::string key = "mps_linear_backward_input" + getTensorsStringKey({grad_output, weight});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
-      newCachedGraph->weightTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, weight_reshaped);
+      newCachedGraph->weightTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, weight);
       newCachedGraph->gradOutputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
 
       // MPS matrixMultiplication crashes for 5D+ tensors on 14.2.1 with `New volume should match old volume`
@@ -259,7 +257,7 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    Placeholder weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_reshaped);
+    Placeholder weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight);
     Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
