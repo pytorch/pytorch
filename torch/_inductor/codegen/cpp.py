@@ -736,7 +736,10 @@ class CppOverrides(OpOverrides):
     # pyrefly: ignore [bad-override]
     def abs(x):
         if isinstance(x, CppCSEVariable) and x.dtype in (
-            torch.uint8, torch.uint16, torch.uint32, torch.uint64
+            torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
         ):
             # abs(x) == x for unsigned types; return identity to avoid
             # -Wtautological-compare and unsigned unary minus warnings.
@@ -1300,7 +1303,10 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def abs(x):
         if isinstance(x, CppCSEVariable) and x.dtype in (
-            torch.uint8, torch.uint16, torch.uint32, torch.uint64
+            torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
         ):
             # Unsigned identity bypass for vectorized path
             return f"{x}"
