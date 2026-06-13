@@ -1546,6 +1546,18 @@ if __name__ == "__main__":
             for result in results:
                 self.assertTrue(b"libsycl.so" in result)
 
+    def test_xpu_header_installed(self):
+        include_dir = os.path.join(os.path.dirname(torch.__file__), "include")
+        aten_dir = os.path.join(include_dir, "ATen")
+        aten_ops_dir = os.path.join(aten_dir, "ops")
+        self.assertTrue(os.path.exists(os.path.join(aten_dir, "XPUFunctions.h")))
+        self.assertTrue(
+            os.path.exists(os.path.join(aten_ops_dir, "cat_xpu_dispatch.h"))
+        )
+        self.assertTrue(os.path.exists(os.path.join(aten_ops_dir, "col2im_native.h")))
+        with open(os.path.join(aten_ops_dir, "col2im_native.h")) as fr:
+            self.assertIn("col2im_xpu", fr.read())
+
     def test_dlpack_conversion(self):
         if self.expandable_segments:
             self.skipTest("Skipping DLPack test for expandable segments allocator.")
