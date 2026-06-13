@@ -4,7 +4,6 @@ import unittest
 from unittest.mock import patch
 
 import torch
-import torch._dynamo.config
 from torch._dynamo.testing import AotEagerAndRecordGraphs, InductorAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
@@ -32,15 +31,6 @@ else:
 
 @instantiate_parametrized_tests
 class TestHopPrint(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        torch._dynamo.config.canonicalize_output_graph_node_order = True
-
-    @classmethod
-    def tearDownClass(cls):
-        torch._dynamo.config.canonicalize_output_graph_node_order = False
-        super().tearDownClass()
     def test_base_print(self):
         def f(x):
             x = x + x
