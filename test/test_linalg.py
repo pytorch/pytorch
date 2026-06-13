@@ -1358,12 +1358,12 @@ class TestLinalg(TestCase):
                 m, args=tuple(torch.tensor([1]))
             )
             self.assertEqual(
-                "Runtime assertion failed for expression Ne(u0*(u0 + 1)*(u0 + 2), 0)"
+                "linalg.vector_norm cannot compute the -1 norm on an empty tensor"
                 in exported_program.graph_module.code,
                 expect_numel_runtime_check,
             )
             self.assertEqual(
-                "Runtime assertion failed for expression Ne(u0, 0) | Ne(u0*(u0 + 1)*(u0 + 2), 0)"
+                "linalg.vector_norm cannot compute the -1 norm on the dimension 0"
                 in exported_program.graph_module.code,
                 expect_index_0_check,
             )

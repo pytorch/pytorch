@@ -23,6 +23,7 @@ from torch._dynamo.testing import (
 from torch._inductor.utils import fresh_cache
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.recording import replay_shape_env_events
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -757,6 +758,42 @@ def forward(self, x_1):
         self.assertTrue(i0 != s0)
         self.assertFalse(i0 > s0)
         self.assertFalse(i0 >= s0)
+
+    def test_expect_true_message_replays(self):
+        shape_env = ShapeEnv(should_record_events=True)
+        i0 = shape_env.create_unbacked_symint()
+        self.assertTrue(expect_true(i0 > 0, message=lambda: "custom message"))
+        replayed_shape_env = replay_shape_env_events(shape_env.events)
+
+        def messages(env):
+            return [
+                ra.error_message
+                for ras in env.deferred_runtime_asserts.values()
+                for ra in ras
+            ]
+
+        self.assertEqual(messages(shape_env), ["custom message"])
+        self.assertEqual(messages(replayed_shape_env), ["custom message"])
+
+    def test_expect_true_cpp_symnode_keeps_message_lazy(self):
+        class BadMsg:
+            def __call__(self):
+                raise RuntimeError("message evaluated")
+
+        b = SymBool(torch._C._get_constant_bool_symnode(True))
+        self.assertTrue(expect_true(b, message=BadMsg()))
+
+    def test_runtime_assert_message_does_not_patch_parent_event(self):
+        shape_env = ShapeEnv(should_record_events=True)
+        i0 = shape_env.create_unbacked_symint()
+        with shape_env._recording():
+            shape_env.guard_or_defer_runtime_assert(
+                (i0 > 0).node.expr,
+                "nested",
+                error_message=lambda: "nested message",
+            )
+
+        self.assertNotIn("error_message", shape_env.events[-1].kwargs or {})
 
     def test_expect_true_prefer_later(self):
         shape_env = ShapeEnv()
@@ -4230,10 +4267,10 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
         ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, 'invalid shape dimension u0. If this was symbolic, it was assumed to not be -1.If this was meant to be inferred, please explicitly pass in -1.');  ge_1 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "shape '[u0, u0]' is invalid for input of size u1");  eq = _assert_scalar_2 = None
         view: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
         view_1: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
         view_2: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
@@ -4271,10 +4308,10 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
         ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, 'invalid shape dimension u0. If this was symbolic, it was assumed to not be -1.If this was meant to be inferred, please explicitly pass in -1.');  ge_1 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "shape '[u0, u0]' is invalid for input of size u1");  eq = _assert_scalar_2 = None
         view: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
         view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
         view_2: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
@@ -5050,10 +5087,10 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
         ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, 'invalid shape dimension u0. If this was symbolic, it was assumed to not be -1.If this was meant to be inferred, please explicitly pass in -1.');  ge_1 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "shape '[u0, u0]' is invalid for input of size u1");  eq = _assert_scalar_2 = None
         _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
         return (_reshape_copy,)""",
             ignore_comments=True,
@@ -5086,10 +5123,10 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
         ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, 'invalid shape dimension u0. If this was symbolic, it was assumed to not be -1.If this was meant to be inferred, please explicitly pass in -1.');  ge_1 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "shape '[u0, u0]' is invalid for input of size u1");  eq = _assert_scalar_2 = None
         _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
         return (_reshape_copy,)""",
             ignore_comments=True,

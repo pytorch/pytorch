@@ -105,6 +105,17 @@ bool SymBool::expect_true(const char* file, int64_t line) const {
   return a->expect_true(file, line);
 }
 
+bool SymBool::expect_true(
+    const char* file,
+    int64_t line,
+    const char* error_message) const {
+  if (auto ma = maybe_as_bool()) {
+    return *ma;
+  }
+  SymNode a = toSymNodeImpl();
+  return a->expect_true(file, line, error_message);
+}
+
 bool SymBool::has_hint() const {
   if (maybe_as_bool()) {
     return true;
