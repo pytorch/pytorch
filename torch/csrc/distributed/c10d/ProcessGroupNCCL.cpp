@@ -938,6 +938,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  TORCH_CHECK(
+      !options_->enable_reconfigure,
+      "ProcessGroupNCCL does not support enable_reconfigure "
+      "(reconfigure-based fault tolerance).");
 
   // getNcclVersion needs to get called before launching threads which can
   // potentially call getenv. getNcclVersion internally calls setenv to set some
@@ -1874,10 +1878,11 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
         lastTimePollStore = currentTime;
         auto handleError = [&](const std::string& errorMessage) {
           LOG(WARNING)
-              << pg_->logPrefix()
-              << "Failed to check the \"should dump\" flag on TCPStore, "
-              << "(maybe TCPStore server has shut down too early), with error: "
-              << errorMessage;
+              << pg_->logPrefix() << "TCPStore check for dump key \""
+              << kStoreDumpKey
+              << "\" failed (store unavailable, not absent key). Cannot detect "
+              << "remote dump signals. A rank exiting outside NCCL without "
+              << "broadcasting is a separate case. Error: " << errorMessage;
           // We give up for now assuming TCPStore has been torn down.
           return;
         };

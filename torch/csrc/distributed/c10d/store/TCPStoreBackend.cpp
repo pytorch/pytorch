@@ -7,8 +7,8 @@
 #include <vector>
 
 #include <c10/util/thread_name.h>
-#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
+#include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
 
 #ifdef _WIN32
 #include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
