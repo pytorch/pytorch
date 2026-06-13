@@ -6363,6 +6363,66 @@ class TestMaybeFastEvalComparison(TestCase):
         self.assertEqual(eager_result, compiled_result)
 
 
+class TestSingletonIntStaticEval(TestCase):
+    def test_singleton_int_only_expr_can_be_statically_evaluated(self):
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        shape_env = ShapeEnv()
+        s = sympy.Symbol("s", integer=True)
+        shape_env.backed_var_to_val[s] = SingletonInt(1)
+
+        cases = [
+            (sympy.Ne(s, 1, evaluate=False), sympy.true),
+            (sympy.Ge(s, 2, evaluate=False), sympy.true),
+            (sympy.Le(2, s, evaluate=False), sympy.true),
+            (sympy.Gt(2, s, evaluate=False), sympy.false),
+            (sympy.Lt(s, 2, evaluate=False), sympy.false),
+        ]
+        for expr, expected in cases:
+            with self.subTest(expr=expr):
+                self.assertEqual(shape_env._maybe_evaluate_static(expr), expected)
+
+    def test_indeterminate_singleton_int_comparison_is_not_statically_evaluated(self):
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        shape_env = ShapeEnv()
+        s = sympy.Symbol("s", integer=True)
+        shape_env.backed_var_to_val[s] = SingletonInt(1)
+
+        for expr in (
+            sympy.Ge(2, s, evaluate=False),
+            sympy.Gt(s, 2, evaluate=False),
+        ):
+            with self.subTest(expr=expr):
+                self.assertIsNone(shape_env._maybe_evaluate_singleton_int(expr))
+                self.assertIsNone(shape_env._maybe_evaluate_static(expr))
+
+    def test_mixed_singleton_int_expr_is_not_statically_evaluated(self):
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        shape_env = ShapeEnv()
+        s = sympy.Symbol("s", integer=True)
+        u = create_symint(shape_env, 4, duck=False).node.expr
+        shape_env.backed_var_to_val[s] = SingletonInt(1)
+
+        expr = sympy.Eq(u, s, evaluate=False)
+        self.assertIsNone(shape_env._maybe_evaluate_singleton_int(expr))
+        self.assertIsNone(shape_env._maybe_evaluate_static(expr))
+
+    def test_unsupported_singleton_int_expr_is_not_statically_evaluated(self):
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        shape_env = ShapeEnv()
+        s = sympy.Symbol("s", integer=True)
+        shape_env.backed_var_to_val[s] = SingletonInt(1)
+
+        for fn in (sympy.Max, sympy.Min):
+            with self.subTest(fn=fn):
+                expr = sympy.Eq(fn(2, s), s, evaluate=False)
+                self.assertIsNone(shape_env._maybe_evaluate_singleton_int(expr))
+                self.assertIsNone(shape_env._maybe_evaluate_static(expr))
+
+
 class TestTransferSymbolsFromForeignShapeEnv(TestCase):
     """Tests for ShapeEnv.transfer_symbols_from_foreign_shape_env."""
 

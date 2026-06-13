@@ -3977,6 +3977,17 @@ class GraphModule(torch.nn.Module):
 
         self._validate_compile(fn, arg_fn=lambda: (values, offsets, offsets))
 
+    def test_in_graph_keepdim_reduction_binary_op(self):
+        # AOTAutograd used to emit an unguardable ephemeral nested-int guard
+        # while tracing the backward for this broadcast.
+        def fn(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return (nt - nt.mean(-1, keepdim=True)).values().sum()
+
+        values = torch.randn(15, 8, requires_grad=True)
+        offsets = torch.tensor([0, 5, 10, 15], dtype=torch.int64)
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets))
+
     def test_in_graph_construction_from_input_4(self):
         # The offsets is taken from an NJT input
         def fn(nt, other_values):
@@ -4085,8 +4096,6 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
 
-    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
-    @unittest.expectedFailure
     def test_in_graph_construction_from_intermediate_5(self):
         # non-shared intermediate
         def fn(values):

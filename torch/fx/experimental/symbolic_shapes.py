@@ -7165,6 +7165,26 @@ class ShapeEnv:
 
         return None
 
+    def _maybe_evaluate_singleton_int(self, expr: sympy.Basic) -> sympy.Basic | None:
+        replacements: dict[sympy.Symbol, SingletonInt] = {}
+        for s in expr.free_symbols:
+            val = self.backed_var_to_val.get(s)
+            if not isinstance(val, SingletonInt):
+                return None
+            replacements[s] = val
+
+        if not replacements:
+            return None
+
+        try:
+            expr = expr.xreplace(replacements)
+            if not expr.free_symbols and (expr.is_number or expr.is_Boolean):
+                return expr
+        except Exception:
+            return None
+
+        return None
+
     def _maybe_evaluate_range_only(
         self,
         expr: sympy.Basic,
@@ -7219,6 +7239,10 @@ class ShapeEnv:
             )
 
         expr = canonicalize_bool_expr(expr)
+
+        singleton_int_expr = self._maybe_evaluate_singleton_int(expr)
+        if singleton_int_expr is not None:
+            return singleton_int_expr
 
         def resimplify_floor_div(axioms: dict[sympy.Expr, sympy.Expr]) -> None:
             if not self._resimplify_floor_div_axioms:
