@@ -604,7 +604,7 @@ def _build_proxy_for_sym_expr(
     To handle this we decompose the sympy.Expr and look for the pieces as
     inputs. But there are problems with this approach:
 
-    - We lose operation provanance: We end up figuring out where to get the
+    - We lose operation provenance: We end up figuring out where to get the
       inputs - but those may not actually be correct. If we have "s1" coming in
       from both tensor1 and tensor2 and we pick the wrong one we could end up
       keeping a tensor alive longer than intended.
@@ -2376,7 +2376,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             self.module_id_cache[id(mod)].append(name)
 
         # Build a wrapper around _AttrProxy to provide the tracer. We can't
-        # store it on _AttrProxy itself beceause we mimic the underlying class
+        # store it on _AttrProxy itself because we mimic the underlying class
         # (including its attributes).
         tracer = self
 

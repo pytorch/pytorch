@@ -317,7 +317,7 @@ def _set_compilation_env():
     # but it exposes some bugs in existing tests so we have to have a temporary flag to control
     # the behavior, which allows dynamo to store an empty graph for a frame without falling back to eager
     try:
-        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
+        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dynamo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
         # pyrefly: ignore [bad-assignment]
