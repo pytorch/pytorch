@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import glob
+import hashlib
 import importlib
 import importlib.abc
 import importlib.util
@@ -151,6 +152,12 @@ def _nt_quote_args(args: list[str] | None) -> list[str]:
     if not args:
         return []
     return [f'"{arg}"' if ' ' in arg else arg for arg in args]
+
+def _get_ninja_build_directory(output_dir: str, objects) -> str:
+    object_paths = [os.path.abspath(obj) for obj in objects]
+    digest = hashlib.sha256("\0".join(object_paths).encode()).hexdigest()[:16]
+    return os.path.join(output_dir, '.ninja', digest)
+
 
 def _find_cuda_home() -> str | None:
     """Find the CUDA install path."""
@@ -1035,7 +1042,7 @@ class BuildExtension(_LazyBuildExt):
                 sycl_cflags=sycl_cflags,
                 sycl_post_cflags=sycl_post_cflags,
                 sycl_dlink_post_cflags=sycl_dlink_post_cflags,
-                build_directory=output_dir,
+                build_directory=_get_ninja_build_directory(output_dir, objects),
                 verbose=True,
                 with_cuda=with_cuda,
                 with_sycl=with_sycl)
@@ -1266,7 +1273,7 @@ class BuildExtension(_LazyBuildExt):
                 sycl_cflags=sycl_cflags,
                 sycl_post_cflags=sycl_post_cflags,
                 sycl_dlink_post_cflags=sycl_dlink_post_cflags,
-                build_directory=output_dir,
+                build_directory=_get_ninja_build_directory(output_dir, objects),
                 verbose=True,
                 with_cuda=with_cuda,
                 with_sycl=with_sycl)
