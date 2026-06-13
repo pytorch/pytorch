@@ -94,6 +94,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     MPI = 4,
     XCCL = 5,
     CUSTOM = 6,
+    MPS = 7,
   };
 
   static std::string backendTypeToString(const BackendType& type) {
@@ -112,6 +113,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         return "undefined";
       case BackendType::CUSTOM:
         return "custom";
+      case BackendType::MPS:
+        return "mps";
       default:
         TORCH_CHECK(false, "THis should never happen!");
     }
@@ -130,6 +133,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       return BackendType::UCC;
     } else if (backend == "mpi") {
       return BackendType::MPI;
+    } else if (backend == "mps") {
+      return BackendType::MPS;
     } else {
       return BackendType::CUSTOM;
     }
@@ -871,6 +876,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       tensor = at::empty(
           {1},
           at::TensorOptions().device(at::DeviceType::XPU).dtype(at::kByte));
+    } else if (backendType_ == c10d::ProcessGroup::BackendType::MPS) {
+      tensor = at::empty(
+          {1},
+          at::TensorOptions().device(at::DeviceType::MPS).dtype(at::kByte));
     } else {
       // Default to using cpu implementation
       tensor = at::empty(

@@ -1355,6 +1355,23 @@ if(USE_GLOO)
   endif()
 endif()
 
+# ---[ JACCL (MLX's RDMA-over-Thunderbolt collective library, used by
+#      ProcessGroupMPS). The subdirectory CMakeLists guards on macOS SDK >= 26.2
+#      and emits an INTERFACE stub otherwise, setting JACCL_AVAILABLE to signal
+#      whether the real library was built.
+if(USE_DISTRIBUTED AND USE_MPS AND USE_C10D_MPS)
+  set(JACCL_AVAILABLE 0)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/jaccl)
+  if(JACCL_AVAILABLE)
+    list(APPEND Caffe2_DEPENDENCY_LIBS jaccl)
+  else()
+    message(WARNING
+      "USE_C10D_MPS is ON but JACCL (MLX) could not be built — macOS SDK >= 26.2 "
+      "is required. Disabling USE_C10D_MPS.")
+    caffe2_update_option(USE_C10D_MPS OFF)
+  endif()
+endif()
+
 # ---[ profiling
 if(USE_PROF)
   find_package(htrace)

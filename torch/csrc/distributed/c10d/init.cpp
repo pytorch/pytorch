@@ -46,6 +46,10 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #endif
 
+#ifdef USE_C10D_MPS
+#include <torch/csrc/distributed/c10d/ProcessGroupMPS.hpp>
+#endif
+
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 #include <pybind11/functional.h>
@@ -3124,6 +3128,7 @@ Arguments:
       .value("UCC", ::c10d::ProcessGroup::BackendType::UCC)
       .value("MPI", ::c10d::ProcessGroup::BackendType::MPI)
       .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
+      .value("MPS", ::c10d::ProcessGroup::BackendType::MPS)
       .export_values();
 
   // TODO: The collection definitions handles direct instantiation of
@@ -4090,6 +4095,47 @@ Returns:
               py::arg("rank"),
               py::arg("size"),
               py::arg("timeout") = kProcessGroupDefaultTimeout);
+#endif
+
+#ifdef USE_C10D_MPS
+  auto processGroupMPS =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupMPS>(
+          module, "ProcessGroupMPS", backend)
+          .def(
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          c10::intrusive_ptr<::c10d::ProcessGroupMPS::Options>
+                              options) {
+                py::gil_scoped_release nogil{};
+                return c10::make_intrusive<::c10d::ProcessGroupMPS>(
+                    store, rank, size, std::move(options));
+              }),
+              py::arg("store"),
+              py::arg("rank"),
+              py::arg("size"),
+              py::arg("options"))
+          .def(
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          const std::chrono::milliseconds& timeout) {
+                py::gil_scoped_release nogil{};
+                auto options =
+                    ::c10d::ProcessGroupMPS::Options::create(timeout);
+                return c10::make_intrusive<::c10d::ProcessGroupMPS>(
+                    store, rank, size, std::move(options));
+              }),
+              py::arg("store"),
+              py::arg("rank"),
+              py::arg("size"),
+              py::arg("timeout") = kProcessGroupDefaultTimeout)
+          .def_property_readonly(
+              "options", &::c10d::ProcessGroupMPS::getOptions);
+
+  intrusive_ptr_class_<::c10d::ProcessGroupMPS::Options>(
+      processGroupMPS, "Options", backendOptions)
+      .def(py::init<>());
 #endif
 
   py::enum_<::c10d::OpType>(module, "OpType")

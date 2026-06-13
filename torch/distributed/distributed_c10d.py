@@ -97,6 +97,7 @@ __all__ = [
     "is_torchelastic_launched",
     "is_ucc_available",
     "is_xccl_available",
+    "is_mps_backend_available",
     "isend",
     "monitored_barrier",
     "new_group",
@@ -146,6 +147,7 @@ _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
 _XCCL_AVAILABLE = True
+_MPS_BACKEND_AVAILABLE = True
 
 try:
     try:
@@ -243,6 +245,14 @@ try:
 except ImportError:
     _XCCL_AVAILABLE = False
 
+try:
+    from torch._C._distributed_c10d import ProcessGroupMPS
+
+    ProcessGroupMPS.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupMPS"]
+except ImportError:
+    _MPS_BACKEND_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
@@ -294,26 +304,28 @@ class Backend(str):  # noqa: SLOT000
     UCC = "ucc"
     MPI = "mpi"
     XCCL = "xccl"
+    MPS = "mps"
     FAKE = "fake"
 
     _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
     _plugins: dict[str, _BackendPlugin] = {}
 
-    backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI, FAKE]
+    backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI, MPS, FAKE]
 
     # 3rd-party devices can register the default backend support here
     default_device_backend_map: dict[str, str] = {
         "cpu": GLOO,
         "cuda": NCCL,
         "xpu": XCCL,
-        "mps": GLOO,
+        "mps": MPS,
     }
 
     backend_capability: dict[str, list[str]] = {
         GLOO: ["cpu", "cuda"],
         NCCL: ["cuda"],
         XCCL: ["xpu"],
+        MPS: ["mps", "cpu"],
         UCC: ["cpu", "cuda"],
         MPI: ["cpu", "cuda"],
         FAKE: ["cpu", "cuda", "hpu", "xpu"],
@@ -324,6 +336,7 @@ class Backend(str):  # noqa: SLOT000
         GLOO: ProcessGroup.BackendType.GLOO,
         NCCL: ProcessGroup.BackendType.NCCL,
         XCCL: ProcessGroup.BackendType.XCCL,
+        MPS: ProcessGroup.BackendType.MPS,
         UCC: ProcessGroup.BackendType.UCC,
         MPI: ProcessGroup.BackendType.MPI,
         FAKE: ProcessGroup.BackendType.CUSTOM,
@@ -1356,6 +1369,11 @@ def is_xccl_available() -> bool:
     return _XCCL_AVAILABLE
 
 
+def is_mps_backend_available() -> bool:
+    """Check if the MPS distributed backend is available."""
+    return _MPS_BACKEND_AVAILABLE
+
+
 def _check_single_backend_availability(backend_name: str) -> bool:
     """
     Helper function to check if a single backend is available.
@@ -2243,6 +2261,18 @@ def _new_process_group_helper(
                 backend_prefix_store, group_rank, group_size, backend_options
             )
             backend_type = ProcessGroup.BackendType.XCCL
+        elif backend_str == Backend.MPS:
+            if not is_mps_backend_available():
+                raise RuntimeError("Distributed package doesn't have MPS built in")
+            backend_options = ProcessGroupMPS.Options()
+            backend_options.global_ranks_in_group = global_ranks_in_group
+            backend_options.group_name = group_name
+            # pyrefly: ignore [bad-argument-type]
+            backend_options._timeout = timeout
+            backend_class = ProcessGroupMPS(
+                backend_prefix_store, group_rank, group_size, backend_options
+            )
+            backend_type = ProcessGroup.BackendType.MPS
         else:
             if backend_str.upper() not in Backend._plugins:
                 raise AssertionError(f"Unknown c10d backend type {backend_str.upper()}")

@@ -44,6 +44,7 @@ torch.distributed.optim <distributed.optim>
 torch.distributed.pipelining <distributed.pipelining>
 torch.distributed._symmetric_memory <symmetric_memory>
 torch.distributed.checkpoint <distributed.checkpoint>
+torch.distributed MPS backend <distributed.mps>
 torch.distributions <distributions>
 torch.compiler <torch.compiler_api>
 torch.fft <fft>
