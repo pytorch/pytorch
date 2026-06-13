@@ -3489,6 +3489,26 @@
       ]
     }
   ],
+  "GB7788": [
+    {
+      "Gb_type": "unbacked alias-or-copy op with dynamic memory format",
+      "Context": "{alias_or_copy_node.target} on marked-unbacked tensor",
+      "Explanation": "Dynamo cannot safely cache an alias-or-copy branch for a marked-unbacked tensor without a concrete memory format.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2489": [
+    {
+      "Gb_type": "unbacked alias-or-copy op on sourceless tensor",
+      "Context": "{alias_or_copy_node.target} on marked-unbacked tensor",
+      "Explanation": "Dynamo cannot safely cache an alias-or-copy branch for a marked-unbacked intermediate tensor without a guardable source.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0243": [
     {
       "Gb_type": "Attempted to use `torch.nn.modules.utils._ntuple` with unsupported argument type",
@@ -3864,6 +3884,16 @@
       "Gb_type": "non-constant key in object __dict__",
       "Context": "key={key.vt}",
       "Explanation": "Dynamo expects object __dict__ replacement keys to be constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9644": [
+    {
+      "Gb_type": "unbacked reshape_as alias-or-copy op",
+      "Context": "reshape_as on marked-unbacked tensor",
+      "Explanation": "Dynamo cannot safely cache or functionalize reshape_as for marked-unbacked tensors because its alias-or-copy behavior depends on layout.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
