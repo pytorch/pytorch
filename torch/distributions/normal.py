@@ -108,6 +108,8 @@ class Normal(ExponentialFamily):
         )
 
     def icdf(self, value):
+        if self._validate_args:
+            self._validate_quantile(value)
         return self.loc + self.scale * torch.erfinv(2 * value - 1) * math.sqrt(2)
 
     def entropy(self):

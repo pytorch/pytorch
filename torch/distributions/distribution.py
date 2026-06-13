@@ -329,6 +329,17 @@ class Distribution:
                 f"but found invalid values:\n{value}"
             )
 
+    def _validate_quantile(self, value: Tensor) -> None:
+        if not isinstance(value, torch.Tensor):
+            raise ValueError("The value argument to icdf must be a Tensor")
+        if not torch._is_all_true(constraints.unit_interval.check(value)):
+            raise ValueError(
+                f"Expected value argument "
+                f"({type(value).__name__} of shape {tuple(value.shape)}) "
+                f"to be within the unit interval [0, 1], "
+                f"but found invalid values:\n{value}"
+            )
+
     def _get_checked_instance(self, cls, _instance=None):
         if _instance is None and type(self).__init__ != cls.__init__:
             raise NotImplementedError(

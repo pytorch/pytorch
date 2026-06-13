@@ -105,6 +105,8 @@ class GeneralizedPareto(Distribution):
         return torch.exp(self.log_cdf(value))
 
     def icdf(self, value):
+        if self._validate_args:
+            self._validate_quantile(value)
         loc = self.loc
         scale = self.scale
         concentration = self.concentration
