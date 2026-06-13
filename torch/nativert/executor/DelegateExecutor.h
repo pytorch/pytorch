@@ -16,7 +16,7 @@ std::string extractToTemporaryFolder(
 using MakeProxyExecutorFn =
     std::function<std::unique_ptr<torch::aot_inductor::ProxyExecutor>(
         const std::string&,
-        bool,
+        const std::string&,
         std::optional<std::unordered_map<std::string, c10::IValue>>)>;
 
 // This is the extension point for delegation backends.
