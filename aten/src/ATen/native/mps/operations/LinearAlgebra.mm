@@ -1337,7 +1337,7 @@ static void cholesky_panel_impl(const Tensor& out, const Tensor& info_, int64_t 
   auto trsmPSO = lib.getPipelineStateForFunc(upper ? "applyPanelTRSMU" : "applyPanelTRSML");
   const auto big = N - NB >= 1024;
   const auto BM = big ? 64 : 32;
-  const auto BN = 64;
+  constexpr auto BN = 64;
   const auto NSG = big ? 4 : 2;
   auto syrkPSO =
       lib.getPipelineStateForFunc(fmt::format("applySYRKTrailing{}_{}_{}_{}", upper ? "U" : "L", BM, BN, NSG));
