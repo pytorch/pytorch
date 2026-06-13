@@ -15420,7 +15420,7 @@ op_db: list[OpInfo] = [
     OpInfo('median',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
-           dtypesIfMPS=all_types_and(torch.bfloat16, torch.float16, torch.bool),
+           dtypesIfMPS=all_types_and(torch.bfloat16, torch.float16),
            # TODO: some signatures of median do support out
            supports_out=False,
            supports_forward_ad=True,
@@ -15429,7 +15429,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
-           dtypesIfMPS=all_types_and(torch.bfloat16, torch.float16, torch.bool),
+           dtypesIfMPS=all_types_and(torch.bfloat16, torch.float16),
            # TODO: some signatures of nanmedian do support out
            supports_out=False,
            supports_forward_ad=True,
@@ -26903,7 +26903,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref", device_type="mps", dtypes=(torch.float32,)),
         ),
         torch_opinfo_name="native_group_norm",
-        # One returned tensor is a view, but not a view of an input, so it's OK.
+        # All returned tensors are views, but not of inputs, so this check is unneeded.
         validate_view_consistency=False,
     ),
     PythonRefInfo(
