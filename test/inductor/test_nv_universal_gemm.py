@@ -882,6 +882,81 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.testing.assert_close(result, fn(a, b, bias), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "bias+relu was NOT fused into epilogue")
 
+    def test_efc_disk_cache_round_trip(self):
+        """Verify that EFC kernel compiled artifacts can be serialized to disk
+        and reloaded correctly.
+
+        EFC kernels produce a closure-wrapped compiled_obj. The disk cache
+        unwraps the inner JIT function for serialization and rewraps it on
+        reload. This test compiles an EFC kernel, round-trips through disk
+        cache, and verifies the reloaded artifact produces correct results."""
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _get_kernel_cache,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _rewrap_efc_compiled_obj,
+            _unwrap_efc_compiled_obj,
+        )
+        from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
+
+        cache = _get_kernel_cache()
+        efc_kernel = None
+        for name, k in cache.items():
+            if (
+                "EFC" in name
+                and "ABFloat16" in name
+                and "outBFloat16" in name
+                and "ttt" in name
+            ):
+                efc_kernel = k
+                break
+        if efc_kernel is None:
+            self.skipTest("No matching EFC kernel found in cache")
+
+        import cutlass_api
+        from cutlass_api.artifact import CompiledArtifact
+
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
+
+        args = cutlass_api.arguments.GemmArguments(
+            a, b, out, accumulator_type=torch.float32
+        )
+        artifact = efc_kernel.compile(args)
+
+        # Unwrap, serialize, reload, rewrap
+        inner = _unwrap_efc_compiled_obj(artifact.compiled_obj)
+        self.assertNotEqual(
+            type(inner).__name__,
+            "function",
+            "unwrap should extract the JIT function, not the closure",
+        )
+
+        test_cache: dict = {}
+        disk_cache_set(test_cache, "/tmp/test_efc_rt.py", ("efc",), ("key",), inner, 0)
+        loaded = disk_cache_get({}, "/tmp/test_efc_rt.py", ("efc",), ("key",), 0)
+        self.assertIsNotNone(loaded, "disk_cache_get returned None")
+
+        rewrapped = _rewrap_efc_compiled_obj(loaded, efc_kernel)
+        reloaded_artifact = CompiledArtifact(rewrapped, efc_kernel)
+
+        # Run with reloaded artifact and verify correctness
+        out2 = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
+        args2 = cutlass_api.arguments.GemmArguments(
+            a, b, out2, accumulator_type=torch.float32
+        )
+        efc_kernel.run(
+            args2,
+            reloaded_artifact,
+            stream=torch.cuda.current_stream(),
+            workspace=None,
+            assume_supported_args=True,
+        )
+        torch.cuda.synchronize()
+        expected = a.float() @ b.float()
+        torch.testing.assert_close(out2.float(), expected, atol=1e-2, rtol=1e-2)
+
     def test_workspace_runtime_integration(self):
         """End-to-end: mock the chosen kernel's workspace_size to non-zero and
         actually let benchmark_codegened_module run, exercising the runtime
