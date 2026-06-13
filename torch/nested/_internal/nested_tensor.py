@@ -528,7 +528,7 @@ def jagged_from_list(
     """Constructs a NestedTensor backed by jagged layout from a list of tensors"""
 
     if len(tensors) == 0:
-        raise RuntimeError("Cannot construct a nested tensor from an empty tensor list")
+        raise RuntimeError("Cannot construct a nested tensor from an empty list.")
     if not len(set(t.dtype for t in tensors)) == 1:  # noqa: C401
         raise RuntimeError(
             "When constructing a nested tensor, all tensors in list must have the same dtype"

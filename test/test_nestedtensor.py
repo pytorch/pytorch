@@ -6174,7 +6174,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         # error case: empty list
         with self.assertRaisesRegex(
-            RuntimeError, "Cannot construct a nested tensor from an empty tensor list"
+            RuntimeError, "Cannot construct a nested tensor from an empty list."
         ):
             torch.nested.nested_tensor([], layout=torch.jagged)
 
