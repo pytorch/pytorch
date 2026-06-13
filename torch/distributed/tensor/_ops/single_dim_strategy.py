@@ -108,6 +108,8 @@ def _insert_single_dim_replication_strategy(
     Inserts the [Replicate(), Replicate(), ...] strategy after asserting that such strategy does not yet exist.
     For ops with masked-off outputs (e.g. backward ops with output_mask), output positions
     where output_tensor_meta is None are set to None in the all-Replicate rule.
+    Output positions that are explicitly None in every strategy are also preserved
+    as None in the inserted rule.
     """
     for strategy in single_dim_strategies_with_placeholders:
         if all(isinstance(p, Replicate) or p is None for p in strategy):
@@ -117,10 +119,17 @@ def _insert_single_dim_replication_strategy(
         Replicate()
     ] * total_len
     # Set None for masked-off output positions based on output_tensor_meta
-    if isinstance(output_tensor_meta, Sequence):
+    if isinstance(output_tensor_meta, Sequence) and not isinstance(
+        output_tensor_meta, TensorMeta
+    ):
         for i, meta in enumerate(output_tensor_meta):
             if meta is None and i < num_outputs:
                 replicate_rule[i] = None
+    for i in range(num_outputs):
+        if single_dim_strategies_with_placeholders and all(
+            strategy[i] is None for strategy in single_dim_strategies_with_placeholders
+        ):
+            replicate_rule[i] = None
     single_dim_strategies_with_placeholders.insert(0, replicate_rule)
     return single_dim_strategies_with_placeholders
 
@@ -253,11 +262,19 @@ def _build_output_specs(
         )
 
     def _spec_for_output(out_idx: int) -> DTensorSpec | None:
+        maybe_placements = tuple(out[out_idx] for out in per_mesh_dim_placements)
+        # All mesh dims agreeing on None means the whole output has no
+        # DTensorSpec, e.g. local scalar SDPA philox outputs.
+        if all(placement is None for placement in maybe_placements):
+            return None
+        if any(placement is None for placement in maybe_placements):
+            raise AssertionError(
+                f"Output {out_idx} mixes None with placements across mesh dims: "
+                f"{maybe_placements}"
+            )
         if output_metas[out_idx] is None:
             return None
-        placements = tuple(
-            cast(Placement, out[out_idx]) for out in per_mesh_dim_placements
-        )
+        placements = tuple(cast(Placement, placement) for placement in maybe_placements)
         return DTensorSpec(mesh, placements, tensor_meta=output_metas[out_idx])
 
     if num_outputs > 1:
