@@ -207,6 +207,8 @@ def _install_opaque_base(_PybindOpaqueBase: type) -> tuple[type, type]:
 
     class OpaqueBase(_PybindOpaqueBase, metaclass=OpaqueBaseMeta):
         def __init__(self, *args, **kwargs):
+            if _needs_pybind_meta_call(type(self)):
+                return
             _ensure_opaque_base_initialized(self)
 
             init = _find_python_init_after_opaque_base(type(self))
@@ -280,6 +282,8 @@ def _install_opaque_base(_PybindOpaqueBase: type) -> tuple[type, type]:
         return None
 
     def _is_pybind_init(init):
+        # This is pybind11's internal method wrapper type name. PyTorch vendors
+        # pybind11, so the dependency is stable and covered by opaque tests.
         return type(init).__name__ == "instancemethod"
 
     def _ensure_opaque_base_initialized(instance):
