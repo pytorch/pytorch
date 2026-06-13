@@ -2289,6 +2289,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return tx.symbolic_torch_function_state.mode_stack[ind]
 
+        @register(torch.utils._python_dispatch._get_current_dispatch_mode_stack)
+        def handle_get_current_dispatch_mode_stack(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            if args or kwargs:
+                raise_type_error(
+                    tx,
+                    "_get_current_dispatch_mode_stack() takes no arguments",
+                )
+            # During tracing, Dynamo runs with dispatch modes removed, so
+            # the stack is always empty. Return [] as a constant instead
+            # of graph-breaking.
+            return VariableTracker.build(tx, [])
+
         @register(torch.get_device_module.__wrapped__)
         def handle_get_device_module(
             self,
