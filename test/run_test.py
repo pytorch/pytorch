@@ -97,6 +97,14 @@ except ImportError:
         pass
 
 
+try:
+    from torch.testing._internal.common_utils import HardwareClassification
+
+    _HC_CHOICES = [e.name for e in HardwareClassification]
+except ImportError:
+    _HC_CHOICES = ["GENERIC", "DEVICE_GENERIC", "CUDA", "XPU", "MPS"]
+
+
 # Make sure to remove REPO_ROOT after import is done
 sys.path.remove(str(REPO_ROOT))
 
@@ -556,6 +564,10 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    if options.hw_classification:
+        # forward hw classification filter to test subprocess
+        unittest_args += ["--hw-classification"] + options.hw_classification
 
     if options.showlocals:
         if options.pytest:
@@ -1487,6 +1499,15 @@ def parse_args():
         metavar="TESTS",
         help="select a set of tests to include (defaults to ALL tests)."
         " tests must be a part of the TESTS list defined in run_test.py",
+    )
+    parser.add_argument(
+        "--hw-classification",
+        nargs="+",
+        choices=_HC_CHOICES,
+        type=str.upper,
+        default=None,
+        metavar="SCOPE",
+        help="filter tests by hardware classification categories (e.g., GENERIC DEVICE_GENERIC CUDA XPU MPS)",
     )
     parser.add_argument(
         "-x",
