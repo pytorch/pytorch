@@ -3676,6 +3676,50 @@ class GuardBuilder(GuardBuilderBase):
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
 
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            guard.create_fn.keywords["memory_format"],
+            value.is_contiguous(
+                memory_format=guard.create_fn.keywords["memory_format"]
+            ),
+            value._base is None,
+        ),
+        eval_fn=lambda value, metadata: (
+            isinstance(value, torch.Tensor)
+            and value.is_contiguous(memory_format=metadata[0]) == metadata[1]
+            and (value._base is None) == metadata[2]
+        ),
+    )
+    def TENSOR_CONTIGUITY_MATCH(
+        self, guard: Guard, memory_format: torch.memory_format
+    ) -> None:
+        ref = self.arg_ref(guard)
+        value = self.get(guard)
+        expected = value.is_contiguous(memory_format=memory_format)
+        expected_base_is_none = value._base is None
+
+        def guard_fn(x: Any) -> bool:
+            return (
+                isinstance(x, torch.Tensor)
+                and x.is_contiguous(memory_format=memory_format) == expected
+                and (x._base is None) == expected_base_is_none
+            )
+
+        memory_format_names = {
+            torch.contiguous_format: "torch.contiguous_format",
+            torch.channels_last: "torch.channels_last",
+            torch.channels_last_3d: "torch.channels_last_3d",
+            torch.preserve_format: "torch.preserve_format",
+        }
+        code = [
+            f"{ref}.is_contiguous(memory_format={memory_format_names.get(memory_format, repr(memory_format))}) == {expected}",
+            f"({ref}._base is None) == {expected_base_is_none}",
+        ]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
     # A util that in the case of export, adds data onto guards
     def _set_guard_export_info(
         self,

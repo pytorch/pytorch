@@ -2575,6 +2575,21 @@ class BuiltinVariable(BaseBuiltinVariable):
         op = self.fn
 
         if op in [operator.is_, operator.is_not]:
+            for arg in (left, right):
+                if arg.is_tensor():
+                    alias_or_copy_guard = arg.as_proxy().node.meta.get(
+                        "_dynamo_unbacked_alias_or_copy_guard"
+                    )
+                    if alias_or_copy_guard is not None:
+                        source, memory_format = alias_or_copy_guard
+                        install_guard(
+                            source.make_guard(
+                                functools.partial(
+                                    GuardBuilder.TENSOR_CONTIGUITY_MATCH,
+                                    memory_format=memory_format,
+                                )
+                            )
+                        )
             is_result = (
                 left.is_tensor()
                 and right.is_tensor()
