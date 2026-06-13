@@ -180,11 +180,8 @@ struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
   ProfilerStateBase& operator=(ProfilerStateBase&&) = delete;
   ~ProfilerStateBase() override;
 
-  static ProfilerStateBase* get(bool global);
-  static ProfilerStateBase* get() {
-    auto* out = get(/*global=*/true);
-    return out ? out : get(/*global=*/false);
-  }
+  static std::shared_ptr<ProfilerStateBase> getGlobal();
+  static ProfilerStateBase* getTLS();
 
   static void push(std::shared_ptr<ProfilerStateBase>&& state);
 
