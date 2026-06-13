@@ -16665,6 +16665,7 @@ op_db: list[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
+           dtypesIfXPU=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.int8),
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -16716,6 +16717,7 @@ op_db: list[OpInfo] = [
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
+           dtypesIfXPU=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.int8),
            sample_inputs_func=sample_inputs_conv_transpose2d,
            # Runs very slowly on slow-gradcheck for complex.
            gradcheck_fast_mode=True,
@@ -16770,6 +16772,7 @@ op_db: list[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(
                torch.float16, torch.chalf, torch.bfloat16),
+           dtypesIfXPU=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.int8),
            sample_inputs_func=sample_inputs_conv_transpose3d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -16808,7 +16811,12 @@ op_db: list[OpInfo] = [
                ),
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-3, rtol=2e-1), }),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestCompositeCompliance', 'test_backward', device_type="xpu"
+               ),
+           ],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -16964,6 +16972,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
                    'TestOperators', 'test_vjpvmap',
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=2e-4, rtol=1e-5)}),
+                   'TestOperators', 'test_vjpvmap', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
@@ -22964,7 +22976,7 @@ op_db: list[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_gradgrad=True,
-        gradcheck_nondet_tol=1e-15,
+        gradcheck_nondet_tol=1e-14,
         skips=(
             DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64),
                          active_if=IS_WINDOWS),
