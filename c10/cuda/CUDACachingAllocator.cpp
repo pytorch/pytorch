@@ -15,6 +15,7 @@
 #include <c10/util/error.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
+#include <c10/util/llvmMathExtras.h>
 #include <c10/util/static_tracepoint.h>
 
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
@@ -35,7 +36,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -3041,7 +3041,7 @@ class DeviceCachingAllocator {
   // them, the values are 1024, 1280, 1536, and 1792. So the function will
   // return 1280 as the nearest ceiling of power-2 division.
   static size_t roundup_power2_next_division(size_t size, size_t divisions) {
-    if (std::has_single_bit(size)) {
+    if (llvm::isPowerOf2_64(size)) {
       return size;
     }
 
@@ -3049,8 +3049,9 @@ class DeviceCachingAllocator {
 
     // divide the space between these 2's power into equal divisions
     // If division is zero, return the power-of-2 ceiling.
-    size_t power2_floor = std::bit_floor(size);
-    size_t power2_division = power2_floor >> (std::bit_width(divisions) - 1);
+    size_t power2_floor = llvm::PowerOf2Floor(size);
+    size_t power2_division =
+        power2_floor >> (63 - llvm::countLeadingZeros(divisions));
     if (C10_UNLIKELY(power2_division == 0)) {
       return (power2_floor << 1);
     }
