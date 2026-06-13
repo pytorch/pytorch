@@ -22,6 +22,8 @@
 #include <ATen/ops/_fft_r2c_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/mul.h>
+#include <ATen/ops/view_as_complex.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 #include <cufft.h>
@@ -317,6 +319,85 @@ bool use_optimized_cufft_path(IntArrayRef dim) {
 // n-dimensional real to complex FFT
 Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
   TORCH_CHECK(self.is_floating_point());
+
+  // Bfloat16 FFT path.
+  //
+  // On CUDA SM_80+ (Ampere): cuFFT supports CUDA_R_16BF → CUDA_C_16BF natively.
+  // PyTorch has no ComplexBFloat16 type, so we allocate a ComplexHalf proxy
+  // buffer (same 4-byte element size as CUDA_C_16BF), let cuFFT write into it,
+  // then reinterpret and upcast to ComplexFloat.
+  // The multi-dim non-optimised path is excluded because subsequent C2C steps
+  // would use the wrong CUDA_C_16F plan via the ComplexHalf proxy dtype.
+  //
+  // On ROCm and pre-SM80 CUDA: no native bfloat16 kernel available;
+  // fall back to float32 promotion.
+  if (self.scalar_type() == ScalarType::BFloat16) {
+#if !defined(USE_ROCM)
+    auto dev_prop = at::cuda::getCurrentDeviceProperties();
+    auto input_sizes = self.sizes();
+    // Native bfloat16 cuFFT path requires all signal dims to be powers of two.
+    // If any dim is not pow2, fall through to the float32 promotion fallback below.
+    bool bf16_all_pow2 = true;
+    for (const auto d : dim) {
+      if (!is_pow_of_two(input_sizes[d])) {
+        bf16_all_pow2 = false;
+        break;
+      }
+    }
+    if (dev_prop->major >= 8 && use_optimized_cufft_path(dim) && bf16_all_pow2) {
+      DimVector onesided_sizes(input_sizes.begin(), input_sizes.end());
+      auto last_dim = dim.back();
+      auto last_dim_halfsize = (input_sizes[last_dim]) / 2 + 1;
+      onesided_sizes[last_dim] = last_dim_halfsize;
+
+      // proxy: ComplexHalf has the same element byte size as CUDA_C_16BF (4 bytes).
+      // CuFFTConfig sees value_type=BFloat16 from the *input* and plans
+      // CUDA_R_16BF → CUDA_C_16BF accordingly.
+      auto proxy = at::empty(onesided_sizes, self.options().dtype(kComplexHalf));
+
+      // R2C requires real input to be over-aligned (same rule as float path).
+      const auto complex_size = 2 * self.element_size();
+      const bool complex_aligned =
+          (reinterpret_cast<std::uintptr_t>(self.const_data_ptr()) % complex_size == 0);
+      auto working_tensor = self;
+      if (!complex_aligned) {
+        working_tensor = self.movedim(last_dim, -1)
+                             .clone(MemoryFormat::Contiguous)
+                             .movedim(-1, last_dim);
+      }
+
+      _exec_fft(proxy, working_tensor, onesided_sizes, dim, /*forward=*/true);
+
+      // Convert CUDA_C_16BF bytes (stored in the ComplexHalf proxy) to ComplexFloat:
+      //   view_as_real    → Half tensor    [..., 2]  (bits are actually bfloat16)
+      //   .view(BFloat16) → BFloat16 tensor [..., 2]  (correct bit interpretation)
+      //   .to(Float)      → Float tensor   [..., 2]  (bf16 → f32)
+      //   view_as_complex → ComplexFloat tensor [...]
+      auto output = at::view_as_complex(
+          at::view_as_real(proxy)
+              .view(ScalarType::BFloat16)
+              .to(ScalarType::Float));
+
+      auto out_slice = output.slice(last_dim, 0, last_dim_halfsize);
+      _fft_apply_normalization(out_slice, normalization, input_sizes, dim);
+
+      if (!onesided) {
+        IntArrayRef out_sizes = input_sizes;
+        if (output.sizes()[last_dim] != out_sizes[last_dim]) {
+          auto twosided = at::empty(out_sizes, output.options());
+          twosided.slice(last_dim, 0, last_dim_halfsize).copy_(output);
+          output = std::move(twosided);
+        }
+        at::native::_fft_fill_with_conjugate_symmetry_(output, dim);
+      }
+      return output;
+    }
+#endif // !defined(USE_ROCM)
+    // Fallback: ROCm, pre-SM80 CUDA, or multi-dim non-optimised path.
+    // Promote bfloat16 → float32 and re-enter.
+    return _fft_r2c_cufft(self.to(ScalarType::Float), dim, normalization, onesided);
+  }
+
   auto input_sizes = self.sizes();
   DimVector onesided_sizes(input_sizes.begin(), input_sizes.end());
   auto last_dim = dim.back();

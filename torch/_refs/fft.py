@@ -71,6 +71,10 @@ def _promote_type_fft(
 
     if maybe_support_half:
         allowed_types.append(torch.float16)
+        # bfloat16 is supported for FFT on CUDA/XPU devices.
+        # corresponding_complex_dtype(bfloat16) == complex64, so the
+        # intermediate complex tensor will be complex64 (not complex32).
+        allowed_types.append(torch.bfloat16)
     torch._check(dtype in allowed_types, lambda: f"Unsupported dtype {dtype}")
 
     if require_complex:
