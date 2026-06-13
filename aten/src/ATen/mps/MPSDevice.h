@@ -31,6 +31,7 @@ enum class MacOSVersion : uint32_t {
 
 // Helper enum for GPU-family-gated workarounds
 enum class AppleGPUFamily : uint32_t {
+  UNKNOWN = 0,
   APPLE_7_PLUS = 1007, // M1
   APPLE_8_PLUS = 1008, // M2
   APPLE_9_PLUS = 1009, // M3 / M4
@@ -89,6 +90,7 @@ class TORCH_API MPSDevice {
 
 TORCH_API bool is_available();
 TORCH_API bool is_macos_13_or_newer(MacOSVersion version);
+TORCH_API AppleGPUFamily get_apple_gpu_family();
 TORCH_API bool is_apple_family_or_newer(AppleGPUFamily family);
 TORCH_API at::Allocator* GetMPSAllocator();
 

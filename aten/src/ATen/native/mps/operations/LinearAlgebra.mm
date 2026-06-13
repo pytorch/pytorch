@@ -10,6 +10,7 @@
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <ATen/native/mps/operations/GemmHeuristics.h>
 
 #include <fmt/format.h>
 
@@ -99,84 +100,6 @@ Resolved resolve_mat(const Tensor& mat, int64_t row_dim, int64_t col_dim) {
   return {contig, cols, false};
 }
 
-// (NSIMD, VEC) for a launch, every pair (and its alignment-clamp fallbacks)
-// has a metal instantiation. Constants tuned on M5 Pro against MPSGraph
-// across LLM decode shapes (K/outlen 512..152064), both dtypes x layouts.
-struct GemvCfg {
-  int nsimd, vec;
-  int rows = 1; // rows per simdgroup (gemv_nt only)
-};
-
-GemvCfg pick_gemv_t(c10::ScalarType dt, int64_t outlen, int64_t K, int64_t align) {
-  int nsimd = 32;
-  int vec = 2;
-  if (outlen <= 512) {
-    vec = 1;
-  } else if (dt == kFloat) {
-    if (K >= 16384) {
-      // Very long reductions: scalar columns keep more k-rows in flight.
-      vec = 1;
-    }
-  } else if (outlen <= 4096 && K >= 2048 && K <= 3584) {
-    nsimd = 8;
-    vec = 4;
-  } else if (outlen > 24576) {
-    // Very wide outputs: bigger column blocks, fewer threadgroups.
-    nsimd = 16;
-    vec = 4;
-  }
-  // Clamp VEC to the row-stride|offset alignment.
-  if (vec == 4 && (align & 3)) {
-    nsimd = 32;
-    vec = 2;
-  }
-  if (vec == 2 && (align & 1)) {
-    vec = 1;
-  }
-  return {nsimd, vec};
-}
-
-GemvCfg pick_gemv_nt(c10::ScalarType dt, int64_t outlen, int64_t K, int64_t align) {
-  int nsimd, vec;
-  int rows = 1;
-  if (dt == kFloat) {
-    if (outlen <= 1024) {
-      // Few rows: wide loads + big threadgroups fill the cores best.
-      nsimd = 16;
-      vec = 4;
-    } else {
-      nsimd = K <= 3072 ? 8 : 4;
-      vec = 2;
-    }
-  } else if (K < 512) {
-    nsimd = 4;
-    vec = 1;
-  } else if (K <= 2048 || (outlen <= 4096 && K <= 3584)) {
-    nsimd = 4;
-    vec = 8;
-  } else if (outlen <= 4096 && K < 8192) {
-    // One x load feeds two rows.
-    nsimd = 4;
-    vec = 8;
-    rows = 2;
-  } else if (outlen > 24576) {
-    nsimd = 8;
-    vec = 2;
-  } else {
-    nsimd = 8;
-    vec = 4;
-  }
-  // Clamp VEC to the row-stride|offset alignment; rows=2 is only
-  // instantiated for the unclamped vec.
-  while (vec > 1 && (align & (vec - 1))) {
-    vec >>= 1;
-  }
-  if (rows == 2 && vec != 8) {
-    rows = 1;
-  }
-  return {nsimd, vec, rows};
-}
-
 // Rank-1 GEMV launch. Matrix orientation selects gemv_t vs gemv_nt; one
 // GemvDims packing handles all four mat/vec layouts.
 void dispatch_gemv(const Tensor& A,
@@ -186,6 +109,7 @@ void dispatch_gemv(const Tensor& A,
                    const Scalar& alpha,
                    const Scalar& beta,
                    at_gemm::GemmEpilogue epi,
+                   const GemvPolicy& policy,
                    bool m_is_one,
                    int64_t outlen,
                    int64_t K) {
@@ -198,12 +122,42 @@ void dispatch_gemv(const Tensor& A,
   // gemv_t when the output runs along the matrix's columns; else gemv_nt.
   const bool gemv_use_t = m_is_one ? !mat.trans : mat.trans;
   const int64_t align = mat.ld | mat.view.storage_offset();
-  const GemvCfg cfg = gemv_use_t ? pick_gemv_t(dt, outlen, K, align) : pick_gemv_nt(dt, outlen, K, align);
+  GemvConfig cfg = gemv_use_t ? policy.pick_t(dt, outlen, K, align) : policy.pick_nt(dt, outlen, K, align);
+  // Tuning-only override: PYTORCH_MPS_GEMV_FORCE_T="nsimd,vec[,u8]" or
+  // "nsimd,kq,t2d", PYTORCH_MPS_GEMV_FORCE_NT="nsimd,vec[,rows]". Read per
+  // call so a tuner can flip configs via os.environ without restarting.
+  if (const char* force = getenv(gemv_use_t ? "PYTORCH_MPS_GEMV_FORCE_T" : "PYTORCH_MPS_GEMV_FORCE_NT")) {
+    int fn = 0, fv = 0;
+    char extra[8] = {0};
+    if (sscanf(force, "%d,%d,%7s", &fn, &fv, extra) >= 2) {
+      cfg = GemvConfig{fn, fv};
+      if (gemv_use_t && strcmp(extra, "u8") == 0) {
+        cfg.kernel = GemvKernel::TUnroll8;
+      } else if (gemv_use_t && strcmp(extra, "t2d") == 0) {
+        cfg.kernel = GemvKernel::T2D;
+        cfg.kq = fv;
+        cfg.vec = 1;
+      } else if (!gemv_use_t && extra[0] != 0) {
+        cfg.rows = atoi(extra);
+      }
+      cfg = gemv_use_t ? GemvPolicy::clamp_t(cfg, align) : GemvPolicy::clamp_nt(cfg, align);
+    }
+  }
+  // T2D loads a full 16 bytes per lane; misaligned matrices fall back to the
+  // scalar-column standard kernel.
+  const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
+  if (cfg.kernel == GemvKernel::T2D && (align & (t2d_vec - 1))) {
+    cfg.kernel = GemvKernel::Standard;
+    cfg.vec = 1;
+  }
+  const GemvConfig launch_cfg = cfg;
+  const bool gemv_t_u8 = gemv_use_t && launch_cfg.kernel == GemvKernel::TUnroll8;
+  const bool gemv_t2d = gemv_use_t && launch_cfg.kernel == GemvKernel::T2D;
 
   const auto vvec = m_is_one ? A : B;
   const auto vec_xs = m_is_one ? A.stride(c) : B.stride(r);
   // Vectorized x loads need x unit-stride and VEC-aligned (nt only).
-  const bool xc = !gemv_use_t && cfg.vec > 1 && vec_xs == 1 && (vvec.storage_offset() % cfg.vec) == 0;
+  const bool xc = !gemv_use_t && launch_cfg.vec > 1 && vec_xs == 1 && (vvec.storage_offset() % launch_cfg.vec) == 0;
 
   Tensor self_e;
   int32_t out_stride = 0;
@@ -225,17 +179,26 @@ void dispatch_gemv(const Tensor& A,
   dims.self_c = gemv_use_t ? out_stride : 0;
 
   const auto epi_str = epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none";
-  const std::string fname = gemv_use_t ? fmt::format("gemv_t_{}_{}_{}_{}", dt_str, cfg.nsimd, cfg.vec, epi_str)
-                                       : fmt::format("gemv_nt_{}_{}_{}_{}_{}{}",
-                                                     dt_str,
-                                                     cfg.nsimd,
-                                                     cfg.vec,
-                                                     epi_str,
-                                                     xc ? "xc" : "xs",
-                                                     cfg.rows > 1 ? fmt::format("_r{}", cfg.rows) : "");
+  std::string fname;
+  if (gemv_t2d) {
+    fname = fmt::format("gemv_t2d_{}_{}_{}_{}", dt_str, launch_cfg.nsimd, launch_cfg.kq, epi_str);
+  } else if (gemv_use_t) {
+    fname = fmt::format(
+        "{}_{}_{}_{}_{}", gemv_t_u8 ? "gemv_t_u8" : "gemv_t", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str);
+  } else {
+    fname = fmt::format("gemv_nt_{}_{}_{}_{}_{}{}",
+                        dt_str,
+                        launch_cfg.nsimd,
+                        launch_cfg.vec,
+                        epi_str,
+                        xc ? "xc" : "xs",
+                        launch_cfg.rows > 1 ? fmt::format("_r{}", launch_cfg.rows) : "");
+  }
   auto pso = lib.getPipelineStateForFunc(fname);
-  const NSUInteger threads_per_tg = static_cast<NSUInteger>(cfg.nsimd * 32);
-  const int64_t rows_per_tg = gemv_use_t ? 32 * cfg.vec : cfg.nsimd * cfg.rows;
+  const NSUInteger threads_per_tg = static_cast<NSUInteger>(launch_cfg.nsimd * 32);
+  const int64_t rows_per_tg = gemv_t2d ? (32 / launch_cfg.kq) * t2d_vec
+      : gemv_use_t                     ? 32 * launch_cfg.vec
+                                       : launch_cfg.nsimd * launch_cfg.rows;
   const int64_t num_groups = (outlen + rows_per_tg - 1) / rows_per_tg;
   const std::array<float, 2> ab = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
 
@@ -279,7 +242,8 @@ bool try_mps_gemv(const Tensor& A,
   if (!out_unit) {
     return false;
   }
-  dispatch_gemv(A, B, out, self, alpha, beta, epi, m_is_one, outlen, K);
+  const GemvPolicy policy = GemvPolicy::current();
+  dispatch_gemv(A, B, out, self, alpha, beta, epi, policy, m_is_one, outlen, K);
   return true;
 }
 

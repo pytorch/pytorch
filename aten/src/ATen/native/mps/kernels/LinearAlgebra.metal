@@ -1355,6 +1355,209 @@ kernel void gemv_t(
   }
 }
 
+// Same geometry as gemv_t, but with a wider inner-loop unroll. This is useful
+// for M2 bf16 small-N cases where loop overhead is visible.
+template <typename DT, int NSIMD, int VEC, GemmEpilogue EPI>
+kernel void gemv_t_u8(
+    device const DT* B [[buffer(0)]],
+    device const DT* x [[buffer(1)]],
+    device DT* y [[buffer(2)]],
+    constant GemvDims& gP [[buffer(3)]],
+    device const DT* self [[buffer(4)]],
+    constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>& alpha_beta
+    [[buffer(5)]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint sgid [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  using ACC_T = ::c10::metal::opmath_t<DT>;
+  using Vec = GemmVec<DT, VEC>;
+  constexpr int BLOCK_N = 32 * VEC;
+  const int gN = gP.n, gK = gP.K, gLdb = gP.ld, gXs = gP.xs;
+  threadgroup ACC_T partials[NSIMD][BLOCK_N + 1];
+
+  const int col0 = int(tgid.x) * BLOCK_N;
+  const int n0 = col0 + int(lane) * VEC;
+
+  const int k_per_simd = (gK + NSIMD - 1) / NSIMD;
+  const int k_start = int(sgid) * k_per_simd;
+  const int k_end = min(gK, k_start + k_per_simd);
+
+  ACC_T acc[VEC];
+#pragma unroll
+  for (int i = 0; i < VEC; ++i) {
+    acc[i] = (ACC_T)0;
+  }
+
+  const bool full = (n0 + VEC) <= gN;
+  if (full) {
+    int k = k_start;
+    for (; k + 8 <= k_end; k += 8) {
+      Vec b0 = *((const device Vec*)(&B[(k + 0) * gLdb + n0]));
+      Vec b1 = *((const device Vec*)(&B[(k + 1) * gLdb + n0]));
+      Vec b2 = *((const device Vec*)(&B[(k + 2) * gLdb + n0]));
+      Vec b3 = *((const device Vec*)(&B[(k + 3) * gLdb + n0]));
+      Vec b4 = *((const device Vec*)(&B[(k + 4) * gLdb + n0]));
+      Vec b5 = *((const device Vec*)(&B[(k + 5) * gLdb + n0]));
+      Vec b6 = *((const device Vec*)(&B[(k + 6) * gLdb + n0]));
+      Vec b7 = *((const device Vec*)(&B[(k + 7) * gLdb + n0]));
+      ACC_T x0 = (ACC_T)x[(k + 0) * gXs], x1 = (ACC_T)x[(k + 1) * gXs];
+      ACC_T x2 = (ACC_T)x[(k + 2) * gXs], x3 = (ACC_T)x[(k + 3) * gXs];
+      ACC_T x4 = (ACC_T)x[(k + 4) * gXs], x5 = (ACC_T)x[(k + 5) * gXs];
+      ACC_T x6 = (ACC_T)x[(k + 6) * gXs], x7 = (ACC_T)x[(k + 7) * gXs];
+#pragma unroll
+      for (int i = 0; i < VEC; ++i) {
+        acc[i] += (ACC_T)b0.v[i] * x0;
+        acc[i] += (ACC_T)b1.v[i] * x1;
+        acc[i] += (ACC_T)b2.v[i] * x2;
+        acc[i] += (ACC_T)b3.v[i] * x3;
+        acc[i] += (ACC_T)b4.v[i] * x4;
+        acc[i] += (ACC_T)b5.v[i] * x5;
+        acc[i] += (ACC_T)b6.v[i] * x6;
+        acc[i] += (ACC_T)b7.v[i] * x7;
+      }
+    }
+    for (; k < k_end; ++k) {
+      Vec bv = *((const device Vec*)(&B[k * gLdb + n0]));
+      ACC_T xk = (ACC_T)x[k * gXs];
+#pragma unroll
+      for (int i = 0; i < VEC; ++i) {
+        acc[i] += (ACC_T)bv.v[i] * xk;
+      }
+    }
+  } else {
+    for (int k = k_start; k < k_end; ++k) {
+      ACC_T xk = (ACC_T)x[k * gXs];
+#pragma unroll
+      for (int i = 0; i < VEC; ++i) {
+        int n = n0 + i;
+        if (n < gN) {
+          acc[i] += (ACC_T)B[k * gLdb + n] * xk;
+        }
+      }
+    }
+  }
+#pragma unroll
+  for (int i = 0; i < VEC; ++i) {
+    partials[sgid][int(lane) * VEC + i] = acc[i];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const ACC_T alpha = alpha_beta[0];
+  const ACC_T beta = alpha_beta[1];
+  for (int cc = int(sgid); cc < BLOCK_N; cc += NSIMD) {
+    ACC_T v = int(lane) < NSIMD ? partials[lane][cc] : (ACC_T)0;
+    v = simd_sum(v);
+    const int n = col0 + cc;
+    if (lane == 0 && n < gN) {
+      y[n] = apply_epilogue<EPI, DT, ACC_T>(
+          v, /*r=*/0, /*c=*/n, self, gP.self_r, gP.self_c, alpha, beta);
+    }
+  }
+}
+
+// gemv_t with a 2D lane layout: lanes split into KQ k-sublanes x C=32/KQ
+// column groups, each lane loading a full 16-byte vector per step. Compared to
+// gemv_t this issues up to 8x fewer (and maximally wide) loads for the same
+// bytes, which holds up much better when the GPU runs at reduced clocks, at
+// the cost of a small shuffle butterfly before the cross-simdgroup reduce.
+// Requires ld and storage offset to be VEC-aligned (host checks).
+template <typename DT, int NSIMD, int KQ, GemmEpilogue EPI>
+kernel void gemv_t2d(
+    device const DT* B [[buffer(0)]],
+    device const DT* x [[buffer(1)]],
+    device DT* y [[buffer(2)]],
+    constant GemvDims& gP [[buffer(3)]],
+    device const DT* self [[buffer(4)]],
+    constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>& alpha_beta
+    [[buffer(5)]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint sgid [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  using ACC_T = ::c10::metal::opmath_t<DT>;
+  constexpr int VEC = 16 / sizeof(DT);
+  constexpr int C = 32 / KQ;
+  constexpr int BLOCK_N = C * VEC;
+  using Vec = GemmVec<DT, VEC>;
+  threadgroup ACC_T partials[NSIMD][BLOCK_N + 1];
+  const int gN = gP.n, gK = gP.K, gLdb = gP.ld, gXs = gP.xs;
+  const int col0 = int(tgid.x) * BLOCK_N;
+  const int kq = int(lane) / C;
+  const int cl = int(lane) % C;
+  const int n0 = col0 + cl * VEC;
+  const int kps = (gK + NSIMD - 1) / NSIMD;
+  const int k_start = int(sgid) * kps;
+  const int k_end = min(gK, k_start + kps);
+  ACC_T acc[VEC];
+#pragma unroll
+  for (int i = 0; i < VEC; ++i) {
+    acc[i] = (ACC_T)0;
+  }
+  if ((n0 + VEC) <= gN) {
+    int k = k_start + kq;
+    for (; k + 3 * KQ < k_end; k += 4 * KQ) {
+      Vec b0 = *((const device Vec*)(&B[(k + 0 * KQ) * gLdb + n0]));
+      Vec b1 = *((const device Vec*)(&B[(k + 1 * KQ) * gLdb + n0]));
+      Vec b2 = *((const device Vec*)(&B[(k + 2 * KQ) * gLdb + n0]));
+      Vec b3 = *((const device Vec*)(&B[(k + 3 * KQ) * gLdb + n0]));
+      ACC_T x0 = (ACC_T)x[(k + 0 * KQ) * gXs];
+      ACC_T x1 = (ACC_T)x[(k + 1 * KQ) * gXs];
+      ACC_T x2 = (ACC_T)x[(k + 2 * KQ) * gXs];
+      ACC_T x3 = (ACC_T)x[(k + 3 * KQ) * gXs];
+#pragma unroll
+      for (int i = 0; i < VEC; ++i) {
+        acc[i] += (ACC_T)b0.v[i] * x0;
+        acc[i] += (ACC_T)b1.v[i] * x1;
+        acc[i] += (ACC_T)b2.v[i] * x2;
+        acc[i] += (ACC_T)b3.v[i] * x3;
+      }
+    }
+    for (; k < k_end; k += KQ) {
+      Vec bv = *((const device Vec*)(&B[k * gLdb + n0]));
+      ACC_T xk = (ACC_T)x[k * gXs];
+#pragma unroll
+      for (int i = 0; i < VEC; ++i) {
+        acc[i] += (ACC_T)bv.v[i] * xk;
+      }
+    }
+  } else {
+    for (int k = k_start + kq; k < k_end; k += KQ) {
+      ACC_T xk = (ACC_T)x[k * gXs];
+#pragma unroll
+      for (int i = 0; i < VEC; ++i) {
+        int n = n0 + i;
+        if (n < gN) {
+          acc[i] += (ACC_T)B[k * gLdb + n] * xk;
+        }
+      }
+    }
+  }
+  // Fold the KQ k-sublanes of each column group (lane stride C).
+#pragma unroll
+  for (int i = 0; i < VEC; ++i) {
+    for (uint off = 16; off >= uint(C); off >>= 1) {
+      acc[i] += simd_shuffle_down(acc[i], off);
+    }
+  }
+  if (kq == 0) {
+#pragma unroll
+    for (int i = 0; i < VEC; ++i) {
+      partials[sgid][cl * VEC + i] = acc[i];
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const ACC_T alpha = alpha_beta[0];
+  const ACC_T beta = alpha_beta[1];
+  for (int cc = int(sgid); cc < BLOCK_N; cc += NSIMD) {
+    ACC_T v = int(lane) < NSIMD ? partials[lane][cc] : (ACC_T)0;
+    v = simd_sum(v);
+    const int n = col0 + cc;
+    if (lane == 0 && n < gN) {
+      y[n] = apply_epilogue<EPI, DT, ACC_T>(
+          v, /*r=*/0, /*c=*/n, self, gP.self_r, gP.self_c, alpha, beta);
+    }
+  }
+}
+
 // y = A @ x, A is (M, K) row-major. Each simdgroup owns ROWS consecutive rows
 // (one x load feeds ROWS rows' FMAs); lanes stride K and reduce with simd_sum.
 // XC: x is unit-stride and VEC-aligned.
@@ -1446,9 +1649,8 @@ kernel void gemv_nt(
   }
 }
 
-// Explicit instantiations (host_name = dispatch key). The (NSIMD,VEC) sets
-// below are exactly the configs pick_gemv_t/pick_gemv_nt (LinearAlgebra.mm)
-// can emit, including their alignment-clamp fallbacks.
+// Explicit instantiations (host_name = dispatch key). These include the
+// family-tuned policy configs and adjacent variants used while tuning.
 #define MB_GEMV_T(DT, NSIMD, VEC, EN, EV)                           \
   template [[host_name("gemv_t_" #DT "_" #NSIMD "_" #VEC "_" #EN)]] \
   kernel void gemv_t<DT, NSIMD, VEC, GemmEpilogue::EV>(             \
@@ -1463,6 +1665,53 @@ kernel void gemv_nt(
       uint);
 #define MB_GEMV_T_E(DT, NSIMD, VEC) \
   MB_GEMV_T(DT, NSIMD, VEC, none, None) MB_GEMV_T(DT, NSIMD, VEC, ab, AlphaBeta)
+
+#define MB_GEMV_T_U8(DT, NSIMD, VEC, EN, EV)                           \
+  template [[host_name("gemv_t_u8_" #DT "_" #NSIMD "_" #VEC "_" #EN)]] \
+  kernel void gemv_t_u8<DT, NSIMD, VEC, GemmEpilogue::EV>(             \
+      device const DT*,                                                \
+      device const DT*,                                                \
+      device DT*,                                                      \
+      constant GemvDims&,                                              \
+      device const DT*,                                                \
+      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&,    \
+      uint3,                                                           \
+      uint,                                                            \
+      uint);
+#define MB_GEMV_T_U8_E(DT, NSIMD, VEC) \
+  MB_GEMV_T_U8(DT, NSIMD, VEC, none, None) MB_GEMV_T_U8(DT, NSIMD, VEC, ab, AlphaBeta)
+
+#define MB_GEMV_T2D(DT, NSIMD, KQ, EN, EV)                            \
+  template [[host_name("gemv_t2d_" #DT "_" #NSIMD "_" #KQ "_" #EN)]] \
+  kernel void gemv_t2d<DT, NSIMD, KQ, GemmEpilogue::EV>(             \
+      device const DT*,                                              \
+      device const DT*,                                              \
+      device DT*,                                                    \
+      constant GemvDims&,                                            \
+      device const DT*,                                              \
+      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&,  \
+      uint3,                                                         \
+      uint,                                                          \
+      uint);
+#define MB_GEMV_T2D_E(DT, NSIMD, KQ) \
+  MB_GEMV_T2D(DT, NSIMD, KQ, none, None) MB_GEMV_T2D(DT, NSIMD, KQ, ab, AlphaBeta)
+
+#define MB_GEMV_T2D_ALL(DT)  \
+  MB_GEMV_T2D_E(DT, 2, 2)    \
+  MB_GEMV_T2D_E(DT, 4, 2)    \
+  MB_GEMV_T2D_E(DT, 8, 2)    \
+  MB_GEMV_T2D_E(DT, 16, 2)   \
+  MB_GEMV_T2D_E(DT, 32, 2)   \
+  MB_GEMV_T2D_E(DT, 2, 4)    \
+  MB_GEMV_T2D_E(DT, 4, 4)    \
+  MB_GEMV_T2D_E(DT, 8, 4)    \
+  MB_GEMV_T2D_E(DT, 16, 4)   \
+  MB_GEMV_T2D_E(DT, 32, 4)   \
+  MB_GEMV_T2D_E(DT, 2, 8)    \
+  MB_GEMV_T2D_E(DT, 4, 8)    \
+  MB_GEMV_T2D_E(DT, 8, 8)    \
+  MB_GEMV_T2D_E(DT, 16, 8)   \
+  MB_GEMV_T2D_E(DT, 32, 8)
 
 #define MB_GEMV_NT(DT, NSIMD, VEC, EN, EV, XN, XV, RN, R)           \
   template[[host_name("gemv_nt_" #DT "_" #NSIMD "_" #VEC "_" #EN    \
@@ -1497,22 +1746,151 @@ kernel void gemv_nt(
 
 // fp32: VEC caps at 4 (float4 = 16-byte loads).
 #define MB_GEMV_FLOAT(DT)  \
+  MB_GEMV_T_E(DT, 1, 1)    \
+  MB_GEMV_T_E(DT, 2, 1)    \
+  MB_GEMV_T_E(DT, 3, 1)    \
+  MB_GEMV_T_E(DT, 4, 1)    \
+  MB_GEMV_T_E(DT, 5, 1)    \
+  MB_GEMV_T_E(DT, 6, 1)    \
+  MB_GEMV_T_E(DT, 7, 1)    \
+  MB_GEMV_T_E(DT, 8, 1)    \
+  MB_GEMV_T_E(DT, 10, 1)   \
+  MB_GEMV_T_E(DT, 12, 1)   \
+  MB_GEMV_T_E(DT, 14, 1)   \
+  MB_GEMV_T_E(DT, 16, 1)   \
+  MB_GEMV_T_E(DT, 20, 1)   \
+  MB_GEMV_T_E(DT, 24, 1)   \
+  MB_GEMV_T_E(DT, 28, 1)   \
   MB_GEMV_T_E(DT, 32, 1)   \
+  MB_GEMV_T_E(DT, 1, 2)    \
+  MB_GEMV_T_E(DT, 2, 2)    \
+  MB_GEMV_T_E(DT, 3, 2)    \
+  MB_GEMV_T_E(DT, 4, 2)    \
+  MB_GEMV_T_E(DT, 5, 2)    \
+  MB_GEMV_T_E(DT, 6, 2)    \
+  MB_GEMV_T_E(DT, 7, 2)    \
+  MB_GEMV_T_E(DT, 8, 2)    \
+  MB_GEMV_T_E(DT, 10, 2)   \
+  MB_GEMV_T_E(DT, 12, 2)   \
+  MB_GEMV_T_E(DT, 14, 2)   \
+  MB_GEMV_T_E(DT, 16, 2)   \
+  MB_GEMV_T_E(DT, 20, 2)   \
+  MB_GEMV_T_E(DT, 24, 2)   \
+  MB_GEMV_T_E(DT, 28, 2)   \
   MB_GEMV_T_E(DT, 32, 2)   \
+  MB_GEMV_T_E(DT, 1, 4)    \
+  MB_GEMV_T_E(DT, 2, 4)    \
+  MB_GEMV_T_E(DT, 3, 4)    \
+  MB_GEMV_T_E(DT, 4, 4)    \
+  MB_GEMV_T_E(DT, 5, 4)    \
+  MB_GEMV_T_E(DT, 6, 4)    \
+  MB_GEMV_T_E(DT, 7, 4)    \
+  MB_GEMV_T_E(DT, 8, 4)    \
+  MB_GEMV_T_E(DT, 10, 4)   \
+  MB_GEMV_T_E(DT, 12, 4)   \
+  MB_GEMV_T_E(DT, 14, 4)   \
+  MB_GEMV_T_E(DT, 16, 4)   \
+  MB_GEMV_T_E(DT, 20, 4)   \
+  MB_GEMV_T_E(DT, 24, 4)   \
+  MB_GEMV_T_E(DT, 28, 4)   \
+  MB_GEMV_T_E(DT, 2, 8)    \
+  MB_GEMV_NT_E1(DT, 2)     \
   MB_GEMV_NT_E1(DT, 4)     \
   MB_GEMV_NT_E1(DT, 8)     \
   MB_GEMV_NT_E1(DT, 16)    \
+  MB_GEMV_NT_EV(DT, 2, 2)  \
   MB_GEMV_NT_EV(DT, 4, 2)  \
   MB_GEMV_NT_EV(DT, 8, 2)  \
   MB_GEMV_NT_EV(DT, 16, 2) \
-  MB_GEMV_NT_EV(DT, 16, 4)
+  MB_GEMV_NT_EV(DT, 2, 4)  \
+  MB_GEMV_NT_EV(DT, 4, 4)  \
+  MB_GEMV_NT_EV(DT, 8, 4)  \
+  MB_GEMV_NT_EV(DT, 16, 4) \
+  MB_GEMV_NT_EV(DT, 2, 8)  \
+  MB_GEMV_NT_EV(DT, 4, 8)  \
+  MB_GEMV_NT_EV(DT, 8, 8)  \
+  MB_GEMV_NT_EV(DT, 16, 8) \
+  MB_GEMV_NT_R2(DT, 2, 8)  \
+  MB_GEMV_NT_R2(DT, 4, 2)  \
+  MB_GEMV_NT_R2(DT, 8, 2)  \
+  MB_GEMV_NT_R2(DT, 16, 2) \
+  MB_GEMV_NT_R2(DT, 2, 4)  \
+  MB_GEMV_NT_R2(DT, 4, 4)  \
+  MB_GEMV_NT_R2(DT, 8, 4)  \
+  MB_GEMV_NT_R2(DT, 16, 4) \
+  MB_GEMV_NT_R2(DT, 4, 8)  \
+  MB_GEMV_NT_R2(DT, 8, 8)  \
+  MB_GEMV_NT_R2(DT, 16, 8)
 
 // half/bf16: VEC=8 = 16-byte loads.
-#define MB_GEMV_LP(DT)    \
+#define MB_GEMV_LP_T(DT)  \
+  MB_GEMV_T_E(DT, 1, 1)   \
+  MB_GEMV_T_E(DT, 2, 1)   \
+  MB_GEMV_T_E(DT, 3, 1)   \
+  MB_GEMV_T_E(DT, 4, 1)   \
+  MB_GEMV_T_E(DT, 5, 1)   \
+  MB_GEMV_T_E(DT, 6, 1)   \
+  MB_GEMV_T_E(DT, 7, 1)   \
+  MB_GEMV_T_E(DT, 8, 1)   \
+  MB_GEMV_T_E(DT, 10, 1)  \
+  MB_GEMV_T_E(DT, 12, 1)  \
+  MB_GEMV_T_E(DT, 14, 1)  \
+  MB_GEMV_T_E(DT, 16, 1)  \
+  MB_GEMV_T_E(DT, 20, 1)  \
+  MB_GEMV_T_E(DT, 24, 1)  \
+  MB_GEMV_T_E(DT, 28, 1)  \
   MB_GEMV_T_E(DT, 32, 1)  \
+  MB_GEMV_T_E(DT, 1, 2)   \
+  MB_GEMV_T_E(DT, 2, 2)   \
+  MB_GEMV_T_E(DT, 3, 2)   \
+  MB_GEMV_T_E(DT, 4, 2)   \
+  MB_GEMV_T_E(DT, 5, 2)   \
+  MB_GEMV_T_E(DT, 6, 2)   \
+  MB_GEMV_T_E(DT, 7, 2)   \
+  MB_GEMV_T_E(DT, 8, 2)   \
+  MB_GEMV_T_E(DT, 10, 2)  \
+  MB_GEMV_T_E(DT, 12, 2)  \
+  MB_GEMV_T_E(DT, 14, 2)  \
+  MB_GEMV_T_E(DT, 16, 2)  \
+  MB_GEMV_T_E(DT, 20, 2)  \
+  MB_GEMV_T_E(DT, 24, 2)  \
+  MB_GEMV_T_E(DT, 28, 2)  \
   MB_GEMV_T_E(DT, 32, 2)  \
-  MB_GEMV_T_E(DT, 16, 4)  \
+  MB_GEMV_T_E(DT, 1, 4)   \
+  MB_GEMV_T_E(DT, 2, 4)   \
+  MB_GEMV_T_E(DT, 3, 4)   \
+  MB_GEMV_T_E(DT, 4, 4)   \
+  MB_GEMV_T_E(DT, 5, 4)   \
+  MB_GEMV_T_E(DT, 6, 4)   \
+  MB_GEMV_T_E(DT, 7, 4)   \
   MB_GEMV_T_E(DT, 8, 4)   \
+  MB_GEMV_T_E(DT, 10, 4)  \
+  MB_GEMV_T_E(DT, 12, 4)  \
+  MB_GEMV_T_E(DT, 14, 4)  \
+  MB_GEMV_T_E(DT, 16, 4)  \
+  MB_GEMV_T_E(DT, 20, 4)  \
+  MB_GEMV_T_E(DT, 24, 4)  \
+  MB_GEMV_T_E(DT, 28, 4)  \
+  MB_GEMV_T_E(DT, 32, 4)  \
+  MB_GEMV_T_E(DT, 1, 8)   \
+  MB_GEMV_T_E(DT, 2, 8)   \
+  MB_GEMV_T_E(DT, 3, 8)   \
+  MB_GEMV_T_E(DT, 4, 8)   \
+  MB_GEMV_T_E(DT, 5, 8)   \
+  MB_GEMV_T_E(DT, 6, 8)   \
+  MB_GEMV_T_E(DT, 7, 8)   \
+  MB_GEMV_T_E(DT, 8, 8)   \
+  MB_GEMV_T_E(DT, 10, 8)  \
+  MB_GEMV_T_E(DT, 12, 8)  \
+  MB_GEMV_T_E(DT, 14, 8)  \
+  MB_GEMV_T_E(DT, 16, 8)  \
+  MB_GEMV_T_E(DT, 20, 8)  \
+  MB_GEMV_T_E(DT, 24, 8)  \
+  MB_GEMV_T_E(DT, 28, 8)  \
+  MB_GEMV_T_U8_E(DT, 8, 1)
+
+#define MB_GEMV_LP(DT)    \
+  MB_GEMV_LP_T(DT)        \
   MB_GEMV_NT_E1(DT, 4)    \
   MB_GEMV_NT_E1(DT, 8)    \
   MB_GEMV_NT_EV(DT, 4, 2) \
@@ -1520,10 +1898,22 @@ kernel void gemv_nt(
   MB_GEMV_NT_EV(DT, 4, 8) \
   MB_GEMV_NT_EV(DT, 8, 2) \
   MB_GEMV_NT_EV(DT, 8, 4) \
-  MB_GEMV_NT_R2(DT, 4, 8)
+  MB_GEMV_NT_EV(DT, 8, 8) \
+  MB_GEMV_NT_EV(DT, 16, 4) \
+  MB_GEMV_NT_EV(DT, 16, 8) \
+  MB_GEMV_NT_R2(DT, 4, 4) \
+  MB_GEMV_NT_R2(DT, 4, 8) \
+  MB_GEMV_NT_R2(DT, 8, 4) \
+  MB_GEMV_NT_R2(DT, 8, 8) \
+  MB_GEMV_NT_R2(DT, 16, 4) \
+  MB_GEMV_NT_R2(DT, 16, 8)
 
 MB_GEMV_FLOAT(float)
 MB_GEMV_LP(half)
 MB_GEMV_LP(bfloat)
+
+MB_GEMV_T2D_ALL(float)
+MB_GEMV_T2D_ALL(half)
+MB_GEMV_T2D_ALL(bfloat)
 
 } // namespace at_gemm
