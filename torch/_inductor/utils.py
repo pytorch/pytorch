@@ -3553,6 +3553,32 @@ def get_static_bw_input_idxs(fx_g: torch.fx.GraphModule) -> list[int]:
     return static_idxs
 
 
+def get_static_bw_input_idxs_no_user_inputs(
+    fx_g: torch.fx.GraphModule, num_params_buffers: int | None = None
+) -> list[int]:
+    """
+    Returns indices of backward graph inputs that correspond to params/buffers.
+    Unlike get_static_bw_input_idxs(), this excludes original user inputs saved
+    for backward.
+    """
+    if num_params_buffers is None:
+        context = torch._guards.TracingContext.try_get()
+        if context is None or context.params_flat is None:
+            return []
+        num_params_buffers = len(context.params_flat)
+
+    static_idxs = []
+    for idx, n in enumerate(fx_g.graph.nodes):
+        if n.op != "placeholder":
+            break
+        if not n.name.startswith("primals_"):
+            continue
+        primal_idx = int(n.name.removeprefix("primals_"))
+        if primal_idx < num_params_buffers:
+            static_idxs.append(idx)
+    return static_idxs
+
+
 @dataclasses.dataclass
 class BoxedBool:
     value: bool

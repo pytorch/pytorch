@@ -2291,6 +2291,7 @@ class CUDAGraphTreeManager:
             if function_id in self.warned_mutation:
                 return
             self.warned_mutation.add(function_id)
+
             log_cudagraph_skip_and_bump_counter(maybe_mutation_str)
         else:
             self.non_cudagraph_managed_mutation_hint[node_id][function_id] = False

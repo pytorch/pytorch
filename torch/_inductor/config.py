@@ -1817,8 +1817,29 @@ class triton:
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
+    # Elide input and output copies when using cudagraphs when
+    # possible. Simplifies a lot of things.
+    cudagraphs_elide_input_output_copies = (
+        os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_ELIDE_INPUT_OUTPUT_COPIES") == "1"
+    )
+
+    # Preserve memcpy and memset nodes for parameterized cudagraph replay instead
+    # of replacing them with CUDA kernels. This lets those nodes use copy engines,
+    # but their dynamic pointers must be updated by host-side graph exec APIs.
+    cudagraphs_preserve_memops = (
+        os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_PRESERVE_MEMOPS") == "1"
+    )
+
+    # Allocate parameterized CUDAGraph replay input slots in a separate private
+    # pool from stream-capture intermediates/outputs.
+    cudagraphs_separate_input_pool = (
+        os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_SEPARATE_INPUT_POOL", "1") == "1"
+    )
+
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = True
+    cudagraph_trees = (
+        os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_ELIDE_INPUT_OUTPUT_COPIES") != "1"
+    )
 
     # Should we skip cudagraphing graphs with dynamic shape inputs
     # If False, we will re-record a graph for each unique set of shape inputs
