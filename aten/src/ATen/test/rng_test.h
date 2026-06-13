@@ -6,55 +6,48 @@
 #include <optional>
 #include <torch/all.h>
 #include <stdexcept>
+#include <concepts>
 
 namespace {
 
 constexpr auto int64_min_val = std::numeric_limits<int64_t>::lowest();
 constexpr auto int64_max_val = std::numeric_limits<int64_t>::max();
-template <typename T,
-          typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+template <std::floating_point T>
 constexpr int64_t _min_val() {
   return int64_min_val;
 }
 
-template <typename T,
-          typename std::enable_if_t<std::is_integral_v<T>, int> = 0>
+template <std::integral T>
 constexpr int64_t _min_val() {
   return static_cast<int64_t>(std::numeric_limits<T>::lowest());
 }
 
-template <typename T,
-          typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+template <std::floating_point T>
 constexpr int64_t _min_from() {
   return -(static_cast<int64_t>(1) << std::numeric_limits<T>::digits);
 }
 
-template <typename T,
-          typename std::enable_if_t<std::is_integral_v<T>, int> = 0>
+template <std::integral T>
 constexpr int64_t _min_from() {
   return _min_val<T>();
 }
 
-template <typename T,
-          typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+template <std::floating_point T>
 constexpr int64_t _max_val() {
   return int64_max_val;
 }
 
-template <typename T,
-          typename std::enable_if_t<std::is_integral_v<T>, int> = 0>
+template <std::integral T>
 constexpr int64_t _max_val() {
   return static_cast<int64_t>(std::numeric_limits<T>::max());
 }
 
-template <typename T,
-          typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+template <std::floating_point T>
 constexpr int64_t _max_to() {
   return static_cast<int64_t>(1) << std::numeric_limits<T>::digits;
 }
 
-template <typename T,
-          typename std::enable_if_t<std::is_integral_v<T>, int> = 0>
+template <std::integral T>
 constexpr int64_t _max_to() {
   return _max_val<T>();
 }
