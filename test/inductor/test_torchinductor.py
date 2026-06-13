@@ -1618,11 +1618,6 @@ class CommonTemplate:
         self.common(fn, (torch.randn(32),))
 
     def test_add_inplace_permuted(self):
-        if config.cpu_backend == "halide":
-            raise unittest.SkipTest(
-                "Halide cpu backend does not work for this test case: https://github.com/pytorch/pytorch/issues/140344"
-            )
-
         def fn(x, y):
             return x.add_(y)
 
@@ -4094,6 +4089,20 @@ for dtype in (torch.int32, torch.int64):
                 b = torch.full((8,), b_val, dtype=dtype, device=self.device)
                 self.common(fn, (a, b))
 
+    def test_minimum_signed_zero(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/185610
+        # torch.minimum(-0.0, +0.0) must return -0.0 per IEEE 754.
+        # The fix is Triton-specific (tl.minimum vs triton_helpers.minimum).
+        if self.device == "cpu":
+            raise unittest.SkipTest("signed zero fix is Triton-specific")
+
+        def fn(a, b):
+            return torch.minimum(a, b)
+
+        a = torch.tensor([-0.0], dtype=torch.bfloat16, device=self.device)
+        b = torch.tensor([0.0], dtype=torch.bfloat16, device=self.device)
+        self.common(fn, (a, b))
+
     def test_div_precision(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/101039
 
@@ -5329,6 +5338,16 @@ for dtype in (torch.int32, torch.int64):
         self.assertTrue(r3.size() == (2, 3))
         self.assertTrue(r4.size() == (2, 1))
 
+    def test_tensor_split_with_scalar_tensor_sections(self):
+        def fn(a, sections):
+            return tuple(t + 1.0 for t in torch.tensor_split(a * 2.0, sections, -1))
+
+        self.common(
+            fn,
+            (torch.randn(2, 2, 10, device=self.device), torch.tensor(3)),
+            copy_to_gpu=False,
+        )
+
     def test_split_overload_packet_lowering(self):
         graph = torch.fx.Graph()
         x_node = graph.placeholder("x")
@@ -5983,6 +6002,124 @@ for dtype in (torch.int32, torch.int64):
             rtol=rtol,
             check_lowp=False,
         )
+
+    @skip_if_cpu
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_conv_backends": "TRITON",
+        }
+    )
+    @parametrize("dilation", (1, 2))
+    @parametrize("stride", (1, 2))
+    @parametrize("padding", (0, 1))
+    @parametrize("kernel", (1, 3))
+    @parametrize(
+        "channels_groups",
+        (
+            [3, 4, 1],
+            [4, 128, 1],
+            [4, 128, 4],
+            [128, 128, 1],
+        ),
+    )
+    @parametrize("nhwc", (False, True))
+    @with_tf32_off
+    def test_conv_transpose2d_forward_triton(
+        self,
+        channels_groups: list,
+        stride: int,
+        dilation: int,
+        padding: int,
+        kernel: int,
+        nhwc: bool,
+    ):
+        in_channels = channels_groups[0]
+        out_channels = channels_groups[1]
+        groups = channels_groups[2]
+
+        if is_dynamic_shape_enabled():
+            self.skipTest("Expected codegen failure under dynamic shapes")
+
+        if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
+            self.skipTest("Expected failure under subprocess compile mode")
+
+        def fn(x, weight):
+            return torch.ops.aten.convolution(
+                x,
+                weight,
+                None,
+                [stride, stride],
+                [padding, padding],
+                [dilation, dilation],
+                True,
+                [0, 0],
+                groups,
+            )
+
+        input_h = 8
+        input_w = 8
+
+        atol = 2e-4
+        rtol = 0.001
+
+        weight = torch.randn([in_channels, out_channels // groups, kernel, kernel])
+        x = torch.randn([2, in_channels, input_h, input_w])
+        if nhwc:
+            weight = weight.to(memory_format=torch.channels_last)
+            x = x.to(memory_format=torch.channels_last)
+        self.common(
+            fn,
+            (x, weight),
+            atol=atol,
+            rtol=rtol,
+            check_lowp=False,
+        )
+
+    @skip_if_cpu
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_conv_backends": "TRITON",
+        }
+    )
+    @with_tf32_off
+    def test_conv_transpose2d_output_padding_triton(self):
+        if is_dynamic_shape_enabled():
+            self.skipTest("Expected codegen failure under dynamic shapes")
+
+        def fn(x, weight):
+            return torch.ops.aten.convolution(
+                x,
+                weight,
+                None,
+                [2, 2],
+                [1, 1],
+                [1, 1],
+                True,
+                [1, 1],
+                1,
+            )
+
+        x = torch.randn([2, 4, 8, 8])
+        weight = torch.randn([4, 4, 3, 3])
+        self.common(fn, (x, weight), check_lowp=False)
+
+    @skip_if_cpu
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_conv_backends": "TRITON",
+        }
+    )
+    def test_conv_transpose1d_triton_fallback(self):
+        """ConvTranspose1d should fall back to ATEN gracefully, not crash."""
+        if is_dynamic_shape_enabled():
+            self.skipTest("Expected codegen failure under dynamic shapes")
+
+        m = torch.nn.ConvTranspose1d(4, 8, 3, stride=2, padding=1)
+        x = torch.randn(2, 4, 16)
+        self.common(m, (x,), check_lowp=False)
 
     @parametrize(
         "use_block_ptr",
@@ -15471,9 +15608,41 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @tf32_on_and_off(0.005)
     def test_mutable_custom_op_fixed_layout2(self):
         with torch.library._scoped_library("mylib", "DEF") as lib:
-            mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=self.device)
-            inp = torch.rand(2, 3, 128, 128, device=self.device)
-            expected_stride = mod(inp).clone().stride()
+            from torch._inductor.ir import get_stride_order
+            from torch._inductor.lowering import empty_strided, register_lowering
+
+            inp = torch.rand(2, 2, device=self.device)
+            expected_stride = (1, inp.shape[0])
+            lowered_stride = (inp.shape[1], 1)
+            expected_stride_order = get_stride_order(expected_stride)
+            lowered_stride_order = get_stride_order(lowered_stride)
+
+            def expected_stride_for(x):
+                return (1, x.shape[0])
+
+            lib.define("make_strided(Tensor x) -> Tensor")
+
+            @torch.library.impl(lib, "make_strided", "CompositeExplicitAutograd")
+            def _(x):
+                return torch.empty_strided(
+                    x.shape, expected_stride_for(x), dtype=x.dtype, device=x.device
+                )
+
+            @torch.library.impl(lib, "make_strided", "Meta")
+            def _(x):
+                return torch.empty_strided(
+                    x.shape, expected_stride_for(x), dtype=x.dtype, device=x.device
+                )
+
+            @register_lowering(torch.ops.mylib.make_strided.default)
+            def _(x):
+                size = x.get_size()
+                return empty_strided(
+                    size,
+                    (size[1], 1),
+                    dtype=x.get_dtype(),
+                    device=x.get_device(),
+                )
 
             lib.define(
                 "bar(Tensor x, bool is_compiling) -> Tensor",
@@ -15498,20 +15667,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 return x.clone()
 
             lib.define(
-                "add_one(Tensor(a!) x) -> ()",
+                "set_one(Tensor(a!) x, bool is_compiling) -> ()",
                 tags=torch.Tag.needs_fixed_stride_order,
             )
 
-            @torch.library.impl(lib, "add_one", "CompositeExplicitAutograd")
-            def _(x):
-                self.assertEqual(x.stride(), expected_stride)
-                x.copy_(x + 1)
+            set_one_strides = []
+
+            @torch.library.impl(lib, "set_one", "CompositeExplicitAutograd")
+            def _(x, is_compiling):
+                if is_compiling:
+                    set_one_strides.append(x.stride())
+                self.assertEqual(get_stride_order(x.stride()), expected_stride_order)
+                x.fill_(1)
+
+            @torch.library.impl(lib, "set_one", "Meta")
+            def _(x, is_compiling):
+                return None
 
             def fn(x):
-                # Inductor changes the conv to be channels-last
-                z = mod(x)
+                # The lowering chooses a different stride order than eager. The
+                # mutable custom op still needs the eager stride order.
+                z = torch.ops.mylib.make_strided(x)
                 output = torch.ops.mylib.bar(z, torch._dynamo.is_compiling())
-                torch.ops.mylib.add_one(output)
+                torch.ops.mylib.set_one(output, torch._dynamo.is_compiling())
                 return output**2
 
             with torch.no_grad():
@@ -15519,11 +15697,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             # Dynamic shapes and rocm invalidate this test case
             if torch._dynamo.config.assume_static_by_default and not TEST_WITH_ROCM:
-                # For this test to be valid, Inductor must have changed the conv
-                # to be channels-last. If this assertion ever fails then we need
-                # a new test case.
                 self.assertEqual(len(bar_strides), 1)
-                self.assertNotEqual(bar_strides[0], expected_stride)
+                self.assertEqual(get_stride_order(bar_strides[0]), lowered_stride_order)
+                self.assertEqual(len(set_one_strides), 1)
+                self.assertEqual(
+                    get_stride_order(set_one_strides[0]), expected_stride_order
+                )
+                self.assertNotEqual(
+                    get_stride_order(bar_strides[0]),
+                    get_stride_order(set_one_strides[0]),
+                )
 
     @config.patch(implicit_fallbacks=True)
     def test_mutable_custom_op_fixed_layout(self):
@@ -17704,14 +17887,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(torch.all(result < 2560).item())
 
         code_str = "\n".join(code)
-        if torch.version.hip:
-            triton_str = "tl.minimum"
-        else:
-            triton_str = "triton_helpers.minimum"
         self.assertIn(
-            triton_str,
+            "tl.minimum",
             code_str,
-            "Generated Triton code should use triton_helpers.minimum for clamping",
+            "Generated Triton code should use tl.minimum for clamping",
         )
 
     @config.patch(implicit_fallbacks=True)

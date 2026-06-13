@@ -1375,8 +1375,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             if len(args) == 1 and isinstance(args[0], TensorVariable):
                 tensor_arg = args[0]
-                example_value = tensor_arg.proxy.node.meta["example_value"]
-                if getattr(example_value, "constant", None) is None:
+                example_value = tensor_arg.proxy.node.meta.get("example_value")
+                if (
+                    example_value is None
+                    or getattr(example_value, "constant", None) is None
+                ):
                     unimplemented(
                         gb_type="torch.Size() with non-constant tensor argument",
                         context=f"torch.Size({tensor_arg})",

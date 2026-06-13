@@ -57,6 +57,7 @@ from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
 from .object_protocol import (
+    generic_richcompare_bool,
     pyindex_check,
     type_implements_nb_index,
     validate_sequence_index,
@@ -215,9 +216,10 @@ class BaseListVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L635-L652
+
         # TODO(dynamo-team): Replace iter_contains by a proper impl. once we
         # implement PyObject_RichCompare
-        return iter_contains(unpack_iterable(tx, self), item, tx)
+        return iter_contains(self.items, item, tx)
 
     def call_tree_map_branch(
         self,
@@ -369,7 +371,7 @@ class BaseListVariable(VariableTracker):
         CPython operates on the internal C array directly, so we compare
         VT items without going through a polyfill.
         """
-        from .object_protocol import generic_richcompare, generic_richcompare_bool
+        from .object_protocol import generic_richcompare
         from .tensor import SymNodeVariable
 
         try:
@@ -1781,21 +1783,20 @@ class SizeVariable(TupleVariable):
             return proxy
 
         example_value = proxy.node.meta["example_value"]
-        constant = getattr(example_value, "constant", None)
-        if constant is not None:
+        missing = object()
+        constant = getattr(example_value, "constant", missing)
+        if constant is not missing:
+            if constant is None:
+                unimplemented(
+                    gb_type="torch.Size() with non-constant tensor data",
+                    context=f"torch.Size item example_value={example_value}",
+                    explanation=(
+                        "Dynamo cannot construct torch.Size from tensor elements "
+                        "unless their values are known while tracing."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             example_value = constant
-        elif isinstance(example_value, torch.Tensor) and hasattr(
-            example_value, "constant"
-        ):
-            unimplemented(
-                gb_type="torch.Size() with non-constant tensor data",
-                context=f"torch.Size item example_value={example_value}",
-                explanation=(
-                    "Dynamo cannot construct torch.Size from tensor elements "
-                    "unless their values are known while tracing."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
 
         if isinstance(example_value, torch.Tensor):
             if example_value.numel() != 1:

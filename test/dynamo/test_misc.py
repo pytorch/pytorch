@@ -5880,16 +5880,35 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(4, 64)
         ref = mod(x)
 
-        opt_mod = torch.compile(mod, backend="eager")
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_mod = torch.compile(mod, backend=backend)
         res = opt_mod(x)
 
         self.assertTrue(same(ref, res))
+        self.assertEqual(len(backend.graphs), 1)
+        call_nodes = [
+            node for node in backend.graphs[0].graph.nodes if node.op == "call_function"
+        ]
+        self.assertEqual([node.target for node in call_nodes], [torch.reshape])
+        self.assertEqual(call_nodes[0].args[1], (4, 64))
 
-    def test_torch_size_from_tensor_buffer_negative_dim_graph_break(self):
+    def test_torch_size_from_tensor_buffer_negative_dim_preemptive_graph_break(self):
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.register_buffer("shape", torch.tensor([-1, 64], dtype=torch.int64))
+
+            def forward(self, x):
+                return torch.reshape(x, torch.Size(self.shape))
+
+        with self.assertRaisesRegex(Unsupported, "non-constant tensor argument"):
+            torch.compile(Mod(), backend="eager", fullgraph=True)(torch.randn(4, 64))
+
+    def test_torch_size_from_tensor_buffer_fullgraph_graph_break(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("shape", torch.tensor([4, 64], dtype=torch.int64))
 
             def forward(self, x):
                 return torch.reshape(x, torch.Size(self.shape))
@@ -5918,10 +5937,23 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(4, 64)
         ref = mod(x)
 
-        opt_mod = torch.compile(mod, backend="eager")
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_mod = torch.compile(mod, backend=backend)
         res = opt_mod(x)
 
         self.assertTrue(same(ref, res))
+        self.assertEqual(len(backend.graphs), 2)
+        call_targets = [
+            [node.target for node in graph.graph.nodes if node.op == "call_function"]
+            for graph in backend.graphs
+        ]
+        self.assertEqual(call_targets, [[operator.eq, torch.any], [torch.reshape]])
+        reshape_node = next(
+            node
+            for node in backend.graphs[1].graph.nodes
+            if node.op == "call_function" and node.target is torch.reshape
+        )
+        self.assertEqual(reshape_node.args[1], (4, 64))
 
     def test_torch_size_item_example_from_constant_tensor(self):
         from torch._dynamo.variables.lists import SizeVariable
@@ -8321,7 +8353,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             opt_fn(x, obj)
             self.assertFalse(True)
         except TypeError as e:
-            self.assertIn("__bool__ should return bool, returned float", str(e))
+            if sys.version_info >= (3, 15):
+                msg = "__bool__() must return a bool, not float"
+            else:
+                msg = "__bool__ should return bool, returned float"
+            self.assertIn(msg, str(e))
 
     def test_unpack_tensor_shape_mismatch(self):
         @torch.compile(backend="eager")
