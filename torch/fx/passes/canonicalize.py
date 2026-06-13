@@ -18,6 +18,9 @@ from typing import Any
 import torch.fx as fx
 
 
+__all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
+
+
 def rename_nodes_to_canonical(graph: fx.Graph) -> None:
     """Rename all nodes in the graph to canonical names based on their target.
 
