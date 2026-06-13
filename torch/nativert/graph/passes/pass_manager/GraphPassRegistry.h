@@ -2,6 +2,8 @@
 
 #include <functional>
 #include <map>
+#include <mutex>
+#include <shared_mutex>
 
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
@@ -42,6 +44,7 @@ class GraphPassRegistry {
   }
 
   void add_pass(GraphPass&& pass) {
+    std::unique_lock lock(mutex_);
     if (auto it = registry_.find(pass.name()); it != registry_.end()) {
       LOG(WARNING) << "Pass " << pass.name() << " already registered";
       return;
@@ -54,6 +57,7 @@ class GraphPassRegistry {
   }
 
   void remove_pass(const GraphPassIdentifier& name) {
+    std::unique_lock lock(mutex_);
     if (!registry_.erase(name)) {
       LOG(WARNING) << "Pass " << name << " not registered but tried to remove";
       return;
@@ -62,6 +66,7 @@ class GraphPassRegistry {
   }
 
   const GraphPass& get_pass(const GraphPassIdentifier& name) {
+    std::shared_lock lock(mutex_);
     auto it = registry_.find(name);
     TORCH_CHECK(it != registry_.end(), "Pass ", name, " not registered to get");
     return it->second;
@@ -73,6 +78,7 @@ class GraphPassRegistry {
   }
 
   std::map<std::string, GraphPass> registry_;
+  mutable std::shared_mutex mutex_;
 
  public:
   GraphPassRegistry(GraphPassRegistry const&) = delete;
