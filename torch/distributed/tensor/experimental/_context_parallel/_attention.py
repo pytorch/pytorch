@@ -965,6 +965,65 @@ OutputFnType = Callable[[nn.Module | None, Any, Any, DeviceMesh], Any]
 _replaced_functions: dict[Callable, tuple[str, Callable]] = {}
 
 
+def _call_context_parallel_sdpa(
+    target_fn: Callable,
+    args: ArgsType,
+    kwargs: KwargsType,
+) -> Any:
+    query = args[0] if len(args) > 0 else kwargs.get("query")
+    key = args[1] if len(args) > 1 else kwargs.get("key")
+    value = args[2] if len(args) > 2 else kwargs.get("value")
+    attn_mask = args[3] if len(args) > 3 else kwargs.get("attn_mask")
+    dropout_p = args[4] if len(args) > 4 else kwargs.get("dropout_p", 0.0)
+    is_causal = args[5] if len(args) > 5 else kwargs.get("is_causal", False)
+    scale = args[6] if len(args) > 6 else kwargs.get("scale")
+    enable_gqa = args[7] if len(args) > 7 else kwargs.get("enable_gqa", False)
+
+    if (
+        isinstance(query, DTensor)
+        and isinstance(key, DTensor)
+        and isinstance(value, DTensor)
+        and query.device.type == "cpu"
+    ):
+        local_query = query.to_local()
+        full_key = key.full_tensor()
+        full_value = value.full_tensor()
+        local_attn_mask = attn_mask
+        local_is_causal = is_causal
+
+        if is_causal and attn_mask is None:
+            group = query.device_mesh.get_group()
+            rank = dist.get_rank(group)
+            local_len = local_query.size(-2)
+            seq_len = full_key.size(-2)
+            load_balancer = _create_default_load_balancer(
+                seq_len, query.device_mesh.size(), local_query.device
+            )
+            positions = (
+                load_balancer._generate_indices(restore=False).reshape(-1)
+                if load_balancer is not None
+                else torch.arange(seq_len, device=local_query.device)
+            )
+            seq_start = rank * local_len
+            q_positions = positions[seq_start : seq_start + local_len]
+            k_positions = positions
+            local_attn_mask = k_positions.unsqueeze(0) <= q_positions.unsqueeze(1)
+            local_is_causal = False
+
+        return target_fn(
+            local_query,
+            full_key,
+            full_value,
+            attn_mask=local_attn_mask,
+            dropout_p=dropout_p,
+            is_causal=local_is_causal,
+            scale=scale,
+            enable_gqa=enable_gqa,
+        )
+
+    return target_fn(*args, **kwargs)
+
+
 def _distribute_function(
     fn: Callable,
     fn_module: types.ModuleType,
@@ -984,7 +1043,11 @@ def _distribute_function(
     ) -> Callable:
         def inner_fn(*args: ArgsType, **kwargs: KwargsType) -> Any:
             args, kwargs = input_fn(None, args, kwargs, device_mesh)
-            outputs = target_fn(*args, **kwargs)
+            outputs = (
+                _call_context_parallel_sdpa(target_fn, args, kwargs)
+                if target_fn.__name__ == "scaled_dot_product_attention"
+                else target_fn(*args, **kwargs)
+            )
             return output_fn(None, (args, kwargs), outputs, device_mesh)
 
         return inner_fn

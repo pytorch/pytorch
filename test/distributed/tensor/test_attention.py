@@ -1265,6 +1265,59 @@ class TestContextParallelStyleSDPA(DTensorTestBase):
         self.assertEqual(out_kwargs["key"].placements, [Shard(2)])
         self.assertEqual(out_kwargs["value"].placements, [Shard(2)])
 
+    @with_comms
+    def test_context_parallel_sdpa_math_is_causal_on_cpu(self):
+        if self.device_type != "cpu":
+            self.skipTest("This regression only reproduces on CPU math SDPA.")
+
+        self.run_subtests(
+            {
+                "batch_size": [1, 2],
+                "n_heads": [2, 4],
+                "seq_len": [8, 16],
+                "load_balance": [False, True],
+            },
+            self._test_context_parallel_sdpa_math_is_causal_on_cpu,
+        )
+
+    def _test_context_parallel_sdpa_math_is_causal_on_cpu(
+        self,
+        batch_size: int,
+        n_heads: int,
+        seq_len: int,
+        load_balance: bool,
+    ) -> None:
+        if load_balance and seq_len % (2 * self.world_size) != 0:
+            return
+
+        head_dim = 1
+        mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+
+        q = torch.rand(batch_size, n_heads, seq_len, head_dim, device=self.device_type)
+        k = torch.rand(batch_size, n_heads, seq_len, head_dim, device=self.device_type)
+        v = torch.rand(batch_size, n_heads, seq_len, head_dim, device=self.device_type)
+        for tensor in (q, k, v):
+            dist.broadcast(tensor, src=0)
+
+        with sdpa_kernel(SDPBackend.MATH):
+            out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+        prev_enable_load_balance = _cp_options.enable_load_balance
+        _cp_options.enable_load_balance = load_balance
+        try:
+            with torch.no_grad():
+                with context_parallel(
+                    mesh,
+                    buffers=(q, k, v),
+                    buffer_seq_dims=(2, 2, 2),
+                ):
+                    cp_out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+            (cp_out,) = context_parallel_unshard(mesh, [cp_out], [2])
+        finally:
+            _cp_options.enable_load_balance = prev_enable_load_balance
+
+        torch.testing.assert_close(out, cp_out)
+
 
 RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
     RingAttentionTest,
