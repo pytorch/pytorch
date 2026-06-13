@@ -29,11 +29,17 @@ def is_available() -> bool:
     return hasattr(torch._C, "_c10d_init")
 
 
+_spmd_types_available: bool | None = None
+
+
 def _is_spmd_types_available() -> bool:
     """Check if the spmd_types package is installed."""
     import importlib.util
 
-    return importlib.util.find_spec("spmd_types") is not None
+    global _spmd_types_available
+    if _spmd_types_available is None:
+        _spmd_types_available = importlib.util.find_spec("spmd_types") is not None
+    return _spmd_types_available
 
 
 def _spmd_no_typecheck():
@@ -172,8 +178,13 @@ if is_available():
         _CoalescingManager,
         _create_process_group_wrapper,
         _get_process_group_name,
+        _get_reconfigure_handle,
+        _new_window,
         _rank_not_in_group,
+        _reconfigure,
         _reduce_scatter_base,
+        _supports_reconfigure,
+        _supports_window,
         _time_estimator,
         get_node_local_rank,
     )

@@ -87,7 +87,7 @@ struct sha1 {
       buf << std::hex << std::setfill('0') << std::setw(8) << i;
     }
 
-    return buf.str();
+    return std::move(buf).str();
   }
 
  private:
