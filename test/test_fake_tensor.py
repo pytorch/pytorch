@@ -303,6 +303,17 @@ class FakeTensorTest(TestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager")(), fn())
 
+    def test_like_preserve_format_preserves_dense_strides(self):
+        x = torch.randn(1, 5).t()
+        expected_empty_stride = torch.empty_like(x).stride()
+        expected_ones_stride = torch.ones_like(x).stride()
+        expected_full_stride = torch.full_like(x, 1).stride()
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(x)
+            self.assertEqual(torch.empty_like(fake_x).stride(), expected_empty_stride)
+            self.assertEqual(torch.ones_like(fake_x).stride(), expected_ones_stride)
+            self.assertEqual(torch.full_like(fake_x, 1).stride(), expected_full_stride)
+
     def test_custom_op_fallback(self):
         from torch.library import _scoped_library, impl
 
