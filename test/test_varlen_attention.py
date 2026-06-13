@@ -297,10 +297,6 @@ class TestVarlenAttention(NNTestCase):
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
-        "sdpa_backend",
-        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
-    )
-    @parametrize(
         "backend",
         _varlen_backends(include_fa4_paged_kv=False),
     )
@@ -710,6 +706,10 @@ class TestVarlenAttention(NNTestCase):
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize(
+        "sdpa_backend",
+        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("num_splits", [1, None])
