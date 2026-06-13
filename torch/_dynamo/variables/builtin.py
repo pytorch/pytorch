@@ -3429,19 +3429,23 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                                 "the mutation out of `torch.compile` region",
                             ],
                         )
-                    elif obj.device != val.device and (  # type: ignore[attr-defined]
-                        obj.size != val.size or obj.stride != val.stride  # type: ignore[attr-defined]
-                    ):
-                        unimplemented(
-                            gb_type="Failed to mutate tensor data attribute across devices with different shape/strides",
-                            context=f"setattr({obj}, {name}, {val})",
-                            explanation="Dynamo only supports cross-device `.data`"
-                            " mutation when shape and strides match",
-                            hints=[
-                                "Don't mutate `.data` on this tensor, or move "
-                                "the mutation out of `torch.compile` region",
-                            ],
-                        )
+                    elif obj.device != val.device:  # type: ignore[attr-defined]
+                        obj_fake = get_fake_value(obj.as_proxy().node, tx)
+                        val_fake = get_fake_value(val.as_proxy().node, tx)
+                        if (
+                            obj_fake.shape != val_fake.shape
+                            or obj_fake.stride() != val_fake.stride()
+                        ):
+                            unimplemented(
+                                gb_type="Failed to mutate tensor data attribute across devices with different shape/strides",
+                                context=f"setattr({obj}, {name}, {val})",
+                                explanation="Dynamo only supports cross-device `.data`"
+                                " mutation when shape and strides match",
+                                hints=[
+                                    "Don't mutate `.data` on this tensor, or move "
+                                    "the mutation out of `torch.compile` region",
+                                ],
+                            )
 
                     # Remove the old reference in tracked fakes - if we don't
                     # do this, .data value size/shape differences cause
