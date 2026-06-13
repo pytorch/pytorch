@@ -85,7 +85,7 @@ from ..utils import (
     unpack_iterable,
     unwrap_if_wrapper,
 )
-from .base import typestr, VariableTracker
+from .base import AsPythonConstantNotImplementedError, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -98,7 +98,7 @@ from .functions import (
     ClosureConversionError,
     NestedUserFunctionVariable,
 )
-from .lists import ListVariable, TupleVariable
+from .lists import ListVariable, SizeVariable, TupleVariable
 from .object_protocol import vt_is_iterable
 from .script_object import TorchScriptObjectVariable
 from .torch_function import (
@@ -1763,6 +1763,35 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 list(args),
                 kwargs,
             )
+
+        @register(torch._C._infer_size)
+        def handle_infer_size(
+            self,
+            tx: "InstructionTranslatorBase",
+            arg1: VariableTracker,
+            arg2: VariableTracker,
+        ) -> VariableTracker | None:
+            if not isinstance(arg1, SizeVariable) or not isinstance(arg2, SizeVariable):
+                return None
+
+            try:
+                size1 = torch.Size(i.as_python_constant() for i in arg1.items)
+                size2 = torch.Size(i.as_python_constant() for i in arg2.items)
+            except AsPythonConstantNotImplementedError:
+                return tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.infer_size),
+                    [arg1, arg2],
+                    {},
+                )
+
+            try:
+                return VariableTracker.build(tx, torch._C._infer_size(size1, size2))
+            except RuntimeError as exc:
+                raise_observed_exception(
+                    RuntimeError,
+                    tx,
+                    args=list(exc.args),
+                )
 
         @register(torch._assert)
         def handle_assert(

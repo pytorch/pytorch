@@ -96,6 +96,32 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
+def infer_size(a: Sequence[Any], b: Sequence[Any]) -> torch.Size:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    dims_a = len(a)
+    dims_b = len(b)
+    ndim = max(dims_a, dims_b)
+    expanded_sizes = [0] * ndim
+
+    for i in range(ndim - 1, -1, -1):
+        offset = ndim - 1 - i
+        dim_a = dims_a - 1 - offset
+        dim_b = dims_b - 1 - offset
+        size_a = a[dim_a] if dim_a >= 0 else 1
+        size_b = b[dim_b] if dim_b >= 0 else 1
+
+        torch._check(
+            guard_or_false(size_a == 1)
+            or guard_or_false(size_b == 1)
+            or size_a == size_b,
+            lambda: "invalid broadcast shape",
+        )
+        expanded_sizes[i] = size_b if guard_or_false(size_a == 1) else size_a
+
+    return torch.Size(expanded_sizes)
+
+
 def impl_IS_MAPPING(a: object) -> TypeIs[Mapping[Any, Any]]:
     return isinstance(a, Mapping)
 
