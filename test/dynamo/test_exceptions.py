@@ -177,6 +177,16 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_range_too_many_args_type_error(self):
+        def fn(x):
+            return x + 1, range(1, 2, 3, 4, 5, 6)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(
+            TypeError, "range expected at most 3 arguments, got 6"
+        ):
+            opt_fn(torch.ones(1))
+
     def test_builtin_arg_count_type_errors(self):
         def check(fn):
             x = torch.randn(4)
@@ -248,7 +258,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         def range_too_many_args(x):
             try:
-                range(1, 2, 3, 4)
+                range(1, 2, 3, 4, 5, 6)
                 raise RuntimeError("Should not be raised")
             except TypeError:
                 return x.sin()

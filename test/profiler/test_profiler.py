@@ -17,6 +17,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 import warnings
 from dataclasses import dataclass, field
@@ -24,6 +25,12 @@ from typing import Optional, TYPE_CHECKING
 from unittest.mock import patch
 
 import expecttest
+
+
+# Suppress libkineto USDT profiler_start/profiler_stop logs in this verbose
+# profiler test file. USDT is the highest libkineto log type, so use one level
+# above it.
+os.environ.setdefault("KINETO_LOG_LEVEL", "6")
 
 import torch
 import torch.nn as nn
@@ -103,6 +110,21 @@ def get_profiler_activities(device_type):
         if device_activity and device_activity in supported_activities():
             activities.append(device_activity)
     return activities
+
+
+def setUpModule():
+    if (
+        kineto_available()
+        and torch.cuda.is_available()
+        and ProfilerActivity.CUDA in supported_activities()
+    ):
+        # Kineto's process-global profiler cannot currently upgrade from a
+        # CPU-only first initialization to CUDA-capable profiling. Prime it with
+        # CUDA so CPU-only tests do not poison later CUDA profiler tests.
+        x = torch.ones(1, device="cuda")
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]):
+            x + x
+            torch.cuda.synchronize()
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -1700,6 +1722,41 @@ class TestProfiler(TestCase):
             with open(fname) as f:
                 json.load(f)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profiler_trace_sanitizes_python_function_names(self):
+        def template():
+            return None
+
+        bad_code = template.__code__.replace(
+            co_filename='profiler_bad"file.py',
+            co_name='bad"name',
+        )
+        bad_fn = types.FunctionType(bad_code, {})
+
+        with profile(activities=[ProfilerActivity.CPU], with_stack=True) as prof:
+            bad_fn()
+
+        del bad_fn, bad_code
+        gc.collect()
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+
+        python_function_names = [
+            event.get("name", "")
+            for event in trace["traceEvents"]
+            if event.get("cat") == "python_function"
+        ]
+        self.assertGreater(len(python_function_names), 0)
+        self.assertTrue(
+            any(
+                "profiler_bad'file.py" in name and "bad'name" in name
+                for name in python_function_names
+            )
+        )
+
     def test_profiler_tracing(self):
         self._test_profiler_tracing(False)
         if kineto_available():
@@ -3060,18 +3117,24 @@ class TestProfilerDevice(TestCase):
             opt.step()
             optimizer_step()
 
-        for _ in range(niters):
-            run_batch()
-
-        with profile(
-            activities=supported_activities(),
-            schedule=torch.profiler.schedule(wait=1, warmup=1, active=2),
-        ) as p:
+        try:
             for _ in range(niters):
                 run_batch()
-                p.step()
 
-        self.assertEqual(KinetoStepTracker.current_step(), initial_step + 2 * niters)
+            with profile(
+                activities=supported_activities(),
+                schedule=torch.profiler.schedule(wait=1, warmup=1, active=2),
+            ) as p:
+                for _ in range(niters):
+                    run_batch()
+                    p.step()
+
+            self.assertEqual(
+                KinetoStepTracker.current_step(), initial_step + 2 * niters
+            )
+        finally:
+            # KinetoStepTracker is global across device-specialized test runs.
+            KinetoStepTracker.erase_step_count("yet_another_step")
 
     @unittest.skipIf(
         IS_MACOS or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/82915"
@@ -3352,12 +3415,12 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
         cpu_op_found = False
         parent_tid = threading.current_thread().ident
-        with profile() as p:
+        with profile(activities=[ProfilerActivity.CPU]) as p:
             self.payload()
         pid = os.fork()
         if pid == 0:
             child_pid = os.getpid()
-            with profile() as p:
+            with profile(activities=[ProfilerActivity.CPU]) as p:
                 self.payload()
             validate_forked_json(p)
             self.assertTrue(cpu_op_found)
