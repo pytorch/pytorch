@@ -1300,6 +1300,32 @@ class TestMPS(TestCaseMPS):
         result_cpu = torch.addmm(bias.cpu().conj(), a.cpu(), b.cpu())
         self.assertEqual(result_cpu, result_mps)
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_mm_strided_output(self, dtype):
+        M, K, N = 8, 64, 12
+        a = torch.randn(M, K, device="mps", dtype=dtype)
+        b = torch.randn(K, N, device="mps", dtype=dtype)
+        out = torch.empty(M, N, 2, device="mps", dtype=dtype)[..., 0]
+        self.assertFalse(out.is_contiguous())
+        torch.mm(a, b, out=out)
+        ref = torch.mm(a.cpu(), b.cpu())
+        tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
+        self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_addmm_strided_output(self, dtype):
+        # addmm shares mm's strided-output fallback; same contract.
+        M, K, N = 8, 64, 12
+        bias = torch.randn(M, N, device="mps", dtype=dtype)
+        a = torch.randn(M, K, device="mps", dtype=dtype)
+        b = torch.randn(K, N, device="mps", dtype=dtype)
+        out = torch.empty(M, N, 2, device="mps", dtype=dtype)[..., 0]
+        self.assertFalse(out.is_contiguous())
+        torch.addmm(bias, a, b, out=out)
+        ref = torch.addmm(bias.cpu(), a.cpu(), b.cpu())
+        tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
+        self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
+
     @xfailIf(MACOS_VERSION < 15.0)
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_large_bmm(self, dtype):
