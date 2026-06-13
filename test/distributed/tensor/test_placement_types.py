@@ -5,6 +5,7 @@ import itertools
 import sympy
 
 import torch
+from torch._opaque_base import OpaqueBase
 from torch._subclasses import FakeTensorMode
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -14,6 +15,7 @@ from torch.distributed.tensor.placement_types import (
     _StridedShard,
     _StridedShardOffsetMode,
     Partial,
+    Placement,
     Replicate,
     Shard,
 )
@@ -29,6 +31,22 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 # Basic functionality test for Placement types.
 class PlacementTypesTestCase(TestCase):
+    def test_placements_subclass_opaque_base(self):
+        for cls in (Placement, Shard, _StridedShard, Partial, Replicate):
+            self.assertTrue(issubclass(cls, OpaqueBase))
+
+        self.assertIsInstance(Shard(0), OpaqueBase)
+        self.assertIsInstance(Replicate(), OpaqueBase)
+        self.assertIsInstance(Partial(), OpaqueBase)
+
+    def test_placement_python_subclass_must_initialize_pybind_base(self):
+        class BadPlacement(Placement):
+            def __init__(self):
+                pass
+
+        with self.assertRaisesRegex(TypeError, "must be called"):
+            BadPlacement()
+
     def test_type_identification(self):
         shard = Shard(3)
         strided_shard = _StridedShard(dim=3, split_factor=7)

@@ -205,13 +205,14 @@ def register_opaque_type(
 
     # Value types store the real object directly during tracing (no
     # FakeScriptObject wrapper), so they don't need OpaqueBaseMeta.
-    if typ != "value" and not isinstance(cls, OpaqueBaseMeta):
+    if typ != "value" and not (
+        issubclass(cls, OpaqueBase) or isinstance(cls, OpaqueBaseMeta)
+    ):
         raise TypeError(
             f"Opaque type {cls} must subclass torch._opaque_base.OpaqueBase "
-            "or 'metaclass=torch._opaque_base.OpaqueBaseMeta'. "
-            "This is required so that FakeScriptObject can be registered "
-            "as a virtual subclass, allowing isinstance() checks to work "
-            "during torch.compile tracing. "
+            "using PyTorch's pybind headers for pybind classes. "
+            "This is required so that isinstance() checks can unwrap "
+            "FakeScriptObject during torch.compile tracing. "
         )
 
     if typ not in ["reference", "value"]:
