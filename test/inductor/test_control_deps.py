@@ -5,7 +5,7 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU_AND_TRITON,
@@ -193,6 +193,90 @@ class TestControlDeps(InductorTestCase):
             expected = fn(a, b, c)
             torch.testing.assert_close(result, expected)
 
+    @config.patch(enable_auto_functionalized_v2=True)
+    def test_control_deps_with_auto_functionalized_v2(self):
+        with torch.library._scoped_library("control_deps_auto_func", "FRAGMENT") as lib:
+            lib.define(
+                "add_one_(Tensor(a!) x) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+
+            def add_one_impl(x):
+                x.add_(1.0)
+                return x.clone()
+
+            lib.impl("add_one_", add_one_impl, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("control_deps_auto_func::add_one_", lib=lib)
+            def add_one_fake(x):
+                return x.clone()
+
+            def fn(x):
+                y = x * 2
+                z = torch.ops.control_deps_auto_func.add_one_(x)
+                return z + y
+
+            def add_control_deps(graph):
+                from torch.utils._ordered_set import OrderedSet
+
+                auto_func_nodes = graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops.higher_order.auto_functionalized_v2,
+                )
+                if len(auto_func_nodes) != 1:
+                    raise AssertionError(
+                        f"Expected 1 auto_functionalized_v2 node, got {len(auto_func_nodes)}"
+                    )
+
+                mul_nodes = graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.mul.Tensor
+                )
+                if len(mul_nodes) != 1:
+                    raise AssertionError(f"Expected 1 mul node, got {len(mul_nodes)}")
+
+                torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
+                    graph, {auto_func_nodes[0]: OrderedSet([mul_nodes[0]])}
+                )
+                control_deps_nodes = graph.find_nodes(
+                    op="call_function", target=torch.ops.higher_order.control_deps
+                )
+                if len(control_deps_nodes) != 1:
+                    raise AssertionError(
+                        f"Expected 1 control_deps node, got {len(control_deps_nodes)}"
+                    )
+
+                subgraph_attr = control_deps_nodes[0].args[1]
+                if not isinstance(subgraph_attr, torch.fx.Node):
+                    raise AssertionError(
+                        f"Expected get_attr node for subgraph, got {type(subgraph_attr)}"
+                    )
+                subgraph = getattr(graph.owning_module, subgraph_attr.target)
+                nested_auto_func_nodes = subgraph.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops.higher_order.auto_functionalized_v2,
+                )
+                if len(nested_auto_func_nodes) != 1:
+                    raise AssertionError(
+                        "Expected control_deps subgraph to contain "
+                        f"1 auto_functionalized_v2 node, got {len(nested_auto_func_nodes)}"
+                    )
+                return graph
+
+            x = torch.zeros(8)
+            compiled_x = x.clone()
+            eager_x = x.clone()
+
+            with torch._inductor.config.patch(
+                post_grad_custom_post_pass=add_control_deps,
+            ):
+                result = torch.compile(fn, backend="inductor", fullgraph=True)(
+                    compiled_x
+                )
+
+            expected = fn(eager_x)
+            torch.testing.assert_close(result, expected)
+            torch.testing.assert_close(compiled_x, eager_x)
+
     @requires_gpu()
     def test_control_deps_with_triton_kernel(self):
         """Test control_deps with triton_kernel_wrapper_mutation."""
@@ -257,7 +341,6 @@ class TestControlDeps(InductorTestCase):
             expected = fn(x, y)
             torch.testing.assert_close(result, expected)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181701")
     @requires_gpu()
     def test_control_deps_orders_void_op_across_nested_calls(self):
         """record_event's void op must be named as an additional_buffer_dep

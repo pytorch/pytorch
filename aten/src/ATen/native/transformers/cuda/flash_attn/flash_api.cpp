@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <tuple>
+#include <utility>
 
 
 #ifdef USE_FLASH_ATTENTION
@@ -352,7 +353,7 @@ std::tuple<at::Tensor, at::Tensor> set_params_splitkv(Flash_fwd_params &params, 
         TORCH_CHECK(params.num_splits <= 128, "num_splits > 128 not supported");
     }
 
-    return std::make_tuple(softmax_lse_accum, out_accum);
+    return std::make_tuple(std::move(softmax_lse_accum), std::move(out_accum));
 }
 
 void set_params_alibi(Flash_fwd_params &params, std::optional<at::Tensor> &alibi_slopes_, int batch_size, int num_heads){
@@ -809,7 +810,15 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         softmax_lse = softmax_lse.reshape({num_heads * max_seqlen_q, batch_size});
     }
 
-    return {out, q_padded, k_padded, v_padded, softmax_lse, rng_state, _unused, p};
+    return {
+        std::move(out),
+        std::move(q_padded),
+        std::move(k_padded),
+        std::move(v_padded),
+        std::move(softmax_lse),
+        std::move(rng_state),
+        std::move(_unused),
+        std::move(p)};
 }
 
 void run_mha_bwd(Flash_bwd_params &params, cudaStream_t stream) {
@@ -891,7 +900,11 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
         const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
         at::Tensor softmax_d = at::empty({0, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
-        return {dq, dk, dv, softmax_d};
+        return {
+            std::move(dq),
+            std::move(dk),
+            std::move(dv),
+            std::move(softmax_d)};
     }
 
     TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
@@ -1540,7 +1553,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
         out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    return {out, softmax_lse};
+    return {std::move(out), std::move(softmax_lse)};
 }
 
 } // namespace pytorch_fmha

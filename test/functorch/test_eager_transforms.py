@@ -93,6 +93,43 @@ except ImportError:
         UserWarning,
     )
 
+
+def _assert_functorch_wrapper_repr(test_case, actual, op_list):
+    expected_grad_wrappers = sum(op is grad for op in op_list)
+    expected_batched_wrappers = sum(op is vmap for op in op_list)
+
+    test_case.assertEqual(actual.count("GradTrackingTensor("), expected_grad_wrappers)
+    test_case.assertEqual(actual.count("BatchedTensor("), expected_batched_wrappers)
+    test_case.assertNotIn("FunctionalTensor(", actual)
+    test_case.assertTrue("Tensor(" in actual or "tensor(" in actual, actual)
+
+    wrapper_tokens = []
+    bdim = expected_batched_wrappers
+    for level, op in enumerate(op_list):
+        if op is grad:
+            wrapper_tokens.append(f"GradTrackingTensor(lvl={level + 1}, value=")
+        elif op is vmap:
+            bdim -= 1
+            wrapper_tokens.append(f"BatchedTensor(lvl={level + 1}, bdim={bdim}, value=")
+
+    if not wrapper_tokens:
+        return
+
+    test_case.assertTrue(actual.startswith(wrapper_tokens[-1]), actual)
+    search_from = 0
+    for token in reversed(wrapper_tokens):
+        pos = actual.find(token, search_from)
+        test_case.assertNotEqual(pos, -1, actual)
+        search_from = pos + len(token)
+
+
+def _assert_leaf_tensor_repr(test_case, actual):
+    test_case.assertNotIn("GradTrackingTensor(", actual)
+    test_case.assertNotIn("BatchedTensor(", actual)
+    test_case.assertNotIn("FunctionalTensor(", actual)
+    test_case.assertTrue(actual.startswith(("Tensor(", "tensor(")), actual)
+
+
 # TestCase for _slice_argnums, an important helper function
 
 
@@ -994,20 +1031,9 @@ class TestGradTransform(TestCase):
                     else:
                         fn = op(fn)
 
-                expected = f"{repr(x)}"
-                for level, op in enumerate(op_list):
-                    if op is grad:
-                        expected = (
-                            f"GradTrackingTensor(lvl={level + 1}, value={expected})"
-                        )
-                    elif op is vmap:
-                        bdim -= 1
-                        expected = f"BatchedTensor(lvl={level + 1}, bdim={bdim}, value={expected})"
-
                 fn(x)
-                buf = buf.replace("\n", "").replace("  ", "")
-                expected = expected.replace("\n", "").replace("  ", "")
-                self.assertEqual(expected, buf)
+                self.assertIsNotNone(buf)
+                _assert_functorch_wrapper_repr(self, buf, op_list)
 
     def test_print_captured_tensor_inside_transform(self, device):
         x = torch.tensor([1.0, 2.0, 3.0], device=device)
@@ -1019,7 +1045,11 @@ class TestGradTransform(TestCase):
             return y
 
         vjp(f, torch.randn(4, device=device))
-        self.assertEqual(out, repr(x))
+        self.assertIsNotNone(out)
+        if TEST_WITH_TORCHDYNAMO:
+            _assert_leaf_tensor_repr(self, out)
+        else:
+            self.assertEqual(out, repr(x))
 
     def test_no_grad_outside(self, device):
         x = torch.randn([], device=device, requires_grad=True)
@@ -5432,6 +5462,94 @@ class TestCompileTransforms(TestCase):
         compiled = torch.compile(grad(model), dynamic=True, backend=backend)
         result = compiled(x)
         self.assertEqual(result, expected)
+
+    def test_compile_dynamic_grad_vjp_index_select_pytree(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/171537
+        from torch.utils import _pytree as pytree
+
+        class Input:
+            def __init__(self, positions):
+                self.positions = positions
+
+        def flatten(inp):
+            return [inp.positions], None
+
+        def unflatten(children, context):
+            return Input(children[0])
+
+        pytree.register_pytree_node(
+            Input,
+            flatten,
+            unflatten,
+            serialized_type_name="test_compile_dynamic_grad_vjp_index_select_pytree.Input",
+        )
+        try:
+
+            def loss(weight, inp):
+                def energy(input_pc):
+                    idx = torch.arange(5, device=input_pc.positions.device)
+                    vals = input_pc.positions.index_select(0, idx) * weight
+                    return vals.sum(dim=[1], keepdim=True)
+
+                y, vjp_fn = torch.func.vjp(energy, inp)
+                (input_grads,) = vjp_fn(torch.ones_like(y))
+                return y.square().sum() + input_grads.positions.square().sum()
+
+            fn = torch.func.grad_and_value(loss, argnums=0)
+            weight = torch.randn(3, device=device, requires_grad=True)
+            inp = Input(torch.randn(7, 3, device=device, requires_grad=True))
+
+            expected = fn(weight, inp)
+
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True, backend="eager")
+            result = compiled(weight, inp)
+            self.assertEqual(result, expected)
+        finally:
+            pytree._deregister_pytree_node(Input)
+
+    def test_compile_dynamic_grad_vjp_trace_pytree(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/171537
+        from torch.utils import _pytree as pytree
+
+        class Input:
+            def __init__(self, matrix):
+                self.matrix = matrix
+
+        def flatten(inp):
+            return [inp.matrix], None
+
+        def unflatten(children, context):
+            return Input(children[0])
+
+        pytree.register_pytree_node(
+            Input,
+            flatten,
+            unflatten,
+            serialized_type_name="test_compile_dynamic_grad_vjp_trace_pytree.Input",
+        )
+        try:
+
+            def loss(weight, inp):
+                def energy(input_pc):
+                    return torch.trace(input_pc.matrix * weight)
+
+                y, vjp_fn = torch.func.vjp(energy, inp)
+                (input_grads,) = vjp_fn(torch.ones_like(y))
+                return y.square() + input_grads.matrix.square().sum()
+
+            fn = torch.func.grad_and_value(loss, argnums=0)
+            weight = torch.randn(4, 4, device=device, requires_grad=True)
+            inp = Input(torch.randn(4, 4, device=device, requires_grad=True))
+
+            expected = fn(weight, inp)
+
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True, backend="eager")
+            result = compiled(weight, inp)
+            self.assertEqual(result, expected)
+        finally:
+            pytree._deregister_pytree_node(Input)
 
     # torch.compile is not supported on Windows
     @torch._dynamo.config.patch(suppress_errors=False)

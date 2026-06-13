@@ -73,11 +73,7 @@ out succinctly and justify the one you took.
 When describing the testing strategy in a commit message, include the literal
 commands that were run in fenced Markdown code blocks.
 
-Disclose that the PR was authored with an AI assistant. Do this informally in
-the commit body (e.g., "Authored by Claude." or a similar attribution for
-whichever assistant was used). NEVER add a `Co-authored-by:` trailer
-attributing the AI assistant, as it interferes with the Linux Foundation CLA
-bot.
+Disclose that the PR was authored with an AI assistant.
 
 When the user asks you to amend a commit, check whether the commit message
 still accurately describes the changes. If it doesn't and the commit is not a
