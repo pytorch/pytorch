@@ -1006,7 +1006,13 @@ class LRUCacheWarningTests(LoggingTestCase):
 
 
 class CustomOpSchemaWarningTests(torch._dynamo.test_case.TestCase):
-    def _run_custom_op_with_changing_int(self, namespace, schema_type):
+    def _run_custom_op_with_changing_int(
+        self,
+        namespace,
+        schema_type,
+        wrap_arg=lambda value: value,
+        unwrap_arg=lambda value: value,
+    ):
         torch._dynamo.reset()
 
         with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
@@ -1016,7 +1022,7 @@ class CustomOpSchemaWarningTests(torch._dynamo.test_case.TestCase):
                 return b.new_empty(b.shape)
 
             def cpu(a, b):
-                return b + a
+                return b + unwrap_arg(a)
 
             lib.impl("multi_input_op", meta, "Meta")
             lib.impl("multi_input_op", cpu, "CPU")
@@ -1027,7 +1033,7 @@ class CustomOpSchemaWarningTests(torch._dynamo.test_case.TestCase):
             op = getattr(torch.ops, namespace).multi_input_op
 
             def forward(input_data, input_tensor):
-                return op(input_data.input_int, input_tensor)
+                return op(wrap_arg(input_data.input_int), input_tensor)
 
             compiled = torch.compile(forward, backend="eager")
             input_data = Holder()
@@ -1050,6 +1056,29 @@ class CustomOpSchemaWarningTests(torch._dynamo.test_case.TestCase):
         self.assertIn("Use SymInt in the operator schema", msg)
         self.assertIn("multi_input_op(int a, Tensor b) -> Tensor", msg)
         self.assertIn("test_repros.py", msg)
+
+    def test_custom_op_optional_int_schema_warns_when_symint_specializes(self):
+        with self.assertLogs("torch._ops", level="WARNING") as records:
+            self._run_custom_op_with_changing_int(
+                "test_custom_op_optional_int_schema_warning", "int?"
+            )
+
+        self.assertEqual(len(records.output), 1)
+        self.assertIn("schema defines this argument as int?", records.output[0])
+        self.assertIn("Use SymInt? in the operator schema", records.output[0])
+
+    def test_custom_op_int_list_schema_warns_when_symint_specializes(self):
+        with self.assertLogs("torch._ops", level="WARNING") as records:
+            self._run_custom_op_with_changing_int(
+                "test_custom_op_int_list_schema_warning",
+                "int[]",
+                wrap_arg=lambda value: [value],
+                unwrap_arg=lambda value: value[0],
+            )
+
+        self.assertEqual(len(records.output), 1)
+        self.assertIn("schema defines this argument as int[]", records.output[0])
+        self.assertIn("Use SymInt[] in the operator schema", records.output[0])
 
     def test_custom_op_symint_schema_does_not_warn(self):
         with self.assertNoLogs("torch._ops", level="WARNING"):
@@ -8080,6 +8109,45 @@ SavedForBackwardsAOTOutput(idx=5)""",
 
         self.assertEqual(actual, expected)
         self.assertEqual(actual.shape, (3, length))
+
+    def test_istft_compile_dynamic_length_clamp(self):
+        # Regression for the sym_min/sym_max clamp in the istft ref. Under
+        # dynamic shapes the (requested length vs signal size) clamp must stay
+        # symbolic: the builtin min would install a guard and recompile when the
+        # relationship flips (or raise GuardOnDataDependentSymNode for unbacked
+        # symints). sym_min/sym_max carry it symbolically, so a single graph
+        # serves both the "length exceeds signal" and "length within signal"
+        # cases.
+        n_fft = 1024
+        hop_length = 512
+        length = 60000
+
+        def fn(spec, window):
+            return torch.istft(
+                spec,
+                n_fft=n_fft,
+                hop_length=hop_length,
+                window=window,
+                length=length,
+            )
+
+        window = torch.hann_window(n_fft)
+        # 50 frames -> signal shorter than length (tail is padded);
+        # 200 frames -> signal longer than length (clamped/sliced).
+        spec_short = torch.view_as_complex(torch.randn(4, n_fft // 2 + 1, 50, 2))
+        spec_long = torch.view_as_complex(torch.randn(4, n_fft // 2 + 1, 200, 2))
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.assertEqual(compiled(spec_short, window), fn(spec_short, window))
+            self.assertEqual(compiled(spec_long, window), fn(spec_long, window))
+
+        # Both shapes share a single graph: the symbolic clamp installs no guard
+        # that would force a recompile when the length/signal relationship flips.
+        self.assertEqual(cnt.frame_count, 1)
 
     @unittest.expectedFailure
     def test_method_dunder_dict_setitem(self):

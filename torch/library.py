@@ -55,28 +55,97 @@ _defs: set[str] = set()
 
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ["prim"]
+_PLAIN_INT_SCHEMA_TYPE = re.compile(r"^int(?:$|\?|\[)")
+
+
+def _schema_argument_declarations(schema: str) -> list[str]:
+    start = schema.index("(") + 1
+    depth = 1
+    end = start
+    quote = ""
+    while end < len(schema) and depth:
+        ch = schema[end]
+        if quote:
+            if ch == quote and schema[end - 1] != "\\":
+                quote = ""
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        end += 1
+
+    args = []
+    current = []
+    paren_depth = 0
+    square_depth = 0
+    quote = ""
+    for ch in schema[start : end - 1]:
+        if quote:
+            current.append(ch)
+            if ch == quote and current[-2:-1] != ["\\"]:
+                quote = ""
+        elif ch in ("'", '"'):
+            quote = ch
+            current.append(ch)
+        elif ch == "(":
+            paren_depth += 1
+            current.append(ch)
+        elif ch == ")":
+            paren_depth -= 1
+            current.append(ch)
+        elif ch == "[":
+            square_depth += 1
+            current.append(ch)
+        elif ch == "]":
+            square_depth -= 1
+            current.append(ch)
+        elif ch == "," and paren_depth == 0 and square_depth == 0:
+            args.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        args.append("".join(current).strip())
+    return args
+
+
+def _strip_schema_arg_default(arg: str) -> str:
+    quote = ""
+    square_depth = 0
+    for idx, ch in enumerate(arg):
+        if quote:
+            if ch == quote and arg[idx - 1] != "\\":
+                quote = ""
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "[":
+            square_depth += 1
+        elif ch == "]":
+            square_depth -= 1
+        elif ch == "=" and square_depth == 0:
+            return arg[:idx].rstrip()
+    return arg
 
 
 def _plain_int_schema_arg_types(schema: str) -> dict[str, str]:
-    from torchgen.model import BaseTy, BaseType, FunctionSchema, ListType, OptionalType
+    parsed_schema = torch._C.parse_schema(schema)
+    arg_types = {}
+    parsed_args = iter(parsed_schema.arguments)
+    for declaration in _schema_argument_declarations(schema):
+        if declaration in {"*", "..."}:
+            continue
+        arg = next(parsed_args)
+        declaration = _strip_schema_arg_default(declaration)
+        type_and_name = declaration.rsplit(None, 1)
+        if len(type_and_name) != 2:
+            continue
+        arg_type, arg_name = type_and_name
+        if arg_name == arg.name and _PLAIN_INT_SCHEMA_TYPE.match(arg_type):
+            arg_types[arg.name] = arg_type
 
-    def contains_plain_int(typ):
-        if isinstance(typ, BaseType):
-            return typ.name == BaseTy.int
-        if isinstance(typ, (ListType, OptionalType)):
-            return contains_plain_int(typ.elem)
-        return False
-
-    try:
-        parsed_schema = FunctionSchema.parse(schema)
-    except Exception:
-        return {}
-
-    return {
-        arg.name: str(arg.type)
-        for arg in parsed_schema.arguments.flat_all
-        if contains_plain_int(arg.type)
-    }
+    return arg_types
 
 
 def fallthrough_kernel():
@@ -332,6 +401,7 @@ class Library:
         if torch.Tag.inplace in tags:
             _validate_inplace_schema(schema)
 
+        int_arg_types = _plain_int_schema_arg_types(schema)
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
         qualname = self.ns + "::" + name
@@ -339,7 +409,7 @@ class Library:
             qualname,
             torch._library.utils.get_source(_stacklevel + 1),
             schema,
-            _plain_int_schema_arg_types(schema),
+            int_arg_types,
         )
 
         # If the OpOverloadPacket exists already, then this means we're adding a
