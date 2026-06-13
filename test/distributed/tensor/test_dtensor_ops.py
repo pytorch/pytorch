@@ -92,6 +92,7 @@ def repurpose_ops(op_db, base_test_name, derived_test_name):
 # like python test/distributed/tensor/test_dtensor_ops.py > failed.expect
 dtensor_fails = {
     # view/reshape ops: rejects flatten/split of sharded dims without redistribution
+    xfail("combinations"),
     xfail("repeat_interleave"),
     xfail("unbind"),
     xfail("unflatten"),
@@ -139,7 +140,6 @@ dtensor_fails = {
     xfail("quantile"),
     xfail("svd_lowrank"),
     # dynamic output shape: output shape depends on data values
-    xfail("combinations"),
     xfail("linalg.lstsq"),
     xfail("linalg.lstsq", "grad_oriented"),
     xfail("masked_select"),
@@ -757,6 +757,7 @@ class TestLocalDTensorOps(TestDTensorOps):
 # This list only contains ops NOT in ops_dde_xfail - those are base tensor issues.
 ops_unbacked_dtensor_dde = {
     xfail("lu_unpack"),
+    xfail("combinations"),
     xfail("__getitem__"),
     xfail("__rmatmul__"),
     xfail("_batch_norm_with_update"),
