@@ -230,6 +230,13 @@ class ConstantVariable(VariableTracker):
         except TypeError as e:
             raise NotImplementedError from e
 
+    def getattro_impl(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker:
+        from .object_protocol import object_generic_getattr
+
+        return object_generic_getattr(tx, self, name)
+
     def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
         return hash(self.value), False
