@@ -1317,6 +1317,7 @@ def unpack_and_apply_fn(
         (
             variables.ConstDictVariable,
             variables.DictViewVariable,
+            variables.MappingProxyVariable,
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
@@ -3261,52 +3262,41 @@ def raise_args_mismatch(
 
 
 def iter_contains(
-    items: Iterable[Any],
-    search: Any,
+    items: Iterable[VariableTracker],
+    search: VariableTracker,
     tx: InstructionTranslatorBase,
-    check_tensor_identity: bool = False,
-) -> Any:
+) -> VariableTracker:
     from .variables import ConstantVariable
+    from .variables.object_protocol import generic_richcompare_bool
 
-    if search.is_python_constant():
+    items = list(items)
+    # CPython's list_contains/set_contains use PyObject_RichCompareBool(item,
+    # search, Py_EQ) with an identity shortcut. The constant fast path is only
+    # valid when every element is a constant too; a non-constant element earlier
+    # in the sequence has an __eq__ that must be honored in order (it may match,
+    # or raise), so fall through to the per-element richcompare loop otherwise.
+    if search.is_python_constant() and all(x.is_python_constant() for x in items):
         search_val = search.as_python_constant()
-        # CPython's list_contains/set_contains use PyObject_RichCompareBool
-        # which has an identity shortcut: if v is w, return True for eq.
-        # Check identity first (matters for NaN).
         found_const = any(
-            x.is_python_constant()
-            and (
-                x.as_python_constant() is search_val
-                or x.as_python_constant() == search_val
-            )
+            x.as_python_constant() is search_val or x.as_python_constant() == search_val
             for x in items
         )
         return ConstantVariable.create(found_const)
-
-    must_check_tensor_id = False
-    if check_tensor_identity and search.is_tensor():
-        must_check_tensor_id = True
-        # Match of Tensor means match of FakeTensor
-        search = _get_fake_tensor(search)
-
     found: VariableTracker | None = None
     for x in items:
-        if must_check_tensor_id:
-            if x.is_tensor():
-                if search is _get_fake_tensor(x):  # Object equivalence
-                    return ConstantVariable.create(True)
+        check = generic_richcompare_bool(tx, x, search, "__eq__")
+        if check.is_constant_match(True):
+            return check
+        if check.is_constant_match(False):
+            continue
+        if found is None:
+            found = check
         else:
             from torch._dynamo.variables.builder import SourcelessBuilder
 
-            check = SourcelessBuilder.create(tx, operator.eq).call_function(
-                tx, [x, search], {}
+            found = SourcelessBuilder.create(tx, operator.or_).call_function(
+                tx, [check, found], {}
             )
-            if found is None:
-                found = check
-            else:
-                found = SourcelessBuilder.create(tx, operator.or_).call_function(
-                    tx, [check, found], {}
-                )
     if found is None:
         found = ConstantVariable.create(False)
     return found
@@ -3750,6 +3740,9 @@ def same(
             ignore_non_fp=ignore_non_fp,
             log_error=log_error,
             use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+            force_max_multiplier=force_max_multiplier,
+            use_iou_for_bool=use_iou_for_bool,
+            iou_threshold=iou_threshold,
         )
     elif type(ref).__name__ in (
         "MaskedLMOutput",
@@ -3779,6 +3772,9 @@ def same(
                 ignore_non_fp=ignore_non_fp,
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+                force_max_multiplier=force_max_multiplier,
+                use_iou_for_bool=use_iou_for_bool,
+                iou_threshold=iou_threshold,
             )
             for key in ref.__dict__
         )
@@ -3928,7 +3924,9 @@ def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) 
     return msg
 
 
-def _custom_op_name_for_fake_tensor_error(node: torch.fx.Node) -> str | None:
+def _custom_op_fake_tensor_failure(
+    node: torch.fx.Node, cause: BaseException
+) -> tuple[str, Literal["missing_fake_impl", "real_data_access"]] | None:
     target = node.target
     namespace = None
 
@@ -3939,17 +3937,17 @@ def _custom_op_name_for_fake_tensor_error(node: torch.fx.Node) -> str | None:
 
     if namespace is None or namespace in {"aten", "prims", "prim"}:
         return None
-    return str(target)
-
-
-def _is_missing_fake_custom_op_error(node: torch.fx.Node, cause: BaseException) -> bool:
-    if _custom_op_name_for_fake_tensor_error(node) is None:
-        return False
 
     msg = str(cause)
-    return "no fake impl registered" in msg or (
-        "data is not allocated yet" in msg and "tracing into a custom kernel" in msg
-    )
+    if "no fake impl registered" in msg:
+        # From torch/_library/custom_ops.py when an opaque custom op has no fake
+        # implementation.
+        return str(target), "missing_fake_impl"
+    if "data is not allocated yet" in msg and "tracing into a custom kernel" in msg:
+        # From fake tensor storage access checks when a fake/meta path reaches a
+        # backend kernel or otherwise tries to read real tensor data.
+        return str(target), "real_data_access"
+    return None
 
 
 def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> NoReturn:
@@ -4174,22 +4172,37 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
             )
-        elif _is_missing_fake_custom_op_error(node, cause):
-            custom_op_name = _custom_op_name_for_fake_tensor_error(node)
-            unimplemented(
-                gb_type="Custom operator does not support running with fake tensors",
-                context=f"unsupported operator: {custom_op_name}",
-                explanation=(
-                    "Dynamo attempted to run a custom operator with fake tensors, "
-                    "but the operator requires real tensor data. This commonly "
-                    "happens when the operator does not have a fake/meta "
-                    "implementation."
-                ),
-                hints=[
-                    "Register a fake/meta implementation for the operator to compile through it.",
-                ],
-                from_exc=cause,
-            )
+        elif custom_op_failure := _custom_op_fake_tensor_failure(node, cause):
+            custom_op_name, failure_kind = custom_op_failure
+            if failure_kind == "missing_fake_impl":
+                unimplemented(
+                    gb_type="Custom operator does not support running with fake tensors",
+                    context=f"unsupported operator: {custom_op_name}",
+                    explanation=(
+                        "Dynamo attempted to run a custom operator with fake "
+                        "tensors, but the operator does not have a fake/meta "
+                        "implementation."
+                    ),
+                    hints=[
+                        "Register a fake/meta implementation for the operator to compile through it.",
+                    ],
+                    from_exc=cause,
+                )
+            else:
+                unimplemented(
+                    gb_type="Custom operator fake/meta implementation tried to access real tensor data",
+                    context=f"unsupported operator: {custom_op_name}",
+                    explanation=(
+                        "Dynamo attempted to run a custom operator with fake "
+                        "tensors, but the operator's fake/meta path tried to "
+                        "read real tensor data. Fake/meta implementations must "
+                        "compute output metadata without accessing tensor data."
+                    ),
+                    hints=[
+                        "Fix the operator's fake/meta implementation so it only computes output metadata.",
+                    ],
+                    from_exc=cause,
+                )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         _wrap_graph_break_with_torch_runtime_err(
             lambda: unimplemented(
