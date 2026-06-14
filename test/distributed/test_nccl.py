@@ -85,6 +85,20 @@ class TestNCCL(TestCase):
         for i in range(torch.cuda.device_count()):
             self.assertEqual(tensors[i], expected)
 
+        # Test with a non-zero root (regression test for #179908)
+        root = nGPUs - 1
+        expected = torch.zeros(128).uniform_().to(dtype=dtype)
+        tensors = [
+            expected.cuda(device)
+            if device == root
+            else torch.zeros(128, dtype=dtype, device=device)
+            for device in range(nGPUs)
+        ]
+
+        nccl.broadcast(tensors, root=root)
+        for i in range(nGPUs):
+            self.assertEqual(tensors[i], expected)
+
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)

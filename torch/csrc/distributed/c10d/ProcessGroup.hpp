@@ -153,12 +153,12 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return size_;
   }
 
-  // Returns an unique opaque ID of this process group object.
+  // Returns a unique opaque ID of this process group object.
   int64_t getID() const {
     return reinterpret_cast<std::intptr_t>(this);
   }
 
-  // Returns an unique opaque ID of a backend for the specific backend type
+  // Returns a unique opaque ID of a backend for the specific backend type
   // that can correlate with this process group's collectives.
   int64_t getBackendID(BackendType backend_type) const {
     return reinterpret_cast<std::intptr_t>(getBackend(backend_type).get());
@@ -1049,6 +1049,31 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   void setUsePgForSymmMemRendezvous(bool value) {
     getDefaultBackend()->setUsePgForSymmMemRendezvous(value);
+  }
+
+  // Fault Tolerance / Reconfigure API. Forwards to the default backend; see
+  // Backend.hpp for semantics.
+  virtual bool supportsReconfigure() const {
+    return getDefaultBackend()->supportsReconfigure();
+  }
+
+  virtual ReconfigureHandle get_reconfigure_handle() const {
+    return getDefaultBackend()->get_reconfigure_handle();
+  }
+
+  virtual c10::intrusive_ptr<Work> reconfigure(const ReconfigureOptions& opts) {
+    return getDefaultBackend()->reconfigure(opts);
+  }
+
+  // Window & One-sided (RMA) API. Forwards to the default backend; see
+  // Backend.hpp and Window.hpp for semantics.
+  virtual bool supportsWindow() const {
+    return getDefaultBackend()->supportsWindow();
+  }
+
+  virtual c10::intrusive_ptr<Window> new_window(
+      const std::optional<at::Tensor>& tensor = std::nullopt) {
+    return getDefaultBackend()->new_window(tensor);
   }
 
   // This creates a new subgroup using the specified ranks.
