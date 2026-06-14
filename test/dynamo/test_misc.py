@@ -2189,6 +2189,147 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(4)
         self.assertEqual(f(x), x + 1)
 
+    def test_pointwise_out_mem_overlap_try_except(self):
+        def fn(x, y):
+            try:
+                torch.addcmul(x[:-1], y, y, out=x[1:])
+            except RuntimeError:
+                x = x + 1
+            return x
+
+        x = torch.randn(5)
+        y = torch.randn(4)
+        expected = fn(x.clone(), y.clone())
+
+        for backend in ("eager", "inductor"):
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend=backend)
+                self.assertEqual(opt_fn(x.clone(), y.clone()), expected)
+
+    def test_pointwise_inplace_mem_overlap_try_except(self):
+        def fn(x):
+            try:
+                x[:-1].add_(x[1:])
+            except RuntimeError:
+                x = x + 2
+            return x
+
+        x = torch.randn(5)
+        expected = fn(x.clone())
+
+        for backend in ("eager", "inductor"):
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend=backend)
+                self.assertEqual(opt_fn(x.clone()), expected)
+
+    def test_masked_fill_mem_overlap_try_except(self):
+        def fn(x, value):
+            try:
+                x[:-1].masked_fill_(x[1:], value)
+            except RuntimeError:
+                x = ~x
+            return x
+
+        def clone_value(value):
+            return value.clone() if isinstance(value, torch.Tensor) else value
+
+        x = torch.tensor([False, True, False, True, False])
+        for value in (True, torch.tensor(True)):
+            expected = fn(x.clone(), clone_value(value))
+
+            for backend in ("eager", "inductor"):
+                with self.subTest(backend=backend, value_type=type(value).__name__):
+                    torch._dynamo.reset()
+                    opt_fn = torch.compile(fn, backend=backend)
+                    self.assertEqual(opt_fn(x.clone(), clone_value(value)), expected)
+
+    def test_copy_mem_overlap_try_except(self):
+        def partial_overlap_fn(x):
+            try:
+                x[:-1].copy_(x[1:])
+            except RuntimeError:
+                x = x + 3
+            return x
+
+        def internal_overlap_fn(x, src):
+            try:
+                x[:1].expand(4).copy_(src)
+            except RuntimeError:
+                x = x + 4
+            return x
+
+        test_cases = (
+            (partial_overlap_fn, (torch.arange(5.0),)),
+            (internal_overlap_fn, (torch.arange(2.0), torch.ones(4))),
+        )
+
+        for fn, args in test_cases:
+            expected = fn(*(arg.clone() for arg in args))
+
+            for backend in ("eager", "inductor"):
+                with self.subTest(backend=backend, fn=fn.__name__):
+                    torch._dynamo.reset()
+                    opt_fn = torch.compile(fn, backend=backend)
+                    actual = opt_fn(*(arg.clone() for arg in args))
+                    self.assertEqual(actual, expected)
+
+    def test_copy_same_data_internal_overlap_try_except(self):
+        def same_view_fn(x):
+            y = x[:1].expand(4)
+            try:
+                y.copy_(y)
+            except RuntimeError:
+                x = x + 7
+            return x
+
+        def same_data_fn(x):
+            y = x[:1].expand(4)
+            z = x[:1].expand(4)
+            try:
+                y.copy_(z)
+            except RuntimeError:
+                x = x + 8
+            return x
+
+        x = torch.arange(2.0)
+        for fn in (same_view_fn, same_data_fn):
+            expected = fn(x.clone())
+
+            for backend in ("eager", "inductor"):
+                with self.subTest(backend=backend, fn=fn.__name__):
+                    torch._dynamo.reset()
+                    opt_fn = torch.compile(fn, backend=backend)
+                    self.assertEqual(opt_fn(x.clone()), expected)
+
+    def test_masked_fill_internal_overlap_self_try_except(self):
+        def fn(x, mask, value):
+            try:
+                x[:1].expand(4).masked_fill_(mask, value)
+            except RuntimeError:
+                x = x + 10
+            return x
+
+        def clone_value(value):
+            return value.clone() if isinstance(value, torch.Tensor) else value
+
+        x = torch.tensor([0, 2])
+        mask = torch.tensor([False, True, False, False])
+        for value in (1, torch.tensor(1)):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                expected = fn(x.clone(), mask.clone(), clone_value(value))
+
+            for backend in ("eager", "inductor"):
+                with self.subTest(backend=backend, value_type=type(value).__name__):
+                    torch._dynamo.reset()
+                    opt_fn = torch.compile(fn, backend=backend)
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", UserWarning)
+                        actual = opt_fn(x.clone(), mask.clone(), clone_value(value))
+                    self.assertEqual(actual, expected)
+
     def test_check_value(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(x):
