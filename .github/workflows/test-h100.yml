@@ -5,7 +5,9 @@ on:
   pull_request:
     paths:
       - .github/workflows/test-h100.yml
+      - test/inductor/test_fused_attention.py
       - test/inductor/test_max_autotune.py
+      - torch/_inductor/fx_passes/fuse_attention.py
       - torch/_inductor/kernel/mm.py
       - torch/_inductor/kernel/mm_grouped.py
 
@@ -51,6 +53,7 @@ jobs:
       test-matrix: |
         { include: [
           { config: "smoke", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "h100_sdpa", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
         ]}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"

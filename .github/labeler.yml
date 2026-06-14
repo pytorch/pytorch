@@ -162,7 +162,9 @@
 - aten/src/ATen/native/cuda/*Blas.cpp
 - aten/src/ATen/cuda/CUDA*Blas.*
 - torch/**/*cublas*
+- torch/_inductor/fx_passes/fuse_attention.py
 - torch/_inductor/kernel/mm.py
+- test/inductor/test_fused_attention.py
 - test/inductor/test_max_autotune.py
 - third_party/fbgemm
 
