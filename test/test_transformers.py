@@ -2175,6 +2175,70 @@ class TestSDPAFailureModes(NNTestCase):
             # for all ones grad_output, each value position receives grad of 1 (because sum of all softmax weights per row is 1)
             self.assertTrue(torch.allclose(value.grad, torch.ones_like(value)))
 
+    @largeTensorTest("10GB", "cuda")
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
+    def test_mem_eff_attention_large_seq_len_manual_causal_mask(self):
+        device = torch.device("cuda")
+        dtype = torch.float16
+
+        # Smallest multiple of 8 whose final query block overflows uint32.
+        seq_len = 65544
+        num_heads = 1
+        head_dim = 8
+
+        torch.manual_seed(0)
+
+        query = torch.randn(
+            1,
+            num_heads,
+            seq_len,
+            head_dim,
+            device=device,
+            dtype=dtype,
+        )
+        key = torch.randn(
+            1,
+            num_heads,
+            seq_len,
+            head_dim,
+            device=device,
+            dtype=dtype,
+        )
+        value = torch.randn(
+            1,
+            num_heads,
+            seq_len,
+            head_dim,
+            device=device,
+            dtype=dtype,
+        )
+
+        mask = torch.empty((seq_len, seq_len), dtype=dtype, device=device)
+        mask.fill_(float("-inf")).triu_(1)
+        overflowing_query_start = 65536
+        self.assertLess(overflowing_query_start, seq_len)
+        self.assertGreater(
+            overflowing_query_start * mask.stride(-2), 2**32 - 1
+        )
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            out_mask = torch.nn.functional.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=mask,
+            )
+
+            out_causal = torch.nn.functional.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                is_causal=True,
+            )
+
+        self.assertEqual(out_mask, out_causal, atol=1e-2, rtol=1e-2)
+
 
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel
