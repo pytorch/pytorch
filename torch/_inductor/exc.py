@@ -79,6 +79,10 @@ class SubgraphLoweringException(RuntimeError):
     pass
 
 
+class SubgraphBufferCreationException(SubgraphLoweringException):
+    pass
+
+
 class InvalidCxxCompiler(RuntimeError):
     def __init__(self, compiler: str | None = None) -> None:
         from . import config

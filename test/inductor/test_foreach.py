@@ -1457,6 +1457,38 @@ class ForeachTests(TestCase):
         self.assertEqual(actual, expected)
 
 
+@instantiate_parametrized_tests
+class ForeachMapMatmulTests(TestCase):
+    """Tests for foreach_map with non-pointwise ops like mm and matmul."""
+
+    @requires_gpu
+    @parametrize("op", [torch.mm, torch.matmul], name_fn=lambda f: f.__name__)
+    def test_foreach_map_matmul_correctness(self, op):
+        def fn(x0, x1, y0, y1):
+            return foreach_map(op, [x0, x1], [y0, y1])
+
+        x0 = torch.rand(4, 8, device=GPU_TYPE)
+        x1 = torch.rand(16, 32, device=GPU_TYPE)
+        y0 = torch.rand(8, 4, device=GPU_TYPE)
+        y1 = torch.rand(32, 16, device=GPU_TYPE)
+
+        expected = fn(x0, x1, y0, y1)
+        actual = torch.compile(fn)(x0, x1, y0, y1)
+        self.assertEqual(actual, expected)
+
+    @requires_gpu
+    def test_foreach_map_matmul_single_pair(self):
+        def fn(x, y):
+            return foreach_map(torch.mm, [x], [y])
+
+        x = torch.rand(8, 16, device=GPU_TYPE)
+        y = torch.rand(16, 8, device=GPU_TYPE)
+
+        expected = fn(x, y)
+        actual = torch.compile(fn)(x, y)
+        self.assertEqual(actual, expected)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
