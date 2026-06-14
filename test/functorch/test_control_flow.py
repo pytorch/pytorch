@@ -8652,6 +8652,82 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(out, exp)
         self.assertEqual(compile_out, exp)
 
+    def test_while_loop_in_vmap_simple(self):
+        def fn(x):
+            def cond_fn(x):
+                return x.sum() < 10.0
+
+            def body_fn(x):
+                return (x + 1.0,)
+
+            return torch.while_loop(cond_fn, body_fn, (x,))
+
+        x = torch.tensor([[0.0, 0.0, 0.0], [3.0, 3.0, 3.0], [8.0, 8.0, 8.0]])
+        result = torch.vmap(fn)(x)
+        # elem 0: sum=0, needs 4 iters (sum=12>=10)
+        # elem 1: sum=9, needs 1 iter (sum=12>=10)
+        # elem 2: sum=24>=10, 0 iters
+        expected = torch.tensor([[4.0, 4.0, 4.0], [4.0, 4.0, 4.0], [8.0, 8.0, 8.0]])
+        self.assertEqual(result[0], expected)
+
+    def test_while_loop_in_vmap_multi_carry(self):
+        def fn(x, count):
+            def cond_fn(x, count):
+                return count < 3
+
+            def body_fn(x, count):
+                return (x * 2.0, count + 1)
+
+            return torch.while_loop(cond_fn, body_fn, (x, count))
+
+        x = torch.tensor([[1.0], [2.0], [3.0]])
+        count = torch.tensor([0, 1, 2])
+        result = torch.vmap(fn)(x, count)
+        # elem 0: count=0, 3 iters -> x*8, count=3
+        # elem 1: count=1, 2 iters -> x*4, count=3
+        # elem 2: count=2, 1 iter  -> x*2, count=3
+        self.assertEqual(result[0], torch.tensor([[8.0], [8.0], [6.0]]))
+        self.assertEqual(result[1], torch.tensor([3, 3, 3]))
+
+    def test_while_loop_in_vmap_convergence(self):
+        def fn(x):
+            def cond_fn(x):
+                return x.abs().sum() > 0.1
+
+            def body_fn(x):
+                return (x * 0.5,)
+
+            return torch.while_loop(cond_fn, body_fn, (x,))
+
+        x = torch.tensor([[10.0], [1.0], [0.01]])
+        result = torch.vmap(fn)(x)
+        # elem 2 starts below threshold, should not be modified
+        self.assertEqual(result[0][2], torch.tensor([0.01]))
+        # elems 0 and 1 converge below threshold
+        self.assertTrue(result[0][0].abs().sum() <= 0.1)
+        self.assertTrue(result[0][1].abs().sum() <= 0.1)
+
+    def test_while_loop_in_vmap_int_carry_unsupported(self):
+        # vmap of while_loop with an int/SymInt carry is not supported because
+        # the masking strategy has no obvious semantics for scalar carries. Make
+        # sure we fail with a clear, actionable error rather than crashing in
+        # tensor-only code (e.g. AttributeError on int.unsqueeze).
+        def fn(x):
+            def cond_fn(i, x):
+                return i < 3
+
+            def body_fn(i, x):
+                return (i + 1, x * 2.0)
+
+            return torch.while_loop(cond_fn, body_fn, (0, x))
+
+        x = torch.tensor([[1.0], [2.0], [3.0]])
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "non-Tensor carried_inputs is not supported",
+        ):
+            torch.vmap(fn)(x)
+
     @skipIfTorchDynamo("Skip because we're testing export")
     @parametrize("strict", [True, False])
     @parametrize("dynamic", [True, False])
