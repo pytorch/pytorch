@@ -849,14 +849,19 @@ class TestOptimRenewed(TestCase):
                 )
                 model.to(dtype=dtype, device=device)
 
-                # foreach/fused optimizers should be tested with a
-                # zero_size tensor as its last param.
-                # ref: https://github.com/pytorch/pytorch/issues/100701
-                empty_param = torch.empty(
-                    (), device=device, dtype=dtype, requires_grad=True
-                )
-                empty_param.grad = torch.rand_like(empty_param)
-                params = list(model.parameters()) + [empty_param]
+                if optim_cls.__name__ == "Muon":
+                    # Muon only accepts 2D parameters, so filter out the 1D
+                    # biases and the empty/0-D scalar.
+                    params = [p for p in model.parameters() if p.ndim == 2]
+                else:
+                    # foreach/fused optimizers should be tested with a
+                    # zero_size tensor as its last param.
+                    # ref: https://github.com/pytorch/pytorch/issues/100701
+                    empty_param = torch.empty(
+                        (), device=device, dtype=dtype, requires_grad=True
+                    )
+                    empty_param.grad = torch.rand_like(empty_param)
+                    params = list(model.parameters()) + [empty_param]
 
                 optimizer = optim_cls(params, **kwargs)
                 models.append(model)
@@ -2532,6 +2537,64 @@ class TestOptimRenewed(TestCase):
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
+
+
+class TestMuonForeach(TestCase):
+    """Tests for the bit-parity and state-dict BC contracts that the
+    multi-tensor (foreach) path advertises but that the generic OptimizerInfo
+    matrix does not test strictly enough."""
+
+    def test_state_dict_round_trip_backfills_foreach(self):
+        # `foreach` was added after the original Muon release; state dicts
+        # saved by older versions of Muon must load cleanly with `foreach`
+        # backfilled to None (the historical single-tensor default), not
+        # silently default to True/False.
+        from torch.optim import Muon
+
+        torch.manual_seed(0)
+        p1 = torch.nn.Parameter(torch.randn(8, 16))
+        p1.grad = torch.randn_like(p1)
+        opt1 = Muon([p1])
+        opt1.step()
+        sd = opt1.state_dict()
+
+        # Simulate an older state dict that predates the foreach flag.
+        sd["param_groups"][0].pop("foreach", None)
+
+        p2 = torch.nn.Parameter(torch.randn(8, 16))
+        p2.grad = torch.randn_like(p2)
+        opt2 = Muon([p2])
+        opt2.load_state_dict(sd)
+
+        # __setstate__ must backfill foreach to None, preserving the
+        # historical single-tensor default for older checkpoints.
+        self.assertEqual(opt2.param_groups[0]["foreach"], None)
+        # And a subsequent step() must succeed on the single-tensor path.
+        opt2.step()
+
+    def test_foreach_matches_forloop_bit_parity_rectangular(self):
+        # The multi-tensor path runs Newton-Schulz per-tensor for rectangular
+        # 2D params (no batching), so the foreach=True and foreach=False
+        # results must be bit-identical on rectangular shapes. float64 makes
+        # any unexpected reduction-order difference visible.
+        from torch.optim import Muon
+
+        torch.manual_seed(0)
+        bases = [torch.randn(8, 16, dtype=torch.float64) for _ in range(3)]
+        grads = [torch.randn(8, 16, dtype=torch.float64) for _ in range(3)]
+
+        p_loop = [torch.nn.Parameter(b.clone().detach()) for b in bases]
+        p_fe = [torch.nn.Parameter(b.clone().detach()) for b in bases]
+        for p, g in zip(p_loop, grads, strict=True):
+            p.grad = g.clone()
+        for p, g in zip(p_fe, grads, strict=True):
+            p.grad = g.clone()
+
+        Muon(p_loop, foreach=False).step()
+        Muon(p_fe, foreach=True).step()
+
+        for a, b in zip(p_loop, p_fe, strict=True):
+            self.assertEqual(a, b, atol=0, rtol=0)
 
 
 if __name__ == "__main__":
