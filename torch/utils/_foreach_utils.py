@@ -1,3 +1,4 @@
+import functools
 from typing import TypeAlias
 
 import torch
@@ -5,11 +6,13 @@ from torch import Tensor
 from torch.autograd.grad_mode import no_grad
 
 
+@functools.cache
 def _get_foreach_kernels_supported_devices() -> list[str]:
     r"""Return the device type list that supports foreach kernels."""
     return ["cuda", "xpu", "mtia", torch._C._get_privateuse1_backend_name()]
 
 
+@functools.cache
 def _get_fused_kernels_supported_devices() -> list[str]:
     r"""Return the device type list that supports fused kernels in optimizer."""
     return [

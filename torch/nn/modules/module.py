@@ -2646,21 +2646,21 @@ class Module:
         self, get_members_fn, prefix="", recurse=True, remove_duplicate: bool = True
     ):
         r"""Help yield various names + members of modules."""
-        memo = set()
+        memo = set() if remove_duplicate else None
         modules = (
             self.named_modules(prefix=prefix, remove_duplicate=remove_duplicate)
             if recurse
             else [(prefix, self)]
         )
         for module_prefix, module in modules:
-            members = get_members_fn(module)
-            for k, v in members:
-                if v is None or v in memo:
+            for k, v in get_members_fn(module):
+                if v is None:
                     continue
-                if remove_duplicate:
+                if memo is not None:
+                    if v in memo:
+                        continue
                     memo.add(v)
-                name = module_prefix + ("." if module_prefix else "") + k
-                yield name, v
+                yield (module_prefix + "." + k) if module_prefix else k, v
 
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
         r"""Return an iterator over module parameters.
