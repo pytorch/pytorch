@@ -2,6 +2,8 @@
 #
 # C10 CUDA is a minimal library, but it does depend on CUDA.
 
+include(GNUInstallDirs)
+
 include(../../cmake/public/utils.cmake)
 include(../../cmake/public/cuda.cmake)
 
@@ -86,7 +88,7 @@ if(NOT BUILD_LIBTORCHLESS)
 # Note: for now, we will put all export path into one single Caffe2Targets group
 # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
 # individual libraries like libc10.so and libcaffe2.so are still self-contained.
-install(TARGETS c10_cuda EXPORT Caffe2Targets DESTINATION lib)
+install(TARGETS c10_cuda EXPORT Caffe2Targets DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 endif()
 
@@ -100,5 +102,5 @@ install(FILES ${CMAKE_BINARY_DIR}/c10/cuda/impl/cuda_cmake_macros.h
   DESTINATION include/c10/cuda/impl)
 
 if(MSVC AND C10_CUDA_BUILD_SHARED_LIBS)
-  install(FILES $<TARGET_PDB_FILE:c10_cuda> DESTINATION lib OPTIONAL)
+  install(FILES $<TARGET_PDB_FILE:c10_cuda> DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
 endif()

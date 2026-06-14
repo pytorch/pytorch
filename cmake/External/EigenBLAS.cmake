@@ -7,6 +7,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT INTERN_USE_EIGEN_BLAS)
   return()
 endif()
 
+include(GNUInstallDirs)
+
 ##############################################################################
 # Eigen BLAS is built together with Libtorch mobile.
 # By default, it builds code from third-party/eigen/blas submodule.
@@ -49,5 +51,5 @@ add_library(eigen_blas STATIC ${EigenBlas_SRCS})
 set_property(TARGET eigen_blas PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 install(TARGETS eigen_blas
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib)
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})

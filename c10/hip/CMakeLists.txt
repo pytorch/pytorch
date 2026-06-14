@@ -3,6 +3,8 @@
 #
 # At the moment, this cmake is NOT standalone
 
+include(GNUInstallDirs)
+
 include(../../cmake/public/utils.cmake)
 
 if(BUILD_LIBTORCHLESS)
@@ -52,7 +54,7 @@ if(NOT BUILD_LIBTORCHLESS)
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
       $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
       $<INSTALL_INTERFACE:include>)
-  install(TARGETS c10_hip EXPORT Caffe2Targets DESTINATION lib)
+  install(TARGETS c10_hip EXPORT Caffe2Targets DESTINATION ${CMAKE_INSTALL_LIBDIR})
   set(C10_HIP_LIB c10_hip)
 endif()
 

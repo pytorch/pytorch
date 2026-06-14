@@ -2,6 +2,8 @@
 #
 # C10 XPU is a minimal library, but it does depend on SYCL.
 
+include(GNUInstallDirs)
+
 include(../../cmake/public/xpu.cmake)
 
 if(NOT BUILD_LIBTORCHLESS)
@@ -49,7 +51,7 @@ if(NOT BUILD_LIBTORCHLESS)
       $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
       $<INSTALL_INTERFACE:include>
       )
-  install(TARGETS c10_xpu EXPORT Caffe2Targets DESTINATION lib)
+  install(TARGETS c10_xpu EXPORT Caffe2Targets DESTINATION ${CMAKE_INSTALL_LIBDIR})
   set(C10_XPU_LIB c10_xpu)
   add_subdirectory(test)
 endif()
@@ -64,5 +66,5 @@ install(FILES ${CMAKE_BINARY_DIR}/c10/xpu/impl/xpu_cmake_macros.h
   DESTINATION include/c10/xpu/impl)
 
 if(MSVC AND C10_XPU_BUILD_SHARED_LIBS)
-  install(FILES $<TARGET_PDB_FILE:c10_xpu> DESTINATION lib OPTIONAL)
+  install(FILES $<TARGET_PDB_FILE:c10_xpu> DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
 endif()
