@@ -4275,6 +4275,71 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 expected = torch.stack([eg[j] for eg in expected_shared])
                 self.assertEqual(shared_grads[j], expected, atol=1e-2, rtol=1e-2)
 
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    def test_sdpa_unbatched_under_vmap(self, device, backend):
+        """Test that unbatched (3D) SDPA input uses fused kernels under vmap."""
+        if device == "cpu" or backend == SDPBackend.MATH:
+            raise unittest.SkipTest("This test requires fused CUDA SDPA backends")
+
+        with sdpa_kernel([backend]):
+            B = 4
+            heads, seq_len, head_dim = 8, 32, 64
+            query = torch.randn(
+                B,
+                heads,
+                seq_len,
+                head_dim,
+                dtype=torch.float16,
+                device=device,
+                requires_grad=True,
+            )
+            key = torch.randn(
+                B,
+                heads,
+                seq_len,
+                head_dim,
+                dtype=torch.float16,
+                device=device,
+                requires_grad=True,
+            )
+            value = torch.randn(
+                B,
+                heads,
+                seq_len,
+                head_dim,
+                dtype=torch.float16,
+                device=device,
+                requires_grad=True,
+            )
+
+            result = vmap(F.scaled_dot_product_attention)(query, key, value)
+            self.assertEqual(result.shape, (B, heads, seq_len, head_dim))
+
+            def f(q, k, v):
+                return F.scaled_dot_product_attention(q, k, v).sum()
+
+            with DisableVmapFallback():
+                grads = vmap(grad(f, argnums=(0, 1, 2)))(query, key, value)
+            self.assertEqual(grads[0].shape, query.shape)
+            self.assertEqual(grads[1].shape, key.shape)
+            self.assertEqual(grads[2].shape, value.shape)
+
+            # Promotion is vmap-scoped, so the per-sample reference feeds 4D.
+            expected_grads = []
+            for i in range(B):
+                q_i = query[i].unsqueeze(0).detach().requires_grad_(True)
+                k_i = key[i].unsqueeze(0).detach().requires_grad_(True)
+                v_i = value[i].unsqueeze(0).detach().requires_grad_(True)
+                out_i = F.scaled_dot_product_attention(q_i, k_i, v_i).sum()
+                out_i.backward()
+                expected_grads.append(
+                    (q_i.grad.squeeze(0), k_i.grad.squeeze(0), v_i.grad.squeeze(0))
+                )
+
+            for j in range(3):
+                expected = torch.stack([eg[j] for eg in expected_grads])
+                self.assertEqual(grads[j], expected, atol=1e-2, rtol=1e-2)
+
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
         leaf = torch.randn(4, 5, requires_grad=True)
