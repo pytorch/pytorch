@@ -2,7 +2,7 @@
 import warnings
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -78,7 +78,7 @@ class Joinable(ABC):
 
     @property
     @abstractmethod
-    def join_process_group(self) -> Any:
+    def join_process_group(self) -> dist.ProcessGroup:
         r"""Returns the process group for the collective communications needed by the join context manager itself."""
         ...
 
