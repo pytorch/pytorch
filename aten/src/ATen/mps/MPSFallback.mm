@@ -112,8 +112,6 @@ TORCH_LIBRARY_IMPL(aten, MPS, m) {
   // For the rest of unsupported ops the user needs to pass 'PYTORCH_ENABLE_MPS_FALLBACK=1'
   // to fallback on CPU, otherwise we will error out.
   m.impl("embedding_renorm_", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
-  m.impl("linalg_svd", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
-  m.impl("linalg_svd.U", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("_slow_conv2d_forward", slow_conv2d_forward_mps);
 }
 
