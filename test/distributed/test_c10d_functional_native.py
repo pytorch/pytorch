@@ -1661,7 +1661,7 @@ class ACTCompileTest(TestCase):
         self.assertEqual(r2, plain * 2)
 
     def test_act_guard_accepts_resolved_tensor(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         compiled_fn = torch.compile(lambda x: x * 2, backend=cnt)
 
         elem = torch.randn(4, 4)
@@ -1676,6 +1676,22 @@ class ACTCompileTest(TestCase):
         other_dtype = elem.double()
         r3 = compiled_fn(other_dtype)
         self.assertEqual(r3, other_dtype * 2)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_act_guard_rejects_unrelated_tensor_subclass(self):
+        class UnrelatedTensor(torch.Tensor):
+            pass
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(lambda x: x * 2, backend=cnt)
+
+        elem = torch.randn(4, 4)
+        compiled_fn(AsyncCollectiveTensor(elem))
+        self.assertEqual(cnt.frame_count, 1)
+
+        unrelated = elem.as_subclass(UnrelatedTensor)
+        result = compiled_fn(unrelated)
+        self.assertEqual(result, unrelated * 2)
         self.assertEqual(cnt.frame_count, 2)
 
     def test_act_guard_recompiles(self):

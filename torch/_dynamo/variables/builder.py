@@ -2981,7 +2981,7 @@ class VariableBuilder:
         resolved_act_value = resolve_async_collective_tensor(value)
         is_act = resolved_act_value is not None and resolved_act_value is not value
         subclass_type = infer_subclass_type(value)
-        if subclass_type is not None and not is_act:
+        if subclass_type is not None:
             self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if get_static_address_type(value) == "guarded":
