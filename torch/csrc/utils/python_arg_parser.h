@@ -42,6 +42,7 @@
 #include <fmt/format.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/python_headers.h>
+#include <cstring>
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>

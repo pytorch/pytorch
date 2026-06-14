@@ -1,3 +1,6 @@
+#include <limits>
+#include <algorithm>
+#include <cstring>
 #include <type_traits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>

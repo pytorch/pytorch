@@ -8,6 +8,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
+#include <cstring>
 
 #include <atomic>
 #include <cstddef>
