@@ -74,6 +74,13 @@ class ContextWrappingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
+        # target_values must be None or a Sequence for reconstruct / _call_func
+        # etc. to work properly.
+        if not (target_values is None or isinstance(target_values, Sequence)):
+            raise TypeError(
+                "ContextWrappingVariable.target_values must be None or a "
+                f"Sequence, got {type(target_values).__name__}"
+            )
 
     def richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
@@ -1586,12 +1593,16 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
     __exit__ method (instead of tracing).
     """
 
+    _nonvar_fields = {
+        "annotation",
+        *ContextWrappingVariable._nonvar_fields,
+    }
+
     def __init__(
-        self, target_values: Any, initial_values: Any = None, **kwargs: Any
+        self, annotation: dict[str, Any], initial_values: Any = None, **kwargs: Any
     ) -> None:
-        super().__init__(
-            target_values=target_values, initial_values=initial_values, **kwargs
-        )
+        self.annotation = annotation
+        super().__init__(target_values=(), initial_values=initial_values, **kwargs)
 
     def enter(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
@@ -1600,7 +1611,7 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         # preserve_node_meta context manager is setup. This is important to pass
         # on the metadata to the create_proxy nodes.
         stack = ExitStack()
-        stack.enter_context(torch.fx.traceback.annotate(self.target_values))
+        stack.enter_context(torch.fx.traceback.annotate(self.annotation))
         stack.enter_context(torch.fx.traceback.preserve_node_meta())
         self.set_cleanup_hook(tx, lambda: stack.close())
         return variables.ConstantVariable.create(None)
