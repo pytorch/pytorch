@@ -5,6 +5,7 @@ import torch
 import torch.fx
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import extract_graph_and_tracker
+from torch.testing._internal.common_utils import recover_orig_fp32_precision
 from torch.utils._pytree import tree_map
 
 
@@ -194,6 +195,7 @@ class GraphRegionTrackerTests(TestCase):
 'o4'], ['_foreach_add_3', 'getitem_6', 'getitem_7', 'sum_4', 'o5']]]""",
         )
 
+    @recover_orig_fp32_precision
     def test_mismatched_global_state(self):
         def inner_fn(x, y):
             x1 = x * 1
