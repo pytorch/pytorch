@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -690,7 +690,7 @@ def stft(
     )
 
 
-istft = _add_docstr(
+istft: Callable = _add_docstr(
     torch.istft,
     "istft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, "
     "normalized=False, onesided=None, length=None, return_complex=False) -> Tensor:\n"
