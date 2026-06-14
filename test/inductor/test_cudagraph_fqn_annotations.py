@@ -13,6 +13,7 @@ Annotations are recorded keyed by the graph node ``tools_id`` and each value is
 a list of ``{"str": "<fqn>"}`` dicts (see ``mark_kernels``).  All tests require
 CUDA with ``cudaGraphNodeGetToolsId`` (CUDA >= 13.1) and are skipped otherwise.
 """
+
 import json
 import unittest
 
@@ -45,8 +46,8 @@ class LeafModule(nn.Module):
         self.linear = nn.Linear(dim, dim)
 
     def forward(self, x):
-        h = self.linear(x)                          # GEMM (cuBLAS addmm)
-        h = torch.nn.functional.silu(h) * h + x    # pointwise → triton fused kernel
+        h = self.linear(x)  # GEMM (cuBLAS addmm)
+        h = torch.nn.functional.silu(h) * h + x  # pointwise → triton fused kernel
         return h
 
 
@@ -58,7 +59,7 @@ class LayerBlock(nn.Module):
 
     def forward(self, x):
         h = self.fc1(x)
-        return h * self.scale + x   # mul + scale + add (residual)
+        return h * self.scale + x  # mul + scale + add (residual)
 
 
 class InnerModel(nn.Module):
@@ -177,9 +178,7 @@ def _all_fqn_strings(annotations) -> list:
 
 
 @unittest.skipUnless(
-    torch.cuda.is_available()
-    and _HAS_CUDA_BINDINGS
-    and not _is_tools_id_unavailable(),
+    torch.cuda.is_available() and _HAS_CUDA_BINDINGS and not _is_tools_id_unavailable(),
     "Requires CUDA with cudaGraphNodeGetToolsId (CUDA >= 13.1)",
 )
 class TestCudagraphFqnAnnotations(TestCase):
@@ -288,9 +287,7 @@ class TestCudagraphFqnAnnotations(TestCase):
         annotations = dict(get_kernel_annotations())
         self.assertTrue(annotations, "expected non-empty kernel annotations")
 
-        with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
-        ) as prof:
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
             with torch.no_grad():
                 compiled(x)
                 torch.cuda.synchronize()
@@ -369,7 +366,9 @@ class TestCudagraphFqnAnnotations(TestCase):
         x = torch.randn(1, 64, device="cuda")
 
         compiled, _ = self._run_inductor_cg(model, x, annotate=True)
-        self.assertTrue(dict(get_kernel_annotations()), "expected non-empty annotations")
+        self.assertTrue(
+            dict(get_kernel_annotations()), "expected non-empty annotations"
+        )
 
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
             with torch.no_grad():
