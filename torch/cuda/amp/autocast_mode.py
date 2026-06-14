@@ -18,7 +18,9 @@ __all__ = ["autocast", "custom_fwd", "custom_bwd"]
 class autocast(torch.amp.autocast_mode.autocast):
     r"""See :class:`torch.autocast`.
 
-    ``torch.cuda.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cuda", args...)`` instead.
+    .. deprecated:: 2.10
+        ``torch.cuda.amp.autocast(args...)`` is deprecated. Use
+        :class:`torch.amp.autocast` with ``"cuda"`` as the device type instead.
     """
 
     # TODO: remove this conditional once we stop supporting Python < 3.13
@@ -89,8 +91,9 @@ def _cast(value, dtype):
 )
 def custom_fwd(fwd=None, *, cast_inputs=None):
     """
-    ``torch.cuda.amp.custom_fwd(args...)`` is deprecated. Please use
-    ``torch.amp.custom_fwd(args..., device_type='cuda')`` instead.
+    .. deprecated:: 2.4
+        ``torch.cuda.amp.custom_fwd(args...)`` is deprecated. Use
+        :func:`torch.amp.custom_fwd` with ``device_type='cuda'`` instead.
     """
     return functools.partial(torch.amp.custom_fwd, device_type="cuda")(
         fwd=fwd, cast_inputs=cast_inputs
@@ -104,7 +107,8 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
 )
 def custom_bwd(bwd):
     """
-    ``torch.cuda.amp.custom_bwd(args...)`` is deprecated. Please use
-    ``torch.amp.custom_bwd(args..., device_type='cuda')`` instead.
+    .. deprecated:: 2.4
+        ``torch.cuda.amp.custom_bwd(args...)`` is deprecated. Use
+        :func:`torch.amp.custom_bwd` with ``device_type='cuda'`` instead.
     """
     return functools.partial(torch.amp.custom_bwd, device_type="cuda")(bwd)
