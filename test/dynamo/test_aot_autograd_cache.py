@@ -3294,6 +3294,62 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    def test_cache_distinguishes_sdpa_backend(self):
+        """
+        Ensure AOTAutograd cache key distinguishes between different
+        scaled_dot_product_attention backends.
+        """
+
+        class Attention(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.scaled_dot_product_attention(
+                    x[0], x[1], x[2]
+                )
+
+        with fresh_cache():
+            from torch.nn.attention import sdpa_kernel, SDPBackend
+
+            model = Attention().eval()
+            x = torch.randn(3, 1, 2, 8, 64)
+
+            # Run 1: compile with the FLASH_ATTENTION backend
+            torch._dynamo.reset()
+            compiled1 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                compiled1(x)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            # Run 2: compile with the MATH backend
+            counters.clear()
+            torch._dynamo.reset()
+            compiled2 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), sdpa_kernel(SDPBackend.MATH):
+                compiled2(x)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            # Run 3: repeat with FLASH_ATTENTION again
+            counters.clear()
+            torch._dynamo.reset()
+            compiled3 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                compiled3(x)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+            # Run 4: repeat with MATH
+            counters.clear()
+            torch._dynamo.reset()
+            compiled4 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), sdpa_kernel(SDPBackend.MATH):
+                compiled4(x)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})

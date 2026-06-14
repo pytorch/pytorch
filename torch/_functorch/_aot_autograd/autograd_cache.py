@@ -542,6 +542,16 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
                 self.autocast_state[device_type] = torch.get_autocast_dtype(device_type)
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
+        self.sdpa_state = (
+            f"{torch._C._get_flash_sdp_enabled()=}",
+            f"{torch._C._get_fa3_sdp_enabled()=}",
+            f"{torch._C._get_mem_efficient_sdp_enabled()=}",
+            f"{torch._C._get_math_sdp_enabled()=}",
+            f"{torch._C._get_math_sdp_allow_fp16_bf16_reduction()=}",
+            f"{torch._C._get_overrideable_sdp_enabled()=}",
+            f"{torch._C._get_sdp_priority_order()=}",
+            f"{torch._C._get_cudnn_sdp_enabled()=}",
+        )
         if has_triton_package():
             self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)
 
