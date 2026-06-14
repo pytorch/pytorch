@@ -89,7 +89,7 @@ from torch.fx.experimental._dynamism import (
     clone_and_convert_to_meta,
     track_dynamism_across_examples,
 )
-from torch.fx.experimental.dynamic_spec import ShapesSpec
+from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -126,7 +126,7 @@ if TYPE_CHECKING:
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
     from torch._subclasses import fake_tensor
-    from torch.fx.experimental.dynamic_spec import ParamsSpec
+    from torch.export._trace import _DynamicShapesInput
     from torch.fx.node import Argument, Node, Target
 
     from .types import (
@@ -427,6 +427,8 @@ def _temporarily_unskip_code(
 
     with contextlib.ExitStack() as stack:
         if ignore_trace_rules:
+            # trace_rules skipfile checks do not have a per-code override, so
+            # explicit skipfile targets need this coarse trace-scope override.
             stack.enter_context(config.patch(dont_skip_tracing=True))
 
         if _is_code_skipped(code):
@@ -573,9 +575,7 @@ class OptimizedModule(torch.nn.Module):
             forward_is_skipfile = forward_is_method and trace_rules.check(
                 self._orig_mod.forward
             )
-            if forward_is_method and (
-                _is_code_skipped(self._orig_mod.forward.__code__) or forward_is_skipfile
-            ):
+            if forward_is_method and _is_code_skipped(self._orig_mod.forward.__code__):
                 prior_code = self.dynamo_ctx._skip_code_override_code
                 prior_ignore_trace_rules = (
                     self.dynamo_ctx._skip_code_override_ignore_trace_rules
@@ -583,9 +583,7 @@ class OptimizedModule(torch.nn.Module):
                 self.dynamo_ctx._skip_code_override_code = (
                     self._orig_mod.forward.__code__
                 )
-                self.dynamo_ctx._skip_code_override_ignore_trace_rules = (
-                    forward_is_skipfile
-                )
+                self.dynamo_ctx._skip_code_override_ignore_trace_rules = False
                 try:
                     self.forward = self.dynamo_ctx(self._orig_mod.__call__)
                 finally:
@@ -593,7 +591,7 @@ class OptimizedModule(torch.nn.Module):
                     self.dynamo_ctx._skip_code_override_ignore_trace_rules = (
                         prior_ignore_trace_rules
                     )
-            elif config.wrap_top_frame:
+            elif config.wrap_top_frame or forward_is_skipfile:
                 self.forward = self.dynamo_ctx(
                     external_utils.wrap_inline(self._orig_mod)
                 )
@@ -1152,7 +1150,9 @@ class _TorchDynamoContext:
         fn_code = getattr(fn, "__code__", None)
         unskip_code = self._skip_code_override_code
         ignore_trace_rules = self._skip_code_override_ignore_trace_rules
-        is_skipfile_target = fn_code is not None and trace_rules.check(fn)
+        is_skipfile_target = (
+            fn_code is not None and inspect.isfunction(fn) and trace_rules.check(fn)
+        )
         if unskip_code is None:
             unskip_code, ignore_trace_rules = _skipped_forward_code_for_call_impl(fn)
         if unskip_code is None and (_is_code_skipped(fn_code) or is_skipfile_target):
@@ -1170,7 +1170,7 @@ class _TorchDynamoContext:
                 # but can be traced directly; wrapping collapses them onto
                 # wrap_inline's shared `inner` code (#124269).
                 (filename is None and not inspect.isfunction(fn))
-                or (fn_code is None and trace_rules.check(fn))
+                or trace_rules.check(fn)
                 or top_level_in_graph
                 or has_polyfill
             )
@@ -2329,7 +2329,7 @@ def export(
     pre_dispatch: bool = False,
     decomposition_table: dict[torch._ops.OpOverload, Callable[..., Any]] | None = None,
     tracing_mode: str = "symbolic",
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
+    dynamic_shapes: _DynamicShapesInput = None,
     specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
@@ -2375,6 +2375,14 @@ def export(
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
 
+         **ShapesSpec API.** ``dynamic_shapes`` may also be a
+         :class:`torch.fx.experimental.dynamic_spec.ShapesSpec` (or its
+         shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`) --
+         the same spec API exposed via ``shapes_spec=`` in
+         :func:`torch.compile`. See :func:`torch.export.export` for usage
+         and semantics, and :mod:`torch.fx.experimental.dynamic_spec` for
+         full details.
+
         same_signature (bool): If True, rewrite the returned graph's signature to be the same as f.
 
         disable_constraint_solver (bool): Whether the dim constraint solver must be disabled.
@@ -2394,6 +2402,27 @@ def export(
     """
     if config.debug_force_graph_break_on_leaf_return:
         raise unittest.SkipTest("Cannot force graph break on export")
+
+    # `dynamic_shapes` is overloaded: it accepts the Dim-based dict/tuple/list
+    # spec, OR the new ShapesSpec/ParamsSpec API. If the latter is passed, we
+    # route it through dynamo's `shapes_spec` mechanism and skip the Dim-based
+    # constraint processing.
+    from torch.fx.experimental.dynamic_spec import (
+        _SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG,
+    )
+
+    shapes_spec: ShapesSpec | ParamsSpec | None = None
+    if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
+        if constraints:
+            raise ValueError(
+                "`dynamic_shapes=ShapesSpec(...)` cannot be combined with "
+                "`constraints`. ShapesSpec controls dynamic behavior on its own."
+            )
+        if prefer_deferred_runtime_asserts_over_guards:
+            raise ValueError(_SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG)
+        # ParamsSpec is normalized to ShapesSpec downstream in OptimizeContext.
+        shapes_spec = dynamic_shapes
+        dynamic_shapes = None
 
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_dynamo"})
@@ -2588,6 +2617,7 @@ def export(
                 ),
                 export=True,
                 export_constraints=constraints,
+                shapes_spec=shapes_spec,
             )(f)
             # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
             try:
