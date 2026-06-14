@@ -164,7 +164,6 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
     for snode in scheduler_nodes:
         if snode.node is None:
             continue
-        buf_name = getattr(snode.node, "name", None)
         origin = snode.node.get_origin_node()
         origin_name = origin.name if origin is not None else None
         anchor_fqn = fqn_map.get(origin_name) if origin_name else None
@@ -181,10 +180,8 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
         # For None origin_node: fall back to scanning origins.
         if origin is not None and origin.op == "placeholder":
             fallback_source = origin.users
-            fallback_kind = "user"
         else:
             fallback_source = snode.node.origins
-            fallback_kind = "origin"
         for fx_node in fallback_source:
             fallback_fqn = fqn_map.get(fx_node.name)
             if fallback_fqn:
@@ -205,7 +202,6 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
     for snode in scheduler_nodes:
         if snode.node is None:
             continue
-        buf_name = getattr(snode.node, "name", None)
         for fx_node in snode.node.origins:
             fqn = fqn_map.get(fx_node.name)
             if not fqn:
