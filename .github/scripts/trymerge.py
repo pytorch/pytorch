@@ -2108,7 +2108,7 @@ def get_ghstack_dependent_prs(
     if skip_len > 0:
         rev_list = rev_list[:-skip_len]
     rc: list[tuple[str, GitHubPR]] = []
-    for pr_, sha in _revlist_to_prs(repo, pr, rev_list):
+    for pr_, _sha in _revlist_to_prs(repo, pr, rev_list):
         if not pr_.is_closed():
             if not only_closed:
                 rc.append(("", pr_))
