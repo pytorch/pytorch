@@ -629,7 +629,11 @@ fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
 
   std::optional<Tensor> attn_bias_;
   if (attn_bias.has_value() && attn_bias->defined()) {
-    attn_bias_ = attn_bias_bdim.has_value() ? reshape_dim_into(*attn_bias_bdim, 0, attn_bias.value()) : attn_bias.value();
+    if (attn_bias_bdim.has_value()) {
+      attn_bias_ = reshape_dim_into(*attn_bias_bdim, 0, attn_bias.value());
+    } else {
+      attn_bias_ = ensure_has_bdim(attn_bias.value(), false, batch_size).flatten(0, 1);
+    }
   }
   auto [res0, res1, res2, res3] = at::_scaled_dot_product_efficient_attention(
       query_, key_, value_, attn_bias_, compute_log_sumexp, dropout_p, is_causal, scale);
@@ -669,9 +673,16 @@ _scaled_dot_product_cudnn_attention_batch_rule(
   key_ = key_.flatten(0, 1);
   value_ = value_.flatten(0, 1);
 
+  // cuDNN broadcasts 2D/3D attn_bias internally; only expand+flatten 4D+
   std::optional<Tensor> attn_bias_;
   if (attn_bias.has_value() && attn_bias->defined()) {
-    attn_bias_ = attn_bias_bdim.has_value() ? reshape_dim_into(*attn_bias_bdim, 0, attn_bias.value()) : attn_bias.value();
+    if (attn_bias_bdim.has_value()) {
+      attn_bias_ = reshape_dim_into(*attn_bias_bdim, 0, attn_bias.value());
+    } else if (attn_bias->dim() >= 4) {
+      attn_bias_ = ensure_has_bdim(attn_bias.value(), false, batch_size).flatten(0, 1);
+    } else {
+      attn_bias_ = attn_bias.value();
+    }
   }
 
   auto [res0, res1, res2, res3, res4, res5, res6, res7, res8] = at::_scaled_dot_product_cudnn_attention(
@@ -702,6 +713,181 @@ _scaled_dot_product_cudnn_attention_batch_rule(
     std::move(res6), std::nullopt,
     std::move(res7), std::nullopt,
     std::move(res8), return_debug_mask ? std::optional<int64_t>(0) : std::nullopt
+  );
+}
+
+fourOutputs _scaled_dot_product_efficient_attention_backward_batch_rule(
+    const Tensor& grad_out_, std::optional<int64_t> grad_out_bdim,
+    const Tensor& query, std::optional<int64_t> query_bdim,
+    const Tensor& key, std::optional<int64_t> key_bdim,
+    const Tensor& value, std::optional<int64_t> value_bdim,
+    const Tensor& attn_bias, std::optional<int64_t> attn_bias_bdim,
+    const Tensor& out, std::optional<int64_t> out_bdim,
+    const Tensor& logsumexp, std::optional<int64_t> logsumexp_bdim,
+    const Tensor& philox_seed, std::optional<int64_t> philox_seed_bdim,
+    const Tensor& philox_offset, std::optional<int64_t> philox_offset_bdim,
+    double dropout_p,
+    std::array<bool, 4> grad_input_mask,
+    bool is_causal,
+    std::optional<double> scale
+) {
+  auto batch_size = get_bdim_size3(
+      query, query_bdim, key, key_bdim, value, value_bdim);
+  auto grad_out = moveBatchDimToFront(grad_out_, grad_out_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  auto out_ = moveBatchDimToFront(out, out_bdim);
+  auto logsumexp_ = moveBatchDimToFront(logsumexp, logsumexp_bdim);
+
+  grad_out = ensure_has_bdim(grad_out, grad_out_bdim.has_value(), batch_size).flatten(0, 1);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size).flatten(0, 1);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size).flatten(0, 1);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size).flatten(0, 1);
+  out_ = ensure_has_bdim(out_, out_bdim.has_value(), batch_size).flatten(0, 1);
+  logsumexp_ = ensure_has_bdim(logsumexp_, logsumexp_bdim.has_value(), batch_size).flatten(0, 1);
+
+  Tensor attn_bias_ = attn_bias;
+  if (attn_bias.defined()) {
+    if (attn_bias_bdim.has_value()) {
+      attn_bias_ = reshape_dim_into(*attn_bias_bdim, 0, attn_bias);
+    } else {
+      attn_bias_ = ensure_has_bdim(attn_bias, false, batch_size).flatten(0, 1);
+    }
+  }
+
+  auto [res0, res1, res2, res3] = at::_scaled_dot_product_efficient_attention_backward(
+      grad_out, query_, key_, value_, attn_bias_, out_, logsumexp_,
+      philox_seed, philox_offset, dropout_p, grad_input_mask, is_causal, scale);
+
+  std::optional<int64_t> res0_bdim = std::nullopt;
+  std::optional<int64_t> res1_bdim = std::nullopt;
+  std::optional<int64_t> res2_bdim = std::nullopt;
+  if (res0.defined()) { res0 = reshape_dim_outof(0, batch_size, res0); res0_bdim = 0; }
+  if (res1.defined()) { res1 = reshape_dim_outof(0, batch_size, res1); res1_bdim = 0; }
+  if (res2.defined()) { res2 = reshape_dim_outof(0, batch_size, res2); res2_bdim = 0; }
+
+  std::optional<int64_t> res3_bdim = std::nullopt;
+  if (res3.defined()) {
+    res3 = reshape_dim_outof(0, batch_size, res3);
+    res3_bdim = 0;
+  }
+
+  return std::make_tuple(
+    std::move(res0), res0_bdim,
+    std::move(res1), res1_bdim,
+    std::move(res2), res2_bdim,
+    std::move(res3), res3_bdim
+  );
+}
+
+threeOutputs _scaled_dot_product_flash_attention_backward_batch_rule(
+    const Tensor& grad_out, std::optional<int64_t> grad_out_bdim,
+    const Tensor& query, std::optional<int64_t> query_bdim,
+    const Tensor& key, std::optional<int64_t> key_bdim,
+    const Tensor& value, std::optional<int64_t> value_bdim,
+    const Tensor& out, std::optional<int64_t> out_bdim,
+    const Tensor& logsumexp, std::optional<int64_t> logsumexp_bdim,
+    const Tensor& cum_seq_q, std::optional<int64_t> cum_seq_q_bdim,
+    const Tensor& cum_seq_k, std::optional<int64_t> cum_seq_k_bdim,
+    const c10::SymInt& max_q,
+    const c10::SymInt& max_k,
+    double dropout_p,
+    bool is_causal,
+    const Tensor& philox_seed, std::optional<int64_t> philox_seed_bdim,
+    const Tensor& philox_offset, std::optional<int64_t> philox_offset_bdim,
+    std::optional<double> scale
+) {
+  auto batch_size = get_bdim_size3(
+      query, query_bdim, key, key_bdim, value, value_bdim);
+  auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  auto out_ = moveBatchDimToFront(out, out_bdim);
+  auto logsumexp_ = moveBatchDimToFront(logsumexp, logsumexp_bdim);
+
+  grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), batch_size).flatten(0, 1);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size).flatten(0, 1);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size).flatten(0, 1);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size).flatten(0, 1);
+  out_ = ensure_has_bdim(out_, out_bdim.has_value(), batch_size).flatten(0, 1);
+  logsumexp_ = ensure_has_bdim(logsumexp_, logsumexp_bdim.has_value(), batch_size).flatten(0, 1);
+
+  auto [res0, res1, res2] = at::_scaled_dot_product_flash_attention_backward(
+      grad_out_, query_, key_, value_, out_, logsumexp_,
+      cum_seq_q, cum_seq_k, max_q.guard_int(__FILE__, __LINE__), max_k.guard_int(__FILE__, __LINE__),
+      dropout_p, is_causal, philox_seed, philox_offset, scale);
+
+  res0 = reshape_dim_outof(0, batch_size, res0);
+  res1 = reshape_dim_outof(0, batch_size, res1);
+  res2 = reshape_dim_outof(0, batch_size, res2);
+
+  return std::make_tuple(
+    std::move(res0), 0,
+    std::move(res1), 0,
+    std::move(res2), 0
+  );
+}
+
+threeOutputs _scaled_dot_product_cudnn_attention_backward_batch_rule(
+    const Tensor& grad_out, std::optional<int64_t> grad_out_bdim,
+    const Tensor& query, std::optional<int64_t> query_bdim,
+    const Tensor& key, std::optional<int64_t> key_bdim,
+    const Tensor& value, std::optional<int64_t> value_bdim,
+    const Tensor& out, std::optional<int64_t> out_bdim,
+    const Tensor& logsumexp, std::optional<int64_t> logsumexp_bdim,
+    const Tensor& philox_seed, std::optional<int64_t> philox_seed_bdim,
+    const Tensor& philox_offset, std::optional<int64_t> philox_offset_bdim,
+    const Tensor& attn_bias, std::optional<int64_t> attn_bias_bdim,
+    const Tensor& cum_seq_q, std::optional<int64_t> cum_seq_q_bdim,
+    const Tensor& cum_seq_k, std::optional<int64_t> cum_seq_k_bdim,
+    const c10::SymInt& max_q,
+    const c10::SymInt& max_k,
+    double dropout_p,
+    bool is_causal,
+    std::optional<double> scale
+) {
+  auto batch_size = get_bdim_size3(
+      query, query_bdim, key, key_bdim, value, value_bdim);
+  auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  auto out_ = moveBatchDimToFront(out, out_bdim);
+  auto logsumexp_ = moveBatchDimToFront(logsumexp, logsumexp_bdim);
+
+  grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), batch_size).flatten(0, 1);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size).flatten(0, 1);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size).flatten(0, 1);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size).flatten(0, 1);
+  out_ = ensure_has_bdim(out_, out_bdim.has_value(), batch_size).flatten(0, 1);
+  logsumexp_ = ensure_has_bdim(logsumexp_, logsumexp_bdim.has_value(), batch_size).flatten(0, 1);
+
+  // cuDNN broadcasts 2D/3D attn_bias internally; only expand+flatten 4D+
+  Tensor attn_bias_ = attn_bias;
+  if (attn_bias.defined()) {
+    if (attn_bias_bdim.has_value()) {
+      attn_bias_ = reshape_dim_into(*attn_bias_bdim, 0, attn_bias);
+    } else if (attn_bias.dim() >= 4) {
+      attn_bias_ = ensure_has_bdim(attn_bias, false, batch_size).flatten(0, 1);
+    }
+  }
+
+  auto [res0, res1, res2] = at::_scaled_dot_product_cudnn_attention_backward(
+      grad_out_, query_, key_, value_, out_, logsumexp_,
+      philox_seed, philox_offset, attn_bias_,
+      cum_seq_q, cum_seq_k, max_q.guard_int(__FILE__, __LINE__), max_k.guard_int(__FILE__, __LINE__),
+      dropout_p, is_causal, scale);
+
+  res0 = reshape_dim_outof(0, batch_size, res0);
+  res1 = reshape_dim_outof(0, batch_size, res1);
+  res2 = reshape_dim_outof(0, batch_size, res2);
+
+  return std::make_tuple(
+    std::move(res0), 0,
+    std::move(res1), 0,
+    std::move(res2), 0
   );
 }
 
@@ -832,10 +1018,14 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
   VMAP_SUPPORT(_scaled_dot_product_efficient_attention, _scaled_dot_product_efficient_attention_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_efficient_attention_backward, _scaled_dot_product_efficient_attention_backward_batch_rule);
 
   VMAP_SUPPORT(_scaled_dot_product_flash_attention, _scaled_dot_product_flash_attention_batch_rule);
   VMAP_SUPPORT2(_scaled_dot_product_flash_attention, quantized, _scaled_dot_product_flash_attention_quantized_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_flash_attention_backward, _scaled_dot_product_flash_attention_backward_batch_rule);
+
   VMAP_SUPPORT(_scaled_dot_product_cudnn_attention, _scaled_dot_product_cudnn_attention_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_cudnn_attention_backward, _scaled_dot_product_cudnn_attention_backward_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 
