@@ -12,6 +12,7 @@ import operator
 import os
 import re
 import tempfile
+import threading
 from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
@@ -380,6 +381,8 @@ class DeviceOpOverrides:
         raise NotImplementedError
 
 
+# Thread-safe lazy initialization for device op overrides
+device_op_overrides_lock = threading.RLock()
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 _device_op_overrides_initialized = False
 custom_backend_passes: dict[str, CustomGraphModulePass | None] = {}
@@ -639,7 +642,8 @@ def index_prevent_reordering(
 def register_device_op_overrides(
     device: str, device_op_overrides: DeviceOpOverrides
 ) -> None:
-    device_op_overrides_dict[device] = device_op_overrides
+    with device_op_overrides_lock:
+        device_op_overrides_dict[device] = device_op_overrides
 
 
 def _initialize_device_op_overrides():
@@ -649,16 +653,19 @@ def _initialize_device_op_overrides():
     if _device_op_overrides_initialized:
         return
 
-    from . import mps_device_op_overrides  # noqa: F401
-    from .cpu_device_op_overrides import CpuDeviceOpOverrides
-    from .cuda import device_op_overrides  # noqa: F401
-    from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
-    from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
+    with device_op_overrides_lock:
+        if _device_op_overrides_initialized:
+            return
+        from . import mps_device_op_overrides  # noqa: F401
+        from .cpu_device_op_overrides import CpuDeviceOpOverrides
+        from .cuda import device_op_overrides  # noqa: F401
+        from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
-    # TPU uses Pallas for codegen and only needs no-op overrides
-    register_device_op_overrides("tpu", CpuDeviceOpOverrides())
+        # TPU uses Pallas for codegen and only needs no-op overrides
+        register_device_op_overrides("tpu", CpuDeviceOpOverrides())
 
-    _device_op_overrides_initialized = True
+        _device_op_overrides_initialized = True
 
 
 def get_device_op_overrides(device: str) -> DeviceOpOverrides:
