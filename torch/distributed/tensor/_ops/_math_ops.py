@@ -1693,11 +1693,28 @@ def interp_upsample_1out_1in_strategy(
     ]
 
 
+POOL_BACKWARD_SPATIAL_RANK: dict[torch._ops.OpOverload, int] = {
+    aten._adaptive_avg_pool2d_backward.default: 2,
+    aten._adaptive_avg_pool3d_backward.default: 3,
+    aten.avg_pool2d_backward.default: 2,
+    aten.avg_pool3d_backward.default: 3,
+    aten.max_pool2d_with_indices_backward.default: 2,
+    aten.max_pool3d_with_indices_backward.default: 3,
+    aten.adaptive_max_pool2d_backward.default: 2,
+    aten.adaptive_max_pool3d_backward.default: 3,
+    aten.max_unpool2d.default: 2,
+    aten.max_unpool3d.default: 3,
+}
+
+
 @register_single_dim_strategy(
     [
         aten.max_unpool2d.default,
         aten.max_unpool3d.default,
         aten._adaptive_avg_pool2d_backward.default,
+        aten._adaptive_avg_pool3d_backward.default,
+        aten.avg_pool2d_backward.default,
+        aten.avg_pool3d_backward.default,
     ],
     schema_info=RuntimeSchemaInfo(1),
 )
@@ -1706,15 +1723,24 @@ def interp_pool_1out_2in_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # 1 output + 2 inputs = 3 placements; shard on batch (0) and channel (1)
-    return [
+    # 1 output + 2 inputs = 3 placements
+    input_meta = cast(TensorMeta, args_schema[0])
+    strategies: list[list[Placement | _ShardingPlaceholder]] = [
         [_ShardingPlaceholder(0)] * 3,
-        [_ShardingPlaceholder(1)] * 3,
     ]
+    spatial_rank = POOL_BACKWARD_SPATIAL_RANK[op]
+    if len(input_meta.shape) >= spatial_rank + 2:
+        strategies.append([_ShardingPlaceholder(1)] * 3)
+    return strategies
 
 
 @register_single_dim_strategy(
-    [aten.max_pool2d_with_indices_backward.default],
+    [
+        aten.max_pool2d_with_indices_backward.default,
+        aten.max_pool3d_with_indices_backward.default,
+        aten.adaptive_max_pool2d_backward.default,
+        aten.adaptive_max_pool3d_backward.default,
+    ],
     schema_info=RuntimeSchemaInfo(1),
 )
 def pool_backward_strategy(
@@ -1722,14 +1748,14 @@ def pool_backward_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # max_pool2d_with_indices_backward(grad_output, self, ..., indices) -> grad_input
+    # max_pool/adaptive_max_pool backward ops: (grad_output, self, ..., indices) -> grad_input
     # 1 output + 3 tensor inputs = 4 placements
-    # Order: [output, grad_output, self, indices]
     input_meta = cast(TensorMeta, args_schema[0])
     strategies: list[list[Placement | _ShardingPlaceholder]] = [
         [_ShardingPlaceholder(0)] * 4,
     ]
-    if len(input_meta.shape) >= 4:  # batched: (N, C, H, W)
+    spatial_rank = POOL_BACKWARD_SPATIAL_RANK[op]
+    if len(input_meta.shape) >= spatial_rank + 2:
         strategies.append([_ShardingPlaceholder(1)] * 4)
     # The backward is linear in grad_output, so P(sum/avg) pass through.
     # indices must be replicated (integer positions, not reducible).
