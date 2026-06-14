@@ -76,7 +76,7 @@ if TEST_CUDA:
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
-mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
+mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+ or XPU"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
 
 # avoid division by zero when calculating scale
@@ -1838,7 +1838,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
 
     @skipIfRocm
-    @onlyCUDA
+    @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("mkn", [
         # Nice shapes
@@ -1870,7 +1870,7 @@ class TestFP8Matmul(TestCase):
         A, A_scale, A_global_scale = data_to_nvfp4_with_global_scale(A_ref, BLOCK_SIZE)
         B, B_scale, B_global_scale = data_to_nvfp4_with_global_scale(B_ref, BLOCK_SIZE)
 
-        if torch.version.cuda:
+        if "cuda" in device:
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
             swizzle = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
@@ -1935,6 +1935,8 @@ class TestFP8Matmul(TestCase):
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe, device) -> None:
         if torch.version.hip and recipe == "nvfp4":
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
+        if "xpu" in device and recipe != "nvfp4":
+            raise unittest.SkipTest(f"{recipe} not supported on XPU, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
         if recipe == "mxfp4" and SM120OrLater:
@@ -2134,8 +2136,8 @@ class TestFP8Matmul(TestCase):
 
         C_ref = A_ref @ B_ref.t()
 
-        # convert to swizzled format
-        if not torch.version.hip:
+        # convert to swizzled format (CUDA only)
+        if "cuda" in device:
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 
@@ -2281,6 +2283,8 @@ class TestFP8Matmul(TestCase):
     def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
         if recipe == "mxfp4" and SM120OrLater:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        if "xpu" in device and recipe != "nvfp4":
+            raise unittest.SkipTest(f"{recipe} not supported on XPU, skipping")
         M, K, N = (1024, 512, 2048)
         BLOCK_SIZE_K = 16 if recipe == "nvfp4" else 32
         BLOCK_SIZE_MN = 128
@@ -2298,16 +2302,20 @@ class TestFP8Matmul(TestCase):
             y_lowp = _bfloat16_to_float4_e2m1fn_x2(y.bfloat16()).t()
 
         num_k_blocks = ceil_div(K, BLOCK_SIZE_K)
-        padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
-        expected_a_size = BLOCK_SIZE_MN * ceil_div(M, BLOCK_SIZE_MN) * padded_num_k_blocks
-        expected_b_size = BLOCK_SIZE_MN * ceil_div(N, BLOCK_SIZE_MN) * padded_num_k_blocks
+        if "xpu" in device:
+            expected_a_size = M * num_k_blocks
+            expected_b_size = N * num_k_blocks
+        else:
+            padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
+            expected_a_size = BLOCK_SIZE_MN * ceil_div(M, BLOCK_SIZE_MN) * padded_num_k_blocks
+            expected_b_size = BLOCK_SIZE_MN * ceil_div(N, BLOCK_SIZE_MN) * padded_num_k_blocks
 
         block = (
             ScalingType.BlockWise1x16
             if recipe == "nvfp4"
             else ScalingType.BlockWise1x32
         )
-        if torch.version.hip:
+        if torch.version.hip or "xpu" in device:
             swizzle = SwizzleType.NO_SWIZZLE
         else:
             swizzle = SwizzleType.SWIZZLE_32_4_4
@@ -2584,7 +2592,6 @@ class TestFP8Matmul(TestCase):
             use_fast_accum=False,
         )
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
-
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)

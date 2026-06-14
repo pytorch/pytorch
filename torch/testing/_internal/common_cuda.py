@@ -207,6 +207,8 @@ def evaluate_platform_supports_mx_gemm():
                 return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
         else:
             return SM100OrLater
+    if torch.xpu.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
