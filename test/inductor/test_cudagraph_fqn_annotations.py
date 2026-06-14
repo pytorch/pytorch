@@ -197,7 +197,6 @@ class TestCudagraphFqnAnnotations(TestCase):
         patches = {
             "triton.cudagraphs": True,
             "triton.cudagraph_kernel_annotations": annotate,
-            "triton.force_disable_cache_for_kernel_annotations": annotate,
         }
         with config.patch(patches), torch.no_grad():
             compiled = torch.compile(model, fullgraph=True)

@@ -2056,12 +2056,6 @@ class triton:
     # merged into Chrome traces via torch.cuda._annotate_cuda_graph_trace.
     cudagraph_kernel_annotations: bool = False
 
-    # Bypass FxGraphCache when cudagraph_kernel_annotations is set, so each call
-    # site recompiles with its own baked FQN instead of sharing one cached
-    # wrapper across structurally-identical sites. Costs one extra wrapper-codegen
-    # per unique call site at warmup; no runtime cost.
-    force_disable_cache_for_kernel_annotations: bool = False
-
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
