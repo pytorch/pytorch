@@ -5723,6 +5723,70 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
+    def test_cond_traced_no_outputs_cudagraphs(self):
+        state = torch.zeros(4, device="cuda")
+
+        def true_fn():
+            state.add_(1.0)
+
+        def false_fn():
+            state.add_(-1.0)
+
+        predicate = torch.tensor(True, device="cuda")
+
+        with torch.no_grad():
+            # Warmup runs both branches and then executes the cond, so
+            # state is incremented once (by the true branch).
+            with ControlFlowOpWarmupDispatchMode():
+                torch.cond(predicate, true_fn, false_fn, [])
+            torch.cuda.synchronize()
+            self.assertEqual(state, torch.ones(4, device="cuda"))
+
+            # Capture records the conditional node but does not execute
+            # GPU code, so state is unchanged.
+            g = torch.cuda.CUDAGraph()
+            with (
+                torch.cuda.graph(g),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                torch.cond(predicate, true_fn, false_fn, [])
+            self.assertEqual(state, torch.ones(4, device="cuda"))
+
+            g.replay()
+            torch.cuda.synchronize()
+            # Replay with pred=True runs the true branch: state += 1.
+            self.assertEqual(state, 2 * torch.ones(4, device="cuda"))
+
+            predicate.fill_(False)
+            g.replay()
+            torch.cuda.synchronize()
+            # Replay with pred=False runs the false branch: state -= 1.
+            self.assertEqual(state, torch.ones(4, device="cuda"))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_unequal_constant_outputs_cudagraphs(self):
+        def true_fn():
+            return 1
+
+        def false_fn():
+            return 2
+
+        predicate = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            ValueError,
+            "returned constants of both branches must be equal",
+        ):
+            with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
+                torch.cond(predicate, true_fn, false_fn, [])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
     def test_cond_traced_record_stream_reuse(self):
         torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:True"
@@ -7284,6 +7348,48 @@ def forward(self, arg0_1):
         # Ensure no error is thrown when not running backward
         res_compiled = torch.compile(f)(*example_inputs)
         self.assertEqual(res, res_compiled)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_cond_no_outputs_aot_autograd_graph(self):
+        backend = AotEagerAndRecordGraphs()
+
+        def f(pred, x):
+            def true_fn(x):
+                x.sin()
+
+            def false_fn(x):
+                x.cos()
+
+            torch.cond(pred, true_fn, false_fn, (x,))
+            return x + 1
+
+        x = torch.ones(3, 4)
+        compiled_f = torch.compile(f, backend=backend, fullgraph=True, dynamic=False)
+
+        self.assertEqual(compiled_f(torch.tensor(True), x), f(torch.tensor(True), x))
+        self.assertEqual(compiled_f(torch.tensor(False), x), f(torch.tensor(False), x))
+        self.assertEqual(len(backend.fw_graphs), 1)
+
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "b8[]", arg1_1: "f32[3, 4]"):
+        add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
+        return (add,)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = sin = None
+            return (None,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            cos: "f32[3, 4]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = cos = None
+            return (None,)
+""",
+        )
 
     @skipIfTorchDynamo("Skip because we're testing export")
     def test_cond_autograd_backward_inp_out_aliasing(self):
