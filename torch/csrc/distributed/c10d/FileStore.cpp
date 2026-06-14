@@ -338,7 +338,7 @@ FileStore::~FileStore() {
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
   std::string regKey = regularPrefix_ + key;
   std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDWR | O_CREAT, timeout_);
+  File file(path_, O_RDWR | O_CREAT, timeout_.load());
   auto lock = file.lockExclusive();
   file.seek(0, SEEK_END);
   file.write(regKey);
@@ -351,7 +351,7 @@ std::vector<uint8_t> FileStore::compareSet(
     const std::vector<uint8_t>& desiredValue) {
   std::string regKey = regularPrefix_ + key;
   std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDWR | O_CREAT, timeout_);
+  File file(path_, O_RDWR | O_CREAT, timeout_.load());
   auto lock = file.lockExclusive();
   // Always refresh since even though the key exists in the cache,
   // it might be outdated
@@ -377,7 +377,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
   const auto start = std::chrono::steady_clock::now();
   while (true) {
     std::unique_lock<std::mutex> l(activeFileOpLock_);
-    File file(path_, O_RDONLY, timeout_);
+    File file(path_, O_RDONLY, timeout_.load());
     auto lock = file.lockShared();
     auto size = file.size();
     if (cache_.count(regKey) == 0 && size == pos_) {
@@ -386,12 +386,12 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
       l.unlock();
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
-      if (timeout_ != kNoTimeout && elapsed > timeout_) {
+      if (timeout_.load() != kNoTimeout && elapsed > timeout_.load()) {
         auto err = c10::str(
             "Timeout waiting for key: ",
             key,
             " after ",
-            timeout_.count(),
+            timeout_.load().count(),
             " ms");
         TORCH_CHECK(false, err);
       }
@@ -409,7 +409,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
 
 int64_t FileStore::addHelper(const std::string& key, int64_t i) {
   std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDWR | O_CREAT, timeout_);
+  File file(path_, O_RDWR | O_CREAT, timeout_.load());
   auto lock = file.lockExclusive();
   pos_ = refresh(file, pos_, cache_, deletePrefix_);
 
@@ -436,7 +436,7 @@ int64_t FileStore::add(const std::string& key, int64_t value) {
 
 int64_t FileStore::getNumKeys() {
   std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDONLY, timeout_);
+  File file(path_, O_RDONLY, timeout_.load());
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_, deletePrefix_);
   return static_cast<int64_t>(cache_.size());
@@ -445,7 +445,7 @@ int64_t FileStore::getNumKeys() {
 bool FileStore::deleteKey(const std::string& key) {
   std::string deleteKey = deletePrefix_ + regularPrefix_ + key;
   std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDWR, timeout_);
+  File file(path_, O_RDWR, timeout_.load());
   auto lock = file.lockExclusive();
   file.seek(0, SEEK_END);
   file.write(deleteKey);
@@ -455,7 +455,7 @@ bool FileStore::deleteKey(const std::string& key) {
 
 bool FileStore::check(const std::vector<std::string>& keys) {
   std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDONLY, timeout_);
+  File file(path_, O_RDONLY, timeout_.load());
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_, deletePrefix_);
 
@@ -470,7 +470,7 @@ bool FileStore::check(const std::vector<std::string>& keys) {
 }
 
 void FileStore::wait(const std::vector<std::string>& keys) {
-  wait(keys, timeout_);
+  wait(keys, timeout_.load());
 }
 
 void FileStore::wait(
@@ -493,7 +493,7 @@ void FileStore::wait(
 
 std::vector<std::string> FileStore::listKeys() {
   std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDONLY, timeout_);
+  File file(path_, O_RDONLY, timeout_.load());
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_, deletePrefix_);
   std::vector<std::string> keys;

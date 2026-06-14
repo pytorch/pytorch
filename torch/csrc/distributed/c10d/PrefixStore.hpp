@@ -35,7 +35,7 @@ class TORCH_API PrefixStore : public Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
 
-  const std::chrono::milliseconds& getTimeout() const noexcept override;
+  std::chrono::milliseconds getTimeout() const noexcept override;
 
   void setTimeout(const std::chrono::milliseconds& timeout) override;
 

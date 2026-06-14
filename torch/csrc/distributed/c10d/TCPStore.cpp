@@ -363,7 +363,7 @@ c10::intrusive_ptr<Store> TCPStore::clone() {
   opts.port = addr_.port;
   opts.isServer = false;
   opts.waitWorkers = false;
-  opts.timeout = timeout_;
+  opts.timeout = timeout_.load();
   opts.useLibUV = usingLibUv_;
 
   return c10::make_intrusive<TCPStore>(addr_.host, opts);
@@ -392,7 +392,7 @@ void TCPStore::waitForWorkers() {
       }
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
-      if (timeout_ != kNoTimeout && elapsed > timeout_) {
+      if (timeout_.load() != kNoTimeout && elapsed > timeout_.load()) {
         C10_THROW_ERROR(
             DistStoreError,
             fmt::format(
@@ -476,7 +476,7 @@ std::vector<uint8_t> TCPStore::get(const std::string& key) {
 }
 
 std::vector<uint8_t> TCPStore::doGet(const std::string& key) {
-  doWait(key, timeout_);
+  doWait(key, timeout_.load());
   detail::SendBuffer buffer(*client_, detail::QueryType::GET);
   buffer.appendString(key);
   buffer.flush();
@@ -541,7 +541,7 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
 }
 
 void TCPStore::wait(const std::vector<std::string>& keys) {
-  wait(keys, timeout_);
+  wait(keys, timeout_.load());
 }
 
 void TCPStore::wait(
@@ -628,7 +628,7 @@ std::vector<std::vector<uint8_t>> TCPStore::multiGet(
   for (const std::string& key : keys) {
     prefixedKeys.emplace_back(keyPrefix_ + key);
   }
-  doWait(prefixedKeys, timeout_);
+  doWait(prefixedKeys, timeout_.load());
 
   detail::SendBuffer buffer(*client_, detail::QueryType::MULTI_GET);
   buffer.appendValue(keys.size());
@@ -693,7 +693,7 @@ std::vector<uint8_t> TCPStore::queuePop(const std::string& key, bool block) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
 
   if (block) {
-    doWait(keyPrefix_ + key, timeout_);
+    doWait(keyPrefix_ + key, timeout_.load());
   }
 
   detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_POP);
