@@ -332,6 +332,16 @@ class profile:
             )
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
+        if (
+            experimental_config.profiler_metrics
+            or experimental_config.profiler_measure_per_kernel
+        ):
+            warn(
+                "profiler_metrics and profiler_measure_per_kernel are deprecated "
+                "and ignored. These options will be removed in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0

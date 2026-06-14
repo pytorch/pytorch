@@ -415,11 +415,8 @@ void initPythonBindings(PyObject* module) {
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
-          "    profiler_metrics : a list of CUPTI profiler metrics used\n"
-          "       to measure GPU performance events.\n"
-          "       If this list contains values Kineto runs in CUPTI profiler mode\n"
-          "    profiler_measure_per_kernel (bool) : whether to profile metrics per kernel\n"
-          "       or for the entire measurement duration.\n"
+          "    profiler_metrics : DEPRECATED and ignored.\n"
+          "    profiler_measure_per_kernel (bool) : DEPRECATED and ignored.\n"
           "    verbose (bool) : whether the trace file has `Call stack` field or not.\n"
           "    performance_events : a list of profiler events to be used for measurement.\n"
           "    enable_cuda_sync_events : for CUDA profiling mode, enable adding CUDA synchronization events\n"
@@ -512,6 +509,12 @@ void initPythonBindings(PyObject* module) {
                 t.size() > 12 ? t[12].cast<bool>() : false,
                 t.size() > 13 ? t[13].cast<bool>() : false);
           }))
+      // profiler_metrics and profiler_measure_per_kernel are deprecated
+      // no-ops, exposed read-only so the Python layer can detect them and warn.
+      .def_readonly("profiler_metrics", &ExperimentalConfig::profiler_metrics)
+      .def_readonly(
+          "profiler_measure_per_kernel",
+          &ExperimentalConfig::profiler_measure_per_kernel)
       .def_readwrite(
           "custom_profiler_config", &ExperimentalConfig::custom_profiler_config)
       .def_readwrite("trace_only", &ExperimentalConfig::trace_only);
