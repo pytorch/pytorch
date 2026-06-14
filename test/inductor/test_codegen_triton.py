@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import unittest
+from collections import namedtuple
+from enum import Enum, IntEnum
 from unittest.mock import patch
 
 import sympy
@@ -512,6 +514,90 @@ class TestCodegenTriton(InductorTestCase):
         _, code = run_and_get_code(torch.compile(fn), x, y)
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
+
+    def test_sanitize_for_repr(self):
+        from torch._inductor.codegen.wrapper import _sanitize_for_repr
+
+        class Color(Enum):
+            RED = "red"
+            BLUE = "blue"
+
+        class Priority(IntEnum):
+            LOW = 0
+            HIGH = 1
+
+        # Enum -> value
+        self.assertEqual(_sanitize_for_repr(Color.RED), "red")
+        self.assertEqual(_sanitize_for_repr(Priority.HIGH), 1)
+
+        # Recursion into containers
+        self.assertEqual(
+            _sanitize_for_repr({"a": Color.RED, "b": [Priority.LOW, 42]}),
+            {"a": "red", "b": [0, 42]},
+        )
+
+        # Tuples
+        self.assertEqual(
+            _sanitize_for_repr((Color.BLUE, 1)),
+            ("blue", 1),
+        )
+
+        # Namedtuples
+        Pair = namedtuple("Pair", ["x", "y"])
+        result = _sanitize_for_repr(Pair(Color.RED, Priority.HIGH))
+        self.assertIsInstance(result, Pair)
+        self.assertEqual(result, Pair("red", 1))
+
+        # Enum as dict key
+        self.assertEqual(
+            _sanitize_for_repr({Color.RED: 1}),
+            {"red": 1},
+        )
+
+        # Nested enum value
+        class Outer(Enum):
+            INNER = Color.RED
+
+        self.assertEqual(_sanitize_for_repr(Outer.INNER), "red")
+
+        # Non-enum passthrough
+        self.assertEqual(_sanitize_for_repr(42), 42)
+        self.assertEqual(_sanitize_for_repr("hello"), "hello")
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_enum_constexpr_in_user_defined_triton_kernel(self):
+        """Custom Triton kernel with IntEnum constexpr generates valid code."""
+        import triton
+        import triton.language as tl
+
+        class Mode(IntEnum):
+            ADD = 1
+            MUL = 2
+
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            enum_kernel[(1,)](x, y, x.numel(), Mode.ADD, 256)
+            return y
+
+        x = torch.randn(128, device=GPU_TYPE)
+        fn_c = torch.compile(fn)
+        res, code = run_and_get_code(fn_c, x)
+        self.assertEqual(fn(x), res)
+        # Verify generated code doesn't contain invalid Enum repr like <Mode.ADD: 1>
+        self.assertNotIn("<Mode.", code[0])
 
 
 if __name__ == "__main__":
