@@ -545,6 +545,7 @@ def replicate_tensor_dim(
 
 
 @register_op_strategy(aten.slice_scatter.default, schema_info=RuntimeSchemaInfo(2))
+@register_op_strategy(aten.narrow_scatter.default, schema_info=RuntimeSchemaInfo(2))
 def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
     # 1. number of dimensions in input and src need to match.
     # 2. number of elements on all non-dim need to match between input and src.
@@ -553,6 +554,8 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
     # - We suggest for src to follow the sharding of input, except on the scatter dimension,
     #   where our best bet for now is to make them replicated as a fall-back.
     #   TODO: Ideally we'd like to make sure the output is re-sharded afterwards to keep input sharding.
+    # Note: narrow_scatter has the same sharding semantics as slice_scatter since it's
+    # implemented as a wrapper that calls slice_scatter_symint.
     mesh = op_schema.get_mesh_from_args()
     input_strategy = op_schema.args_schema[0]
     src_strategy = op_schema.args_schema[1]
