@@ -25,19 +25,22 @@ extern PyObject* guard_complete_hook;
 namespace {
 PyObject* bytecode_debugger_callback_obj = nullptr;
 std::unordered_set<PyCodeObject*> breakpoint_code_objects;
+thread_local PyObject* skip_code_override_obj = nullptr;
 
 // RAII guard that calls __exit__ on a Python context manager when destroyed.
 struct DebugContextGuard {
   py::object ctx;
 
-  explicit DebugContextGuard(py::object c) : ctx(std::move(c)) {
+  explicit DebugContextGuard(const py::object& c) : ctx(c) {
     ctx.attr("__enter__")();
   }
 
   ~DebugContextGuard() {
     // Save any pending Python exception (e.g. KeyboardInterrupt from the
     // debugger's 'q' command) so calling __exit__ doesn't clobber it.
-    PyObject *exc_type, *exc_value, *exc_tb;
+    PyObject* exc_type = nullptr;
+    PyObject* exc_value = nullptr;
+    PyObject* exc_tb = nullptr;
     PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
     try {
       ctx.attr("__exit__")(py::none(), py::none(), py::none());
@@ -52,11 +55,17 @@ struct DebugContextGuard {
 
   DebugContextGuard(const DebugContextGuard&) = delete;
   DebugContextGuard& operator=(const DebugContextGuard&) = delete;
+  DebugContextGuard(DebugContextGuard&&) = delete;
+  DebugContextGuard& operator=(DebugContextGuard&&) = delete;
 };
+
+bool should_override_skip(PyCodeObject* code) {
+  return skip_code_override_obj == reinterpret_cast<PyObject*>(code);
+}
 
 } // namespace
 
-void set_bytecode_debugger_callback(py::object callback) {
+void set_bytecode_debugger_callback(const py::object& callback) {
   if (callback.is_none()) {
     Py_XSETREF(bytecode_debugger_callback_obj, nullptr);
   } else {
@@ -72,7 +81,7 @@ py::object get_bytecode_debugger_callback() {
       py::handle(bytecode_debugger_callback_obj));
 }
 
-void register_breakpoint_code(py::object code) {
+void register_breakpoint_code(const py::object& code) {
   breakpoint_code_objects.insert((PyCodeObject*)code.ptr());
 }
 
@@ -328,6 +337,10 @@ struct CRecursionLimitRAII {
   ~CRecursionLimitRAII() {
     this->tstate->c_recursion_remaining = this->old_recursion_remaining;
   }
+  CRecursionLimitRAII(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII& operator=(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII(CRecursionLimitRAII&&) = delete;
+  CRecursionLimitRAII& operator=(CRecursionLimitRAII&&) = delete;
 };
 
 #else
@@ -517,6 +530,11 @@ PyObject* dynamo__custom_eval_frame(
   recursive_callback =
       _callback_from_action(recursive_callback, strategy.recursive_action);
 
+  if (strategy.cur_action == FrameAction::SKIP &&
+      should_override_skip(F_CODE(frame))) {
+    strategy.cur_action = FrameAction::DEFAULT;
+  }
+
   if (strategy.cur_action == FrameAction::SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     eval_default();
@@ -693,6 +711,20 @@ PyObject* dynamo__custom_eval_frame(
   return eval_result;
 }
 
+PyObject* dynamo_get_code_exec_strategy(PyObject* dummy, PyObject* arg) {
+  if (!PyCode_Check(arg)) {
+    PyErr_SetString(PyExc_TypeError, "expected a code object");
+    return nullptr;
+  }
+
+  PyCodeObject* code = (PyCodeObject*)arg;
+  ExtraState* extra = get_extra_state(code);
+  FrameExecStrategy strategy = extra == nullptr
+      ? FrameExecStrategy{FrameAction::DEFAULT, FrameAction::DEFAULT}
+      : extra_state_get_exec_strategy(extra);
+  return py::cast(strategy).release().ptr();
+}
+
 PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
   PyObject* code_obj = nullptr;
   PyObject* strategy_obj = nullptr;
@@ -715,6 +747,22 @@ PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
 
   extra_state_set_exec_strategy(extra, strategy);
   Py_RETURN_NONE;
+}
+
+PyObject* dynamo_set_skip_code_override(PyObject* dummy, PyObject* arg) {
+  if (arg != Py_None && !PyCode_Check(arg)) {
+    PyErr_SetString(PyExc_TypeError, "expected a code object or None");
+    return nullptr;
+  }
+
+  PyObject* old =
+      skip_code_override_obj == nullptr ? Py_None : skip_code_override_obj;
+  Py_INCREF(old);
+  PyObject* new_obj = arg == Py_None ? nullptr : arg;
+  Py_XINCREF(new_obj);
+  Py_XDECREF(skip_code_override_obj);
+  skip_code_override_obj = new_obj;
+  return old;
 }
 
 void dynamo_skip_code_recursive(PyCodeObject* code) {
