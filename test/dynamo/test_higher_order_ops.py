@@ -6883,6 +6883,76 @@ class GraphModule(torch.nn.Module):
         actual = opt(x)
         self.assertEqual(expected, actual)
 
+    def test_vjp_returning_fullgraph_errors(self):
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            out, vjpfunc = torch.func.vjp(fn, x)
+            return vjpfunc
+
+        x = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"vjp.*closure.*TensorWrapper",
+        ):
+            torch.compile(wrapper_fn, backend="eager", fullgraph=True)(x)
+
+    def test_vjp_returning_graph_break(self):
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            a = x.cos() * 2
+            grad_val = torch.func.grad(fn)(a)
+            b = a.sin() * 2
+            out, vjpfunc = torch.func.vjp(fn, b)
+
+            return vjpfunc, grad_val
+
+        x = torch.randn(3, 3)
+
+        backend = EagerAndRecordGraphs()
+        result_vjpfunc, result_grad = torch.compile(
+            wrapper_fn, backend=backend, fullgraph=False
+        )(x)
+        ref_vjpfunc, ref_grad = wrapper_fn(x)
+
+        grad_result = result_vjpfunc(torch.ones([]))
+        ref_result = ref_vjpfunc(torch.ones([]))
+
+        self.assertEqual(grad_result[0], ref_result[0])
+        self.assertEqual(result_grad, ref_grad)
+
+        self.assertEqual(len(backend.graphs), 1)
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    cos = l_x_.cos();  l_x_ = None
+    a = cos * 2;  cos = None
+    _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
+    _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
+    diff_args = torch._C._functorch._wrap_for_grad(a, 1)
+    set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
+    _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args);  _set_tensor_requires_grad = None
+    set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
+    sin = diff_args.sin()
+    output = sin.sum();  sin = None
+    _autograd_grad = torch._functorch.eager_transforms._autograd_grad((output,), [diff_args], create_graph = True);  diff_args = None
+    grad_input = _autograd_grad[0];  _autograd_grad = None
+    grad_input_1 = torch._C._functorch._unwrap_for_grad(grad_input, 1);  grad_input = None
+    output_1 = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
+    _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
+    _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
+    sin_1 = a.sin();  a = None
+    b = sin_1 * 2;  sin_1 = None
+    return (b, grad_input_1)""",
+            )
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
