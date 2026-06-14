@@ -2395,7 +2395,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.cond"
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
-    supports_aliasing = False
+    # torch.cond branches are mutually exclusive — only one branch executes,
+    # so output-input aliasing is safe (no concurrent access to aliased buffers).
+    supports_aliasing = True
 
     def _call_function(
         self,
@@ -2406,7 +2408,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from . import ListVariable
 
         self.supports_input_mutation = not torch.is_grad_enabled()
-        self.supports_aliasing = not torch.is_grad_enabled()
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
