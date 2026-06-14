@@ -518,7 +518,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77, s77]", L_y_: "f32[s77, s77]"):
+    def forward(self, s77: "Sym(s77)", s27: "Sym(s17)", L_x_: "f32[s77, s17]", s94: "Sym(s94)", L_y_: "f32[s17, s94]"):
         l_x_ = L_x_
         l_y_ = L_y_
 
@@ -531,7 +531,7 @@ class GraphModule(torch.nn.Module):
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        x: "bf16[s77, s94]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
@@ -606,7 +606,7 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77, s77]", L_y_: "f32[s77, s77]"):
+    def forward(self, s77: "Sym(s77)", s27: "Sym(s17)", L_x_: "f32[s77, s17]", s94: "Sym(s94)", L_y_: "f32[s17, s94]"):
         l_x_ = L_x_
         l_y_ = L_y_
 
@@ -619,7 +619,7 @@ class GraphModule(torch.nn.Module):
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        x: "bf16[s77, s94]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
         return (x,)
 """,
             )
@@ -655,11 +655,11 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "bf16[s77, s77]", L_z_: "f32[s77, s77]"):
+    def forward(self, s77: "Sym(s77)", s27: "Sym(s27)", L_x_: "bf16[s77, s27]", s32: "Sym(s32)", L_z_: "f32[s27, s32]"):
         l_x_ = L_x_
         l_z_ = L_z_
 
-        x: "bf16[s77, s77]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
+        x: "bf16[s77, s32]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 

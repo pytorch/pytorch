@@ -1256,6 +1256,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             record_str,
         )
 
+    @torch.fx.experimental._config.patch(use_duck_shape=True)
     @make_logging_test(guards=True)
     def test_guards_sloc(self, records):
         @torch.compile(dynamic=True, backend="eager")

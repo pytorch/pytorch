@@ -362,6 +362,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
+    @torch.fx.experimental._config.patch(use_duck_shape=True)
     def test_cache_hot_load(self, device, dtype, dynamic):
         """
         Verify that we can populate and hot load functions from the cache.
@@ -581,6 +582,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
+    @torch.fx.experimental._config.patch(use_duck_shape=True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_multi_graph_specialization(self):
         """
