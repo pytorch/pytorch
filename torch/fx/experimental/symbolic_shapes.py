@@ -6147,8 +6147,20 @@ class ShapeEnv:
                 # - Otherwise issue a guard to constrain them.
                 eq = sympy.Eq(expr1, expr2_)
                 simplified_eq = sympy.simplify(eq)
+                concrete_val = self._maybe_evaluate_static(
+                    replace_with_example_values(eq),
+                    compute_hint=True,
+                )
+                if concrete_val is not None and not bool(concrete_val):
+                    raise ConstraintViolationError(
+                        f"Expected input {srcEq.name} to be equal to "
+                        f"{fn(sympy.Symbol(debug_name))}, "
+                        f"where {debug_name} = {replace_with_example_values(expr2)}, "
+                        f"but got {replace_with_example_values(expr1)}"
+                    )
                 if (
                     not (simplified_eq is sympy.S.true or simplified_eq is True)
+                    and concrete_val is not None
                     and expr1.free_symbols
                     and expr1.free_symbols <= expr2_.free_symbols
                 ):
@@ -6160,10 +6172,6 @@ class ShapeEnv:
                 try:
                     concrete_val = self.evaluate_expr(eq)
                 except GuardOnDataDependentSymNode:
-                    concrete_val = self._maybe_evaluate_static(
-                        replace_with_example_values(eq),
-                        compute_hint=True,
-                    )
                     if concrete_val is None or bool(concrete_val):
                         concrete_val = self.guard_or_defer_runtime_assert(
                             eq,
