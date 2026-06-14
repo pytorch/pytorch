@@ -5401,5 +5401,113 @@ instantiate_parametrized_tests(TestSubclassSerialization)
 instantiate_parametrized_tests(TestOldSerialization)
 instantiate_parametrized_tests(TestSerialization)
 
+
+class TestSaveAtomicWrite(TestCase):
+    """Regression tests for gh-48243: torch.save must not create or corrupt
+    the target file when serialization fails."""
+
+    class _Unpicklable:
+        def __reduce__(self):
+            raise RuntimeError("intentional pickle failure")
+
+    def test_new_file_not_created_on_pickle_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "out.pt")
+            with self.assertRaisesRegex(RuntimeError, "intentional pickle failure"):
+                torch.save(self._Unpicklable(), path)
+            self.assertFalse(os.path.exists(path))
+
+    def test_existing_file_unchanged_on_pickle_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "out.pt")
+            original = b"original content"
+            with open(path, "wb") as f:
+                f.write(original)
+            with self.assertRaisesRegex(RuntimeError, "intentional pickle failure"):
+                torch.save(self._Unpicklable(), path)
+            with open(path, "rb") as f:
+                self.assertEqual(f.read(), original)
+
+    def test_original_exception_preserved(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaisesRegex(RuntimeError, "intentional pickle failure"):
+                torch.save(self._Unpicklable(), os.path.join(td, "out.pt"))
+
+    def test_valid_save_after_failed_save(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "out.pt")
+            with self.assertRaises(RuntimeError):
+                torch.save(self._Unpicklable(), path)
+            t = torch.tensor([1, 2, 3])
+            torch.save(t, path)
+            self.assertEqual(torch.load(path, weights_only=True), t)
+
+    def test_pathlib_path_new_file_not_created_on_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = pathlib.Path(td) / "out.pt"
+            with self.assertRaises(RuntimeError):
+                torch.save(self._Unpicklable(), path)
+            self.assertFalse(path.exists())
+
+    def test_legacy_format_new_file_not_created_on_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "out.pt")
+            with self.assertRaisesRegex(RuntimeError, "intentional pickle failure"):
+                torch.save(self._Unpicklable(), path, _use_new_zipfile_serialization=False)
+            self.assertFalse(os.path.exists(path))
+
+    def test_legacy_format_existing_file_unchanged_on_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "out.pt")
+            original = b"original content"
+            with open(path, "wb") as f:
+                f.write(original)
+            with self.assertRaisesRegex(RuntimeError, "intentional pickle failure"):
+                torch.save(self._Unpicklable(), path, _use_new_zipfile_serialization=False)
+            with open(path, "rb") as f:
+                self.assertEqual(f.read(), original)
+
+    def test_filelike_raises_but_no_path_side_effects(self):
+        buf = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, "intentional pickle failure"):
+            torch.save(self._Unpicklable(), buf)
+
+    def test_is_local_path_routing(self):
+        from torch.serialization import _is_local_path
+
+        self.assertTrue(_is_local_path("/home/user/out.pt"))
+        self.assertTrue(_is_local_path("out.pt"))
+        self.assertTrue(_is_local_path("relative/path/out.pt"))
+        self.assertTrue(_is_local_path("C:/Users/foo/bar.pt"))
+        self.assertFalse(_is_local_path("s3://bucket/key.pt"))
+        self.assertFalse(_is_local_path("gcs://bucket/key.pt"))
+        self.assertFalse(_is_local_path("hdfs://namenode/key.pt"))
+        self.assertFalse(_is_local_path("a://host/path"))
+        if sys.platform == "win32":
+            self.assertFalse(_is_local_path("//server/share/file.pt"))
+            self.assertFalse(_is_local_path("\\\\server\\share\\file.pt"))
+        else:
+            # On POSIX, //server/share is a local path (os.path.splitdrive returns "").
+            self.assertTrue(_is_local_path("//server/share/file.pt"))
+
+    def test_remote_path_bypasses_tmp(self):
+        # The save itself will fail (s3:// is not natively supported); we only
+        # verify the routing: _save_via_tmp must not be called for remote URIs.
+        with patch("torch.serialization._save_via_tmp") as mock_tmp:
+            try:
+                torch.save(torch.tensor([1]), "s3://bucket/key.pt")
+            except Exception:
+                pass
+            mock_tmp.assert_not_called()
+
+        # Complementary check: local paths must use _save_via_tmp.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch("torch.serialization._save_via_tmp") as mock_tmp:
+                mock_tmp.side_effect = RuntimeError("intercepted")
+                with self.assertRaises(RuntimeError):
+                    torch.save(torch.tensor([1]), os.path.join(tmp_dir, "out.pt"))
+                mock_tmp.assert_called_once()
+
+
 if __name__ == '__main__':
     run_tests()
