@@ -240,6 +240,18 @@ PyObjectTypePtr PyObjectType::get() {
   static PyObjectTypePtr value(new PyObjectType());
   return value;
 }
+PyObjectTypePtr PyObjectType::create(std::string class_name) {
+  static ska::flat_hash_map<std::string, PyObjectTypePtr> pyObjectTypePtrs;
+  static std::mutex mutex;
+  std::lock_guard<std::mutex> lock(mutex);
+  auto it = pyObjectTypePtrs.find(class_name);
+  if (it != pyObjectTypePtrs.end()) {
+    return it->second;
+  }
+  auto type = PyObjectTypePtr(new PyObjectType(class_name));
+  pyObjectTypePtrs.emplace(std::move(class_name), type);
+  return type;
+}
 CapsuleTypePtr CapsuleType::get() {
   static CapsuleTypePtr value(new CapsuleType());
   return value;

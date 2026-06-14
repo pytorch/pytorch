@@ -124,7 +124,14 @@ TypePtr SchemaTypeParser::parseBaseType() {
 
   // Check if this type is registered as an opaque type first
   if (isRegisteredOpaqueType(text)) {
-    return c10::PyObjectType::get();
+    return c10::PyObjectType::create(text);
+  }
+
+  if (text == "PyObject") {
+    throw(
+        ErrorReport(tok.range)
+        << "PyObject is not a valid type specifier in operator schemas. "
+           "Register an opaque type and use its registered class name instead.");
   }
 
   auto it = type_map.find(text);
