@@ -25,6 +25,7 @@
 #include <utility>
 
 #include <ATen/ThreadLocalState.h>
+#include <ATen/TensorUtils.h>
 
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
@@ -1565,7 +1566,36 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::all_gather_single(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const AllgatherOptions& opts) {
-  auto tensor_list = at::chunk(output_tensor, this->getSize(), 0);
+  auto worldSize = this->getSize();
+
+  TORCH_CHECK_VALUE(
+      input_tensor.numel() * worldSize == output_tensor.numel(),
+      "ProcessGroupGloo::_allgather_base: output tensor size must be equal "
+      "to world_size times input tensor size");
+
+  // Support both concatenation and stacking output layouts.
+  // The underlying allgather() validates that each output chunk has the same
+  // shape as the input.  A stacked output (world_size, *input.shape) needs to
+  // be viewed as the concatenated form (world_size * input.size(0), ...) so
+  // that chunking along dim 0 produces chunks matching the input shape.
+  // We verify the strides are compatible before calling view() to guarantee a
+  // zero-copy alias rather than silently writing into a temporary copy.
+  auto expected_cat_sizes = input_tensor.sizes().vec();
+  if (!expected_cat_sizes.empty()) {
+    expected_cat_sizes[0] *= worldSize;
+  }
+  auto new_strides = at::detail::computeStride(
+      output_tensor.sizes(), output_tensor.strides(), expected_cat_sizes);
+  TORCH_CHECK(
+      new_strides.has_value(),
+      "ProcessGroupGloo::_allgather_base: output tensor with shape ",
+      output_tensor.sizes(),
+      " is not viewable as ",
+      expected_cat_sizes,
+      ". Output must be contiguous in the concatenation or stacking layout.");
+  auto output_for_chunk = output_tensor.view(expected_cat_sizes);
+
+  auto tensor_list = at::chunk(output_for_chunk, worldSize, 0);
   std::vector<std::vector<at::Tensor>> outputs = {tensor_list};
   std::vector<at::Tensor> inputs = {input_tensor};
   return this->allgather(outputs, inputs, opts);
