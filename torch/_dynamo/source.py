@@ -1174,6 +1174,13 @@ class SubclassAttrListSource(ChainedSource):
         return "{0}.__tensor_flatten__()[0]"
 
 
+@dataclass_with_cached_hash(frozen=True)
+class AsyncCollectiveTensorSource(ChainedSource):
+    @property
+    def _name_template(self) -> str:
+        return "___resolve_async_collective_tensor({0})"
+
+
 # NB: We don't expect you to actually ever generate guards against this
 # source, it is ephemeral
 @dataclass_with_cached_hash(frozen=True)

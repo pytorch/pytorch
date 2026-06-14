@@ -119,6 +119,7 @@ from torch.utils.weak import TensorWeakRef
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
 from .source import (
+    AsyncCollectiveTensorSource,
     AttrProxySource,
     AttrSource,
     CallFunctionNoArgsSource,
@@ -740,6 +741,16 @@ def from_numpy(a: Any) -> torch.Tensor:
         return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
 
 
+def resolve_async_collective_tensor(a: Any) -> torch.Tensor | None:
+    if type(a) is torch.Tensor:
+        return a
+    module = sys.modules.get("torch.distributed._functional_collectives")
+    act_type = getattr(module, "AsyncCollectiveTensor", None)
+    if act_type is not None and type(a) is act_type:
+        return a.elem
+    return None
+
+
 # For user stack printing
 @functools.cache
 def uninteresting_files() -> set[str]:
@@ -784,6 +795,7 @@ def _get_closure_vars() -> dict[str, object]:
             "utils_device": torch.utils._device,
             "device": torch.device,
             "___from_numpy": from_numpy,
+            "___resolve_async_collective_tensor": resolve_async_collective_tensor,
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
@@ -1858,6 +1870,15 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x.__tensor_flatten__()[0],
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, AsyncCollectiveTensorSource):
+            if not base_guard_manager:
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=resolve_async_collective_tensor,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

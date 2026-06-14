@@ -1610,10 +1610,28 @@ class ACTCompileTest(TestCase):
         r2 = compiled_fn(act2)
         self.assertEqual(r2, elem2 * 2)
 
-    def test_act_guard_recompiles(self):
+    def test_act_guard_accepts_resolved_tensor(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(lambda x: x * 2, backend=cnt)
+
+        elem = torch.randn(4, 4)
+        r1 = compiled_fn(AsyncCollectiveTensor(elem))
+        self.assertEqual(r1, elem * 2)
+        self.assertEqual(cnt.frame_count, 1)
+
+        r2 = compiled_fn(elem)
+        self.assertEqual(r2, elem * 2)
+        self.assertEqual(cnt.frame_count, 1)
+
+        other_dtype = elem.double()
+        r3 = compiled_fn(other_dtype)
+        self.assertEqual(r3, other_dtype * 2)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_tensor_guard_recompiles_for_act(self):
         """
-        Dynamo must recompile when an input switches between plain tensor
-        and AsyncCollectiveTensor (or vice versa).
+        Dynamo must recompile when a plain Tensor input switches to an
+        AsyncCollectiveTensor.
         """
         cnt = torch._dynamo.testing.CompileCounter()
         compiled_fn = torch.compile(lambda x: x * 2, backend=cnt)
