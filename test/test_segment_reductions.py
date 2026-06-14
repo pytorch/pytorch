@@ -8,6 +8,7 @@ import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
+    dtypesIfMPS,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -15,7 +16,6 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     parametrize,
 )
-
 
 reductions = ["max", "mean", "min", "sum", "prod"]
 
@@ -122,6 +122,12 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(
+        *product(
+            (torch.half, torch.bfloat16, torch.float),
+            (torch.int, torch.int64)
+        )
+    )
     def test_simple_1d(self, device, dtypes):
         val_dtype, length_type = dtypes
         lengths = [1, 2, 3, 0]
@@ -179,6 +185,12 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(
+        *product(
+            (torch.half, torch.bfloat16, torch.float),
+            (torch.int, torch.int64)
+        )
+    )
     def test_simple_zero_length(self, device, dtypes):
         val_dtype, length_type = dtypes
         lengths = [0, 0]
@@ -234,6 +246,12 @@ class TestSegmentReductions(TestCase):
         *product(
             (torch.half, torch.bfloat16, torch.float, torch.double),
             (torch.int, torch.int64),
+        )
+    )
+    @dtypesIfMPS(
+        *product(
+            (torch.half, torch.bfloat16, torch.float),
+            (torch.int, torch.int64)
         )
     )
     def test_multi_d_simple(self, device, dtypes):
@@ -364,6 +382,12 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(
+        *product(
+            (torch.half, torch.bfloat16, torch.float),
+            (torch.int, torch.int64)
+        )
+    )
     @parametrize("reduce", ['sum', 'prod', 'min', 'max', 'mean'])
     def test_pytorch_scatter_test_cases(self, device, dtypes, reduce):
         val_dtype, length_dtype = dtypes
@@ -486,6 +510,12 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(
+        *product(
+            (torch.half, torch.bfloat16, torch.float),
+            (torch.int, torch.int64)
+        )
+    )
     def test_multi_d(self, device, dtypes):
         val_dtype, _ = dtypes
         axis = 0
@@ -569,7 +599,7 @@ class TestSegmentReductions(TestCase):
 
 
 
-instantiate_device_type_tests(TestSegmentReductions, globals())
+instantiate_device_type_tests(TestSegmentReductions, globals(), allow_mps=True)
 
 if __name__ == "__main__":
     run_tests()
