@@ -1487,6 +1487,31 @@ Example::
     tensor([[ 0.,  0.,  0.],
             [ 0.,  0.,  0.],
             [ 0.,  0.,  0.]])
+
+.. function:: bernoulli(input, p, *, generator=None) -> Tensor
+   :noindex:
+
+Draws binary random numbers (0 or 1) from a Bernoulli distribution, using the
+single probability :attr:`p` for every element. In this overload the values of
+:attr:`input` are ignored; the tensor is used only to determine the shape,
+``dtype``, ``layout`` and ``device`` of the returned tensor.
+
+Args:
+    input (Tensor): the tensor that defines the shape, ``dtype``, ``layout``
+        and ``device`` of the output tensor
+    p (float): the probability of drawing ``1``, shared by all elements. Must
+        be in the range :math:`0 \leq p \leq 1`.
+
+Keyword args:
+    {generator}
+
+Example::
+
+    >>> a = torch.empty(3, 3)
+    >>> torch.bernoulli(a, 0.5)
+    tensor([[ 0.,  1.,  0.],
+            [ 1.,  1.,  0.],
+            [ 0.,  1.,  1.]])
 """.format(**common_args),
 )
 
