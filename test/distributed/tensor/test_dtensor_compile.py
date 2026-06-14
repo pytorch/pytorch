@@ -251,6 +251,20 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = fn(x)
         res.to_local().sum().backward()
 
+    def test_to_local_backward_unbacked_symbolic_stride(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        local = torch.randn(8, 8, device=self.device_type, requires_grad=True)
+        x = DTensor.from_local(local, mesh, [Shard(0)], run_check=False)
+        torch._dynamo.decorators.mark_unbacked(x, 0, hint_override=x.shape[0])
+        torch._dynamo.decorators.mark_unbacked(x, 1, hint_override=x.shape[1])
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return (x.to_local() * 2).sum()
+
+        fn(x).backward()
+        self.assertEqual(local.grad, torch.full_like(local, 2))
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW or TEST_XPU,
         "https://github.com/pytorch/pytorch/issues/178745",

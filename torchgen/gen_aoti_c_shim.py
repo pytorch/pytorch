@@ -7,11 +7,7 @@ import textwrap
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from torchgen.aoti.fallback_ops import (
-    AOTIFallbackMetadata,
-    aten_shimified_ops,
-    inductor_fallback_ops,
-)
+from torchgen.aoti.fallback_ops import aten_shimified_ops, inductor_fallback_ops
 from torchgen.api.types import DispatcherSignature
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
 from torchgen.context import method_with_native_function
@@ -304,7 +300,7 @@ _TORCH_VERSION_PATTERN = re.compile(r"^TORCH_VERSION_\d+_\d+_\d+$")
 
 
 def _get_earliest_torch_version_for_op_variant(
-    op_metadata: AOTIFallbackMetadata,
+    op_metadata: dict[str, str | dict[str, list[str] | str]],
     op_version: int,
 ) -> str | None:
     """
@@ -336,7 +332,7 @@ def gen_declaration_and_definition(
     schema: FunctionSchema,
     device: str,
     backend_call: str,
-    op_metadata: AOTIFallbackMetadata,
+    op_metadata: dict[str, str | dict[str, list[str] | str]],
 ) -> tuple[str, str]:
     base_name = schema.name.unambiguous_name()
 
@@ -560,7 +556,7 @@ def get_fallback_op_name(func: NativeFunction) -> str:
 
 def gen_c_shim(
     func: NativeFunction,
-    version_info: AOTIFallbackMetadata,
+    version_info: dict[str, str | dict[str, list[str] | str]],
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
@@ -602,7 +598,7 @@ def gen_c_shim(
 
 @dataclass(frozen=True)
 class ShimGenerator:
-    inductor_fallback_ops: dict[str, AOTIFallbackMetadata]
+    inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]]
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup]
     dispatch_key: DispatchKey | None
     backend_indices: dict[DispatchKey, BackendIndex]
@@ -629,7 +625,7 @@ class ShimGenerator:
 
 def gen_aoti_c_shim(
     native_functions: Sequence[NativeFunction],
-    inductor_fallback_ops: dict[str, AOTIFallbackMetadata],
+    inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]],
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],

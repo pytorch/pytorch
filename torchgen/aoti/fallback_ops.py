@@ -26,9 +26,7 @@
 # available since torch 2.9. ALL NEWLY ADDED OPS MUST INCLUDE A "since" KEY WITH THE VALUE SET
 # TO THE CURRENT TORCH VERSION (the version when the op was added).
 
-AOTIFallbackMetadata = dict[str, str | bool | dict[str, list[str] | str]]
-
-inductor_fallback_ops: dict[str, AOTIFallbackMetadata] = {
+inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten._adaptive_avg_pool2d_backward.default": {},
     "aten._adaptive_avg_pool2d.default": {},
     "aten._adaptive_avg_pool3d_backward.default": {},
@@ -83,10 +81,10 @@ inductor_fallback_ops: dict[str, AOTIFallbackMetadata] = {
         "since": "TORCH_VERSION_2_11_0"
     },
     "aten._scaled_dot_product_fused_attention_overrideable_backward.default": {
-        "only_for_kernel_backends": True
+        "only_for_kernel_backends": "1"
     },
     "aten._scaled_dot_product_fused_attention_overrideable.default": {
-        "only_for_kernel_backends": True
+        "only_for_kernel_backends": "1"
     },
     "aten._scaled_mm.default": {},
     "aten._scaled_grouped_mm.default": {"since": "TORCH_VERSION_2_10_0"},
@@ -232,7 +230,7 @@ only_for_kernel_backends_allowed_devices: dict[str, frozenset[str]] = {
 _only_for_kernel_backends_ops = frozenset(
     name
     for name, metadata in inductor_fallback_ops.items()
-    if metadata.get("only_for_kernel_backends") is True
+    if metadata.get("only_for_kernel_backends") == "1"
 )
 if _only_for_kernel_backends_ops != only_for_kernel_backends_allowed_devices.keys():
     missing = (
@@ -252,7 +250,7 @@ if _only_for_kernel_backends_ops != only_for_kernel_backends_allowed_devices.key
 # Unlike other c_shims, operators in this file do not bypass the dispatcher.
 # The same BC rules apply as inductor_fallback_ops, read about the "since"
 # key above.
-aten_shimified_ops: dict[str, AOTIFallbackMetadata] = {
+aten_shimified_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten.fill_.Scalar": {},
     "aten.pad.default": {},
     "aten.narrow.default": {},
