@@ -198,7 +198,7 @@ class SymNode:
     def _value_eq(self, other: SymNode) -> bool:
         # Purposely don't include the shape_env in the eq.
         return (
-            self._expr == other._expr
+            self._expr == other._expr  # type: ignore[bad-return]
             and self.pytype == other.pytype
             and self._hint == other._hint
             and self.constant == other.constant
@@ -751,6 +751,7 @@ METHOD_TO_OPERATOR = {
     "sym_not": sym_not,
     "float_truediv": operator.truediv,
     "int_truediv": operator.truediv,
+    "xor": operator.xor,
 }
 
 unary_magic_methods = {
@@ -806,11 +807,11 @@ unary_methods = unary_magic_methods | unary_nonmagic_methods
 
 # Most methods are only registered on SymInt and SymFloat
 # Some methods are only be registered on SymBool
-only_bool_magic_methods = {"and", "or", "sym_not", "sym_ite"}
+only_bool_magic_methods = {"and", "or", "xor", "sym_not", "sym_ite"}
 # Methods that implicitly convert SymBool into SymInt
 bool_becomes_int_magic_methods = {"add", "sub", "mul"}
 # Methods that are also on SymBool, in addition to on SymInt and SymFloat
-also_bool_magic_methods = {"eq"}
+also_bool_magic_methods = {"eq", "ge", "gt", "le", "lt", "ne"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
 # Methods that are only for float
@@ -839,6 +840,7 @@ always_bool_magic_methods = {
     "ge",
     "and",
     "or",
+    "xor",
     "sym_not",
     "is_non_overlapping_and_dense",
     "is_integer",
@@ -896,6 +898,12 @@ def _sympy_or(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
     import sympy
 
     return sympy.Or(a, b)
+
+
+def _sympy_xor(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+    import sympy
+
+    return sympy.Xor(a, b)
 
 
 def _sympy_lshift(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
@@ -1045,6 +1053,7 @@ reflectable_magic_methods = {
     "and": _sympy_and,
     "bitwise_and": _bitwise_and,
     "or": _sympy_or,
+    "xor": _sympy_xor,
     "bitwise_or": _bitwise_or,
     "bitwise_xor": _bitwise_xor,
     "float_truediv": _sympy_float_truediv,

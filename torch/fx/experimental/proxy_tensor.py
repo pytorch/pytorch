@@ -1367,9 +1367,11 @@ class _SymNodeDict:
         self.sym_node_dict: dict[PySymType, _PySymProxyType] = {}
 
     def __setitem__(self, key: PySymType, value: _PySymProxyType) -> None:
+        # pyrefly: ignore [unsupported-operation]
         self.sym_node_dict[key.node] = value
 
     def __getitem__(self, key: PySymType) -> _PySymProxyType:
+        # pyrefly: ignore [bad-index]
         return self.sym_node_dict[key.node]
 
     def __contains__(self, key: PySymType) -> bool:
@@ -1463,7 +1465,8 @@ class PythonKeyTracer(Tracer):
         elif isinstance(a, py_sym_types):
             if a.node.constant is None:
                 raise AssertionError("a.node.constant should not be None")
-            return a.node.constant
+            # pyrefly: ignore [bad-return]
+            return a.constant
 
         # Try reconstructing untracked opaque reference types from existing
         # graph inputs (e.g. derive a DeviceMesh submesh from its root mesh).

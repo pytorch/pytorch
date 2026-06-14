@@ -41,6 +41,7 @@ from torch._logging import trace_structured
 from torch._opaque_base import OpaqueBase
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._typing_utils import not_none
 from torch.utils.weak import WeakIdKeyDictionary
 
 
@@ -536,10 +537,12 @@ class MetaStorageDesc:
         if isinstance(self.size, torch.SymInt):
             node = self.size.node
             free_symbols = node.expr.free_symbols
-            if free_symbols and all(
-                symbol in node.shape_env.var_to_hint_override for symbol in free_symbols
-            ):
-                metadata["size_hint"] = node.shape_env.optimization_hint(node.expr)
+            if free_symbols:
+                shape_env = not_none(node.shape_env)
+                if all(
+                    symbol in shape_env.var_to_hint_override for symbol in free_symbols
+                ):
+                    metadata["size_hint"] = shape_env.optimization_hint(node.expr)
         return metadata
 
 
