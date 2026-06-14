@@ -834,9 +834,13 @@ def _codegen_compiled_fn_invocation(
             if disable_amp:
                 rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
                 rw_lines.append("            with _DisableAutocast_():")
-                rw_lines.append("                return _compiled_fn_(args)")
+                rw_lines.append(
+                    "                return _normalize_as_list_(_compiled_fn_(args))"
+                )
             else:
-                rw_lines.append("            return _compiled_fn_(args)")
+                rw_lines.append(
+                    "            return _normalize_as_list_(_compiled_fn_(args))"
+                )
         elif disable_amp:
             rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
             rw_lines.append("            with _DisableAutocast_():")
