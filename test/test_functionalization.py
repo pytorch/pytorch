@@ -194,6 +194,42 @@ class TestFunctionalization(TestCase):
         )
         self.assertEqual(r.stride(), (5, 1))
 
+    def test_inplace_on_strided_input_preserves_stride_for_as_strided(self):
+        def f(x):
+            x.add_(1)
+            return torch.as_strided_copy(x, (3,), (2,))
+
+        x_ref = torch.arange(10)[1::2]
+        x_test = torch.arange(10)[1::2]
+
+        out_ref = f(x_ref)
+        out_test = _functionalize(f, reapply_views=True, crossref=self.crossref)(x_test)
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x_ref, x_test)
+
+    @skipIfTorchDynamo("Test directly exercises torch.compile")
+    def test_compile_dynamic_inplace_on_strided_input_preserves_stride_for_as_strided(
+        self,
+    ):
+        def f(x):
+            x.add_(1)
+            return torch.as_strided_copy(x, (3,), (2,))
+
+        compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True, dynamic=True)
+        x_ref = torch.arange(10)[1::2]
+        x_test = torch.arange(10)[1::2]
+        torch._dynamo.mark_dynamic(x_test, 0)
+
+        try:
+            out_ref = f(x_ref)
+            out_test = compiled_f(x_test)
+        finally:
+            torch._dynamo.reset()
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x_ref, x_test)
+
     def test_set_(self):
         def f(x):
             y = torch.ones(2)
@@ -601,8 +637,9 @@ def forward(self, arg0_1):
 
 def forward(self, arg0_1):
     as_strided = torch.ops.aten.as_strided.default(arg0_1, [2], [2], 1)
-    add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(arg0_1, add, [2], [2], 1);  add = None
+    add = torch.ops.aten.add.Tensor(as_strided, 1)
+    copy = torch.ops.aten.copy.default(as_strided, add);  as_strided = add = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(arg0_1, copy, [2], [2], 1);  copy = None
     as_strided_1 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [2], 1);  as_strided_1 = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, as_strided_scatter);  arg0_1 = copy_ = None
     return as_strided_scatter
@@ -708,7 +745,8 @@ def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     clone = torch.ops.aten.clone.default(arg0_1)
     diagonal = torch.ops.aten.diagonal.default(clone)
-    add = torch.ops.aten.add_.Tensor(diagonal, ones);  diagonal = ones = add = None
+    add = torch.ops.aten.add.Tensor(diagonal, ones);  ones = None
+    copy = torch.ops.aten.copy_.default(diagonal, add);  diagonal = add = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(clone);  clone = diagonal_1 = None
     mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
     return mul
@@ -756,8 +794,9 @@ def forward(self, arg0_1):
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(arg0_1)
-    add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(arg0_1, add);  add = None
+    add = torch.ops.aten.add.Tensor(diagonal, ones);  ones = None
+    copy = torch.ops.aten.copy.default(diagonal, add);  diagonal = add = None
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(arg0_1, copy);  copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(diagonal_scatter);  diagonal_1 = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, diagonal_scatter);  arg0_1 = copy_ = None
     return diagonal_scatter
@@ -839,11 +878,12 @@ def forward(self, arg0_1):
     getitem = split[0];  getitem = None
     getitem_1 = split[1];  split = None
     diagonal = torch.ops.aten.diagonal.default(getitem_1);  getitem_1 = None
-    add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
+    add = torch.ops.aten.add.Tensor(diagonal, ones);  ones = None
+    copy = torch.ops.aten.copy.default(diagonal, add);  diagonal = add = None
     split_1 = torch.ops.aten.split.Tensor(arg0_1, 2)
     getitem_2 = split_1[0];  getitem_2 = None
     getitem_3 = split_1[1];  split_1 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_3, add);  getitem_3 = add = None
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_3, copy);  getitem_3 = copy = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 2, 4);  diagonal_scatter = None
     split_2 = torch.ops.aten.split.Tensor(slice_scatter, 2)
     getitem_4 = split_2[0];  getitem_4 = None
@@ -911,11 +951,12 @@ def forward(self, arg0_1):
     getitem = split_with_sizes[0]
     getitem_1 = split_with_sizes[1];  split_with_sizes = getitem_1 = None
     diagonal = torch.ops.aten.diagonal.default(getitem);  getitem = None
-    add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
+    add = torch.ops.aten.add.Tensor(diagonal, ones);  ones = None
+    copy = torch.ops.aten.copy.default(diagonal, add);  diagonal = add = None
     split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [2, 2])
     getitem_2 = split_with_sizes_1[0]
     getitem_3 = split_with_sizes_1[1];  split_with_sizes_1 = getitem_3 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_2, add);  getitem_2 = add = None
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_2, copy);  getitem_2 = copy = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 0, 2);  diagonal_scatter = None
     split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(slice_scatter, [2, 2])
     getitem_4 = split_with_sizes_2[0]
@@ -1029,9 +1070,10 @@ def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
     transpose = torch.ops.aten.transpose.int(arg0_1, 1, 0)
     select = torch.ops.aten.select.int(transpose, 0, 0);  transpose = None
-    add = torch.ops.aten.add.Tensor(select, ones);  select = ones = None
+    add = torch.ops.aten.add.Tensor(select, ones);  ones = None
+    copy = torch.ops.aten.copy.default(select, add);  select = add = None
     transpose_1 = torch.ops.aten.transpose.int(arg0_1, 1, 0);  arg0_1 = None
-    select_scatter = torch.ops.aten.select_scatter.default(transpose_1, add, 0, 0);  transpose_1 = add = None
+    select_scatter = torch.ops.aten.select_scatter.default(transpose_1, copy, 0, 0);  transpose_1 = copy = None
     transpose_2 = torch.ops.aten.transpose.int(select_scatter, 1, 0);  select_scatter = None
     transpose_3 = torch.ops.aten.transpose.int(transpose_2, 1, 0)
     select_1 = torch.ops.aten.select.int(transpose_3, 0, 0);  transpose_3 = select_1 = None
@@ -1092,9 +1134,10 @@ def forward(self, arg0_1):
     unbind = torch.ops.aten.unbind.int(transpose);  transpose = None
     getitem = unbind[0]
     getitem_1 = unbind[1];  unbind = getitem_1 = None
-    add = torch.ops.aten.add.Tensor(getitem, ones);  getitem = ones = None
+    add = torch.ops.aten.add.Tensor(getitem, ones);  ones = None
+    copy = torch.ops.aten.copy.default(getitem, add);  getitem = add = None
     transpose_1 = torch.ops.aten.transpose.int(arg0_1, 1, 0);  arg0_1 = None
-    select_scatter = torch.ops.aten.select_scatter.default(transpose_1, add, 0, 0);  transpose_1 = add = None
+    select_scatter = torch.ops.aten.select_scatter.default(transpose_1, copy, 0, 0);  transpose_1 = copy = None
     transpose_2 = torch.ops.aten.transpose.int(select_scatter, 1, 0);  select_scatter = None
     transpose_3 = torch.ops.aten.transpose.int(transpose_2, 1, 0)
     unbind_1 = torch.ops.aten.unbind.int(transpose_3);  transpose_3 = None
@@ -1341,7 +1384,8 @@ def forward(self, arg0_1):
     split = torch.ops.aten.split.Tensor(squeeze, 2);  squeeze = None
     getitem = split[0]
     getitem_1 = split[1];  split = getitem_1 = None
-    add_1 = torch.ops.aten.add_.Tensor(getitem, ones);  getitem = ones = add_1 = None
+    add_1 = torch.ops.aten.add.Tensor(getitem, ones);  ones = None
+    copy = torch.ops.aten.copy_.default(getitem, add_1);  getitem = add_1 = copy = None
     view_2 = torch.ops.aten.view.default(add, [8]);  add = None
     view_3 = torch.ops.aten.view.default(view_2, [2, 4]);  view_2 = None
     transpose_1 = torch.ops.aten.transpose.int(view_3, 1, 0);  view_3 = None
@@ -1468,7 +1512,8 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
+    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
+    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
@@ -1510,7 +1555,8 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
+    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
+    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
@@ -1552,7 +1598,8 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
+    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
+    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
@@ -1594,7 +1641,8 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
+    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
+    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
@@ -1657,7 +1705,8 @@ def forward(self, arg0_1):
 def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
     diagonal = torch.ops.aten.diagonal.default(add)
-    fill = torch.ops.aten.fill_.Scalar(diagonal, 0);  diagonal = fill = None
+    fill = torch.ops.aten.fill.Scalar(diagonal, 0)
+    copy = torch.ops.aten.copy_.default(diagonal, fill);  diagonal = fill = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(add);  diagonal_1 = None
     return add
     """,
@@ -1903,7 +1952,8 @@ def forward(self, arg0_1):
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([10], device = device(type='cpu'), pin_memory = False)
     select = torch.ops.aten.select.int(zeros, 0, 5)
-    fill = torch.ops.aten.fill_.Scalar(select, 1);  select = fill = None
+    fill = torch.ops.aten.fill.Scalar(select, 1)
+    copy = torch.ops.aten.copy_.default(select, fill);  select = fill = copy = None
     select_1 = torch.ops.aten.select.int(zeros, 0, 5);  select_1 = None
     return zeros
     """,
