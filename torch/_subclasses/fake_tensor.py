@@ -82,9 +82,21 @@ T = TypeVar("T")
 
 aten = torch._ops.ops.aten
 
-CONSTANT_NUMEL_LIMIT = 1
+# Keep small tensors constant so shape tensors built during tracing preserve
+# their values through downstream scalar uses such as item() or SymInt args.
+CONSTANT_NUMEL_LIMIT = 8
 
 RECURSION_COUNT = 0
+
+
+def can_constant_fold_through_op(func: torch._ops.OpOverload) -> bool:
+    if torch.Tag.nondeterministic_seeded in func.tags:
+        return False
+    # This op's result depends on the current rank, so folding one rank's value
+    # into a graph compiled for other ranks is incorrect.
+    if func.name() == "device_mesh::_runtime_compute_coordinate_on_dim":
+        return False
+    return True
 
 
 class _FakeTensorConstructorIgnoredState(TypedDict, total=False):
@@ -2727,7 +2739,7 @@ class FakeTensorMode(TorchDispatchMode):
         all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
             isinstance(func, torch._ops.OpOverload)
-            and torch.Tag.nondeterministic_seeded not in func.tags
+            and can_constant_fold_through_op(func)
             # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view.
             # Example: fake_a.transpose_(0,1) would mutate fake_a.constant in-place, changing its
             # shape from (2,3) to (3,2), while fake_a.shape still reports (2,3) → divergence.

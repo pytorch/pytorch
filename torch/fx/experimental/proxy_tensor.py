@@ -52,6 +52,8 @@ from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
+    can_constant_fold_through_op,
+    CONSTANT_NUMEL_LIMIT,
     FakeTensor,
     FakeTensorMode,
     get_plain_tensors,
@@ -120,8 +122,6 @@ prim = torch.ops.prim
 
 log = logging.getLogger(__name__)
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
-
-CONSTANT_NUMEL_LIMIT = 1
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -1329,7 +1329,7 @@ def proxy_call(
                 raise AssertionError(f"Expected Proxy or Tensor, got {type(args[0])}")
             constant = args[0].clone()
     elif (
-        torch.Tag.nondeterministic_seeded not in func.tags
+        can_constant_fold_through_op(func)
         and all_constant
         and any_constant
         and pytree.tree_all_only(Tensor, tensor_numel_in_limit, out)

@@ -210,9 +210,10 @@ class FakeTensorTest(TestCase):
             self.skipTest("propagate_real_tensors resolves the real nnz")
 
         with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
-            out = torch.sparse.spdiags(
-                torch.randn(2, 100), torch.tensor([-1, -2]), (100, 2)
+            dynamic_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, torch.tensor([-1, -2]), make_constant=False
             )
+            out = torch.sparse.spdiags(torch.randn(2, 100), dynamic_offsets, (100, 2))
 
         nnz = out._values().shape[0]
         nnz_range = mode.shape_env.var_to_range[nnz.node.expr]
@@ -2211,14 +2212,12 @@ class FakeTensorConstHandling(TestCase):
             batch_shape = [len(tensors)] + list(tensors[0].shape[:-2]) + list(max_size)
             return tensors[0].new_full(batch_shape, 0.0)
 
-        with self.assertRaises(
-            torch._subclasses.fake_tensor.DataDependentOutputException
-        ):
-            with torch._subclasses.fake_tensor.FakeTensorMode():
-                a = torch.randn(3, 800, 1199)
-                b = torch.randn(3, 800, 800)
-                inputs = [a, b]
-                ref = fn(inputs)
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            a = torch.randn(3, 800, 1199)
+            b = torch.randn(3, 800, 800)
+            inputs = [a, b]
+            ref = fn(inputs)
+            self.assertEqual(ref.shape, torch.Size([2, 3, 800, 1216]))
 
     def test_fake_tensor_batch_norm_cpu(self):
         with torch._subclasses.CrossRefFakeMode():
@@ -2240,7 +2239,7 @@ class FakeTensorConstHandling(TestCase):
     def test_aliased_const_write(self):
         with FakeTensorMode():
             x = torch.tensor([1])
-            y = x.expand([4])
+            y = x.expand([torch._subclasses.fake_tensor.CONSTANT_NUMEL_LIMIT + 1])
             self.assertNotConst(y)
             y[0] = 1
             self.assertNotConst(x)
@@ -3249,6 +3248,7 @@ class FakeTensorDispatchCache(TestCase):
         """
         with FakeTensorMode():
             x = torch.tensor([1, 2], dtype=torch.int32)
+            x.constant = None
             torch.set_default_dtype(torch.float32)
 
             FakeTensorMode.cache_clear()
@@ -3280,18 +3280,21 @@ class FakeTensorDispatchCache(TestCase):
             try:
                 torch.set_default_device("cpu")
                 x = torch.tensor([1, 2])
+                x.constant = None
                 y = x + 1.0
                 self.assertEqual(y.device.type, "cpu")
                 self.assertHitsMisses(0, 1)
 
                 torch.set_default_device("cuda")
                 x = torch.tensor([1, 2])
+                x.constant = None
                 y = x + 1.0
                 self.assertEqual(y.device.type, "cuda")
                 self.assertHitsMisses(0, 2)
 
                 torch.set_default_device("cpu")
                 x = torch.tensor([1, 2])
+                x.constant = None
                 y = x + 1.0
                 self.assertEqual(y.device.type, "cpu")
                 self.assertHitsMisses(1, 2)
@@ -3548,10 +3551,14 @@ class FakeTensorDispatchCache(TestCase):
                 )
 
     def test_cache_aten_index(self):
-        with FakeTensorMode():
+        with FakeTensorMode() as fake_mode:
             x = torch.randn(4, 4, 4)
-            idx_tensor1 = torch.tensor([0, 2, 3])
-            idx_tensor2 = torch.tensor([0, 1, 2])
+            idx_tensor1 = fake_mode.fake_tensor_converter.from_real_tensor(
+                fake_mode, torch.tensor([0, 2, 3]), make_constant=False
+            )
+            idx_tensor2 = fake_mode.fake_tensor_converter.from_real_tensor(
+                fake_mode, torch.tensor([0, 1, 2]), make_constant=False
+            )
 
             FakeTensorMode.cache_clear()
             self.assertHitsMisses(0, 0)
@@ -3563,15 +3570,23 @@ class FakeTensorDispatchCache(TestCase):
             self.assertHitsMisses(1, 3)
             self.assertEqual(extract_tensor_metadata(ref), extract_tensor_metadata(res))
 
-        with FakeTensorMode():
+        with FakeTensorMode() as fake_mode:
             x = torch.randn(4, 4, 4)
-            idx_tensor1 = torch.tensor([True, True, False, True])
+            idx_tensor1 = fake_mode.fake_tensor_converter.from_real_tensor(
+                fake_mode,
+                torch.tensor([True, True, False, True]),
+                make_constant=False,
+            )
             self.assertRaises(
                 DynamicOutputShapeException,
                 lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
             )
 
-            idx_tensor1 = torch.tensor([1, -2, 3, -4], dtype=torch.int8)
+            idx_tensor1 = fake_mode.fake_tensor_converter.from_real_tensor(
+                fake_mode,
+                torch.tensor([1, -2, 3, -4], dtype=torch.int8),
+                make_constant=False,
+            )
             self.assertRaises(
                 DynamicOutputShapeException,
                 lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
