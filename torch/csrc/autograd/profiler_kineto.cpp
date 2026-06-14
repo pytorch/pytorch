@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
+#include <fmt/format.h>
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
@@ -100,11 +101,11 @@ inline bool isExternalTracerState(ProfilerState state) {
 
 inline bool hasRequestedDeviceActivity(
     const std::set<torch::profiler::impl::ActivityType>& activities) {
-  return activities.count(ActivityType::CUDA) ||
-      activities.count(ActivityType::XPU) ||
-      activities.count(ActivityType::MTIA) ||
-      activities.count(ActivityType::HPU) ||
-      activities.count(ActivityType::PrivateUse1);
+  return activities.contains(ActivityType::CUDA) ||
+      activities.contains(ActivityType::XPU) ||
+      activities.contains(ActivityType::MTIA) ||
+      activities.contains(ActivityType::HPU) ||
+      activities.contains(ActivityType::PrivateUse1);
 }
 
 struct OpArgData {
@@ -120,7 +121,7 @@ auto parseArgData(
     const std::vector<op_input_t>& input_shapes,
     const std::vector<op_input_t>& concreteInputs) {
   if (input_shapes.empty()) {
-    return OpArgData{false, {}, {}, {}, {}, {}};
+    return OpArgData{.hasData = false};
   }
 
   std::vector<shape> shapes(input_shapes.size());
@@ -179,12 +180,12 @@ auto parseArgData(
   }
 
   return OpArgData{
-      true,
-      shapes,
-      dtypes,
-      concrete_inputs_list,
-      shapesForKinetoEvent,
-      strides};
+      .hasData = true,
+      .shapes = shapes,
+      .dtypes = dtypes,
+      .concreteInputs = concrete_inputs_list,
+      .shapesForKinetoEvent = shapesForKinetoEvent,
+      .strides = strides};
 }
 
 struct MetadataBase {
@@ -317,10 +318,8 @@ struct AddGenericMetadata : public MetadataBase {
       if (!isValidType && val.isList()) {
         // Check if it's a list of strings
         auto list = val.toListRef();
-        isStringList =
-            std::all_of(list.begin(), list.end(), [](const c10::IValue& item) {
-              return item.isString();
-            });
+        isStringList = std::ranges::all_of(
+            list, [](const c10::IValue& item) { return item.isString(); });
       }
 
       if (!isValidType && !isStringList) {
@@ -869,15 +868,15 @@ static void toggleCPUCollectionDynamic(bool enable) {
 void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
-  if (activities.count(torch::autograd::profiler::ActivityType::CPU) > 0 &&
-      (activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0 ||
-       activities.count(torch::autograd::profiler::ActivityType::XPU) == 0)) {
+  if (activities.contains(torch::autograd::profiler::ActivityType::CPU) &&
+      (!activities.contains(torch::autograd::profiler::ActivityType::CUDA) ||
+       !activities.contains(torch::autograd::profiler::ActivityType::XPU))) {
     LOG(WARNING)
         << "Toggling CPU activity with GPU activity on may result in traces with GPU events on arbitrary tracks";
   } else if (
-      (activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 ||
-       activities.count(torch::autograd::profiler::ActivityType::XPU) > 0) &&
-      activities.count(torch::autograd::profiler::ActivityType::CPU) == 0) {
+      (activities.contains(torch::autograd::profiler::ActivityType::CUDA) ||
+       activities.contains(torch::autograd::profiler::ActivityType::XPU)) &&
+      !activities.contains(torch::autograd::profiler::ActivityType::CPU)) {
     LOG(WARNING)
         << "Toggling GPU activity with CPU activity on may result in traces with incorrect correlation between CPU and GPU events";
   }
