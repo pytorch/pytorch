@@ -674,8 +674,9 @@ Tensor maybe_preserve_strides(const Tensor& old_value, const Tensor& new_value) 
       break;
     }
   }
-  // Avoid forcing a guard on unbacked symbolic storage offsets. If the offset
-  // mismatch is statically known, preserve it; otherwise rely on stride checks.
+  // Avoid forcing a guard on unbacked symbolic storage offsets. Unknown offset
+  // mismatches preserve the preexisting behavior when sizes/strides match; any
+  // statically-known offset mismatch still takes the stride-preserving path.
   if (TORCH_STATICALLY_KNOWN_TRUE(sym_ne(
           old_value.sym_storage_offset(), new_value.sym_storage_offset()))) {
     needs_preserve_strides = true;
