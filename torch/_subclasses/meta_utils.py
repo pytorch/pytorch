@@ -1672,7 +1672,11 @@ class MetaConverter(Generic[_TensorT]):
                         )
                     )
                     if _is_fake_tensor(r):
-                        r._fake_is_mkldnn = True
+                        from torch._subclasses.fake_tensor import (
+                            _mark_fake_tensor_mkldnn,
+                        )
+
+                        _mark_fake_tensor_mkldnn(r)
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
                             if t.size is None:

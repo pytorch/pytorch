@@ -3749,7 +3749,7 @@ class FakeTensorDispatchCache(TestCase):
 
         FakeTensorMode.cache_clear()
         ep.run_decompositions({})
-        self.assertBypasses("unrepresented symbol in output", 3)
+        self.assertBypasses("unrepresented symbol in output", 2)
 
 
 class FakeTensorPreferDeviceType(TestCase):
@@ -3862,6 +3862,18 @@ class FakeTensorViewCopy(TestCase):
                 self.assertTrue(output.is_mkldnn)
                 with self.assertRaisesRegex(RuntimeError, "Change to use reshape"):
                     output.view(output.size(0), -1)
+            for output in (
+                torch.sigmoid(fake_x),
+                torch.ops.aten.sigmoid.default(self=fake_x),
+                torch.tanh(fake_x),
+                fake_x * 2,
+                fake_x + fake_x,
+            ):
+                self.assertTrue(output.is_mkldnn)
+                with self.assertRaisesRegex(RuntimeError, "Change to use reshape"):
+                    output.view(output.size(0), -1)
+            with self.assertRaisesRegex(RuntimeError, "expects MKL-DNN tensor input"):
+                fake_x + fake_mode.from_tensor(torch.ones(fake_x.shape))
             for clone in (
                 lambda: torch.clone(fake_x),
                 lambda: torch.clone(fake_x, memory_format=None),
@@ -3883,6 +3895,7 @@ class FakeTensorViewCopy(TestCase):
 
         with FakeTensorMode() as fake_mode:
             fake_x = fake_mode.from_tensor(x)
+            self.assertEqual(fake_x.dim_order(), x.dim_order())
             for memory_format in (
                 torch.contiguous_format,
                 torch.channels_last,
@@ -4245,6 +4258,9 @@ class FakeTensorViewCopy(TestCase):
                 x, kernel_size=3, stride=3, padding=1, return_indices=True
             )
 
+        def sigmoid_then_view(x):
+            return torch.sigmoid(x).view(x.size(0), -1)
+
         error_cases = (
             (
                 max_pool2d_invalid_dilation,
@@ -4269,6 +4285,12 @@ class FakeTensorViewCopy(TestCase):
                 x3,
                 torch._dynamo.exc.Unsupported,
                 "max_pool3d_with_indices.*MkldnnCPU",
+            ),
+            (
+                sigmoid_then_view,
+                x2,
+                torch._dynamo.exc.TorchRuntimeError,
+                "Change to use reshape",
             ),
         )
         for fn, x, error_type, error in error_cases:

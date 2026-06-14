@@ -88,6 +88,10 @@ _MKLDNN_PROPAGATE_OPS = {
     aten.relu.default,
     aten.transpose.int,
 }
+_MKLDNN_DENSE_OUTPUT_OPS = {
+    aten._to_dense.default,
+    aten.to_dense.default,
+}
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -870,9 +874,27 @@ def _fake_tensor_dim_order(
 
 
 def _should_propagate_mkldnn(func: OpOverload, flat_args: Sequence[object]) -> bool:
-    return func in _MKLDNN_PROPAGATE_OPS and any(
-        isinstance(arg, FakeTensor) and arg.is_mkldnn for arg in flat_args
-    )
+    tensor_args = [
+        arg for arg in pytree.tree_leaves(flat_args) if isinstance(arg, Tensor)
+    ]
+    has_mkldnn_arg = any(arg.is_mkldnn for arg in tensor_args)
+    if not has_mkldnn_arg:
+        return False
+    if any(not arg.is_mkldnn for arg in tensor_args):
+        raise RuntimeError("itensor_from_mkldnn expects MKL-DNN tensor input")
+    if func in _MKLDNN_DENSE_OUTPUT_OPS:
+        return False
+    return func in _MKLDNN_PROPAGATE_OPS or _has_mkldnn_kernel(func)
+
+
+@functools.cache
+def _has_mkldnn_kernel(func: OpOverload) -> bool:
+    try:
+        return torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), "MkldnnCPU")
+    except RuntimeError as e:
+        if "does not exist" in str(e):
+            return False
+        raise
 
 
 class FakeTensor(Tensor):
@@ -1093,6 +1115,8 @@ class FakeTensor(Tensor):
         self.fake_device = device
         self.fake_mode = fake_mode
         self._fake_is_mkldnn = _fake_is_mkldnn
+        if _fake_is_mkldnn and cls is FakeTensor:
+            _mark_fake_tensor_mkldnn(self)
         self.constant = constant
         self.pytype = pytype
         self.dispatch_keys = dispatch_keys
@@ -1143,7 +1167,7 @@ class FakeTensor(Tensor):
         return fake_mode.from_tensor(t)
 
     @classmethod
-    def __torch_function__(
+    def _mkldnn_torch_function(
         cls,
         func: object,
         types: Sequence[type],
@@ -1265,7 +1289,7 @@ class FakeTensor(Tensor):
                 with torch._C.DisableTorchFunctionSubclass():
                     output = aten.clone.default(input_, memory_format=memory_format)
                 if isinstance(output, FakeTensor):
-                    output._fake_is_mkldnn = True
+                    _mark_fake_tensor_mkldnn(output)
                 return output
 
             if func in (torch.Tensor.permute, torch.permute, aten.permute.default):
@@ -1278,6 +1302,13 @@ class FakeTensor(Tensor):
                     torch.preserve_format,
                 )
 
+            if func in (torch.Tensor.sigmoid, torch.sigmoid):
+                with torch._C.DisableTorchFunctionSubclass():
+                    output = aten.sigmoid.default(input_)
+                if isinstance(output, FakeTensor):
+                    _mark_fake_tensor_mkldnn(output)
+                return output
+
         if any(
             torch_function_type is not torch.Tensor
             and not issubclass(torch_function_type, cls)
@@ -1286,7 +1317,16 @@ class FakeTensor(Tensor):
             return NotImplemented
 
         with torch._C.DisableTorchFunctionSubclass():
-            return cast(Any, func)(*args, **kwargs)
+            output = cast(Any, func)(*args, **kwargs)
+        if isinstance(func, torch._ops.OpOverload) and _should_propagate_mkldnn(
+            func, (args, kwargs)
+        ):
+            output_tensors = [
+                out for out in pytree.tree_leaves(output) if isinstance(out, FakeTensor)
+            ]
+            if len(output_tensors) == 1:
+                _mark_fake_tensor_mkldnn(output_tensors[0])
+        return output
 
     @classmethod
     @count
@@ -1508,6 +1548,25 @@ class FakeTensor(Tensor):
             return [elem.item() for elem in self]
         else:
             return [elem.tolist() for elem in self]
+
+
+class MkldnnFakeTensor(FakeTensor):
+    @classmethod
+    def __torch_function__(
+        cls,
+        func: object,
+        types: Sequence[type],
+        args: Sequence[object] = (),
+        kwargs: Mapping[str, object] | None = None,
+    ) -> object:
+        return cls._mkldnn_torch_function(func, types, args, kwargs)
+
+
+def _mark_fake_tensor_mkldnn(t: FakeTensor) -> FakeTensor:
+    t._fake_is_mkldnn = True
+    if type(t) is FakeTensor:
+        t.__class__ = MkldnnFakeTensor
+    return t
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
@@ -3209,6 +3268,15 @@ class FakeTensorMode(TorchDispatchMode):
                 # TODO: Is this really needed?
                 compute_unbacked_bindings(self.shape_env, fake_out, peek=True)
 
+            if _should_propagate_mkldnn(func, flat_args):
+                output_tensors = [
+                    out
+                    for out in pytree.tree_leaves(fake_out)
+                    if isinstance(out, FakeTensor)
+                ]
+                if len(output_tensors) == 1:
+                    _mark_fake_tensor_mkldnn(output_tensors[0])
+
             return fake_out
 
         # Try for fastpath
@@ -3472,6 +3540,11 @@ class FakeTensorMode(TorchDispatchMode):
         common_device = None
         has_scalar_only_inputs = False
         propagate_mkldnn = _should_propagate_mkldnn(func, flat_args)
+        if propagate_mkldnn:
+            output_tensors = [
+                out for out in pytree.tree_leaves(r) if isinstance(out, Tensor)
+            ]
+            propagate_mkldnn = len(output_tensors) == 1
 
         def wrap(e: T) -> T | FakeTensor:
             nonlocal common_device
@@ -3493,7 +3566,7 @@ class FakeTensorMode(TorchDispatchMode):
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
                 if propagate_mkldnn:
-                    e._fake_is_mkldnn = True
+                    _mark_fake_tensor_mkldnn(e)
                 return cast(T, e)
             elif converter is not None:
                 if has_scalar_only_inputs:
@@ -3506,7 +3579,7 @@ class FakeTensorMode(TorchDispatchMode):
                         self, e, device or common_device
                     )
                 if propagate_mkldnn:
-                    out._fake_is_mkldnn = True
+                    _mark_fake_tensor_mkldnn(out)
                 return out
             else:
                 # pyrefly: ignore [bad-return]
