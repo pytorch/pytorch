@@ -10578,6 +10578,8 @@ class TestLinalgCudaOnly(TestCase):
     @setBlasBackendsToDefaultFinally
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     def test_ck_blas_library_mm(self, dtype):
+        if dtype == torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH):
+            self.skipTest("bfloat16 case skipped on gfx90a")
         device = 'cuda'
         shapes = [(7168, 8192, 1280), (1280, 8192, 7168), (8192, 8192, 1280)]
         for M, K, N in shapes:
