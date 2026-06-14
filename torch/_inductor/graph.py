@@ -13,7 +13,7 @@ import time
 import typing_extensions
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import Any, Literal, NoReturn, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -435,6 +435,9 @@ class GraphLowering(torch.fx.Interpreter):
         # InputBuffer offsets are relative to input.data_ptr(); explicit FX
         # as_strided storage offsets are relative to the input's storage.
         self.graph_input_storage_offsets: dict[str, Expr] = {}
+        self.symbolic_input_sources: dict[
+            sympy.Symbol, tuple[str, Literal["size", "stride"], int]
+        ] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (

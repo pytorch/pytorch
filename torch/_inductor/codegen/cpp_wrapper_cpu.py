@@ -10,7 +10,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import sympy
 
@@ -756,6 +756,33 @@ class CppWrapperCpu(PythonWrapperCodegen):
             pass
         else:
             raise AssertionError(f"Unknown value type: {type(value)}")
+
+    def bind_input_symbol(
+        self,
+        sym: sympy.Symbol,
+        input_name: str,
+        kind: Literal["size", "stride"],
+        dim: int,
+        bound_vars: OrderedSet[sympy.Symbol],
+    ) -> None:
+        if sym in bound_vars:
+            return
+        accessor = "sizes" if kind == "size" else "strides"
+        self.prefix.writeline(f"int64_t {sym} = {input_name}.{accessor}()[{dim}];")
+        bound_vars.add(sym)
+        sizevars = getattr(V.graph, "sizevars", None)
+        shape_env = getattr(sizevars, "shape_env", None)
+        if shape_env is None:
+            return
+        for src, tgt in shape_env.replacements.items():
+            if (
+                tgt == sym
+                and isinstance(src, sympy.Symbol)
+                and src not in bound_vars
+                and not symbol_is_type(src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+            ):
+                self.prefix.writeline(f"int64_t {src} = {sym};")
+                bound_vars.add(src)
 
     def generate_input_output_runtime_checks(self):
         """
