@@ -119,6 +119,32 @@ def sequence_iterator(iterable) -> Iterable[object]:
     raise TypeError(f"'{type(iterable)}' object is not iterable")
 
 
+class _ReversedSequenceIterator:
+    # Mirrors CPython's reversed object (Objects/enumobject.c). Walks the
+    # sequence backwards via __getitem__, starting from len(seq) - 1.
+    def __init__(self, seq) -> None:
+        self.seq = seq
+        self.index = len(seq) - 1
+
+    def __iter__(self) -> _ReversedSequenceIterator:
+        return self
+
+    def __next__(self) -> object:
+        if self.index < 0:
+            raise StopIteration
+        try:
+            result = self.seq[self.index]
+        except (IndexError, StopIteration):
+            self.index = -1
+            raise StopIteration from None
+        self.index -= 1
+        return result
+
+
+def reversed_sequence_iterator(seq) -> Iterable[object]:
+    return _ReversedSequenceIterator(seq)
+
+
 def callable_iterator(fn, sentinel, /):
     # If the second argument, sentinel, is given, then object must be a
     # callable object.
@@ -129,5 +155,5 @@ def callable_iterator(fn, sentinel, /):
 
 
 @substitute_in_graph(typing.cast, can_constant_fold_through=True)
-def cast(typ: type, val: _T) -> _T:
+def cast(typ: type, val: _T) -> _T:  # type: ignore[type-var]
     return val

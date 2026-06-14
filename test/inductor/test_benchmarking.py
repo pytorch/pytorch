@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import unittest
 from unittest.mock import patch
 
@@ -9,7 +10,11 @@ from torch._inductor.config import (
     inductor_default_autotune_rep,
     inductor_default_autotune_warmup,
 )
-from torch._inductor.runtime.benchmarking import Benchmarker, TritonBenchmarker
+from torch._inductor.runtime.benchmarking import (
+    Benchmarker,
+    TorchProfilerBenchmarker,
+    TritonBenchmarker,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -220,6 +225,308 @@ class TestBenchmarker(TestCase):
         finally:
             _bench._BENCHMARK_DISPATCH.clear()
             _bench._BENCHMARK_DISPATCH.update(orig)
+
+    def test_default_profiler_benchmarker_selection_supports_xpu_only(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        with (
+            patch.object(
+                _bench.inductor_config, "use_torch_profiler_benchmarker", True
+            ),
+            patch.object(_bench.inductor_config, "use_experimental_benchmarker", False),
+            patch.object(
+                _bench.torch.cuda,
+                "is_available",
+                side_effect=AssertionError("should not query CUDA availability"),
+            ),
+            patch.object(
+                _bench.torch.xpu,
+                "is_available",
+                side_effect=AssertionError("should not query XPU availability"),
+            ),
+            patch.object(
+                _bench.torch.mtia,
+                "is_available",
+                side_effect=AssertionError("should not query MTIA availability"),
+            ),
+        ):
+            self.assertIsInstance(
+                _bench._make_default_benchmarker(), TorchProfilerBenchmarker
+            )
+
+    def test_profiler_benchmarker_fallback_uses_correlated_device_events(self):
+        from torch._inductor.runtime import benchmarking as _bench
+        from torch.autograd import DeviceType
+
+        class FakeProfilerEvent:
+            def __init__(self, name, device_type, event_id, cpu_children=()):
+                self.name = name
+                self.device_type = device_type
+                self.id = event_id
+                self.cpu_children = list(cpu_children)
+
+        class FakeKinetoEvent:
+            def __init__(
+                self,
+                name,
+                device_type,
+                linked_correlation_id,
+                correlation_id,
+                activity_type,
+                start_ns,
+                end_ns,
+            ):
+                self._name = name
+                self._device_type = device_type
+                self._linked_correlation_id = linked_correlation_id
+                self._correlation_id = correlation_id
+                self._activity_type = activity_type
+                self._start_ns = start_ns
+                self._end_ns = end_ns
+
+            def name(self):
+                return self._name
+
+            def device_type(self):
+                return self._device_type
+
+            def linked_correlation_id(self):
+                return self._linked_correlation_id
+
+            def correlation_id(self):
+                return self._correlation_id
+
+            def activity_type(self):
+                return self._activity_type
+
+            def start_ns(self):
+                return self._start_ns
+
+            def end_ns(self):
+                return self._end_ns
+
+        child_event = FakeProfilerEvent("aten::sum", DeviceType.CPU, 11)
+        profiler_events = [
+            FakeProfilerEvent(
+                _bench._CALLABLE_PROFILE_EVENT_NAME,
+                DeviceType.CPU,
+                7,
+                (child_event,),
+            )
+        ]
+        kineto_events = [
+            FakeKinetoEvent("unrelated", DeviceType.XPU, 0, 99, "kernel", 0, 1000),
+            FakeKinetoEvent(
+                "xpu_kernel", DeviceType.XPU, 11, 101, "kernel", 1000, 6000
+            ),
+            FakeKinetoEvent(
+                _bench._CALLABLE_PROFILE_EVENT_NAME,
+                DeviceType.XPU,
+                7,
+                7,
+                "gpu_user_annotation",
+                1000,
+                9000,
+            ),
+        ]
+
+        self.assertEqual(
+            _bench._get_callable_device_kernel_time_us(
+                kineto_events, profiler_events, 1, DeviceType.XPU
+            ),
+            5.0,
+        )
+
+    def test_gpu_benchmark_lock_without_registered_context_is_noop(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        with patch(
+            "torch.cuda.current_device",
+            side_effect=AssertionError("should not query device"),
+        ):
+            with _bench.maybe_gpu_benchmark_lock():
+                pass
+
+    def test_gpu_benchmark_lock_uses_registered_context(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        calls = []
+
+        @contextlib.contextmanager
+        def custom_context():
+            calls.append("enter")
+            try:
+                yield
+            finally:
+                calls.append("exit")
+
+        previous = _bench.set_gpu_benchmark_lock_context(custom_context)
+        try:
+            with patch(
+                "torch.cuda.current_device",
+                side_effect=AssertionError("custom context should not query device"),
+            ):
+                with _bench.maybe_gpu_benchmark_lock():
+                    calls.append("body")
+        finally:
+            _bench.set_gpu_benchmark_lock_context(previous)
+
+        self.assertEqual(calls, ["enter", "body", "exit"])
+
+    def test_set_gpu_benchmark_lock_context_returns_previous_context(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        @contextlib.contextmanager
+        def first_context():
+            yield
+
+        @contextlib.contextmanager
+        def second_context():
+            yield
+
+        previous = _bench.set_gpu_benchmark_lock_context(first_context)
+        try:
+            self.assertIs(
+                _bench.set_gpu_benchmark_lock_context(second_context),
+                first_context,
+            )
+        finally:
+            _bench.set_gpu_benchmark_lock_context(previous)
+
+    def test_do_bench_using_profiling_uses_gpu_benchmark_lock(self):
+        from torch._inductor import utils as inductor_utils
+        from torch._inductor.runtime import benchmarking as _bench
+
+        calls = []
+
+        @contextlib.contextmanager
+        def custom_context():
+            calls.append("enter")
+            try:
+                yield
+            finally:
+                calls.append("exit")
+
+        def fake_do_bench(fn, warmup, rep, is_vetted_benchmarking):
+            calls.append((warmup, rep, is_vetted_benchmarking))
+            fn()
+            return 3.0
+
+        previous = _bench.set_gpu_benchmark_lock_context(custom_context)
+        try:
+            with patch.object(
+                inductor_utils,
+                "_do_bench_using_profiling",
+                side_effect=fake_do_bench,
+            ):
+                result = inductor_utils.do_bench_using_profiling(
+                    lambda: calls.append("fn"),
+                    warmup=1,
+                    rep=2,
+                    is_vetted_benchmarking=True,
+                )
+        finally:
+            _bench.set_gpu_benchmark_lock_context(previous)
+
+        self.assertEqual(result, 3.0)
+        self.assertEqual(calls, ["enter", (1, 2, True), "fn", "exit"])
+
+    def test_benchmark_gpu_with_cuda_graph_uses_gpu_benchmark_lock(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        class FakeCUDAGraph:
+            def replay(self):
+                calls.append("replay")
+
+        class FakeBenchmarker(Benchmarker):
+            @_bench.gpu_benchmark_lock
+            def benchmark_gpu(self, _callable, **kwargs):
+                calls.append("benchmark_gpu")
+                _callable()
+                return 9.0
+
+        benchmarker = FakeBenchmarker()
+        calls = []
+
+        @contextlib.contextmanager
+        def custom_context():
+            calls.append("enter")
+            try:
+                yield
+            finally:
+                calls.append("exit")
+
+        previous = _bench.set_gpu_benchmark_lock_context(custom_context)
+        try:
+            with (
+                patch("torch.cuda.synchronize"),
+                patch("torch.cuda.CUDAGraph", FakeCUDAGraph),
+                patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
+            ):
+                result = benchmarker.benchmark_gpu_with_cuda_graph(
+                    lambda: calls.append("call")
+                )
+        finally:
+            _bench.set_gpu_benchmark_lock_context(previous)
+
+        self.assertEqual(result, 9.0)
+        self.assertEqual(
+            calls,
+            [
+                "enter",
+                "call",
+                "call",
+                "enter",
+                "benchmark_gpu",
+                "replay",
+                "exit",
+                "exit",
+            ],
+        )
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @parametrize(
+        "hip_value, expected_buffer_size_bytes",
+        ((None, 1024), ("mock-hip", 256 * 1024 * 1024)),
+    )
+    def test_torch_profiler_benchmarker_reuses_inductor_helpers(
+        self, hip_value, expected_buffer_size_bytes, device=GPU_TYPE
+    ):
+        benchmarker = TorchProfilerBenchmarker()
+        benchmarker.__dict__["L2_cache_size"] = 1024
+        _, _callable = self.make_params(device, size=16)
+
+        captured_buffer_lengths = []
+        captured_buffer_devices = []
+        original_empty = torch.empty
+
+        def empty_spy(*args, **kwargs):
+            captured_buffer_lengths.append(args[0])
+            captured_buffer_devices.append(kwargs["device"])
+            return original_empty(*args, **kwargs)
+
+        with patch.object(
+            benchmarker,
+            "get_event_pairs",
+            wraps=benchmarker.get_event_pairs,
+        ) as mock_get_event_pairs:
+            with patch.object(torch.version, "hip", hip_value):
+                with patch(
+                    "torch._inductor.runtime.benchmarking.torch.empty",
+                    side_effect=empty_spy,
+                ):
+                    timing = benchmarker.benchmark_gpu(
+                        _callable,
+                        rep=1,
+                        estimation_iters=1,
+                        memory_warmup_iters=0,
+                    )
+
+        self.assertGreater(timing, 0)
+        mock_get_event_pairs.assert_called_once_with(1, device_type=device)
+        self.assertGreater(len(captured_buffer_lengths), 0)
+        self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
+        self.assertEqual(captured_buffer_devices[0], device)
 
 
 if __name__ == "__main__":

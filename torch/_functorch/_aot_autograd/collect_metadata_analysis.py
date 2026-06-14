@@ -123,7 +123,7 @@ def coerce_tangent_and_suggest_memory_format(
     #     and traced tangents with a Shard() placement at compile time.
     #
     if is_subclass and hasattr(out, "__coerce_tangent_metadata__"):
-        out = out.__coerce_tangent_metadata__()
+        out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
 
     if is_subclass:
         # pyrefly: ignore [missing-attribute]
@@ -251,18 +251,10 @@ def run_functionalized_fw_and_collect_metadata(
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
         for arg, f_arg in zip(flat_args, flat_f_args):
-            # NB: Mutation of non-contiguous tensor subclass input can result in a mismatch in
-            # strides between the functionalized arg inner tensors and non-functionalized arg inner
-            # tensors. This is a problem as the inner tensor stride change may not be reflected
-            # correctly in the outer tensor, so disallow this for now.
             mutates_data = has_data_mutation(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
-            if mutates_metadata and is_traceable_wrapper_subclass(arg):
-                raise RuntimeError(
-                    "Metadata mutations are currently not allowed on tensor subclasses"
-                )
             mutates_storage_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=True
             )
@@ -453,7 +445,9 @@ def run_functionalized_fw_and_collect_metadata(
         for o, desc in zip(flat_f_outs, flat_f_outs_descs):
             functional_tensor_storage_changed = isinstance(
                 o, FunctionalTensor
-            ) and torch._functionalize_was_storage_changed(o.elem)
+            ) and torch._functionalize_was_storage_changed(  # type: ignore[attr-defined]
+                o.elem
+            )
             curr_storage = (
                 None
                 if not isinstance(o, torch.Tensor)

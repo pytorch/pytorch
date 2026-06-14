@@ -127,7 +127,7 @@ def get_module_string(gm: torch.fx.GraphModule) -> str:
         s = first + "\n" + s
         return s
 
-    module_string = NNModuleToString.convert(gm)
+    module_string = NNModuleToString.convert(gm, allow_unsafe_repr=True)
     return _convert_to_comment(module_string)
 
 
@@ -308,7 +308,7 @@ def repro_common(
     torch._inductor.config.generate_intermediate_hooks = True
     mod = exported_program.module(check_guards=False)
     args, kwargs = exported_program.example_inputs
-    return mod, args, kwargs
+    return mod, args, kwargs  # type: ignore[return-value]
 
 
 def repro_get_args(

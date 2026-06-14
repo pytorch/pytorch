@@ -208,7 +208,7 @@ if(USE_FLASH_ATTENTION)
         if(ENV{USE_ROCM_CK_SDPA} EQUAL 1)
           caffe2_update_option(USE_ROCM_CK_SDPA ON)
         endif()
-    else()
+    elseif(NOT WIN32)
       caffe2_update_option(USE_ROCM_CK_SDPA ON)
     endif()
     # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
@@ -244,18 +244,17 @@ if(USE_FLASH_ATTENTION)
         -fhip-new-launch-api
         -fgnuc-version=4.2.1
         -fno-implicit-modules
-        -fskip-odr-check-in-gmf
         -fcxx-exceptions
         -fexceptions
         -fcolor-diagnostics
         -faddrsig
         -fno-rounding-math
-        -mconstructor-aliases
         -mllvm=-amdgpu-internalize-symbols
         -fvisibility=hidden
         -Wno-float-equal
         -fgpu-flush-denormals-to-zero
-        -Wno-unused-parameter)
+        -Wno-unused-parameter
+        -Wno-unknown-warning-option)
 
     #TODO: The following flags are specific to 8-bit width types which are not integrated via CK yet.
     #      Add once that support is integrated
@@ -292,6 +291,7 @@ if(USE_FLASH_ATTENTION)
         CK_USE_FNUZ_FP8
         CK_USE_GFX94
         CK_USE_XDL
+        ENABLE_CK
         __HIP_PLATFORM_AMD__=1
         __HIP_PLATFORM_HCC__=1
         CK_TILE_FMHA_FWD_FAST_EXP2=1
@@ -1003,6 +1003,12 @@ foreach(HEADER ${generated_headers} ${cuda_generated_headers})
   # NB: Assumed to be flat
   install(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
 endforeach()
+
+if(USE_XPU)
+  foreach(HEADER ${xpu_generated_headers})
+    install(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
+  endforeach()
+endif()
 
 message("AT_INSTALL_INCLUDE_DIR ${AT_INSTALL_INCLUDE_DIR}/ATen/core")
 foreach(HEADER ${core_generated_headers})

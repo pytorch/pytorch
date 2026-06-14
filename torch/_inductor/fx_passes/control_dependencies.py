@@ -8,6 +8,7 @@ operations (e.g., collective_start -> mm -> wait), this pass wraps operations
 with control_deps to make dependencies explicit.
 """
 
+from operator import attrgetter
 from typing import Any
 
 import torch.fx as fx
@@ -15,6 +16,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
+from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -149,7 +151,8 @@ def preserve_node_ordering(
 
     # Process each node that needs additional dependencies
     for dependent_node, dep_nodes in additional_deps_map.items():
-        assert dependent_node.op == "call_function", dependent_node.op
+        if dependent_node.op != "call_function":
+            raise AssertionError(dependent_node.op)
 
         original_name = dependent_node.name
         original_args = dependent_node.args
@@ -162,7 +165,8 @@ def preserve_node_ordering(
         subgraph_module = _create_subgraph_for_node(graph, dependent_node)
 
         owning_mod = graph.owning_module
-        assert owning_mod is not None
+        if owning_mod is None:
+            raise AssertionError("expected graph to have an owning_module")
         subgraph_attr_name = get_subgraph_name(owning_mod, original_name)
         setattr(graph.owning_module, subgraph_attr_name, subgraph_module)
 
@@ -241,6 +245,8 @@ def _create_subgraph_for_node(
         placeholder = subgraph.placeholder(f"arg_{idx}")
         if "val" in orig_node.meta:
             placeholder.meta.update(orig_node.meta)
+        elif orig_node.op == "get_attr" and isinstance(orig_node.target, str):
+            placeholder.meta["val"] = attrgetter(orig_node.target)(owning_module)
         node_to_placeholder[orig_node] = placeholder
 
     # Replace fx.Node instances with their placeholders
@@ -260,11 +266,12 @@ def _create_subgraph_for_node(
     new_args, new_kwargs = pytree.tree_unflatten(new_flat, spec)
 
     # Recreate the exact original operation in the subgraph
-    assert callable(node.target)
+    if not callable(node.target):
+        raise AssertionError(f"expected node.target to be callable, got {node.target}")
     result = subgraph.call_function(
         node.target,
         tuple(new_args),
-        new_kwargs,
+        new_kwargs,  # type: ignore[arg-type]
     )
 
     # Copy metadata from the original node
@@ -279,4 +286,4 @@ def _create_subgraph_for_node(
         if "val" in result.meta:
             out.meta["val"] = result.meta["val"]
 
-    return fx.GraphModule(owning_module, subgraph)
+    return _LazyGraphModule(owning_module, subgraph)

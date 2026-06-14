@@ -130,7 +130,7 @@ def call_backward(
     *args: Any,
 ) -> torch.Tensor | tuple[torch.Tensor, ...]:
     fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
-    grads = fake._forward_cls.backward(fake, *args)
+    grads = fake._forward_cls.backward(fake, *args)  # type: ignore[attr-defined]
 
     if not isinstance(grads, tuple):
         grads = (grads,)
@@ -227,12 +227,22 @@ def unwrap_maybe_dynamic_int(x: torch.Tensor | int) -> int:
 
 
 def call_accumulate_grad(
-    variable: torch.Tensor, grad: torch.Tensor, has_post_hooks: bool
-) -> None:
+    variable: torch.Tensor,
+    variable_grad: torch.Tensor | None,
+    grad: torch.Tensor | bool,
+    has_post_hooks: bool | None = None,
+) -> torch.Tensor | None:
+    if has_post_hooks is None:
+        # Backward compatibility for graphs captured before current grad became
+        # an explicit argument.
+        has_post_hooks = bool(grad)
+        grad = variable_grad  # type: ignore[assignment]
+        variable_grad = variable.grad
     updated_grad = torch._dynamo.compiled_autograd.ops.AccumulateGrad(  # type: ignore[attr-defined]
-        [grad], variable, variable.grad, has_post_hooks
+        [grad], variable, variable_grad, has_post_hooks
     )
     variable.grad = updated_grad[0]
+    return variable.grad
 
 
 def wrap_inline_with_error_on_graph_break(

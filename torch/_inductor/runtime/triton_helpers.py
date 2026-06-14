@@ -89,6 +89,25 @@ def promote_to_tensor(x):
 
 
 @triton.jit
+def fp8e4m3fn_to_float32(x):
+    x_u32 = x.to(tl.uint32)
+    sign = (x_u32 & 0x80) << 24
+    exp = (x_u32 >> 3) & 0xF
+    mant = x_u32 & 0x7
+
+    normal_bits = sign | ((exp + 120) << 23) | (mant << 20)
+    normal = normal_bits.to(tl.float32, bitcast=True)
+
+    subnormal_abs = mant.to(tl.float32) * 0.001953125
+    subnormal_bits = subnormal_abs.to(tl.uint32, bitcast=True) | sign
+    subnormal = subnormal_bits.to(tl.float32, bitcast=True)
+
+    nan = (sign | 0x7FF00000).to(tl.float32, bitcast=True)
+    result = tl.where(exp == 0, subnormal, normal)
+    return tl.where((exp == 0xF) & (mant == 0x7), nan, result)
+
+
+@triton.jit
 def div_floor_integer(a, b):
     # NOTE: a // b is C division, but we want floor division
     # Based on c10::div_floor_integer
@@ -247,6 +266,23 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
 
 
 @triton.jit
+def online_softmax_combine_with_sum(
+    lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math: tl.constexpr
+):
+    out_max = maximum(lhs_max, rhs_max)
+
+    lhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    )
+    rhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
+    )
+
+    out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    return out_max, out_sum
+
+
+@triton.jit
 def welford_reduce(value, mean, m2, weight, first_iteration):
     if first_iteration:
         new_weight = tl.full(weight.shape, 1, weight.dtype)
@@ -262,7 +298,9 @@ def welford_reduce(value, mean, m2, weight, first_iteration):
 
 @triton.jit
 def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
-    delta = mean_2 - mean_1
+    # Guard against inf - inf = NaN when both means are infinite and equal.
+    # This occurs during FP16/BF16 LayerNorm when inputs overflow to inf.
+    delta = tl.where(mean_1 == mean_2, 0.0, mean_2 - mean_1)
     new_weight = weight_1 + weight_2
     w2_over_w = tl.where(new_weight == 0.0, 0.0, weight_2 / new_weight)
     return (
@@ -309,6 +347,37 @@ def rand_eager_kernel(seed, offset_blocks, tid: tl.tensor, VEC: tl.constexpr):
     rand_int = tl.where((lane == 0) | (lane == 1), v01, v23)
 
     return 1.0 - (rand_int.to(tl.float32) * inv + half)
+
+
+@triton.jit
+def _random_4x_to_block(r0, r1, r2, r3):
+    # Pack lanes by logical offset so the random stream is independent of XBLOCK.
+    size: tl.constexpr = r0.numel
+    return tl.reshape(tl.join(tl.join(r0, r2), tl.join(r1, r3)), [size * 4])
+
+
+@triton.jit
+def rand4x(seed, offsets, BLOCK: tl.constexpr):
+    offsets = offsets.to(tl.uint32)
+    seed = tl.min(seed + offsets * 0, axis=0)
+    if BLOCK >= 4 and BLOCK % 4 == 0:
+        base = tl.min(offsets, axis=0)
+        reduced_offsets = base // 4 + tl.arange(0, BLOCK // 4)
+        r0, r1, r2, r3 = tl.rand4x(seed, reduced_offsets)
+        return _random_4x_to_block(r0, r1, r2, r3)
+    return tl.rand(seed, offsets)
+
+
+@triton.jit
+def randn4x(seed, offsets, BLOCK: tl.constexpr):
+    offsets = offsets.to(tl.uint32)
+    seed = tl.min(seed + offsets * 0, axis=0)
+    if BLOCK >= 4 and BLOCK % 4 == 0:
+        base = tl.min(offsets, axis=0)
+        reduced_offsets = base // 4 + tl.arange(0, BLOCK // 4)
+        r0, r1, r2, r3 = tl.randn4x(seed, reduced_offsets)
+        return _random_4x_to_block(r0, r1, r2, r3)
+    return tl.randn(seed, offsets)
 
 
 @triton.jit
@@ -579,9 +648,13 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 @triton.jit
 def frexp(x):
     # TODO(isuruf): use inline_asm_elementwise here
-    y = libdevice.ilogb(x) + 1
-    exponent = tl.where(x == 0, 0, y)
-    mantissa = tl.where(x == 0, 0, libdevice.ldexp(x, -y))
+    zero = x == 0
+    not_finite = libdevice.isinf(x).to(tl.int1) | libdevice.isnan(x).to(tl.int1)
+    special = zero | not_finite
+    safe_x = tl.where(special, 1.0, x)
+    y = libdevice.ilogb(safe_x) + 1
+    exponent = tl.where(special, 0, y)
+    mantissa = tl.where(zero, 0, tl.where(not_finite, x, libdevice.ldexp(safe_x, -y)))
     return mantissa, exponent
 
 
@@ -798,7 +871,7 @@ def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
             kwargs["_builder"] = _semantic
             return f(*args, **kwargs)
     else:
-        wrapper = f
+        wrapper = f  # type: ignore[assignment]
 
     wrapper.__triton_builtin__ = True  # type: ignore[attr-defined]
     return wrapper
@@ -811,7 +884,8 @@ def constexpr_next_power_of_2(
     """
     A version triton.next_power_of_two that can be used within a kernel on constants.
     """
-    assert isinstance(n, tl.constexpr)
+    if not isinstance(n, tl.constexpr):
+        raise AssertionError(f"Expected tl.constexpr, got {type(n)}")
     return tl.constexpr(triton.next_power_of_2(n.value))
 
 

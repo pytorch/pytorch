@@ -455,10 +455,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         self.alpha = alpha
         self.beta = beta
         self.use_fast_accum = use_fast_accum
-        assert 2 <= len(input_nodes) <= 5
-        assert self._are_inputs_layout_compatible(
+        if not (2 <= len(input_nodes) <= 5):
+            raise AssertionError(f"expected 2 to 5 input nodes, got {len(input_nodes)}")
+        if not self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
-        )
+        ):
+            raise AssertionError("input nodes have incompatible layouts")
 
         self.cache_key: str = create_inputs_key(self.input_nodes)
 
@@ -677,7 +679,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             cutlass_lib.LayoutType: The converted layout corresponding to the `torch_layout` or None if no matching
             value is found.
         """
-        assert cutlass_utils.try_import_cutlass()
+        if not cutlass_utils.try_import_cutlass():
+            raise AssertionError("could not import cutlass")
         import cutlass_library.library as cutlass_lib
 
         if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
@@ -693,7 +696,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     ) -> "cutlass_lib.LayoutType":  # type: ignore[name-defined]  # noqa: F821
         """Helper method: Flips a given cutlass layout (cutlass_lib.LayoutType) from RowMajor
         to ColumnMajor or vice versa"""
-        assert cutlass_utils.try_import_cutlass()
+        if not cutlass_utils.try_import_cutlass():
+            raise AssertionError("could not import cutlass")
         import cutlass_library.library as cutlass_lib
 
         if cutlass_layout == cutlass_lib.LayoutType.RowMajor:
@@ -870,8 +874,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         """
         Filter ops without using information about the torch op, input nodes and output node.
         """
-        assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib
+        if not cutlass_utils.try_import_cutlass():
+            raise AssertionError("could not import cutlass")
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         # Skip simt kernels
         ops = [
@@ -1035,7 +1040,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             List[tuple[str, cutlass_gemm_op.GemmOperation]]: A list of (cutlass_name, GemmOperation)
             tuples that are compatible with the operation requirements of this template.
         """
-        assert cutlass_utils.try_import_cutlass()
+        if not cutlass_utils.try_import_cutlass():
+            raise AssertionError("could not import cutlass")
         import cutlass_library.gemm_operation as cutlass_gemm_op
 
         if self.cache_key in self.filtered_ops_cache:
@@ -1058,7 +1064,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         start_time = time.time()
         for op in ops:
             # if changed, need to also change CUTLASS_OPERATION_KIND
-            assert isinstance(op, cutlass_gemm_op.GemmOperation)
+            if not isinstance(op, cutlass_gemm_op.GemmOperation):
+                raise AssertionError(f"expected GemmOperation, got {type(op).__name__}")
             filter_res = self.filter_op(op)
             if (
                 filter_res is not None
@@ -1151,13 +1158,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             All inputs and their corresponding buffer addresses and names take precedence over previously
             passed inputs to the template at construction time. However, they should be layout compatible.
         """
-        assert cutlass_utils.try_import_cutlass()
+        if not cutlass_utils.try_import_cutlass():
+            raise AssertionError("could not import cutlass")
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
-        assert isinstance(op, cutlass_gemm_op.GemmOperation), (
-            "op argument is required and has to be an instance of GemmOperation"
-        )
+        if not isinstance(op, cutlass_gemm_op.GemmOperation):
+            raise AssertionError(
+                "op argument is required and has to be an instance of GemmOperation"
+            )
 
         if epilogue_nodes:
             if self.device_type == "cuda" and not self._has_tma_epilogue(op):
@@ -1165,7 +1174,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     "Non-TMA epilogue visitor tree is not supported in NV-Cutlass."
                 )
 
-        assert len(self.input_nodes) >= 2 and self.output_node is not None
+        if not (len(self.input_nodes) >= 2 and self.output_node is not None):
+            raise AssertionError(
+                "expected at least 2 input nodes and a non-None output node"
+            )
         X, W = self.input_nodes[0], self.input_nodes[1]
         for input_node in self.input_nodes:
             if not isinstance(X.layout, FixedLayout):
@@ -1196,14 +1208,18 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         op = copy.deepcopy(op)
         is_scaled_mm = len(self.input_nodes) in (4, 5)
         if Bias is not None and not is_scaled_mm:
-            assert Bias.get_dtype() == X.get_dtype()
+            if Bias.get_dtype() != X.get_dtype():
+                raise AssertionError(
+                    f"expected Bias dtype {X.get_dtype()}, got {Bias.get_dtype()}"
+                )
             # This might have been set to void during filtering, when the assumption was still that there's no C
             # operand
             op.C.element = op.A.element
 
-            assert op.C.element == op.D.element, (
-                f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
-            )
+            if op.C.element != op.D.element:
+                raise AssertionError(
+                    f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
+                )
 
         argument_template, epilogue_template = self._get_template_args(op)
         should_swap_xw: bool = False
@@ -1219,7 +1235,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         name_to_buffer = {node.get_name(): node for node in self.input_nodes}
         # handle the fake output buffer during lowering
-        name_to_buffer[Y.get_name()] = Y
+        name_to_buffer[Y.get_name()] = Y  # type: ignore[assignment]
 
         if epilogue_nodes or is_scaled_mm:
             if epilogue_nodes:
@@ -1242,7 +1258,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
                 D_output_name = var_name_to_buffer_name["D"]
                 D_output_buffer = name_to_buffer[D_output_name]
-                Y = D_output_buffer
+                Y = D_output_buffer  # type: ignore[assignment]
                 # Interestingly, I don't think the rest of the layout matters here since we
                 # use the properties of the Y buffer to fill in D's properties in the epilogue
                 # args. This is needed though because it defines types expected in the epilogue args.
@@ -1250,10 +1266,26 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     D_output_buffer.get_dtype()
                 )
 
-                assert output_names, "There should be at least one write"
+                # When the D output buffer has a compatible reshape of the template
+                # output (e.g., [16, 512, 3072] vs [8192, 3072]), use the template's
+                # layout for EVT since CUTLASS operates on the 2D GEMM output shape.
+                if (
+                    template_buffer_node is not None
+                    and D_output_buffer.get_size() != template_buffer_node.get_size()
+                ):
+                    name_to_buffer[D_output_name] = template_buffer_node
+
+                if not output_names:
+                    raise AssertionError("There should be at least one write")
 
                 epilogue_inputs = [name_to_buffer[name] for name in input_names]
-                outputs = [name_to_buffer[name] for name in output_names]
+                # Use D_output_buffer directly for the D output entry in outputs,
+                # not name_to_buffer[D_output_name] which may have been replaced
+                # with template_buffer_node for EVT layout purposes.
+                outputs = [
+                    D_output_buffer if name == D_output_name else name_to_buffer[name]
+                    for name in output_names
+                ]
             else:  # Scaled MM, we read the two scale matrices (and optional bias) and write a single output
                 bias = None if len(self.input_nodes) < 5 else self.input_nodes[4]
                 bias_name = bias.get_name() if bias else None
@@ -1279,7 +1311,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             acc_dtype = cutlass_utils.get_accumulator_dtype(
                 [X.get_dtype(), W.get_dtype()]
             )
-            assert acc_dtype, "Could not determine accumulator dtype"
+            if not acc_dtype:
+                raise AssertionError("Could not determine accumulator dtype")
 
             evt_name, evt_args, evt_code, evt_arg_renames = self._render_evt(
                 op,
@@ -1294,10 +1327,23 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 X,
                 W,
                 Bias,
-                *epilogue_inputs,
+                *epilogue_inputs,  # type: ignore[list-item]
                 Y,
                 *extra_inputs,
             ]
+            # Extend input_reorder to cover epilogue inputs, Y, and extra_inputs
+            # at their natural positions (identity mapping for new entries)
+            if input_reorder is not None:
+                base_len = len(input_reorder)
+                if not (base_len <= len(inputs)):
+                    raise AssertionError(
+                        "input_reorder must be a prefix mapping for the current input list"
+                    )
+                num_new = len(inputs) - base_len
+                if num_new > 0:
+                    input_reorder = input_reorder + list(
+                        range(base_len, base_len + num_new)
+                    )
             input_names = [evt_arg_renames.get(name) for name in input_names]
             output_names = [evt_arg_renames.get(name) for name in output_names]
 
@@ -1391,7 +1437,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         name_to_buffer: dict[str, Buffer],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
-    ) -> tuple[str, str, str, EVTArgRenames]:
+    ) -> tuple[str, str, str, EVTArgRenames]:  # type: ignore[name-defined]
         raise NotImplementedError("_render_evt in CUTLASSGemmTemplate not implemented")
 
 
@@ -1441,11 +1487,12 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         return (GEMM_ARGS_CUTLASS_3X, GEMM_ARGS_CUTLASS_3X_EPILOGUE)
 
     @staticmethod
-    def _has_tma_epilogue(
+    def _has_tma_epilogue(  # type: ignore[arg-type,name-defined]
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined,arg-type] # noqa: F821
-    ) -> bool:
+    ) -> bool:  # type: ignore[name-defined]
         """Helper method: Determine whether a given Cutlass GEMM op has a TMA Epilogue"""
-        assert cutlass_utils.try_import_cutlass()
+        if not cutlass_utils.try_import_cutlass():
+            raise AssertionError("could not import cutlass")
         import cutlass_library.library as cutlass_lib
 
         result = False
@@ -1477,7 +1524,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         Returns:
             bool: True if layouts are GEMM compatible, otherwise False.
         """
-        assert 2 <= len(layouts) <= 5
+        if not (2 <= len(layouts) <= 5):
+            raise AssertionError(f"expected 2 to 5 layouts, got {len(layouts)}")
         # Check if A and B are compatible
         A_layout, B_layout = layouts[:2]
         if len(A_layout.size) < 1:
@@ -1527,7 +1575,10 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                 if N != remaining_size and remaining_size != 1:
                     return False
                 return True
-            assert len(C_size) == len(A_size)
+            if len(C_size) != len(A_size):
+                raise AssertionError(
+                    f"expected C and A to have same rank, got {len(C_size)} and {len(A_size)}"
+                )
             if M != C_size[-2] and C_size[-2] != 1:
                 return False
             if N != C_size[-1] and C_size[-1] != 1:
@@ -1566,8 +1617,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             examples,
             acc_dtype,
             output_dtype,
-            op.tile_description,
-            op.epilogue_schedule,
+            op.tile_description,  # type: ignore[attr-defined]
+            op.epilogue_schedule,  # type: ignore[attr-defined]
             {k: name_to_buffer[v] for k, v in var_name_to_buffer_name.items()},  # type: ignore[arg-type,misc]
             V.graph.sizevars.guarding_hint_or_throw,
             kernel_schedule=op.kernel_schedule,
@@ -1637,14 +1688,15 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             tuple[str, str]: A tuple where the first part is a string that constitutes the defined GEMM operation in C++
                              code (render) and the second part is the string that specifies the operation type.
         """
-        assert cutlass_utils.try_import_cutlass()
+        if not cutlass_utils.try_import_cutlass():
+            raise AssertionError("could not import cutlass")
         import cutlass_library.library as cutlass_lib
 
         from .lib_extensions import gemm_operation_extensions as gemm_extensions
 
         emitter = gemm_extensions.EmitGemmUniversal3xInstanceWithEVT(
             evt_name=evt_name, device_type=self.device_type
-        )
+        )  # type: ignore[call-arg]
 
         if not hasattr(op, "epilogue_functor") or not isinstance(
             op.epilogue_functor, enum.Enum
@@ -1741,21 +1793,23 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             "N": "N",
             "epilogue_args": epilogue_args,
         }
-        assert epilogue_template is not None
+        if epilogue_template is None:
+            raise AssertionError("expected epilogue_template to be non-None")
 
         if should_swap_xw:
             # Swap
             def clone_with_transposed_stride(node: IRNode) -> IRNode:
                 old_layout = node.get_layout()
-                new_stride = list(old_layout.stride)
+                new_stride = list(old_layout.stride)  # type: ignore[union-attr]
                 new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
-                assert old_layout.device is not None
+                if old_layout.device is None:
+                    raise AssertionError("expected old_layout.device to be non-None")
                 new_layout = FixedLayout(
                     old_layout.device,
                     old_layout.dtype,
-                    list(old_layout.size),
+                    list(old_layout.size),  # type: ignore[union-attr]
                     new_stride,
-                    old_layout.offset,
+                    old_layout.offset,  # type: ignore[union-attr]
                 )
                 return Buffer(name=node.get_name(), layout=new_layout)
 
@@ -1847,7 +1901,8 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         Returns:
             bool: True if layouts are GEMM compatible, otherwise False.
         """
-        assert len(layouts) == 2 or len(layouts) == 3
+        if not (len(layouts) == 2 or len(layouts) == 3):
+            raise AssertionError(f"expected 2 or 3 layouts, got {len(layouts)}")
         # Check if A and B are compatible
         A_layout, B_layout = layouts[:2]
         if len(A_layout.size) != 2:
@@ -1929,7 +1984,8 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
             tuple[str, str]: A tuple where the first part is a string that constitutes the defined GEMM operation in C++
                              code (render) and the second part is the string that specifies the operation type.
         """
-        assert cutlass_utils.try_import_cutlass()
+        if not cutlass_utils.try_import_cutlass():
+            raise AssertionError("could not import cutlass")
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
