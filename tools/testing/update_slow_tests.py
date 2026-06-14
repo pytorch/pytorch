@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import requests
-from clickhouse import query_clickhouse  # type: ignore[import]
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -91,13 +90,14 @@ ORDER BY
 """
 
 
-UPDATEBOT_TOKEN = os.environ["UPDATEBOT_TOKEN"]
-PYTORCHBOT_TOKEN = os.environ["PYTORCHBOT_TOKEN"]
+SLOW_TESTS_FILE = REPO_ROOT / "test" / "slow_tests.json"
 
 
 def git_api(
-    url: str, params: dict[str, Any], type: str = "get", token: str = UPDATEBOT_TOKEN
+    url: str, params: dict[str, Any], type: str = "get", token: str | None = None
 ) -> Any:
+    if token is None:
+        token = os.environ["UPDATEBOT_TOKEN"]
     headers = {
         "Accept": "application/vnd.github.v3+json",
         "Authorization": f"token {token}",
@@ -135,7 +135,7 @@ def approve_pr(source_repo: str, pr_number: int) -> None:
         f"/repos/{source_repo}/pulls/{pr_number}/reviews",
         params,
         type="post",
-        token=PYTORCHBOT_TOKEN,
+        token=os.environ["PYTORCHBOT_TOKEN"],
     )
 
 
@@ -146,7 +146,7 @@ def make_comment(source_repo: str, pr_number: int, msg: str) -> None:
         f"/repos/{source_repo}/issues/{pr_number}/comments",
         params,
         type="post",
-        token=PYTORCHBOT_TOKEN,
+        token=os.environ["PYTORCHBOT_TOKEN"],
     )
 
 
@@ -178,11 +178,31 @@ def search_for_open_pr(source_repo: str, search_string: str) -> tuple[int, str] 
     return None
 
 
-if __name__ == "__main__":
-    results = query_clickhouse(QUERY, {})
-    slow_tests = {row["test_name"]: row["avg_duration_sec"] for row in results}
+def read_existing_slow_tests() -> dict[str, float]:
+    if not SLOW_TESTS_FILE.exists():
+        return {}
+    with open(SLOW_TESTS_FILE) as f:
+        return cast(dict[str, float], json.load(f))
 
-    with open(REPO_ROOT / "test" / "slow_tests.json", "w") as f:
+
+def merge_slow_tests(
+    existing_slow_tests: dict[str, float], measured_slow_tests: dict[str, float]
+) -> dict[str, float]:
+    # Existing slow tests are skipped by viable/strict, so absence from the
+    # fresh ClickHouse sample is not evidence that they became fast.
+    return dict(sorted({**existing_slow_tests, **measured_slow_tests}.items()))
+
+
+if __name__ == "__main__":
+    from clickhouse import query_clickhouse  # type: ignore[import]
+
+    results = query_clickhouse(QUERY, {})
+    measured_slow_tests = {
+        row["test_name"]: row["avg_duration_sec"] for row in results
+    }
+    slow_tests = merge_slow_tests(read_existing_slow_tests(), measured_slow_tests)
+
+    with open(SLOW_TESTS_FILE, "w") as f:
         json.dump(slow_tests, f, indent=2)
 
     branch_name = f"update_slow_tests_{int(time.time())}"
