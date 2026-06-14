@@ -301,10 +301,14 @@ class TestCudagraphFqnAnnotations(TestCase):
         import os
 
         artifacts_dir = "/artifacts"
-        use_artifacts = os.path.isdir(artifacts_dir) and os.access(artifacts_dir, os.W_OK)
+        use_artifacts = os.path.isdir(artifacts_dir) and os.access(
+            artifacts_dir, os.W_OK
+        )
 
         if use_artifacts:
-            trace_path = os.path.join(artifacts_dir, "cuda_graph_fqn_profiler_trace.json")
+            trace_path = os.path.join(
+                artifacts_dir, "cuda_graph_fqn_profiler_trace.json"
+            )
             prof.export_chrome_trace(trace_path)
             with open(trace_path) as f:
                 trace = json.load(f)
@@ -316,7 +320,9 @@ class TestCudagraphFqnAnnotations(TestCase):
 
         # Save annotations (graph_node_id -> [{str: fqn}]) for post-processing.
         if use_artifacts:
-            annotations_path = os.path.join(artifacts_dir, "cuda_graph_fqn_annotations.json")
+            annotations_path = os.path.join(
+                artifacts_dir, "cuda_graph_fqn_annotations.json"
+            )
             with open(annotations_path, "w") as f:
                 json.dump({str(k): v for k, v in annotations.items()}, f, indent=2)
 
