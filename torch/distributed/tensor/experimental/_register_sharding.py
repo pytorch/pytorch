@@ -15,11 +15,13 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+from torch.utils._exposed_in import exposed_in
 
 
 __all__ = ["register_sharding"]
 
 
+@exposed_in("torch.distributed.tensor.experimental")
 def register_sharding(op: OpOverload | list[OpOverload]):
     """
     :meth:`register_sharding` is an experimental API that allows users to register sharding
