@@ -3,20 +3,72 @@
 #include <ATen/DeviceAccelerator.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
 
+#include <atomic>
+#include <cstdint>
+
 namespace at::accelerator {
 
+namespace {
+
+constexpr int16_t kUnsetAccelerator = -1;
+std::atomic<int16_t> current_accelerator{kUnsetAccelerator};
+
+bool isAcceleratorDeviceType(c10::DeviceType device_type) {
+  switch (device_type) {
+    case at::kCUDA:
+    case at::kMTIA:
+    case at::kXPU:
+    case at::kHIP:
+    case at::kMPS:
+    case at::kHPU:
+    case at::kPrivateUse1:
+    case c10::DeviceType::PrivateUse2:
+    case c10::DeviceType::PrivateUse3:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool isSelectableAccelerator(c10::DeviceType device_type) {
+  switch (device_type) {
+    case at::kPrivateUse1:
+    case c10::DeviceType::PrivateUse2:
+    case c10::DeviceType::PrivateUse3:
+      return c10::is_privateuse_backend_registered(device_type);
+    case at::kMTIA:
+      return at::hasMTIA();
+    case at::kCUDA:
+      return at::detail::getCUDAHooks().isBuilt();
+    case at::kXPU:
+      return at::detail::getXPUHooks().isBuilt();
+    case at::kHIP:
+      return at::detail::getHIPHooks().isBuilt();
+    case at::kMPS:
+      return at::detail::getMPSHooks().isBuilt();
+    case at::kHPU:
+      return at::detail::getHPUHooks().isBuilt();
+    default:
+      return false;
+  }
+}
+
+std::optional<c10::DeviceType> getCurrentAcceleratorOverride() {
+  const auto device_type = current_accelerator.load(std::memory_order_acquire);
+  if (device_type == kUnsetAccelerator) {
+    return std::nullopt;
+  }
+  return static_cast<c10::DeviceType>(device_type);
+}
+
+} // namespace
+
 std::optional<c10::DeviceType> getAccelerator(bool checked) {
-  // 1. Check PrivateUse1 backends
-  // We explicitly allow PrivateUse1 and another device at the same time as we
-  // use this for testing. Whenever a PrivateUse1 device is registered, use it
-  // first.
-  // Note that this check is only for hook registration and thus is NOT initializing
-  // the device or poisoning fork.
-  if (is_privateuse1_backend_registered()) {
-    return kPrivateUse1;
+  if (auto device_type = getCurrentAcceleratorOverride()) {
+    return device_type;
   }
 
-  // 2. Check runtime backends
+  // 1. Check runtime backends
   // This state is temporary, these runtime checks should be moved to compile-time
   // once they provide the new isBuilt API and we are sure they're never in the
   // same binary as another accelerator.
@@ -56,18 +108,21 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
 }
 
 bool isAccelerator(c10::DeviceType device_type) {
-  switch (device_type) {
-    case at::kCUDA:
-    case at::kMTIA:
-    case at::kXPU:
-    case at::kHIP:
-    case at::kMPS:
-    case at::kHPU:
-    case at::kPrivateUse1:
-      return true;
-    default:
-      return false;
-  }
+  return isAcceleratorDeviceType(device_type);
+}
+
+void setCurrentAccelerator(c10::DeviceType device_type) {
+  TORCH_CHECK(
+      isAcceleratorDeviceType(device_type),
+      c10::DeviceTypeName(device_type),
+      " is not an accelerator.");
+  TORCH_CHECK(
+      isSelectableAccelerator(device_type),
+      "Cannot set current accelerator to ",
+      c10::DeviceTypeName(device_type),
+      " because it is not available in this PyTorch build.");
+  current_accelerator.store(
+      static_cast<int16_t>(device_type), std::memory_order_release);
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)

@@ -44,6 +44,7 @@ __all__ = [
     "memory_stats",
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
+    "set_current_accelerator",
     "set_device_idx",  # deprecated
     "set_device_index",
     "set_stream",
@@ -100,7 +101,9 @@ def is_available() -> bool:
 
 
 def current_accelerator(check_available: bool = False) -> torch.device | None:
-    r"""Return the device of the accelerator available at compilation time.
+    r"""Return the device of the current accelerator.
+    By default, this is the accelerator available at compilation time. It can
+    be changed explicitly with :func:`torch.accelerator.set_current_accelerator`.
     If no accelerator were available at compilation time, returns None.
     See :ref:`accelerator<accelerators>` for details.
 
@@ -129,6 +132,24 @@ def current_accelerator(check_available: bool = False) -> torch.device | None:
         if (not check_available) or (check_available and is_available()):
             return acc
     return None
+
+
+def set_current_accelerator(device: torch.device | str, /) -> None:
+    r"""Set the current :ref:`accelerator<accelerators>` device type.
+
+    Args:
+        device (:class:`torch.device` or str): accelerator device type to select.
+
+    .. note:: This API only selects the accelerator device type. To select a
+        specific device index, use :func:`torch.accelerator.set_device_index`.
+    """
+    device = torch.device(device)
+    if device.index is not None:
+        raise ValueError(
+            "Expected a device type without an index for accelerator selection, "
+            f"but got: {device}"
+        )
+    torch._C._accelerator_setAccelerator(device)
 
 
 def current_device_index() -> int:

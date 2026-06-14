@@ -35,14 +35,17 @@ DeviceType parse_type(const std::string& device_string) {
           {"hpu", DeviceType::HPU},
           {"mtia", DeviceType::MTIA},
           {"privateuseone", DeviceType::PrivateUse1},
+          {"privateusetwo", DeviceType::PrivateUse2},
+          {"privateusethree", DeviceType::PrivateUse3},
       }};
   if (device_string == "mkldnn") {
     TORCH_WARN_ONCE(
         "'mkldnn' is no longer used as device type. So torch.device('mkldnn') will be "
         "deprecated and removed in the future. Please use other valid device types instead.");
   }
-  if (device_string == get_privateuse1_backend()) {
-    return DeviceType::PrivateUse1;
+  if (auto privateuse_device_type =
+          get_privateuse_backend_device_type(device_string)) {
+    return *privateuse_device_type;
   }
   auto device = std::find_if(
       types.begin(),

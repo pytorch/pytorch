@@ -374,6 +374,10 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::MTIA;
       case c10::DeviceType::PrivateUse1:
         return c10::DispatchKey::PrivateUse1;
+      case c10::DeviceType::PrivateUse2:
+        return c10::DispatchKey::PrivateUse2;
+      case c10::DeviceType::PrivateUse3:
+        return c10::DispatchKey::PrivateUse3;
       default:
         TORCH_CHECK(
             false,

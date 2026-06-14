@@ -20,13 +20,16 @@ namespace at::accelerator {
 // As of today, accelerator devices are (in no particular order):
 // CUDA, MTIA, XPU, HIP, MPS, PrivateUse1
 
-// Ensures that only one accelerator is available (at
-// compile time if possible) and return it.
+// Ensures that only one accelerator is selected (at compile time if possible)
+// and return it. If the current accelerator was set explicitly, return it.
 // When checked is true, the returned optional always has a value.
 TORCH_API std::optional<c10::DeviceType> getAccelerator(bool checked = false);
 
 // Check if the given device type is an accelerator.
 TORCH_API bool isAccelerator(c10::DeviceType device_type);
+
+// Set the current accelerator to the given device type.
+TORCH_API void setCurrentAccelerator(c10::DeviceType device_type);
 
 // Check if the given device type is an accelerator, not the excluded ones.
 template <
