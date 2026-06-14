@@ -9,6 +9,10 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/add.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/log_sigmoid_backward_native.h>
+#include <ATen/ops/log_sigmoid_forward_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mul_native.h>
 #include <ATen/ops/relu_native.h>
@@ -145,6 +149,45 @@ static void gelu_backward_kernel(TensorIteratorBase& iter, GeluType approximate)
 
 static void sigmoid_backward_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "sigmoid_backward");
+}
+
+std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_mps(const Tensor& self, Tensor& output, Tensor& buffer) {
+  // NOTE: buffer is only used by CPU dispatch, we just ignore it here
+  output.resize_as_(self);
+  if (self.numel() == 0) {
+    return std::forward_as_tuple(output, buffer);
+  }
+  auto iter = at::TensorIteratorConfig().add_output(output).add_const_input(self).build();
+  lib.exec_unary_kernel(iter, "log_sigmoid_forward");
+  return std::forward_as_tuple(output, buffer);
+}
+
+std::tuple<Tensor, Tensor> log_sigmoid_forward_mps(const Tensor& self) {
+  auto output = at::empty_like(self);
+  auto buffer = at::empty({0}, self.options());
+  log_sigmoid_forward_out_mps(self, output, buffer);
+  return std::make_tuple(std::move(output), std::move(buffer));
+}
+
+Tensor& log_sigmoid_backward_mps_out(const Tensor& grad_output,
+                                     const Tensor& self,
+                                     const Tensor& buffer,
+                                     Tensor& grad_input) {
+  // NOTE: buffer is only used by CPU dispatch, we just ignore it here
+  grad_input.resize_as_(self);
+  if (self.numel() == 0) {
+    return grad_input;
+  }
+  auto iter =
+      at::TensorIteratorConfig().add_output(grad_input).add_const_input(self).add_const_input(grad_output).build();
+  lib.exec_binary_kernel(iter, "log_sigmoid_backward");
+  return grad_input;
+}
+
+Tensor log_sigmoid_backward_mps(const Tensor& grad_output, const Tensor& self, const Tensor& buffer) {
+  auto grad_input = at::empty_like(grad_output);
+  log_sigmoid_backward_mps_out(grad_output, self, buffer, grad_input);
+  return grad_input;
 }
 
 REGISTER_DISPATCH(hardshrink_stub, hardshrink_kernel);

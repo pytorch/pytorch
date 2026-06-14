@@ -323,3 +323,33 @@ REGISTER_BINARY_OP(sigmoid_backward, half, half);
 REGISTER_BINARY_OP(sigmoid_backward, bfloat, bfloat);
 REGISTER_BINARY_OP(sigmoid_backward, float2, float2);
 REGISTER_BINARY_OP(sigmoid_backward, half2, half2);
+
+struct log_sigmoid_forward_functor {
+  template <typename T>
+  inline T operator()(const T self) {
+    const float x = float(self);
+    const float m = ::metal::min(0.0f, x);
+    const float z = ::metal::precise::exp(-::metal::abs(x));
+    return static_cast<T>(m - log1p(z));
+  }
+};
+
+REGISTER_UNARY_OP(log_sigmoid_forward, float, float);
+REGISTER_UNARY_OP(log_sigmoid_forward, half, half);
+REGISTER_UNARY_OP(log_sigmoid_forward, bfloat, bfloat);
+
+struct log_sigmoid_backward_functor {
+  template <typename T>
+  inline T operator()(const T self, const T grad_output) {
+    // d/dx log(sigmoid(x)) = 1 - sigmoid(x) = sigmoid(-x); compute it stably
+    // via z = exp(-|x|), splitting on sign(x) to avoid overflow.
+    const float in = float(self);
+    const float z = ::metal::precise::exp(-::metal::abs(in));
+    const float t = z / (1.0f + z);
+    return static_cast<T>(float(grad_output) * (in < 0.0f ? 1.0f - t : t));
+  }
+};
+
+REGISTER_BINARY_OP(log_sigmoid_backward, float, float);
+REGISTER_BINARY_OP(log_sigmoid_backward, half, half);
+REGISTER_BINARY_OP(log_sigmoid_backward, bfloat, bfloat);
