@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import heapq
 from collections import Counter, defaultdict
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch  # noqa: TC001
 import torch.fx as fx  # noqa: TC001
@@ -231,9 +231,29 @@ class ManualOverlapScheduler(OverlapScheduler):
         insert_overlap_deps: bool,
         module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
         bucket_mode: BucketMode | None = None,
+        custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+        | None = None,
+        collective_estimator: Literal["analytical", "benchmark"] = "analytical",
+        compute_estimator: Literal["analytical", "benchmark"] = "analytical",
+        log_runtime_estimations: bool = False,
     ):
         # Manual overlap historically used "custom_ops" mode for bucketing
         bucket_mode = bucket_mode or "custom_ops"
+
+        # ManualOverlapScheduler is plan-driven rather than estimation-driven.
+        # Keep a no-op estimator by default so the inherited OverlapScheduler
+        # initialization path does not enter analytical NCCL estimation for
+        # compile-on-one-rank graphs where group_name may be an FX Node.
+        if custom_runtime_estimation is None:
+
+            def default_custom_runtime_estimation(
+                node: fx.Node,
+                size: int | None,
+            ) -> float | None:
+                return 0.0
+
+            custom_runtime_estimation = default_custom_runtime_estimation
+
         super().__init__(
             gm,
             max_in_flight_gb=0.0,
@@ -242,14 +262,12 @@ class ManualOverlapScheduler(OverlapScheduler):
             insert_overlap_deps=insert_overlap_deps,
             compute_overlap_multipler=0.0,
             max_coll_distance=0,
-            # ManualOverlapScheduler doesn't use runtime estimates (it
-            # hardcodes estimated_time_ms=0 in _identify_collectives and
-            # schedules purely from module_bucket_plans). Providing a
-            # no-op estimator avoids the analytical NCCL path, which
-            # crashes in compile-on-one-rank graphs where group_name is
-            # an FX Node and the distributed runtime may not be available.
-            custom_runtime_estimation=lambda node, size: 0.0,
-            collective_estimator="analytical",
+            # ManualOverlapScheduler schedules from module_bucket_plans and
+            # overrides _identify_collectives() to assign zero collective cost.
+            custom_runtime_estimation=custom_runtime_estimation,
+            collective_estimator=collective_estimator,
+            compute_estimator=compute_estimator,
+            log_runtime_estimations=log_runtime_estimations,
             max_memory_increase_gb=None,
             max_memory_increase_ratio=None,
             bucket_mode=bucket_mode,
@@ -454,6 +472,11 @@ def manual_overlap_bucketing(
     insert_overlap_deps: bool = False,
     module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
     bucket_mode: BucketMode | None = None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
+    collective_estimator: Literal["analytical", "benchmark"] = "analytical",
+    compute_estimator: Literal["analytical", "benchmark"] = "analytical",
+    log_runtime_estimations: bool = False,
 ) -> torch.fx.GraphModule:
     """Schedule nodes based on user specifications in module_bucket_plans
     The manual overlapping consists of two steps:
@@ -481,6 +504,10 @@ def manual_overlap_bucketing(
         insert_overlap_deps,
         module_stack_fn,
         bucket_mode=bucket_mode,
+        custom_runtime_estimation=custom_runtime_estimation,
+        collective_estimator=collective_estimator,
+        compute_estimator=compute_estimator,
+        log_runtime_estimations=log_runtime_estimations,
     ).run()
     overlapped_gm.recompile()
     return overlapped_gm
