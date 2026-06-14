@@ -423,6 +423,12 @@ auto_functionalized_v2.fallthrough(DispatchKey.AutogradCPU)
 auto_functionalized_v2.fallthrough(DispatchKey.AutogradCUDA)
 
 
+def _hops_allowing_empty_schema_returns() -> tuple[HigherOrderOperator, ...]:
+    from torch._higher_order_ops.while_loop import while_loop_op
+
+    return (while_loop_op,)
+
+
 def can_auto_functionalize(
     op: OperatorBase | HopInstance,
 ) -> bool:
@@ -888,9 +894,9 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
     )
 
     if isinstance(op, HigherOrderOperator):
-        if len(schema.returns) <= 0:
+        if len(schema.returns) <= 0 and op not in _hops_allowing_empty_schema_returns():
             raise AssertionError(
-                f"hop is expected to return at least one output {schema}."
+                f"HOP {op} does not support zero schema returns {schema}."
             )
         if len(unwrapped_actual_out) != len(schema.returns):
             raise AssertionError(

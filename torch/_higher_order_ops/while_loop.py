@@ -159,6 +159,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
         cond_fn (Callable): A callable function that returns a boolean Scalar tensor or a python boolean.
 
         body_fn (Callable): A callable function that takes the same inputs as `cond_fn` and returns a tuple of tensors or ints
+            with the same length as ``carried_inputs`` (possibly empty when all state is updated via in-place mutation).
 
         carried_inputs (Tuple of possibly nested dict/list/tuple of tensors or ints): A tuple of inputs to cond_fn and body_fn.
             It's also the initial value of states that are carried across iterations. Note that when pass an integer as carry,
