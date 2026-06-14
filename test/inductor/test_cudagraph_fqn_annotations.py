@@ -29,6 +29,7 @@ from torch.cuda._graph_annotations import (
     register_fqn_annotation_hooks,
     remap_to_exec_graph,
     resolve_pending_annotations,
+    save_kernel_annotations,
 )
 from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
 
@@ -353,6 +354,58 @@ class TestCudagraphFqnAnnotations(TestCase):
         self.assertTrue(
             any("L.model.layers." in v for v in recovered.values()),
             f"recovered FQNs lack layer hierarchy: {sorted(set(recovered.values()))}",
+        )
+
+    def test_save_annotations_and_join_trace(self):
+        """End-to-end save -> annotate workflow: save_kernel_annotations writes the
+        annotations JSON, the profiler writes the Chrome trace JSON, and
+        _annotate_cuda_graph_trace.annotate_trace joins the two on the cuda graph
+        node id -- producing (kernel name, graph node id, fqn) rows."""
+        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
+        from torch.profiler import profile, ProfilerActivity
+
+        num_layers = 4
+        model = OuterModel(dim=64, num_layers=num_layers).cuda()
+        x = torch.randn(1, 64, device="cuda")
+
+        compiled, _ = self._run_inductor_cg(model, x, annotate=True)
+        self.assertTrue(dict(get_kernel_annotations()), "expected non-empty annotations")
+
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            with torch.no_grad():
+                compiled(x)
+                torch.cuda.synchronize()
+
+        # Artifact 1: annotations JSON written by the public save API.
+        with TemporaryFileName(suffix=".json") as ann_path:
+            save_kernel_annotations(ann_path)
+            with open(ann_path) as f:
+                annotations = {int(k): v for k, v in json.load(f).items()}
+
+        # Artifact 2: Chrome trace JSON (kernel events carry "graph node id").
+        with TemporaryFileName(suffix=".json") as trace_path:
+            prof.export_chrome_trace(trace_path)
+            with open(trace_path) as f:
+                trace = json.load(f)
+
+        # Join the two on the cuda graph node id (annotate_trace merges the fqn
+        # into each matching kernel event's args).
+        annotated = annotate_trace(trace, annotations)
+        self.assertGreater(annotated, 0, "no kernel events joined on graph node id")
+
+        # The joined result is a (kernel name, graph node id, fqn) table.
+        table = [
+            (e.get("name"), e["args"]["graph node id"], e["args"]["str"])
+            for e in trace["traceEvents"]
+            if isinstance(e.get("args"), dict)
+            and "str" in e["args"]
+            and e["args"].get("graph node id")
+        ]
+        self.assertTrue(table, "join produced no (kernel, graph node id, fqn) rows")
+        fqns = [row[2] for row in table]
+        self.assertTrue(
+            any("L.model.layers." in s for s in fqns),
+            f"joined table lacks per-layer FQNs; saw {sorted(set(fqns))[:8]}",
         )
 
 
