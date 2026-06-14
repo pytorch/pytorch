@@ -1,7 +1,7 @@
 """
 Update committed CSV files used as reference points by dynamo/inductor CI.
 
-Currently only cares about graph breaks, so only saves those columns.
+Saves graph breaks and recompile counts as reference columns.
 
 Hardcodes a list of job names and artifacts per job, but builds the lookup
 by querying github sha and finding associated github actions workflow ID and CI jobs,
@@ -187,6 +187,8 @@ def download_single_artifact(suite, shard, url_candidates):
                     try:
                         df = pd.read_csv(artifact.open(name))
                         df["graph_breaks"] = df["graph_breaks"].fillna(0).astype(int)
+                        if "recompiles" in df.columns:
+                            df["recompiles"] = df["recompiles"].fillna(0).astype(int)
                         result[(suite, phase)] = df
                         found = True
                         break
@@ -246,7 +248,10 @@ def write_filtered_csvs(root_path, dataframes):
             # Add any new entries from df that weren't in existing
             df = existing_df.combine_first(df).reset_index()
         df = df.sort_values(by="name")
-        df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
+        columns = ["name", "accuracy", "graph_breaks"]
+        if "recompiles" in df.columns:
+            columns.append("recompiles")
+        df.to_csv(out_fn, index=False, columns=columns)
         apply_lints(out_fn)
 
 
