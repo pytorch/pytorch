@@ -3234,20 +3234,17 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, boo
 }
 
 std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
-  // TODO: uncomment the following when svd is deprecated not only in docs
-  // torch/xla is blocking the transition from at::svd to at::linalg_svd in at::linalg_pinv code
-  // see https://github.com/pytorch/xla/issues/2755
-  // TORCH_WARN_ONCE(
-  //     "torch.svd is deprecated in favor of torch.linalg.svd and will be ",
-  //     "removed in a future PyTorch release.\n",
-  //     "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
-  //     "should be replaced with\n",
-  //     "U, S, Vh = torch.linalg.svd(A, full_matrices=not some)\n",
-  //     "V = Vh.mH\n",
-  //     "and\n",
-  //     "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
-  //     "should be replaced with\n",
-  //     "S = torch.linalg.svdvals(A)");
+  TORCH_WARN_ONCE(
+      "torch.svd is deprecated in favor of torch.linalg.svd and will be ",
+      "removed in a future PyTorch release.\n",
+      "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
+      "should be replaced with\n",
+      "U, S, Vh = torch.linalg.svd(A, full_matrices=not some)\n",
+      "V = Vh.mH\n",
+      "and\n",
+      "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
+      "should be replaced with\n",
+      "S = torch.linalg.svdvals(A)");
   TORCH_CHECK(self.dim() >= 2, "linalg.svd: input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   Tensor U, S, Vh;
   if (compute_uv) {

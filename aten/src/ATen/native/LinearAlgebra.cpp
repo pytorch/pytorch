@@ -105,6 +105,7 @@
 #include <ATen/ops/linalg_slogdet.h>
 #include <ATen/ops/linalg_slogdet_native.h>
 #include <ATen/ops/linalg_solve.h>
+#include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/linalg_svdvals.h>
 #include <ATen/ops/linalg_tensorinv.h>
 #include <ATen/ops/linalg_tensorinv_native.h>
@@ -518,16 +519,17 @@ Tensor linalg_pinv(
   if (input.sym_numel() == 0) {
     // The implementation below uses operations that do not work for zero numel tensors
     // therefore we need this early return for 'input.numel() == 0' case
-    // TODO: replace input.svd with linalg_svd when torch/xla can work with at::linalg_svd
-    auto [U, S, V] = input.svd();
+    Tensor U, S, Vh;
+    std::tie(U, S, Vh) = at::linalg_svd(input, false);
+    Tensor V = Vh.mH();
     return at::matmul(V * S.reciprocal().unsqueeze(-2), U.mH());
   }
 
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
   if (!hermitian) {
-    // TODO: replace input.svd with linalg_svd
-    // using linalg_svd breaks pytorch/xla, see https://github.com/pytorch/xla/issues/2755
-    auto [U, S, V] = input.svd();
+    Tensor U, S, Vh;
+    std::tie(U, S, Vh) = at::linalg_svd(input, false);
+    Tensor V = Vh.mH();
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
     Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_val);
     Tensor S_pseudoinv = at::where(S > tol, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
