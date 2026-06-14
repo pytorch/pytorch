@@ -2831,6 +2831,7 @@ class TorchPatcher:
 
         for opt in optimizer_classes:
             if opt in excluded_optimizer_classes:
+                # pyrefly: ignore [bad-assignment]
                 opt.step = disable(
                     opt.step, reason=f"optimizer {opt} step not supported"
                 )
