@@ -4787,6 +4787,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
             loss_too_positive = bceloss(output_too_positive, target)
 
+    def test_bce_with_logits_target_range(self):
+        bcelogitsloss = nn.BCEWithLogitsLoss()
+
+        output = torch.randn(25, 25)
+        target_valid = torch.rand(25, 25)
+        target_too_negative = target_valid - 1.0
+        target_too_positive = target_valid + 1.0
+
+        bcelogitsloss(output, target_valid)
+        with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
+            bcelogitsloss(output, target_too_negative)
+        with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
+            bcelogitsloss(output, target_too_positive)
+
     def test_bce_loss_size_mismatch(self):
         bceloss = nn.BCELoss()
         a = torch.rand(25)
@@ -4828,7 +4842,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_bce_with_logits_has_correct_forward_grad(self):
         output = torch.randn(3, 5, requires_grad=True, dtype=torch.double)
-        target = torch.randn(3, 5, dtype=torch.double)
+        target = torch.rand(3, 5, dtype=torch.double)
         for reduction in ('sum', 'mean', 'none'):
             gradcheck(lambda self, target: nn.BCEWithLogitsLoss(reduction=reduction)(self, target),
                       (output, target), check_forward_ad=True)
@@ -10543,7 +10557,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
             v(lambda: F.gaussian_nll_loss(input, input, var, reduction=reduction))
             v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input.gt(0).to(torch.get_default_dtype()), reduction=reduction))
-            v(lambda: F.binary_cross_entropy_with_logits(input, input, reduction=reduction))
+            v(lambda: F.binary_cross_entropy_with_logits(input, input.gt(0).to(torch.get_default_dtype()), reduction=reduction))
 
             zeros = torch.zeros_like(input).to(torch.int64)
             v(lambda: F.multilabel_soft_margin_loss(input, zeros, reduction=reduction))

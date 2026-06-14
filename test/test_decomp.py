@@ -1098,7 +1098,7 @@ def forward(self, scores_1, mask_1, value_1):
     def test_binary_cross_entropy_with_logits_decomp(self, device):
         op_config = {
             "self": torch.randn([4, 5, 6], dtype=torch.bfloat16, device=device),
-            "target": torch.randn([4, 5, 6], dtype=torch.bfloat16, device=device),
+            "target": torch.rand([4, 5, 6], dtype=torch.bfloat16, device=device),
             "weight": torch.randn([6], dtype=torch.float32, device=device),
             "reduction": 2,
         }
