@@ -332,6 +332,7 @@ def load(
     *,
     extra_files: dict[str, Any] | None = None,
     expected_opset_version: dict[str, int] | None = None,
+    weights_only: bool = False,
 ) -> ExportedProgram:
     """
 
@@ -355,6 +356,10 @@ def load(
 
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
+
+        weights_only (bool): If True, only weights will be loaded and no complex
+         pickled objects. Recommended for untrusted sources. See :func:`torch.load`
+         for more details. Default: False.
 
     Returns:
         An :class:`ExportedProgram` object
@@ -390,6 +395,7 @@ def load(
         pt2_contents = load_pt2(
             f,
             expected_opset_version=expected_opset_version,
+            weights_only=weights_only,
         )
     except RuntimeError:
         log.warning("Ran into the following error when deserializing", exc_info=True)
