@@ -69,6 +69,66 @@ Vectorized<int16_t> C10_ALWAYS_INLINE fmadd(
       a.vec0() * b.vec0() + c.vec0(), a.vec1() * b.vec1() + c.vec1()};
 }
 
+template <>
+Vectorized<c10::Half> C10_ALWAYS_INLINE fmadd(
+    const Vectorized<c10::Half>& a,
+    const Vectorized<c10::Half>& b,
+    const Vectorized<c10::Half>& c) {
+  constexpr int size = Vectorized<c10::Half>::size();
+  Vectorized<c10::Half> result;
+
+  for (int i = 0; i < size; i++) {
+    float af = static_cast<float>(a[i]);
+    float bf = static_cast<float>(b[i]);
+    float cf = static_cast<float>(c[i]);
+
+    float ab = af * bf;
+    float rf = ab + cf;
+    result[i] = c10::Half(rf);
+  }
+  return result;
+}
+
+template <>
+Vectorized<c10::Half> C10_ALWAYS_INLINE fmsub(
+    const Vectorized<c10::Half>& a,
+    const Vectorized<c10::Half>& b,
+    const Vectorized<c10::Half>& c) {
+  constexpr int size = Vectorized<c10::Half>::size();
+  Vectorized<c10::Half> result;
+
+  for (int i = 0; i < size; i++) {
+    float af = static_cast<float>(a[i]);
+    float bf = static_cast<float>(b[i]);
+    float cf = static_cast<float>(c[i]);
+
+    float ab = af * bf;
+    float rf = ab - cf;
+    result[i] = c10::Half(rf);
+  }
+  return result;
+}
+
+template <>
+Vectorized<c10::Half> C10_ALWAYS_INLINE fnmsub(
+    const Vectorized<c10::Half>& a,
+    const Vectorized<c10::Half>& b,
+    const Vectorized<c10::Half>& c) {
+  constexpr int size = Vectorized<c10::Half>::size();
+  Vectorized<c10::Half> result;
+
+  for (int i = 0; i < size; i++) {
+    float af = static_cast<float>(a[i]);
+    float bf = static_cast<float>(b[i]);
+    float cf = static_cast<float>(c[i]);
+
+    float ab = -(af * bf);
+    float rf = ab - cf;
+    result[i] = c10::Half(rf);
+  }
+  return result;
+}
+
 DEFINE_REINTERPRET_CAST_TO_ALL_FUNCS(float)
 DEFINE_REINTERPRET_CAST_TO_ALL_FUNCS(double)
 DEFINE_REINTERPRET_CAST_TO_ALL_FUNCS(int64_t)
