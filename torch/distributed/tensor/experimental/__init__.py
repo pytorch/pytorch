@@ -1,6 +1,24 @@
+"""
+torch.distributed.tensor.experimental
+
+Experimental APIs for distributed tensor parallelism.
+
+Note: See https://github.com/pytorch/pytorch/issues/171905
+"""
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Iterator
 from contextlib import contextmanager
+
+import warnings
+
+# These APIs are experimental and subject to change
+warnings.warn(
+    "torch.distributed.tensor.experimental APIs are unstable and subject to change. "
+    "See https://github.com/pytorch/pytorch/issues/171905",
+    UserWarning,
+    stacklevel=2,
+)
+
 
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor.experimental._attention import context_parallel
@@ -28,6 +46,10 @@ def implicit_replication() -> Iterator[None]:
 
 
 # Set namespace for exposed private names
+# NOTE: These __module__ assignments are a workaround to make type checkers
+# correctly identify the origin of these classes.
+# See: https://github.com/pytorch/pytorch/issues/171905
+# TODO: Migrate to TypeAliasType (PEP 613) for better type checker support
 context_parallel.__module__ = "torch.distributed.tensor.experimental"
 implicit_replication.__module__ = "torch.distributed.tensor.experimental"
 local_map.__module__ = "torch.distributed.tensor.experimental"
