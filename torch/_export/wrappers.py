@@ -10,6 +10,7 @@ from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
 from torch._higher_order_ops.flat_apply import (
     _ConstantFunction,
     flat_apply,
+    is_graphable,
     to_graphable,
 )
 from torch._higher_order_ops.strict_mode import strict_mode
@@ -164,8 +165,26 @@ def _emit_flat_apply_call(
     track_value,
     call_spec_cache_key: str,
 ):
-    # Flatten to graphable form and record the spec on the FX root
-    flat_args, in_spec = to_graphable(graphable_args)
+    # Temporarily register non-graphable hashable types as pytree constants so
+    # tree_flatten absorbs them into the TreeSpec rather than leaving them as
+    # leaves. This is scoped to just this call to avoid polluting global pytree
+    # state which can change dynamo decomposition behavior (see #176128).
+    tmp_registered: list[type] = []
+    for leaf in pytree.tree_leaves(graphable_args):
+        cls = type(leaf)
+        if not is_graphable(leaf) and cls not in pytree.SUPPORTED_NODES:
+            try:
+                pytree.register_constant(cls)
+                tmp_registered.append(cls)
+            except TypeError:
+                pass
+    try:
+        # Flatten to graphable form and record the spec on the FX root
+        flat_args, in_spec = to_graphable(graphable_args)
+    finally:
+        for cls in tmp_registered:
+            pytree._deregister_pytree_node(cls)
+
     qualname = tracer.get_fresh_qualname(spec_name)  # type: ignore[union-attr]
     setattr(tracer.root, qualname, in_spec)  # type: ignore[union-attr]
     spec_proxy = tracer.create_proxy("get_attr", qualname, (), {})
