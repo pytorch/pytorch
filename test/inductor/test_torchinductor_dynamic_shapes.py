@@ -171,6 +171,16 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         common = check_model_gpu
         device = GPU_TYPE
 
+        def test_narrow_tensor_start_zero_length_storage_offset(self):
+            def fn(x, start):
+                return torch.ops.aten.narrow(x, 1, start, 0)
+
+            inputs = (
+                torch.randn((5, 5, 5), device=self.device),
+                torch.tensor(1),
+            )
+            self.common(fn, inputs, copy_to_gpu=False)
+
     copy_tests(
         DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
     )
