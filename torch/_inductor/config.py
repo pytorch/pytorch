@@ -861,6 +861,7 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 realize_reads_threshold = 4
 _realize_opcount_threshold_default = 30
 realize_opcount_threshold: int | None = None
+realize_opusers_threshold = 5
 # CPU kernels tolerate larger fused pointwise bodies than GPU kernels, and
 # materializing moderate CPU expressions can add expensive full-buffer traffic.
 realize_cpu_opcount_threshold = 50
