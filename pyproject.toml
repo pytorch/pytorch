@@ -348,6 +348,7 @@ select = [
     "UP", # collect_env.py needs to work with older versions of Python
 ]
 "torch/_vendor/**" = [
+    "B904", # Fix in upstream projects, then revendor instead of editing _vendor
     "UP", # No need to mess with _vendor
 ]
 "tools/linter/**" = [
