@@ -16,12 +16,11 @@ class _AutoDefault(NamedTuple):
 # keyed by ``(device_type, input_dtype, prob_target)`` -- Pareto picks from
 # an fp64-jacobian sweep. CPU picks ``"accurate"`` (only chunked policy with
 # fp32 weight-grad mm on CPU; others hit emulated low-precision matmul,
-# ~20-50x slower). Probability targets on CUDA pick aspect_ratio factor 1:
-# the (N, V) target is an input on that path, so it floors peak memory
-# regardless of chunk size -- on A100 every aspect_ratio factor measured the
-# same peak while factor 1 ran ~1.4x faster than factor 2 at large
-# num_classes; finer chunking is pure overhead. The CPU prob-target picks
-# are inherited from the index-target measurements (not yet prob-measured).
+# ~20-50x slower). Probability targets on CUDA pick aspect_ratio factor 1.
+# These are the BELOW-crossing picks; ``_adjust`` automatically switches the
+# resolved method to ``"budget"`` above the crossing region (large
+# ``in_features``), where aspect_ratio's accumulator grows quadratically --
+# see the switch in ``_adjust``.
 _AUTO_DEFAULTS: dict[tuple[str, torch.dtype, bool], _AutoDefault] = {
     ("cuda", torch.bfloat16, False): _AutoDefault("compact", "aspect_ratio:2"),
     ("cuda", torch.float16, False): _AutoDefault("compact", "aspect_ratio:2"),
@@ -93,9 +92,22 @@ class LinearCrossEntropyOptions:
     chunking_method: str | None = "auto"
     """Heuristic for picking :attr:`batch_chunk_size`.
 
-    - ``"auto"`` (default) -- resolves to a per-(device, dtype) pick from
-      :data:`_AUTO_DEFAULTS` at call time; falls back to
-      ``"aspect_ratio:2"`` for unlisted pairs.
+    - ``"auto"`` (default) -- resolves at call time to a per-(device, dtype)
+      pick from :data:`_AUTO_DEFAULTS` (an ``aspect_ratio`` variant), then
+      switches to ``"budget"`` above the crossing region (large
+      ``in_features``; see ``_adjust``). Falls back to ``"aspect_ratio:2"``
+      for unlisted pairs.
+    - ``"budget"`` -- sizes each chunk so the per-chunk working buffers
+      occupy about one input footprint
+      (``num_batches * in_features * itemsize`` bytes). Unlike
+      ``aspect_ratio``, this bounds the buffer to a fixed multiple of the
+      input, so peak memory stays close to the reference even when
+      ``in_features`` approaches ``num_classes`` (where ``aspect_ratio``'s
+      ``(batch_chunk_size, in_features)`` accumulator grows quadratically
+      and overtakes the reference). The default for ``"auto"``.
+    - ``"budget:E"`` (``E > 0`` float) -- same, with the buffer budget set
+      to ``E`` input footprints. Smaller ``E`` cuts peak memory at the cost
+      of more chunks (slower); larger ``E`` does the reverse.
     - ``"aspect_ratio"`` -- sizes each chunk so its
       ``(batch_chunk_size, num_classes)`` logits buffer matches the
       ``(num_batches, in_features)`` input in memory:
@@ -158,9 +170,16 @@ class LinearCrossEntropyOptions:
             raise ValueError(f"invalid acc_policy: {self.acc_policy!r}")
         if self.chunking_method is not None and self.chunking_method != "auto":
             name, sep, factor = self.chunking_method.partition(":")
-            if not sep:
-                factor = "1"
-            if not (name == "aspect_ratio" and factor.isdigit() and int(factor) > 0):
+            if name == "aspect_ratio":
+                valid = (not sep) or (factor.isdigit() and int(factor) > 0)
+            elif name == "budget":
+                try:
+                    valid = (not sep) or float(factor) > 0
+                except ValueError:
+                    valid = False
+            else:
+                valid = False
+            if not valid:
                 raise ValueError(f"invalid chunking_method: {self.chunking_method!r}")
         if not (
             self.batch_chunk_size is None
@@ -187,6 +206,20 @@ class LinearCrossEntropyOptions:
     def _ceil_div(a: int, b: int) -> int:
         """ceil(a / b) for non-negative integers."""
         return -(-a // b)
+
+    @staticmethod
+    def _logits_buffer_itemsize(
+        dtype: torch.dtype, acc_dtype: torch.dtype, acc_policy: str
+    ) -> int:
+        """Bytes per element of the per-chunk logits buffer, mirroring
+        ``_ChunkContext.build``'s ``logits_buf_dtype``: input dtype on fp16
+        memory-like policies, else the acc dtype.
+        """
+        if dtype == acc_dtype:
+            return dtype.itemsize
+        if dtype == torch.float16 and acc_policy in ("balanced", "compact"):
+            return dtype.itemsize
+        return acc_dtype.itemsize
 
     @staticmethod
     def _resolve_auto_acc_dtype(
@@ -237,6 +270,44 @@ class LinearCrossEntropyOptions:
         # __post_init__ validates the method, so this is unreachable.
         raise AssertionError(f"unhandled chunking_method: {method!r}")
 
+    def _compute_batch_chunk_size_budget(
+        self,
+        num_batches: int,
+        in_features: int,
+        num_classes: int,
+        dtype: torch.dtype,
+        acc_dtype: torch.dtype,
+        acc_policy: str,
+        eps: float,
+    ) -> int:
+        """Chunk size for the ``budget`` method: size ``B`` so the per-chunk
+        working buffers occupy about ``eps`` times the input tensor's
+        footprint (``num_batches * in_features * dtype.itemsize`` bytes).
+
+        ``aspect_ratio`` scales the logits buffer with the input, which
+        makes the ``(B, in_features)`` accumulator grow as ``B * in_features
+        ~ num_batches * in_features^2 / num_classes`` -- quadratic in
+        ``in_features`` -- so peak memory crosses the reference once
+        ``in_features`` approaches ``num_classes``. ``budget`` instead caps
+        the total per-chunk buffer at a fixed multiple of the input, so peak
+        memory stays parallel to the reference at large ``in_features``.
+
+        Buffer model (mirrors the dominant mixed-precision path in
+        ``_ChunkContext.build``): per chunk row, the logits buffer is
+        ``num_classes * L`` bytes and the input/grad accumulator is
+        ``in_features * a`` bytes, with ``a = acc_dtype.itemsize`` and ``L``
+        the logits-buffer dtype size (input dtype on fp16 memory-like
+        policies, else acc dtype). A bf16 / class-weighted probability
+        target carries one extra ``(B, num_classes)`` buffer not modelled
+        here, so its actual buffer is up to ~2x eps -- still bounded.
+        """
+        s = dtype.itemsize
+        a = acc_dtype.itemsize
+        logits_bytes = self._logits_buffer_itemsize(dtype, acc_dtype, acc_policy)
+        per_row = num_classes * logits_bytes + in_features * a
+        input_bytes = num_batches * in_features * s
+        return max(1, min(int(eps * input_bytes / per_row), num_batches))
+
     def _adjust(
         self,
         num_batches,
@@ -262,6 +333,7 @@ class LinearCrossEntropyOptions:
         # unaffected.
         if chunking_method == "auto" and self.batch_chunk_size is not None:
             chunking_method = None
+        auto_chunk = chunking_method == "auto"
         if acc_policy == "auto" or chunking_method == "auto":
             if device is not None:
                 ap, cm = _AUTO_DEFAULTS.get(
@@ -274,29 +346,8 @@ class LinearCrossEntropyOptions:
             if chunking_method == "auto":
                 chunking_method = cm
 
-        if self.batch_chunk_size is None:
-            batch_chunk_size = num_batches
-        else:
-            batch_chunk_size = min(self.batch_chunk_size, num_batches)
-
-        if chunking_method is not None:
-            batch_chunk_size = self._compute_batch_chunk_size(
-                num_batches,
-                in_features,
-                num_classes,
-                chunking_method,
-            )
-            if (
-                self.batch_chunk_size is not None
-                and self.batch_chunk_size != batch_chunk_size
-            ):
-                raise ValueError(
-                    f"batch_chunk_size (={self.batch_chunk_size}) and "
-                    f"chunking_method ('{chunking_method}') give different "
-                    f"chunk sizes ({self.batch_chunk_size} vs {batch_chunk_size}); "
-                    f"pass only one."
-                )
-
+        # Resolve acc_dtype before chunk sizing: the ``budget`` method needs
+        # the acc dtype size to model the per-chunk buffer bytes.
         if self.acc_dtype is None:
             # Under "auto" prefer fp32 on hardware that supports the
             # mixed-precision mm path; otherwise fall back to input dtype.
@@ -308,6 +359,71 @@ class LinearCrossEntropyOptions:
             acc_dtype = auto_acc if auto_acc is not None else dtype
         else:
             acc_dtype = self.acc_dtype
+
+        # Auto switch to ``budget`` above the crossing region. Aspect_ratio
+        # sizes chunks so the logits buffer matches the input, which is the
+        # efficient pick while the logits buffer dominates. Once the per-chunk
+        # (B, in_features) accumulator outgrows the (B, num_classes) logits
+        # buffer (in_features * acc_bytes >= num_classes * logits_bytes), that
+        # accumulator -- which aspect_ratio does not size for -- grows
+        # quadratically in in_features and overtakes the reference; budget
+        # bounds it instead. Only auto-resolved methods switch; an explicit
+        # aspect_ratio is respected.
+        #
+        # budget's default eps=1 ("buffer ~ one input footprint") is fixed by
+        # continuity at this boundary, not by a memory objective: any
+        # memory-only criterion (minimize peak / "don't lose to reference")
+        # is monotonic in eps and degenerates to eps=0 (B=1, slowest). eps=1
+        # makes budget's chunk size meet aspect_ratio's right at the switch,
+        # so the method change is seamless, then budget bounds B above it.
+        if (
+            auto_chunk
+            and chunking_method is not None
+            and chunking_method.startswith("aspect_ratio")
+        ):
+            logits_bytes = self._logits_buffer_itemsize(dtype, acc_dtype, acc_policy)
+            if in_features * acc_dtype.itemsize >= num_classes * logits_bytes:
+                chunking_method = "budget"
+
+        if self.batch_chunk_size is None:
+            batch_chunk_size = num_batches
+        else:
+            batch_chunk_size = min(self.batch_chunk_size, num_batches)
+
+        if chunking_method is not None:
+            if chunking_method.startswith("budget"):
+                eps = (
+                    float(chunking_method.split(":", 1)[1])
+                    if ":" in chunking_method
+                    else 1.0
+                )
+                batch_chunk_size = self._compute_batch_chunk_size_budget(
+                    num_batches,
+                    in_features,
+                    num_classes,
+                    dtype,
+                    acc_dtype,
+                    acc_policy,
+                    eps,
+                )
+            else:
+                batch_chunk_size = self._compute_batch_chunk_size(
+                    num_batches,
+                    in_features,
+                    num_classes,
+                    chunking_method,
+                )
+            if (
+                self.batch_chunk_size is not None
+                and self.batch_chunk_size != batch_chunk_size
+            ):
+                raise ValueError(
+                    f"batch_chunk_size (={self.batch_chunk_size}) and "
+                    f"chunking_method ('{chunking_method}') give different "
+                    f"chunk sizes ({self.batch_chunk_size} vs {batch_chunk_size}); "
+                    f"pass only one."
+                )
+
         return dataclasses.replace(
             self,
             acc_policy=acc_policy,

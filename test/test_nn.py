@@ -7560,7 +7560,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(opts.acc_policy, "auto")
         self.assertEqual(opts.chunking_method, "auto")
 
-        # Known pair: CUDA + bf16 -> ("compact", "aspect_ratio:2").
+        # Known pair: CUDA + bf16 -> ("compact", "aspect_ratio:2"). This
+        # shape is below the crossing region (num_classes >> in_features),
+        # so auto keeps aspect_ratio rather than switching to budget.
         adjusted = opts._adjust(
             128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
         )
@@ -7592,6 +7594,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         )
         self.assertEqual(adjusted.acc_policy, "accurate")
         self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # Above the crossing region (in_features >= ~num_classes): auto
+        # switches the resolved method to budget to bound the per-chunk
+        # accumulator that aspect_ratio would let grow quadratically.
+        adjusted = opts._adjust(
+            4096, 32768, 16384, torch.float16, torch.device("cuda"),
+        )
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "budget")
 
         # Unknown pair (cpu + fp32) -> _AUTO_FALLBACK.
         adjusted = opts._adjust(
@@ -15734,17 +15745,17 @@ if __name__ == '__main__':
             )
         self.assertEqual(out.dtype, torch.float32)
 
-        # auto heuristic: on CUDA, probability targets resolve the
-        # chunking method to aspect_ratio factor 1 (the (N, V) target
-        # floors peak memory, so finer chunking is pure overhead).
+        # auto heuristic, below the crossing region (num_classes >>
+        # in_features): probability targets resolve to aspect_ratio
+        # factor 1, index targets to aspect_ratio:2.
         if "cuda" in device:
             adjusted = nn.LinearCrossEntropyOptions()._adjust(
-                num_batches=N, in_features=F_, num_classes=C,
+                num_batches=4096, in_features=2048, num_classes=32000,
                 dtype=torch.float16, device=inp.device, prob_target=True,
             )
             self.assertEqual(adjusted.chunking_method, "aspect_ratio")
             adjusted = nn.LinearCrossEntropyOptions()._adjust(
-                num_batches=N, in_features=F_, num_classes=C,
+                num_batches=4096, in_features=2048, num_classes=32000,
                 dtype=torch.float16, device=inp.device, prob_target=False,
             )
             self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
