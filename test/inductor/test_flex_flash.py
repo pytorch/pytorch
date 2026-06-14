@@ -372,7 +372,7 @@ def create_test_tensors(
 
 
 def _create_block_mask_for_device(
-    mask_mod, batch_size, num_heads, q_len, kv_len, *, device
+    mask_mod, batch_size, num_heads, q_len, kv_len, *, device, dim=64
 ):
     """Match FlexAttention's block-height expectations per compute capability."""
     q_block = _DEFAULT_SPARSE_BLOCK_SIZE
@@ -382,6 +382,9 @@ def _create_block_mask_for_device(
         major, _ = torch.cuda.get_device_capability(dev)
         if major == 8:
             kv_block = 64
+        elif major == 9:
+            if dim <= 64:
+                q_block = 192
         elif major == 10:
             q_block *= 2
     return create_block_mask(
@@ -978,6 +981,7 @@ class TestFlexFlash(InductorTestCase):
             and params["case"].score_mod_factory is not None
         ),
     )
+    @decorateIf(unittest.expectedFailure, lambda params: IS_SM90)
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_mask_mod_cases(self, device, dtype, case):
@@ -1012,6 +1016,7 @@ class TestFlexFlash(InductorTestCase):
                 case.seq_len,
                 case.seq_len,
                 device=device,
+                dim=case.dim,
             ),
         )
 
@@ -1223,7 +1228,7 @@ class TestFlexFlash(InductorTestCase):
     @decorateIf(
         unittest.expectedFailure,
         lambda params: (
-            SM120OrLater
+            (SM120OrLater or IS_SM90)
             and params["case"].name
             in {
                 "backward_block_mask_causal",
@@ -1285,7 +1290,7 @@ class TestFlexFlash(InductorTestCase):
     @decorateIf(
         unittest.expectedFailure,
         lambda params: (
-            SM120OrLater
+            (SM120OrLater or IS_SM90)
             and params["case"].name
             in {
                 "gqa_block_mask_causal",
@@ -1345,6 +1350,7 @@ class TestFlexFlash(InductorTestCase):
                 case.seq_len,
                 case.seq_len,
                 device=device,
+                dim=case.dim,
             ),
         )
 
@@ -2262,7 +2268,13 @@ class TestFlexFlash(InductorTestCase):
         self.assertEqual(v.stride()[1], 0, "V should have stride=0 from expand()")
 
         block_mask = _create_block_mask_for_device(
-            _causal_mask, batch_size, n_heads, seqlen, seqlen, device=device
+            _causal_mask,
+            batch_size,
+            n_heads,
+            seqlen,
+            seqlen,
+            device=device,
+            dim=headdim,
         )
 
         if SM120OrLater:
@@ -2443,6 +2455,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self._run_dynamic_test(seq_lens=[128, 256, 512], score_mod=alibi_score_mod)
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(
+        IS_SM90, "block sparse q_block=192 incompatible with Triton BLOCK_M=128"
+    )
     def test_dynamic_seq_len_with_block_mask(self):
         """Test dynamic sequence lengths with block mask."""
 
@@ -2482,6 +2497,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(
+        IS_SM90, "block sparse q_block=192 incompatible with Triton BLOCK_M=128"
+    )
     def test_dynamic_backward_with_block_mask(self):
         """Test backward with block mask and dynamic sequence lengths."""
         major, _ = torch.cuda.get_device_capability()
@@ -2597,6 +2615,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self.assertEqual(out.shape, q.shape)
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(
+        IS_SM90, "default BLOCK_SIZE=128 incompatible with Flash m_block_size=192"
+    )
     def test_dynamic_mask_from_input_lengths_single_graph(self):
         """Dynamic mask creation driven by input lengths should stay single-graph."""
         counter = CompileCounterWithBackend("inductor")
@@ -2644,6 +2665,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM90, "BLOCK_SIZE=128 incompatible with Flash m_block_size=192")
     def test_dynamic_free_symbol_mask_single_graph(self):
         """Free-symbol dense mask under dynamic=True should not recompile."""
         counter = CompileCounterWithBackend("inductor")
