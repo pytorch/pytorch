@@ -621,7 +621,7 @@ def jacobian(
             more information.
         strategy (str, optional): Set to ``"forward-mode"`` or ``"reverse-mode"`` to
             determine whether the Jacobian will be computed with forward or reverse
-            mode AD. Currently, ``"forward-mode"`` requires ``vectorized=True``.
+            mode AD. Currently, ``"forward-mode"`` requires ``vectorize=True``.
             Defaults to ``"reverse-mode"``. If ``func`` has more outputs than
             inputs, ``"forward-mode"`` tends to be more performant. Otherwise,
             prefer to use ``"reverse-mode"``.
@@ -684,6 +684,12 @@ def jacobian(
             'Otherwise, prefer to use "reverse-mode".'
         )
     if strategy == "forward-mode":
+        if not vectorize:
+            raise ValueError(
+                'strategy="forward-mode" requires vectorize=True. '
+                "Please either set `vectorize=True` or "
+                '`strategy="reverse-mode"`.'
+            )
         if create_graph:
             raise NotImplementedError(
                 "torch.autograd.functional.jacobian: `create_graph=True` "
@@ -893,7 +899,7 @@ def hessian(
             computed in reverse-mode AD. Setting strategy to ``"forward-mode"``
             or ``"reverse-mode"`` determines whether the outer Jacobian will be
             computed with forward or reverse mode AD. Currently, computing the outer
-            Jacobian in ``"forward-mode"`` requires ``vectorized=True``. Defaults
+            Jacobian in ``"forward-mode"`` requires ``vectorize=True``. Defaults
             to ``"reverse-mode"``.
 
     Returns:
@@ -953,6 +959,12 @@ def hessian(
     ):
         raise AssertionError(
             'Expected strategy to be either "forward-mode" or "reverse-mode".'
+        )
+    if outer_jacobian_strategy == "forward-mode" and not vectorize:
+        raise ValueError(
+            'outer_jacobian_strategy="forward-mode" requires vectorize=True. '
+            "Please either set `vectorize=True` or "
+            '`outer_jacobian_strategy="reverse-mode"`.'
         )
 
     def ensure_single_output_function(*inp):
