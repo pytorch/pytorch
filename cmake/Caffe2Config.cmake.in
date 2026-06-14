@@ -80,7 +80,8 @@ if(@USE_CUDA@)
   # be found again when including the Caffe2 target.
   set(CAFFE2_USE_CUDA @USE_CUDA@)
 
-  # Add current directory to module path so we pick up FindCUDAToolkit.cmake
+  # Add current directory to module path so public/cuda.cmake can find
+  # the bundled FindCUDNN / FindCUSPARSELT / FindCUDSS modules.
   set(old_CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}")
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
   include("${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake")

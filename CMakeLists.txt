@@ -1381,10 +1381,6 @@ if(BUILD_SHARED_LIBS)
     DESTINATION share/cmake/Caffe2/
     COMPONENT dev)
   install(
-    FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
-    DESTINATION share/cmake/Caffe2/
-    COMPONENT dev)
-  install(
     FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUSPARSELT.cmake
     DESTINATION share/cmake/Caffe2/
     COMPONENT dev)
