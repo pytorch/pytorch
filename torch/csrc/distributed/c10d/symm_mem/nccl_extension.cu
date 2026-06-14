@@ -285,6 +285,68 @@ void nccl_get(at::Tensor& tensor, const int64_t peer) {
 #endif
 }
 
+void nccl_get_out(
+    at::Tensor& dst,
+    const c10::intrusive_ptr<SymmetricMemory>& hdl,
+    int64_t offset,
+    int64_t size,
+    int64_t peer) {
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  TORCH_CHECK(dst.is_cuda(), "symm_mem.get: expected a CUDA tensor");
+  TORCH_CHECK(
+      dst.device() == hdl->get_device(),
+      "symm_mem.get: dst must be on the same device as hdl");
+  TORCH_CHECK(
+      dst.is_contiguous(),
+      "symm_mem.get: dst must be backed by contiguous memory");
+  TORCH_CHECK(offset >= 0, "symm_mem.get: offset must be non-negative");
+  TORCH_CHECK(size >= 0, "symm_mem.get: size must be non-negative");
+  TORCH_CHECK(
+      dst.numel() >= size,
+      "symm_mem.get: dst must contain at least `size` elements");
+  TORCH_CHECK(
+      peer >= 0 && peer < hdl->get_world_size(), "symm_mem.get: invalid peer");
+  auto element_size = static_cast<size_t>(dst.element_size());
+  auto buffer_offset = hdl->get_offset();
+  TORCH_CHECK(
+      buffer_offset % element_size == 0,
+      "symm_mem.get: handle offset is not element-aligned");
+  auto buffer_size = hdl->get_buffer_size();
+  TORCH_CHECK(
+      buffer_offset <= buffer_size,
+      "symm_mem.get: handle offset exceeds symmetric allocation");
+  auto available_bytes = buffer_size - buffer_offset;
+  TORCH_CHECK(
+      static_cast<size_t>(offset) <= available_bytes / element_size &&
+          static_cast<size_t>(size) <=
+              (available_bytes - static_cast<size_t>(offset) * element_size) /
+                  element_size,
+      "symm_mem.get: requested range exceeds symmetric allocation");
+  auto nbytes = static_cast<size_t>(size) * element_size;
+  if (nbytes == 0) {
+    return;
+  }
+
+  c10::cuda::CUDAGuard guard(dst.device());
+  int threads = THREADS_PER_BLOCK;
+  int blocks = (nbytes + threads - 1) / threads;
+  size_t src_byte_offset =
+      buffer_offset + static_cast<size_t>(offset) * element_size;
+
+  lsa_get_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      hdl->get_buffer_ptrs_dev(),
+      peer,
+      src_byte_offset,
+      dst.mutable_data_ptr(),
+      nbytes);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
+  TORCH_CHECK(
+      false,
+      "NCCL symmetric memory get is not supported. Requires NCCL >= 2.28.0");
+#endif
+}
+
 bool is_nccl_symmem_available() {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
     return true;
@@ -396,6 +458,19 @@ void nccl_wait_signal_boxed(
       c10d::symmetric_memory::SymmetricMemory>();
   c10d::nccl_extension::nccl_wait_signal(hdl, peer);
 }
+
+void nccl_get_out_boxed(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet ks,
+    c10::Stack* stack) {
+  auto peer = torch::jit::pop(*stack).toInt();
+  auto size = torch::jit::pop(*stack).toInt();
+  auto offset = torch::jit::pop(*stack).toInt();
+  auto hdl = torch::jit::pop(*stack).toCustomClass<
+      c10d::symmetric_memory::SymmetricMemory>();
+  auto dst = torch::jit::pop(*stack).toTensor();
+  c10d::nccl_extension::nccl_get_out(dst, hdl, offset, size, peer);
+}
 } // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
@@ -405,9 +480,11 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   // TODO: rename with more descriptive name
   m.impl("nccl_wait_for_signal", c10d::nccl_extension::nccl_wait_for_signal);
   m.impl("nccl_put_with_signal", c10d::nccl_extension::nccl_put_with_signal);
-  // API that uses internal signal mechanism and accepts handle
+  // APIs that accept a handle
   m.impl("nccl_put_signal",
       torch::CppFunction::makeFromBoxedFunction<&nccl_put_signal_boxed>());
+  m.impl("nccl_get_out",
+      torch::CppFunction::makeFromBoxedFunction<&nccl_get_out_boxed>());
   m.impl("nccl_reduce_scatter_offset", c10d::nccl_extension::nccl_reduce_scatter_offset);
 }
 
