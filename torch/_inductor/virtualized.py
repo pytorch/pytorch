@@ -172,6 +172,8 @@ class NullKernelHandler(NullHandler):
         self.removed_buffers = OrderedSet[Any]()
         self.inplaced_to_remove = OrderedSet[Any]()
         self.index_dtype = "tl.int64"
+        self.codegen_value_expr_symbol_casts = False
+        self.codegen_value_expr_symbol_source_dtype = None
 
     def get_index_dtype_as_torch_dtype(self):
         import torch
