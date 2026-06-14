@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <functional>
 #include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
@@ -18,6 +19,9 @@
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#include <ATen/native/cuda/CublasGroupedArgs.h>
+#endif
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
@@ -414,6 +418,179 @@ void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const in
 
 } // namespace
 
+static Tensor grouped_mm_cublaslt(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype) {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  // Validate inputs without the strict stride-alignment check from
+  // _grouped_mm_validate_inputs — cublasLt handles alignment via padding
+  // inside cublaslt_grouped_mm.
+  TORCH_CHECK(
+      mat_a.dtype() == at::kBFloat16 || mat_a.dtype() == at::kHalf,
+      "cublasLt grouped GEMM requires BFloat16 or Float16 input, got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == mat_a.dtype(),
+      "mat_a and mat_b must have the same dtype");
+  TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
+  TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  if (!a_is_2d || !b_is_2d) {
+    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2),
+        "contraction dimension of mat_a and mat_b must match");
+  }
+  TORCH_CHECK(offs.has_value() == (a_is_2d || b_is_2d),
+      "Must provide offsets iff at least one input is 2D");
+  if (offs.has_value()) {
+    TORCH_CHECK(offs->dim() == 1, "offs must be 1D");
+    TORCH_CHECK(offs->dtype() == at::kInt, "offs must be int32");
+  }
+  TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
+
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  cublasGroupedArgs args(mat_a, mat_b, offs, out);
+  at::cuda::blas::grouped_gemm(args.transa, args.transb,
+                               args.mArray, args.avgM,
+                               args.nArray, args.avgN,
+                               args.kArray, args.avgK,
+                               args.alphaPtrArray, args.alphaScalar, args.A_dtype,
+                               args.APtrArray, args.ldaArray,
+                               args.BPtrArray, args.ldbArray,
+                               args.betaPtrArray, args.betaScalar, args.result_dtype,
+                               args.DPtrArray, args.lddArray,
+                               args.DPtrArray, args.lddArray, args.batchCount);
+  return out;
+#else
+  TORCH_CHECK(false, "cublasLt grouped GEMM requires CUDA >= 13.2 and is not supported on ROCm. Current build does not meet these requirements.");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+}
+
+static Tensor scaled_grouped_mm_cublaslt(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<at::Tensor>& offs,
+    const std::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& scale_result,
+    std::optional<c10::ScalarType> out_dtype,
+    bool use_fast_accum,
+    const std::optional<at::blas::ScalingType>& scaling_choice_a = std::nullopt,
+    const std::optional<at::blas::ScalingType>& scaling_choice_b = std::nullopt) {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  TORCH_CHECK(
+      mat_a.dtype() == at::kFloat8_e4m3fn || mat_a.dtype() == at::kFloat8_e5m2,
+      "cublasLt scaled grouped GEMM requires Float8_e4m3fn or Float8_e5m2 input, got ", mat_a.scalar_type());
+  TORCH_CHECK(
+      mat_b.dtype() == at::kFloat8_e4m3fn || mat_b.dtype() == at::kFloat8_e5m2,
+      "cublasLt scaled grouped GEMM requires Float8_e4m3fn or Float8_e5m2 input, got ", mat_b.scalar_type());
+  TORCH_CHECK(
+    mat_a.dtype() == at::kFloat8_e4m3fn || mat_b.dtype() == at::kFloat8_e4m3fn,
+    "at least one input must be Float8_e4m3fn");
+  TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
+  TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  if (!a_is_2d || !b_is_2d) {
+    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2),
+        "contraction dimension of mat_a and mat_b must match");
+  }
+  TORCH_CHECK(offs.has_value() == (a_is_2d || b_is_2d),
+      "Must provide offsets iff at least one input is 2D");
+  if (offs.has_value()) {
+    TORCH_CHECK(offs->dim() == 1, "offs must be 1D");
+    TORCH_CHECK(offs->dtype() == at::kInt, "offs must be int32");
+  }
+  TORCH_CHECK(!bias.has_value(), "Bias not supported for scaled grouped GEMM");
+
+  TORCH_CHECK(
+      scale_a.dtype() == at::kFloat || scale_a.dtype() == at::kFloat8_e8m0fnu,
+      "scale_a must be float32 or float8_e8m0fnu, got ", scale_a.scalar_type());
+  TORCH_CHECK(
+      scale_b.dtype() == at::kFloat || scale_b.dtype() == at::kFloat8_e8m0fnu,
+      "scale_b must be float32 or float8_e8m0fnu, got ", scale_b.scalar_type());
+  const int batchCount = offs.has_value()
+      ? static_cast<int>(offs.value().size(0))
+      : static_cast<int>(mat_a.size(0));
+
+  auto is_vec128_blk128 = [](at::blas::ScalingType st) {
+    return st == at::blas::ScalingType::BlockWise1x128
+        || st == at::blas::ScalingType::BlockWise128x128;
+  };
+  const bool has_vec128_blk128 =
+      (scaling_choice_a.has_value() && is_vec128_blk128(*scaling_choice_a)) ||
+      (scaling_choice_b.has_value() && is_vec128_blk128(*scaling_choice_b));
+
+  // Float32 scales: numel == 1 (TensorWise), numel == batchCount (GroupWise),
+  // or larger (VEC128/BLK128x128 when explicit scaling choices are given).
+  if (scale_a.dtype() == at::kFloat && !has_vec128_blk128) {
+    TORCH_CHECK(
+        scale_a.numel() == 1 || scale_a.numel() == batchCount,
+        "float32 scale_a must have 1 or batchCount (", batchCount, ") elements, got ", scale_a.numel());
+  }
+  if (scale_b.dtype() == at::kFloat && !has_vec128_blk128) {
+    TORCH_CHECK(
+        scale_b.numel() == 1 || scale_b.numel() == batchCount,
+        "float32 scale_b must have 1 or batchCount (", batchCount, ") elements, got ", scale_b.numel());
+  }
+  TORCH_CHECK(!scale_result.has_value(), "scale_result is not supported yet for scaled grouped GEMM");
+
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (has_vec128_blk128) {
+    // VEC128/BLK128x128 only supported on SM 9.0 for grouped GEMM
+    TORCH_CHECK(prop->major == 9,
+        "VEC128/BLK128x128 grouped GEMM is only supported on SM 9.0 (H100)");
+    TORCH_CHECK(!use_fast_accum,
+        "use_fast_accum is not supported with VEC128/BLK128x128 scaling");
+    TORCH_CHECK(scale_a.dtype() == at::kFloat && scale_b.dtype() == at::kFloat,
+        "VEC128/BLK128x128 scales must be float32");
+    // Reject 128x128 x 128x128 combo
+    if (scaling_choice_a.has_value() && scaling_choice_b.has_value()) {
+      TORCH_CHECK(
+          !(*scaling_choice_a == at::blas::ScalingType::BlockWise128x128 &&
+            *scaling_choice_b == at::blas::ScalingType::BlockWise128x128),
+          "BlockWise128x128 x BlockWise128x128 combo is not supported");
+    }
+  } else if (prop->major == 9) {
+    // SM 9.0 without VEC128/BLK128x128: only tensorwise is supported
+    TORCH_CHECK(
+        scale_a.numel() == 1 && scale_a.dtype() == at::kFloat &&
+        scale_b.numel() == 1 && scale_b.dtype() == at::kFloat,
+        "SM 9.0 grouped GEMM only supports tensorwise scaling "
+        "(single fp32 scale per tensor) or VEC128/BLK128x128 with explicit scaling choices");
+  }
+
+  if (out_dtype.has_value()) {
+    TORCH_CHECK(
+      out_dtype.value() == at::kBFloat16 || out_dtype.value() == at::kHalf || out_dtype.value() == at::kFloat,
+      "Only bf16, fp16, and fp32 output types are supported for scaled grouped GEMM");
+  }
+
+  const auto out_dtype_ = out_dtype.value_or(at::kBFloat16);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  cublasGroupedArgs args(mat_a, mat_b, offs, out, scale_a, scale_b, scale_result,
+                         scaling_choice_a, scaling_choice_b);
+  at::cuda::blas::scaled_grouped_gemm(
+      args.transa, args.transb,
+      args.mArray, args.avgM,
+      args.nArray, args.avgN,
+      args.kArray, args.avgK,
+      args.alphaPtrArray, args.alphaScalar,
+      args.A_dtype, args.APtrArray, args.scale_mata_ptr, args.ldaArray,
+      args.B_dtype, args.BPtrArray, args.scale_matb_ptr, args.ldbArray,
+      args.betaPtrArray, args.betaScalar, args.result_dtype,
+      args.DPtrArray, args.lddArray,
+      args.DPtrArray, args.scale_result_ptr, args.lddArray,
+      use_fast_accum, args.batchCount,
+      args.scale_mata_dtype, args.scale_matb_dtype,
+      args.scale_mata_scaling_type, args.scale_matb_scaling_type);
+  return out;
+#else
+  TORCH_CHECK(false, "cublasLt scaled grouped GEMM requires CUDA >= 13.2 and is not supported on ROCm. Current build does not meet these requirements.");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+}
+
 Tensor
 _scaled_grouped_mm_cuda(
         const Tensor& mat_a,
@@ -427,6 +604,14 @@ _scaled_grouped_mm_cuda(
         bool use_fast_accum) {
   bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
   TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  if (at::globalContext().preferCublasltGroupedGemm()) {
+    return scaled_grouped_mm_cublaslt(
+        mat_a, mat_b, scale_a, scale_b, offs, bias,
+        scale_result, out_dtype, use_fast_accum);
+  }
+#endif
 
   TORCH_CHECK_VALUE(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK_VALUE(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
@@ -518,9 +703,16 @@ _scaled_grouped_mm_cuda(
 namespace {
 
 using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
+using namespace std::placeholders;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 4> scale_grouped_kernel_dispatch = {{
+std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 7> scale_grouped_kernel_dispatch = {{
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
+  { "block_1x128_128x128", std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128, _1, _2, _3, _4, _5, _6),
+    ScaledGemmImplementation::BLOCK_1x128_128x128},
+  { "block_128x128_1x128", std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise128x128, ScalingType::BlockWise1x128, _1, _2, _3, _4, _5, _6),
+    ScaledGemmImplementation::BLOCK_128x128_1x128},
+  { "block_1x128_1x128", std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise1x128, _1, _2, _3, _4, _5, _6),
+    ScaledGemmImplementation::BLOCK_1x128_1x128},
   { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
   { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4},
   { "nvfp4_nvfp4", scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4}}};
@@ -543,6 +735,50 @@ _scaled_grouped_mm_cuda_v2(
           bool use_fast_accum) {
   bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
   TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  if (at::globalContext().preferCublasltGroupedGemm()) {
+    auto recipe_a_enum = convert_int_to_enum<ScalingType>(scale_recipe_a);
+    auto recipe_b_enum = convert_int_to_enum<ScalingType>(scale_recipe_b);
+    if (recipe_a_enum.size() == 1 && recipe_b_enum.size() == 1) {
+      auto a_st = recipe_a_enum[0];
+      auto b_st = recipe_b_enum[0];
+      bool supported = a_st == ScalingType::TensorWise
+          || a_st == ScalingType::GroupWise
+          || a_st == ScalingType::BlockWise1x32;
+
+      // VEC128/BLK128x128 combos (SM 9.0 only)
+      bool is_vec128_blk128_combo =
+          (a_st == ScalingType::BlockWise1x128 && b_st == ScalingType::BlockWise1x128) ||
+          (a_st == ScalingType::BlockWise128x128 && b_st == ScalingType::BlockWise1x128) ||
+          (a_st == ScalingType::BlockWise1x128 && b_st == ScalingType::BlockWise128x128);
+      supported = supported || is_vec128_blk128_combo;
+
+      cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+      if (prop->major == 9) {
+        // SM 9.0: TensorWise and VEC128/BLK128x128 only
+        if (a_st != ScalingType::TensorWise && !is_vec128_blk128_combo) {
+          supported = false;
+        }
+      } else {
+        // SM 10.x+: VEC128/BLK128x128 not supported for grouped GEMM
+        if (is_vec128_blk128_combo) {
+          supported = false;
+        }
+      }
+      if (supported) {
+        std::optional<at::blas::ScalingType> sc_a = is_vec128_blk128_combo
+            ? std::optional(a_st) : std::nullopt;
+        std::optional<at::blas::ScalingType> sc_b = is_vec128_blk128_combo
+            ? std::optional(b_st) : std::nullopt;
+        return scaled_grouped_mm_cublaslt(
+            mat_a, mat_b, scale_a[0], scale_b[0],
+            offs, bias, /*scale_result=*/std::nullopt,
+            out_dtype, use_fast_accum, sc_a, sc_b);
+      }
+    }
+  }
+#endif
 
   TORCH_CHECK_VALUE(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK_VALUE(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
@@ -680,6 +916,17 @@ _scaled_grouped_mm_cuda_v2(
           std::nullopt, /* bias */
           out);
     }
+    case ScaledGemmImplementation::BLOCK_1x128_128x128:
+    case ScaledGemmImplementation::BLOCK_128x128_1x128:
+    case ScaledGemmImplementation::BLOCK_1x128_1x128: {
+      TORCH_CHECK(at::globalContext().preferCublasltGroupedGemm(),
+          "VEC128/BLK128x128 grouped GEMM requires TORCH_GROUPED_MM_PREFER_CUBLASLT=1");
+      return scaled_grouped_mm_cublaslt(
+          mat_a, mat_b, scale_a[0], scale_b[0],
+          offs, bias, /*scale_result=*/std::nullopt,
+          out_dtype, use_fast_accum,
+          scale_recipe_a_enum[0], scale_recipe_b_enum[0]);
+    }
     default:
       TORCH_CHECK_NOT_IMPLEMENTED(false,
           "_scaled_grouped_mm_cuda_v2 is in an inconsistent state - should never reach here");
@@ -691,6 +938,11 @@ const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  if (at::globalContext().preferCublasltGroupedGemm()) {
+    return grouped_mm_cublaslt(mat_a, mat_b, offs, bias, out_dtype);
+  }
+#endif
   bool a_b_and_out_are_bf16 = (
     mat_a.dtype() == at::kBFloat16 &&
     mat_b.dtype() == at::kBFloat16 &&
