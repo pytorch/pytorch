@@ -3142,6 +3142,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             for a in chain(op._schema.arguments, op._schema.returns)
         )
 
+    def _fallback_output_declaration(
+        self, output_arg: str | None, raw_output_arg: Any
+    ) -> str | None:
+        if output_arg is None or isinstance(raw_output_arg, ir.MutationOutput):
+            return None
+        if isinstance(raw_output_arg, sympy.Symbol):
+            self.unbacked_symbol_decls.add(str(raw_output_arg))
+            return f"int64_t {output_arg};"
+        return f"RAIIAtenTensorHandle {output_arg};"
+
     @staticmethod
     def _compatible_with_cpp_boxed_dispatch(op: torch._ops.OpOverload) -> bool:
         """Returns true if cpp_wrapper JIT can directly codegen c10::IValue boxing
@@ -3176,7 +3186,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         def return_supported(t: torch.JitType) -> bool:
             if isinstance(t, torch.OptionalType):
                 return isinstance(t.getElementType(), torch.TensorType)
-            return isinstance(t, (torch.NoneType, torch.TensorType))
+            return isinstance(t, (torch.NoneType, torch.SymIntType, torch.TensorType))
 
         return all(arg_supported(a.real_type) for a in op._schema.arguments) and all(
             return_supported(r.real_type) for r in op._schema.returns
@@ -3212,6 +3222,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return mutated_buf_names[0]
             if isinstance(out, (list, tuple)):
                 return [extract_output_name(o) for o in out]  # type: ignore[misc]
+            if isinstance(out, sympy.Symbol):
+                return str(out)
             if isinstance(out, int):
                 return str(out)
             raise AssertionError(f"Unexpected output: {type(out)}")
@@ -3523,10 +3535,14 @@ if (!custom_op_wrapper) {
         to support more datatypes."""
         if raw_outputs:
             declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
+                decl
                 for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
-                if output_arg is not None
-                and not isinstance(raw_output_arg, ir.MutationOutput)
+                if (
+                    decl := self._fallback_output_declaration(
+                        output_arg, raw_output_arg
+                    )
+                )
+                is not None
             ]
         else:
             declarations_before_scope = [
@@ -3608,12 +3624,29 @@ if (!custom_op_wrapper) {
             dispatch_lines.writeline(");")
 
             # assign result(s), ignoring None
-            for idx, output_arg in enumerate(output_args):
-                if output_arg is None:
-                    continue
-                dispatch_lines.writeline(
-                    f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
-                )
+            if raw_outputs:
+                for idx, (output_arg, raw_output_arg) in enumerate(
+                    zip(output_args, raw_outputs)
+                ):
+                    if output_arg is None or isinstance(
+                        raw_output_arg, ir.MutationOutput
+                    ):
+                        continue
+                    if isinstance(raw_output_arg, sympy.Symbol):
+                        dispatch_lines.writeline(
+                            f"{output_arg} = torch::stable::detail::to<int64_t>(dispatch_vars[{idx}]);"
+                        )
+                    else:
+                        dispatch_lines.writeline(
+                            f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                        )
+            else:
+                for idx, output_arg in enumerate(output_args):
+                    if output_arg is None:
+                        continue
+                    dispatch_lines.writeline(
+                        f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                    )
 
         dispatch_lines.writeline("}")
         self.writelines(dispatch_lines.getvalue().splitlines())
@@ -3637,10 +3670,14 @@ if (!custom_op_wrapper) {
 
         if raw_outputs:
             declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
+                decl
                 for output_arg, raw_output_arg in zip(output_args, raw_outputs)
-                if output_arg is not None
-                and not isinstance(raw_output_arg, ir.MutationOutput)
+                if (
+                    decl := self._fallback_output_declaration(
+                        output_arg, raw_output_arg
+                    )
+                )
+                is not None
             ]
         else:
             declarations_before_scope = [
@@ -3850,14 +3887,26 @@ if (!custom_op_wrapper) {
             dispatch_lines.writeline(f"op.callBoxed(&{stack_var});")
 
             stack_idx = 0
-            for output_arg, raw_output_arg in zip(output_args, raw_outputs):
+            for output_arg, raw_output_arg, schema_return in zip(
+                output_args, raw_outputs, op_overload._schema.returns
+            ):
                 if isinstance(raw_output_arg, ir.MutationOutput):
                     continue
                 if output_arg is not None:
-                    dispatch_lines.writeline(
-                        f"{output_arg} = torch::aot_inductor::new_tensor_handle("
-                        f"std::move({stack_var}[{stack_idx}]).toTensor());"
-                    )
+                    if isinstance(raw_output_arg, sympy.Symbol):
+                        if not isinstance(schema_return.real_type, torch.SymIntType):
+                            raise AssertionError(
+                                f"Unexpected fallback symbol output type: {schema_return.real_type}"
+                            )
+                        dispatch_lines.writeline(
+                            f"{output_arg} = std::move({stack_var}[{stack_idx}])"
+                            ".toSymInt().guard_int(__FILE__, __LINE__);"
+                        )
+                    else:
+                        dispatch_lines.writeline(
+                            f"{output_arg} = torch::aot_inductor::new_tensor_handle("
+                            f"std::move({stack_var}[{stack_idx}]).toTensor());"
+                        )
                 stack_idx += 1
 
         dispatch_lines.writeline("}")
