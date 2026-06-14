@@ -192,6 +192,7 @@ try:
         )
         from .test_control_flow import (
             CondModels,
+            InvokeSubgraphModels,
             prepend_counters,
             prepend_predicates,
             WhileLoopModels,
@@ -206,6 +207,7 @@ try:
         )
         from test_control_flow import (  # @manual=fbcode//caffe2/test/inductor:control_flow-library
             CondModels,
+            InvokeSubgraphModels,
             prepend_counters,
             prepend_predicates,
             WhileLoopModels,
@@ -2957,6 +2959,24 @@ class AOTInductorTestsTemplate:
                 Model().to(self.device),
                 example_inputs=example_inputs,
             )
+
+    def test_invoke_subgraph_simple(self):
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        self.check_model(InvokeSubgraphModels.Simple(), inputs)
+
+    def test_invoke_subgraph_multiple_outputs(self):
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        self.check_model(InvokeSubgraphModels.MultipleOutputs(), inputs)
+
+    def test_invoke_subgraph_stacked(self):
+        inputs = (torch.randn((10, 20), device=self.device),)
+        self.check_model(InvokeSubgraphModels.Stacked(num_blocks=3), inputs)
 
     def test_while_loop_simple(self):
         inputs = (

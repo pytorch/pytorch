@@ -481,8 +481,9 @@ def get_tensor_storages(tensor: torch.Tensor) -> set[StorageWeakRef]:
     """
     Get storage references from a tensor.
 
-    Handles regular tensors. Raises NotImplementedError for sparse tensors
-    and traceable wrapper subclasses.
+    For traceable wrapper subclasses, unions the storages of all inner
+    tensors reachable via ``__tensor_flatten__``. Raises NotImplementedError
+    for sparse tensors.
 
     Args:
         tensor: The tensor to extract storages from
@@ -502,9 +503,9 @@ def get_tensor_storages(tensor: torch.Tensor) -> set[StorageWeakRef]:
         raise NotImplementedError("get_tensor_storages does not support sparse tensors")
 
     if is_traceable_wrapper_subclass(tensor):
-        raise NotImplementedError(
-            "get_tensor_storages does not support traceable wrapper subclasses"
-        )
+        attrs, _ = tensor.__tensor_flatten__()
+        for attr in attrs:
+            storages |= get_tensor_storages(getattr(tensor, attr))
     else:
         storages.add(StorageWeakRef(tensor._typed_storage()))
 

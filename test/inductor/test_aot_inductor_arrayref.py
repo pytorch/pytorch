@@ -277,6 +277,12 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
     # TODO: error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
+    # Same ArrayRefTensor vs RAIIAtenTensorHandle mismatch as while_loop:
+    # the subgraph's stack-allocated output can't be std::move-assigned into
+    # the outer RAIIAtenTensorHandle pre-declared in codegen_invoke_subgraph.
+    "test_invoke_subgraph_simple": fail_stack_allocation(is_skip=True),
+    "test_invoke_subgraph_multiple_outputs": fail_stack_allocation(is_skip=True),
+    "test_invoke_subgraph_stacked": fail_stack_allocation(is_skip=True),
     # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
     "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),

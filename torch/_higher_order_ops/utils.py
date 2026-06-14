@@ -436,7 +436,7 @@ def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
 
 
 def _collect_fake_inputs(inputs):
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake
 
     # Get the example values of the inputs.
     inputs_fake: list[FakeTensor | torch.Tensor | int] = []
@@ -455,7 +455,10 @@ def _collect_fake_inputs(inputs):
                             val
                         ) or torch._C._functorch.is_functionaltensor(val):
                             val = torch._C._functorch.get_unwrapped(val)
-                        if not isinstance(val, FakeTensor):
+                        # is_fake also accepts traceable wrapper subclasses
+                        # whose inner tensors are FakeTensors (e.g. torchao
+                        # quantized parameter subclasses).
+                        if not is_fake(val):
                             raise AssertionError(
                                 f"Expected FakeTensor after unwrapping, got {type(val)}"
                             )
@@ -471,8 +474,11 @@ def _collect_fake_inputs(inputs):
                                 )
                             inputs_fake.append(unwrapped_input)
                     else:
-                        # This is the standard case of a TensorVariable
-                        if not isinstance(val, FakeTensor):
+                        # This is the standard case of a TensorVariable.
+                        # is_fake also accepts traceable wrapper subclasses
+                        # whose inner tensors are FakeTensors (e.g. torchao
+                        # quantized parameter subclasses).
+                        if not is_fake(val):
                             raise AssertionError(
                                 f"Expected FakeTensor, got {type(val)}"
                             )

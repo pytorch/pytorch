@@ -2709,9 +2709,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return output_names
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
-        raise NotImplementedError(
-            "codegen invoke_subgraph is not implemented for cpp wrapper"
-        )
+        outer_inputs = [buf.codegen_reference() for buf in invoke_subgraph.inputs]
+        outer_outputs = []
+        for out in invoke_subgraph.outputs:
+            # in ABI-compatible mode, ir.MultiOutput is not codegened,
+            # hence pre-declare output variables directly and separately
+            self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
+            outer_outputs.append(out.get_name())
+
+        self.writeline(EnterSubgraphLine(self, invoke_subgraph.subgraph.graph))
+        self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, outer_outputs)
+        self.writeline(ExitSubgraphLine(self))
 
     def codegen_conditional(self, conditional):
         """Emit ABI-compatible C++ for a higher-order conditional."""

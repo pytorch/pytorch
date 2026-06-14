@@ -858,6 +858,55 @@ class CondTests(TestCase):
         )
 
 
+# nested_compile_region-decorated helpers must live at module scope, not
+# inside forward -- Dynamo refuses to trace into the decorator call itself
+# when it is applied on a local function each call.
+@torch.compiler.nested_compile_region
+def _invoke_subgraph_gn_simple(x, y):
+    return x * y + x - y
+
+
+@torch.compiler.nested_compile_region
+def _invoke_subgraph_gn_multi_out(x, y):
+    return x * y, x + y, x - y
+
+
+class InvokeSubgraphModels:
+    class Simple(torch.nn.Module):
+        """Minimal single-call nested_compile_region invocation."""
+
+        def forward(self, a, b):
+            return _invoke_subgraph_gn_simple(a, b)
+
+    class MultipleOutputs(torch.nn.Module):
+        """Subgraph returning a tuple of tensors -- exercises per-output
+        RAIIAtenTensorHandle declaration and std::move suffix in cpp wrapper."""
+
+        def forward(self, a, b):
+            return _invoke_subgraph_gn_multi_out(a, b)
+
+    class Stacked(torch.nn.Module):
+        """N identical Blocks whose forward is wrapped with nested_compile_region.
+        Analogous to a stack of transformer layers; exercises subgraph reuse
+        across multiple invoke_subgraph call sites."""
+
+        class Block(torch.nn.Module):
+            @torch.compiler.nested_compile_region
+            def forward(self, x):
+                return (x * x + x).sin()
+
+        def __init__(self, num_blocks=3):
+            super().__init__()
+            self.blocks = torch.nn.ModuleList(
+                [InvokeSubgraphModels.Stacked.Block() for _ in range(num_blocks)]
+            )
+
+        def forward(self, x):
+            for b in self.blocks:
+                x = b(x)
+            return x
+
+
 class WhileLoopModels:
     class Simple(torch.nn.Module):
         def forward(self, ci, a, b):
