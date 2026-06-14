@@ -31,7 +31,8 @@ class TestCodegenRuntimeWrapper(TestCase):
     def test_inference_simple(self):
         """
         Simple inference: no mutations, no aliases. Generated code should
-        use the inference path (grad disabled) with empty orig_inputs.
+        use the inference path (grad disabled). orig_inputs is omitted
+        entirely when there are no aliased outputs (Fix C optimization).
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
 
@@ -45,7 +46,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(out, x * 2)
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("orig_inputs = {}", source)
+        self.assertNotIn("orig_inputs", source)
         self.assertIn("torch._C._set_grad_enabled(False)", source)
         self.assertNotIn("_force_view_tracking_", source)
         self.assertNotIn("_is_view_replay_enabled", source)
@@ -222,18 +223,24 @@ class TestCodegenRuntimeWrapper(TestCase):
         """
         The expected output arity should be baked into the generated code
         as a constant, not computed at runtime.
+
+        The function returns an aliased output (x.view(-1)) to ensure the
+        non-trivial epilogue path is taken (is_trivial=False). The compiled
+        function returns 3 non-aliased outputs; the aliased view is
+        reconstructed by _replay_aliases_ in the epilogue. The arity check
+        `if len(all_outs) != 3:` verifies that 3 is baked as a constant.
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
-                return x + 1, x * 2, x - 1
+                return x + 1, x * 2, x - 1, x.view(-1)
 
             f(torch.randn(4))
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("if len(all_outs) != 3:", source)
+        self.assertIn("if len(all_outs) != 4:", source)
 
     @skipIfTorchDynamo("dynamo handles mutations in-graph")
     def test_split_index_baked(self):
