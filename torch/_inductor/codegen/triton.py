@@ -1573,18 +1573,12 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def minimum(a, b):
-        if torch.version.hip:
-            return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
-        else:
-            return f"triton_helpers.minimum({a}, {b})"
+        return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
-        if torch.version.hip:
-            return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
-        else:
-            return f"triton_helpers.maximum({a}, {b})"
+        return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -3724,7 +3718,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     can_lift=can_lift,
                     stride_sorter_cls=stride_sorter_cls,
                 )
-                if issubclass(options_class, TensorDescriptorOptions):
+                if isinstance(options, TensorDescriptorOptions):
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )

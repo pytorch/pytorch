@@ -1087,9 +1087,8 @@ class _BoxedCodeGen(CodeGen):
             ]
 
             if placeholder_vars:
-                fn_def += "\n    args_iter = iter(args_list)"
-                for var in placeholder_vars:
-                    fn_def += f"\n    {var} = next(args_iter)"
+                for idx, var in enumerate(placeholder_vars):
+                    fn_def += f"\n    {var} = args_list[{idx}]"
                 fn_def += "\n    args_list.clear()"
 
         return fn_def
@@ -1125,7 +1124,8 @@ class _PyTreeCodeGen(CodeGen):
         if expanded_def:
             return "\n    " + "\n    ".join(has_annotation)
         else:
-            return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
+            # Use join() to avoid trailing whitespace (breaks expecttest snapshots).
+            return "\n    " + "; ".join(has_annotation) + ";\n"
 
     def gen_var_bindings(
         self, fn_args: list[str], free_vars: list[str], expanded_def: bool

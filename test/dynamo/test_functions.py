@@ -332,6 +332,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(Unsupported, fn)
         self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
         self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], -1)
 
     @make_test
     def test_itertools_permutations_various_iterators(a, b):
@@ -520,6 +521,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for size in itertools.combinations((1, 2, 3, 4), 2):
             combs.append(torch.ones(size))
         return combs
+
+    def test_itertools_combinations_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            return list(itertools.combinations(*args, **kwargs))
+
+        self.assertRaises(Unsupported, fn)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], -1)
+
+    @make_test
+    def test_itertools_combinations_various_iterators(a, b):
+        itertools.combinations([a, b], 1)
+        itertools.combinations(zip([1, 2], [3, 4]), 1)
+        itertools.combinations(map(lambda x: x, [1, 2]), 1)
+        itertools.combinations(filter(lambda x: True, [1, 2]), 1)
+        return a
 
     @make_test
     def test_itertools_combinations_with_replacement(a, b):
@@ -3236,11 +3255,14 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_lambda0_keywords_y_: "f32[2, 2]"):
-        l_lambda0_keywords_y_ = L_lambda0_keywords_y_
+    def forward(self, args_list):
+        L_torch_dynamo_resume_args_4_keywords_y_ = args_list[0]
+        args_list.clear()
+        l_torch_dynamo_resume_args_4_keywords_y_ = L_torch_dynamo_resume_args_4_keywords_y_
+        L_torch_dynamo_resume_args_4_keywords_y_ = None
 
-        mul: "f32[2, 2]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
-        mul_1: "f32[2, 2]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        mul: "f32[2, 2]" = l_torch_dynamo_resume_args_4_keywords_y_ * l_torch_dynamo_resume_args_4_keywords_y_
+        mul_1: "f32[2, 2]" = l_torch_dynamo_resume_args_4_keywords_y_ * l_torch_dynamo_resume_args_4_keywords_y_;  l_torch_dynamo_resume_args_4_keywords_y_ = None
 
         mul_2: "f32[2, 2]" = torch.mul(mul, mul_1);  mul = mul_1 = None
         return (mul_2,)
@@ -3251,13 +3273,17 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s9: "Sym(s9)", L_lambda0_keywords_y_: "f32[s9, s9]"):
-        l_lambda0_keywords_y_ = L_lambda0_keywords_y_
+    def forward(self, args_list):
+        s11 = args_list[0]
+        L_torch_dynamo_resume_args_4_keywords_y_ = args_list[1]
+        args_list.clear()
+        l_torch_dynamo_resume_args_4_keywords_y_ = L_torch_dynamo_resume_args_4_keywords_y_
+        L_torch_dynamo_resume_args_4_keywords_y_ = None
 
-        mul: "f32[s9, s9]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
-        mul_1: "f32[s9, s9]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        mul: "f32[s11, s11]" = l_torch_dynamo_resume_args_4_keywords_y_ * l_torch_dynamo_resume_args_4_keywords_y_
+        mul_1: "f32[s11, s11]" = l_torch_dynamo_resume_args_4_keywords_y_ * l_torch_dynamo_resume_args_4_keywords_y_;  l_torch_dynamo_resume_args_4_keywords_y_ = None
 
-        mul_2: "f32[s9, s9]" = torch.mul(mul, mul_1);  mul = mul_1 = None
+        mul_2: "f32[s11, s11]" = torch.mul(mul, mul_1);  mul = mul_1 = None
         return (mul_2,)
 """,
             )

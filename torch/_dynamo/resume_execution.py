@@ -20,6 +20,8 @@ import dataclasses
 import sys
 from typing import Any, cast, TYPE_CHECKING
 
+import torch.compiler.config
+
 from .bytecode_transformation import (
     add_push_null,
     bytecode_from_template,
@@ -402,14 +404,17 @@ class ContinueExecutionCache:
             resume_arg_names.extend(v for v in argnames if v not in resume_arg_names)
             frame_value_names = set(argnames)
             frame_value_names.update(f"___stack{i}" for i in range(nstack))
-            boxed_resume = not nested_code_objs or any(
-                (
-                    inst.opname == "DELETE_FAST"
-                    and inst.argval in frame_value_names
-                    and inst.offset is not None
-                    and inst.offset >= resume_offset
+            boxed_resume = not torch.compiler.config.dynamic_sources and (
+                not nested_code_objs
+                or any(
+                    (
+                        inst.opname == "DELETE_FAST"
+                        and inst.argval in frame_value_names
+                        and inst.offset is not None
+                        and inst.offset >= resume_offset
+                    )
+                    for inst in instructions
                 )
-                for inst in instructions
             )
             resume_args_varname = RESUME_ARGS_VARNAME
             if boxed_resume:

@@ -1850,7 +1850,7 @@ class InstructionTranslatorBase(
             cg.extend_output(
                 [
                     *create_swap(2),
-                    create_instruction("LIST_APPEND", arg=1),
+                    *cg.create_list_append(),
                 ]
             )
             self.parent.push(UnknownVariable())
@@ -3840,16 +3840,18 @@ class InstructionTranslatorBase(
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
+        source = getattr(obj, "source", None)
         if (
             self.is_tracing_resume_prologue
-            and isinstance(obj.source, LocalSource)
-            and obj.source.local_name == self._boxed_resume_arg_name()
+            and isinstance(source, LocalSource)
+            and source.local_name == self._boxed_resume_arg_name()
         ):
             return
         # Check for tensor items using side-effect-free internal lookups
         # only. We avoid call_method("__getitem__") because it can execute
         # user code and add unwanted graph nodes.
-        self._maybe_sync_dealloc_subscr(obj, key)
+        if not self.is_tracing_resume_prologue:
+            self._maybe_sync_dealloc_subscr(obj, key)
         obj.call_method(self, "__delitem__", [key], {})
 
     def _maybe_sync_dealloc_subscr(
