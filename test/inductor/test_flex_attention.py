@@ -4693,6 +4693,90 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(decode_out.shape, (1, 2, 64, 64))
         torch.testing.assert_close(default_out, decode_out, atol=3e-3, rtol=3e-3)
 
+    def test_unbacked_flex_decoding_eligibility_falls_back(self, device):
+        from torch._inductor.kernel.flex.flex_decoding import _use_flex_decoding
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class FakeBuffer:
+            def __init__(self, size):
+                self.size = size
+
+            def get_size(self):
+                return self.size
+
+        shape_env = ShapeEnv()
+        seq_len = shape_env.create_unbacked_symint().node.expr
+        shape_env.var_to_hint_override[seq_len] = 64
+        graph = mock.Mock(sizevars=SizeVarAllocator(shape_env))
+
+        with V.set_graph_handler(graph):
+            self.assertFalse(
+                _use_flex_decoding(
+                    FakeBuffer([1, 2, seq_len, 64]),
+                    FakeBuffer([1, 1, 1, 1]),
+                    FakeBuffer([1, 2, seq_len, 64]),
+                    {},
+                    False,
+                )
+            )
+
+    def test_backward_fake_symbolic_query_key_batch_non_broadcast(self, device):
+        from torch._dynamo.source import LocalSource
+        from torch._higher_order_ops.flex_attention import (
+            flex_attention_backward_fake_tensor_mode,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+
+        def fakeify(t, name):
+            dynamic_sizes = [DimDynamic.STATIC] * t.dim()
+            dynamic_sizes[0] = DimDynamic.UNBACKED
+            return fake_mode.from_tensor(
+                t,
+                source=LocalSource(name, is_input=True),
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=dynamic_sizes,
+                    shape_ids={0: "batch"},
+                ),
+            )
+
+        B, H, S, D = 4, 2, 8, 16
+        query = fakeify(torch.empty(B, H, S, D, device=device), "query")
+        key = fakeify(torch.empty(B, H, S, D, device=device), "key")
+        value = fakeify(torch.empty(B, H, S, D, device=device), "value")
+        out = fakeify(torch.empty(B, H, S, D, device=device), "out")
+        grad_out = fakeify(torch.empty(B, H, S, D, device=device), "grad_out")
+        logsumexp = fakeify(torch.empty(B, H, S, device=device), "logsumexp")
+        grad_logsumexp = fakeify(torch.empty(B, H, S, device=device), "grad_logsumexp")
+
+        with fake_mode:
+            _, grad_key, grad_value, _ = flex_attention_backward_fake_tensor_mode(
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                grad_out,
+                grad_logsumexp,
+                None,
+                None,
+                (),
+                1.0,
+                {},
+            )
+
+        self.assertEqual(grad_key.shape, key.shape)
+        self.assertEqual(grad_value.shape, value.shape)
+
     @supported_platform
     @skip_on_cpu
     @skip_on_mps  # asserts Triton-specific BACKEND='TRITON_DECODE' error
