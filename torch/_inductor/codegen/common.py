@@ -2082,6 +2082,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         dtype: torch.dtype | None = None,
         shape: BlockShapeType = None,
     ) -> CSEVariableType:
+        """Return a cached CSE variable for expr, emitting an assignment when needed."""
         if isinstance(expr, OpsValue):
             expr = expr.value
 
@@ -2132,6 +2133,12 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                     else:
                         line = f"{expr}{self.suffix}"
                     buffer.writeline(line)
+                    if (
+                        assignment
+                        and dtype is torch.float64
+                        and buffer is V.kernel.compute
+                    ):
+                        V.kernel.num_fp64_compute_ops += 1
 
                     # cpp backend cannot determine is_vec at this point
                     if (
@@ -2211,6 +2218,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.num_load = 0
         self.num_store = 0
         self.num_reduction = 0
+        self.num_fp64_compute_ops = 0
 
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers: OrderedSet[str] = OrderedSet()
