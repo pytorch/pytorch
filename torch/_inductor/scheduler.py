@@ -3808,12 +3808,13 @@ def _occupancy_before_and_after_fusion(
 
     # # Need device info to calculate occupancy
     regs_per_sm = device_props.regs_per_multiprocessor
-    if regs_per_sm is None:
+    warp_size = device_props.warp_size
+    if regs_per_sm is None or warp_size is None:
         return 1, 1  # Can't calculate, allow fusion
 
     if not num_warps:
         raise AssertionError("expected num_warps to be truthy")
-    threads_per_block = num_warps * device_props.warp_size_or_default
+    threads_per_block = num_warps * warp_size
 
     regs_per_block_unfused = unfused_n_regs * threads_per_block
     regs_per_block_fused = fused_n_regs * threads_per_block
