@@ -4,6 +4,8 @@ from functools import cached_property
 from typing import Any
 from typing_extensions import Unpack
 
+import torch
+
 from ..utils import is_rocm
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 from .triton_helpers import get_constexprs
@@ -109,7 +111,9 @@ class StaticallyLaunchedTritonKernel:
         self.has_profile_scratch = needs_scratch_arg("Profile", "profile_scratch_size")
 
         # pyrefly: ignore [missing-attribute]
-        self.arg_tys = self.arg_ty_from_signature(kernel.src)
+        self.arg_tys, self.pointer_arg_validation = self.arg_ty_from_signature(
+            kernel.src
+        )
         self.function: int | None = None  # Loaded by load_kernel(on the parent process)
         self.module: int | None = None  # Owns the HIP/CUDA module loaded for function
         num_ctas = 1
@@ -190,6 +194,27 @@ class StaticallyLaunchedTritonKernel:
             # TODO handle nvTmaDesc/CUtensormap
         }
 
+    @staticmethod
+    @functools.lru_cache
+    def pointer_type_mappings() -> dict[str, torch.dtype]:
+        return {
+            "*i1": torch.bool,
+            "*u1": torch.bool,
+            "*i8": torch.int8,
+            "*i16": torch.int16,
+            "*i32": torch.int32,
+            "*i64": torch.int64,
+            "*u8": torch.uint8,
+            "*u16": torch.uint16,
+            "*u32": torch.uint32,
+            "*u64": torch.uint64,
+            "*fp16": torch.float16,
+            "*bf16": torch.bfloat16,
+            "*fp32": torch.float32,
+            "*f32": torch.float32,
+            "*fp64": torch.float64,
+        }
+
     def extract_type(self, ty: str) -> str:
         """
         Takes a triton type from CompiledKernel.signature and
@@ -203,7 +228,9 @@ class StaticallyLaunchedTritonKernel:
             raise NotImplementedError("nvTmaDesc kernels are not yet supported")
         return StaticallyLaunchedTritonKernel.type_mappings()[ty]
 
-    def arg_ty_from_signature(self, src: ASTSource) -> str:
+    def arg_ty_from_signature(
+        self, src: ASTSource
+    ) -> tuple[str, tuple[tuple[int, str, torch.dtype], ...]]:
         def index_key(i: Any) -> int:
             if isinstance(i, str):
                 # pyrefly: ignore [missing-attribute]
@@ -227,6 +254,7 @@ class StaticallyLaunchedTritonKernel:
         # completely ignores the constexprs passed into it when generating code.
         # So we can ignore them here too
         params = []
+        pointer_arg_validation = []
 
         for i in sorted(signature.keys()):
             ty = signature[i]
@@ -237,8 +265,23 @@ class StaticallyLaunchedTritonKernel:
                 pass
             else:
                 # pyrefly: ignore [bad-argument-type]
+                expected_dtype = self.pointer_type_mappings().get(ty)
+                if expected_dtype is not None:
+                    pointer_arg_validation.append((len(params), ty, expected_dtype))
                 params.append(self.extract_type(ty))
-        return "".join(params)
+        return "".join(params), tuple(pointer_arg_validation)
+
+    def validate_pointer_arg_dtypes(self, args: tuple[object, ...]) -> None:
+        for arg_idx, triton_ty, expected_dtype in self.pointer_arg_validation:
+            arg = args[arg_idx]
+            if not isinstance(arg, torch.Tensor):
+                continue
+            if arg.dtype != expected_dtype:
+                raise TypeError(
+                    "Static Triton launcher argument "
+                    f"{arg_idx} expected Triton pointer type {triton_ty} "
+                    f"(tensor dtype {expected_dtype}), but got tensor dtype {arg.dtype}"
+                )
 
     def __getstate__(self) -> dict[str, Any]:
         # Remove objects that are no longer valid for pickling
@@ -268,6 +311,9 @@ class StaticallyLaunchedTritonKernel:
         # throw an exception. But if inductor is the only one calling this
         # thing, it should always match.
         # Get rid of constants before passing to cubin launcher
+
+        if self.pointer_arg_validation:
+            self.validate_pointer_arg_dtypes(args)
 
         arg_tys = self.arg_tys
 
