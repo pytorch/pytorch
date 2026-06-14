@@ -1525,6 +1525,8 @@ class TensorVariable(VariableTracker):
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
         result = DataPtrVariable(self)
+        # Emit and cache the read here so later storage mutations cannot
+        # reorder it after the original data_ptr() call.
         result.as_sym_node(tx)
         return result
 

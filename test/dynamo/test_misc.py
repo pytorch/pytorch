@@ -8235,7 +8235,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             opt_fn(x, obj)
             self.assertFalse(True)
         except TypeError as e:
-            self.assertIn("__bool__ should return bool, returned float", str(e))
+            if sys.version_info >= (3, 15):
+                msg = "__bool__() must return a bool, not float"
+            else:
+                msg = "__bool__ should return bool, returned float"
+            self.assertIn(msg, str(e))
 
     def test_unpack_tensor_shape_mismatch(self):
         @torch.compile(backend="eager")
@@ -14819,6 +14823,28 @@ fn
 
         expected = f(x, y)
         actual = torch.compile(f, backend=backend, fullgraph=True)(x, y)
+
+        self.assertEqual(expected, actual)
+        self.assertIsNotNone(backend.graph)
+        FileCheck().check("torch.ops.prims._data_ptr.default").run(backend.graph.code)
+
+    def test_data_ptr_scalar_tensor_fullgraph(self):
+        class CaptureGraph:
+            def __init__(self):
+                self.graph = None
+
+            def __call__(self, gm, example_inputs):
+                self.graph = gm
+                return gm
+
+        def f(x):
+            return torch.scalar_tensor(x.data_ptr(), device=x.device)
+
+        backend = CaptureGraph()
+        x = torch.randn(4)
+
+        expected = f(x)
+        actual = torch.compile(f, backend=backend, fullgraph=True)(x)
 
         self.assertEqual(expected, actual)
         self.assertIsNotNone(backend.graph)

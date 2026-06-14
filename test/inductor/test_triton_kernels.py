@@ -188,6 +188,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             z = torch.empty_like(x)
             xy = torch.tensor(
                 [x.data_ptr(), y.data_ptr()],
+                dtype=torch.long,
                 pin_memory=True,
             ).to(device=x.device, non_blocking=True)
             n_elements = x.numel()

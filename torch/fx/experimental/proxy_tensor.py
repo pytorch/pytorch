@@ -3050,7 +3050,7 @@ def make_fx(
         _allow_fake_constant,
         _error_on_data_dependent_ops,
         record_stack_traces=record_stack_traces
-        or config.trace.provenance_tracking_level == 1,
+        or config.effective_provenance_tracking_level() == 1,
         proxy_module_inputs=proxy_module_inputs,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
@@ -3084,7 +3084,7 @@ def get_proxy_mode() -> ProxyTorchDispatchMode | None:
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     if not (pre_dispatch_mode is None or mode is None):
         raise AssertionError(f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}")
-    return pre_dispatch_mode or mode
+    return typing.cast(ProxyTorchDispatchMode | None, pre_dispatch_mode or mode)
 
 
 def handle_sym_dispatch(
@@ -3171,8 +3171,9 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
     fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-    if fake_mode and fake_mode.shape_env:
-        if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
+    if isinstance(fake_mode, FakeTensorMode) and fake_mode.shape_env:
+        symbol_to_path = compute_unbacked_bindings(fake_mode.shape_env, out)
+        if symbol_to_path:
             if not isinstance(out_proxy, Proxy):
                 raise AssertionError(f"Expected Proxy, got {out_proxy}")
             out_proxy.node.meta["unbacked_bindings"] = symbol_to_path
