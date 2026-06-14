@@ -7560,7 +7560,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(opts.acc_policy, "auto")
         self.assertEqual(opts.chunking_method, "auto")
 
-        # Known pair: CUDA + bf16 -> ("compact", "aspect_ratio:2").
+        # Known pair: CUDA + bf16 -> ("compact", "aspect_ratio:2"). This
+        # shape is below the crossing region (num_classes >> in_features),
+        # so auto keeps aspect_ratio rather than switching to budget.
         adjusted = opts._adjust(
             128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
         )
@@ -7592,6 +7594,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         )
         self.assertEqual(adjusted.acc_policy, "accurate")
         self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # Above the crossing region (in_features >= ~num_classes): auto
+        # switches the resolved method to budget to bound the per-chunk
+        # accumulator that aspect_ratio would let grow quadratically.
+        adjusted = opts._adjust(
+            4096, 32768, 16384, torch.float16, torch.device("cuda"),
+        )
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "budget")
 
         # Unknown pair (cpu + fp32) -> _AUTO_FALLBACK.
         adjusted = opts._adjust(
