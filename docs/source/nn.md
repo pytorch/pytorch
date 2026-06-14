@@ -312,6 +312,17 @@ Global Hooks For Module
     nn.EmbeddingBag
 ```
 
+## Positional Encoding
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.RotaryEmbedding
+```
+
 ## Distance Functions
 
 ```{eval-rst}
