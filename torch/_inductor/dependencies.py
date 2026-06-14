@@ -105,7 +105,10 @@ class MemoryDep(Dep):
         """
         Can return None if not able to decide loop orders.
         """
-        assert self.num_vars == other.num_vars
+        if self.num_vars != other.num_vars:
+            raise AssertionError(
+                f"expected num_vars to match, got {self.num_vars} and {other.num_vars}"
+            )
 
         # ignore broadcast for now since broadcast causes extra 0 strides
         # which makes it hard to decide the correct loop orders.
@@ -155,7 +158,10 @@ class MemoryDep(Dep):
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
         order = [stride_to_index[s] for s in other_strides]
 
-        assert OrderedSet(order) == OrderedSet(range(self.num_vars))
+        if OrderedSet(order) != OrderedSet(range(self.num_vars)):
+            raise AssertionError(
+                f"expected order to be a permutation of range({self.num_vars}), got {order}"
+            )
         return order
 
     def get_offset(self) -> sympy.Expr:
@@ -166,13 +172,13 @@ class MemoryDep(Dep):
 
     def normalize(self) -> "MemoryDep":
         """
-        Normalize by merging loops. The different to normalize_with_stride_order is,
-        this method does not reorder loops while normalize_with_stride_order reorder
+        Normalize by merging loops. The difference from normalize_with_stride_order is,
+        this method does not reorder loops while normalize_with_stride_order reorders
         loops based on stride order.
         """
         return MemoryDep(
             self.name,
-            *_RecordLoadStoreInner._normalize(self.index, self.ranges),
+            *_RecordLoadStoreInner._normalize(self.index, self.ranges),  # type: ignore[arg-type]
             self.mode,
         )
 
@@ -217,7 +223,7 @@ class MemoryDep(Dep):
 
         out = MemoryDep(
             self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values())
-        )
+        )  # type: ignore[arg-type]
         return out
 
     @property
@@ -243,7 +249,7 @@ class MemoryDep(Dep):
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
-        return numel
+        return numel  # type: ignore[return-value]
 
     def rename(self, renames: dict[str, str]) -> "MemoryDep":
         if self.name in renames:
@@ -313,7 +319,7 @@ class MemoryDep(Dep):
         return isinstance(self.index, (int, sympy.Integer))
 
     def is_indirect(self) -> bool:
-        return any(is_indirect(v.name) for v in self.index.free_symbols)
+        return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -329,7 +335,7 @@ class StarDep(Dep):
         raise NotImplementedError("StarDep does not have an index")
 
     def get_numel(self) -> sympy.Expr:
-        return V.graph.get_numel(self.name)
+        return V.graph.get_numel(self.name)  # type: ignore[return-value]
 
     def rename(self, renames: dict[str, str]) -> "StarDep":
         if self.name in renames:
@@ -423,7 +429,7 @@ class WeakDep(Dep):
 
 @dataclasses.dataclass(frozen=True)
 class IndexExprDep:
-    index: sympy.Expr
+    index: sympy.Expr  # type: ignore[assignment]
     var_names: tuple[sympy.Symbol, ...]
     size: tuple[sympy.Expr, ...]
 
@@ -446,7 +452,10 @@ class ReadWrites:
         )
 
     def with_read(self, dep: Dep | OrderedSet[Dep]) -> "ReadWrites":
-        assert isinstance(dep, (WeakDep, StarDep, OrderedSet))
+        if not isinstance(dep, (WeakDep, StarDep, OrderedSet)):
+            raise AssertionError(
+                f"expected WeakDep, StarDep, or OrderedSet, got {type(dep)}"
+            )
         if not isinstance(dep, OrderedSet):
             dep = OrderedSet([dep])
         return ReadWrites(
@@ -541,7 +550,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
         index_vars = [*var_ranges.keys()]
-        sizes = tuple(var_ranges.values())
+        sizes = tuple(var_ranges.values())  # type: ignore[assignment]
         new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
@@ -557,7 +566,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         new_vars = [*new_vars.keys()]
         new_sizes = [*new_sizes]
         cls.drop_unused_symbols(index, new_vars, new_sizes)
-        return index, tuple(new_vars), tuple(new_sizes)
+        return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
 
     def canonicalize(
         self, index: sympy.Expr
@@ -569,7 +578,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
             self.drop_unused_symbols(index, var_names, sizes)
 
-            return index, tuple(var_names), tuple(sizes)
+            return index, tuple(var_names), tuple(sizes)  # type: ignore[return-value, arg-type]
         var_ranges = {
             k: V.graph.sizevars.simplify(v)
             for k, v in self._var_ranges.items()
@@ -582,7 +591,8 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))
 
     def load_seed(self, name: str, index: int) -> None:
-        assert isinstance(index, int)
+        if not isinstance(index, int):
+            raise AssertionError(f"expected index to be int, got {type(index)}")
         self.load(name, sympy.Integer(index))
 
     def store(
@@ -594,6 +604,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self.store(name, index, f"store_reduction({value})")
 
     def index_expr(self, index: sympy.Expr, dtype: torch.dtype | None) -> None:
+        self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
+
+    def value_expr(self, index: sympy.Expr, dtype: torch.dtype | None) -> None:
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
 
     def bucketize(
@@ -648,10 +661,8 @@ def index_vars_squeeze(
 
     var_ranges, add_var = var_builder(prefix)
     args: list[Sequence[sympy.Expr]] = []
-    new_sizes: list[Sequence[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
-        new_sizes.append(new_size)
         args.append(reindex(list(map(add_var, new_size))))
     return args, var_ranges
 
@@ -712,11 +723,11 @@ def extract_loop_body_with_args(
     if fn.indirect_vars:
         # mimic the `tmpX` naming tracing gives us
         repl = {v: make_symbol(SymT.TMP, i) for i, v in enumerate(fn.indirect_vars)}
-        name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}
+        name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}  # type: ignore[arg-type]
     for entry in fn.memory_usage[MemoryUsageType.LOAD]:
-        inner.load(entry.buffer_name, name_to_index[entry.index_name])
+        inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
     for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
-        inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))
+        inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
     for entry in fn.memory_usage[MemoryUsageType.STORE]:
         inner.store(
             entry.buffer_name,
@@ -837,7 +848,10 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
-        assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
+        if isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean)):
+            raise AssertionError(
+                f"index_var must not be a sympy Expr or Boolean, got {type(index_var)}"
+            )
         self.symbols |= self.get_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
 
@@ -865,7 +879,8 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         return (None,) * num_values if num_values > 1 else None
 
     def masked(self, mask: Any, body: Callable[..., Any], other: Any) -> None:
-        assert callable(body), "masked body must always be callable."
+        if not callable(body):
+            raise AssertionError("masked body must always be callable.")
         # The body can make additional calls, for e.g. ops.indirect_indexing
         body()
 

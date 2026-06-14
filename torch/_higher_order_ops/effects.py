@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Union
+from typing import Any, cast, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -8,11 +8,11 @@ from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch._higher_order_ops.print import print as hop_print
 from torch._higher_order_ops.schema import HopSchema
 from torch._higher_order_ops.torchbind import call_torchbind
+from torch._higher_order_ops.utils import register_fake
 from torch._library.custom_ops import CustomOpDef
 from torch._library.effects import EffectType
 from torch._library.utils import RegistrationHandle
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -61,6 +61,9 @@ def _get_effect(op: _op_identifier) -> _EffectType | None:
 
 
 _register_effectful_op("aten::_print", _EffectType.ORDERED)
+# _linalg_check_errors has no tensor output, but it raises on invalid linalg
+# results and must be preserved by functionalization/DCE.
+_register_effectful_op("aten::_linalg_check_errors", _EffectType.ORDERED)
 _register_effectful_op("profiler::_record_function_exit._RecordFunction", None)
 _register_effectful_op(call_torchbind, _EffectType.ORDERED)
 _register_effectful_op(hop_print, _EffectType.ORDERED)
@@ -152,17 +155,15 @@ def with_effects_dense(
     return (new_token, out)
 
 
-@with_effects.py_impl(FakeTensorMode)
+@register_fake(with_effects, skip_cache=True)
 def with_effects_fake(
-    mode,
     token: torch.Tensor,
     op: torch._ops.OpOverload,
     *args: tuple[Any, ...],
     **kwargs: dict[str, Any],
 ) -> tuple[torch.Tensor, ...]:
-    with mode:
-        result = with_effects_dense(token, op, *args, **kwargs)
-        return result
+    result = with_effects_dense(token, op, *args, **kwargs)
+    return result
 
 
 @with_effects.py_impl(ProxyTorchDispatchMode)
@@ -269,7 +270,8 @@ def handle_effects(
         if proxy_tensor_mode is not None:
             # If we discovered a new token during tracing, we are in backward.
             # Then we patch the graph, adding additional tangents_token as input to the joint graph.
-            tracer = proxy_tensor_mode.tracer
+            proxy_mode = cast(ProxyTorchDispatchMode, proxy_tensor_mode)
+            tracer = proxy_mode.tracer
 
             from torch.fx.experimental.proxy_tensor import (
                 disable_proxy_modes_tracing,
@@ -279,7 +281,7 @@ def handle_effects(
             with disable_proxy_modes_tracing():
                 token_tensor = new_token_tensor()
 
-            token_proxy = proxy_tensor_mode.tracer.create_proxy(
+            token_proxy = proxy_mode.tracer.create_proxy(
                 "placeholder", "tangents_token", (), {}, name="tangents_token"
             )
             track_tensor_tree(token_tensor, token_proxy, constant=None, tracer=tracer)

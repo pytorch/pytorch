@@ -7,7 +7,11 @@ import torch
 import torch._dynamo
 import torch._dynamo.config
 from torch._dynamo import debug_utils
-from torch._dynamo.debug_utils import aot_graph_input_parser, generate_env_vars_string
+from torch._dynamo.debug_utils import (
+    aot_graph_input_parser,
+    generate_env_vars_string,
+    NNModuleToString,
+)
 from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -68,6 +72,8 @@ def forward(self, x_1):
             "TEST_ENV": "1",
             "TORCHINDUCTOR_ENV_SINGLE_QUOTES": "inductor_'env'",
             "TORCHINDUCTOR_ENV_DOUBLE_QUOTES": 'inductor_"env"',
+            "TORCHDYNAMO_REPRO_AFTER": "aot",
+            "TORCHDYNAMO_REPRO_LEVEL": "4",
         },
     )
     def test_generate_env_vars_string(self):
@@ -97,6 +103,10 @@ def forward(self, x_1):
 """,
             env_strings,
         )
+        self.assertNotIn("os.environ['TORCHDYNAMO_REPRO_AFTER']", env_strings)
+        self.assertNotIn("os.environ['TORCHDYNAMO_REPRO_LEVEL']", env_strings)
+        self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_AFTER', None)", env_strings)
+        self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_LEVEL', None)", env_strings)
 
 
 class TestDebugUtilsDevice(TestCase):
@@ -208,6 +218,40 @@ class TestDebugUtilsDevice(TestCase):
         self.assertEqual(list(kwargs["primals_4"].shape), [5])
         self.assertEqual(kwargs["primals_5"], 5)
 
+
+class TestNNModuleToStringBufferDevice(TestCase):
+    def test_nn_module_to_string_buffer_device(self, device):
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        gm.register_buffer("test_buf", torch.empty(5, device=device))
+
+        result = NNModuleToString.convert(gm)
+
+        if torch.device(device).type == "cpu":
+            self.assertNotIn(".to(", result)
+        else:
+            expected_device = str(torch.empty(1, device=device).device)
+            self.assertIn(f'.to("{expected_device}")', result)
+            self.assertNotIn(".cuda()", result)
+
+    def test_nn_module_to_string_param_device(self, device):
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        gm.register_parameter(
+            "test_param", torch.nn.Parameter(torch.empty(5, device=device))
+        )
+
+        result = NNModuleToString.convert(gm)
+
+        if torch.device(device).type == "cpu":
+            self.assertNotIn("device=", result)
+        else:
+            expected_device = str(torch.empty(1, device=device).device)
+            self.assertIn(f'device="{expected_device}"', result)
+            self.assertNotIn(', device="cuda")', result)
+
+
+instantiate_device_type_tests(
+    TestNNModuleToStringBufferDevice, globals(), allow_xpu=True
+)
 
 instantiate_device_type_tests(TestDebugUtils, globals())
 

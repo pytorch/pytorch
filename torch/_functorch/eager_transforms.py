@@ -7,19 +7,19 @@
 from __future__ import annotations
 
 import contextlib
-from functools import partial, wraps
+from functools import partial
 from typing import Any, overload, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch.autograd.forward_ad as fwAD
 from torch._C._functorch import (
-    _assert_wrapped_functional,
-    _func_decrement_nesting,
-    _func_increment_nesting,
+    _assert_wrapped_functional,  # type: ignore[attr-defined]
+    _func_decrement_nesting,  # type: ignore[attr-defined]
+    _func_increment_nesting,  # type: ignore[attr-defined]
     _grad_decrement_nesting,
     _grad_increment_nesting,
-    _propagate_functional_input_mutation,
+    _propagate_functional_input_mutation,  # type: ignore[attr-defined]
     _unwrap_functional_tensor,
     _wrap_for_grad,
     _wrap_functional_tensor,
@@ -47,7 +47,7 @@ from torch.utils._pytree import (
     treespec_pprint,
 )
 
-from .apis import vmap
+from .apis import _wraps_without_dynamo_attrs, vmap
 from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 
@@ -477,7 +477,7 @@ def _vjp_with_argnums(
             return tree_unflatten(result, primals_spec)
 
     if has_aux:
-        return results, wrapper, aux
+        return results, wrapper, aux  # type: ignore[possibly-unbound]
     else:
         return results, wrapper
 
@@ -640,7 +640,7 @@ def jacrev(
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
-    @wraps(func)
+    @_wraps_without_dynamo_attrs(func)
     def wrapper_fn(*args: Any) -> Any:
         error_if_complex("jacrev", args, is_input=True)
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
@@ -765,10 +765,10 @@ def jacrev(
                         )
                     return flat_results
 
-                for r, sr in zip(flat_results, stacked_results):
+                for r, sr in zip(flat_results, stacked_results):  # type: ignore[possibly-unbound]
                     sr[idx * chunk_size : (idx + 1) * chunk_size].copy_(r)
 
-            return stacked_results
+            return stacked_results  # type: ignore[possibly-unbound]
 
         if _preallocate_and_copy:
             flat_jacobians_per_input = compute_jacobian_preallocate_and_copy()
@@ -778,7 +778,7 @@ def jacrev(
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
         flat_jacobians_per_input = [
-            result.split(flat_output_numels, dim=0)
+            torch.split(result, list(flat_output_numels), dim=0)
             for result in flat_jacobians_per_input
         ]
         flat_input_flat_output = [
@@ -810,7 +810,7 @@ def jacrev(
             )
         output_input = tree_unflatten(flat_output_input, output_spec)
         if has_aux:
-            return output_input, aux
+            return output_input, aux  # type: ignore[possibly-unbound]
         return output_input
 
     return wrapper_fn
@@ -897,10 +897,11 @@ def _chunked_standard_basis_for_(
         chunk_size = total_numel
         chunk_numels = [total_numel]
 
-    diag_start_indices = (
-        0,
-        *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind(),
-    )
+    diag_start_indices = []
+    diag_start_idx = 0
+    for tensor_numel in tensor_numels:
+        diag_start_indices.append(diag_start_idx)
+        diag_start_idx -= tensor_numel
 
     for chunk_idx, total_numel in enumerate(chunk_numels):
         chunks = tuple(
@@ -1234,7 +1235,7 @@ def _jvp_with_argnums(
                 primals_out_unflatten = tree_unflatten(primals_out, spec)
                 tangents_out_unflatten = tree_unflatten(tangents_out, spec)
                 if has_aux:
-                    return primals_out_unflatten, tangents_out_unflatten, aux
+                    return primals_out_unflatten, tangents_out_unflatten, aux  # type: ignore[possibly-unbound]
 
                 return primals_out_unflatten, tangents_out_unflatten
 
@@ -1362,7 +1363,7 @@ def jacfwd(
 
     """
 
-    @wraps(func)
+    @_wraps_without_dynamo_attrs(func)
     def wrapper_fn(*args: Any) -> Any:
         error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
@@ -1405,7 +1406,9 @@ def jacfwd(
                 safe_unflatten(jac_out_in, -1, primal.shape)
                 for primal, jac_out_in in zip(
                     flat_primals,
-                    jac_out.movedim(0, -1).split(flat_primals_numels, dim=-1),
+                    torch.split(
+                        jac_out.movedim(0, -1), list(flat_primals_numels), dim=-1
+                    ),
                 )
             )
             for jac_out in jac_outs
@@ -1417,7 +1420,7 @@ def jacfwd(
         if isinstance(argnums, int):
             jac_outs_ins = tuple(jac_ins[0] for jac_ins in jac_outs_ins)
         if has_aux:
-            return tree_unflatten(jac_outs_ins, spec), aux
+            return tree_unflatten(jac_outs_ins, spec), aux  # type: ignore[possibly-unbound]
         return tree_unflatten(jac_outs_ins, spec)
 
     return wrapper_fn
@@ -1765,7 +1768,7 @@ def functionalize(
             " replaced with their non-aliasing counterparts, {view}_copy.\n"
         )
 
-    @wraps(func)
+    @_wraps_without_dynamo_attrs(func)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         try:
             func_level = _func_increment_nesting(reapply_views)
@@ -1927,7 +1930,7 @@ def linearize(
                 f"the same argspec as the primals {primals_argspec}"
             )
 
-        forward_ad_checks(flat_tangents)
+        forward_ad_checks(flat_tangents)  # type: ignore[arg-type]
 
         flat_output = const_folded_jvp_graph(*flat_tangents)
         # const folded graph can return flat output,

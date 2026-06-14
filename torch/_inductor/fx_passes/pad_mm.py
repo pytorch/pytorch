@@ -362,7 +362,7 @@ def should_pad_bench_key(
 
 
 def get_non_view_def(node: torch.fx.Node) -> torch.fx.Node:
-    if node.op is operator.getitem:
+    if node.op == "call_function" and node.target is operator.getitem:
         return get_non_view_def(node.args[0])  # type: ignore[arg-type]
 
     if (
@@ -969,7 +969,12 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
             should_pad_addmm,
         ),
     ]:
-        assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
+        if not isinstance(
+            workaround, dict
+        ):  # mypy is unable to infer the type properly
+            raise AssertionError(
+                f"expected workaround to be a dict, got {type(workaround)}"
+            )
         name = pattern.__name__
 
         gen_register_replacement(

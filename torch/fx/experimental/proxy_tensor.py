@@ -525,6 +525,19 @@ def _get_proxies(t: torch.Tensor | TraceableWrapperSubclass) -> list[Proxy]:
     return proxies
 
 
+# sympy Max/Min are n-ary (they flatten, e.g. Max(a, Max(b, c)) -> Max(a, b, c)),
+# but torch.sym_max/sym_min are binary. Reduce so _build_proxy_for_sym_expr can
+# rebuild flattened expressions as nested binary ops. These are module-level
+# (not lambdas) so they have a qualified name and survive FX codegen/pickling
+# when used as a graph node target.
+def _nary_sym_max(*args: Any) -> Any:
+    return functools.reduce(torch.sym_max, args)
+
+
+def _nary_sym_min(*args: Any) -> Any:
+    return functools.reduce(torch.sym_min, args)
+
+
 @functools.cache
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
@@ -540,6 +553,15 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
         op = getattr(operator, v, None)
         if op is not None:
             handlers[k] = op
+        # sympy Max/Min have no operator.* equivalent. Map them to n-ary-safe
+        # wrappers over torch.sym_max/sym_min. Without this,
+        # _build_proxy_for_sym_expr cannot rebuild expressions like Max(1, u2)
+        # that escape a disable_proxy_modes_tracing region (e.g. DTensor shard
+        # propagation size inference).
+        elif v == "maximum":
+            handlers[k] = _nary_sym_max
+        elif v == "minimum":
+            handlers[k] = _nary_sym_min
 
     # sympy.Add is n-ary (e.g. Add(a, b, c)) but operator.add is binary.
     # torch.sym_sum handles n-ary integer addition and accepts both
@@ -1791,6 +1813,13 @@ class TorchFunctionMetadataMode(TorchFunctionMode):
         # pyrefly: ignore [bad-assignment]
         self.tracer.torch_fn_metadata = func
         self.tracer.torch_fn_counts[func] = self.tracer.torch_fn_counts.get(func, 0) + 1
+        if (
+            func is torch.ops.aten.size.default
+            and len(args) == 1
+            and isinstance(args[0], Tensor)
+            and any(isinstance(s, py_sym_types) for s in args[0].size())
+        ):
+            return torch.ops.aten.sym_size.default(*args, **kwargs)
         return func(*args, **kwargs)
 
 
@@ -1841,7 +1870,6 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 # pyrefly: ignore [bad-argument-type]
                 func(*args, **kwargs)
             return node
-
         # We need more complicated handling here because the inputs
         # to these functions are sometimes tensors or symints where
         # we need to fetch the proxies properly.
@@ -3022,7 +3050,7 @@ def make_fx(
         _allow_fake_constant,
         _error_on_data_dependent_ops,
         record_stack_traces=record_stack_traces
-        or config.trace.provenance_tracking_level == 1,
+        or config.effective_provenance_tracking_level() == 1,
         proxy_module_inputs=proxy_module_inputs,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
@@ -3056,7 +3084,7 @@ def get_proxy_mode() -> ProxyTorchDispatchMode | None:
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     if not (pre_dispatch_mode is None or mode is None):
         raise AssertionError(f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}")
-    return pre_dispatch_mode or mode
+    return typing.cast(ProxyTorchDispatchMode | None, pre_dispatch_mode or mode)
 
 
 def handle_sym_dispatch(
@@ -3143,8 +3171,9 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
     fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-    if fake_mode and fake_mode.shape_env:
-        if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
+    if isinstance(fake_mode, FakeTensorMode) and fake_mode.shape_env:
+        symbol_to_path = compute_unbacked_bindings(fake_mode.shape_env, out)
+        if symbol_to_path:
             if not isinstance(out_proxy, Proxy):
                 raise AssertionError(f"Expected Proxy, got {out_proxy}")
             out_proxy.node.meta["unbacked_bindings"] = symbol_to_path

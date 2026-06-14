@@ -120,9 +120,14 @@ const DeviceAndResource kineto_ids() {
 void addMetadata(
     activity_t* activity,
     const std::string& key,
-    const std::string& value) {
+    const std::string& value,
+    bool quote) {
 #ifdef USE_KINETO
-  activity->addMetadata(key, value);
+  if (quote) {
+    activity->addMetadataQuoted(key, value);
+  } else {
+    activity->addMetadata(key, value);
+  }
 #endif // USE_KINETO
 }
 
@@ -249,7 +254,7 @@ class ExperimentalConfigWrapper {
     LOG(INFO) << "Generated config = " << configss.str();
 
     libkineto::api().activityProfiler().prepareTrace(
-        k_activities, configss.str());
+        k_activities, std::move(configss).str());
 #endif // USE_KINETO
   }
 
@@ -276,7 +281,7 @@ static const std::string setTraceID(const std::string& trace_id) {
   std::stringstream configss;
   configss << "REQUEST_TRACE_ID=" << trace_id << '\n';
   configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << '\n';
-  return configss.str();
+  return std::move(configss).str();
 }
 
 static const std::string appendCustomConfig(
@@ -288,7 +293,7 @@ static const std::string appendCustomConfig(
   std::stringstream configss;
   configss << config;
   configss << "CUSTOM_CONFIG=" << custom_profiler_config << '\n';
-  return configss.str();
+  return std::move(configss).str();
 }
 #endif
 
