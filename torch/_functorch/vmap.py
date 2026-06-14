@@ -16,7 +16,7 @@ from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch import Tensor
-from torch._C._functorch import is_batchedtensor
+from torch._C._functorch import get_interpreter_stack, is_batchedtensor, TransformType
 from torch._functorch.predispatch import (
     _add_batch_dim,
     _remove_batch_dim,
@@ -44,16 +44,31 @@ in_dims_t = int | tuple[Any, ...]
 out_dims_t = int | tuple[int, ...] | None
 
 
-def doesnt_support_saved_tensors_hooks(f: Callable[_P, _R]) -> Callable[_P, _R]:
+def disable_saved_tensors_hooks_for_higher_order(
+    f: Callable[_P, _R],
+) -> Callable[_P, _R]:
     message = (
-        "torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. "
-        "Please open an issue with your use case."
+        "torch.func transforms (grad, vjp, jacrev, hessian) don't support saved "
+        "tensor hooks (e.g. torch.autograd.graph.save_on_cpu) under higher-order "
+        "differentiation such as grad(grad) or hessian: the saved-tensor "
+        "round-trip severs the higher-order graph and would silently produce "
+        "incorrect gradients. First-order use is supported."
     )
 
     @functools.wraps(f)
     def fn(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        with torch.autograd.graph.disable_saved_tensors_hooks(message):
-            return f(*args, **kwargs)
+        # An enclosing Grad/Jvp layer (checked before this transform pushes its
+        # own) means higher-order differentiation, where saved-tensor hooks
+        # miscompute. vmap layers don't differentiate and are ignored.
+        stack = get_interpreter_stack()
+        higher_order = bool(stack) and any(
+            interpreter.key() in (TransformType.Grad, TransformType.Jvp)
+            for interpreter in stack
+        )
+        if higher_order:
+            with torch.autograd.graph.disable_saved_tensors_hooks(message):
+                return f(*args, **kwargs)
+        return f(*args, **kwargs)
 
     return fn
 
