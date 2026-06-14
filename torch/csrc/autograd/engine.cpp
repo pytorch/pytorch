@@ -293,12 +293,13 @@ void Engine::stop() {
   auto wait_duration =
       wait_duration_str ? std::atof(wait_duration_str->c_str()) : 10.0;
   bool noBackward = true;
-  for (auto& queue : device_ready_queues_) {
-    noBackward = noBackward && queue->empty();
+  auto num_queues = device_queues_size_.load(std::memory_order_acquire);
+  for (c10::DeviceIndex i = 0; i < num_queues; ++i) {
+    noBackward = noBackward && device_ready_queues_[i]->empty();
   }
   if (noBackward && wait_duration > 0.0f) {
-    for (auto& queue : device_ready_queues_) {
-      queue->pushShutdownTask();
+    for (c10::DeviceIndex i = 0; i < num_queues; ++i) {
+      device_ready_queues_[i]->pushShutdownTask();
     }
     // Do not wait for termination of global threads on Windows
     // Because CRT terminates DLL threads before calling
@@ -377,6 +378,8 @@ void Engine::thread_init(
   // initialize each device thread's thread local ready queue with the ready
   // queue that is created before the thread initialization
   init_local_ready_queue(ready_queue);
+
+  device_thread_ready_[device].store(true, std::memory_order_release);
 
   std::shared_ptr<GraphTask> graph_task = nullptr;
   thread_main(graph_task);
@@ -1403,23 +1406,10 @@ auto Engine::execute(
   return fut->value().toTensorVector();
 }
 
-void Engine::initialize_device_threads_pool() {
-  TORCH_CHECK(
-      !in_bad_autograd_fork,
-      "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
-      "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
-  // Ensures device_ready_queues_ are initialized only once
-  static bool start_device_threads_flag_ [[maybe_unused]] = [this]() {
-    this->start_device_threads();
-    return true;
-  }();
-}
-
 c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     c10::intrusive_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
-  initialize_device_threads_pool();
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
@@ -1556,12 +1546,15 @@ auto Engine::ready_queue(
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
+    c10::DeviceIndex device_index = device.index();
     TORCH_INTERNAL_ASSERT(
-        0 <= device.index() &&
-        device.index() <
-            static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
+        device_index >= 0, "Expected non-negative device index");
+
+    ensure_device_queues_allocated(device_index + 1);
+    ensure_device_thread_started(device_index);
+
     // See Note [Allocating GPUs to autograd threads]
-    return device_ready_queues_.at(device.index());
+    return device_ready_queues_.at(device_index);
   }
 }
 
@@ -1569,68 +1562,139 @@ auto Engine::ready_queue_by_index(
     std::shared_ptr<ReadyQueue> cpu_ready_queue,
     int device_index) -> std::shared_ptr<ReadyQueue> {
   if (device_index == CPU_DEVICE) {
-    // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
     TORCH_INTERNAL_ASSERT(
-        0 <= device_index &&
-        device_index <
-            static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
-    // See Note [Allocating GPUs to autograd threads]
-    // NB: This function would become obsolete if we truly allocated a CPU
-    // thread per device, rather than colocate.
+        device_index >= 0, "Expected non-negative device index");
+
+    ensure_device_queues_allocated(device_index + 1);
+    ensure_device_thread_started(device_index);
+
     return device_ready_queues_.at(device_index);
   }
 }
 
-auto Engine::start_device_threads() -> void {
-  // First always initialize the thread pool for re-entrant threads
-  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+c10::DeviceIndex Engine::compute_max_device_count() {
+  if (global_device_count_computed_) {
+    return max_device_count_;
+  }
 
-  // Second, create special threads for each non-CPU device
-  // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
     auto* impl = impl_atomic.load();
-    // Only record the number of devices for device that don't run on the
-    // cpu ready queue.
     if (impl && !should_run_in_cpu_ready_queue(impl->type())) {
       num_devices = std::max(num_devices, impl->deviceCount());
     }
   }
 
-  // If there are no device except cpu, no need to create worker threads
-  if (num_devices == 0) {
+  max_device_count_ = num_devices;
+  global_device_count_computed_ = true;
+
+  return num_devices;
+}
+
+void Engine::ensure_device_queues_allocated(c10::DeviceIndex required_size) {
+  if (device_queues_size_.load(std::memory_order_acquire) >= required_size) {
     return;
   }
 
-  // Since we're about to create threads, forking is not possible anymore
-  track_bad_autograd_forks();
+  std::lock_guard<std::mutex> lock(device_queues_init_mutex_);
 
-  // allocate one thread for every GPU device (but colocate GPUs of different
-  // types), and pre-allocate the device_ready_queues_ to ensure safe reading on
-  // it.
-  device_ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_devices);
-  for (auto& queue : device_ready_queues_) {
-    queue = std::make_shared<ReadyQueue>();
+  if (static_cast<c10::DeviceIndex>(device_ready_queues_.size()) >=
+      required_size) {
+    return;
   }
 
-  for (const auto i : c10::irange(num_devices)) {
-    std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
-    t.detach();
+  c10::DeviceIndex max_devices = compute_max_device_count();
+  c10::DeviceIndex new_size = std::max(required_size, max_devices);
+
+  c10::DeviceIndex old_size = device_ready_queues_.size();
+  device_ready_queues_.resize(new_size);
+  device_thread_started_.resize(new_size);
+  device_thread_ready_.resize(new_size);
+
+  for (c10::DeviceIndex i = old_size; i < new_size; ++i) {
+    device_ready_queues_[i] = std::make_shared<ReadyQueue>();
+    device_thread_started_[i].store(false, std::memory_order_relaxed);
+    device_thread_ready_[i].store(false, std::memory_order_relaxed);
   }
-  // Wait for the threads to start
+
+  device_queues_size_.store(new_size, std::memory_order_release);
+}
+
+void Engine::ensure_device_thread_started(c10::DeviceIndex device_index) {
+  TORCH_INTERNAL_ASSERT(
+      device_index >= 0 &&
+          device_index < device_queues_size_.load(std::memory_order_acquire),
+      "Device index out of bounds");
+
+  if (stopped_) {
+    return;
+  }
+
+  if (device_thread_ready_[device_index].load(std::memory_order_acquire)) {
+    return;
+  }
+
   {
-    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
-    while (non_reentrant_device_thread_count_.load() !=
-           static_cast<uint32_t>(num_devices)) {
-      non_reentrant_device_thread_condvar_.wait(lk);
+    std::lock_guard<std::mutex> lock(device_queues_init_mutex_);
+
+    if (device_thread_ready_[device_index].load(std::memory_order_acquire)) {
+      return;
     }
+
+    bool expected = false;
+    if (device_thread_started_[device_index].compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel)) {
+      TORCH_CHECK(
+          !in_bad_autograd_fork,
+          "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
+          "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
+
+      track_bad_autograd_forks();
+      ensure_thread_pool_initialized();
+
+      C10_LOG_API_USAGE_ONCE(
+          "torch.autograd.thread_start." + std::to_string(device_index));
+
+      try {
+        std::thread t(
+            &Engine::thread_init,
+            this,
+            device_index,
+            device_ready_queues_[device_index],
+            true);
+        t.detach();
+      } catch (...) {
+        // Reset so future callers can retry thread creation.
+        device_thread_started_[device_index].store(
+            false, std::memory_order_release);
+        throw; // @allow-raw-throw
+      }
+    }
+  }
+
+  while (!device_thread_ready_[device_index].load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+
+  if (stopped_) {
+    device_ready_queues_[device_index]->pushShutdownTask();
   }
 }
 
+void Engine::ensure_thread_pool_initialized() {
+  static bool initialized [[maybe_unused]] = [this]() {
+    if (!thread_pool_shared_) {
+      thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+    }
+    return true;
+  }();
+}
+
 void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
+  ensure_thread_pool_initialized();
   std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
   // There may already be some items on the graphtasks_queue_ added by other
   // threads but not enough workers to get to the new task that will be

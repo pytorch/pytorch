@@ -34,8 +34,11 @@ class TestAutograd(TestCase):
                 thread_name = file.read().strip()
             all_thread_names.add(thread_name)
 
-        for i in range(torch.accelerator.device_count()):
-            self.assertIn(f"pt_autograd_{i}", all_thread_names)
+        # Device threads are initialized lazily: only the device used in
+        # backward should have a thread, not all registered devices.
+        self.assertIn("pt_autograd_0", all_thread_names)
+        for i in range(1, torch.accelerator.device_count()):
+            self.assertNotIn(f"pt_autograd_{i}", all_thread_names)
 
     def test_autograd_backward(self):
         """Test backward propagation on openreg device"""
