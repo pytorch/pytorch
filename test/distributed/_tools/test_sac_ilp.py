@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -33,6 +34,14 @@ except ImportError:
     HAS_PULP = False
     get_optimal_checkpointing_policy_per_module = None  # type: ignore[assignment, misc]
     sac_milp = None  # type: ignore[assignment]
+
+# A100 SXM datasheet values, mirrored from the "NVIDIA A100" entry in
+# torch/_inductor/analysis/device_info.py. Keep in sync with that entry; they
+# exist only to make the roofline cost model host-independent in
+# test_sac_ilp_case1_with_pinned_hw.
+_A100_TFLOPS = {torch.bfloat16: 312.5, torch.float16: 312.5, torch.int8: 624.0}
+_A100_DEFAULT_TFLOPS = 19.5  # fp32 / fp64
+_A100_DRAM_GBPS = 2039.0
 
 
 class TestSACILP(TestCase):
@@ -210,6 +219,56 @@ class TestSACILP(TestCase):
         self.assertEqual(ac_decisions, {})
         self.assertEqual(recomputation_time, 0)
         self.assertEqual(peak_mem, -1)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not HAS_PULP, "pulp package not installed")
+    @patch(
+        "torch.utils._runtime_estimation.get_gpu_dram_gbps",
+        return_value=_A100_DRAM_GBPS,
+    )
+    @patch(
+        "torch.utils._runtime_estimation.get_device_tflops",
+        side_effect=lambda dtype: _A100_TFLOPS.get(dtype, _A100_DEFAULT_TFLOPS),
+    )
+    def test_sac_ilp_case1_with_pinned_hw(self, _mock_tflops, _mock_gbps):
+        """
+        Same scenario as test_sac_ilp_case1 but with the roofline cost
+        model's hardware oracles pinned to the NVIDIA A100 SXM datasheet
+        (the "NVIDIA A100" entry in torch/_inductor/analysis/device_info.py),
+        so the MILP inputs are identical on every GPU host. Restores the
+        numerical assertions that case1 had to drop to be portable across
+        A100/H100/MI300/MI350.
+
+        Still requires a CUDA/ROCm device (setUp uses current_device()). The
+        AC ratios and recomputation_time asserted below are golden values:
+        sac_milp solves with PULP_CBC_CMD(gapRel=0.05), which accepts any
+        solution within 5% of optimal, so they are pinned to the bundled CBC
+        build and may need re-capturing after a pulp/CBC upgrade. The memory
+        assertions (baseline_peak_mem, peak_mem) are solver-version robust.
+        """
+        mod_info = self._collect_module_info_with_fake_tensor_mode()
+        g = parse_module_info(mod_info)
+
+        memory_budget = 1.6
+        budget_bytes = round(memory_budget * (2**30))
+
+        baseline_peak_mem, _ = get_peak_memory_runtime_baseline(g)
+        self.assertEqual(baseline_peak_mem, 2583888896)
+
+        ac_decisions, recomputation_time, peak_mem = sac_milp(
+            g, memory_budget=memory_budget, world_size=4
+        )
+
+        self.assertEqual(
+            set(ac_decisions.keys()),
+            {f"Transformer.layers.{i}" for i in range(4)},
+        )
+        self.assertEqual(
+            sorted(ac_decisions.values()),
+            [0.5225, 0.5225, 0.5225, 0.7983],
+        )
+        self.assertEqual(peak_mem, budget_bytes)
+        self.assertEqual(recomputation_time, 6.92)
 
 
 class TestOptimalCheckpointingPolicy(TestCase):
