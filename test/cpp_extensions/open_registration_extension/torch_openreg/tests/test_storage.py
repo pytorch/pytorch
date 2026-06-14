@@ -65,6 +65,19 @@ class TestSerialization(TestCase):
             self.assertFalse(tensor_cpu.is_openreg)
             self.assertEqual(torch._utils.get_tensor_metadata(tensor_cpu), {})
 
+    def test_copy_backend_meta(self):
+        """Test copying backend metadata from one tensor to another"""
+        src = torch.empty(3, 3, device="openreg")
+        self.assertEqual(torch._utils.get_tensor_metadata(src), {})
+        metadata = {"version_number": True, "format_number": True}
+        torch._utils.set_tensor_metadata(src, metadata)
+        self.assertEqual(torch._utils.get_tensor_metadata(src), metadata)
+
+        dst = torch.empty(3, 3, device="openreg")
+        self.assertEqual(torch._utils.get_tensor_metadata(dst), {})
+        torch._C._copy_backend_meta(src, dst)
+        self.assertEqual(torch._utils.get_tensor_metadata(dst), metadata)
+
     @skipIfTorchDynamo()
     @unittest.skipIf(
         numpy.__version__ < "1.25",
@@ -182,6 +195,45 @@ class TestSerialization(TestCase):
 
             loaded_tensor = torch.load(path)
             self.assertEqual(torch._utils.get_tensor_metadata(loaded_tensor), metadata)
+
+    def test_fake_tensor_metadata_preservation(self):
+        """Test that backend metadata is propagated to a FakeTensor"""
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+        tensor = torch.empty(3, 3, device="openreg")
+        metadata = {"version_number": True, "format_number": True}
+        torch._utils.set_tensor_metadata(tensor, metadata)
+
+        with FakeTensorMode() as mode:
+            fake_tensor = mode.from_tensor(tensor)
+        self.assertIsInstance(fake_tensor, FakeTensor)
+        self.assertEqual(torch._utils.get_tensor_metadata(fake_tensor), metadata)
+
+    def test_fake_tensor_metadata_preservation_functional(self):
+        """Test backend metadata propagation when fakeifying a FunctionalTensor.
+
+        Exercises the inner_t unwrap in from_real_tensor: the FunctionalTensor
+        wrapper carries no backend metadata, only the inner tensor does, so
+        reading from the wrapper would propagate nothing.
+        """
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        tensor = torch.empty(3, 3, device="openreg")
+        metadata = {"version_number": True, "format_number": True}
+        torch._utils.set_tensor_metadata(tensor, metadata)
+
+        with FunctionalTensorMode():
+            functional_tensor = FunctionalTensor.to_functional(tensor)
+            # The wrapper carries no backend metadata; only the inner does.
+            self.assertEqual(torch._utils.get_tensor_metadata(functional_tensor), {})
+            with FakeTensorMode() as mode:
+                fake_tensor = mode.from_tensor(functional_tensor)
+        self.assertIsInstance(fake_tensor, FakeTensor)
+        self.assertEqual(torch._utils.get_tensor_metadata(fake_tensor), metadata)
 
     def test_serialization_map_location_cpu(self):
         """Test serialization with map_location to CPU"""
