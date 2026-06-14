@@ -18,7 +18,7 @@ import sympy
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
-from torch import SymInt, Tensor
+from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import _dispatch_keys, DispatchKey
 from torch._higher_order_ops.utils import redirect_to_mode, register_fake
 from torch._ops import HigherOrderOperator
@@ -1272,6 +1272,7 @@ class TritonKernelWrapperMutation(_TritonKernelWrapper):
         grid: list["TritonGridType"],
         tma_descriptor_metadata: TMADescriptorMetadata,
         kwargs: dict[str, Any],
+        launch_kwargs: tuple[str, ...] | None = None,
     ) -> Any:
         # pyrefly: ignore [missing-attribute]
         return super().__call__(
@@ -1280,6 +1281,7 @@ class TritonKernelWrapperMutation(_TritonKernelWrapper):
             grid=grid,
             tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=kwargs,
+            launch_kwargs=() if launch_kwargs is None else launch_kwargs,
         )
 
 
@@ -1299,6 +1301,7 @@ class TritonKernelWrapperFunctional(_TritonKernelWrapper):
         tma_descriptor_metadata: TMADescriptorMetadata,
         kwargs: dict[str, Any],
         tensors_to_clone: list[str],
+        launch_kwargs: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         # pyrefly: ignore [missing-attribute]
         return super().__call__(
@@ -1308,6 +1311,7 @@ class TritonKernelWrapperFunctional(_TritonKernelWrapper):
             tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=kwargs,
             tensors_to_clone=tensors_to_clone,
+            launch_kwargs=() if launch_kwargs is None else launch_kwargs,
         )
 
 
@@ -1326,6 +1330,7 @@ def triton_kernel_wrapper_mutation_dense(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
     from torch._inductor.codegen.wrapper import user_defined_kernel_grid_fn_code
 
@@ -1393,8 +1398,23 @@ def triton_kernel_wrapper_mutation_dense(
     # avoid mutating the original inputs
     kwargs = kwargs.copy()
     constant_args = constant_args.copy()
+    launch_kwargs = () if launch_kwargs is None else launch_kwargs
     # pyrefly: ignore [missing-attribute]
     for name in kernel.arg_names:
+        if name in launch_kwargs:
+            # Preserve the original kwarg form for launch kwargs. Triton's
+            # binder uses the kwarg to bind the kernel parameter, and
+            # _pack_args still exposes launch kwargs to backend.parse_options()
+            # so the same name may also be parsed as a compiler option.
+            #
+            # Stop positional packing entirely at this point. A later kernel
+            # parameter cannot be safely packed positionally after an earlier
+            # parameter is intentionally left in kwargs/constant_args; doing so
+            # would shift it into the wrong argument slot. Triton accepts the
+            # remaining parameters by keyword, so the only trade-off is that
+            # the triton#5082 workaround no longer applies after this first
+            # backend-option/kernel-parameter overlap.
+            break
         if name in kwargs:
             args.append(kwargs.pop(name))
         elif name in constant_args:
@@ -1414,6 +1434,7 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
     return None
 
@@ -1426,6 +1447,7 @@ def _(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
     return None
 
@@ -1463,6 +1485,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
     trace_triton_kernel_wrapper(
         mode,
@@ -1473,6 +1496,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
             "grid": grid,
             "tma_descriptor_metadata": tma_descriptor_metadata,
             "kwargs": kwargs,
+            "launch_kwargs": () if launch_kwargs is None else launch_kwargs,
         },
     )
 
@@ -1507,6 +1531,7 @@ def triton_kernel_wrapper_mutation_functionalize(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
@@ -1524,6 +1549,7 @@ def triton_kernel_wrapper_mutation_functionalize(
             tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=unwrapped_kwargs,
             tensors_to_clone=tensors_to_clone,
+            launch_kwargs=() if launch_kwargs is None else launch_kwargs,
         )
 
     if not set(unwrapped_outputs.keys()).issubset(set(kwargs.keys())):
@@ -1556,6 +1582,7 @@ def triton_kernel_wrapper_functional_dense(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    launch_kwargs: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
@@ -1571,6 +1598,7 @@ def triton_kernel_wrapper_functional_dense(
         grid=grid,
         tma_descriptor_metadata=tma_descriptor_metadata,
         kwargs=kwargs,
+        launch_kwargs=() if launch_kwargs is None else launch_kwargs,
     )
     return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
 
@@ -1584,6 +1612,7 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    launch_kwargs: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
@@ -1606,6 +1635,7 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    launch_kwargs: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     ret = trace_triton_kernel_wrapper(
         mode,
@@ -1617,6 +1647,7 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
             "tma_descriptor_metadata": tma_descriptor_metadata,
             "kwargs": kwargs,
             "tensors_to_clone": tensors_to_clone,
+            "launch_kwargs": () if launch_kwargs is None else launch_kwargs,
         },
     )
     if ret is None:
@@ -1633,6 +1664,7 @@ def triton_kernel_wrapper_functional_functionalize(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    launch_kwargs: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():
@@ -1643,6 +1675,7 @@ def triton_kernel_wrapper_functional_functionalize(
             tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=unwrapped_kwargs,
             tensors_to_clone=tensors_to_clone,
+            launch_kwargs=() if launch_kwargs is None else launch_kwargs,
         )
         return ctx.wrap_tensors(outputs)  # type: ignore[return-value,arg-type]
 
@@ -1789,6 +1822,8 @@ class TritonHOPifier:
         variable,
         grids,
         combined_args: dict[str, Any],
+        launch_kwargs: tuple[str, ...],
+        kernel_arg_names: set[str],
         tx,
     ) -> Optional["ConstantVariable"]:
         raise NotImplementedError("abstract method")
@@ -1979,6 +2014,8 @@ class TritonHOPifier:
 
             iter_kernel = iter_kernel.fn
 
+        jit_arg_names = set(iter_kernel.arg_names)
+
         # Process the @triton.heuristics decorator:
         # - We know there is only 1 autotuner decorator here
         # - We can apply the heuristic to all triton.Configs in the order that the decorators appear
@@ -2103,7 +2140,7 @@ class TritonHOPifier:
         if isinstance(variable.kernel, Autotuner):
             special_param_names = []
             for name in SPECIAL_CONFIG_NAMES:
-                if name in variable.kernel.fn.arg_names:
+                if name in jit_arg_names:
                     special_param_names.append(name)
 
             if special_param_names:
@@ -2210,10 +2247,43 @@ class TritonHOPifier:
             )
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
-        # Both for grid's meta as well as for the kernel, we need combined
-        # args and kwargs combined and normalized
+        # Triton passes launch kwargs to backend.parse_options(), even when a
+        # kwarg also binds a kernel parameter. Preserve the launch-site names;
+        # values stay in combined_args_raw so Inductor materializes backend
+        # options only after the target backend is known.
+        launch_kwargs = tuple(kwargs)
 
-        combined_args_raw = {**dict(zip(variable.kernel.arg_names, args)), **kwargs}
+        if isinstance(variable.kernel, Autotuner):
+            config_kwarg_names = set().union(
+                *(set(config.kwargs) for config in variable.kernel.configs)
+            )
+            config_conflicts = sorted(set(launch_kwargs) & config_kwarg_names)
+            if config_conflicts:
+                self.raise_unsupported(
+                    "Triton launch kwargs conflict with autotune config kwargs: "
+                    f"{config_conflicts!r}."
+                )
+
+        positional_arg_names = iter_kernel.arg_names[: len(args)]
+        if len(args) > len(iter_kernel.arg_names):
+            self.raise_unsupported(
+                f"{iter_kernel.__name__}() takes {len(iter_kernel.arg_names)} "
+                f"positional arguments but {len(args)} were given"
+            )
+
+        duplicate_kwargs = sorted(set(positional_arg_names) & set(kwargs))
+        if duplicate_kwargs:
+            self.raise_unsupported(
+                f"{iter_kernel.__name__}() got multiple values for argument "
+                f"{duplicate_kwargs[0]!r}"
+            )
+
+        # Both for grid's meta as well as for the kernel, we need combined
+        # args and launch kwargs combined and normalized. Non-signature launch
+        # kwargs are included here so Inductor can later recover their values
+        # when materializing target-specific backend options.
+
+        combined_args_raw = {**dict(zip(iter_kernel.arg_names, args)), **kwargs}
 
         # precompute the grid for the kernel
         configs = (
@@ -2276,7 +2346,9 @@ class TritonHOPifier:
                     combined_args_raw[arg_name] = variable.specialize_symbolic(
                         combined_args_raw[arg_name]
                     )
-        return self.call_HOP(variable, grids, combined_args_raw, tx)
+        return self.call_HOP(
+            variable, grids, combined_args_raw, launch_kwargs, jit_arg_names, tx
+        )
 
 
 ###############################################################################
@@ -2377,11 +2449,34 @@ class TracingTritonHOPifier(TritonHOPifier):
 
         return graphable_args, constant_args_idx
 
+    def is_dynamic_backend_option(self, value: Any) -> bool:
+        # Backend options are compile-time values. In proxy tracing, a value can
+        # be a Proxy/Node directly or be nested inside a tuple/list option such
+        # as backend_option=(sym_size,). Reject those unless the name is later
+        # identified as a real kernel parameter.
+        leaves, _ = pytree.tree_flatten(value)
+        return any(
+            isinstance(
+                leaf,
+                (
+                    fx.Node,
+                    fx.Proxy,
+                    Tensor,
+                    SymInt,
+                    SymBool,
+                    SymFloat,
+                ),
+            )
+            for leaf in leaves
+        )
+
     def call_HOP(
         self,
         variable: "TraceableTritonKernelWrapper",
         grids: list["TritonGridTupleType"],
         combined_args: dict[str, Any],
+        launch_kwargs: tuple[str, ...],
+        kernel_arg_names: set[str],
         tx: None,
     ) -> None:
         if tx is not None:
@@ -2392,6 +2487,22 @@ class TracingTritonHOPifier(TritonHOPifier):
             )
 
         graphable_args, constant_args_idx = self.store_non_graphable_args(combined_args)
+        # launch_kwargs records the names passed as kwargs at the Triton launch
+        # site. A non-kernel launch kwarg can only be a compiler option, so it
+        # must be concrete before entering the graph. Kernel launch kwargs may
+        # also be compiler options, but that target-specific check happens in
+        # Inductor after backend.parse_options().
+        non_const_options = [
+            k
+            for k in launch_kwargs
+            if k not in kernel_arg_names
+            and self.is_dynamic_backend_option(combined_args[k])
+        ]
+        if non_const_options:
+            self.raise_unsupported(
+                "Triton backend options must be concrete values: "
+                f"{sorted(non_const_options)!r}."
+            )
 
         if not isinstance(variable.kernel_idx, int):
             raise AssertionError(
@@ -2405,6 +2516,7 @@ class TracingTritonHOPifier(TritonHOPifier):
             # supported in non-dynamo tracing
             tma_descriptor_metadata={},
             kwargs=graphable_args,
+            launch_kwargs=launch_kwargs,
         )
 
 
