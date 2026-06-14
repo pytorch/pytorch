@@ -571,11 +571,13 @@ std::string toString(const ExtraFields<EventType::PyCall>& e) {
       e.callsite_.funcname_.str());
 }
 
+#ifdef USE_KINETO
 auto scopeToType(at::RecordScope scope) {
   return scope == at::RecordScope::USER_SCOPE
       ? libkineto::ActivityType::USER_ANNOTATION
       : libkineto::ActivityType::CPU_OP;
 }
+#endif
 
 int64_t torchOpEndNS(
     const ExtraFields<EventType::TorchOp>& e,
@@ -624,6 +626,7 @@ std::string Result::overload_name() const {
       [](const auto& e) -> std::string { return ""; }));
 }
 
+#ifdef USE_KINETO
 libkineto::ActivityType Result::kinetoType() const {
   return visit(c10::overloaded(
       ATTRIBUTE(TorchOp, scopeToType(e.scope_)),
@@ -636,6 +639,11 @@ libkineto::ActivityType Result::kinetoType() const {
       ATTRIBUTE(PythonGC, libkineto::ActivityType::PYTHON_FUNCTION),
       ATTRIBUTE(Kineto, e.activity_type_)));
 }
+#else
+libkineto::ActivityType Result::kinetoType() const {
+  return libkineto::ActivityType::NONE;
+}
+#endif
 
 uint64_t Result::correlationID() const {
   return visit(c10::overloaded(

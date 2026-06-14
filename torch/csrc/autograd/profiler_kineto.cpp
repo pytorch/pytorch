@@ -1267,6 +1267,13 @@ int64_t KinetoEvent::privateuse1ElapsedUs() const {
       &privateuse1_event_start, &privateuse1_event_end);
 }
 
+bool KinetoEvent::isUserAnnotation() const {
+  constexpr uint8_t kUserAnnotation = 1;
+  constexpr uint8_t kGpuUserAnnotation = 2;
+  const auto type = activityType();
+  return type == kUserAnnotation || type == kGpuUserAnnotation;
+}
+
 void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {
   return result_->visit(c10::overloaded(
       [&in](const ExtraFields<EventType::TorchOp>& e) -> void {
@@ -1304,27 +1311,33 @@ int64_t KinetoEvent::externalId() const {
     return static_cast<int64_t>(linked);
   }
 
+#if defined(USE_KINETO) && \
+    (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
   // Orphaned GPU activities (no linked CPU op) in these types should not get
   // an External id, to avoid incorrect cross-linking in trace viewers.
+  // These GPU-specific ActivityType values are only present when kineto is
+  // built with GPU backend support (CUPTI or ROCtracer). CPU-only kineto
+  // builds (e.g. system packages without GPU support) omit them.
   auto type = static_cast<libkineto::ActivityType>(activityType());
-  if (type != libkineto::ActivityType::GPU_MEMCPY &&
-      type != libkineto::ActivityType::GPU_MEMSET &&
-      type != libkineto::ActivityType::CONCURRENT_KERNEL &&
-      type != libkineto::ActivityType::CUDA_RUNTIME &&
-      type != libkineto::ActivityType::CUDA_DRIVER &&
-      type != libkineto::ActivityType::PRIVATEUSE1_RUNTIME &&
-      type != libkineto::ActivityType::PRIVATEUSE1_DRIVER) {
-    return static_cast<int64_t>(result_->visit(c10::overloaded(
-        [](const ExtraFields<EventType::TorchOp>& e) -> uint64_t {
-          return e.correlation_id_;
-        },
-        [](const ExtraFields<EventType::Kineto>& e) -> uint64_t {
-          return e.correlation_id_;
-        },
-        [](const auto&) -> uint64_t { return 0; })));
+  if (type == libkineto::ActivityType::GPU_MEMCPY ||
+      type == libkineto::ActivityType::GPU_MEMSET ||
+      type == libkineto::ActivityType::CONCURRENT_KERNEL ||
+      type == libkineto::ActivityType::CUDA_RUNTIME ||
+      type == libkineto::ActivityType::CUDA_DRIVER ||
+      type == libkineto::ActivityType::PRIVATEUSE1_RUNTIME ||
+      type == libkineto::ActivityType::PRIVATEUSE1_DRIVER) {
+    return 0;
   }
+#endif
 
-  return 0;
+  return static_cast<int64_t>(result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e) -> uint64_t {
+        return e.correlation_id_;
+      },
+      [](const ExtraFields<EventType::Kineto>& e) -> uint64_t {
+        return e.correlation_id_;
+      },
+      [](const auto&) -> uint64_t { return 0; })));
 }
 
 #define FORWARD_FROM_RESULT(method_name, result_expr)                        \
