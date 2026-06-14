@@ -2571,6 +2571,10 @@ class xpu(cutlass):
 
 
 class rocm:
+    """
+    Config options specific to the ROCm/HIP inductor backend.
+    """
+
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
     # If empty, the `native` arch is used
     arch: list[str] = []
@@ -2603,6 +2607,34 @@ class rocm:
 
     # Flag to print register and LDS usage during compilation
     print_kernel_resource_usage = False
+
+    # Optional override for matrix_instr_nonkdim in the AMD MM Triton template.
+    # None (default = env unset) leaves upstream behaviour unchanged: the
+    # autotune sweep tries matrix_instr_nonkdim in [0, 16] and
+    # ROCmGemmConfig defaults to 16.
+    #
+    # Set via the env var TORCHINDUCTOR_MFMA_NONKDIM. Recognised values:
+    #   unset       upstream default (= None)
+    #   "0"/"16"/"32"  force a single value; autotune sweep collapses to
+    #                  [value] and ROCmGemmConfig defaults to that value
+    #   "auto"      extend the autotune sweep to [0, 16, 32]; the default
+    #                ROCmGemmConfig.matrix_instr_nonkdim stays 16 and
+    #                autotune picks
+    #
+    # mfma_32x32x*_bf16 is only emitted when the value 32 is included in
+    # the sweep (or forced). This is workload-specific tuning; "auto" is
+    # the safest opt-in for shapes where mfma_32 might win, "32" forces
+    # it on, and "16" is the conservative upstream behaviour. Ignored on
+    # non-ROCm backends.
+    mfma_nonkdim: int | str | None = (
+        "auto"
+        if os.environ.get("TORCHINDUCTOR_MFMA_NONKDIM", "").lower() == "auto"
+        else (
+            int(os.environ["TORCHINDUCTOR_MFMA_NONKDIM"])
+            if os.environ.get("TORCHINDUCTOR_MFMA_NONKDIM", "").lstrip("-").isdigit()
+            else None
+        )
+    )
 
     # Path to ROCm installation, if None, use env variable ROCM_HOME.
     # In fbcode see triton/fb/TARGETS for how ROCM_HOME gets set.

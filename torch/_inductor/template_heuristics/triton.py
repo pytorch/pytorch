@@ -219,13 +219,39 @@ class FlexDecodeConfig:
 
 
 # ROCm classes
+def _amd_mm_nonkdim_default() -> int:
+    """Default ``matrix_instr_nonkdim`` for ROCm MM Triton configs.
+
+    Reads ``config.rocm.mfma_nonkdim``; falls back to 16 (the upstream
+    literal) when None or "auto". See `torch._inductor.config.rocm`.
+    """
+    v = config.rocm.mfma_nonkdim
+    return v if isinstance(v, int) else 16
+
+
+def _amd_mm_nonkdim_autotune_choices() -> list[int]:
+    """``matrix_instr_nonkdim`` values the AMD MM autotune sweep should try.
+
+    Default [0, 16] (upstream); a forced int collapses to a single value;
+    "auto" extends to [0, 16, 32].
+    """
+    v = config.rocm.mfma_nonkdim
+    if isinstance(v, int):
+        return [v]
+    if v == "auto":
+        return [0, 16, 32]
+    return [0, 16]
+
+
 @dataclasses.dataclass
 class ROCmGemmConfig(GemmConfig):
     """
     ROCm subclass for GEMMs, with AMD backend specific tuneable kernargs
     """
 
-    matrix_instr_nonkdim: int = 16
+    matrix_instr_nonkdim: int = dataclasses.field(
+        default_factory=_amd_mm_nonkdim_default
+    )
     waves_per_eu: int = 0
     kpack: int = 1
 
@@ -1611,7 +1637,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_stages in [1, self.default_num_stages]
             for num_warps in [4, 8]
             for group_m in [4, 8, 16]
-            for matrix_instr_nonkdim in [0, 16]
+            for matrix_instr_nonkdim in _amd_mm_nonkdim_autotune_choices()
             for waves_per_eu in [0, 2]
             for kpack in [1, 2]
         ]
