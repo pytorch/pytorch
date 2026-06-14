@@ -22,12 +22,18 @@ from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestSha
 
 
 try:
-    from torch.testing._internal.common_utils import parse_cmd_line_args
+    from torch.testing._internal.common_utils import (
+        install_fault_handler,
+        parse_cmd_line_args,
+    )
 except ImportError:
     # Temporary workaround needed until parse_cmd_line_args makes it into a nightlye because
     # main / PR's tests are sometimes run against the previous day's nightly which won't
     # have this function.
     def parse_cmd_line_args():
+        pass
+
+    def install_fault_handler():
         pass
 
 
@@ -93,6 +99,7 @@ def pytest_addoption(parser: Parser) -> None:
 
 
 def pytest_configure(config: Config) -> None:
+    install_fault_handler()
     parse_cmd_line_args()
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
