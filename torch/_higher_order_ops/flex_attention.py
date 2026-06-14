@@ -1467,10 +1467,19 @@ def flex_attention_backward_fake_tensor_mode(
     broadcasted_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
     broadcasted_grad_value = _permute_strides(broadcasted_grad_value, value.stride())
 
-    if Bq > 1 and Bkv == 1:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
+    # The fake kernel must choose one metadata shape during tracing. Reduce to
+    # key/value batch only when key/value is provably batch-broadcast; otherwise
+    # keep the non-broadcast metadata and record its equality precondition.
+    if guard_or_false(Bkv == 1) and guard_or_true(Bq != 1):
         grad_key = torch.sum(broadcasted_grad_key, dim=0, keepdim=True)
         grad_value = torch.sum(broadcasted_grad_value, dim=0, keepdim=True)
     else:
+        torch._check(
+            Bq == Bkv,
+            lambda: "grad_key/grad_value batch must match key/value batch.",
+        )
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
 
