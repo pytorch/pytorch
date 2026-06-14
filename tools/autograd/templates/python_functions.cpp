@@ -2,7 +2,7 @@
 
 // ${generated_comment}
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 #include <ATen/ATen.h>
 
 #include <c10/core/SymNodeImpl.h>

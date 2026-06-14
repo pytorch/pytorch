@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 
 // ${generated_comment}
 

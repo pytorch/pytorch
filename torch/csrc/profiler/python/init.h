@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/python/pybind.h>

@@ -13,7 +13,7 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 #include <torch/csrc/utils/python_numbers.h>
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};

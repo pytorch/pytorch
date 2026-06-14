@@ -6,7 +6,7 @@
 #include <optional>
 #include <utility>
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 #if __has_include(<pybind11/gil_simple.h>)
 #include <pybind11/gil_simple.h>
 #else

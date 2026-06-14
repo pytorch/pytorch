@@ -9,7 +9,8 @@
 #undef _XOPEN_SOURCE
 #undef _POSIX_C_SOURCE
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
+
 #include <frameobject.h>
 #include <structseq.h>
 

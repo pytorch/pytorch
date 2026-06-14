@@ -1,4 +1,4 @@
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 
 extern PyObject* initModule(void);
 
