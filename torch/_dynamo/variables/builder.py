@@ -1665,17 +1665,60 @@ class VariableBuilder:
                     # We need to create an unbacked symint to replace the unbacked symbool.
                     new_symint = self.tx.output.shape_env.create_unbacked_symint()
                 else:
-                    # TODO (yidi): we need to figure out a way to propagate the guards
-                    # we accumulated when tracing the subggraph to outer shape_env. For normal symints,
-                    # this is automatically done by evaluating the guards once but this
-                    # will cause data-dependent error when we evaluate the outer unbacked symints.
-                    # The test case that triggers this graph break is test_cond_unbacked_symint_closure
-                    unimplemented(
-                        gb_type="Attempted to wrap unbacked SymInt",
-                        context="",
-                        explanation="Unbacked SymInt input is not supported yet.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
+                    # Raw unbacked SymInt inputs have no guardable hint. Model
+                    # them as unbacked inputs in this ShapeEnv and let later
+                    # data-dependent uses fail through the normal guard path.
+                    src_shape_env = value.node.shape_env
+                    src_expr = value.node.expr
+                    cache_key = (id(src_shape_env), src_expr)
+                    new_symint = self.tx.output.unbacked_symint_input_cache.get(
+                        cache_key
                     )
+                    if new_symint is None:
+                        shape_env = self.tx.output.shape_env
+                        with shape_env.ignore_fresh_unbacked_symbols():
+                            new_symint = shape_env.create_unbacked_symint(source)
+
+                        new_expr = new_symint.node.expr
+                        if not isinstance(new_expr, sympy.Symbol):
+                            raise AssertionError(f"{new_expr} is not a basic Symbol.")
+                        shape_env.unbacked_inputs.add(new_expr)
+
+                        if src_shape_env is not None:
+                            shape_env.var_to_range[new_expr] = (
+                                src_shape_env.bound_sympy(src_expr)
+                            )
+                            if (
+                                isinstance(src_expr, sympy.Symbol)
+                                and src_expr in src_shape_env.var_to_range_sloc
+                            ):
+                                shape_env.var_to_range_sloc[new_expr] = (
+                                    src_shape_env.var_to_range_sloc[src_expr]
+                                )
+
+                            hint_expr = src_expr.xreplace(
+                                src_shape_env.backed_var_to_val
+                            ).xreplace(src_shape_env.var_to_hint_override)
+                            if not getattr(hint_expr, "free_symbols", ()):
+                                shape_env.var_to_hint_override[new_expr] = int(
+                                    hint_expr
+                                )
+
+                        self.tx.output.unbacked_symint_input_cache[cache_key] = (
+                            new_symint
+                        )
+                    new_expr = new_symint.node.expr
+                    if not isinstance(new_expr, sympy.Symbol):
+                        raise AssertionError(f"{new_expr} is not a basic Symbol.")
+                    if source is not None:
+                        self.tx.output.shape_env.source_to_var[source.name] = new_expr
+                        var_sources = (
+                            self.tx.output.shape_env.var_to_sources.setdefault(
+                                new_expr, []
+                            )
+                        )
+                        if source not in var_sources:
+                            var_sources.append(source)
             if new_symint is None:
                 raise AssertionError("new_symint must not be None after wrapping")
             if not isinstance(new_symint, SymInt):
