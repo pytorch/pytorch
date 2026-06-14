@@ -25,9 +25,7 @@ NodePattern = TypeAliasType(
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
 # Define separately to prevent circular imports.
 # TODO(future PR): improve this.
-# make this public once fixed (can't be public as is because setting the module directly
-# doesn't work)
-QuantizerCls = Any
+QuantizerCls = TypeAliasType("QuantizerCls", Any)
 
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
