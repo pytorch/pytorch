@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import types
 import unittest
 import weakref
 from functools import cache
@@ -918,34 +919,145 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(len(_get_cache_entries_for_region(f, id_b)), 1)
 
-    # ===== Default strategy × region: SKIP inherited, RUN_ONLY not =====
+    # ===== Explicit compile and RUN_ONLY strategy =====
 
-    def test_isolate_recompiles_inherits_default_skip(self):
-        """Global SKIP (from skip_code / @torch._dynamo.skip / FX plumbing /
-        TorchScript __init__ / etc.) is a correctness decision — the code
-        must not be traced. Isolated regions inherit this SKIP, so neither
-        the default nor isolated wrapper compiles a skip_code-marked code
-        object. Only the automatic RUN_ONLY (from a prior non-isolated
-        recompile-limit hit) is prevented from bleeding into regions."""
-        cnt = torch._dynamo.testing.CompileCounter()
+    def test_compile_skip_code_function_attempts_compile(self):
+        def f(x):
+            if torch.compiler.is_compiling():
+                return x - 1
+            return x + 1
+
+        for isolate_recompiles in (False, True):
+            with self.subTest(isolate_recompiles=isolate_recompiles):
+                torch._dynamo.reset()
+                cnt = torch._dynamo.testing.CompileCounter()
+                torch._dynamo.eval_frame.skip_code(f.__code__)
+
+                x = torch.ones(3)
+                opt_f = torch.compile(
+                    f, backend=cnt, isolate_recompiles=isolate_recompiles
+                )
+
+                self.assertEqual(opt_f(x), x - 1)
+                self.assertEqual(cnt.frame_count, 1)
+
+    def test_compile_skipfile_function_attempts_compile(self):
+        import torch.nn.modules.linear as linear_mod
 
         def f(x):
-            return x.sin()
+            if torch.compiler.is_compiling():
+                return x - 1
+            return x + 1
 
-        torch._dynamo.eval_frame.skip_code(f.__code__)
+        skipfile_code = f.__code__.replace(co_filename=linear_mod.__file__)
+        skipfile_fn = types.FunctionType(skipfile_code, globals(), "skipfile_fn")
 
-        opt_default = torch.compile(f, backend=cnt)
-        opt_default(torch.randn(3))
-        self.assertEqual(cnt.frame_count, 0)
-        self.assertEqual(len(_get_cache_entries_for_region(f, -1)), 0)
+        for isolate_recompiles in (False, True):
+            with self.subTest(isolate_recompiles=isolate_recompiles):
+                torch._dynamo.reset()
+                cnt = torch._dynamo.testing.CompileCounter()
 
-        opt_iso = torch.compile(f, backend=cnt, isolate_recompiles=True)
-        id_iso = opt_iso._isolate_recompiles_id
+                x = torch.ones(3)
+                opt_f = torch.compile(
+                    skipfile_fn, backend=cnt, isolate_recompiles=isolate_recompiles
+                )
 
-        x = torch.randn(3)
-        self.assertEqual(opt_iso(x), f(x))
-        self.assertEqual(cnt.frame_count, 0)
-        self.assertEqual(len(_get_cache_entries_for_region(f, id_iso)), 0)
+                self.assertEqual(opt_f(x), x - 1)
+                self.assertEqual(cnt.frame_count, 1)
+
+    def test_compile_skip_code_module_attempts_compile(self):
+        for isolate_recompiles in (False, True):
+            with self.subTest(isolate_recompiles=isolate_recompiles):
+                torch._dynamo.reset()
+
+                class Mod(torch.nn.Module):
+                    def forward(self, x):
+                        if torch.compiler.is_compiling():
+                            return x - 1
+                        return x + 1
+
+                mod = Mod()
+                cnt = torch._dynamo.testing.CompileCounter()
+                torch._dynamo.eval_frame.skip_code(mod.forward.__code__)
+
+                x = torch.ones(3)
+                opt_mod = torch.compile(
+                    mod, backend=cnt, isolate_recompiles=isolate_recompiles
+                )
+
+                self.assertEqual(opt_mod(x), x - 1)
+                self.assertEqual(cnt.frame_count, 1)
+
+    def test_module_compile_skip_code_attempts_compile(self):
+        for isolate_recompiles in (False, True):
+            with self.subTest(isolate_recompiles=isolate_recompiles):
+                torch._dynamo.reset()
+
+                class Mod(torch.nn.Module):
+                    def forward(self, x):
+                        if torch.compiler.is_compiling():
+                            return x - 1
+                        return x + 1
+
+                mod = Mod()
+                cnt = torch._dynamo.testing.CompileCounter()
+                torch._dynamo.eval_frame.skip_code(mod.forward.__code__)
+
+                x = torch.ones(3)
+                mod.compile(backend=cnt, isolate_recompiles=isolate_recompiles)
+
+                self.assertEqual(mod(x), x - 1)
+                self.assertEqual(cnt.frame_count, 1)
+
+    def test_module_compile_skipfile_attempts_compile(self):
+        import torch.nn.modules.linear as linear_mod
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                if torch.compiler.is_compiling():
+                    return x - 1
+                return x + 1
+
+        Mod.forward = types.FunctionType(
+            Mod.forward.__code__.replace(co_filename=linear_mod.__file__),
+            globals(),
+            "forward",
+        )
+
+        for isolate_recompiles in (False, True):
+            with self.subTest(isolate_recompiles=isolate_recompiles):
+                torch._dynamo.reset()
+
+                mod = Mod()
+                cnt = torch._dynamo.testing.CompileCounter()
+
+                x = torch.ones(3)
+                mod.compile(backend=cnt, isolate_recompiles=isolate_recompiles)
+
+                self.assertEqual(mod(x), x - 1)
+                self.assertEqual(cnt.frame_count, 1)
+
+    def test_compile_skip_code_fallback_handles_unhashable_consts(self):
+        from torch._dynamo import eval_frame
+        from torch._dynamo.types import FrameAction, FrameExecStrategy
+
+        def f():
+            return None
+
+        code = f.__code__.replace(co_consts=({},))
+        get_code_exec_strategy = eval_frame._get_code_exec_strategy
+        try:
+            eval_frame._get_code_exec_strategy = None
+            eval_frame.set_code_exec_strategy(
+                code, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+            )
+            self.assertTrue(eval_frame._is_code_skipped(code))
+
+            eval_frame.reset_code(code)
+            self.assertFalse(eval_frame._is_code_skipped(code))
+        finally:
+            eval_frame._get_code_exec_strategy = get_code_exec_strategy
+            eval_frame.reset_code(code)
 
     def test_isolate_recompiles_ignores_default_run_only(self):
         """Regression for the RUN_ONLY-bleed case: a prior non-isolated

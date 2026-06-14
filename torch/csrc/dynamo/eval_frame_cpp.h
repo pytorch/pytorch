@@ -19,7 +19,9 @@ PyObject* dynamo__custom_eval_frame(
     int throw_flag,
     PyObject* callback);
 
+PyObject* dynamo_get_code_exec_strategy(PyObject* dummy, PyObject* obj);
 PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* obj);
+PyObject* dynamo_set_skip_code_override(PyObject* dummy, PyObject* obj);
 void dynamo_skip_code_recursive(PyCodeObject* code);
 
 void dynamo_set_c_recursion_limit(int32_t limit);
@@ -30,11 +32,11 @@ int32_t dynamo_get_c_recursion_limit();
 } // extern "C"
 
 // Bytecode debugger callback functions
-void set_bytecode_debugger_callback(py::object callback);
+void set_bytecode_debugger_callback(const py::object& callback);
 py::object get_bytecode_debugger_callback();
 
 // Breakpoint code object tracking
-void register_breakpoint_code(py::object code);
+void register_breakpoint_code(const py::object& code);
 
 // NullStackValue - sentinel class for representing NULL values on Python stack
 class NullStackValue {
