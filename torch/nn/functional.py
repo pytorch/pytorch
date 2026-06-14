@@ -5985,6 +5985,8 @@ def triplet_margin_loss(
         reduction_enum = _Reduction.get_enum(reduction)
     if margin <= 0:
         raise ValueError(f"margin must be greater than 0, got {margin}")
+    if p < 1:
+        raise ValueError(f"triplet_margin_loss: expected p to be >= 1, got {p}")
     return torch.triplet_margin_loss(
         anchor, positive, negative, margin, p, eps, swap, reduction_enum
     )

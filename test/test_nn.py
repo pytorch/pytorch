@@ -5654,6 +5654,23 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(F.triplet_margin_loss(input1, input2, input3, swap=True, reduction='none'),
                          loss_reference_fns['TripletMarginLoss'](input1, input2, input3, swap=True, reduction='none'))
 
+    def test_triplet_margin_loss_invalid_p(self):
+        anchor = torch.randn(4, 8)
+        positive = torch.randn(4, 8)
+        negative = torch.randn(4, 8)
+        with self.assertRaisesRegex(ValueError, "expected p to be >= 1"):
+            F.triplet_margin_loss(anchor, positive, negative, p=0.5)
+        with self.assertRaisesRegex(ValueError, "expected p to be >= 1"):
+            F.triplet_margin_loss(anchor, positive, negative, p=1e-6)
+        with self.assertRaisesRegex(ValueError, "expected p to be >= 1"):
+            torch.nn.TripletMarginLoss(p=0.5)
+        with self.assertRaisesRegex(ValueError, "expected p to be >= 1"):
+            torch.nn.TripletMarginLoss(p=-1.0)
+        loss = F.triplet_margin_loss(anchor, positive, negative, p=1)
+        self.assertFalse(torch.isnan(loss).any())
+        loss = F.triplet_margin_loss(anchor, positive, negative, p=2)
+        self.assertFalse(torch.isnan(loss).any())
+
     def test_pointwise_loss_target_grad_none_reduction(self):
         i = torch.randn(5, 10)
         t = torch.randn(5, 10, requires_grad=True)
