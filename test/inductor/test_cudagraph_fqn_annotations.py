@@ -35,7 +35,7 @@ from torch.cuda._graph_annotations import (
 from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
 
 
-# ── Fixtures (ported from the external validation harness) ──────────────────
+# --- Fixtures (ported from the external validation harness) ---
 # Llama-shaped hierarchy exercising deep dotted FQNs:
 #   L.model.layers.N.input_layernorm, L.model.layers.N.mlp, L.logits
 
@@ -47,7 +47,7 @@ class LeafModule(nn.Module):
 
     def forward(self, x):
         h = self.linear(x)  # GEMM (cuBLAS addmm)
-        h = torch.nn.functional.silu(h) * h + x  # pointwise → triton fused kernel
+        h = torch.nn.functional.silu(h) * h + x  # pointwise -> triton fused kernel
         return h
 
 
@@ -113,8 +113,7 @@ class CNNEnsemble(nn.Module):
         return self.classifier(x.view(x.size(0), -1))
 
 
-# ── Profiler graph-node-id extraction (test 4) ──────────────────────────────
-
+# --- Profiler graph-node-id extraction (test 4) ---
 # Candidate metadata keys under which CUPTI/kineto may surface the cuda graph
 # node id on a kernel event.  The first GPU run confirms the real key (the test
 # dumps observed keys on miss, see test_profiler_path_recovers_fqn).
