@@ -602,6 +602,8 @@ def insert_deferred_runtime_asserts(
                         try:
                             p = _sympy_interp(expr_to_proxy, d.node.expr)
                         except KeyError:
+                            # Without duck sizing, a divisor symbol may not have
+                            # been lowered yet; materialize it from its producers.
                             return graph.materialize_symint(d)
                         return p.node if isinstance(p, fx.Proxy) else p
 

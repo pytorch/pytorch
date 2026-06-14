@@ -332,6 +332,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(Unsupported, fn)
         self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
         self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], -1)
 
     @make_test
     def test_itertools_permutations_various_iterators(a, b):
@@ -520,6 +521,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for size in itertools.combinations((1, 2, 3, 4), 2):
             combs.append(torch.ones(size))
         return combs
+
+    def test_itertools_combinations_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            return list(itertools.combinations(*args, **kwargs))
+
+        self.assertRaises(Unsupported, fn)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], -1)
+
+    @make_test
+    def test_itertools_combinations_various_iterators(a, b):
+        itertools.combinations([a, b], 1)
+        itertools.combinations(zip([1, 2], [3, 4]), 1)
+        itertools.combinations(map(lambda x: x, [1, 2]), 1)
+        itertools.combinations(filter(lambda x: True, [1, 2]), 1)
+        return a
 
     @make_test
     def test_itertools_combinations_with_replacement(a, b):
@@ -3298,14 +3317,14 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s9: "Sym(s9)", L_lambda0_keywords_y_: "f32[s9, s9]"):
+    def forward(self, s9: "Sym(s9)", s25: "Sym(s25)", L_lambda0_keywords_y_: "f32[s9, s25]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul: "f32[s9, s9]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        mul: "f32[s9, s25]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
 
-        add: "f32[s9, s9]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        add: "f32[s9, s25]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
-        mul_1: "f32[s9, s9]" = torch.mul(mul, add);  mul = add = None
+        mul_1: "f32[s9, s25]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
 """,
             )
