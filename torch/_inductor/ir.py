@@ -574,6 +574,7 @@ class IRNode:
 
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
     _current_stream_idx: ClassVar[int | None] = None
+    _current_primary_node: ClassVar[torch.fx.Node | None] = None
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
@@ -608,6 +609,18 @@ class IRNode:
             IRNode._current_stream_idx = old
 
     @staticmethod
+    @contextlib.contextmanager
+    def current_primary_node(
+        node: torch.fx.Node | None,
+    ) -> Generator[None, None, None]:
+        old = IRNode._current_primary_node
+        IRNode._current_primary_node = node
+        try:
+            yield
+        finally:
+            IRNode._current_primary_node = old
+
+    @staticmethod
     def is_realized_node(node: IRNode) -> bool:
         return isinstance(
             node,
@@ -635,7 +648,7 @@ class IRNode:
         self._post_init_setattr(
             "traceback", traceback.format_stack() if config.debug_ir_traceback else None
         )
-        self._post_init_setattr("origin_node", None)
+        self._post_init_setattr("origin_node", self._current_primary_node)
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self._post_init_setattr("annotations", {})
         self._post_init_setattr("stream_idx", self._current_stream_idx)
@@ -5088,10 +5101,6 @@ class Buffer(IRNode, CodegenSymbol):
 
     # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
     # MultiOutput does NOT define this!
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        self._post_init_setattr("origin_node", None)
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         return self.get_layout().make_indexer()

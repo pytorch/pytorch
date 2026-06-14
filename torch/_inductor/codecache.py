@@ -2258,6 +2258,17 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
+        # FQN annotations bake call-site strings into the wrapper; sharing one
+        # cached wrapper across structurally-identical call sites would collapse
+        # attribution.
+        if (
+            config.triton.cudagraph_kernel_annotations
+            and config.triton.force_disable_cache_for_kernel_annotations
+        ):
+            raise BypassFxGraphCache(
+                "FQN annotations require per-call-site recompilation"
+            )
+
         shape_env = FxGraphCache._get_shape_env() if require_shape_env else None
         CacheabilityValidator(
             gm,

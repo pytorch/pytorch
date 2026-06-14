@@ -751,6 +751,42 @@ class KernelCallLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class AnnotatedKernelCallLine(WrapperLine):
+    """Wraps a KernelCallLine with mark_kernels for per-kernel CUDA graph FQN annotation."""
+
+    inner: KernelCallLine
+    module_fqn: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.writeline(f"with _graph_annotations.mark_kernels({self.module_fqn!r}):")
+        with code.indent():
+            self.inner.codegen(code)
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return self.inner.codegen_fx(converter)
+
+
+@dataclasses.dataclass
+class AnnotatedExternKernelBlock(WrapperLine):
+    """Wraps extern kernel codegen lines with mark_kernels for per-kernel CUDA graph FQN annotation."""
+
+    inner_lines: list[Any]
+    module_fqn: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.writeline(f"with _graph_annotations.mark_kernels({self.module_fqn!r}):")
+        with code.indent():
+            for line in self.inner_lines:
+                if isinstance(line, WrapperLine):
+                    line.codegen(code)
+                else:
+                    code.writeline(line)
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        raise NotImplementedError("extern kernel FX conversion not supported")
+
+
+@dataclasses.dataclass
 class KernelDefinitionLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     kernel_name: str
@@ -1504,6 +1540,8 @@ class PythonWrapperCodegen(CodeGen):
             pass
         if config.annotate_training:
             self.header.writeline("from torch.cuda import nvtx")
+        if config.triton.cudagraph_kernel_annotations:
+            self.header.writeline("from torch.cuda import _graph_annotations")
         if config.triton.proton_profiling:
             self.header.writeline("import triton.profiler as proton")
             self.header.writeline("import triton.profiler.language as pl")
@@ -3559,28 +3597,31 @@ class PythonWrapperCodegen(CodeGen):
 
         device = device or V.graph.get_current_device_or_throw()
         current_stream_idx = V.graph.scheduler.current_stream_idx
-        self.writeline(
-            KernelCallLine(
-                self,
-                kernel_name=kernel_name,
-                call_args=call_args,
-                # pyrefly: ignore [bad-argument-type]
-                raw_keys=raw_keys,
-                # pyrefly: ignore [bad-argument-type]
-                raw_args=raw_args,
-                # pyrefly: ignore [bad-argument-type]
-                arg_types=arg_types,
-                triton=triton,
-                # pyrefly: ignore [bad-argument-type]
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                device=device,
-                graph_name=V.graph.name,
-                # pyrefly: ignore [bad-argument-type]
-                original_fxnode_name=original_fxnode_name,
-                current_stream_idx=current_stream_idx,
-            )
+        kernel_line = KernelCallLine(
+            self,
+            kernel_name=kernel_name,
+            call_args=call_args,
+            # pyrefly: ignore [bad-argument-type]
+            raw_keys=raw_keys,
+            # pyrefly: ignore [bad-argument-type]
+            raw_args=raw_args,
+            # pyrefly: ignore [bad-argument-type]
+            arg_types=arg_types,
+            triton=triton,
+            # pyrefly: ignore [bad-argument-type]
+            triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
+            device=device,
+            graph_name=V.graph.name,
+            # pyrefly: ignore [bad-argument-type]
+            original_fxnode_name=original_fxnode_name,
+            current_stream_idx=current_stream_idx,
         )
+        module_fqn = getattr(V.graph, "_current_kernel_module_fqn", None)
+        if module_fqn and config.triton.cudagraph_kernel_annotations:
+            self.writeline(AnnotatedKernelCallLine(kernel_line, module_fqn))
+        else:
+            self.writeline(kernel_line)
 
     def _generate_kernel_call_helper(
         self,
