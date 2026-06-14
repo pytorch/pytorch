@@ -65,18 +65,9 @@ RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
 RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_drm.sh /usr ; fi && rm install_rocm_drm.sh
 
-# Default ROCm environment; /etc/rocm_env.sh (created by install_rocm.sh) may
-# override these at runtime for different install methods (tarballs vs wheels).
-ENV ROCM_PATH=/opt/rocm \
-    ROCM_HOME=/opt/rocm \
-    ROCM_SOURCE_DIR=/opt/rocm \
-    ROCM_BIN=/opt/rocm/bin \
-    ROCM_CMAKE=/opt/rocm \
-    ROCM_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode \
-    HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode \
-    MAGMA_HOME=/opt/rocm/magma
-ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
-ENV LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH:-}
+# ROCm environment is written by install_rocm.sh to /etc/rocm_env.sh and sourced
+# by CI scripts. Do not set /opt/rocm defaults here: rocm-nightly installs ROCm
+# from TheRock wheels under the Python environment instead.
 
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
