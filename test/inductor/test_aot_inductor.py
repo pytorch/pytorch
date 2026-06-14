@@ -4717,6 +4717,25 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
+    def test_size_one_dynamic_dim_aot_compile(self):
+        class Model(torch.nn.Module):
+            def forward(self, img, points, labels):
+                return img + (points.sum() + labels.sum()) * 0
+
+        inputs = (
+            torch.randn(1, 3, 8, 8, device=self.device),
+            torch.randn(1, 1, 2, device=self.device),
+            torch.randn(1, 1, 1, device=self.device),
+        )
+        n_labels = Dim("n_labels", min=1, max=12)
+        dynamic_shapes = {
+            "img": {},
+            "points": {1: n_labels},
+            "labels": {1: n_labels},
+        }
+
+        self.check_model(Model(), inputs, dynamic_shapes=dynamic_shapes)
+
     def test_pad_fallback(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
