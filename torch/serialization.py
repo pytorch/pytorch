@@ -830,8 +830,9 @@ class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
                 )
             )
 
-    def __exit__(self, *args) -> None:
-        self.file_like.write_end_of_file()
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        if exc_type is None:
+            self.file_like.write_end_of_file()
         if self.file_stream is not None:
             self.file_stream.close()
 
@@ -941,6 +942,29 @@ def _check_save_filelike(f):
         )
 
 
+def _save_via_tmp(path: str, opener, writer) -> None:
+    """Atomically write to path via a temp file, deleting the temp on failure.
+
+    Prevents creating or corrupting the target file if serialization fails (gh-48243).
+    """
+    dir_name = os.path.dirname(os.path.abspath(path))
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name)
+    wrote_ok = False
+    try:
+        os.close(tmp_fd)
+        with opener(tmp_path) as ctx:
+            writer(ctx)
+        wrote_ok = True
+        os.replace(tmp_path, path)
+    except BaseException:
+        if not wrote_ok:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
+
+
 def save(
     obj: object,
     f: FileLike,
@@ -999,23 +1023,39 @@ def save(
         f = os.fspath(f)
 
     if _use_new_zipfile_serialization:
-        with _open_zipfile_writer(f) as opened_zipfile:
-            _save(
-                obj,
-                opened_zipfile,
-                pickle_module,
-                pickle_protocol,
-                _disable_byteorder_record,
+        if isinstance(f, str):
+            _save_via_tmp(
+                f,
+                _open_zipfile_writer,
+                lambda writer: _save(
+                    obj, writer, pickle_module, pickle_protocol, _disable_byteorder_record
+                ),
             )
-            return
+        else:
+            with _open_zipfile_writer(f) as opened_zipfile:
+                _save(
+                    obj,
+                    opened_zipfile,
+                    pickle_module,
+                    pickle_protocol,
+                    _disable_byteorder_record,
+                )
+        return
     else:
         global _serialization_tls
         if _serialization_tls.skip_data:
             raise RuntimeError(
                 "Cannot use skip_data=True with _use_new_zipfile_serialization=False"
             )
-        with _open_file_like(f, "wb") as opened_file:
-            _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
+        if isinstance(f, str):
+            _save_via_tmp(
+                f,
+                lambda tmp: _open_file_like(tmp, "wb"),
+                lambda fh: _legacy_save(obj, fh, pickle_module, pickle_protocol),
+            )
+        else:
+            with _open_file_like(f, "wb") as opened_file:
+                _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
 
 
 def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
