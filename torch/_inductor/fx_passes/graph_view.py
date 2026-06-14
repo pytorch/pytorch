@@ -153,7 +153,7 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
         their own snodes, while excluding cascaded history from upstream
         blocks.
     """
-    fqn_map: dict[str, str] = getattr(V.graph, "fx_fqn_map", {})
+    fqn_map: dict[str, str] = V.graph.fx_fqn_map
     log.debug("get_fused_kernel_module_fqn: snodes=%d", len(scheduler_nodes))
 
     # Pass 1: derive block anchor prefixes from each snode's origin_node.
@@ -197,7 +197,7 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
     # set), look each up in fqn_map, and include only those whose FQN prefix
     # matches an anchor.  This captures inline ops (e.g. relu, add inlined into
     # a parent buffer) while rejecting cascaded history from upstream blocks.
-    extern_fqns: OrderedSet[str] = getattr(V.graph, "fx_extern_fqns", OrderedSet())
+    extern_fqns: OrderedSet[str] = V.graph.fx_extern_fqns
     module_names: OrderedSet[str] = OrderedSet()
     for snode in scheduler_nodes:
         if snode.node is None:
