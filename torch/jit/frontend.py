@@ -442,7 +442,11 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=No
             is_method,  # type: ignore[assignment]
         )
 
-    return Def(Ident(r, def_name), decl, build_stmts(ctx, body))
+    return Def(
+        Ident(r, def_name),
+        decl,  # pyrefly: ignore[bad-argument-type]
+        build_stmts(ctx, body),
+    )
 
 
 _vararg_kwarg_err = (
