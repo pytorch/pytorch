@@ -955,16 +955,31 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
       auto threshold = threshold_.to<float>();
       const Vec beta_vec(beta);
       const Vec threshold_vec(threshold);
+      const Vec zero_vec(0.0f);
       cpu_kernel_vec(
           iter,
           [beta, threshold](scalar_t a) -> scalar_t {
-            return (float(a) * beta) > threshold ? a
-              : static_cast<scalar_t>((std::log1p(std::exp(float(a) * beta))) / beta);
+            float y = float(a) * beta;
+            if (y > threshold) {
+              return a;
+            }
+            // Use numerically stable formula: exp(-abs(y)) never overflows
+            float z = std::log1p(std::exp(-std::abs(y))) / beta;
+            return (y > 0.0f ? float(a) : 0.0f) + z;
           },
-          [beta_vec, threshold_vec](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
+          [beta_vec, threshold_vec, zero_vec](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
             auto [a0, a1] = convert_to_float<scalar_t>(a);
-            a0 = Vec::blendv((a0 * beta_vec).exp().log1p() / beta_vec, a0, (a0 * beta_vec) > threshold_vec);
-            a1 = Vec::blendv((a1 * beta_vec).exp().log1p() / beta_vec, a1, (a1 * beta_vec) > threshold_vec);
+            Vec y0 = a0 * beta_vec;
+            Vec y1 = a1 * beta_vec;
+            // Use numerically stable formula: exp(-abs(y)) never overflows
+            Vec z0 = y0.abs().neg().exp().log1p() / beta_vec;
+            Vec z1 = y1.abs().neg().exp().log1p() / beta_vec;
+            // For y > 0: result = a + z; For y <= 0: result = z
+            Vec result0 = Vec::blendv(z0, a0 + z0, y0 > zero_vec);
+            Vec result1 = Vec::blendv(z1, a1 + z1, y1 > zero_vec);
+            // Select based on y > threshold
+            a0 = Vec::blendv(result0, a0, y0 > threshold_vec);
+            a1 = Vec::blendv(result1, a1, y1 > threshold_vec);
             return convert_from_float<scalar_t>(a0, a1);
           }
       );
@@ -976,14 +991,26 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
     auto threshold = threshold_.to<scalar_t>();
     const Vec beta_vec(beta);
     const Vec threshold_vec(threshold);
+    const Vec zero_vec(static_cast<scalar_t>(0.0));
     cpu_kernel_vec(
         iter,
         [beta, threshold](scalar_t a) -> scalar_t {
-          return (a * beta) > threshold ? a
-            : static_cast<scalar_t>(std::log1p(std::exp(a * beta))) / beta;
+          scalar_t y = a * beta;
+          if (y > threshold) {
+            return a;
+          }
+          // Use numerically stable formula: exp(-abs(y)) never overflows
+          scalar_t z = std::log1p(std::exp(-std::abs(y))) / beta;
+          return (y > scalar_t(0) ? a : scalar_t(0)) + z;
         },
-        [beta_vec, threshold_vec](Vec a) -> Vec {
-          return Vec::blendv((a * beta_vec).exp().log1p() / beta_vec, a, (a * beta_vec) > threshold_vec);
+        [beta_vec, threshold_vec, zero_vec](Vec a) -> Vec {
+          Vec y = a * beta_vec;
+          // Use numerically stable formula: exp(-abs(y)) never overflows
+          Vec z = y.abs().neg().exp().log1p() / beta_vec;
+          // For y > 0: result = a + z; For y <= 0: result = z
+          Vec result = Vec::blendv(z, a + z, y > zero_vec);
+          // Select based on y > threshold
+          return Vec::blendv(result, a, y > threshold_vec);
         }
     );
   });
@@ -1002,16 +1029,26 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
     cpu_kernel_vec(
         iter,
         [beta, threshold](scalar_t a, scalar_t b) -> scalar_t {
-          float z = std::exp(float(b) * beta);
-          return (float(b) * beta) > threshold ? a : static_cast<scalar_t>(float(a) * z / (z + float(1.)));
+          float y = float(b) * beta;
+          if (y > threshold) {
+            return a;
+          }
+          // Use numerically stable formula: grad / (1 + exp(-y))
+          // For y >= 0: exp(-y) is small, no overflow
+          // For y < 0: exp(-y) can be large but 1/(1+large) -> 0, which is correct
+          return static_cast<scalar_t>(float(a) / (1.0f + std::exp(-y)));
         },
         [beta_vec, one_vec, threshold_vec](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
           auto [a0, a1] = convert_to_float<scalar_t>(a);
           auto [b0, b1] = convert_to_float<scalar_t>(b);
-          Vec z = (b0 * beta_vec).exp();
-          a0 = Vec::blendv(a0 * z / (z + one_vec), a0, (b0 * beta_vec) > threshold_vec);
-          z = (b1 * beta_vec).exp();
-          a1 = Vec::blendv(a1 * z / (z + one_vec), a1, (b1 * beta_vec) > threshold_vec);
+          Vec y0 = b0 * beta_vec;
+          Vec y1 = b1 * beta_vec;
+          // Use numerically stable formula: grad / (1 + exp(-y))
+          Vec result0 = a0 / (one_vec + y0.neg().exp());
+          Vec result1 = a1 / (one_vec + y1.neg().exp());
+          // Select based on y > threshold
+          a0 = Vec::blendv(result0, a0, y0 > threshold_vec);
+          a1 = Vec::blendv(result1, a1, y1 > threshold_vec);
           return convert_from_float<scalar_t>(a0, a1);
         });
     });
@@ -1026,12 +1063,19 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
     cpu_kernel_vec(
         iter,
         [beta, threshold](scalar_t a, scalar_t b) -> scalar_t {
-          scalar_t z = std::exp(b * beta);
-          return (b * beta) > threshold ? a : a * z / (z + scalar_t(1.));
+          scalar_t y = b * beta;
+          if (y > threshold) {
+            return a;
+          }
+          // Use numerically stable formula: grad / (1 + exp(-y))
+          return a / (scalar_t(1) + std::exp(-y));
         },
         [beta_vec, one_vec, threshold_vec](Vec a, Vec b) -> Vec {
-          const Vec z = (b * beta_vec).exp();
-          return Vec::blendv(a * z / (z + one_vec), a, (b * beta_vec) > threshold_vec);
+          Vec y = b * beta_vec;
+          // Use numerically stable formula: grad / (1 + exp(-y))
+          Vec result = a / (one_vec + y.neg().exp());
+          // Select based on y > threshold
+          return Vec::blendv(result, a, y > threshold_vec);
         }
     );
   });

@@ -563,17 +563,26 @@ TORCH_IMPL_FUNC(softplus_out_mps)
       MPSGraphTensor* reluTensor = [mpsGraph reLUWithTensor:inputTensor name:nil];
 
       MPSGraphTensor* reciprocalBetaTensor = [mpsGraph reciprocalWithTensor:betaTensor name:nil];
+      // y = beta * x
       MPSGraphTensor* bxTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
                                                            secondaryTensor:betaTensor
                                                                       name:nil];
       MPSGraphTensor* predicateTensor = [mpsGraph greaterThanWithPrimaryTensor:bxTensor
                                                                secondaryTensor:thresholdTensor
                                                                           name:nil];
-      MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:bxTensor name:nil];
+      // Numerically stable: log1p(exp(-|y|)) / beta + max(x, 0)
+      // exp(-|y|) never overflows since -|y| <= 0
+      MPSGraphTensor* absBxTensor = [mpsGraph absoluteWithTensor:bxTensor name:nil];
+      MPSGraphTensor* negAbsBxTensor = [mpsGraph negativeWithTensor:absBxTensor name:nil];
+      MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:negAbsBxTensor name:nil];
       MPSGraphTensor* log1pTensor = at::native::mps::log1p(mpsGraph, expTensor);
-      MPSGraphTensor* softplusTensor = [mpsGraph multiplicationWithPrimaryTensor:log1pTensor
-                                                                 secondaryTensor:reciprocalBetaTensor
-                                                                            name:nil];
+      MPSGraphTensor* scaledLog1pTensor = [mpsGraph multiplicationWithPrimaryTensor:log1pTensor
+                                                                    secondaryTensor:reciprocalBetaTensor
+                                                                               name:nil];
+      MPSGraphTensor* positivePartTensor = [mpsGraph reLUWithTensor:inputTensor name:nil];
+      MPSGraphTensor* softplusTensor = [mpsGraph additionWithPrimaryTensor:scaledLog1pTensor
+                                                           secondaryTensor:positivePartTensor
+                                                                      name:nil];
       MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
                                                      truePredicateTensor:reluTensor
                                                     falsePredicateTensor:softplusTensor
@@ -634,17 +643,21 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps)
       MPSGraphTensor* thresholdTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
 
       MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:getMPSDataType(self)];
+      // y = beta * x
       MPSGraphTensor* bxTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
                                                            secondaryTensor:betaTensor
                                                                       name:nil];
-      MPSGraphTensor* expBxTensor = [mpsGraph exponentWithTensor:bxTensor name:nil];
-      MPSGraphTensor* unitExpBxTensor = [mpsGraph additionWithPrimaryTensor:expBxTensor
-                                                            secondaryTensor:unitTensor
-                                                                       name:nil];
-      MPSGraphTensor* rTensor = [mpsGraph multiplicationWithPrimaryTensor:gradOutputTensor
-                                                          secondaryTensor:expBxTensor
-                                                                     name:nil];
-      rTensor = [mpsGraph divisionWithPrimaryTensor:rTensor secondaryTensor:unitExpBxTensor name:nil];
+      // Numerically stable: grad / (1 + exp(-y))
+      // For large y, exp(-y) -> 0, so result -> grad (correct)
+      // For large negative y, exp(-y) -> inf, so result -> 0 (correct)
+      MPSGraphTensor* negBxTensor = [mpsGraph negativeWithTensor:bxTensor name:nil];
+      MPSGraphTensor* expNegBxTensor = [mpsGraph exponentWithTensor:negBxTensor name:nil];
+      MPSGraphTensor* denomTensor = [mpsGraph additionWithPrimaryTensor:unitTensor
+                                                        secondaryTensor:expNegBxTensor
+                                                                   name:nil];
+      MPSGraphTensor* rTensor = [mpsGraph divisionWithPrimaryTensor:gradOutputTensor
+                                                    secondaryTensor:denomTensor
+                                                               name:nil];
       MPSGraphTensor* predicateTensor = [mpsGraph greaterThanWithPrimaryTensor:bxTensor
                                                                secondaryTensor:thresholdTensor
                                                                           name:nil];
