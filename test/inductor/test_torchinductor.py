@@ -3788,8 +3788,6 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    test_one_hot._expected_failure_halide = True
-
     def test_div1(self):
         def fn(a, b):
             return (
@@ -15951,6 +15949,53 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(x, source)
+
+    # The bounds assert is emitted inside the scatter kernel via
+    # indirect_indexing. On cpp it fires inside an omp parallel region, so
+    # the throw cannot unwind to Python and the process terminates instead
+    # of raising - the runtime failure is checked in a subprocess. CUDA's
+    # device-side assert poisons the context (uncatchable in-process).
+    @skipCUDAIf(True, "device-side assert poisons CUDA context; see #185885")
+    @skip_if_triton_cpu
+    @skip_if_pallas
+    @skip_if_halide
+    @xfail_if_mps  # MPS index_add lacks runtime bounds-checking
+    def test_index_add_out_of_bounds(self):
+        # https://github.com/pytorch/pytorch/issues/185885
+        # Eager index_add bounds-checks to [0, size) and does not wrap
+        # negative indices; the lowering must match instead of silently
+        # accepting them via index_put advanced-indexing semantics.
+        def fn(x, index, source):
+            return torch.index_add(x, 0, index, source)
+
+        x = torch.zeros(4, 3, device=self.device)
+        valid = torch.tensor([0, 2], device=self.device)
+        source = torch.ones(valid.size(0), 3, device=self.device)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        out, (code,) = run_and_get_code(compiled_fn, x, valid, source)
+        self.assertEqual(out, fn(x, valid, source))
+        self.assertIn("out of bounds", code)
+
+        for bad in (-1, 4, 5):
+            indices = torch.tensor([0, bad], device=self.device)
+            bad_source = torch.ones(indices.size(0), 3, device=self.device)
+            with self.assertRaises(RuntimeError):
+                fn(x, indices, bad_source)
+
+        if self.device == "cpu":
+            script = (
+                "import torch\n"
+                "def fn(x, index, source):\n"
+                "    return torch.index_add(x, 0, index, source)\n"
+                "compiled = torch.compile(fn, fullgraph=True)\n"
+                "compiled(torch.zeros(4, 3), torch.tensor([0, -1]), "
+                "torch.ones(2, 3))\n"
+            )
+            proc = subprocess.run(
+                [sys.executable, "-c", script], capture_output=True, text=True
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("out of bounds", proc.stderr)
 
     @skip_if_gpu_halide  # cuda error
     def test_mutations_loop_fusion(self):

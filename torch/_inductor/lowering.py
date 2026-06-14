@@ -23,6 +23,7 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._environment import is_fbcode
 from torch._functorch._aot_autograd.descriptors import (
     SavedForBackwardsAOTOutput,
     SavedForBackwardsNoVcCheckAOTOutput,
@@ -122,7 +123,6 @@ _P = ParamSpec("_P")
 FALLBACK_ALLOW_LIST = OrderedSet(
     [
         "torchvision::roi_align",
-        "aten::index_add",
     ]
 )
 
@@ -1856,6 +1856,12 @@ def quantized_decomposed_quantize_per_channel(
 
 
 def _assert_async(cond, msg):
+    # Skip the assert on backends that do not implement device_assert_async
+    # in their kernel codegen (e.g. Halide inherits a NotImplementedError stub).
+    # Backends declare runtime-assert support via
+    # BackendFeature.RUNTIME_DEVICE_ASSERT on their scheduling class.
+    if not V.graph.has_feature(cond.get_device(), BackendFeature.RUNTIME_DEVICE_ASSERT):
+        return None
     cond.realize()
     cond = to_dtype(cond, torch.bool)
 
@@ -4741,7 +4747,61 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
     )
 
 
-def index_put_impl_(self, indices, values, accumulate, check, may_realize=False):
+fallback_index_add = fallback_handler(aten.index_add.default, add_to_fallback_set=False)
+fallback_index_add_ = fallback_handler(
+    aten.index_add_.default, add_to_fallback_set=False
+)
+
+
+def index_add_impl(x, dim, index, source, alpha, inplace):
+    # index_add bounds-checks index to [0, x.size(dim)) and does not wrap
+    # negatives, unlike index_put. Lower through the index_put machinery
+    # with wrap_neg=False so the bounds assert is emitted inside the
+    # scatter kernel. Fall back to eager index_add (which bounds-checks)
+    # where index_put_impl_ would fall back to eager index_put_ (which
+    # wraps), and for bf16 (#137425). Fixes #185885 parity.
+    if (
+        (not is_fbcode() and x.get_dtype() == torch.bfloat16)
+        or torch.are_deterministic_algorithms_enabled()
+        or needs_fallback_due_to_atomic_add_limitations(x.get_dtype())
+    ):
+        fb = fallback_index_add_ if inplace else fallback_index_add
+        return fb(x, dim, index, source, alpha=alpha)
+
+    if alpha != 1:
+        source = mul(source, alpha)
+
+    zero_dim = len(x.get_size()) == 0
+    x1 = view(x, [1]) if zero_dim else x
+    dim = _validate_dim(x1, dim)
+    idx = [None] * dim + [index]
+    out = index_put_impl_(
+        x1 if inplace else clone(x1),
+        idx,
+        source,
+        accumulate=True,
+        check=True,
+        may_realize=inplace,
+        wrap_neg=False,
+    )
+    if zero_dim:
+        out = view(out, [])
+    return x if inplace else out
+
+
+@register_lowering(aten.index_add, type_promotion_kind=None)
+def index_add(x, dim, index, source, *, alpha=1):
+    return index_add_impl(x, dim, index, source, alpha, inplace=False)
+
+
+@register_lowering(aten.index_add_, type_promotion_kind=None)
+def index_add_(x, dim, index, source, *, alpha=1):
+    return index_add_impl(x, dim, index, source, alpha, inplace=True)
+
+
+def index_put_impl_(
+    self, indices, values, accumulate, check, may_realize=False, wrap_neg=True
+):
     if may_realize:
 
         def indice_slice_from_randperm(indice):
@@ -4833,6 +4893,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         indexed_size,
         None,
         check=check,
+        wrap_neg=wrap_neg,
     )
     values = expand(values, expected_vals_size)
     # all guards are set above during broadcast_tensors and expand

@@ -5087,6 +5087,7 @@ class CppScheduling(BaseScheduling):
         [
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
+            BackendFeature.RUNTIME_DEVICE_ASSERT,
         ]
     )
 
