@@ -10,7 +10,14 @@ from itertools import product
 import torch
 from torch.cuda.jiterator import _create_jit_fn as create_jit_fn
 from torch.cuda.jiterator import _create_multi_output_jit_fn as create_multi_output_jit_fn
-from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, TEST_CUDA, NoTest
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    NoTest,
+    parametrize,
+    run_tests,
+    TestCase,
+    TEST_CUDA,
+)
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, dtypes, toleranceOverride, tol)
@@ -169,6 +176,9 @@ class TestPythonJiterator(TestCase):
             create_jit_fn(code_string)
 
     def test_corrupt_kernel_cache_recompiles(self, device):
+        if IS_WINDOWS:
+            self.skipTest("prod JITerator reduction is disabled on Windows")
+
         script = textwrap.dedent("""
             import torch
 
