@@ -17001,6 +17001,32 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         FileCheck().check(check1).check(check2).run(code)
 
+    @lowering.force_fallback(aten.add.Tensor)
+    def test_no_redundant_assignment_single_output_fallback(self):
+        @torch.compile
+        def f(x):
+            return x + 2
+
+        x = torch.randn(16, 32, device=self.device)
+        expected = x + 2
+        actual, source_codes = run_and_get_code(f, x)
+        self.assertEqual(actual, expected)
+        source_code = "\n".join(source_codes)
+        self.assertIn("torch.ops.aten.add.Tensor", source_code)
+        if config.cpp_wrapper:
+            FileCheck().check_regex(
+                r'assert_size_stride\(buf\d+, \{.*\}, \{.*\}, "torch.ops.aten.add.Tensor"\)'
+            ).run(source_code)
+        else:
+            FileCheck().check_regex(
+                r"assert_size_stride\(buf\d+, \(.*\), \(.*\), 'torch.ops.aten.add.Tensor'\)"
+            ).run(source_code)
+            if torch.device(self.device).type == "cuda":
+                FileCheck().check_regex(
+                    r"assert_alignment\(buf\d+, \d+, 'torch.ops.aten.add.Tensor'\)"
+                ).run(source_code)
+        self.assertNotRegex(source_code, r"\bbuf\d+\s*=\s*buf\d+\b")
+
     @requires_gpu_and_triton
     @config.patch(use_fast_math=True)
     def test_prepare_softmax_with_fast_math(self):
