@@ -3924,6 +3924,32 @@ def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) 
     return msg
 
 
+def _custom_op_fake_tensor_failure(
+    node: torch.fx.Node, cause: BaseException
+) -> tuple[str, Literal["missing_fake_impl", "real_data_access"]] | None:
+    target = node.target
+    namespace = None
+
+    if isinstance(target, torch._ops.OpOverload):
+        namespace = target.namespace
+    elif isinstance(target, torch._ops.OpOverloadPacket):
+        namespace = target._qualified_op_name.split("::", 1)[0]
+
+    if namespace is None or namespace in {"aten", "prims", "prim"}:
+        return None
+
+    msg = str(cause)
+    if "no fake impl registered" in msg:
+        # From torch/_library/custom_ops.py when an opaque custom op has no fake
+        # implementation.
+        return str(target), "missing_fake_impl"
+    if "data is not allocated yet" in msg and "tracing into a custom kernel" in msg:
+        # From fake tensor storage access checks when a fake/meta path reaches a
+        # backend kernel or otherwise tries to read real tensor data.
+        return str(target), "real_data_access"
+    return None
+
+
 def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> NoReturn:
     from .exc import TorchRuntimeError, Unsupported
 
@@ -4146,6 +4172,37 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
             )
+        elif custom_op_failure := _custom_op_fake_tensor_failure(node, cause):
+            custom_op_name, failure_kind = custom_op_failure
+            if failure_kind == "missing_fake_impl":
+                unimplemented(
+                    gb_type="Custom operator does not support running with fake tensors",
+                    context=f"unsupported operator: {custom_op_name}",
+                    explanation=(
+                        "Dynamo attempted to run a custom operator with fake "
+                        "tensors, but the operator does not have a fake/meta "
+                        "implementation."
+                    ),
+                    hints=[
+                        "Register a fake/meta implementation for the operator to compile through it.",
+                    ],
+                    from_exc=cause,
+                )
+            else:
+                unimplemented(
+                    gb_type="Custom operator fake/meta implementation tried to access real tensor data",
+                    context=f"unsupported operator: {custom_op_name}",
+                    explanation=(
+                        "Dynamo attempted to run a custom operator with fake "
+                        "tensors, but the operator's fake/meta path tried to "
+                        "read real tensor data. Fake/meta implementations must "
+                        "compute output metadata without accessing tensor data."
+                    ),
+                    hints=[
+                        "Fix the operator's fake/meta implementation so it only computes output metadata.",
+                    ],
+                    from_exc=cause,
+                )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         _wrap_graph_break_with_torch_runtime_err(
             lambda: unimplemented(

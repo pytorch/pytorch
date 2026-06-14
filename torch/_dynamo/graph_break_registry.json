@@ -5323,6 +5323,24 @@
       ]
     }
   ],
+  "GB6217": [
+    {
+      "Gb_type": "Custom operator does not support running with fake tensors",
+      "Context": "unsupported operator: {custom_op_name}",
+      "Explanation": "Dynamo attempted to run a custom operator with fake tensors, but the operator does not have a fake/meta implementation.",
+      "Hints": [
+        "Register a fake/meta implementation for the operator to compile through it."
+      ]
+    },
+    {
+      "Gb_type": "Custom operator does not support running with fake tensors",
+      "Context": "unsupported operator: {custom_op_name}",
+      "Explanation": "Dynamo attempted to run a custom operator with fake tensors, but the operator requires real tensor data. This commonly happens when the operator does not have a fake/meta implementation.",
+      "Hints": [
+        "Register a fake/meta implementation for the operator to compile through it."
+      ]
+    }
+  ],
   "GB5380": [
     {
       "Gb_type": "repr() on non-constant set",
@@ -5408,6 +5426,16 @@
       "Explanation": "ScriptModules aren't supported in UnspecializedNNModuleVariable because their .forward function isn't a static member of their type.",
       "Hints": [
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB3023": [
+    {
+      "Gb_type": "Custom operator fake/meta implementation tried to access real tensor data",
+      "Context": "unsupported operator: {custom_op_name}",
+      "Explanation": "Dynamo attempted to run a custom operator with fake tensors, but the operator's fake/meta path tried to read real tensor data. Fake/meta implementations must compute output metadata without accessing tensor data.",
+      "Hints": [
+        "Fix the operator's fake/meta implementation so it only computes output metadata."
       ]
     }
   ],
