@@ -277,6 +277,51 @@ class ForeachTests(TestCase):
     def test_foreach_cpp_wrapper_cuda(self):
         self._test_single_list(op=torch._foreach_add)
 
+    @requires_gpu
+    def test_foreach_map_debug_assert_fused_happy_basic(self):
+        def fn(xs):
+            return torch._higher_order_ops.foreach_map(
+                torch.add, xs, 1.0, _debug_assert_fused=True
+            )
+
+        xs = [
+            torch.rand(10, 10, device=GPU_TYPE),
+            torch.rand(10, 10, device=GPU_TYPE),
+        ]
+
+        self.check_model_gpu(fn, (xs,))
+
+    @requires_gpu
+    def test_foreach_map_debug_assert_fused_raises(self):
+        def body(x):
+            return torch.mm(x, x)
+
+        def fn(xs):
+            return torch._higher_order_ops.foreach_map(
+                body, xs, _debug_assert_fused=True
+            )
+
+        xs = [torch.rand(10, 10, device=GPU_TYPE)]
+
+        with self.assertRaisesRegex(Exception, "_debug_assert_fused"):
+            self.check_model_gpu(fn, (xs,))
+
+    @requires_gpu
+    def test_foreach_map_debug_assert_fused_disabled(self):
+        def body(x):
+            return torch.mm(x, x)
+
+        def fn(xs):
+            return torch._higher_order_ops.foreach_map(body, xs)
+
+        xs = [torch.randn(10, 10, device=GPU_TYPE)]
+
+        with self.assertRaisesRegex(
+            Exception,
+            "Buffers cannot be created while lowering a pointwise subgraph",
+        ):
+            self.check_model_gpu(fn, (xs,))
+
     # called in test_gpu_cpp_wrapper.py
     test_foreach_cpp_wrapper_xpu = test_foreach_cpp_wrapper_cuda
 

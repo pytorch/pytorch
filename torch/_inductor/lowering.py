@@ -964,6 +964,25 @@ def to_dtype(
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+def _unwrap_tensorbox_to_irnode(x):
+    if isinstance(x, TensorBox):
+        x = x.data
+    if isinstance(x, ir.BaseView):
+        x = x.unwrap_view()
+    if isinstance(x, ir.StorageBox):
+        x = x.data
+    return x
+
+
+def _is_single_realized_tensor_output(x):
+    node = _unwrap_tensorbox_to_irnode(x)
+    return (
+        isinstance(node, ir.IRNode)
+        and node.has_tensor_output()
+        and ir.IRNode.is_realized_node(node)
+    )
+
+
 @register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
 def _foreach_map(subgraph, *args, **kwargs):
     """
@@ -975,14 +994,25 @@ def _foreach_map(subgraph, *args, **kwargs):
     The graph outputs represent the vertically fused sequence of ops, and then register_operation_list
     below registers the buffers as horizontally fuseable in the scheduler.
     """
-    from .subgraph_lowering import PointwiseSubgraphLowering
+    from .subgraph_lowering import PointwiseSubgraphLowering, SubgraphLoweringException
+
+    debug_assert_fused = kwargs.pop("_debug_assert_fused", False)
+    assert not kwargs, (
+        f"unexpected kwargs to foreach_map lowering: {list(kwargs.keys())}"
+    )
 
     inputs = args
-
     gm = subgraph.graph_module
-    pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
-    with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
-        pw_subgraph.run(*inputs)
+    try:
+        pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
+        with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
+            pw_subgraph.run(*inputs)
+    except SubgraphLoweringException as e:
+        if debug_assert_fused:
+            raise RuntimeError(
+                f"Failed to lower foreach_map with _debug_assert_fused=True: {e}"
+            ) from e
+        raise
 
     sub_outputs = pw_subgraph.graph_outputs
     # group outputs by device and register as foreach
@@ -992,6 +1022,18 @@ def _foreach_map(subgraph, *args, **kwargs):
 
     outputs = [None] * len(sub_outputs)
     for (device, use_foreach), group in groups.items():
+        if debug_assert_fused:
+            if not use_foreach:
+                raise RuntimeError(
+                    f"foreach_map _debug_assert_fused=True failed: "
+                    f"outputs on device {device} are not eligible for foreach fusion "
+                    f"because use_foreach=False"
+                )
+            if not V.graph.has_feature(device, BackendFeature.FOREACH):
+                raise RuntimeError(
+                    f"foreach_map _debug_assert_fused=True failed: "
+                    f"device {device} does not support foreach"
+                )
         operation_list: list[str] = []
         for (
             output_ind,
@@ -1001,6 +1043,11 @@ def _foreach_map(subgraph, *args, **kwargs):
 
             if V.graph.has_feature(device, BackendFeature.FOREACH) and use_foreach:
                 output.realize()
+                if debug_assert_fused and not _is_single_realized_tensor_output(output):
+                    raise RuntimeError(
+                        f"foreach_map _debug_assert_fused=True failed: "
+                        f"output {output_ind} did not realize to a single tensor IR node"
+                    )
                 operation_list.append(output.get_operation_name())
 
         if operation_list:
