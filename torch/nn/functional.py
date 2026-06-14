@@ -1144,15 +1144,13 @@ def lp_pool3d(
             return -max_pool3d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
 
     if stride is not None:
-        out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+        out = avg_pool3d(input.abs().pow_(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
         out = avg_pool3d(
-            input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
+            input.abs().pow_(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
         )
 
-    return (
-        (torch.sign(out) * relu(torch.abs(out))).mul(kd * kw * kh).pow(1.0 / norm_type)
-    )
+    return relu(out).mul(kd * kw * kh).pow(1.0 / norm_type)
 
 
 def lp_pool2d(
@@ -1191,13 +1189,13 @@ def lp_pool2d(
             return -max_pool2d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
 
     if stride is not None:
-        out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+        out = avg_pool2d(input.abs().pow_(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
         out = avg_pool2d(
-            input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
+            input.abs().pow_(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
         )
 
-    return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1.0 / norm_type)
+    return relu(out).mul(kw * kh).pow(1.0 / norm_type)
 
 
 def lp_pool1d(
@@ -1234,15 +1232,13 @@ def lp_pool1d(
             return -max_pool1d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
 
     if stride is not None:
-        out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+        out = avg_pool1d(input.abs().pow_(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
         out = avg_pool1d(
-            input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
+            input.abs().pow_(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
         )
 
-    return (
-        (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1.0 / norm_type)
-    )
+    return relu(out).mul(kernel_size).pow(1.0 / norm_type)
 
 
 def adaptive_max_pool1d_with_indices(
