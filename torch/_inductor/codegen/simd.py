@@ -3025,6 +3025,7 @@ class SIMDScheduling(BaseScheduling):
 
         if torch._inductor.config.triton.cudagraph_kernel_annotations:
             from torch._inductor.fx_passes.graph_view import get_fused_kernel_module_fqn
+
             V.graph._current_kernel_module_fqn = get_fused_kernel_module_fqn(nodes)
         else:
             V.graph._current_kernel_module_fqn = None

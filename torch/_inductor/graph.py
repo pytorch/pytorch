@@ -1917,10 +1917,7 @@ class GraphLowering(torch.fx.Interpreter):
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-            self._realize_inputs_at_stream_boundaries(n)) if o.meta.get('nn_module_stack') else 'no_stack'}"
-                for o in origins
-            ),
-        )
+            self._realize_inputs_at_stream_boundaries(n)
         # Populate fx_fqn_map for n itself if it has nn_module_stack.
         # Every FX node is processed by run_node exactly once, so iterating
         # over n (not the accumulated origins) gives us a complete map by the

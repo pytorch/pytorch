@@ -2228,8 +2228,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
                 # single-FQN result without cascading upstream names.
                 module_fqn = get_fused_kernel_module_fqn([self])
             if module_fqn and hasattr(V.graph, "fx_extern_fqns"):
-                V.graph.fx_extern_fqns.add(module_fqn),
-            )
+                V.graph.fx_extern_fqns.add(module_fqn)
             if module_fqn:
                 n_before = len(wrapper.lines)
                 self.node.codegen(wrapper)
@@ -4695,12 +4694,6 @@ class Scheduler:
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
-            if node.node is not None:,
-                    ", ".join(
-                        f"{o.name}:{list(o.meta['nn_module_stack'].values()) if o.meta.get('nn_module_stack') else 'no_stack'}"
-                        for o in node.node.origins
-                    ),
-                )
 
             if has_non_input_unbacked_defs:
                 if node.node is None:
