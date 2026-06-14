@@ -486,6 +486,34 @@ class TestNumPyInterop(TestCase):
                 self.assertEqual(geq2_x[i], geq2_array[i])
 
     @onlyCPU
+    def test_numpy_array_interface_copy(self, device):
+        x = torch.tensor([1, 2, 3])
+
+        asarray = x.__array__(copy=None)
+        self.assertIsInstance(asarray, np.ndarray)
+        self.assertEqual(asarray.tolist(), [1, 2, 3])
+        asarray[0] = 4
+        self.assertEqual(x[0], 4)
+
+        copied = x.__array__(copy=True)
+        self.assertIsInstance(copied, np.ndarray)
+        self.assertEqual(copied.tolist(), [4, 2, 3])
+        copied[0] = 5
+        self.assertEqual(x[0], 4)
+
+        no_copy = x.__array__(dtype=np.int64, copy=False)
+        self.assertIsInstance(no_copy, np.ndarray)
+        no_copy[0] = 6
+        self.assertEqual(x[0], 6)
+
+        with self.assertRaises(ValueError):
+            x.__array__(dtype=np.float32, copy=False)
+
+        wrapped = x.__array_wrap__(np.array([1, 2, 3]), None, False)
+        self.assertIsInstance(wrapped, torch.Tensor)
+        self.assertEqual(wrapped, torch.tensor([1, 2, 3]))
+
+    @onlyCPU
     def test_multiplication_numpy_scalar(self, device) -> None:
         for np_dtype in [
             np.float32,

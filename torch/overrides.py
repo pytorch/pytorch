@@ -1331,7 +1331,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.__xor__: lambda self, other: -1,
         Tensor.__float__: lambda self: -1,
         Tensor.__complex__: lambda self: -1,
-        Tensor.__array__: lambda self, dtype: -1,
+        Tensor.__array__: lambda self, dtype=None, copy=None: -1,
         Tensor.__bool__: lambda self: -1,
         Tensor.__contains__: lambda self, other: -1,
         Tensor.__neg__: lambda self: -1,
@@ -1339,7 +1339,9 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.__mod__: lambda self, other: -1,
         Tensor.__rmod__: lambda self, other: -1,
         Tensor.__imod__: lambda self, other: -1,
-        Tensor.__array_wrap__: lambda self, array: -1,
+        Tensor.__array_wrap__: (
+            lambda self, array, context=None, return_scalar=False: -1
+        ),
         Tensor.__getitem__: lambda self, idx: -1,
         Tensor.__deepcopy__: lambda self, memo: -1,
         Tensor.__int__: lambda self: -1,
