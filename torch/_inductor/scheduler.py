@@ -4135,10 +4135,6 @@ class Scheduler:
         with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
 
-    @staticmethod
-    def count_kernel_nodes(nodes: Sequence[BaseSchedulerNode]) -> int:
-        return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
-
     def _init(self, nodes: list[ir.Operation]) -> None:
         super().__init__()
         V.graph.scheduler = self
@@ -7968,6 +7964,15 @@ class Scheduler:
             ]
             if not relevant_reads:
                 continue
+            device = node2.get_device()
+            if device is not None and (
+                (device.type == "cpu" and config.cpu_backend == "halide")
+                or (device.type == "cuda" and config.cuda_backend == "halide")
+            ):
+                # Halide autoschedules may overcompute output tiles via
+                # TailStrategy::ShiftInwards.  That is only semantics-preserving
+                # if the output is not also an input read by the fused producer.
+                return False
             num_concurrent_reads += 1
             if not all(
                 isinstance(read, MemoryDep)
@@ -9312,7 +9317,12 @@ class Scheduler:
         if min_size > 0:
             for i, (partition, skip) in enumerate(zip(partitions, skip_cudagraphs)):
                 if not skip:
-                    kernel_count = self.count_kernel_nodes(partition)
+                    # Count kernels excluding NopKernelSchedulerNode
+                    kernel_count = sum(
+                        1
+                        for n in partition
+                        if not isinstance(n, NopKernelSchedulerNode)
+                    )
                     if kernel_count < min_size:
                         skip_cudagraphs[i] = True
                         cudagraphs_log.debug(

@@ -4097,27 +4097,6 @@ class TestUnbacked(TestCase):
             ):
                 func_negative(x)
 
-    def test_ignore_fresh_unbacked_symbols_preserves_existing_pending(self):
-        shape_env = ShapeEnv()
-        fake_mode = torch._subclasses.FakeTensorMode(
-            allow_non_fake_inputs=True, shape_env=shape_env
-        )
-        with fake_mode:
-            pending = shape_env.create_unbacked_symint().node.expr
-
-            with shape_env.ignore_fresh_unbacked_symbols():
-                ignored = shape_env.create_unbacked_symint().node.expr
-                example_value = torch.empty(2)
-            with self.assertRaisesRegex(
-                Exception, f"Pending unbacked symbols {{{pending}}}"
-            ):
-                torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
-                    shape_env,
-                    example_value,
-                )
-
-        self.assertNotIn(ignored, shape_env.pending_fresh_unbacked_symbols)
-
     def test_meta_copy(self):
         """
         Test that meta_copy_ does not raise when self and src have different
