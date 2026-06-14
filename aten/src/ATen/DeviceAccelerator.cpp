@@ -110,6 +110,12 @@ c10::Stream getCurrentStream(c10::DeviceIndex device_index) {
   return impl.getStream({device_type, device_index});
 }
 
+c10::Stream getDefaultStream(c10::DeviceIndex device_index) {
+  const auto device_type = getAccelerator(true).value();
+  c10::impl::VirtualGuardImpl impl(device_type);
+  return impl.getDefaultStream({device_type, device_index});
+}
+
 void synchronizeDevice(c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);

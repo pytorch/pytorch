@@ -69,6 +69,12 @@ void initModule(PyObject* module) {
     return at::accelerator::getCurrentStream(device_index);
   });
 
+  m.def("_accelerator_getDefaultStream", [](c10::DeviceIndex device_index) {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    torch::utils::maybe_initialize_device(device_type);
+    return at::accelerator::getDefaultStream(device_index);
+  });
+
   m.def("_accelerator_synchronizeDevice", [](c10::DeviceIndex device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
     if (torch::utils::is_device_lazy_init_supported(device_type) &&
