@@ -166,6 +166,7 @@ _COPY_META_FIELDS = [
     "_numeric_debug_handle",  # TODO deprecated
     "custom",
     "partitioner_tag",
+    "call_hierarchy",
 ]
 
 

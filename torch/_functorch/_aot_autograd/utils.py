@@ -621,6 +621,7 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
         if fwd_node is not None:
             node.meta["fwd_nn_module_stack"] = fwd_node.meta.get("nn_module_stack")
             node.meta["fwd_source_fn_stack"] = fwd_node.meta.get("source_fn_stack")
+            node.meta["fwd_call_hierarchy"] = fwd_node.meta.get("call_hierarchy")
             # TODO: better to change to a specific field of custom?
             custom = fwd_node.meta.get("custom")
             if custom is not None:
