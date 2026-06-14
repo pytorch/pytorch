@@ -1830,6 +1830,26 @@ class TestSplitIterationRanges(MockSchedulerTest):
         # The first getter should return 0 for any input
         self.assertEqual(getters[0][0]([sympy.Integer(99)]), sympy.Integer(0))
 
+    def test_leftover_extent_raises_cant_split(self):
+        """Lengths consume cleanly but leave a non-unit group extent.
+
+        Each size divides cleanly as it is consumed, so none of the add_range
+        divisibility checks trip, but the groups are larger than the lengths and
+        a non-unit extent remains at the end. This is the case a fused epilogue
+        whose iteration domain is a strict sub-multiple of a template's tiling
+        hits (e.g. [s, N] into [K*s, N]); it must surface as CantSplit so callers
+        skip the fusion rather than crashing the compile with an AssertionError.
+        """
+        from torch._inductor.codegen.simd import CantSplit, SIMDKernel
+
+        # groups=[2, 2], lengths=[[2], []]: size 2 maps onto group 0, leaving
+        # group 1 (extent 2) unconsumed -> remaining=[1, 2], not all ones.
+        with self.assertRaises(CantSplit):
+            SIMDKernel._split_iteration_ranges(
+                [sympy.Integer(2), sympy.Integer(2)],
+                [[sympy.Integer(2)], []],
+            )
+
 
 class TestIndexInversion(TestCase):
     @classmethod
