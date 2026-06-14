@@ -1524,7 +1524,11 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
-        return DataPtrVariable(self)
+        result = DataPtrVariable(self)
+        # Emit and cache the read here so later storage mutations cannot
+        # reorder it after the original data_ptr() call.
+        result.as_sym_node(tx)
+        return result
 
     def method_const_data_ptr(
         self,
@@ -3376,9 +3380,26 @@ class DataPtrVariable(VariableTracker):
         self.from_tensor = from_tensor
         self.method_name = method_name
         self.tensor_version = from_tensor._get_fake_version()
+        self._sym_node: VariableTracker | None = None
 
     def python_type(self) -> type:
         return int
+
+    def as_sym_node(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.method_name != "data_ptr":
+            raise AssertionError(self.method_name)
+        if self._sym_node is not None:
+            return self._sym_node
+        from ..data_ptr_op import _data_ptr
+
+        proxy = tx.output.create_proxy(
+            "call_function",
+            _data_ptr,
+            (self.from_tensor.as_proxy(),),
+            {},
+        )
+        self._sym_node = SymNodeVariable.create(tx, proxy)
+        return self._sym_node
 
     @classmethod
     def _strip_data_ptr_preserving_aliases(cls, node: torch.fx.Node) -> torch.fx.Node:

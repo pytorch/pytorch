@@ -167,6 +167,41 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # No need to assert anything, the goal is to make sure dynamo does
         # not crash
 
+    @skipIfWindows(msg="AOTI/Cpp_Wrapper have not enabled on Windows")
+    @requires_gpu
+    @parametrize("cpp_wrapper", [False, True])
+    def test_data_ptr_packing(self, cpp_wrapper):
+        @triton.jit
+        def add_kernel(xy, z, BLOCK_SIZE: "tl.constexpr", n_elements):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x_ptr = tl.load(xy + 0).to(tl.pointer_type(tl.float32))
+            y_ptr = tl.load(xy + 1).to(tl.pointer_type(tl.float32))
+
+            x = tl.load(x_ptr + offsets, mask=mask)
+            y = tl.load(y_ptr + offsets, mask=mask)
+            tl.store(z + offsets, x + y, mask=mask)
+
+        def f(x, y):
+            z = torch.empty_like(x)
+            xy = torch.tensor(
+                [x.data_ptr(), y.data_ptr()],
+                dtype=torch.long,
+                pin_memory=True,
+            ).to(device=x.device, non_blocking=True)
+            n_elements = x.numel()
+            grid = (triton.cdiv(n_elements, 4),)
+            add_kernel[grid](xy, z, 4, n_elements)
+            return z
+
+        x = torch.randn(17, device=GPU_TYPE)
+        y = torch.randn(17, device=GPU_TYPE)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            actual = torch.compile(f, fullgraph=True)(x, y)
+            self.assertEqual(actual, x + y)
+
     @requires_gpu
     def test_triton_kernel_dunder_name_no_name_mangling(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/170398
