@@ -6704,6 +6704,23 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
 
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_skips_networkx_flow_on_easy_graph(self):
+        def f(a, b, c, d):
+            x = a + b + c + d
+            return x.cos().cos()
+
+        with patch(
+            "networkx.minimum_cut",
+            side_effect=AssertionError("NetworkX flow solver should be skipped"),
+        ):
+            fw_graph, bw_graph = get_fw_bw_graph(
+                f, [torch.randn(3, requires_grad=True) for _ in range(4)]
+            )
+
+        self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
+        self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
+
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view
         # happens in the backward pass.
