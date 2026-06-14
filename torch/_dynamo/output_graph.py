@@ -686,6 +686,12 @@ class OutputGraph(OutputGraphCommon):
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: dict[Source, VariableTracker] = {}
+        # Raw unbacked SymInt inputs can come from an outer ShapeEnv when Dynamo
+        # traces a nested callable. Reuse the same inner symbol for repeated
+        # occurrences of the same outer expression so equality is preserved.
+        self.unbacked_symint_input_cache: dict[
+            tuple[int, sympy.Expr], torch.SymInt
+        ] = {}
         # List of TensorVariables that are leaf tensors created in-graph
         # (e.g., nn.Parameter via tracable_create_parameter). These need to be
         # tracked separately from input_source_to_var for backward() auto-detection.
