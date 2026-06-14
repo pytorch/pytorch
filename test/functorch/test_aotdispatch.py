@@ -7555,6 +7555,20 @@ def forward(self, primals_1, tangents_1):
         result = wrapper([10, 20])
         self.assertIsNone(result)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_linalg_check_errors_not_eliminated(self):
+        # [[1, 2], [2, 1]] has eigenvalues ~3 and ~-1 (not PD)
+        A = torch.tensor([[1.0, 2.0], [2.0, 1.0]], device="cuda", dtype=torch.float32)
+
+        def fn(x):
+            return torch.linalg.cholesky(x)
+
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch.linalg.LinAlgError, r"linalg\.cholesky.*not positive-definite"
+        ):
+            compiled_fn(A)
+
     # --- FunctionalizedRngRuntimeWrapper codegen tests ---
 
     def _make_rng_wrapper_via_post_compile(
@@ -11614,6 +11628,25 @@ symbolic_aot_autograd_failures = {
     ),
 }
 
+# Ops that use _linalg_check_errors, which is an effectful op requiring functionalization.
+aot_autograd_disable_functionalization_failures = {
+    skip("linalg.cholesky"),
+    skip("linalg.cholesky_ex"),
+    skip("linalg.eigh"),
+    skip("linalg.inv"),
+    skip("linalg.inv_ex"),
+    skip("linalg.svd"),
+    skip("linalg.eig"),
+    skip("linalg.eigvals"),
+    skip("linalg.ldl_factor"),
+    skip("linalg.lstsq"),
+    skip("linalg.lu_factor"),
+    skip("linalg.lu_factor_ex"),
+    skip("linalg.solve"),
+    skip("linalg.solve_ex"),
+    skip("linalg.matrix_power"),
+}
+
 
 def _test_aot_autograd_helper(
     self,
@@ -11752,7 +11785,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
 
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        aot_autograd_failures,
+        aot_autograd_failures | aot_autograd_disable_functionalization_failures,
     )
     def test_aot_autograd_disable_functionalization_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(
@@ -11762,7 +11795,9 @@ class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps(
-        aot_autograd_failures | symbolic_aot_autograd_failures,
+        aot_autograd_failures
+        | symbolic_aot_autograd_failures
+        | aot_autograd_disable_functionalization_failures,
     )
     def test_aot_autograd_disable_functionalization_symbolic_exhaustive(
         self, device, dtype, op
