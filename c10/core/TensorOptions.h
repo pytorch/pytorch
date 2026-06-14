@@ -153,7 +153,8 @@ struct C10_API TensorOptions {
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
   template <
       typename T,
-      typename = std::enable_if_t<std::is_same_v<std::decay_t<T>, Device>>>
+      typename = std::enable_if_t< // NOLINT(modernize-use-constraints)
+          std::is_same_v<std::decay_t<T>, Device>>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -168,7 +169,8 @@ struct C10_API TensorOptions {
   ///     constructors too.
   template <
       typename... Args,
-      typename = std::enable_if_t<std::is_constructible_v<Device, Args&&...>>>
+      typename = std::enable_if_t< // NOLINT(modernize-use-constraints)
+          std::is_constructible_v<Device, Args&&...>>>
   /* implicit */ TensorOptions(Args&&... args)
       : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
@@ -623,7 +625,7 @@ inline TensorOptions dtype() {
 inline std::string toString(const TensorOptions& options) {
   std::ostringstream stream;
   stream << options;
-  return stream.str();
+  return std::move(stream).str();
 }
 
 // This is intended to be a centralized location by which we can determine
