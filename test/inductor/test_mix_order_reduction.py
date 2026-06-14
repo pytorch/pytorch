@@ -117,6 +117,53 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
+    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
+    def test_same_order_reductions_with_non_common_strided_read(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, y):
+            return x.sum(dim=1), (x * y.t()).sum(dim=1)
+
+        M = N = 8192
+        x = torch.randn(M, N, device=GPU_TYPE)
+        y = torch.randn(N, M, device=GPU_TYPE)
+
+        opt_f = torch.compile(f)
+
+        ref = f(x, y)
+        act = opt_f(x, y)
+
+        self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            0,
+            metrics.codegen_mix_order_reduction,
+            "same-order reductions must not be classified as mix-order",
+        )
+
+    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
+    def test_square_mix_order_reductions_non_strict(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        M = N = 8192
+        x = torch.randn(M, N, device=GPU_TYPE)
+
+        opt_f = torch.compile(f)
+
+        ref = f(x)
+        act = opt_f(x)
+
+        self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            1,
+            metrics.codegen_mix_order_reduction,
+            "square reductions with opposite common-read access should use mix-order",
+        )
+
     def test_xmask(self):
         """
         Make sure xmask is setup properly
@@ -725,7 +772,12 @@ class MixOrderReductionTest(TestBase):
         mock_get_common_read.return_value = "common_read"
         from sympy import Integer
 
-        mock_get_numel_rnumel.return_value = (Integer(1), Integer(1))
+        mock_get_numel_rnumel.side_effect = [
+            (Integer(2), Integer(1)),
+            (Integer(1), Integer(2)),
+            (Integer(2), Integer(1)),
+            (Integer(1), Integer(2)),
+        ]
         mock_is_split_reduction.return_value = False
 
         mock_node_1.read_writes = mock.Mock()
