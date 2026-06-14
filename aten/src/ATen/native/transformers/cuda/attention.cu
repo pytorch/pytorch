@@ -1002,6 +1002,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
   const bool is_nested = cumulative_sequence_length_q.has_value();
+  TORCH_CHECK(
+      !is_nested || max_seqlen_batch_q > 128,
+      "cuDNN varlen attention does not support query sequence length <= 128.");
   if (!is_nested) {
     const int64_t batch_size = query.size(0);
     const int64_t num_heads = query.size(1);
