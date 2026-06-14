@@ -1546,6 +1546,18 @@ if __name__ == "__main__":
             for result in results:
                 self.assertTrue(b"libsycl.so" in result)
 
+    def test_xpu_header_installed(self):
+        include_dir = os.path.join(os.path.dirname(torch.__file__), "include")
+        aten_dir = os.path.join(include_dir, "ATen")
+        aten_ops_dir = os.path.join(aten_dir, "ops")
+        self.assertTrue(os.path.exists(os.path.join(aten_dir, "XPUFunctions.h")))
+        self.assertTrue(
+            os.path.exists(os.path.join(aten_ops_dir, "cat_xpu_dispatch.h"))
+        )
+        self.assertTrue(os.path.exists(os.path.join(aten_ops_dir, "col2im_native.h")))
+        with open(os.path.join(aten_ops_dir, "col2im_native.h")) as fr:
+            self.assertIn("col2im_xpu", fr.read())
+
     def test_dlpack_conversion(self):
         if self.expandable_segments:
             self.skipTest("Skipping DLPack test for expandable segments allocator.")
@@ -1676,6 +1688,25 @@ if __name__ == "__main__":
         # After exiting context, should be back on default stream
         restored_handle = module.get_xpu_work_stream(tensor, api_capsule)
         self.assertEqual(default_handle, restored_handle)
+
+    def test_storage_pin_memory(self):
+        t = torch.empty(10, pin_memory=True)
+        self.assertTrue(t.is_pinned())
+        storage = t.untyped_storage()
+        self.assertTrue(storage.is_pinned())
+
+        t = torch.empty(10)
+        self.assertFalse(t.is_pinned())
+        storage = t.untyped_storage()
+        s = storage.pin_memory()
+        self.assertTrue(s.is_pinned())
+
+        t = torch.empty(10, device="xpu")
+        s = t.untyped_storage()
+        s_cpu = s.to(device="cpu", non_blocking=True)
+
+        torch.xpu.synchronize()
+        self.assertTrue(s_cpu.is_pinned())
 
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.xpu.is_current_stream_capturing())

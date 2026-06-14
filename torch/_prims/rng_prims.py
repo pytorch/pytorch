@@ -5,10 +5,9 @@ import torch
 import torch.utils._pytree as pytree
 from torch import _prims
 from torch._C import DispatchKey
-from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._higher_order_ops.utils import autograd_not_implemented, register_fake
 from torch._ops import HigherOrderOperator
 from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -143,6 +142,8 @@ def get_device(args, kwargs):
     for arg in args:
         if isinstance(arg, torch.Tensor):
             return arg.device.type
+        if isinstance(arg, torch.device):
+            return arg.type
     return None
 
 
@@ -193,11 +194,10 @@ def register_run_and_save_rng_state_op():
         impl = impl_map[device]
         return impl(op, *args, **kwargs)
 
-    @run_and_save_rng_state.py_impl(FakeTensorMode)
-    def impl_fake_tensor_mode(mode, op, *args, **kwargs):
+    @register_fake(run_and_save_rng_state, skip_cache=True)
+    def impl_fake_tensor_mode(op, *args, **kwargs):
         # Check device to call the right impl
-        with mode:
-            return impl_backend_select(op, *args, **kwargs)
+        return impl_backend_select(op, *args, **kwargs)
 
     @run_and_save_rng_state.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(mode, op, *args, **kwargs):
@@ -288,12 +288,11 @@ def register_run_with_rng_state_op():
         impl = impl_map[device]
         return impl(rng_state, op, *args, **kwargs)
 
-    @run_with_rng_state.py_impl(FakeTensorMode)
-    def impl_fake_tensor_mode(mode, rng_state, op, *args, **kwargs):
+    @register_fake(run_with_rng_state, skip_cache=True)
+    def impl_fake_tensor_mode(rng_state, op, *args, **kwargs):
         # Skip setting the set_rng_state as it does not work well with fake tensors.
         # And it does not matter for the fake tensor mode.
-        with mode:
-            return op(*args, **kwargs)
+        return op(*args, **kwargs)
 
     @run_with_rng_state.py_functionalize_impl
     def impl_functional(ctx, rng_state, op, *args, **kwargs):
@@ -336,7 +335,7 @@ def _impl_graphsafe_rng(op, *args, rng_state=None, **kwargs):
 def register_graphsafe_run_with_rng_state_op():
     class GraphSafeRunWithRngState(HigherOrderOperator):
         def __init__(self):
-            super().__init__("graphsafe_run_with_rng_state")
+            super().__init__("graphsafe_run_with_rng_state", cacheable=True)
 
         def __call__(self, op, *args, rng_state=None, **kwargs):
             # pyrefly: ignore [missing-attribute]
@@ -360,10 +359,9 @@ def register_graphsafe_run_with_rng_state_op():
             )
         return _impl_graphsafe_rng(op, *args, rng_state=rng_state, **kwargs)
 
-    @graphsafe_run_with_rng_state.py_impl(FakeTensorMode)
-    def impl_fake_tensor_mode(mode, op, *args, rng_state=None, **kwargs):
-        with mode:
-            return op(*args, **kwargs)
+    @register_fake(graphsafe_run_with_rng_state, skip_cache=True)
+    def impl_fake_tensor_mode(op, *args, rng_state=None, **kwargs):
+        return op(*args, **kwargs)
 
     @graphsafe_run_with_rng_state.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(mode, op, *args, rng_state=None, **kwargs):
@@ -497,12 +495,9 @@ def register_run_dtensor_rng_op():
             )
         return impl_cuda(start_offset_incr, end_offset_incr, op, *args, **kwargs)
 
-    @run_dtensor_rng_op.py_impl(FakeTensorMode)
-    def impl_fake_tensor_mode(
-        mode, start_offset_incr, end_offset_incr, op, *args, **kwargs
-    ):
-        with mode:
-            return op(*args, **kwargs)
+    @register_fake(run_dtensor_rng_op, skip_cache=True)
+    def impl_fake_tensor_mode(start_offset_incr, end_offset_incr, op, *args, **kwargs):
+        return op(*args, **kwargs)
 
     @run_dtensor_rng_op.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(

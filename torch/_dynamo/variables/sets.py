@@ -433,11 +433,14 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            if args[0] not in self:
-                raise_observed_exception(KeyError, tx, args=args)
+            if not self.sq_contains(tx, args[0]).as_python_constant():
+                raise_observed_exception(KeyError, tx, args=[args[0]])
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
-            self.items.pop(HashableTracker(args[0]))
+            # sq_contains validated/normalized args[0]; a set key was coerced to
+            # a frozenset, so pop that same normalized key.
+            key = args[0] if is_hashable(args[0]) else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
+            self.items.pop(HashableTracker(key))
             return ConstantVariable.create(None)
         elif name == "discard":
             if kwargs or len(args) != 1:
@@ -447,10 +450,17 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            if args[0] in self:
+            if self.sq_contains(tx, args[0]).as_python_constant():
                 self.should_reconstruct_all = True
                 tx.output.side_effects.mutation(self)
-                self.items.pop(HashableTracker(args[0]))
+                # sq_contains validated/normalized args[0]; a set key was coerced
+                # to a frozenset, so pop that same normalized key.
+                key = (
+                    args[0]
+                    if is_hashable(args[0])
+                    else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
+                )
+                self.items.pop(HashableTracker(key))
             return ConstantVariable.create(None)
         elif name in ("issubset", "issuperset"):
             if len(args) != 1:
@@ -648,6 +658,54 @@ class SetVariable(VariableTracker):
             self.items.pop(k, None)
         return self
 
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1506-L1518 (set_and)
+        self_, other_ = (other, self) if reverse else (self, other)
+
+        if not pyanyset_check(self_) or not pyanyset_check(other_):
+            return ConstantVariable.create(NotImplemented)
+
+        return self_.call_method(tx, "intersection", [other_], {})
+
+    def nb_inplace_and_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1520-L1536 (set_iand)
+        if not pyanyset_check(other):
+            return ConstantVariable.create(NotImplemented)
+
+        self.call_method(tx, "intersection_update", [other], {})
+        return self
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1984-L1990 (set_xor)
+        self_, other_ = (other, self) if reverse else (self, other)
+
+        if not pyanyset_check(self_) or not pyanyset_check(other_):
+            return ConstantVariable.create(NotImplemented)
+
+        return self_.call_method(tx, "symmetric_difference", [other_], {})
+
+    def nb_inplace_xor_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1992-L2004 (set_ixor)
+        if not pyanyset_check(other):
+            return ConstantVariable.create(NotImplemented)
+
+        self.call_method(tx, "symmetric_difference_update", [other], {})
+        return self
+
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
 
@@ -803,6 +861,26 @@ class OrderedSetVariable(SetVariable):
         # OrderedSet does not inherit from Python set, so SetVariable.nb_or_impl
         # won't work due to the PyAnySet_Check
         return super().call_method(tx, "union", [other], {})
+
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # OrderedSet does not inherit from Python set, so SetVariable.nb_and_impl
+        # won't work due to the PyAnySet_Check
+        return super().call_method(tx, "intersection", [other], {})
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # OrderedSet does not inherit from Python set, so SetVariable.nb_xor_impl
+        # won't work due to the PyAnySet_Check
+        return super().call_method(tx, "symmetric_difference", [other], {})
 
     def nb_subtract_impl(
         self,

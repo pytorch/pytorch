@@ -595,6 +595,27 @@ class TestExport(TestCase):
         #     exported_program.module()(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
         # )
 
+    def test_guards_fn_recovers_from_unparse_recursion_error(self):
+        # Regression test: guards-fn codegen pretty-prints each guard for the
+        # assert error message via ast.unparse(ast.parse(...)), which recurses
+        # once per AST node. A deeply-nested guard (e.g. a sum over thousands of
+        # symbolic sizes) overflowed the recursion limit there, crashing export
+        # even though the pretty-printing is cosmetic and the executed guard
+        # does not depend on it. Codegen must fall back to the raw guard string
+        # instead of propagating the error.
+        #
+        # We inject the overflow via a mocked ast.unparse rather than building a
+        # genuinely deep expression: the test target is ASAN-instrumented, where
+        # deep ast.parse/compile recursion can abort the process before the
+        # pure-Python RecursionError is reached.
+        from torch.export._unlift import _convert_guards_code_to_fn
+
+        guard = "args[0] == 0"
+        with patch("ast.unparse", side_effect=RecursionError):
+            guards_fn = _convert_guards_code_to_fn([guard], [])
+
+        self.assertIsNotNone(guards_fn)
+
     def _check_dynamic_shapes_specs_and_shapes(
         self,
         model,
@@ -655,6 +676,142 @@ class TestExport(TestCase):
         f = Module()
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
+
+    def test_non_strict_scalar_tensor_slice_bounds(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, i):
+                start = i * 2
+                end = torch.minimum(start + 5, torch.tensor(x.size(0), device=x.device))
+                return x[start:end]
+
+        x = torch.randn(10)
+        i = torch.tensor(1, dtype=torch.int64)
+        ep = export(Module(), (x, i), strict=False)
+        self.assertEqual(ep.module()(x, i), Module()(x, i))
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 1, exactly=True).run(
+            str(ep.graph)
+        )
+
+    def test_non_strict_scalar_tensor_slice_step(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, step):
+                torch._check(step.item() > 0)
+                return x[::step]
+
+        x = torch.randn(10)
+        step = torch.tensor(2, dtype=torch.int64)
+        ep = export(Module(), (x, step), strict=False)
+        self.assertEqual(ep.module()(x, step), Module()(x, step))
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 1, exactly=True).run(
+            str(ep.graph)
+        )
+
+    def test_non_strict_bool_scalar_tensor_slice_not_rewritten(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, b):
+                return x[:b]
+
+        with self.assertRaisesRegex(
+            torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+            "Could not guard on data-dependent expression",
+        ) as cm:
+            export(Module(), (torch.arange(5), torch.tensor(True)), strict=False)
+        self.assertNotIn("Expected a value of type 'Optional[int]'", str(cm.exception))
+
+    def test_non_strict_while_loop_scalar_tensor_slice_bounds(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                i = torch.tensor(0, dtype=torch.int64, device=x.device)
+                out = torch.zeros((), dtype=x.dtype, device=x.device)
+
+                def cond_fn(i, out, x):
+                    return i < 1
+
+                def body_fn(i, out, x):
+                    start = i * 2
+                    end = torch.minimum(
+                        start + 3, torch.tensor(x.size(0), device=x.device)
+                    )
+                    patch = x[start:end]
+                    return i + 1, out + patch.sum(), x.clone()
+
+                _, out, _ = torch.while_loop(cond_fn, body_fn, (i, out, x))
+                return out
+
+        x = torch.randn(10)
+        dynamic_shapes = {"x": {0: Dim("n", min=4, max=20)}}
+        ep = export(Module(), (x,), dynamic_shapes=dynamic_shapes, strict=False)
+        self.assertEqual(ep.module()(x), Module()(x))
+        FileCheck().check_count(
+            "torch.ops.higher_order.while_loop", 1, exactly=True
+        ).run(str(ep.graph))
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 1, exactly=True).run(
+            ep.graph_module.while_loop_body_graph_0.code
+        )
+
+    def test_non_strict_while_loop_scalar_tensor_slice_step(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, step):
+                i = torch.tensor(0, dtype=torch.int64, device=x.device)
+                out = torch.zeros((), dtype=x.dtype, device=x.device)
+
+                def cond_fn(i, out, x, step):
+                    return i < 1
+
+                def body_fn(i, out, x, step):
+                    torch._check(step.item() > 0)
+                    patch = x[::step]
+                    return i + 1, out + patch.sum(), x.clone(), step.clone()
+
+                _, out, _, _ = torch.while_loop(cond_fn, body_fn, (i, out, x, step))
+                return out
+
+        x = torch.randn(10)
+        step = torch.tensor(2, dtype=torch.int64)
+        dynamic_shapes = {
+            "x": {0: Dim("n", min=4, max=20)},
+            "step": None,
+        }
+        ep = export(Module(), (x, step), dynamic_shapes=dynamic_shapes, strict=False)
+        self.assertEqual(ep.module()(x, step), Module()(x, step))
+        FileCheck().check_count(
+            "torch.ops.higher_order.while_loop", 1, exactly=True
+        ).run(str(ep.graph))
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 1, exactly=True).run(
+            ep.graph_module.while_loop_body_graph_0.code
+        )
+
+    def test_non_strict_while_loop_bool_scalar_tensor_slice_not_rewritten(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, b):
+                i = torch.tensor(0, dtype=torch.int64, device=x.device)
+                out = torch.zeros((), dtype=x.dtype, device=x.device)
+
+                def cond_fn(i, out, x, b):
+                    return i < 1
+
+                def body_fn(i, out, x, b):
+                    patch = x[:b]
+                    return i + 1, out + patch.sum(), x.clone(), b.clone()
+
+                _, out, _, _ = torch.while_loop(cond_fn, body_fn, (i, out, x, b))
+                return out
+
+        dynamic_shapes = {
+            "x": {0: Dim("n", min=4, max=10)},
+            "b": None,
+        }
+        with self.assertRaisesRegex(
+            torchdynamo.exc.TorchRuntimeError,
+            "slice indices must be integers",
+        ) as cm:
+            export(
+                Module(),
+                (torch.arange(5, dtype=torch.float32), torch.tensor(True)),
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
+            )
+        self.assertNotIn("Expected a value of type 'Optional[int]'", str(cm.exception))
 
     @skipIfCrossRef  # CrossRefMode interferes with functorch ops
     @skipIfTorchDynamo("export inside dynamo is not supported")
@@ -1336,6 +1493,23 @@ graph():
 
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
+
+    def test_export_allows_aten_hardtanh_with_inverted_bounds(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.hardtanh(x, min_val=2, max_val=0)
+
+        model = M()
+        x = torch.randn(3)
+        ep = export(model, (x,), strict=True)
+        self.assertEqual(ep.module()(x), model(x))
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target == torch.ops.aten.hardtanh.default
+                for node in ep.graph_module.graph.nodes
+            )
+        )
 
     def test_symint_output(self):
         class Foo(torch.nn.Module):
@@ -2411,6 +2585,26 @@ graph():
         self.assertEqual(exp_out, ep_decomposed.module()(x, y, out_copy2))
         # For non-functional graph module, out_copy is not mutated
         self.assertEqual(out_copy2, out_copy3)
+
+    @requires_cuda_and_triton
+    def test_export_raw_triton_kernel_non_strict_error(self):
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_kernel[(1,)](x, y, out, x.numel(), BLOCK_SIZE=16)
+                return out
+
+        args = (
+            torch.randn(3, device="cuda"),
+            torch.randn(3, device="cuda"),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Raw Triton kernel calls are not supported by non-strict torch.export",
+        ):
+            export(M(), args, strict=False)
 
     def test_masked_select_dynamic(self):
         class M(torch.nn.Module):
@@ -18995,6 +19189,22 @@ def forward(self, x, y):
             ignore_empty_lines=True,
         )
 
+    def test_scalar_tensor_index(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x[y]
+
+        x = torch.randn((3, 4))
+        for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            with self.subTest(dtype=dtype):
+                y = torch.tensor(1, dtype=dtype)
+                traced = export(MyModel(), (x, y))
+                y2 = torch.tensor(2, dtype=dtype)
+                self.assertEqual(
+                    traced.module()(x, y2),
+                    MyModel()(x, y2),
+                )
+
     def test_is_fx_tracing(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -19070,6 +19280,20 @@ def forward(self, x, y):
             export_result = exported.module()(boundaries)
             self.assertEqual(eager_result, export_result)
             self.assertEqual(export_result.dtype, expected_dtype)
+
+    def test_constant_pad_nd_run_decompositions(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167068
+        # constant_pad_nd's ref decomposition must be fully functional so that
+        # run_decompositions (used by ONNX dynamo export) doesn't trip
+        # assert_functional_graph.
+        class Pad(torch.nn.Module):
+            def forward(self, x):
+                return F.pad(x, (0, 0, 0, 240, 0, 0))
+
+        ep = export(Pad(), (torch.randn(1, 16, 64),), strict=False)
+        decomposed = ep.run_decompositions(decomposition_table)
+        result = decomposed.module()(torch.randn(1, 16, 64))
+        self.assertEqual(result.shape, (1, 256, 64))
 
 
 if __name__ == "__main__":
