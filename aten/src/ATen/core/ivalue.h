@@ -811,26 +811,23 @@ struct TORCH_API IValue final {
   // possible.  To avoid ambiguous overload situations, we template them
   // to prevent implicit conversions
   template <class T>
-  using enable_if_symint =
-      std::enable_if_t<std::is_same_v<T, c10::SymInt>, std::nullptr_t>;
-
-  template <class T, enable_if_symint<T> = nullptr>
+    requires std::is_same_v<T, c10::SymInt>
   IValue(at::ArrayRef<T> v);
-  template <class T, enable_if_symint<T> = nullptr>
+  template <class T>
+    requires std::is_same_v<T, c10::SymInt>
   IValue(at::OptionalArrayRef<T> v);
-  template <class T, enable_if_symint<T> = nullptr>
+  template <class T>
+    requires std::is_same_v<T, c10::SymInt>
   IValue(const std::vector<T>& v);
-  template <class T, enable_if_symint<T> = nullptr>
+  template <class T>
+    requires std::is_same_v<T, c10::SymInt>
   IValue(std::vector<T>&& v);
 
   template <class T>
-  using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
-      std::is_constructible_v<IValue, T> &&
-          std::is_constructible_v<IValue, typename IListRef<T>::boxed_type> &&
-          !std::is_same_v<T, c10::SymInt>,
-      std::nullptr_t>;
-
-  template <class T, enable_if_ilist_is_ivalue_constructible<T> = nullptr>
+    requires(
+        std::is_constructible_v<IValue, T> &&
+        std::is_constructible_v<IValue, typename IListRef<T>::boxed_type> &&
+        !std::is_same_v<T, c10::SymInt>)
   IValue(c10::IListRef<T> v);
 
   // GenericDict

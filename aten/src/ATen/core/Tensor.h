@@ -74,7 +74,8 @@ class TORCH_API TensorRef {
 };
 
 template <typename T>
-auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
+  requires std::is_void_v<std::invoke_result_t<T&, Tensor>>
+unsigned Tensor::register_hook(T&& hook) const {
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Tensor return type
   static_assert(std::is_same_v<decltype(hook(Tensor())), void>,
@@ -87,7 +88,8 @@ auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
 }
 
 template <typename T>
-auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
+  requires std::is_same_v<std::invoke_result_t<T&, Tensor>, Tensor>
+unsigned Tensor::register_hook(T&& hook) const {
   return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad_base) {
     TensorRef grad(grad_base);
     Tensor ret = fn(*grad);
