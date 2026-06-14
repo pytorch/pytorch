@@ -80,6 +80,7 @@
 
 "ciflow/trunk":
 - .ci/docker/ci_commit_pins/triton.txt
+- .ci/docker/ci_commit_pins/triton-rocm.txt
 
 "release notes: distributed (checkpoint)":
 - torch/distributed/checkpoint/**

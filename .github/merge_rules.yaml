@@ -59,6 +59,7 @@
   - .github/ci_commit_pins/torchdynamo.txt
   - .github/ci_commit_pins/vllm.txt
   - .ci/docker/ci_commit_pins/triton.txt
+  - .ci/docker/ci_commit_pins/triton-rocm.txt
   approved_by:
   - pytorchbot
   mandatory_checks_name:

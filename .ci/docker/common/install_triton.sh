@@ -14,7 +14,10 @@ get_pip_version() {
   conda_run pip list | grep -w $* | head -n 1 | awk '{print $2}'
 }
 
-if [ -n "${XPU_VERSION}" ]; then
+if [ -n "${ROCM_VERSION}" ]; then
+  TRITON_REPO="https://github.com/triton-lang/triton"
+  TRITON_TEXT_FILE="triton-rocm"
+elif [ -n "${XPU_VERSION}" ]; then
   TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
   TRITON_TEXT_FILE="triton-xpu"
   # XPU believes new ninja is bad, see https://github.com/intel/intel-xpu-backend-for-triton/commit/fe21682167b831e48bba2544712012abe2f74bb1
