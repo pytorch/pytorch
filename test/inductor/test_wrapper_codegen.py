@@ -287,7 +287,9 @@ s0 = arg0_1.size()[0]
 s1 = arg0_1.stride()[0]""",
         )
 
-    def test_codegen_inputs_binds_needed_input_symbols_without_size_asserts(self):
+    def test_codegen_inputs_does_not_bind_needed_input_symbols_without_size_asserts(
+        self,
+    ):
         wrapper = self._new_wrapper()
         s0 = sympy.Symbol("s0")
         tensor = ir.TensorBox.create(
@@ -314,9 +316,9 @@ s1 = arg0_1.stride()[0]""",
         ):
             wrapper.codegen_inputs()
 
-        self.assertEqual(wrapper.prefix.getvalue().strip(), "s0 = arg0_1.size()[0]")
+        self.assertEqual(wrapper.prefix.getvalue().strip(), "")
 
-    def test_codegen_inputs_binds_needed_zero_size_input_symbols(self):
+    def test_codegen_inputs_does_not_bind_needed_zero_size_input_symbols(self):
         wrapper = self._new_wrapper()
         s0 = sympy.Symbol("s0")
         tensor = ir.TensorBox.create(
@@ -343,7 +345,7 @@ s1 = arg0_1.stride()[0]""",
         ):
             wrapper.codegen_inputs()
 
-        self.assertEqual(wrapper.prefix.getvalue().strip(), "s0 = arg0_1.size()[0]")
+        self.assertEqual(wrapper.prefix.getvalue().strip(), "")
 
     def test_codegen_inputs_ignores_unused_compound_input_symbols(self):
         wrapper = self._new_wrapper()
