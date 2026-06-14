@@ -77,7 +77,7 @@ def evaluate_platform_supports_flash_attention():
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
-        return not IS_WINDOWS and SM80OrLater
+        return SM80OrLater
     if TEST_XPU:
         return True
     return False
