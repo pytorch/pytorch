@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 from collections.abc import Callable, Sequence
+from typing_extensions import TypeAliasType
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -17,9 +18,11 @@ except ImportError:
 
 __all__ = ["local_map"]
 
-PlacementType = Sequence[Placement] | None
-InputPlacements = tuple[PlacementType, ...] | None
-OutputPlacements = PlacementType | tuple[PlacementType, ...]
+PlacementType = TypeAliasType("PlacementType", Sequence[Placement] | None)
+InputPlacements = TypeAliasType("InputPlacements", tuple[PlacementType, ...] | None)
+OutputPlacements = TypeAliasType(
+    "OutputPlacements", PlacementType | tuple[PlacementType, ...]
+)
 
 
 def local_map(
