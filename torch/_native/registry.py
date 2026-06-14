@@ -919,7 +919,15 @@ def _register_overrides_from_graph(
                 return getattr(torch.ops._native, impl_name)(*args, **kwargs)
         return _NO_MATCH
 
-    def eager_router(keyset, *args, _fallback=fallback_kernel, **kwargs):
+    def eager_router(
+        keyset, *args, _fallback=fallback_kernel, _aten_overload=overload, **kwargs
+    ):
+        # This branch is only safe while Dynamo is actively tracing this Python
+        # router. The broader compile-session flag can be true when this router
+        # executes eagerly; redispatching to aten there would re-enter us.
+        if torch.compiler.is_dynamo_compiling() and _aten_overload is not None:
+            return _aten_overload(*args, **kwargs)
+
         result = _dispatch(args, kwargs, swallow_cond_exceptions=False)
         if result is _NO_MATCH:
             return _fallback.call_boxed(keyset, *args, **kwargs)
