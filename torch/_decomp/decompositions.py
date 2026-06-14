@@ -3345,6 +3345,8 @@ def _index_add(
     inplace: bool,
     alpha: NumberType = 1,
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
         x.device == index.device and x.device == tensor.device,
@@ -3358,12 +3360,52 @@ def _index_add(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
-    index_size = index.size(0) if index.ndim == 1 else 1
+    torch._check(
+        index.dtype in (torch.int32, torch.int64),
+        lambda: f"index_add_(): Expected dtype int32/int64 for index but got: {index.dtype}",
+    )
+    torch._check(
+        x.dtype == tensor.dtype,
+        lambda: (
+            f"index_add_(): self ({x.dtype}) and source ({tensor.dtype}) "
+            f"must have the same scalar type"
+        ),
+    )
+    torch._check(
+        dim == 0 or dim < tensor.ndim,
+        lambda: (
+            f"index_add_(): Indexing dim {dim} is out of bounds of the "
+            f"source tensor with dim {tensor.ndim}"
+        ),
+    )
+    index_size = index.numel()
     tensor_size = tensor.size(dim) if tensor.ndim > 0 else 1
     torch._check(
         tensor_size == index_size,
         lambda: f"Number of indices ({index_size}) should be equal to tensor.size(dim) ({tensor_size}), for {dim=}",
     )
+    x_shape = list(x.shape)
+    tensor_shape = list(tensor.shape)
+    if x.ndim != 0 and tensor.ndim != 0:
+        del x_shape[dim]
+        del tensor_shape[dim]
+    torch._check(
+        sym_eq(x_shape, tensor_shape),
+        lambda: (
+            "source tensor shape must match self tensor shape, excluding the "
+            f"specified dimension. Got self.shape = {x.shape} "
+            f"source.shape = {tensor.shape}"
+        ),
+    )
+    has_dtensor_spec = any(
+        getattr(arg, "_spec", None) is not None for arg in (x, index, tensor)
+    )
+    index_bound = 1 if x.ndim == 0 else x.size(dim)
+    if not has_dtensor_spec:
+        aten._assert_async.msg(
+            torch.all((index >= 0) & (index < index_bound)),
+            "index_add(): index out of bounds",
+        )
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(
@@ -3375,9 +3417,28 @@ def _index_add(
     # Treat scalars as elements of \R^1
     zero_dim = x.ndim == 0
     x1 = x.unsqueeze(0) if zero_dim else x
-    idx = (None,) * dim + (index,)
-    index_put = aten.index_put_ if inplace else aten.index_put
-    out = index_put(x1, idx, tensor, accumulate=True)
+    scatter_dim = 0 if zero_dim else dim
+    # DTensor sharding propagation traces decompositions on meta tensors tagged
+    # with _spec. Keep the old index_put lowering for that trace because its
+    # placement rules support the index_add cases covered by DTensor today.
+    # CPU low-precision dtypes also keep the old path to match eager numerics.
+    use_index_put = (
+        x.dtype == torch.complex32
+        or has_dtensor_spec
+        or (x.device.type == "cpu" and x.dtype in (torch.float16, torch.bfloat16))
+    )
+    if use_index_put:
+        idx = (None,) * scatter_dim + (index,)
+        index_put = aten.index_put_ if inplace else aten.index_put
+        out = index_put(x1, idx, tensor, accumulate=True)
+    else:
+        tensor1 = tensor.unsqueeze(0) if tensor.ndim == 0 else tensor
+        index1 = index.reshape([index_size])
+        index_shape = [1] * tensor1.ndim
+        index_shape[scatter_dim] = index_size
+        index1 = index1.reshape(index_shape).expand(tensor1.shape)
+        scatter_add = aten.scatter_add_ if inplace else aten.scatter_add
+        out = scatter_add(x1, scatter_dim, index1, tensor1)
     if inplace:
         return x
     else:
