@@ -10165,6 +10165,30 @@ class TestNNDeviceType(NNTestCase):
         inp = torch.ones(0, 5, 24, 24, device=device)
         _test_module_empty_input(self, mod, inp, check_size=False)
 
+    @onlyNativeDeviceTypes
+    def test_LocalResponseNorm_zero_denominator(self, device):
+        with self.assertRaisesRegex(ValueError, "cannot both be non-positive"):
+            torch.nn.LocalResponseNorm(size=1, alpha=0.0, beta=0.2, k=0.0)
+        with self.assertRaisesRegex(ValueError, "cannot both be non-positive"):
+            torch.nn.LocalResponseNorm(size=1, alpha=-1.0, beta=0.5, k=-0.5)
+        with self.assertRaisesRegex(ValueError, "cannot both be non-positive"):
+            F.local_response_norm(
+                torch.randn(2, 8, 4, 4, device=device),
+                size=1, alpha=0.0, beta=0.2, k=0.0,
+            )
+        # k=0 with positive alpha is safe
+        mod = torch.nn.LocalResponseNorm(size=1, alpha=1e-4, beta=0.75, k=0.0)
+        out = mod(torch.randn(2, 8, 4, 4, device=device))
+        self.assertFalse(torch.isinf(out).any())
+        # alpha=0 with positive k is safe
+        mod = torch.nn.LocalResponseNorm(size=1, alpha=0.0, beta=0.75, k=1.0)
+        out = mod(torch.randn(2, 8, 4, 4, device=device))
+        self.assertFalse(torch.isinf(out).any())
+        # beta=0 makes LRN a no-op, so k=0 alpha=0 is safe
+        mod = torch.nn.LocalResponseNorm(size=1, alpha=0.0, beta=0.0, k=0.0)
+        out = mod(torch.randn(2, 8, 4, 4, device=device))
+        self.assertFalse(torch.isinf(out).any())
+
     @onlyCUDA   # Test if CPU and GPU results match
     def test_ReflectionPad3d_large(self, device):
         shapes = ([2, 1000, 7, 7, 7], [1000, 2, 7, 7, 7])
