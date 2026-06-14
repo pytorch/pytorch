@@ -40,7 +40,7 @@ case ${image} in
     manylinux2_28_aarch64-builder:cpu-aarch64)
         TARGET=final
         GPU_IMAGE=arm64v8/almalinux:8
-        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13"
+        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=15"
         MANY_LINUX_VERSION="2_28_aarch64"
         ;;
     manylinuxs390x-builder:cpu-s390x)
@@ -70,7 +70,7 @@ case ${image} in
     manylinuxaarch64-builder:cuda*)
         TARGET=cuda_final
         GPU_IMAGE=amd64/almalinux:8
-        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
+        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=15"
         MANY_LINUX_VERSION="aarch64"
         DOCKERFILE_SUFFIX="_cuda_aarch64"
         ;;
