@@ -803,7 +803,7 @@ Stack (TOS at end):
 
             # Verify we can inspect locals at the exception point
             locals_output = yield "locals"
-            self.assertIn("x =", locals_output)  # Input tensor should be in locals
+            self.assertIn("graph_out_0 =", locals_output)
 
             # Verify we can inspect the stack at the exception point
             # Note: On Python 3.11 with settrace, when an exception is raised,
