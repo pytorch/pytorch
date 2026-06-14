@@ -5701,6 +5701,8 @@ skipped_tests.add("test_checkpoint_error_suggests_mark_dynamic")
 skipped_tests.add("test_checkpoint_automatic_dynamic_graph_shadowing")
 skipped_tests.add("test_checkpoint_automatic_dynamic_mark_dynamic_workaround")
 skipped_tests.add("test_checkpoint_automatic_dynamic_lru_disabled_workaround")
+# Compiled autograd does not support the higher-order gradients this test needs.
+skipped_tests.add("test_batch_norm_errors_on_third_order_grad")
 
 # boxed_grads_call relies on eager C++ PyNode::apply, incompatible with compiled autograd
 skipped_tests.add("test_custom_function_boxed_grads")
