@@ -10,6 +10,8 @@
 
 #include <torch/library.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/AutogradState.h>
+#include <c10/core/InferenceMode.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/irange.h>
 #include <ATen/FuncTorchTLS.h>
@@ -30,7 +32,7 @@ DynamicLayer::DynamicLayer(
     std::optional<bool> prev_grad_mode,
     std::optional<bool> prev_fwd_grad_mode,
     std::optional<bool> functionalize_add_back_views,
-    std::optional<bool> prev_inference_mode)
+    bool prev_inference_mode)
 {
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
@@ -41,17 +43,17 @@ DynamicLayer::DynamicLayer(
   switch (transform_type) {
     case TransformType::Vmap:
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      interpreter_ = Interpreter::Vmap(layerId, std::move(batchSize.value()), randomness.value());
+      interpreter_ = Interpreter::Vmap(layerId, std::move(batchSize.value()), randomness.value(), prev_inference_mode);
       break;
     case TransformType::Grad:
-      interpreter_ = Interpreter::Grad(layerId, prev_grad_mode.value(), prev_inference_mode.value_or(false));
+      interpreter_ = Interpreter::Grad(layerId, prev_grad_mode.value(), prev_inference_mode);
       break;
     case TransformType::Jvp:
-      interpreter_ = Interpreter::Jvp(layerId, prev_fwd_grad_mode.value(), prev_inference_mode.value_or(false));
+      interpreter_ = Interpreter::Jvp(layerId, prev_fwd_grad_mode.value(), prev_inference_mode);
       break;
     case TransformType::Functionalize:
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      interpreter_ = Interpreter::Functionalize(layerId, functionalize_add_back_views.value());
+      interpreter_ = Interpreter::Functionalize(layerId, functionalize_add_back_views.value(), prev_inference_mode);
       break;
     default:
       TORCH_INTERNAL_ASSERT(false);
@@ -247,15 +249,25 @@ int64_t initAndPushDynamicLayer(
     std::optional<RandomnessType> randomness,
     std::optional<bool> prev_grad_mode,
     std::optional<bool> prev_fwd_grad_mode,
-    std::optional<bool> functionalize_add_back_views,
-    std::optional<bool> prev_inference_mode) {
+    std::optional<bool> functionalize_add_back_views) {
+  // When inference_mode is on, new tensors lack autograd dispatch keys
+  // (TensorImpl strips them in its constructor). Toggle the flag off so
+  // tensors created inside the transform can participate in autograd.
+  // Uses AutogradState::set_inference_mode directly — not the InferenceMode
+  // RAII guard, which would clobber grad_mode and fw_grad_mode on destruction.
+  bool prev_inference_mode = c10::InferenceMode::is_enabled();
+  if (prev_inference_mode) {
+    auto state = c10::AutogradState::get_tls_state();
+    state.set_inference_mode(false);
+    c10::AutogradState::set_tls_state(state);
+  }
+
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
   const int64_t layerId = static_cast<int64_t>(1 + dynamicLayerStack.size());
   DynamicLayer new_layer(transform_type, layerId, std::move(batch_size), randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views, prev_inference_mode);
   // NB: this function should be called while holding the GIL to avoid races
   new_layer.interpreter().set_is_alive(true);
   pushDynamicLayer(std::move(new_layer));
-
 
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
@@ -271,6 +283,12 @@ DynamicLayer popDynamicLayerAndDeleteMetadata() {
 
   // NB: this function should be called while holding the GIL to avoid races
   result.interpreter().set_is_alive(false);
+  // Restore inference_mode if it was saved by initAndPushDynamicLayer.
+  if (result.interpreter().prevInferenceMode()) {
+    auto state = c10::AutogradState::get_tls_state();
+    state.set_inference_mode(true);
+    c10::AutogradState::set_tls_state(state);
+  }
   return result;
 }
 
