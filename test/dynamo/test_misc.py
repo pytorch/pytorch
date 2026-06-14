@@ -1643,9 +1643,9 @@ graph():
         self.assertExpectedInline(
             guard_code_str,
             """\
-L['x'].size()[1] == L['x'].size()[0]
 L['x'].storage_offset() == 0
 2 <= L['x'].size()[0]
+2 <= L['x'].size()[1]
 utils_device.CURRENT_DEVICE == None
 str(L['x'].dtype) == 'torch.float32'
 str(L['x'].device) == 'cpu'
@@ -13153,8 +13153,8 @@ def ___make_guard_fn():
 ShapeEnv not equal: field values don't match:
 
 ==> settings: values don't match.
-  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, trace_asserts=False)
-  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, trace_asserts=False)
+  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=False, prefer_deferred_runtime_asserts_over_guards=False, trace_asserts=False)
+  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=False, prefer_deferred_runtime_asserts_over_guards=False, trace_asserts=False)
 """,
         )
         self._replay_and_check(main)
