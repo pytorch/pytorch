@@ -32,7 +32,7 @@ def _validate_and_get_batch_size(
 
 
 def _num_outputs(batched_outputs: Tensor | tuple[Tensor, ...]) -> int:
-    if isinstance(batched_outputs, tuple):
+    if isinstance(batched_outputs, (tuple, list)):
         return len(batched_outputs)
     return 1
 
@@ -113,6 +113,20 @@ def _create_batched_inputs(
     return tree_unflatten(batched_inputs, args_spec), batch_size
 
 
+def _remove_or_passthrough_single(out, vmap_level, batch_size, out_dim, func):
+    if isinstance(out, Tensor):
+        return torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
+    if out is None:
+        return None
+    if isinstance(out, (int, float, bool, complex)):
+        return torch.full((batch_size,), out)
+    raise ValueError(
+        f"vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return "
+        f"Tensors, got type {type(out)}. "
+        "Did you mean to set out_dims= to None for output?"
+    )
+
+
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
     batched_outputs: Tensor | tuple[Tensor, ...],
@@ -136,40 +150,29 @@ def _unwrap_batched(
     if isinstance(batched_outputs, Tensor):
         out_dim = out_dims_as_tuple[0]
         return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore[return-value]
+
+    if isinstance(batched_outputs, list):
+        batched_outputs = tuple(batched_outputs)
+    elif not isinstance(batched_outputs, tuple):
+        out_dim = out_dims_as_tuple[0]
+        return _remove_or_passthrough_single(
+            batched_outputs, vmap_level, batch_size, out_dim, func
+        )  # type: ignore[return-value]
+
+    def _remove_or_passthrough(out, out_dim):
+        return _remove_or_passthrough_single(
+            out, vmap_level, batch_size, out_dim, func
+        )
+
     if allow_none_pass_through:
         return tuple(
-            (
-                torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
-                if out is not None
-                else None
-            )
+            _remove_or_passthrough(out, out_dim) if out is not None else None
             for out, out_dim in zip(batched_outputs, out_dims_as_tuple)
         )
     else:
         return tuple(
-            torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
+            _remove_or_passthrough(out, out_dim)
             for out, out_dim in zip(batched_outputs, out_dims_as_tuple)
-        )
-
-
-# Checks that `fn` returned one or more Tensors and nothing else.
-# NB: A python function that return multiple arguments returns a single tuple,
-# so we are effectively checking that `outputs` is a single Tensor or a tuple of
-# Tensors.
-def _validate_outputs(outputs: Any, func: Callable) -> None:
-    if isinstance(outputs, Tensor):
-        return
-    if not isinstance(outputs, tuple):
-        raise ValueError(
-            f"vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return "
-            f"Tensors, got type {type(outputs)} as the return."
-        )
-    for idx, output in enumerate(outputs):
-        if isinstance(output, Tensor):
-            continue
-        raise ValueError(
-            f"vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return "
-            f"Tensors, got type {type(output)} for return {idx}."
         )
 
 
@@ -230,8 +233,6 @@ def _vmap(
                 in_dims, args, vmap_level, func
             )
             batched_outputs = func(*batched_inputs)
-            if not allow_none_pass_through:
-                _validate_outputs(batched_outputs, func)
             return _unwrap_batched(
                 batched_outputs,
                 out_dims,
