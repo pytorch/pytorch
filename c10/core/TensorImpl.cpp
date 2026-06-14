@@ -425,6 +425,8 @@ c10::Device TensorImpl::device_custom() const {
     if (c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
       return device_default();
     }
+    // has_value() is checked above; the dataflow check misses it here.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *extra_meta_->fake_device_;
   }
   return device_default();

@@ -46,8 +46,8 @@ struct C10_API AutogradState {
     grad_layout_enforcement_enabled_ = enabled;
   }
 
-  void set_graph_exec_group(std::optional<SafePyObject> group) {
-    graph_exec_group_ = std::move(group);
+  void set_graph_exec_group(const std::optional<SafePyObject>& group) {
+    graph_exec_group_ = group;
   }
 
   bool get_grad_mode() const {
