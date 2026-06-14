@@ -4864,6 +4864,24 @@ if HAS_CUDA_AND_TRITON:
             compiled_out = compiled_f(p, a)
             self.assertEqual(eager_out, compiled_out)
 
+        def test_output_fed_back_as_input(self):
+            """Output→input feedback must error, not silently clone."""
+
+            @torch.compile(mode="reduce-overhead")
+            def step(x):
+                return x * 0.99 + 0.01
+
+            x = torch.randn(100, device="cuda")
+            # First call is fine (no previous pool storage to conflict with)
+            torch.compiler.cudagraph_mark_step_begin()
+            x = step(x)
+            # Feeding the output back triggers the pool-input check
+            with self.assertRaisesRegex(
+                RuntimeError, "reference storage from the CUDA graph pool"
+            ):
+                torch.compiler.cudagraph_mark_step_begin()
+                x = step(x)
+
         @torch._inductor.config.patch("graph_partition", True)
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
         def test_graph_partition_unbacked_symint_multi_output_layout(self):

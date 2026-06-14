@@ -52,6 +52,7 @@ from collections import defaultdict
 from contextlib import AbstractContextManager
 from enum import auto, Enum
 from typing import Any, cast, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch.fx
 from torch import Tensor
@@ -470,6 +471,42 @@ def cudagraphify_impl(
         return out
 
     return deferred_cudagraphify
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def check_pool_inputs_for_partitioned_call(
+    callable: Callable[_P, _R], device_index: int
+) -> Callable[_P, _R]:
+    """Wrap a partitioned callable to error on pool-referencing inputs.
+
+    When a compiled function is split into multiple CUDA-graph partitions,
+    the first partition's ``dealloc_current_path_weakrefs`` frees *all* pool
+    storage from the previous generation — including storage that later
+    partitions' inputs still reference.  ``_check_inputs_not_in_pool``
+    inside ``_run`` only sees *one* partition's inputs, so cross-partition
+    references are left dangling.
+
+    This wrapper runs before any partition and raises if any top-level input
+    references pool storage, so the user can ``.clone()`` explicitly.
+    """
+
+    def checked(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        inputs = args[0]
+        container = get_container(device_index)
+        manager = container.tree_manager
+        if (
+            manager is not None
+            and manager.current_node is not None
+            and (manager.in_recording or manager.in_warmup)
+            and manager.can_start_new_generation()
+        ):
+            manager._check_inputs_not_in_pool(inputs)  # type: ignore[arg-type]
+        return callable(*args, **kwargs)
+
+    return checked  # type: ignore[return-value]
 
 
 @contextlib.contextmanager
@@ -2311,11 +2348,58 @@ class CUDAGraphTreeManager:
             > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
         )
 
+    def _check_inputs_not_in_pool(self, new_inputs: list[InputType]) -> None:
+        """Raise if any input tensor's storage lives in the CUDA graph pool.
+
+        When outputs from a previous run are fed back as inputs (e.g. the
+        standard RL loop ``state = compiled_step(state)``), their storage
+        is inside the CUDA graph pool.  ``dealloc_current_path_weakrefs``
+        frees that storage and marks it with an access-error, so any
+        subsequent read from those tensors would raise with a confusing
+        "overwritten by a subsequent run" message.
+
+        Rather than silently cloning, we surface a clear error so users
+        can explicitly ``.clone()`` the tensors they feed back.
+        """
+        if self.current_node is None:
+            return
+
+        pool_ptrs: OrderedSet[int] = OrderedSet()
+        for storage_ref in self.current_node.path_live_weakrefs():
+            pool_ptrs.add(storage_ref.data_ptr())
+
+        if not pool_ptrs:
+            return
+
+        offending = [
+            i
+            for i, inp in enumerate(new_inputs)
+            if isinstance(inp, torch.Tensor)
+            and inp.untyped_storage().data_ptr() in pool_ptrs
+        ]
+        if offending:
+            raise RuntimeError(
+                f"Input tensors at indices {offending} reference storage from "
+                f"the CUDA graph pool of a previous run.  When a new generation "
+                f"starts, that pool storage is freed and any access would crash.  "
+                f"Please .clone() these tensors before passing them back as "
+                f"inputs (e.g. `x = compiled_fn(x.clone())` or clone the "
+                f"outputs before reuse)."
+            )
+
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
+
+        # When starting a new generation, try_end_curr_recording /
+        # try_end_curr_warmup will call dealloc_current_path_weakrefs which
+        # frees pool storage.  If any new_inputs reference that storage
+        # (output→input feedback), error out so the user can clone explicitly.
+        if (self.in_recording or self.in_warmup) and self.can_start_new_generation():
+            self._check_inputs_not_in_pool(new_inputs)
+
         if self.in_recording:
             self.try_end_curr_recording(function_id)
 
