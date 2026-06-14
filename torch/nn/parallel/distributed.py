@@ -821,7 +821,7 @@ class DistributedDataParallel(Module, Joinable):
         dim=0,
         broadcast_buffers=None,
         init_sync=True,
-        process_group: dist.ProcessGroup | None = None,
+        process_group=None,
         bucket_cap_mb=None,
         find_unused_parameters=False,
         check_reduction=False,
@@ -2123,11 +2123,11 @@ class DistributedDataParallel(Module, Joinable):
         )
 
     @property
-    def join_device(self) -> torch.device:
+    def join_device(self):
         return self.device
 
     @property
-    def join_process_group(self) -> dist.ProcessGroup:
+    def join_process_group(self):
         return self.process_group
 
     def _register_buffer_comm_hook(
