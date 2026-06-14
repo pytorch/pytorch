@@ -121,6 +121,7 @@ def _create_graph(
             export=aot_config.is_export,
             # Allow token discovery for joint fn tracing as tokens can be used in backward.
             _allow_token_discovery=True,
+            decomposition_table=aot_config.decompositions,
         )
 
     with (
