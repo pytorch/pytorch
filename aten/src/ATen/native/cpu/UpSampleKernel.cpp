@@ -1929,9 +1929,7 @@ void upsample_bilinear2d_aa_kernel_impl(
           /*antialias=*/true);
       }
     #elif defined(__aarch64__)
-      if (input.size(1) == 3
-          && input.is_contiguous(at::MemoryFormat::ChannelsLast)
-          && output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+      if (input.size(1) == 3) {
         return upsample_neon_bilinear_bicubic_uint8<scale_t, HelperInterpLinear>(
           input, output, align_corners, {scales_h, scales_w},
           /*antialias=*/true);
@@ -2006,9 +2004,7 @@ void upsample_bicubic2d_aa_kernel_impl(
           /*antialias=*/true);
       }
     #elif defined(__aarch64__)
-      if (input.size(1) == 3
-          && input.is_contiguous(at::MemoryFormat::ChannelsLast)
-          && output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+      if (input.size(1) == 3) {
         return upsample_neon_bilinear_bicubic_uint8<scale_t, HelperInterpCubic>(
           input, output, align_corners, {scales_h, scales_w},
           /*antialias=*/true);
