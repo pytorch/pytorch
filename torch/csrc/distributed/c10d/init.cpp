@@ -4067,7 +4067,26 @@ Example::
           .def_property_readonly(
               "options",
               &::c10d::ProcessGroupXCCL::getOptions,
-              R"(Return the options used to create this ProcessGroupXCCL instance.)");
+              R"(Return the options used to create this ProcessGroupXCCL instance.)")
+          .def_property_readonly(
+              "uid", &::c10d::ProcessGroupXCCL::getUid, R"(Return the uid.)")
+          .def(
+              "_set_enable_nan_check",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupXCCL>& self,
+                 bool enable_nan_check) {
+                self->setEnableNanCheck(enable_nan_check);
+              },
+              py::arg("enable_nan_check"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_is_initialized",
+              &::c10d::ProcessGroupXCCL::isInitialized,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_set_default_timeout",
+              &::c10d::ProcessGroupXCCL::setTimeout,
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>());
 
   intrusive_ptr_class_<::c10d::ProcessGroupXCCL::Options>(
       processGroupXCCL, "Options", backendOptions)
@@ -4098,7 +4117,27 @@ Returns:
     Stringified pickle work traces.
     Default settings return everything - i.e. contains XCCL comm dumps and collective traces.
       )")
+      .def(
+          "_dump_xccl_trace_json",
+          [](std::optional<bool> includeCollectives,
+             std::optional<bool> onlyActive) {
+            return py::bytes(::c10d::dump_xccl_trace_json(
+                includeCollectives.value_or(true), onlyActive.value_or(false)));
+          },
+          py::arg("includeCollectives") = std::optional<bool>(),
+          py::arg("onlyActive") = std::optional<bool>(),
+          R"(
+Arguments:
+    includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+    onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+Returns:
+    Stringified json work traces.
+    Default settings return everything - i.e. contains comm dumps and collective traces.)")
       .def("get_xccl_version", [] { return ::c10d::getXcclVersion(); });
+  module.def(
+      "_reset_fr_recording_xccl",
+      []() { ::c10d::reset_xccl_trace(); },
+      "API to reset Flight recorder recording when it comes to fault tolerance.");
 
 #endif
 

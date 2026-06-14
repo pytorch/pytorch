@@ -1522,11 +1522,13 @@ def get_default_backend_for_device(device: str | torch.device) -> str:
 def _get_process_group_uid(pg: ProcessGroup) -> int:
     backend = None
     try:
-        backend = pg._get_backend(torch.device("cuda"))
+        backend = pg._get_backend(
+            torch.accelerator.current_accelerator() or torch.device("cpu")
+        )
+        if is_backend_available(pg._get_backend_name()) and hasattr(backend, "uid"):
+            return backend.uid
     except RuntimeError:
         pass
-    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
-        return backend.uid
     return -1
 
 
@@ -1655,9 +1657,14 @@ def _set_pg_timeout(timeout: timedelta, group: ProcessGroup | None = None) -> No
             backends.add(backend)  # type: ignore[arg-type]
         elif _use_torchcomms_enabled() and isinstance(backend, _BackendWrapper):
             backends.add(backend)  # type: ignore[arg-type]
+    if torch.device("xpu") in devices:
+        backend = group._get_backend(torch.device("xpu"))
+        if is_xccl_available() and isinstance(backend, ProcessGroupXCCL):
+            backends.add(backend)  # type: ignore[arg-type]
     if len(backends) == 0:
         warnings.warn(
-            "Set timeout is now only supported for either nccl or gloo.", stacklevel=2
+            "Set timeout is now only supported for either nccl, gloo, or xccl.",
+            stacklevel=2,
         )
     for backend in backends:
         backend._set_default_timeout(timeout)

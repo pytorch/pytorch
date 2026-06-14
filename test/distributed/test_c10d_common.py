@@ -365,7 +365,7 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device(f"cuda:{self.rank:d}")
+        device = devices[0] if devices else torch.device(f"{device_type}:{self.rank:d}")
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -2190,6 +2190,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 # Hide all GPUs
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["ZE_AFFINITY_MASK"] = ""
 
 import torch
 from torch import distributed as dist
@@ -2271,7 +2272,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             store=store,
         )
         # TODO: this will be updated in the future to not be backend specific
-        device = "cuda" if backend == "nccl" else "cpu"
+        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
         tensors = [torch.ones(10, 10, device=torch.device(device))]
         dist.all_reduce_coalesced(tensors, dist.ReduceOp.SUM)
         for tensor in tensors:
