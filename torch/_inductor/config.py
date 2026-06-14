@@ -2658,6 +2658,7 @@ class rocm:
     # Side-effect: when this is True, choices._need_to_fix_layout() returns True
     # so flexible layouts are disabled. Origami's grid/workgroup mappings depend
     # on exact strides and would mis-compile under flexible layouts.
+    # Change
     origami: bool = os.environ.get("TORCHINDUCTOR_ORIGAMI") == "1"
 
     # Number of top configs origami selects per GEMM. Read once from

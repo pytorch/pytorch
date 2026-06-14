@@ -54,7 +54,7 @@ on:
         description: Run inductor_max_autotune?
         required: false
         type: boolean
-        default: false
+        default: true
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
