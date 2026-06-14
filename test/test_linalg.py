@@ -5861,6 +5861,41 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                     f(torch.empty(1, 2, 2), pivot=False)
 
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
+    @skipCUDAIfNoCusolver
+    @setLinalgBackendsToDefaultFinally
+    @onlyCUDA
+    @dtypes(*floating_and_complex_types())
+    def test_lu_factor_looped_cusolver_multistream(self, device, dtype):
+        # The looped cuSOLVER getrf path overlaps independent factorizations
+        # across auxiliary streams. It is only taken when the cuSOLVER backend is
+        # selected (batched cuBLAS is the default for small matrices) and
+        # batch_size >= kMultiStreamMinBatch (=8). Force it so the fork/join,
+        # recordStream, and per-stream handle logic is exercised in CI.
+        torch.backends.cuda.preferred_linalg_library('cusolver')
+        for batch in (8, 16):  # >= kMultiStreamMinBatch, covers the trigger boundary
+            for pivot in (True, False):
+                # Rectangular [B, M, M-1] guarantees the looped (non-batched) path.
+                # Bounded off-diagonals + a strongly dominant diagonal keep both the
+                # pivoted and non-pivoted LU stable and accurate (incl. fp32), so the
+                # reconstruction check stays tight.
+                A = make_tensor((batch, 64, 63), device=device, dtype=dtype, low=-1, high=1)
+                eye = torch.eye(64, 63, device=device, dtype=dtype).expand(batch, -1, -1)
+                A = A + 100 * eye
+                LU, pivots, info = torch.linalg.lu_factor_ex(A, pivot=pivot)
+                self.assertEqual(info, torch.zeros_like(info))
+                # Pivot choice is not unique, so validate by reconstruction.
+                if pivot:
+                    P, L, U = torch.lu_unpack(LU, pivots)
+                    self.assertEqual(P @ L @ U, A)
+                else:
+                    m, n = A.shape[-2:]
+                    k = min(m, n)
+                    L = torch.tril(LU[..., :, :k], diagonal=-1)
+                    L = L + torch.eye(m, k, device=device, dtype=dtype)
+                    U = torch.triu(LU[..., :k, :])
+                    self.assertEqual(L @ U, A)
+
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
