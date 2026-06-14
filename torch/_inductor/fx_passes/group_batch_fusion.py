@@ -495,13 +495,19 @@ class BatchLinearLHSFusion(BatchFusion):
     We have a separate pass to eliminate contiguous transpose in a generic way.
     """
 
-    def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
+    def match(self, node: torch.fx.Node) -> tuple[str, int | None, Any] | None:
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
             bias = get_arg_value(node, 2, "bias")
-            group_key = ("batch_linear_lhs", bias is None, input)
+            bias_tensor = None
+            if bias is not None:
+                bias_tensor = bias.meta.get("val")
+                if bias_tensor is None:
+                    bias_tensor = bias.meta.get("example_value")
+            bias_dim = None if bias_tensor is None else bias_tensor.ndim  # type: ignore[union-attr]
+            group_key = ("batch_linear_lhs", bias_dim, input)
         else:
             group_key = None
         return group_key
@@ -1417,13 +1423,18 @@ def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
     return fusions
 
 
-def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
+def group_batch_fusion_passes(
+    graph: torch.fx.Graph, pre_grad=True, fusion_options=None
+):
     fusions: list[GroupBatchFusionBase] = []
     # we keep all current pre grad fusions to keep
     # current implementation, will remove this later
     if pre_grad:
         fusions += generate_fusion_from_config(
-            config.pre_grad_fusion_options, pre_grad=True
+            fusion_options
+            if fusion_options is not None
+            else config.pre_grad_fusion_options,
+            pre_grad=True,
         )
     else:
         fbgemm_fusion_keys = [

@@ -7,6 +7,7 @@ import torch
 import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
+from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
@@ -697,6 +698,12 @@ class TestGroupBatchFusion(TestCase):
             "unbind_stack_aten_pass": {},
         },
     )
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"min_fuse_set_size": 999}
+        },  # Disable auto-enable to test post-grad behavior
+    )
     def test_gate_fusion_post_grad(self):
         counters.clear()
         size = 20
@@ -773,6 +780,40 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["normalization_pass"], 1)
         self.assertEqual(counters["inductor"]["batch_dropout"], 1)
         counters.clear()
+
+    @unittest.skipUnless(
+        torch.xpu.is_available(),
+        "batch_linear_lhs auto-enable is XPU-only for now",
+    )
+    def test_xpu_auto_enable_batch_linear_lhs(self):
+        # Verify that batch_linear_lhs fusion is auto-enabled when example inputs
+        # contain XPU tensors, without explicitly setting
+        # config.pre_grad_fusion_options.
+        z = 10
+        for has_bias in [True, False]:
+            # Capture the global config state before compilation
+            orig_fusion_options = dict(config.pre_grad_fusion_options)
+            counters.clear()
+            module = MyModule4(z, "xpu", has_bias)
+            input = [torch.randn(20, z, device="xpu")]
+            traced = torch.compile(module)
+            ref = module(*input)
+            res = traced(*input)
+            self.compare_pred(module, traced, input)
+            # Verify fusion was applied
+            self.assertGreater(counters["inductor"]["batch_linear_lhs"], 0)
+            self.assertTrue(torch.allclose(ref, res))
+            ref.sum().backward()
+            res.sum().backward()
+            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            # Verify global config was NOT mutated
+            self.assertEqual(
+                orig_fusion_options,
+                dict(config.pre_grad_fusion_options),
+                "config.pre_grad_fusion_options should not be mutated by auto-enable",
+            )
+            counters.clear()
 
 
 class TestBMMFusionModule(torch.nn.Module):
