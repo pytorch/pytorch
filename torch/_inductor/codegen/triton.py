@@ -905,6 +905,43 @@ def triton_reshape(
 # inconsistent with Python semantics (and consistent with C semantics).  We
 # must override all of these, or it is potential silent correctness problem
 class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
+    def _print_Symbol(self, expr: sympy.Symbol) -> str:
+        symbol = str(expr)
+        if cast_dtype := self._value_expr_symbol_cast_dtype(expr):
+            return f"({symbol}).to({cast_dtype})"
+        return symbol
+
+    @staticmethod
+    def _value_expr_symbol_cast_dtype(expr: sympy.Symbol) -> str | None:
+        if not V.kernel.codegen_value_expr_symbol_casts:
+            return None
+
+        index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
+        if index_dtype not in (torch.int32, torch.int64):
+            return None
+
+        cast_dtype = V.kernel.dtype_to_str(index_dtype)
+        emitted_index_dtype = V.kernel.codegen_value_expr_symbol_source_dtype
+
+        if emitted_index_dtype not in ("tl.int32", "tl.int64"):
+            raise AssertionError(f"unexpected index dtype: {emitted_index_dtype}")
+
+        # Value expressions should perform integer arithmetic in the requested
+        # dtype, even when that widens or narrows from the selected index dtype.
+        if expr in V.kernel.range_tree_nodes:
+            return None if emitted_index_dtype == cast_dtype else cast_dtype
+
+        for tree in V.kernel.range_trees:
+            if expr in (tree.index_sym(), tree.block_offset()):
+                return None if emitted_index_dtype == cast_dtype else cast_dtype
+
+        if symbol_is_type(expr, SymT.TMP):
+            var = V.kernel.cse.varname_map[expr.name]
+            if var.dtype in (torch.int32, torch.int64) and var.dtype != index_dtype:
+                return cast_dtype
+
+        return None
+
     def _print_TruncToInt(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
@@ -2471,17 +2508,30 @@ class TritonKernelOverrides(TritonOverrides):
     def value_expr(cls, expr, dtype):
         """
         Like :meth:`index_expr`, but honors ``dtype`` by setting the kernel
-        index dtype before emitting, and casting the result if needed.
+        index dtype before emitting, casting range symbols before arithmetic,
+        and casting the result if needed.
         """
         real_index_dtype = V.kernel._index_dtype
+        real_codegen_value_expr_symbol_casts = V.kernel.codegen_value_expr_symbol_casts
+        real_codegen_value_expr_symbol_source_dtype = (
+            V.kernel.codegen_value_expr_symbol_source_dtype
+        )
+        V.kernel.codegen_value_expr_symbol_source_dtype = V.kernel.index_dtype
         V.kernel._index_dtype = (
             dtype if dtype in (torch.int32, torch.int64) else torch.int64
         )
+        V.kernel.codegen_value_expr_symbol_casts = True
         try:
             var = cls.index_expr(expr, dtype)
         finally:
             V.kernel._index_dtype = real_index_dtype
-        if real_index_dtype != dtype or var.dtype != dtype:
+            V.kernel.codegen_value_expr_symbol_casts = (
+                real_codegen_value_expr_symbol_casts
+            )
+            V.kernel.codegen_value_expr_symbol_source_dtype = (
+                real_codegen_value_expr_symbol_source_dtype
+            )
+        if var.dtype != dtype:
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"({var}).to({triton_type(dtype)})",
