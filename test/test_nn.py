@@ -14723,7 +14723,7 @@ if __name__ == '__main__':
 
     def _test_linear_cross_entropy_loss(self, device='cpu', dtype=torch.float32,
                                         acc_policy=None, acc_dtype=None, bias=False,
-                                        none_reduction=False):
+                                        none_reduction=False, prob_target=False):
         """Test the chunked LCE forward + backward against an fp64 reference.
 
         Two metrics per gradient:
@@ -14779,7 +14779,7 @@ if __name__ == '__main__':
                 _AUTO_DEFAULTS, _AUTO_FALLBACK,
             )
             _resolved_policy, _ = _AUTO_DEFAULTS.get(
-                (torch.device(device).type, dtype), _AUTO_FALLBACK,
+                (torch.device(device).type, dtype, prob_target), _AUTO_FALLBACK,
             )
         else:
             _resolved_policy = acc_policy
@@ -14794,7 +14794,34 @@ if __name__ == '__main__':
         # input/weight matmuls), so the cap is generally tighter than
         # the input/weight caps for the same combo.
         expected_linear_bias_grad_max_ulp_diff = 0
-        if none_reduction:
+        if prob_target:
+            # Probability-target caps with the near-zero ULP floor (see
+            # ``grad_max_ulp``). Measured on A100-host CPU/CUDA and
+            # x86_64 + RTX 2060; ROCm / aarch64 / MPS pending (the
+            # ``[prob calibration]`` print stays until they report).
+            # fp32 takes the all-input-dtype path, so its caps are
+            # policy-independent and the ULP counts run larger (smaller
+            # eps; the floor threshold feps*max barely bites), in line
+            # with the index-target fp32 caps below. Observed maxima:
+            # fp32 ig 9229 (aarch64; x86_64 4619, A100 173) / w 16-914;
+            # fp16 balanced/compact ig 60-93 / w 17-58; bf16
+            # balanced/compact ig 6 / w 3; accurate fp16/bf16 all 0.
+            # No bias=True prob samples, so the bias-grad cap stays 0.
+            expected_max_ulp_diff = 4
+            if dtype == torch.float32:
+                expected_input_grad_max_ulp_diff = 16384  # aarch64 9229
+                expected_weight_grad_max_ulp_diff = 2048
+            elif _resolved_policy == "accurate":
+                expected_input_grad_max_ulp_diff = 4
+                expected_weight_grad_max_ulp_diff = 4
+            elif dtype == torch.bfloat16:  # balanced / compact, bf16
+                expected_input_grad_max_ulp_diff = 16
+                expected_weight_grad_max_ulp_diff = 8
+            else:  # balanced / compact, fp16
+                expected_input_grad_max_ulp_diff = 192
+                expected_weight_grad_max_ulp_diff = 128
+            expected_linear_bias_grad_max_ulp_diff = 0
+        elif none_reduction:
             # reduction='none' caps. The per-element ULP uses a near-zero
             # floor (see ``grad_max_ulp``) so these track drift in the
             # well-scaled grad elements, not the intrinsic softmax-onehot
@@ -15006,11 +15033,13 @@ if __name__ == '__main__':
             # which is ~0 up to rounding on near-cancelling rows; the sign
             # of such an element is numerically meaningless (``grad_error``
             # is the correctness guard) but a sign flip inflates the ULP
-            # toward the uint ceiling. Drop elements below feps of the peak
-            # |grad| so the cap tracks drift in the well-scaled elements,
-            # not rounding noise. Scalar reductions keep every element.
+            # toward the uint ceiling. Probability targets cancel the same
+            # way wherever ``softmax(x) ~ weight*target``. Drop elements
+            # below feps of the peak |grad| so the cap tracks drift in the
+            # well-scaled elements, not rounding noise. The scalar
+            # index-target legs keep every element.
             ulp = diff_ulp(grad, expected)
-            if none_reduction:
+            if none_reduction or prob_target:
                 ulp = torch.where(expected.abs() >= feps * expected.abs().max(), ulp, 0)
             return ulp.max().item()
 
@@ -15039,16 +15068,17 @@ if __name__ == '__main__':
             options = module_kwargs.get('options')
             if (
                     options is None
-                    or target.dtype.is_floating_point
+                    or target.dtype.is_floating_point != prob_target
                     or module_kwargs.get('out_features')
                     or (module_kwargs.get('reduction') == 'none') != none_reduction
                     or module_kwargs.get('label_smoothing') > 0
             ):
                 # skip samples that are not be processed via chunking
-                # algorithms. ``none_reduction`` selects the matching
-                # subset: reduction='none' samples when True, the
-                # scalar (mean/sum) samples when False -- the two have
-                # separate cap tables (different numerics).
+                # algorithms. ``none_reduction`` / ``prob_target`` select
+                # the matching subset: reduction='none' samples,
+                # probability-target samples, or the scalar index-target
+                # samples -- each has its own cap table (different
+                # numerics).
                 continue
             if module_kwargs.get('bias', False) != bias:
                 # bias=True and bias=False samples have separate cap
@@ -15084,6 +15114,10 @@ if __name__ == '__main__':
 
             out = loss(input, target)
             ref_target = target.to(ref_device)
+            if prob_target:
+                # fp64 reference target (lossless upcast); the chunked
+                # call keeps the input-dtype target.
+                ref_target = ref_target.to(ref_dtype)
             ref_out = ref_loss(ref_input, ref_target)
 
             max_ulp_diff = diff_ulp(out.to(ref_device), ref_out.to(dtype)).max().item()
@@ -15140,6 +15174,25 @@ if __name__ == '__main__':
                     maximal_linear_bias_grad_err = err
                     worst_linear_bias_grad_err_kwargs = dict(module_kwargs)
 
+        if prob_target:
+            # TEMP: calibration data for the probability-target ULP caps.
+            # Re-run per host, copy the observed values into the
+            # ``if prob_target:`` cap block above (keyed on policy /
+            # dtype / device), then delete this block.
+            print(
+                f"\n[prob calibration] _resolved_policy={_resolved_policy!r}"
+                f" dtype={dtype} device={device} bias={bias}\n"
+                f"  output:        observed={maximal_output_max_ulp_diff:6d}"
+                f"  cap={expected_max_ulp_diff:6d}\n"
+                f"  input_grad:    observed={maximal_input_grad_max_ulp_diff:6d}"
+                f"  cap={expected_input_grad_max_ulp_diff:6d}\n"
+                f"  linear_weight: observed={maximal_linear_weight_grad_max_ulp_diff:6d}"
+                f"  cap={expected_weight_grad_max_ulp_diff:6d}\n"
+                f"  linear_bias:   observed={maximal_linear_bias_grad_max_ulp_diff:6d}"
+                f"  cap={expected_linear_bias_grad_max_ulp_diff:6d}",
+                flush=True,
+            )
+
         self.assertLessEqual(maximal_input_grad_err, feps,
                              msg=f"worst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
         self.assertLessEqual(maximal_linear_weight_grad_err, feps,
@@ -15160,9 +15213,12 @@ if __name__ == '__main__':
     def test_linear_cross_entropy_loss_default(self, device, dtype, bias):
         self._test_linear_cross_entropy_loss(device=device, dtype=dtype, bias=bias)
 
+    @parametrize_test("prob_target", [False, True])
     @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
     @parametrize_test("bias", [False, True])
-    def test_linear_cross_entropy_chunked_gradcheck(self, device, acc_policy, bias):
+    def test_linear_cross_entropy_chunked_gradcheck(
+        self, device, acc_policy, bias, prob_target
+    ):
         """``torch.autograd.gradcheck`` against the chunked op.
 
         The chunked path is an unusual autograd hookup: forward
@@ -15179,6 +15235,9 @@ if __name__ == '__main__':
 
         The ``bias`` parametrization covers both the no-bias path and
         the new chunked ``linear_bias`` path (``compute_linear_bias_grad=True``).
+        ``prob_target`` swaps the class-index target for a probability
+        target (with a class weight, exercising ``prob_wt``), routing
+        through the dense prob loop instead of the gather/index one.
         fp64 inputs keep the chunked op's mixed-precision paths off
         (``use_acc_dtype=False``) and stay within gradcheck's default
         tolerance. Small (N, F, V) keeps gradcheck's O(num_inputs)
@@ -15201,7 +15260,14 @@ if __name__ == '__main__':
             torch.randn(V, device=device, dtype=torch.float64, requires_grad=True)
             if bias else None
         )
-        target = torch.randint(0, V, (N,), device=device)
+        if prob_target:
+            target = torch.softmax(
+                torch.randn(N, V, device=device, dtype=torch.float64), dim=1
+            )
+            cw = torch.rand(V, device=device, dtype=torch.float64) + 0.5
+        else:
+            target = torch.randint(0, V, (N,), device=device)
+            cw = None
         options = nn.LinearCrossEntropyOptions(
             batch_chunk_size=2,
             acc_policy=acc_policy,
@@ -15210,7 +15276,8 @@ if __name__ == '__main__':
 
         def f(i, w, b=None):
             return nn.functional.linear_cross_entropy(
-                i, w, target, linear_bias=b, reduction="mean", options=options,
+                i, w, target, linear_bias=b, weight=cw,
+                reduction="mean", options=options,
             )
 
         torch.autograd.gradcheck(f, (inp, weight, linear_bias) if bias else (inp, weight))
@@ -15598,6 +15665,115 @@ if __name__ == '__main__':
             device=device, dtype=dtype, acc_policy=acc_policy,
             acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
             bias=bias, none_reduction=True)
+
+    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    @dtypes(torch.float32)
+    def test_linear_cross_entropy_loss_prob_target(self, device, dtype, acc_policy):
+        # Probability-target counterpart of the scalar harness legs:
+        # exercises the dense prob loop against the fp64 reference. The
+        # generator has no bias=True probability-target samples, so only
+        # the bias=False subset runs. See the ``prob_target`` cap block
+        # in _test_linear_cross_entropy_loss.
+        self._test_linear_cross_entropy_loss(
+            device=device, dtype=dtype, acc_policy=acc_policy, prob_target=True)
+
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    def test_linear_cross_entropy_loss_prob_target_with_acc_dtype(
+        self, device, dtype, acc_policy
+    ):
+        # Mixed-precision probability-target leg (exercises the
+        # prob_target_buf scratch: weight*target staged at the logits
+        # dtype).
+        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
+            self.skipTest("bf16 requires SM80+ on CUDA")
+        self._test_linear_cross_entropy_loss(
+            device=device, dtype=dtype, acc_policy=acc_policy,
+            acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
+            prob_target=True)
+
+    def test_linear_cross_entropy_prob_target_dispatch(self, device):
+        """Probability-target dispatch edges. The harness covers the
+        supported configurations; this covers the gate itself: supported
+        prob targets must chunk silently, and the unsupported
+        configurations (target requiring grad -- the chunked op has no
+        grad-target slot -- reduction='none', and a target dtype
+        differing from the input) must warn and fall back to the
+        reference, staying correct. Plus the empty-batch edge.
+        """
+        torch.manual_seed(0)
+        N, F_, C = 8, 5, 4
+        inp = torch.randn(N, F_, device=device, requires_grad=True)
+        lw = torch.randn(C, F_, device=device, requires_grad=True)
+        target = torch.softmax(torch.randn(N, C, device=device), dim=1)
+        options = nn.LinearCrossEntropyOptions(batch_chunk_size=2)
+
+        # Positive control: a supported prob target takes the chunked
+        # path with no fallback warning.
+        out = self.assertNotWarn(
+            lambda: nn.functional.linear_cross_entropy(
+                inp, lw, target, reduction="mean", options=options,
+            )
+        )
+
+        # target.requires_grad: falls back; the target gradient flows.
+        target_g = target.clone().requires_grad_(True)
+        with self.assertWarnsRegex(UserWarning, "options.*ignored"):
+            out = nn.functional.linear_cross_entropy(
+                inp, lw, target_g, reduction="mean", options=options,
+            )
+        ref = nn.functional.cross_entropy(
+            nn.functional.linear(inp, lw), target_g, reduction="mean",
+        )
+        self.assertEqual(out, ref)
+        (grad_target,) = torch.autograd.grad(out, [target_g])
+        self.assertGreater(grad_target.norm().item(), 0.0)
+
+        # reduction='none' with a probability target: falls back.
+        with self.assertWarnsRegex(UserWarning, "options.*ignored"):
+            out = nn.functional.linear_cross_entropy(
+                inp, lw, target, reduction="none", options=options,
+            )
+        self.assertEqual(out.shape, (N,))
+
+        # dtype mismatch: falls back (the reference type-promotes, so
+        # the loss carries the promoted dtype).
+        with self.assertWarnsRegex(UserWarning, "options.*ignored"):
+            out = nn.functional.linear_cross_entropy(
+                inp.half(), lw.half(), target, reduction="mean",
+                options=options,
+            )
+        self.assertEqual(out.dtype, torch.float32)
+
+        # auto heuristic, below the crossing region (num_classes >>
+        # in_features): probability targets resolve to aspect_ratio
+        # factor 1, index targets to aspect_ratio:2.
+        if "cuda" in device:
+            adjusted = nn.LinearCrossEntropyOptions()._adjust(
+                num_batches=4096, in_features=2048, num_classes=32000,
+                dtype=torch.float16, device=inp.device, prob_target=True,
+            )
+            self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+            adjusted = nn.LinearCrossEntropyOptions()._adjust(
+                num_batches=4096, in_features=2048, num_classes=32000,
+                dtype=torch.float16, device=inp.device, prob_target=False,
+            )
+            self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+
+        # Empty batch on the chunked path: mean is NaN, sum is 0
+        # (matches the reference).
+        i0 = torch.randn(0, F_, device=device)
+        t0 = torch.zeros(0, C, device=device)
+        self.assertTrue(
+            nn.functional.linear_cross_entropy(
+                i0, lw.detach(), t0, reduction="mean", options=options,
+            ).isnan().item()
+        )
+        self.assertEqual(
+            nn.functional.linear_cross_entropy(
+                i0, lw.detach(), t0, reduction="sum", options=options,
+            ).abs().item(), 0.0,
+        )
 
     @parametrize_test("reduction", ["sum", "mean"])
     def test_linear_cross_entropy_chunk_size_invariance(self, device, reduction):
