@@ -163,7 +163,7 @@ class TestCustomOpOutLowering(InductorTestCase):
             FileCheck().check("aoti_torch_call_dispatcher").run(source_code)
             # ArrayRef wrapper tensors are not AtenTensorHandle, so that wrapper
             # path intentionally does not emit assert_size_stride.
-            if "cpp_wrapper/array_ref.h" not in source_code:
+            if "array_ref.h" not in source_code:
                 FileCheck().check_regex(
                     r'assert_size_stride\([^,]+,\s*\{4L?,\s*4L?\},\s*\{4L?,\s*1L?\},\s*"torch.ops.mylib.no_out_op.default"\)'
                 ).run(source_code)
