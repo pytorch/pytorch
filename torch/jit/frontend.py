@@ -204,7 +204,7 @@ def get_class_properties(cls, self_name):
         here refers to the subclass of TreeView.
     """
     props = inspect.getmembers(cls, predicate=lambda m: isinstance(m, property))
-    # Any property that should not compiled must be in this list on the Module.
+    # Any property that should not be compiled must be in this list on the Module.
     unused_properties = getattr(cls, "__jit_unused_properties__", [])
 
     # Create Property TreeView objects from inspected property objects.
@@ -442,7 +442,11 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=No
             is_method,  # type: ignore[assignment]
         )
 
-    return Def(Ident(r, def_name), decl, build_stmts(ctx, body))
+    return Def(
+        Ident(r, def_name),
+        decl,  # pyrefly: ignore[bad-argument-type]
+        build_stmts(ctx, body),
+    )
 
 
 _vararg_kwarg_err = (

@@ -53,17 +53,18 @@ CUDA_AARCH64_ARCHES = [
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvtx]==12.6.3; platform_system == 'Linux' | "
         "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
+        "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux'"
     ),
     "13.0": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
@@ -71,7 +72,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "13.2": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
