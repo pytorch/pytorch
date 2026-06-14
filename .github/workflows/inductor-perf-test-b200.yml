@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 name: inductor-perf-b200
 
 on:
