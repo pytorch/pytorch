@@ -2231,9 +2231,36 @@ class OutputGraph(OutputGraphCommon):
             output = []
             subgraph_pycode = None
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
-                instructions, subgraph_pycode = self.compile_and_call_fx_graph(
-                    tx, pass2.graph_output_vars(), root
+                live_local_names = (
+                    self._live_local_names(pass2) | self._resume_live_local_names()
                 )
+                graph_input_names_to_delete = self._dead_tensor_graph_input_names(
+                    live_local_names
+                )
+                resume_args_varname = tx._boxed_resume_arg_name()
+                if (
+                    resume_args_varname is not None
+                    and resume_args_varname in live_local_names
+                ):
+                    graph_input_names_to_delete.discard(resume_args_varname)
+                graph_input_names_to_clear = tx.cleared_fast_locals - live_local_names
+                use_boxed_graph_call = resume_args_varname is not None and bool(
+                    graph_input_names_to_delete or graph_input_names_to_clear
+                )
+                instructions, subgraph_pycode = self.compile_and_call_fx_graph(
+                    tx,
+                    pass2.graph_output_vars(),
+                    root,
+                    graph_input_names_to_delete,
+                    graph_input_names_to_clear,
+                    use_boxed_graph_call,
+                )
+                if resume_args_varname is not None and resume_args_varname in (
+                    graph_input_names_to_delete | graph_input_names_to_clear
+                ):
+                    tx._mark_resume_args_cleanup_emitted()
+                    if self.root_tx is not tx:
+                        self.root_tx._mark_resume_args_cleanup_emitted()
                 output.extend(instructions)
 
                 if len(pass2.graph_outputs) != 0:
@@ -2444,6 +2471,49 @@ class OutputGraph(OutputGraphCommon):
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
         self.side_effects.codegen_update_mutated(cg, log_side_effects)
+
+    @staticmethod
+    def _base_local_name(source: Source | None) -> str | None:
+        while source is not None:
+            if isinstance(source, LocalSource):
+                return source.local_name
+            source = getattr(source, "base", None)
+        return None
+
+    def _live_local_names(self, cg: PyCodegen) -> set[str]:
+        live_local_names: set[str] = set(self.code_options["co_cellvars"])
+        live_local_names.update(self.code_options["co_freevars"])
+        for value in cg.uses:
+            source = (
+                value if isinstance(value, Source) else getattr(value, "source", None)
+            )
+            local_name = self._base_local_name(source)
+            if local_name is not None:
+                live_local_names.add(local_name)
+        return live_local_names
+
+    def _resume_live_local_names(self) -> set[str]:
+        if not self.compile_subgraph_reason.graph_break:
+            return set()
+
+        return {
+            name
+            for name, value in self.root_tx.symbolic_locals.items()
+            if isinstance(value.source, LocalSource) and value.source.local_name == name
+        }
+
+    def _dead_tensor_graph_input_names(self, live_local_names: set[str]) -> set[str]:
+        names: set[str] = set()
+        for arg in self.graphargs:
+            if (
+                arg.is_tensor
+                and not arg.pass_arg_as_tensor
+                and isinstance(arg.source, LocalSource)
+                and arg.source.local_name not in live_local_names
+                and arg.source.local_name in self.code_options["co_varnames"]
+            ):
+                names.add(arg.source.local_name)
+        return names
 
     def cleanup_graph(self) -> None:
         """
@@ -2706,6 +2776,9 @@ class OutputGraph(OutputGraphCommon):
         tx: "InstructionTranslatorBase",
         rv: list[VariableTracker],
         root: FakeRootModule,
+        graph_input_names_to_delete: set[str] | None = None,
+        graph_input_names_to_clear: set[str] | None = None,
+        use_boxed_graph_call: bool = False,
     ) -> tuple[list[Instruction], list[str] | None]:
         """
         Generate code from self.graph and return the Instruction()s to
@@ -2926,6 +2999,29 @@ class OutputGraph(OutputGraphCommon):
 
                 compiled_fn = _tf_disabled_wrapper
 
+            is_gm_forward = (
+                getattr(compiled_fn, "__self__", None) is gm
+                and getattr(compiled_fn, "__name__", None) == "forward"
+            )
+            compiled_fn_code = getattr(compiled_fn, "__code__", None)
+            # Some AOTAutograd wrappers inherit _boxed_call from an inner
+            # function even though they still accept *args.
+            boxed_call = (
+                getattr(gm, "_boxed_call", False)
+                if is_gm_forward
+                else (
+                    getattr(compiled_fn, "_boxed_call", False)
+                    and compiled_fn_code is not None
+                    and compiled_fn_code.co_argcount == 1
+                    and not (compiled_fn_code.co_flags & inspect.CO_VARARGS)
+                )
+            )
+            if use_boxed_graph_call and not boxed_call and is_gm_forward:
+                gm.graph.set_codegen(torch.fx.graph._BoxedCodeGen())
+                gm.recompile()
+                compiled_fn = gm.forward
+                boxed_call = True
+
             compiled_fn = disable(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"
             )
@@ -3031,7 +3127,12 @@ class OutputGraph(OutputGraphCommon):
             for idx, arg in enumerate(self.graphargs):
                 self.export_metadata.graph_input_idx_to_local_source[idx] = arg.source
 
-            cg.make_call_generated_code(name)
+            cg.make_call_generated_code(
+                name,
+                graph_input_names_to_delete,
+                graph_input_names_to_clear,
+                boxed_call,
+            )
 
             return cg.get_instructions(), cg.get_pycode()
 

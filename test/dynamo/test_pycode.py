@@ -39,6 +39,7 @@ class TestPycode(torch._dynamo.test_case.TestCase):
 __arg0 = self._modules['linear']._parameters['weight']
 __arg1 = self._modules['linear']._parameters['bias']
 __arg2 = x
+del x
 __graph_out = __compiled_fn_<ID>(__arg0, __arg1, __arg2)
 __stack0 = __graph_out[0]
 __ret = __stack0""",
@@ -74,6 +75,7 @@ __ret = __stack0""",
             """\
 __arg0 = x
 __arg1 = y
+del x, y
 __graph_out = __compiled_fn_<ID>(__arg0, __arg1)
 __stack0 = {'sum': __graph_out[0], 'diff': __graph_out[1], 'prod': __graph_out[2]}
 __ret = __stack0""",
@@ -105,6 +107,7 @@ def __generate_func__():
         __arg0 = self._modules['linear']._parameters['weight']
         __arg1 = self._modules['linear']._parameters['bias']
         __arg2 = x
+        del x
         __graph_out = __compiled_fn_<ID>(__arg0, __arg1, __arg2)
         __stack0 = __graph_out[0]
         __ret = __stack0
@@ -133,6 +136,7 @@ __dynamo_generated_func__ = __generate_func__()""",
             """\
 __arg0 = x
 __arg1 = y
+del x, y
 __graph_out = __compiled_fn_<ID>(__arg0, __arg1)
 __stack0 = __graph_out[0]
 __ret = __stack0""",

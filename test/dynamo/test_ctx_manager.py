@@ -655,11 +655,17 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "bf16[s77, s77]", L_z_: "f32[s77, s77]"):
-        l_x_ = L_x_
-        l_z_ = L_z_
+    def forward(self, args_list):
+        s41 = args_list[0]
+        L_torch_dynamo_resume_args_3_ = args_list[1]
+        L_torch_dynamo_resume_args_4_ = args_list[2]
+        args_list.clear()
+        l_torch_dynamo_resume_args_3_ = L_torch_dynamo_resume_args_3_
+        L_torch_dynamo_resume_args_3_ = None
+        l_torch_dynamo_resume_args_4_ = L_torch_dynamo_resume_args_4_
+        L_torch_dynamo_resume_args_4_ = None
 
-        x: "bf16[s77, s77]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
+        x: "bf16[s41, s41]" = l_torch_dynamo_resume_args_3_ @ l_torch_dynamo_resume_args_4_;  l_torch_dynamo_resume_args_3_ = l_torch_dynamo_resume_args_4_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
@@ -678,11 +684,16 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "bf16[3, 3]", L_z_: "f32[3, 3]"):
-        l_x_ = L_x_
-        l_z_ = L_z_
+    def forward(self, args_list):
+        L_torch_dynamo_resume_args_3_ = args_list[0]
+        L_torch_dynamo_resume_args_4_ = args_list[1]
+        args_list.clear()
+        l_torch_dynamo_resume_args_3_ = L_torch_dynamo_resume_args_3_
+        L_torch_dynamo_resume_args_3_ = None
+        l_torch_dynamo_resume_args_4_ = L_torch_dynamo_resume_args_4_
+        L_torch_dynamo_resume_args_4_ = None
 
-        x: "bf16[3, 3]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
+        x: "bf16[3, 3]" = l_torch_dynamo_resume_args_3_ @ l_torch_dynamo_resume_args_4_;  l_torch_dynamo_resume_args_3_ = l_torch_dynamo_resume_args_4_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
@@ -1296,12 +1307,15 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_: "f32[]"):
-        l_y_ = L_y_
+    def forward(self, args_list):
+        L_torch_dynamo_resume_args_4_ = args_list[0]
+        args_list.clear()
+        l_torch_dynamo_resume_args_4_ = L_torch_dynamo_resume_args_4_
+        L_torch_dynamo_resume_args_4_ = None
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        mul: "f32[]" = l_y_ * 2;  l_y_ = None
+        mul: "f32[]" = l_torch_dynamo_resume_args_4_ * 2;  l_torch_dynamo_resume_args_4_ = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (mul,)

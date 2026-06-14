@@ -89,7 +89,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             else:
                 return 2, tmp1, tmp2
 
-        self._common(fn, 6, 13)
+        self._common(fn, 4, 13)
 
     def test_capi_call1(self):
         def fn(a, b):
@@ -348,24 +348,62 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(3)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
-    def test_resume_del_post_break_local_uses_positional_call(self):
+    def test_resume_del_post_break_local_releases_tensor(self):
+        refs = []
+        events = []
+
+        @torch._dynamo.disable
+        def check_tensor_dead(label):
+            gc.collect()
+            events.append((label, refs[-1]() is None))
+
         def fn(x):
             torch._dynamo.graph_break()
             y = x + 1
+            refs.append(weakref.ref(y, lambda _: events.append("freed_y")))
             del y
+            check_tensor_dead("after_del")
             return x + 2
 
         self.assertEqual(
             torch.compile(fn, backend="eager")(torch.ones(3)),
             torch.full((3,), 3.0),
         )
+        self.assertEqual(
+            events,
+            ["freed_y", ("after_del", True)],
+        )
 
-        from torch._dynamo.resume_execution import ContinueExecutionCache
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_resume_del_post_break_local_releases_tensor(self):
+        refs = []
+        events = []
 
-        resume_codes = list(ContinueExecutionCache.cache[fn.__code__].values())
-        self.assertGreater(len(resume_codes), 0)
-        self.assertFalse(
-            any(ContinueExecutionCache.uses_boxed_call(code) for code in resume_codes)
+        @torch._dynamo.disable
+        def check_tensor_dead(label):
+            gc.collect()
+            events.append((label, refs[-1]() is None))
+
+        def inner(x):
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def fn(x):
+            torch._dynamo.graph_break()
+            y = x + 1
+            refs.append(weakref.ref(y, lambda _: events.append("freed_y")))
+            out = inner(x)
+            del y
+            check_tensor_dead("after_del")
+            return out + 3
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(torch.ones(3)),
+            torch.full((3,), 6.0),
+        )
+        self.assertEqual(
+            events,
+            ["freed_y", ("after_del", True)],
         )
 
     def test_start1(self):
@@ -603,8 +641,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                     opt_fn(v1, a, b, c)
 
         # checking here we don't create 2^n graphs
-        self.assertEqual(cnt.frame_count, 7)
-        self.assertEqual(cnt.op_count, 10)
+        self.assertEqual(cnt.frame_count, 9)
+        self.assertEqual(cnt.op_count, 13)
 
     def test_resume_with_no_grad1(self):
         def fn(a, b):
