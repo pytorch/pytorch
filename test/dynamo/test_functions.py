@@ -292,6 +292,30 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_functools_partial(a, b):
         return clip01(a + b)
 
+    def test_functools_partial_from_unregistered_module(self):
+        module_name = "test_dynamo_unregistered_module"
+        self.assertNotIn(module_name, sys.modules)
+        module = types.ModuleType(module_name)
+        exec(
+            """
+import functools
+import torch
+
+def helper(x, scale):
+    return torch.nn.functional.normalize(x, dim=-1) * scale
+
+def fn(x, scale):
+    return helper(x, scale)
+
+partial_fn = functools.partial(fn, scale=2)
+""",
+            module.__dict__,
+        )
+
+        x = torch.randn(4, 4)
+        compiled_fn = torch.compile(module.partial_fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_fn(x), module.partial_fn(x))
+
     @make_test
     def test_itertools_product(a, b):
         v = a
