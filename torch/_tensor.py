@@ -1422,7 +1422,12 @@ class Tensor(torch._C.TensorBase):
             The dim_order tensor API is experimental and subject to change.
         """
         if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.dim_order, (self,), self)
+            return handle_torch_function(
+                Tensor.dim_order,
+                (self,),
+                self,
+                ambiguity_check=ambiguity_check,
+            )
 
         if self.is_sparse:
             raise AttributeError(

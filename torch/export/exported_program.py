@@ -867,6 +867,34 @@ def _common_getitem_elimination_pass(
                     node_id[node] = node.name
 
 
+def _normalize_exported_sym_not(
+    gm: torch.fx.GraphModule, graph_signature, module_call_graph
+) -> None:
+    with gm._set_replace_hook(graph_signature.get_replace_hook()):
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+
+            modified = False
+            for node in list(module.graph.nodes):
+                if node.op == "call_method" and node.target == "__sym_not__":
+                    with module.graph.inserting_before(node):
+                        replacement = module.graph.call_function(
+                            torch.sym_not, args=node.args, kwargs=node.kwargs
+                        )
+                    replacement.meta.update(node.meta)
+                    node.replace_all_uses_with(replacement)
+                    for entry in module_call_graph:
+                        if entry.signature is not None:
+                            entry.signature.replace_all_uses_with(node, replacement)
+                    module.graph.erase_node(node)
+                    modified = True
+
+            if modified:
+                module.graph.lint()
+                module.recompile()
+
+
 def _get_updated_module_call_graph(
     old_gm: torch.fx.GraphModule,
     old_graph_signature: ExportGraphSignature,
@@ -1117,6 +1145,9 @@ class ExportedProgram:
             self._graph_module.meta.update(root.meta)
 
         _common_getitem_elimination_pass(
+            self._graph_module, graph_signature, module_call_graph
+        )
+        _normalize_exported_sym_not(
             self._graph_module, graph_signature, module_call_graph
         )
         self._graph_signature: ExportGraphSignature = graph_signature

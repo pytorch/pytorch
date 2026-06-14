@@ -11857,6 +11857,11 @@ def ___make_guard_fn():
             y = torch.empty_strided([4, 4, 4], [u0, u0, u0])  # no ordering
             return y.dim_order(ambiguity_check=ambiguity_check)
 
+        @torch.compile(dynamic=False, fullgraph=True, backend="eager")
+        def h2():
+            y = torch.empty([1, 2, 3, 4])
+            return y.dim_order(ambiguity_check=True)
+
         # check that for functions permuting contiguous input, the original stride is recovered with dim_order.
         def test(x):
             stride_inp = tuple(x.stride())
@@ -11894,6 +11899,11 @@ def ___make_guard_fn():
             r"The tensor does not have unique dim order.",
         ):
             h1(xs, ambiguity_check=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            r"The tensor does not have unique dim order.",
+        ):
+            h2()
 
     def test_str_format_assert1(self):
         @torch.compile(backend="eager", fullgraph=True)
