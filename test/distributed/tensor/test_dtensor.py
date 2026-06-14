@@ -785,6 +785,55 @@ class DTensorTest(DTensorTestBase):
         self.assertNotEqual(hash(sharded_tensor._spec), hash(replica_tensor._spec))
 
     @with_comms
+    def test_dtensor_spec_hash_dynamic_shapes(self):
+        # A symbolic shape must not make DTensorSpec unhashable.
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        mesh = self.build_device_mesh()
+        s0 = ShapeEnv().create_unbacked_symint()
+
+        def spec():
+            meta = TensorMeta(torch.Size([s0, 4]), (4, 1), torch.float32)
+            return DTensorSpec(mesh, (Shard(0),), tensor_meta=meta)
+
+        self.assertEqual(hash(spec()), hash(spec()))
+
+    @with_comms
+    def test_dtensor_spec_dynamic_shapes_eq_hash_consistency(self):
+        # __eq__ and __hash__ must agree under dynamic shapes, and comparing
+        # specs must not specialize a symbolic dim by installing a ShapeEnv
+        # guard. Comparing a symbolic dim against another symbol or a constant
+        # used to evaluate `SymInt == ...` (raising on unbacked symints and
+        # guarding on backed ones); now it compares hashable surrogates.
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        mesh = self.build_device_mesh()
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_unbacked_symint()
+        s1 = shape_env.create_unbacked_symint()
+
+        def spec(dim):
+            meta = TensorMeta(torch.Size([dim, 4]), (4, 1), torch.float32)
+            return DTensorSpec(mesh, (Shard(0),), tensor_meta=meta)
+
+        # Same symbol: equal and same hash.
+        self.assertEqual(spec(s0), spec(s0))
+        self.assertEqual(hash(spec(s0)), hash(spec(s0)))
+
+        # Distinct symbols and symbol-vs-constant are distinct keys; comparing
+        # them must not raise or guard on the symbolic dim.
+        self.assertNotEqual(spec(s0), spec(s1))
+        self.assertNotEqual(spec(s0), spec(4))
+        self.assertEqual(len(shape_env.guards), 0)
+
+        # eq/hash contract: equal specs must hash equal.
+        for a, b in [(spec(s0), spec(s0)), (spec(4), spec(4))]:
+            if a == b:
+                self.assertEqual(hash(a), hash(b))
+
+    @with_comms
     def test_dtensor_properties(self):
         device_mesh = self.build_device_mesh()
         placements = [Shard(0)]

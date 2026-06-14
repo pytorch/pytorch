@@ -73,6 +73,15 @@ class TensorMeta(NamedTuple):
     dtype: torch.dtype
 
 
+def _hashable_dim(d: Any) -> Any:
+    # Symbolic SymInts are unhashable by design; map dims to a hashable surrogate
+    # so DTensorSpec stays hashable under dynamic shapes (constants keep int value).
+    if isinstance(d, torch.SymInt):
+        i = d.node.maybe_as_int()
+        return i if i is not None else str(d)
+    return d
+
+
 # used internally to propagate the placements
 @dataclass
 class DTensorSpec:
@@ -422,15 +431,27 @@ class DTensorSpec:
             if not isinstance(value, TensorMeta | TensorMetadata):
                 raise AssertionError(repr(value))
 
+    def _hashable_shape_stride(self) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+        # Single source of truth for the shape/stride portion of both __hash__
+        # and __eq__, so the eq/hash contract holds under dynamic shapes.
+        # Comparing SymInts directly with `==` would additionally install a
+        # ShapeEnv guard, so eq compares these surrogates instead. Only called
+        # when tensor_meta is not None.
+        return (
+            tuple(_hashable_dim(d) for d in self.tensor_meta.shape),  # type: ignore[union-attr]
+            tuple(_hashable_dim(d) for d in self.tensor_meta.stride),  # type: ignore[union-attr]
+        )
+
     def _hash_key(self) -> tuple[Any, ...]:
         """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
         if self.tensor_meta is not None:
+            shape, stride = self._hashable_shape_stride()
             return (
                 self.mesh,
                 self.placements,
                 self.shard_order,
-                self.tensor_meta.shape,
-                self.tensor_meta.stride,
+                shape,
+                stride,
                 self.tensor_meta.dtype,
             )
         return (self.mesh, self.placements, self.shard_order)
@@ -480,9 +501,8 @@ class DTensorSpec:
         if skip_shapes:
             return self.tensor_meta.dtype == other.tensor_meta.dtype
         return (
-            self.tensor_meta.shape == other.tensor_meta.shape  # type: ignore[union-attr]
-            and self.tensor_meta.stride == other.tensor_meta.stride  # type: ignore[union-attr]
-            and self.tensor_meta.dtype == other.tensor_meta.dtype  # type: ignore[union-attr]
+            self._hashable_shape_stride() == other._hashable_shape_stride()
+            and self.tensor_meta.dtype == other.tensor_meta.dtype
         )
 
     def __eq__(self, other: object, /) -> bool:
