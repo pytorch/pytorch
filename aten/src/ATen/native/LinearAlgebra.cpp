@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/AccumulateType.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
@@ -1637,9 +1638,9 @@ static inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, 
   int64_t js = result.size(2);
   int64_t ks = self.size(2);
 
-  using opmath_t = at::opmath_type<scalar_t>;
-  opmath_t alpha = alpha_.to<opmath_t>();
-  opmath_t beta = beta_.to<opmath_t>();
+  using accscalar_t = at::acc_type<scalar_t, false>;
+  accscalar_t alpha = alpha_.to<accscalar_t>();
+  accscalar_t beta = beta_.to<accscalar_t>();
 
   auto r0 = result.accessor<scalar_t, 3>();
   auto s0 = self.accessor<const scalar_t, 3>();
@@ -1656,19 +1657,19 @@ static inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, 
           auto r2 = r1[i];
           auto s2 = s1[i];
           for (const auto j : c10::irange(js)) {
-            opmath_t acc_value = 0;//is_bmm ? opmath_t(0) : opmath_t(r2[j]);
+            accscalar_t acc_value = 0;//is_bmm ? opmath_t(0) : opmath_t(r2[j]);
             for (const auto k : c10::irange(ks)) {
-              acc_value += static_cast<opmath_t>(s2[k]) *
-                  static_cast<opmath_t>(m1[k][j]);
+              acc_value += static_cast<accscalar_t>(static_cast<opmath_t>(s2[k]) *
+                  static_cast<opmath_t>(m1[k][j]));
             }
             if (is_bmm) {
               r2[j] = acc_value;
             } else {
               // For beta == 0, the r's value will be ignored, especially for nan value.
-              if (beta == opmath_t{0}) {
+              if (beta == accscalar_t{0}) {
                 r2[j] = alpha * acc_value;
               } else {
-                r2[j] = static_cast<opmath_t>(r2[j]) * beta + alpha * acc_value;
+                r2[j] = static_cast<accscalar_t>(r2[j]) * beta + alpha * acc_value;
               }
             }
           }
