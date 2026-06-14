@@ -49,6 +49,8 @@ def reset_makefx_module_storage() -> None:
 
 
 class _LeafCallable(OpaqueBase):
+    _allow_opaque_reference_mid_trace_creation = True
+
     def __init__(self, fn: Callable) -> None:
         self._fn = fn
 
