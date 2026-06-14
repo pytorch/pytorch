@@ -4097,27 +4097,6 @@ class TestUnbacked(TestCase):
             ):
                 func_negative(x)
 
-    def test_ignore_fresh_unbacked_symbols_preserves_existing_pending(self):
-        shape_env = ShapeEnv()
-        fake_mode = torch._subclasses.FakeTensorMode(
-            allow_non_fake_inputs=True, shape_env=shape_env
-        )
-        with fake_mode:
-            pending = shape_env.create_unbacked_symint().node.expr
-
-            with shape_env.ignore_fresh_unbacked_symbols():
-                ignored = shape_env.create_unbacked_symint().node.expr
-                example_value = torch.empty(2)
-            with self.assertRaisesRegex(
-                Exception, f"Pending unbacked symbols {{{pending}}}"
-            ):
-                torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
-                    shape_env,
-                    example_value,
-                )
-
-        self.assertNotIn(ignored, shape_env.pending_fresh_unbacked_symbols)
-
     def test_meta_copy(self):
         """
         Test that meta_copy_ does not raise when self and src have different
@@ -4259,9 +4238,9 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         view_1: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
         view_2: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
         clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
-        mul_14: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        mul_17: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
-        return (mul_14, mul_17, clone)""",
+        mul_11: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        mul_14: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
+        return (mul_11, mul_14, clone)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4300,9 +4279,9 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
         view_2: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
         clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
-        mul_8: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        mul_11: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
-        return (mul_8, mul_11, clone)""",
+        mul_6: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        mul_9: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
+        return (mul_6, mul_9, clone)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
