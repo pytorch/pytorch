@@ -26,3 +26,18 @@ struct QrParams {
   uint32_t m;
   uint32_t n;
 };
+
+namespace at_gemm {
+
+enum class GemmEpilogue : int { None = 0, AlphaBeta = 1 };
+
+// n - output length
+// ld - matrix row stride
+// xs - vector stride
+// self_r/self_c - row/col strides of the bias (for addmm)
+struct GemvDims {
+  int n, K, ld, xs;
+  int self_r, self_c;
+};
+
+} // namespace at_gemm
