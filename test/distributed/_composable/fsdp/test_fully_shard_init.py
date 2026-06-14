@@ -1021,6 +1021,27 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
             self.assertEqual(param, ref_param)
             self.assertEqual(param.grad, ref_param.grad)
 
+        # Also cover the opt-in reduce-scatter PG setup on HSDP meshes. Each
+        # rank creates the communicator for its shard group, so the
+        # implementation must use local synchronization internally to avoid
+        # waiting for nonmember ranks in new_group's post-init barrier.
+        model.set_separate_reduce_scatter_group()
+        rs_process_groups = set()
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                for param_group in module._get_fsdp_state()._fsdp_param_groups:
+                    self.assertIsNotNone(
+                        param_group.mesh_info.reduce_scatter_process_group
+                    )
+                    self.assertIsNot(
+                        param_group._reduce_scatter_process_group,
+                        param_group.mesh_info.shard_process_group,
+                    )
+                    rs_process_groups.add(
+                        id(param_group.mesh_info.reduce_scatter_process_group)
+                    )
+        self.assertEqual(len(rs_process_groups), 1)
+
 
 class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
     @property

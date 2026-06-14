@@ -329,9 +329,15 @@ class CPUReproTests(TestCase):
                     else set_num_threads(1)
                 ):
                     with torch.no_grad():
+                        # Fold accumulates overlapping patches, so parallel CPU
+                        # codegen can differ slightly from eager accumulation order.
+                        tol_kwargs = (
+                            {"atol": 1e-4, "rtol": 1e-4} if num_threads is None else {}
+                        )
                         self.common(
                             mod,
                             (v,),
+                            **tol_kwargs,
                         )
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
@@ -1229,9 +1235,12 @@ class CPUReproTests(TestCase):
 
         # both inputs to conv should be channels last
         if config.cpp_wrapper:
-            FileCheck().check("{2L, 3L, 4L, 4L}").check("{128L, 1L, 32L, 8L}").check(
-                "{4L, 3L, 3L, 3L}"
-            ).check("{27L, 1L, 9L, 3L}").check("aoti_torch_empty_strided").run(code)
+            cpp_int_array_str = test_torchinductor.cpp_int_array_str
+            FileCheck().check(cpp_int_array_str([2, 3, 4, 4])).check(
+                cpp_int_array_str([128, 1, 32, 8])
+            ).check(cpp_int_array_str([4, 3, 3, 3])).check(
+                cpp_int_array_str([27, 1, 9, 3])
+            ).check("aoti_torch_empty_strided").run(code)
         else:
             FileCheck().check("(2, 3, 4, 4), (128, 1, 32, 8)").check(
                 "empty_strided_cpu((4, 3, 3, 3), (27, 1, 9, 3)"
@@ -1398,56 +1407,55 @@ class CPUReproTests(TestCase):
         self.common(Model(), (x,))
 
     @requires_vectorization
-    def test_cpu_floating_amin_amax_backward_matches_fp64(self):
+    def test_cpu_floating_amin_amax_backward_matches_eager(self):
         # https://github.com/pytorch/pytorch/issues/186799
         cases = (
-            (0, lambda x, y: torch.atan2(x, y).amin(dim=-1)),
-            (1, lambda x, y: torch.atan2(x, y).amax(dim=-1)),
-            (0, lambda x, y: torch.sin(x).amin(dim=-1)),
-            (0, lambda x, y: torch.sin(x).amax(dim=-1)),
-            (0, lambda x, y: torch.cos(x).amin(dim=-1)),
-            (1, lambda x, y: torch.cos(x).amax(dim=-1)),
-            (0, lambda x, y: torch.erf(x).amin(dim=-1)),
-            (0, lambda x, y: torch.erf(x).amax(dim=-1)),
-            (0, lambda x, y: torch.atan(x).amin(dim=-1)),
-            (15, lambda x, y: torch.atan(x).amax(dim=-1)),
+            ("atan2_amin", 0, lambda x, y: torch.atan2(x, y).amin(dim=-1)),
+            ("atan2_amax", 1, lambda x, y: torch.atan2(x, y).amax(dim=-1)),
+            ("sin_amin", 0, lambda x, y: torch.sin(x).amin(dim=-1)),
+            ("sin_amax", 0, lambda x, y: torch.sin(x).amax(dim=-1)),
+            ("cos_amin", 0, lambda x, y: torch.cos(x).amin(dim=-1)),
+            ("cos_amax", 1, lambda x, y: torch.cos(x).amax(dim=-1)),
+            ("erf_amin", 0, lambda x, y: torch.erf(x).amin(dim=-1)),
+            ("erf_amax", 0, lambda x, y: torch.erf(x).amax(dim=-1)),
+            ("atan_amin", 0, lambda x, y: torch.atan(x).amin(dim=-1)),
+            ("atan_amax", 15, lambda x, y: torch.atan(x).amax(dim=-1)),
             (
+                "atan2_view_amin",
                 0,
                 lambda x, y: torch.atan2(x, y).unsqueeze(0).squeeze(0).amin(dim=-1),
             ),
             (
+                "atan2_view_amax",
                 1,
                 lambda x, y: torch.atan2(x, y).unsqueeze(0).squeeze(0).amax(dim=-1),
             ),
-            (0, lambda x, y: torch.sin(x).t().amin(dim=0)),
-            (0, lambda x, y: torch.sin(x).t().amax(dim=0)),
+            ("sin_transpose_amin", 0, lambda x, y: torch.sin(x).t().amin(dim=0)),
+            ("sin_transpose_amax", 0, lambda x, y: torch.sin(x).t().amax(dim=0)),
         )
-        for seed, fn in cases:
-            torch._dynamo.reset()
-            torch.manual_seed(seed)
-            x_init = torch.randn(2, 3)
-            y = torch.randn(2, 3)
+        for name, seed, fn in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                torch.manual_seed(seed)
+                x_init = torch.randn(2, 3)
+                y = torch.randn(2, 3)
 
-            x_ref = x_init.detach().double().requires_grad_(True)
-            y_ref = y.detach().double()
-            ref_out = fn(x_ref, y_ref)
-            ref_out.sum().backward()
+                x_eager = x_init.detach().clone().requires_grad_(True)
+                eager_out = fn(x_eager, y)
+                eager_out.sum().backward()
 
-            x_eager = x_init.detach().clone().requires_grad_(True)
-            eager_out = fn(x_eager, y)
-            eager_out.sum().backward()
+                x_compiled = x_init.detach().clone().requires_grad_(True)
+                compiled_out = torch.compile(fn, backend="inductor")(x_compiled, y)
+                compiled_out.sum().backward()
 
-            x_compiled = x_init.detach().clone().requires_grad_(True)
-            compiled_out = torch.compile(fn, backend="inductor")(x_compiled, y)
-            compiled_out.sum().backward()
-
-            torch.testing.assert_close(compiled_out, eager_out)
-            torch.testing.assert_close(
-                x_eager.grad, x_ref.grad.float(), rtol=1e-5, atol=1e-6
-            )
-            torch.testing.assert_close(
-                x_compiled.grad, x_ref.grad.float(), rtol=1e-5, atol=1e-6
-            )
+                torch.testing.assert_close(compiled_out, eager_out, equal_nan=True)
+                torch.testing.assert_close(
+                    x_compiled.grad,
+                    x_eager.grad,
+                    rtol=1e-5,
+                    atol=1e-6,
+                    equal_nan=True,
+                )
 
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",

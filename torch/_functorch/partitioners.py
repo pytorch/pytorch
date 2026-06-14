@@ -2117,7 +2117,9 @@ def force_save_cpu_floating_aminmax_eq_input(
         # amin/amax backward routes gradients by exact value equality with the
         # reduced input. Rematerializing a CPU floating input in the backward can
         # take a different math path from the forward reduction, making the
-        # equality mask miss the selected element.
+        # equality mask miss the selected element. Saving the producer makes the
+        # backward compare against the same materialized buffer the forward
+        # reduction consumed.
         producer.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
 
