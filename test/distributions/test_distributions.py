@@ -4240,6 +4240,25 @@ class TestDistributions(DistributionsTestCase):
                         self.assertEqual(expanded.event_shape, indep_dist.event_shape)
                         self.assertEqual(expanded.batch_shape, expanded_shape)
 
+    def test_icdf_validates_quantile(self):
+        distributions_to_test = [
+            Uniform(0.0, 1.0),
+            Normal(0.0, 1.0),
+            Cauchy(0.0, 1.0),
+            Exponential(1.0),
+            Laplace(0.0, 1.0),
+            HalfCauchy(1.0),
+            HalfNormal(1.0),
+            ContinuousBernoulli(0.3),
+            GeneralizedPareto(0.0, 1.0, 0.5),
+        ]
+        invalid_quantiles = [torch.tensor(-0.1), torch.tensor(1.5)]
+        for dist in distributions_to_test:
+            for q in invalid_quantiles:
+                with self.assertRaises(ValueError, msg=f"{dist} icdf({q})"):
+                    dist.icdf(q)
+            dist.icdf(torch.tensor(0.5))
+
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_cdf_icdf_inverse(self):

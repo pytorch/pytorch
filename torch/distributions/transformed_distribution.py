@@ -219,6 +219,8 @@ class TransformedDistribution(Distribution):
         Computes the inverse cumulative distribution function using
         transform(s) and computing the score of the base distribution.
         """
+        if self._validate_args:
+            self._validate_quantile(value)
         value = self._monotonize_cdf(value)
         value = self.base_dist.icdf(value)
         for transform in self.transforms:

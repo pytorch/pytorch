@@ -210,6 +210,8 @@ class ContinuousBernoulli(ExponentialFamily):
         )
 
     def icdf(self, value):
+        if self._validate_args:
+            self._validate_quantile(value)
         cut_probs = self._cut_probs()
         return torch.where(
             self._outside_unstable_region(),

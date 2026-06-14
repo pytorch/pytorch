@@ -97,6 +97,8 @@ class Laplace(Distribution):
         )
 
     def icdf(self, value):
+        if self._validate_args:
+            self._validate_quantile(value)
         term = value - 0.5
         return self.loc - self.scale * (term).sign() * torch.log1p(-2 * term.abs())
 

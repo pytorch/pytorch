@@ -78,6 +78,8 @@ class HalfNormal(TransformedDistribution):
         return 2 * self.base_dist.cdf(value) - 1
 
     def icdf(self, prob):
+        if self._validate_args:
+            self._validate_quantile(prob)
         return self.base_dist.icdf((prob + 1) / 2)
 
     def entropy(self):
