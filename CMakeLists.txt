@@ -1033,6 +1033,7 @@ endif()
 
 if(USE_XNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_XNNPACK")
+  string(APPEND CMAKE_CXX_FLAGS " -DXNNPACK_NO_CODE_CACHE")  # Temporary migration aid - see #183795
 endif()
 
 if(USE_VULKAN)
