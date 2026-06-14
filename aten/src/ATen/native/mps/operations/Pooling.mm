@@ -588,6 +588,15 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
   auto dims = input.dim();
   auto leading_dims = input.dim() - pooling_dims;
+  for (int64_t i = 1; i < dims; ++i) {
+    TORCH_CHECK(input.size(i) > 0,
+                op_name,
+                ": Expected input to have non-zero size for non-batch dimensions, but got ",
+                input.sizes(),
+                " with dimension ",
+                i,
+                " being empty.");
+  }
 
   const auto memory_format = input.suggest_memory_format();
   std::vector<int64_t> output_size(dims);
@@ -595,15 +604,27 @@ static void max_unpool_out_mps_template(const Tensor& input,
     output_size[dim] = input.sizes()[dim];
   }
   for (int dim : c10::irange(pooling_dims)) {
+    TORCH_CHECK(output_size_[dim] >= 0,
+                op_name,
+                ": output_size must contain non-negative spatial dimensions, but got output_size[",
+                dim,
+                "]=",
+                output_size_[dim]);
     output_size[leading_dims + dim] = output_size_[dim];
   }
 
   output.resize_(output_size, memory_format);
+  if (output.numel() == 0) {
+    return;
+  }
   output.fill_(0);
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto numThreads = input.numel();
+  if (numThreads == 0) {
+    return;
+  }
   MaxUnpoolingParams<5> params;
 
   params.dims = dims;

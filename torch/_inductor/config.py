@@ -622,7 +622,7 @@ max_autotune_gemm_backends = os.environ.get(
 
 # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
 # in max_autotune. By default it's 5, to keep compile time reasonable.
-# Set to None (or env var "none"/"all") to tune all configs.
+# Set to 0, None, or env var "none"/"all" to tune all configs.
 def _nvgemm_max_profiling_configs_default() -> int | None:
     env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "5")
     if env_val.lower() in ("none", "all"):
@@ -1115,11 +1115,12 @@ def decide_worker_start_method() -> str:
         start_method = os.environ["TORCHINDUCTOR_WORKER_START"]
     else:
         start_method = "subprocess"
-    assert start_method in (
+    if start_method not in (
         "subprocess",
         "fork",
         "spawn",
-    ), f"Invalid start method: {start_method}"
+    ):
+        raise AssertionError(f"Invalid start method: {start_method}")
     return start_method
 
 
@@ -1318,6 +1319,10 @@ class aten_distributed_optimizations:
     # With the empirical profiles this should be 1.0; kept for manual tuning.
     pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
 
+    # Decompose collective patterns when mathematically equivalent local
+    # computation exists. See torch/_inductor/fx_passes/decomp_comms.py.
+    allow_comms_decompositions: bool = False
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
@@ -1358,7 +1363,8 @@ def decide_compile_threads() -> int:
         log.info("compile_threads set to 1 in fbcode")
     else:
         cpu_count = torch._utils.cpu_count()
-        assert cpu_count
+        if not cpu_count:
+            raise AssertionError(f"expected nonzero cpu_count, got {cpu_count}")
         compile_threads = min(32, cpu_count)
         log.info("compile_threads set to %d", compile_threads)
 
@@ -1405,6 +1411,16 @@ strict_static_cuda_launcher: bool = (
 # Alias of strict_static_cuda_launcher, used by both CUDA/XPU.
 strict_static_triton_launcher: bool = Config(
     alias="torch._inductor.config.strict_static_cuda_launcher"
+)
+
+# Retain raw cubin bytes on statically-launchable Triton kernels when caching
+# them, instead of dropping them and relying on the per-kernel cubin files left
+# in the local Triton cache dir. Makes a cached CachingAutotuner portable across
+# machines (e.g. a remote cache restored on a cold container), where
+# reload_cubin_path can rehydrate from the retained bytes instead of forcing a
+# recompile. Trades cache size for portability.
+keep_static_cubin_raw: bool = (
+    os.environ.get("TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW", "0") == "1"
 )
 
 # Use _FastCudaLauncher (vectorcall C extension) instead of
@@ -1685,6 +1701,12 @@ class cpp:
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
+    )
+
+    # Allow emitting KernelContextGuard metadata alongside kernel profiling.
+    # This switch only works when enable_kernel_profile is set to 1.
+    enable_kernel_context_guard = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_CONTEXT_GUARD", "0") == "1"
     )
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint
@@ -2528,10 +2550,6 @@ class cuda(cutlass):
     # Whether to keep intermediate files dring compilation.
     enable_ptxas_info = False
 
-    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
-    # By default it's 5, to keep compile time to a reasonable level.
-    nvgemm_max_profiling_configs: int | None = 5
-
 
 @inherit_fields_from(cutlass)
 class xpu(cutlass):
@@ -2796,6 +2814,18 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
+    # Add Inductor kernel stack traces back into exported PyTorch profiler timelines.
+    provenance_tracking_to_timeline = (
+        os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
+    )
+
+    # Maximum number of trace events to process in profiler timeline post-processing.
+    # If the trace exceeds this limit, provenance tracking will be skipped to avoid OOM.
+    # Set to 0 to disable this protection.
+    provenance_tracking_max_events: int = int(
+        os.environ.get("TORCH_COMPILE_DEBUG_MAX_EVENTS", "500000")
+    )
+
     # Save mapping info from inductor generated kernel to post_grad/pre_grad fx nodes
     # Levels:
     #   0 - disabled (default)
@@ -2809,6 +2839,12 @@ class trace:
             "INDUCTOR_PROVENANCE", os.environ.get("TORCH_COMPILE_DEBUG", "0")
         )
     )
+
+
+def effective_provenance_tracking_level() -> int:
+    if trace.provenance_tracking_to_timeline:
+        return max(trace.provenance_tracking_level, 1)
+    return trace.provenance_tracking_level
 
 
 _save_config_ignore: list[str] = [
