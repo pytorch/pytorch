@@ -2075,6 +2075,22 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   params.cudnn_enabled = ctx.userEnabledCuDNN();
   params.allow_tf32 = ctx.allowTF32CuDNN(at::Float32Op::CONV);
 
+  // Unbatched input (no leading batch dim) is supported by the slow dilated
+  // backward kernels, which insert the batch dim internally and return an
+  // unbatched grad_input. Route such inputs directly to them; the generic path
+  // below requires a batch dim. Other backends fall through and raise the usual
+  // dimensionality error.
+  if (!transposed && groups == 1 && (k == 4 || k == 5) &&
+      input.dim() == k - 1 && grad_output.dim() == k - 1) {
+    ConvBackend dilated_backend = select_conv_backend(
+        input.unsqueeze(0), weight, bias_sizes_opt, /*need_backward=*/true, params);
+    if (dilated_backend == ConvBackend::SlowDilated2d ||
+        dilated_backend == ConvBackend::SlowDilated3d) {
+      return _convolution_backward_nogroup_backend(
+          grad_output, input, weight, output_mask, dilated_backend, params);
+    }
+  }
+
   // Validate inputs.
   check_shape_backward(input, weight.sizes(), params);
   TORCH_CHECK(input.dim() == grad_output.dim(),
