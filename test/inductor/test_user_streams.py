@@ -1667,6 +1667,81 @@ class GraphModule(torch.nn.Module):
         )
 
 
+    def test_codegen_hoist_alignment_copy_multi_stream(self):
+        """Regression test for hoisting alignment fixups read by many streams.
+
+        When an input is read on more than one stream, its
+        ``x = copy_if_misaligned(x)`` rewrite must be hoisted to the prologue
+        (default stream, before any stream fork) instead of being deferred to
+        its first reader by line order.  Deferring it places the copy inside
+        one branch's ``torch.cuda.stream`` body; the other branch then reads
+        a tensor cloned on -- and ordered only after -- that branch's stream,
+        which is a cross-stream race.
+
+        Here ``x`` is read on both ``s1`` and ``s2`` (``w1`` only on ``s1``,
+        ``w2`` only on ``s2``), so ``x``'s alignment copy must appear before
+        the first side-stream context.  Before the fix the copy landed inside
+        ``with stream1:`` and this test failed.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, w1, w2):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x @ w1
+                e1.record(s1)
+            with torch.cuda.stream(s2):
+                b = x @ w2
+                e2.record(s2)
+            e1.wait()
+            e2.wait()
+            c = a + b
+            s1.synchronize()
+            s2.synchronize()
+            return c
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x, w1, w2)
+        self.assertEqual(result, expected)
+
+        wrapper_body = _extract_wrapper_body(code)
+        lines = wrapper_body.split("\n")
+
+        def _first_index(predicate):
+            for idx, line in enumerate(lines):
+                if predicate(line):
+                    return idx
+            return None
+
+        first_copy = _first_index(lambda l: "copy_if_misaligned" in l)
+        first_side_stream = _first_index(
+            lambda l: l.strip().startswith("with stream")
+        )
+
+        self.assertIsNotNone(
+            first_copy, f"no copy_if_misaligned in wrapper:\n{wrapper_body}"
+        )
+        self.assertIsNotNone(
+            first_side_stream,
+            f"no side-stream context in wrapper:\n{wrapper_body}",
+        )
+        # The hoisted copy for the multi-stream input must precede the fork.
+        self.assertLess(
+            first_copy,
+            first_side_stream,
+            "alignment copy for an input read on multiple streams must be "
+            "hoisted to the prologue, before the first side-stream context; "
+            f"got:\n{wrapper_body}",
+        )
+
+
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
 @xfailIfNoAcceleratorTriton
 class TestStreamOrderingStress(InductorTestCase):
