@@ -19,7 +19,9 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfMPS,
+    expectedFailureMeta,
     expectedFailureMPS,
+    expectedFailureXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -4032,10 +4034,12 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     lambda i, w, b: op(i, w, bias=b, **kwargs), inputs
                 )
 
+    # Only CPU and CUDA dispatch; xfail others so new backends XPASS and enable.
+    @expectedFailureMeta
+    @expectedFailureXPU
+    @expectedFailureMPS
     @onlyNativeDeviceTypes
     def test_slow_conv_dilated2d_unbatched(self, device):
-        if torch.device(device).type not in ("cpu", "cuda"):
-            self.skipTest("slow_conv_dilated2d only dispatches to CPU and CUDA")
         # Direct op call to guarantee the slow path.
         input = torch.randn(2, 5, 5, dtype=torch.double, device=device)
         weight = torch.randn(3, 2, 3, 3, dtype=torch.double, device=device)
@@ -4050,10 +4054,12 @@ class TestConvolutionNNDeviceType(NNTestCase):
             torch.ops.aten.slow_conv_dilated2d, input, weight, bias, kwargs
         )
 
+    # Only CPU and CUDA dispatch; xfail others so new backends XPASS and enable.
+    @expectedFailureMeta
+    @expectedFailureXPU
+    @expectedFailureMPS
     @onlyNativeDeviceTypes
     def test_slow_conv_dilated3d_unbatched(self, device):
-        if torch.device(device).type not in ("cpu", "cuda"):
-            self.skipTest("slow_conv_dilated3d only dispatches to CPU and CUDA")
         # Direct op call to guarantee the slow path.
         input = torch.randn(2, 5, 5, 5, dtype=torch.double, device=device)
         weight = torch.randn(3, 2, 3, 3, 3, dtype=torch.double, device=device)
