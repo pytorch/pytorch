@@ -102,10 +102,10 @@ class FlexGemmCuteDSLOpOverrides(CuteDSLOpOverrides):
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmOutputPlan:
-    """Classify the FlexGEMM body output into main and optional aux tensors."""
+    """Classify the FlexGEMM body output into a main result and aux returns."""
 
     output: torch.fx.Node
-    aux_output: torch.fx.Node | None = None
+    aux_outputs: tuple[torch.fx.Node, ...] = ()
 
 
 def output_plan(
@@ -118,19 +118,15 @@ def output_plan(
     if isinstance(output_value, (tuple, list)):
         if len(output_value) == 1:
             output_value = output_value[0]
-        elif len(output_value) == 2:
-            output, aux_output = output_value
-            if not isinstance(output, torch.fx.Node) or not isinstance(
-                aux_output, torch.fx.Node
+        else:
+            output, *aux_outputs = output_value
+            if not isinstance(output, torch.fx.Node) or any(
+                not isinstance(aux_output, torch.fx.Node) for aux_output in aux_outputs
             ):
                 raise NotImplementedError(
                     "FlexGEMM tuple epilogues expect tensor outputs"
                 )
-            return FlexGemmOutputPlan(output, aux_output)
-        else:
-            raise NotImplementedError(
-                "FlexGEMM tuple epilogues currently support only one aux output"
-            )
+            return FlexGemmOutputPlan(output, tuple(aux_outputs))
     if not isinstance(output_value, torch.fx.Node):
         raise NotImplementedError("FlexGEMM expects one tensor output")
     return FlexGemmOutputPlan(output_value)
@@ -231,8 +227,9 @@ def materialize_flex_gemm_epilogue(
     aux_args = [f"aux{index}" for index in range(len(epilogue_arg_placeholders))]
     epilogue_params = ", ".join(["acc", *aux_args])
     result = _cute_arg(outputs.output, env)
-    if outputs.aux_output is not None:
-        result = f"({result}, {_cute_arg(outputs.aux_output, env)})"
+    if outputs.aux_outputs:
+        aux_results = [_cute_arg(aux_output, env) for aux_output in outputs.aux_outputs]
+        result = f"({', '.join(str(item) for item in (result, *aux_results))})"
     return (
         name,
         "import cutlass\n"

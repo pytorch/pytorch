@@ -274,7 +274,7 @@ class FlexGemmTestCase(TestCase):
         )
 
     def assertTupleAuxMatchesReference(self, actual, aux, a, b):
-        """Validate the Chunk 3 tuple-aux epilogue against low/high precision refs."""
+        """Validate tuple-aux epilogues against low/high precision references."""
         acc = a @ b
         acc_float = acc.float()
         high_precision_acc = a.double() @ b.double()
@@ -860,7 +860,22 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(4, 8)
         b = torch.randn(8, 5)
 
-        with self.assertRaisesRegex(Exception, "aux output shape to match"):
+        with self.assertRaisesRegex(Exception, "aux output shapes to match"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    def test_generated_tuple_aux_rejects_multiple_aux_outputs(self):
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: (acc.relu(), acc + 1, acc * 2),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(4, 8)
+        b = torch.randn(8, 5)
+
+        with self.assertRaisesRegex(Exception, "at most one aux output"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL
