@@ -171,9 +171,16 @@ def try_import_cutlass() -> bool:
             import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
             import cutlass_library.generator
             import cutlass_library.library
-            import cutlass_library.manifest  # noqa: F401
+            import cutlass_library.manifest
             import pycute  # type: ignore[import-not-found]  # noqa: F401
 
+            # On XPU, the CUTLASS at TORCHINDUCTOR_CUTLASS_DIR may be
+            # NVIDIA CUTLASS without Intel Xe support.  Try to find
+            # SYCL-TLA (which has GenerateIntelXe) and swap it in.
+            if torch.xpu._is_compiled() and not hasattr(
+                cutlass_library.generator, "GenerateIntelXe"
+            ):
+                _try_swap_sycl_tla()
             return True
         except ImportError as e:
             log.debug(
@@ -185,7 +192,99 @@ def try_import_cutlass() -> bool:
             "Failed to import CUTLASS packages: CUTLASS repo does not exist: %s",
             cutlass_python_path,
         )
+    # On XPU, try system-installed cutlass_library (e.g., SYCL-TLA pip package)
+    # which provides GenerateIntelXe even when TORCHINDUCTOR_CUTLASS_DIR is
+    # not set or points to NVIDIA CUTLASS.
+    if torch.xpu._is_compiled():
+        try:
+            import cutlass_library.generator as _sys_gen  # type: ignore[import-not-found]
+
+            if hasattr(_sys_gen, "GenerateIntelXe"):
+                return True
+        except ImportError:
+            pass
     return False
+
+
+def _try_swap_sycl_tla() -> None:
+    """On XPU, try to find SYCL-TLA (with GenerateIntelXe) and swap sys.modules.
+
+    Called when ``try_import_cutlass()`` successfully imported CUTLASS from
+    ``TORCHINDUCTOR_CUTLASS_DIR`` but the imported ``cutlass_library.generator``
+    lacks ``GenerateIntelXe`` (NVIDIA CUTLASS on XPU).
+
+    Searches, in order:
+    1. System pip-installed SYCL-TLA (site-packages)
+    2. Sibling ``sycl-tla/python`` directory relative to pytorch root
+
+    If SYCL-TLA is found, its modules replace the NVIDIA CUTLASS entries in
+    ``sys.modules`` so subsequent imports in ``_gen_ops_cached()`` use the
+    SYCL-TLA versions.  If not found, the original (NVIDIA CUTLASS) modules
+    are restored unchanged.
+    """
+    # Remove the tmp symlink paths so importlib searches system site-packages.
+    saved_paths = [p for p in sys.path if "torch_cutlass" in p]
+    for p in saved_paths:
+        sys.path.remove(p)
+
+    # Clear cached cutlass modules imported from the symlink paths.
+    saved_modules = {}
+    for mod_name in list(sys.modules):
+        if mod_name.startswith(("cutlass_library", "cutlass_cppgen", "pycute")):
+            saved_modules[mod_name] = sys.modules.pop(mod_name)
+
+    found = False
+    try:
+        # Try 1: system pip-installed SYCL-TLA
+        try:
+            import cutlass_library.generator as _sys_gen  # type: ignore[no-redef]
+
+            if hasattr(_sys_gen, "GenerateIntelXe"):
+                log.debug(
+                    "Using system-installed CUTLASS library (SYCL-TLA) for XPU ops."
+                )
+                found = True
+        except ImportError:
+            pass
+
+        if not found:
+            # Try 2: sibling sycl-tla/python directory
+            import torch
+
+            torch_root = os.path.abspath(os.path.dirname(torch.__file__))
+            sycl_tla_python = os.path.abspath(
+                os.path.join(
+                    torch_root,
+                    os.pardir,
+                    os.pardir,
+                    os.pardir,
+                    "sycl-tla",
+                    "python",
+                )
+            )
+            if os.path.isdir(sycl_tla_python):
+                sys.path.insert(0, sycl_tla_python)
+                try:
+                    import cutlass_library.generator as _sib_gen  # type: ignore[no-redef]
+
+                    if hasattr(_sib_gen, "GenerateIntelXe"):
+                        log.debug(
+                            "Using sibling sycl-tla (%s) for XPU CUTLASS ops.",
+                            sycl_tla_python,
+                        )
+                        found = True
+                except ImportError:
+                    pass
+
+        if found:
+            # Success: the new module versions stay in sys.modules.
+            log.debug("SYCL-TLA swap succeeded for XPU CUTLASS.")
+            return
+    finally:
+        if not found:
+            # Restore the original (NVIDIA CUTLASS) modules and paths.
+            sys.modules.update(saved_modules)
+        sys.path.extend(saved_paths)
 
 
 def _normalize_xpu_arch(arch: str) -> str:
@@ -316,9 +415,94 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
                 manifest, args.toolkit_version, arch=int(arch)
             )
         else:
-            raise NotImplementedError(
-                "Arch " + arch + " is not supported by current cutlass lib."
-            )
+            # The CUTLASS at TORCHINDUCTOR_CUTLASS_DIR (or default) may be
+            # NVIDIA CUTLASS without Intel Xe support. Try to find the
+            # system-installed cutlass_library (e.g., SYCL-TLA pip package)
+            # which provides GenerateIntelXe for XPU.
+            try:
+                import sys as _sys
+
+                # Temporarily remove tmp symlink paths so importlib finds
+                # the system-installed cutlass_library instead
+                saved_paths = [p for p in _sys.path if "torch_cutlass" in p]
+                for p in saved_paths:
+                    _sys.path.remove(p)
+                # Clear cached modules imported from the tmp symlink paths
+                saved_modules = {}
+                for mod_name in list(_sys.modules):
+                    if mod_name.startswith(
+                        ("cutlass_library", "cutlass_cppgen", "pycute")
+                    ):
+                        saved_modules[mod_name] = _sys.modules.pop(mod_name)
+
+                _found = False
+                sys_gen = None
+                try:
+                    # Try 1: system pip-installed SYCL-TLA
+                    import cutlass_library.generator as sys_gen  # type: ignore[no-redef]
+
+                    if hasattr(sys_gen, "GenerateIntelXe"):
+                        _found = True
+                except ImportError:
+                    pass
+
+                if not _found:
+                    # Try 2: sibling sycl-tla/python directory
+                    _torch_root = os.path.abspath(os.path.dirname(torch.__file__))
+                    _sycl_tla_python = os.path.abspath(
+                        os.path.join(
+                            _torch_root,
+                            os.pardir,
+                            os.pardir,
+                            os.pardir,
+                            "sycl-tla",
+                            "python",
+                        )
+                    )
+                    if os.path.isdir(_sycl_tla_python):
+                        _sys.path.insert(0, _sycl_tla_python)
+                        try:
+                            import cutlass_library.generator as sib_gen  # type: ignore[no-redef]
+
+                            if hasattr(sib_gen, "GenerateIntelXe"):
+                                _found = True
+                                sys_gen = sib_gen
+                        except ImportError:
+                            pass
+
+                if _found:
+                    sys_gen.GenerateIntelXe(  # type: ignore[union-attr]
+                        manifest, args.toolkit_version, arch=int(arch)
+                    )
+                    log.debug(
+                        "Using %s CUTLASS library (SYCL-TLA) for XPU ops generation.",
+                        "system-installed"
+                        if not os.path.isdir(
+                            os.path.join(
+                                os.path.abspath(os.path.dirname(torch.__file__)),
+                                os.pardir,
+                                os.pardir,
+                                os.pardir,
+                                "sycl-tla",
+                                "python",
+                            )
+                        )
+                        else "sibling sycl-tla",
+                    )
+                else:
+                    raise ImportError("System cutlass_library lacks GenerateIntelXe")
+            except ImportError:
+                log.warning(
+                    "GenerateIntelXe not available in CUTLASS library. "
+                    "Skipping CUTLASS gemm ops for XPU arch %s. "
+                    "Set TORCHINDUCTOR_CUTLASS_DIR to a CUTLASS with "
+                    "Intel Xe support.",
+                    arch,
+                )
+                return {}
+            finally:
+                _sys.path.extend(saved_paths)
+                _sys.modules.update(saved_modules)
 
     elif arch == "100":
         if hasattr(cutlass_generator, "GenerateSM100"):

@@ -543,6 +543,20 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         # The future will be awaited at scheduling time in select_algorithm.py
         best_config_future = gen_best_config(mat1, mat2)
 
+    # Safety net: fall back to ATEN when configured backends produce no choices
+    # (e.g., CUTLASS-only config on XPU where CUTLASS XPU ops aren't available).
+    # Only trigger when max_autotune_gemm_backends is non-empty — an empty
+    # backends string (deliberately set by test_no_valid_choices) should still
+    # raise NoValidChoicesError upstream.
+    if len(choices) == 0 and inductor_config.max_autotune_gemm_backends:
+        log.warning(
+            "No gemm choices found for backend(s) %s. Falling back to ATEN.",
+            inductor_config.max_autotune_gemm_backends,
+        )
+        choices.append(
+            aten_handler.bind(kernel_inputs.nodes(), layout, **aten_extra_kwargs)
+        )
+
     if box := distributed_autotune.maybe_autotune_remote(
         name, choices, kernel_inputs.nodes(), layout
     ):
