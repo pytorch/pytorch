@@ -3296,6 +3296,42 @@ class CommonTemplate:
         actual = torch.compile(fn)(x)
         self.assertEqual(actual, expected)
 
+    def test_add_scalar_type_promotion_bf16(self):
+        # https://github.com/pytorch/pytorch/issues/185517
+        def fwd(x):
+            return x + 1.7, x - 1.7
+
+        x = torch.tensor(
+            [-1.703125, 1.703125, 0.5], dtype=torch.bfloat16, device=self.device
+        )
+        self.assertEqual(torch.compile(fwd)(x), fwd(x))
+
+        # Eager CPU/MPS round margin to bf16, making the pre-clamp value of
+        # margin_ranking_loss exactly 0.0, so the clamp_min backward passes
+        # gradient at the boundary. The compiled backward must agree.
+        def loss_fn(a, b, t):
+            return torch.nn.functional.margin_ranking_loss(
+                a, b, t, margin=1.7, reduction="mean"
+            )
+
+        def grads(f):
+            a = torch.tensor(
+                [1.703125] * 2,
+                dtype=torch.bfloat16,
+                device=self.device,
+                requires_grad=True,
+            )
+            b = torch.zeros(
+                2, dtype=torch.bfloat16, device=self.device, requires_grad=True
+            )
+            t = torch.ones(2, dtype=torch.bfloat16, device=self.device)
+            f(a, b, t).backward()
+            return a.grad, b.grad
+
+        expected = grads(loss_fn)
+        actual = grads(torch.compile(loss_fn))
+        self.assertEqual(actual, expected)
+
     @skip_if_gpu_halide
     @xfail_if_triton_cpu
     def test_dist(self):
