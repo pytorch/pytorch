@@ -141,6 +141,102 @@ def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
     preserve_node_ordering(graph, additional_deps_map)
 
 
+def _get_arg_value_or_default(
+    node: torch.fx.Node, arg_number: int, kwarg_name: str, default: Any
+) -> Any:
+    if len(node.args) > arg_number:
+        return node.args[arg_number]
+    return node.kwargs.get(kwarg_name, default)
+
+
+def _is_mean_dim_node(node: torch.fx.Node) -> bool:
+    return (
+        node.op == "call_function"
+        and node.target == aten.mean.dim
+        and _get_arg_value_or_default(node, 3, "dtype", None) is None
+    )
+
+
+def _is_var_correction_node(node: torch.fx.Node) -> bool:
+    return node.op == "call_function" and node.target == aten.var.correction
+
+
+def _normalize_reduction_dim_arg(dim: Any) -> Any:
+    if isinstance(dim, (list, tuple)):
+        return tuple(dim)
+    return dim
+
+
+def _same_mean_var_reduction(mean_node: torch.fx.Node, var_node: torch.fx.Node) -> bool:
+    return (
+        mean_node.args[0] is var_node.args[0]
+        and _normalize_reduction_dim_arg(get_arg_value(mean_node, 1, "dim"))
+        == _normalize_reduction_dim_arg(get_arg_value(var_node, 1, "dim"))
+        and _get_arg_value_or_default(mean_node, 2, "keepdim", False)
+        == _get_arg_value_or_default(var_node, 3, "keepdim", False)
+    )
+
+
+def canonicalize_mean_var_to_var_mean(graph: torch.fx.Graph) -> None:
+    """
+    Replace same-input mean/var reduction pairs with var_mean so the first sum is shared.
+    """
+    mean_nodes = [node for node in graph.nodes if _is_mean_dim_node(node)]
+    if not mean_nodes:
+        return
+
+    node_positions = {node: pos for pos, node in enumerate(graph.nodes)}
+    remaining_mean_nodes = OrderedSet(mean_nodes)
+
+    for var_node in list(graph.nodes):
+        if not _is_var_correction_node(var_node):
+            continue
+
+        mean_node = next(
+            (
+                node
+                for node in remaining_mean_nodes
+                if _same_mean_var_reduction(node, var_node)
+            ),
+            None,
+        )
+        if mean_node is None:
+            continue
+
+        dim = get_arg_value(var_node, 1, "dim")
+        correction = _get_arg_value_or_default(var_node, 2, "correction", None)
+        keepdim = _get_arg_value_or_default(var_node, 3, "keepdim", False)
+        first_node = (
+            mean_node
+            if node_positions[mean_node] < node_positions[var_node]
+            else var_node
+        )
+
+        with graph.inserting_before(first_node):
+            var_mean_node = graph.call_function(
+                aten.var_mean.correction,
+                args=(var_node.args[0], dim),
+                kwargs={"correction": correction, "keepdim": keepdim},
+            )
+            var_getitem = graph.call_function(operator.getitem, args=(var_mean_node, 0))
+            mean_getitem = graph.call_function(
+                operator.getitem, args=(var_mean_node, 1)
+            )
+
+        var_mean_node.meta.update(var_node.meta)
+        if "val" in var_node.meta and "val" in mean_node.meta:
+            var_mean_node.meta["val"] = (var_node.meta["val"], mean_node.meta["val"])
+        var_getitem.meta.update(var_node.meta)
+        mean_getitem.meta.update(mean_node.meta)
+
+        var_node.replace_all_uses_with(var_getitem)
+        mean_node.replace_all_uses_with(mean_getitem)
+        graph.erase_node(var_node)
+        graph.erase_node(mean_node)
+        remaining_mean_nodes.remove(mean_node)
+        counters["inductor"]["mean_var_to_var_mean"] += 1
+
+
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
@@ -205,6 +301,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
             remove_assert_ops
         )
+        GraphTransformObserver(
+            gm, "canonicalize_mean_var_to_var_mean"
+        ).apply_graph_pass(canonicalize_mean_var_to_var_mean)
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
