@@ -29,8 +29,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfTorchDynamo,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
@@ -243,7 +245,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         # once - so in total 2 (1 fwd + 1 bwd)
         self.assertEqual(len(codes), 2)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False, True])
     def test_flex_attention(self, serialize):
         def _squared(score, b, h, m, n):
@@ -268,7 +270,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             a * b,
             b,
             dtype=torch.bfloat16,
-            device="cuda",
+            device=device_type,
             requires_grad=True,
         )
 
@@ -426,7 +428,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         ):
             opt_fn(x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False, True])
     def test_selective_ac_flex(self, serialize):
         class FlexAttentionModule(torch.nn.Module):
@@ -517,9 +519,9 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
                 return output
 
         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
-            "cuda", dtype=torch.bfloat16
+            device_type, dtype=torch.bfloat16
         )
-        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+        x = torch.ones(8, 1024, 512, device=device_type, dtype=torch.bfloat16)
         compiled_module = torch.compile(
             flex_module, backend=aot_eager_regional_inductor(), fullgraph=True
         )
@@ -925,7 +927,7 @@ def forward(self, arg0_1, arg1_1):
                 ignore_empty_lines=True,
             )
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False])  # , True
     def test_flex_attention(self, serialize):
         def _squared(score, b, h, m, n):
@@ -959,7 +961,7 @@ def forward(self, arg0_1, arg1_1):
             a * b,
             b,
             dtype=torch.bfloat16,
-            device="cuda",
+            device=device_type,
             requires_grad=True,
         )
 
@@ -1086,7 +1088,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 }
             )
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False])  # , True
     def test_selective_ac_flex(self, serialize):
         # must decompose the following fallback ops in inductor
@@ -1194,9 +1196,9 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 return output
 
         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
-            "cuda", dtype=torch.bfloat16
+            device_type, dtype=torch.bfloat16
         )
-        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+        x = torch.ones(8, 1024, 512, device=device_type, dtype=torch.bfloat16)
         compiled_module = torch.compile(
             flex_module,
             backend=aot_eager_regional_inductor(serialize, on_invoke_subgraph=True),
@@ -1604,7 +1606,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         fn(x).sum().backward()
         self.assertEqual(x.grad, x * 3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False])
     def test_comprehensive_padding_saved_tensor_stride(self, serialize):
         # When an op inside a nested_compile_region produces a tensor whose
@@ -1632,9 +1634,15 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         def fn(x, w):
             return loss_region(x, w)
 
-        x = torch.randn(64, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        x = torch.randn(
+            64, 32, device=device_type, dtype=torch.bfloat16, requires_grad=True
+        )
         w = torch.randn(
-            out_features, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+            out_features,
+            32,
+            device=device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
         )
 
         x_ref = x.detach().clone().requires_grad_()
