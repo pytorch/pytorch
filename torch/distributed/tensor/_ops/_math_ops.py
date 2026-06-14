@@ -1776,11 +1776,11 @@ def grid_sampler_backward_strategy(
 def _adjust_group_norm_scalars(
     input_specs: list[DTensorSpec], schema: OpSchema
 ) -> OpSchema:
-    """Adjust N, C, HxW scalar args in native_group_norm to local values.
+    """Adjust N, C, HxW scalar args to local values for group_norm forward/backward.
 
-    native_group_norm(input, weight?, bias?, N, C, HxW, group, eps)
-    The scalar args are derived from the global input shape by the Python frontend.
-    When the input is sharded, we recompute them from the local input shape.
+    Shared by native_group_norm and native_group_norm_backward. Both have
+    tensor args followed by N, C, HxW scalars. The scalars are derived from
+    the global input shape; we recompute them from the local shape when sharded.
     """
     input_spec = input_specs[0]
     if input_spec.tensor_meta is None:
@@ -1899,11 +1899,39 @@ def group_norm_strategy(
     return [placements]
 
 
-# Register scalar shape adjuster for group_norm so the sharding propagator
-# rewrites the N/C/HxW args to local values when the input is sharded.
+@register_single_dim_strategy(
+    [aten.native_group_norm_backward.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def group_norm_backward_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    # native_group_norm_backward(grad_out, input, mean, rstd, weight?, N, C, HxW, group, output_mask)
+    #   -> (grad_input, grad_weight, grad_bias)
+    weight_meta = args_schema[4]
+    placements: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(0),  # grad_input [N,C,*]
+        Partial("sum") if weight_meta is not None else None,  # grad_weight [C]
+        Partial("sum") if weight_meta is not None else None,  # grad_bias [C]
+        _ShardingPlaceholder(0),  # grad_out [N,C,*]
+        _ShardingPlaceholder(0),  # input [N,C,*]
+        _ShardingPlaceholder(0),  # mean [N,groups]
+        _ShardingPlaceholder(0),  # rstd [N,groups]
+    ]
+    if weight_meta is not None:
+        placements.append(Replicate())
+    return [placements]
+
+
+# Register scalar adjuster for both forward and backward.
 from torch.distributed.tensor._api import DTensor
 
 
 DTensor._op_dispatcher.sharding_propagator.op_to_scalar_shape_adjuster[
     aten.native_group_norm.default
+] = _adjust_group_norm_scalars
+DTensor._op_dispatcher.sharding_propagator.op_to_scalar_shape_adjuster[
+    aten.native_group_norm_backward.default
 ] = _adjust_group_norm_scalars
