@@ -407,6 +407,10 @@ void weight_norm_kernel(
     int64_t dim) {
   TORCH_INTERNAL_ASSERT(dim == 0 || dim == v.dim() - 1,
       "fused kernels can only be applied for first or last dim");
+  if (v.numel() == 0) {
+    norm.fill_(0);
+    return;
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, v.scalar_type(),
       "weight_norm_kernel", [&]() {
     using accscalar_t = at::opmath_type<scalar_t>;
@@ -432,6 +436,10 @@ void weight_norm_backward_kernel(
     int64_t dim) {
   TORCH_INTERNAL_ASSERT(dim == 0 || dim == saved_v.dim() - 1,
       "fused kernels can only be applied for first or last dim");
+  if (saved_v.numel() == 0) {
+    grad_g.fill_(0);
+    return;
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, saved_v.scalar_type(),
       "weight_norm_backward_kernel", [&]() {
     using accscalar_t = at::opmath_type<scalar_t>;
