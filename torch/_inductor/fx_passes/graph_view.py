@@ -200,7 +200,7 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
     # set), look each up in fqn_map, and include only those whose FQN prefix
     # matches an anchor.  This captures inline ops (e.g. relu, add inlined into
     # a parent buffer) while rejecting cascaded history from upstream blocks.
-    extern_fqns: set[str] = getattr(V.graph, "fx_extern_fqns", set())
+    extern_fqns: OrderedSet[str] = getattr(V.graph, "fx_extern_fqns", OrderedSet())
     module_names: OrderedSet[str] = OrderedSet()
     for snode in scheduler_nodes:
         if snode.node is None:
