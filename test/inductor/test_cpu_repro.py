@@ -1406,6 +1406,57 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 3, 64, 64)
         self.common(Model(), (x,))
 
+    @requires_vectorization
+    def test_cpu_floating_amin_amax_backward_matches_eager(self):
+        # https://github.com/pytorch/pytorch/issues/186799
+        cases = (
+            ("atan2_amin", 0, lambda x, y: torch.atan2(x, y).amin(dim=-1)),
+            ("atan2_amax", 1, lambda x, y: torch.atan2(x, y).amax(dim=-1)),
+            ("sin_amin", 0, lambda x, y: torch.sin(x).amin(dim=-1)),
+            ("sin_amax", 0, lambda x, y: torch.sin(x).amax(dim=-1)),
+            ("cos_amin", 0, lambda x, y: torch.cos(x).amin(dim=-1)),
+            ("cos_amax", 1, lambda x, y: torch.cos(x).amax(dim=-1)),
+            ("erf_amin", 0, lambda x, y: torch.erf(x).amin(dim=-1)),
+            ("erf_amax", 0, lambda x, y: torch.erf(x).amax(dim=-1)),
+            ("atan_amin", 0, lambda x, y: torch.atan(x).amin(dim=-1)),
+            ("atan_amax", 15, lambda x, y: torch.atan(x).amax(dim=-1)),
+            (
+                "atan2_view_amin",
+                0,
+                lambda x, y: torch.atan2(x, y).unsqueeze(0).squeeze(0).amin(dim=-1),
+            ),
+            (
+                "atan2_view_amax",
+                1,
+                lambda x, y: torch.atan2(x, y).unsqueeze(0).squeeze(0).amax(dim=-1),
+            ),
+            ("sin_transpose_amin", 0, lambda x, y: torch.sin(x).t().amin(dim=0)),
+            ("sin_transpose_amax", 0, lambda x, y: torch.sin(x).t().amax(dim=0)),
+        )
+        for name, seed, fn in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                torch.manual_seed(seed)
+                x_init = torch.randn(2, 3)
+                y = torch.randn(2, 3)
+
+                x_eager = x_init.detach().clone().requires_grad_(True)
+                eager_out = fn(x_eager, y)
+                eager_out.sum().backward()
+
+                x_compiled = x_init.detach().clone().requires_grad_(True)
+                compiled_out = torch.compile(fn, backend="inductor")(x_compiled, y)
+                compiled_out.sum().backward()
+
+                torch.testing.assert_close(compiled_out, eager_out, equal_nan=True)
+                torch.testing.assert_close(
+                    x_compiled.grad,
+                    x_eager.grad,
+                    rtol=1e-5,
+                    atol=1e-6,
+                    equal_nan=True,
+                )
+
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",
         "Failing in periodic nogpu_NO_AVX2 after added in #152542",
