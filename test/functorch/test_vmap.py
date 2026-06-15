@@ -71,6 +71,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     subtest,
+    TEST_MPS,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1226,6 +1227,10 @@ class TestVmapAPI(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_vmap_autocast_cuda(self):
         self._test_vmap_autocast("cuda")
+
+    @unittest.skipIf(not TEST_MPS, "MPS is unavailable")
+    def test_vmap_autocast_mps(self):
+        self._test_vmap_autocast("mps")
 
     def test_restore_vmap_pytree_input_output(self):
         def f(x, y):
