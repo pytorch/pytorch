@@ -71,6 +71,28 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+_DATA_PTR_ACCESS_ERROR = "Cannot access data pointer of Tensor"
+_RAW_TRITON_KERNEL_NON_STRICT_EXPORT_ERROR = (
+    "Raw Triton kernel calls are not supported by non-strict torch.export. "
+    "Wrap the kernel in a torch.library.triton_op and call it through "
+    "torch.library.wrap_triton (or torch._library.capture_triton) so export "
+    "records a stable custom operator instead of tracing into Triton's runtime."
+)
+
+
+def _is_raw_triton_kernel_data_ptr_error(func, exc: RuntimeError) -> bool:
+    if getattr(func, "__name__", None) != "data_ptr":
+        return False
+    if _DATA_PTR_ACCESS_ERROR not in str(exc):
+        return False
+
+    for frame in inspect.stack(context=0):
+        filename = frame.filename.replace("\\", "/")
+        if "/triton/runtime/" in filename:
+            return True
+    return False
+
+
 class _KeyPath:
     """
     Wraps `KeyPath` to aid `isinstance` checks.
@@ -540,13 +562,15 @@ def _flatten_dynamic_shapes(
 
 
 def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
-    for attr in [
+    for attr in (
         "_dynamo_weak_dynamic_indices",
         "_dynamo_dynamic_indices",
         "_dynamo_dynamic_range",
         "_dynamo_static_indices",
         "_dynamo_unbacked_indices",
-    ]:
+        "_dynamo_propagated_dynamic_indices",
+        "_has_dynamo_dim_marking",
+    ):
         if hasattr(tensor, attr):
             delattr(tensor, attr)
 
@@ -1063,6 +1087,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 args = ()
                 if func in (
                     torch.distributed.all_reduce,
+                    torch.distributed.reduce_scatter_single,
                     torch.distributed.reduce_scatter_tensor,
                     torch.distributed._reduce_scatter_base,
                 ):
@@ -1081,20 +1106,51 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 return torch._refs.tensor, args, kwargs
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
 
+            def is_scalar_tensor_index(item):
+                if not isinstance(item, torch.Tensor) or item.ndim != 0:
+                    return False
+
+                from torch._prims_common import is_integer_dtype
+
+                return is_integer_dtype(item.dtype)
+
+            def maybe_tensor_index_item(item):
+                if is_scalar_tensor_index(item):
+                    return item.item()
+                return item
+
             def rewrite(dim, item):
                 # Redirect to torch.select for indexing.
                 if item is None:
                     return dim + 1, (torch.unsqueeze, [dim])
                 if isinstance(item, (int, torch.SymInt)):
                     return dim, (torch.select, [dim, item])
+                if is_scalar_tensor_index(item):
+                    return dim, (
+                        lambda t, dim, item: torch.select(
+                            t, dim, maybe_tensor_index_item(item)
+                        ),
+                        [dim, item],
+                    )
                 # Redirect to torch.ops.aten.slice for slicing.
                 if isinstance(item, slice):
-                    step = item.step or 1
-                    if item.start is None and item.stop is None and step == 1:
+                    step = 1 if item.step is None else item.step
+                    if (
+                        item.start is None
+                        and item.stop is None
+                        and isinstance(step, int)
+                        and step == 1
+                    ):
                         # no-op
                         return dim + 1, (lambda t: t, [])
                     return dim + 1, (
-                        torch.ops.aten.slice,
+                        lambda t, dim, start, stop, step: torch.ops.aten.slice(
+                            t,
+                            dim,
+                            maybe_tensor_index_item(start),
+                            maybe_tensor_index_item(stop),
+                            maybe_tensor_index_item(step),
+                        ),
                         [dim, item.start, item.stop, step],
                     )
                 # Otherwise do nothing.
@@ -1106,12 +1162,16 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             t = args[0]
             n_none_slices = t.ndim + 1
             for i, item in enumerate(items):
-                if isinstance(item, torch.SymInt) or (
-                    isinstance(item, slice)
-                    and any(
-                        isinstance(s, torch.SymInt)
-                        for s in (item.start, item.stop, item.step)
+                if (
+                    isinstance(item, torch.SymInt)
+                    or (
+                        isinstance(item, slice)
+                        and any(
+                            isinstance(s, torch.SymInt) or is_scalar_tensor_index(s)
+                            for s in (item.start, item.stop, item.step)
+                        )
                     )
+                    or is_scalar_tensor_index(item)
                 ):
                     has_symint = True
                 if item is Ellipsis:
@@ -1167,4 +1227,8 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             return func(*args, **kwargs)
         except GuardOnDataDependentSymNode as e:
             _suggest_fixes_for_data_dependent_error_non_strict(e)
+            raise
+        except RuntimeError as e:
+            if _is_raw_triton_kernel_data_ptr_error(func, e):
+                raise RuntimeError(_RAW_TRITON_KERNEL_NON_STRICT_EXPORT_ERROR) from e
             raise

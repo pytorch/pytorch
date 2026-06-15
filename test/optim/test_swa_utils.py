@@ -10,17 +10,8 @@ from torch.optim.swa_utils import (
     get_swa_multi_avg_fn,
     update_bn,
 )
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    load_tests,
-    parametrize,
-    TestCase,
-)
-
-
-# load_tests from common_utils is used to automatically filter tests for
-# sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests  # noqa: PLW0127
+from torch.testing._internal.common_device_type import onlyAccelerator, onlyCPU
+from torch.testing._internal.common_utils import parametrize, TestCase
 
 
 class TestSWAUtils(TestCase):
@@ -57,6 +48,8 @@ class TestSWAUtils(TestCase):
             return x
 
     def _test_averaged_model(self, net_device, swa_device, ema):
+        net_device = torch.device(net_device)
+        swa_device = torch.device(swa_device)
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.ReLU(),
@@ -108,23 +101,23 @@ class TestSWAUtils(TestCase):
         return averaged_params, averaged_dnn
 
     @parametrize("ema", [True, False])
-    def test_averaged_model_all_devices(self, ema):
-        cpu = torch.device("cpu")
-        self._test_averaged_model(cpu, cpu, ema)
-        if torch.cuda.is_available():
-            cuda = torch.device(0)
-            self._test_averaged_model(cuda, cpu, ema)
-            self._test_averaged_model(cpu, cuda, ema)
-            self._test_averaged_model(cuda, cuda, ema)
+    def test_averaged_model_same_device(self, device, ema):
+        self._test_averaged_model(device, device, ema)
 
+    @onlyAccelerator
     @parametrize("ema", [True, False])
-    def test_averaged_model_mixed_device(self, ema):
-        if not torch.cuda.is_available():
-            return
+    def test_averaged_model_cross_device(self, device, ema):
+        cpu = torch.device("cpu")
+        self._test_averaged_model(device, cpu, ema)
+        self._test_averaged_model(cpu, device, ema)
+
+    @onlyAccelerator
+    @parametrize("ema", [True, False])
+    def test_averaged_model_mixed_device(self, device, ema):
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3), torch.nn.Linear(5, 10)
         )
-        dnn[0].cuda()
+        dnn[0].to(device)
         dnn[1].cpu()
 
         averaged_params, averaged_dnn = self._run_averaged_steps(dnn, None, ema)
@@ -134,7 +127,8 @@ class TestSWAUtils(TestCase):
             # Check that AveragedModel is on the correct device
             self.assertTrue(p_avg.device == p_swa.device)
 
-    def test_averaged_model_state_dict(self):
+    @onlyCPU
+    def test_averaged_model_state_dict(self, device):
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3), torch.nn.Linear(5, 10)
         )
@@ -150,7 +144,8 @@ class TestSWAUtils(TestCase):
             self.assertEqual(p_swa, p_swa2)
         self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
 
-    def test_averaged_model_default_avg_fn_picklable(self):
+    @onlyCPU
+    def test_averaged_model_default_avg_fn_picklable(self, device):
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.BatchNorm2d(5),
@@ -159,9 +154,10 @@ class TestSWAUtils(TestCase):
         averaged_dnn = AveragedModel(dnn)
         pickle.dumps(averaged_dnn)
 
+    @onlyCPU
     @parametrize("use_multi_avg_fn", [True, False])
     @parametrize("use_buffers", [True, False])
-    def test_averaged_model_exponential(self, use_multi_avg_fn, use_buffers):
+    def test_averaged_model_exponential(self, device, use_multi_avg_fn, use_buffers):
         # Test AveragedModel with EMA as avg_fn and use_buffers as True.
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
@@ -222,17 +218,12 @@ class TestSWAUtils(TestCase):
             for b_avg, b_swa in zip(dnn.buffers(), averaged_dnn.module.buffers()):
                 self.assertEqual(b_avg, b_swa)
 
-    def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):
-        preactivation_sum = torch.zeros(dnn.n_features)
-        preactivation_squared_sum = torch.zeros(dnn.n_features)
-        if cuda:
-            preactivation_sum = preactivation_sum.cuda()
-            preactivation_squared_sum = preactivation_squared_sum.cuda()
+    def _test_update_bn(self, dnn, dl_x, dl_xy, device):
+        preactivation_sum = torch.zeros(dnn.n_features, device=device)
+        preactivation_squared_sum = torch.zeros(dnn.n_features, device=device)
         total_num = 0
         for x in dl_x:
-            x = x[0]
-            if cuda:
-                x = x.cuda()
+            x = x[0].to(device)
 
             dnn.forward(x)
             preactivations = dnn.compute_preactivation(x)
@@ -248,7 +239,7 @@ class TestSWAUtils(TestCase):
         preactivation_var = preactivation_squared_sum / total_num
         preactivation_var = preactivation_var - preactivation_mean**2
 
-        update_bn(dl_xy, dnn, device=x.device)
+        update_bn(dl_xy, dnn, device=device)
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
         self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1, rtol=0)
 
@@ -259,16 +250,16 @@ class TestSWAUtils(TestCase):
 
         # reset batch norm and run update_bn again
         dnn.apply(_reset_bn)
-        update_bn(dl_xy, dnn, device=x.device)
+        update_bn(dl_xy, dnn, device=device)
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
         self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1, rtol=0)
         # using the dl_x loader instead of dl_xy
         dnn.apply(_reset_bn)
-        update_bn(dl_x, dnn, device=x.device)
+        update_bn(dl_x, dnn, device=device)
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
         self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1, rtol=0)
 
-    def test_update_bn_dnn(self):
+    def test_update_bn_dnn(self, device):
         # Test update_bn for a fully-connected network with BatchNorm1d
         objects, input_features = 100, 5
         x = torch.rand(objects, input_features)
@@ -277,16 +268,12 @@ class TestSWAUtils(TestCase):
         ds_xy = torch.utils.data.TensorDataset(x, y)
         dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
         dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
-        dnn = self.SWATestDNN(input_features=input_features)
+        dnn = self.SWATestDNN(input_features=input_features).to(device)
         dnn.train()
-        self._test_update_bn(dnn, dl_x, dl_xy, False)
-        if torch.cuda.is_available():
-            dnn = self.SWATestDNN(input_features=input_features)
-            dnn.train()
-            self._test_update_bn(dnn.cuda(), dl_x, dl_xy, True)
+        self._test_update_bn(dnn, dl_x, dl_xy, device)
         self.assertTrue(dnn.training)
 
-    def test_update_bn_cnn(self):
+    def test_update_bn_cnn(self, device):
         # Test update_bn for convolutional network and BatchNorm2d
         objects = 100
         input_channels = 3
@@ -297,16 +284,13 @@ class TestSWAUtils(TestCase):
         ds_xy = torch.utils.data.TensorDataset(x, y)
         dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
         dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
-        cnn = self.SWATestCNN(input_channels=input_channels)
+        cnn = self.SWATestCNN(input_channels=input_channels).to(device)
         cnn.train()
-        self._test_update_bn(cnn, dl_x, dl_xy, False)
-        if torch.cuda.is_available():
-            cnn = self.SWATestCNN(input_channels=input_channels)
-            cnn.train()
-            self._test_update_bn(cnn.cuda(), dl_x, dl_xy, True)
+        self._test_update_bn(cnn, dl_x, dl_xy, device)
         self.assertTrue(cnn.training)
 
-    def test_bn_update_eval_momentum(self):
+    @onlyCPU
+    def test_bn_update_eval_momentum(self, device):
         # check that update_bn preserves eval mode
         objects = 100
         input_channels = 3
@@ -321,9 +305,6 @@ class TestSWAUtils(TestCase):
 
         # check that momentum is preserved
         self.assertEqual(cnn.bn.momentum, 0.3)
-
-
-instantiate_parametrized_tests(TestSWAUtils)
 
 
 if __name__ == "__main__":

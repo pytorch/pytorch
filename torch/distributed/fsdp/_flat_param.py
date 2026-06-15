@@ -29,7 +29,6 @@ from torch.distributed.utils import (
 )
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
-from torch.utils._typing_utils import not_none
 
 from ._fsdp_extensions import (
     _ext_post_unflatten_transform,
@@ -601,7 +600,6 @@ class FlatParamHandle:
         self._needs_pre_backward_unshard = False
         # Was the handle prefetched? Set on successful _prefetch_handle and unshard
         self._prefetched = False
-        self._compute_stream: torch.Stream | None = None
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1324,11 +1322,6 @@ class FlatParamHandle:
             self._use_sharded_views()
         ret = False
         if self._use_orig_params and not self._skip_writeback_check:
-            # Wait for the compute stream since _writeback_orig_params reads
-            # original parameters that may still be in use during prefetch.
-            self._device_handle.current_stream().wait_stream(
-                not_none(self._compute_stream)
-            )
             ret = self._writeback_orig_params()
         if (
             self.uses_sharded_strategy
@@ -1480,7 +1473,7 @@ class FlatParamHandle:
             )
             dist.all_gather(tensor_list, sharded_flat_param, group=pg)
         else:
-            dist.all_gather_into_tensor(
+            dist.all_gather_single(
                 padded_unsharded_flat_param,
                 sharded_flat_param,
                 pg,
@@ -1603,9 +1596,7 @@ class FlatParamHandle:
             device=self.device,
             dtype=sharded_grad.dtype,
         )
-        dist.all_gather_into_tensor(
-            padded_unsharded_grad, sharded_grad, self.process_group
-        )
+        dist.all_gather_single(padded_unsharded_grad, sharded_grad, self.process_group)
         unsharded_size = self.flat_param._unpadded_unsharded_size
         flat_param.grad = padded_unsharded_grad[: unsharded_size.numel()].view(
             unsharded_size

@@ -19,6 +19,7 @@ from torch.distributed.elastic.rendezvous import (
 
 class RendezvousParametersTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._backend = "dummy_backend"
         self._endpoint = "dummy_endpoint"
         self._run_id = "dummy_run_id"
@@ -227,6 +228,7 @@ class _DummyRendezvousHandler(RendezvousHandler):
 
 class RendezvousHandlerRegistryTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._params = RendezvousParameters(
             backend="dummy_backend",
             endpoint="dummy_endpoint",

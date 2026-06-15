@@ -15,7 +15,6 @@ import types
 import unittest
 import warnings
 from collections import namedtuple, OrderedDict
-from unittest.case import skipIf
 
 from common_utils import (
     check_vmap_fallback,
@@ -28,7 +27,7 @@ from common_utils import (
     is_valid_inplace_sample_input,
     opsToleranceOverride,
     skip,
-    skipOps,
+    skipIf,
     tol1,
     xfail,
     xfailIf,
@@ -59,6 +58,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     OpDTypes,
     ops,
+    skipOps,
     tol,
     toleranceOverride,
 )
@@ -71,6 +71,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     subtest,
+    TEST_MPS,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1223,9 +1224,13 @@ class TestVmapAPI(TestCase):
     def test_vmap_autocast_cpu(self):
         self._test_vmap_autocast("cpu")
 
-    @skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_vmap_autocast_cuda(self):
         self._test_vmap_autocast("cuda")
+
+    @unittest.skipIf(not TEST_MPS, "MPS is unavailable")
+    def test_vmap_autocast_mps(self):
+        self._test_vmap_autocast("mps")
 
     def test_restore_vmap_pytree_input_output(self):
         def f(x, y):
@@ -4413,8 +4418,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         }
     )
     @skipOps(
-        "TestVmapOperatorsOpInfo",
-        "test_vmap_exhaustive",
         vmap_fail.union(
             {
                 # RuntimeError: Batch norm got a batched tensor as input while the running_mean or running_var,
@@ -4440,6 +4443,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                         sample.kwargs["memory_format"] == torch.channels_last
                     ),
                 ),
+                xfail("native_group_norm"),
+                # https://github.com/pytorch/pytorch/issues/164556
+                skipIf("cholesky_solve", lambda *args: TEST_WITH_ROCM),
             }
         ),
     )
@@ -4477,8 +4483,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         }
     )
     @skipOps(
-        "TestVmapOperatorsOpInfo",
-        "test_op_has_batch_rule",
         vmap_fail.union(
             {
                 xfail("as_strided", "partial_views"),
@@ -4505,18 +4509,15 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("put"),
                 xfail("quantile"),
                 xfail("renorm"),
-                xfail("squeeze_copy"),
                 xfail("resize_as_"),
                 xfail("take"),
                 xfail("tensor_split"),
-                xfail("transpose_copy"),
                 xfail("to_sparse"),
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
                 xfail("__getitem__", ""),
-                xfail("count_nonzero"),
                 xfail(
                     "nn.functional.dropout"
                 ),  # works, can't check against for loop because of randomness inconsistency
@@ -4536,9 +4537,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("histc"),
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
-                xfail("permute_copy"),
-                xfail("t_copy"),
-                xfail("unsqueeze_copy"),
                 xfail("istft"),
                 xfail("nonzero"),
                 xfail("nn.functional.fractional_max_pool2d"),
@@ -4619,6 +4617,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail(
                     "searchsorted"
                 ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -5284,8 +5283,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         allowed_dtypes=(torch.float,),
     )
     @skipOps(
-        "TestVmapOperatorsOpInfo",
-        "test_vmap_linalg_failure_1D_input",
         {
             xfail("linalg.vector_norm"),  # can accept vector inputs
             xfail("linalg.norm"),  # can accept vector inputs

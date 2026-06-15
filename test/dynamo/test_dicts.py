@@ -30,6 +30,20 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
+class _BadCmpExc(Exception):
+    pass
+
+
+class _BadCmpValue:
+    # Hashable (so it can be a dict value compared via PyObject_RichCompareBool)
+    # but its __eq__ raises.
+    def __eq__(self, other: object) -> bool:
+        raise _BadCmpExc
+
+    def __hash__(self) -> int:
+        return 1
+
+
 class SimpleDict(dict):
     pass
 
@@ -757,6 +771,69 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dict_update_no_args(self):
+        def fn(x):
+            d = {"a": x}
+            result = d.update()
+            return d["a"], result is None, len(d)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_from_mapping_like(self):
+        class MappingLike:
+            def __init__(self, x):
+                self.d = {"a": x, "b": x + 1}
+
+            def keys(self):
+                return self.d.keys()
+
+            def __getitem__(self, key):
+                return self.d[key]
+
+        def fn(x):
+            d = {"a": x - 1}
+            result = d.update(MappingLike(x))
+            return d["a"], d["b"], result is None
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_from_mapping_proxy(self):
+        def fn(x):
+            source = {"a": x, "b": x + 1}
+            d = {"a": x - 1}
+            d.update(types.MappingProxyType(source))
+            return d["a"], d["b"]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_rejects_bad_sequence_element_length(self):
+        def fn():
+            try:
+                {}.update([(1, 2, 3)])
+            except ValueError as exc:
+                return "length 3; 2 is required" in str(exc)
+            return False
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
+    def test_dict_update_rejects_too_many_args(self):
+        def fn():
+            try:
+                {}.update({}, {})
+            except TypeError:
+                return True
+            return False
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
     def test_dict_subclass_initialization_in_graph(self):
         for super_class in (
             OrderedDict,
@@ -918,20 +995,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(res["a"], opt_fn(x)["a"])
-
-    def test_fn_id(self):
-        def fn(x, f):
-            d = {id(f): 3}
-            return x * d[id(f)]
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-
-        def nothing():
-            pass
-
-        f = nothing
-        self.assertEqual(fn(x, f), opt_fn(x, f))
 
     def test_mapping_proxy_for_local(self):
         def fn(x):
@@ -1131,7 +1194,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return a | b
 
         for arg in args:
-            with self.assertRaisesRegex(Unsupported, "Observed exception"):
+            with self.assertRaises(Unsupported):
                 _ = fn(arg)
 
     def test_builtin_or_with_diff_keys(self):
@@ -1158,6 +1221,50 @@ class DictTests(torch._dynamo.test_case.TestCase):
             b = {"two": torch.ones(2)}
             a |= b
             return a, b
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_defaultdict_inplace_union_preserves_factory(self):
+        def f():
+            d = defaultdict(int, {1: 1, 2: 2})
+            d |= [(0, "zero"), (1, "one")]
+            result = d.__ior__({3: "three"})
+            return (
+                result is d,
+                d.default_factory is int,
+                type(d) is defaultdict,
+                dict(d),
+                list(d),
+                d[4],
+            )
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_defaultdict_shallow_copy_preserves_factory(self):
+        # defaultdict.copy(), dd.__copy__(), and copy.copy(dd) all produce a
+        # new defaultdict with the same default_factory and a shallow copy of
+        # the contents. The copies are consumed in-graph because reconstructing
+        # an escaping sourceless defaultdict is a separate unsupported case.
+        import copy
+
+        def f():
+            d = defaultdict(list, {1: 1, 2: 2})
+            c1 = d.copy()
+            c2 = d.__copy__()
+            c3 = copy.copy(d)
+            return (
+                c1.default_factory is list,
+                c2.default_factory is list,
+                c3.default_factory is list,
+                dict(c1),
+                dict(c2),
+                dict(c3),
+                c1 == d,
+                c3 == d,
+                c1[5],
+            )
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
@@ -2055,7 +2162,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2080,7 +2187,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2171,6 +2278,38 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     def assertNotEqual(self, x, y):
         self.assertFalse(x == y, f"Expected {x} to not be equal to {y}")
+
+    @make_dynamo_test
+    def test_dict_items_cmp_value_eq_raises(self):
+        # dictitems_contains calls PyObject_RichCompareBool(found, value, Py_EQ)
+        # on the stored value, so a value whose __eq__ raises must propagate that
+        # exception. Equal-length views push the comparison past
+        # dictview_richcompare's length short-circuit for eq/ne/le/ge.
+        d1 = self.thetype({1: _BadCmpValue()})
+        d2 = self.thetype({1: _BadCmpValue()})
+        for op in (operator.eq, operator.ne, operator.le, operator.ge):
+            with self.assertRaises(_BadCmpExc):
+                op(d1.items(), d2.items())
+        # lt/gt reach the value comparison only on a proper-subset length match.
+        d3 = self.thetype({1: _BadCmpValue(), 2: _BadCmpValue()})
+        with self.assertRaises(_BadCmpExc):
+            d1.items() < d3.items()  # noqa: B015
+        with self.assertRaises(_BadCmpExc):
+            d3.items() > d1.items()  # noqa: B015
+
+    @make_dynamo_test
+    def test_dict_items_cmp_value_present_absent(self):
+        # Normal value comparison: matching/non-matching stored values resolve
+        # membership without raising, matching eager dict_items semantics.
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"a": 1, "b": 2, "c": 3})
+        d3 = self.thetype({"a": 1, "b": 99})
+        self.assertEqual(d1.items() == d2.items(), False)
+        self.assertEqual(d1.items() <= d2.items(), True)
+        self.assertEqual(d1.items() < d2.items(), True)
+        self.assertEqual(d1.items() == d3.items(), False)
+        self.assertEqual(d1.items() <= d3.items(), False)
+        self.assertEqual(d2.items() >= d1.items(), True)
 
     @make_dynamo_test
     def test_cmp_eq(self):
@@ -2317,7 +2456,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # Test invalid usage
         self.assertRaises(TypeError, d.copy, 1)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_fromkeys(self):
         d = self.thetype.fromkeys(["a", "b"], 1)
@@ -2480,6 +2618,46 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, d.values, 1)
 
     @make_dynamo_test
+    def test_keys_contains(self):
+        d = self.thetype({"a": 1, "b": 2})
+        keys = d.keys()
+        self.assertTrue("a" in keys)
+        self.assertTrue("b" in keys)
+        self.assertFalse("c" in keys)
+
+        # Test Dict.keys contains
+        self.assertTrue("a" in dict.keys(d))
+        self.assertFalse("c" in dict.keys(d))
+        self.assertTrue("b" in self.thetype.keys(d))
+
+    @make_dynamo_test
+    def test_items_contains(self):
+        d = self.thetype({"a": 1, "b": 2})
+        items = d.items()
+        self.assertTrue(("a", 1) in items)
+        self.assertTrue(("b", 2) in items)
+        self.assertFalse(("a", 2) in items)
+        self.assertFalse(("c", 1) in items)
+
+        # Test Dict.items contains
+        self.assertTrue(("a", 1) in dict.items(d))
+        self.assertFalse(("c", 1) in dict.items(d))
+        self.assertTrue(("b", 2) in self.thetype.items(d))
+
+    @make_dynamo_test
+    def test_values_contains(self):
+        d = self.thetype({"a": 1, "b": 2})
+        values = d.values()
+        self.assertTrue(1 in values)
+        self.assertTrue(2 in values)
+        self.assertFalse(3 in values)
+
+        # Test Dict.values contains
+        self.assertTrue(1 in dict.values(d))
+        self.assertFalse(3 in dict.values(d))
+        self.assertTrue(2 in self.thetype.values(d))
+
+    @make_dynamo_test
     def test_type(self):
         d = self.thetype({"a": 1, "b": 2})
         self.assertIsInstance(d, self.thetype)
@@ -2607,9 +2785,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
-
-    def test_binop_or(self):
-        super().test_binop_or()
 
 
 class OrderedDictMethodsTests(DictMethodsTests):
@@ -2771,6 +2946,22 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         obj = MyClass()
         result = fn(obj)
         self.assertEqual(result, [1, 2, 3])
+
+    def test_dunder_dict_copy_does_not_alias_instance_dict(self):
+        class MyClass:
+            def __init__(self):
+                self.y = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.__dict__.copy()["x"] = 4
+            return "x" in obj.__dict__, dict(obj.__dict__.items())
+
+        obj = MyClass()
+        has_x, live_dict = fn(obj)
+        self.assertFalse(has_x)
+        self.assertEqual(live_dict, {"y": 1})
+        self.assertNotIn("x", obj.__dict__)
 
     def test_dunder_dict_comprehension_with_mutations(self):
         """Test dict comprehension over __dict__ with mutations (scheduler use case)"""

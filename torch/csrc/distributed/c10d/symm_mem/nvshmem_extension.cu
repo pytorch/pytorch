@@ -11,7 +11,6 @@
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <torch/custom_class.h>
 
-#include <ATen/ceil_div.h>
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
 #include <ATen/cuda/cub.cuh>
 

@@ -52,7 +52,12 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import MI350_ARCH, skipIfRocmArch, skipIfXpu
+from torch.testing._internal.common_utils import (
+    MI350_ARCH,
+    skipIfRocmArch,
+    skipIfTorchInductor,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -1221,6 +1226,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 )
                 self.assertTrue(same(correct_results, opt_results))
 
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/152944")
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_automatic_dynamic_tensor(self):
@@ -2311,6 +2317,47 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         torch.compile(mod, backend=cnt)(*args)
 
+    @patch.object(config, "optimize_ddp", True)
+    def test_selective_activation_checkpoint(self):
+        """DDPOptimizer must not clobber SAC's _checkpoint_context_fn metadata."""
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        N = 1000
+        policy_call_count = 0
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            nonlocal policy_call_count
+            policy_call_count += 1
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(N, N)
+                self.linear2 = torch.nn.Linear(N, N)
+
+            def forward(self, x):
+                x = checkpoint(
+                    self.linear1, x, use_reentrant=False, context_fn=context_fn
+                )
+                return checkpoint(
+                    self.linear2, x, use_reentrant=False, context_fn=context_fn
+                )
+
+        mod = MockModule().to(self.device_type)
+        mod = DDP(mod, bucket_cap_mb=1)
+        x = torch.randn(N, N, device=self.device_type, requires_grad=True)
+
+        compiled = torch.compile(mod, backend="aot_eager")
+        compiled(x).sum().backward()
+        self.assertGreater(policy_call_count, 0)
+
     def test_fsdp_orig_params_assert(self):
         # Test with basic FSDP wrapping (outer wrap around whole model)
         m, inputs, _ = get_model(f"{self.device_type}:{self.rank}")
@@ -2603,7 +2650,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_compiled_all_gather_into_tensor_returns_none(self):
         def fn(output, input, w):
-            result = dist.all_gather_into_tensor(output, input, async_op=False)
+            result = dist.all_gather_single(output, input, async_op=False)
             assert result is None  # noqa: S101
             return output @ w
 
@@ -2616,7 +2663,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_compiled_reduce_scatter_tensor_returns_none(self):
         def fn(output, input, w):
-            result = dist.reduce_scatter_tensor(output, input, async_op=False)
+            result = dist.reduce_scatter_single(output, input, async_op=False)
             assert result is None  # noqa: S101
             return output @ w
 
@@ -2731,7 +2778,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             torch.randn(4, 4),
             "all_gather",
-            suggestion="torch.distributed._functional_collectives.all_gather_tensor",
+            suggestion="torch.distributed._functional_collectives.all_gather_single",
         )
 
     def test_nn_functional_reduce_scatter_unsupported(self):
@@ -2746,7 +2793,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             [torch.randn(4, 4), torch.randn(4, 4)],
             "reduce_scatter",
-            suggestion="torch.distributed._functional_collectives.reduce_scatter_tensor",
+            suggestion="torch.distributed._functional_collectives.reduce_scatter_single",
         )
 
     def test_nn_functional_all_to_all_single_unsupported(self):

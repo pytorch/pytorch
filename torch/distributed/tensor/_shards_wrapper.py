@@ -44,7 +44,7 @@ class LocalShardsWrapper(torch.Tensor):
         ):
             raise AssertionError
 
-        # if empty shard, we create a empty tensor
+        # if empty shard, we create an empty tensor
         if len(local_shards) == 0:
             r = torch.Tensor._make_wrapper_subclass(
                 cls,

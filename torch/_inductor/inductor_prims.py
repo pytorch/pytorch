@@ -211,6 +211,44 @@ fma = make_prim(
     tags=(torch.Tag.pointwise,),
 )
 
+
+def _fma_setup_context(ctx, inputs, output):
+    a, b, c = inputs
+    ctx.a_shape = a.shape
+    ctx.b_is_tensor = isinstance(b, Tensor)
+    if ctx.b_is_tensor:
+        ctx.b_shape = b.shape
+        ctx.save_for_backward(a, b)
+    else:
+        ctx.b = b
+        ctx.save_for_backward(a)
+    ctx.c_shape = c.shape
+
+
+def _fma_backward(ctx, grad):
+    if ctx.b_is_tensor:
+        a, b = ctx.saved_tensors
+    else:
+        (a,) = ctx.saved_tensors
+        b = ctx.b
+
+    grad_a = (grad * b).sum_to_size(ctx.a_shape) if ctx.needs_input_grad[0] else None
+    grad_b = (
+        (grad * a).sum_to_size(ctx.b_shape)
+        if ctx.b_is_tensor and ctx.needs_input_grad[1]
+        else None
+    )
+    grad_c = grad.sum_to_size(ctx.c_shape) if ctx.needs_input_grad[2] else None
+    return grad_a, grad_b, grad_c
+
+
+torch.library.register_autograd(
+    fma,
+    _fma_backward,
+    setup_context=_fma_setup_context,
+)
+
+
 # Register DTensor sharding strategies for inductor prims ops.
 # This must happen here (not in _pointwise_ops.py) because the ops
 # don't exist until make_prim() is called above.

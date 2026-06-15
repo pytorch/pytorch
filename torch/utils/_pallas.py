@@ -84,14 +84,9 @@ def has_jax_tpu_backend() -> bool:
 @functools.cache
 def has_torch_tpu() -> bool:
     """Check if torch_tpu is installed and available."""
-    try:
-        import torch_tpu.api  # type: ignore[import]
-
-        # Verify hardware/runtime access
-        torch_tpu.api.tpu_device()
-        return True
-    except (ImportError, RuntimeError):
-        return False
+    # The TPU module is an autoloaded out-of-tree backend.
+    tpu_module = getattr(torch, "tpu", None)
+    return tpu_module is not None
 
 
 @functools.cache

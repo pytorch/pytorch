@@ -3,6 +3,8 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Sleep.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
 
 TEST(CUDAEventTest, testCUDAExternalEvent) {
   if (!at::cuda::is_available()) {
@@ -33,4 +35,10 @@ TEST(CUDAEventTest, testCUDAExternalEvent) {
   graph.replay();
   at::cuda::device_synchronize();
   EXPECT_TRUE(start_event.elapsed_time(end_event) > 0);
+}
+
+int main(int argc, char* argv[]) {
+  ::testing::InitGoogleTest(&argc, argv);
+  c10::cuda::CUDACachingAllocator::init(c10::cuda::device_count());
+  return RUN_ALL_TESTS();
 }

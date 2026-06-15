@@ -358,6 +358,210 @@ REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(short);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(char);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(uchar);
 
+// index_add is index_reduce with a sum reduction plus an alpha scale on the
+// source. Accumulation happens directly in the output dtype via atomic add,
+// which (unlike MPSGraph scatter) natively covers long and complex types.
+template <typename T, typename IT>
+kernel void index_add(
+    device AtomicType_t<T>* self [[buffer(0)]],
+    device IT* index [[buffer(1)]],
+    device T* source [[buffer(2)]],
+    constant IndexReduceParams<>& params [[buffer(3)]],
+    constant T& alpha [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint32_t tid_ = tid;
+  long source_offset = 0;
+  long self_offset = 0;
+
+  for (int32_t dim = params.ndim - 1; dim >= 0; dim--) {
+    auto source_size = params.source_sizes[dim];
+    auto dim_idx = tid_ % source_size;
+
+    source_offset += dim_idx * params.source_strides[dim];
+
+    if (dim == params.reduce_dim) {
+      // Clamp keeps the access in bounds; out-of-range indices are reported
+      // separately by the index_check_bounds pass, which invalidates the
+      // result.
+      long idx = clamp(
+          long(index[dim_idx * params.index_stride]),
+          0L,
+          long(params.self_sizes[dim]) - 1);
+      self_offset += static_cast<uint32_t>(idx) * params.self_strides[dim];
+    } else {
+      self_offset += dim_idx * params.self_strides[dim];
+    }
+
+    tid_ /= source_size;
+  }
+
+  AtomicType<T>::atomic_add(
+      self, self_offset, mul(alpha, source[source_offset]));
+}
+
+#define REGISTER_INDEX_ADD_OP(T, IT)                          \
+  template [[host_name("index_add_" #T "_" #IT)]] kernel void \
+  index_add<T, IT>(                                           \
+      device AtomicType_t<T> * self [[buffer(0)]],            \
+      device IT * index [[buffer(1)]],                        \
+      device T * source [[buffer(2)]],                        \
+      constant IndexReduceParams<> & params [[buffer(3)]],    \
+      constant T & alpha [[buffer(4)]],                       \
+      uint tid [[thread_position_in_grid]]);
+
+#define REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(T) \
+  REGISTER_INDEX_ADD_OP(T, int);                 \
+  REGISTER_INDEX_ADD_OP(T, long);
+
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(float);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(half);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(bfloat);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(long);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(int);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(short);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(char);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(uchar);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(bool);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(float2);
+REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(half2);
+
+// Dim-based index_select gather: output[..., j, ...] = input[..., index[j],
+// ...] along reduce_dim. One thread per output element; templated by element
+// bit-size (T) so a single set of kernels covers every dtype, complex included.
+// Validate index values once (one thread per index) before a gather/scatter
+// kernel runs, so the hot kernel can clamp instead of branch-and-report on
+// every element. Reports the first out-of-bounds index via the stream error
+// buffer.
+template <typename IT>
+kernel void index_check_bounds(
+    device IT* index [[buffer(0)]],
+    constant uint& index_stride [[buffer(1)]],
+    constant long& dim_size [[buffer(2)]],
+    device ErrorMessages* error_buf [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  long idx = index[tid * index_stride];
+  if (idx < 0 || idx >= dim_size) {
+    TORCH_REPORT_ERROR(
+        error_buf,
+        "index ",
+        idx,
+        " is out of bounds for dimension with size ",
+        dim_size);
+  }
+}
+
+template [[host_name("index_check_bounds_int")]] kernel void index_check_bounds<
+    int>(
+    device int*,
+    constant uint&,
+    constant long&,
+    device ErrorMessages*,
+    uint);
+template [[host_name("index_check_bounds_long")]] kernel void index_check_bounds<
+    long>(
+    device long*,
+    constant uint&,
+    constant long&,
+    device ErrorMessages*,
+    uint);
+
+template <typename T, typename IT>
+kernel void index_select_dim(
+    device T* output [[buffer(0)]],
+    device IT* index [[buffer(1)]],
+    device T* input [[buffer(2)]],
+    constant IndexReduceParams<>& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint32_t tid_ = tid;
+  long output_offset = 0;
+  long input_offset = 0;
+
+  // params.source_* describe the output (iterated), params.self_* the input.
+  for (int32_t dim = params.ndim - 1; dim >= 0; dim--) {
+    auto output_size = params.source_sizes[dim];
+    auto dim_idx = tid_ % output_size;
+
+    output_offset += dim_idx * params.source_strides[dim];
+
+    if (dim == params.reduce_dim) {
+      // Clamp keeps the access in bounds; index_check_bounds reports any
+      // out-of-range index and invalidates the result.
+      long idx = clamp(
+          long(index[dim_idx * params.index_stride]),
+          0L,
+          long(params.self_sizes[dim]) - 1);
+      input_offset += static_cast<uint32_t>(idx) * params.self_strides[dim];
+    } else {
+      input_offset += dim_idx * params.self_strides[dim];
+    }
+
+    tid_ /= output_size;
+  }
+
+  output[output_offset] = input[input_offset];
+}
+
+#define REGISTER_INDEX_SELECT_DIM_OP(SUFFIX, T, IT)                       \
+  template [[host_name("index_select_dim_" #SUFFIX "_" #IT)]] kernel void \
+  index_select_dim<T, IT>(                                                \
+      device T * output [[buffer(0)]],                                    \
+      device IT * index [[buffer(1)]],                                    \
+      device T * input [[buffer(2)]],                                     \
+      constant IndexReduceParams<> & params [[buffer(3)]],                \
+      uint tid [[thread_position_in_grid]]);
+
+#define REGISTER_INDEX_SELECT_DIM_OP_ALL_SIZES(IT) \
+  REGISTER_INDEX_SELECT_DIM_OP(8bit, char, IT);    \
+  REGISTER_INDEX_SELECT_DIM_OP(16bit, short, IT);  \
+  REGISTER_INDEX_SELECT_DIM_OP(32bit, int, IT);    \
+  REGISTER_INDEX_SELECT_DIM_OP(64bit, long, IT);
+
+REGISTER_INDEX_SELECT_DIM_OP_ALL_SIZES(int);
+REGISTER_INDEX_SELECT_DIM_OP_ALL_SIZES(long);
+
+// Fast path for contiguous index_select: tensors are [outer, dim, inner]; a 3D
+// grid (inner, out_dim, outer) drops the per-element coordinate decomposition.
+template <typename T, typename IT>
+kernel void index_select_dim_dense(
+    device T* output [[buffer(0)]],
+    device IT* index [[buffer(1)]],
+    device T* input [[buffer(2)]],
+    constant IndexSelectParams& params [[buffer(3)]],
+    uint3 tid [[thread_position_in_grid]]) {
+  // Clamp keeps the read in bounds; index_check_bounds reports any out-of-range
+  // index and invalidates the result.
+  long in_row = clamp(
+      long(index[tid.y * params.index_stride]),
+      0L,
+      long(params.in_dim_size) - 1);
+  long out_off =
+      (static_cast<long>(tid.z) * params.out_dim_size + tid.y) * params.inner +
+      tid.x;
+  long in_off =
+      (static_cast<long>(tid.z) * params.in_dim_size + in_row) * params.inner +
+      tid.x;
+  output[out_off] = input[in_off];
+}
+
+#define REGISTER_INDEX_SELECT_DIM_DENSE_OP(SUFFIX, T, IT)                  \
+  template                                                                 \
+      [[host_name("index_select_dim_dense_" #SUFFIX "_" #IT)]] kernel void \
+      index_select_dim_dense<T, IT>(                                       \
+          device T * output [[buffer(0)]],                                 \
+          device IT * index [[buffer(1)]],                                 \
+          device T * input [[buffer(2)]],                                  \
+          constant IndexSelectParams & params [[buffer(3)]],               \
+          uint3 tid [[thread_position_in_grid]]);
+
+#define REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(IT) \
+  REGISTER_INDEX_SELECT_DIM_DENSE_OP(8bit, char, IT);    \
+  REGISTER_INDEX_SELECT_DIM_DENSE_OP(16bit, short, IT);  \
+  REGISTER_INDEX_SELECT_DIM_DENSE_OP(32bit, int, IT);    \
+  REGISTER_INDEX_SELECT_DIM_DENSE_OP(64bit, long, IT);
+
+REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(int);
+REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(long);
+
 template <typename StridesT, typename DataT>
 kernel void kernel_index_offsets(
     constant StridesT* strides [[buffer(0)]],
@@ -431,98 +635,52 @@ kernel void masked_fill_scalar_strided(
   }
 }
 
-template <typename T, typename index_t>
+template <typename T, typename index_t, typename OffsetT>
 kernel void index_copy_dense(
     device T* output,
-    constant T* input,
     constant T* source,
     constant index_t* indices,
-    constant uint& dim,
-    constant long* sizes,
-    constant uint& ndim,
-    constant uint& indices_numel,
-    uint thread_index [[thread_position_in_grid]]) {
-  // first copy input to output
-  output[thread_index] = input[thread_index];
-
-  // calculate pos in the tensor using a signed counter
-  long pos[max_ndim];
-  long linear_idx = thread_index;
-  for (int i = static_cast<int>(ndim) - 1; i >= 0; --i) {
-    pos[i] = linear_idx % sizes[i];
-    linear_idx /= sizes[i];
-  }
-
-  // check if this position's dim coordinate is in the indices
-  long dim_pos = pos[dim];
-
-  // search through indices to see if current dim pos should be updated
-  for (uint i = 0; i < indices_numel; i++) {
-    if (indices[i] == dim_pos) {
-      // this position should be updated from source
-      // calculate source offset where the source tensor has the same shape
-      // except along dim where it has size = indices_numel
-      long source_offset = 0;
-      long stride = 1;
-      for (int j = static_cast<int>(ndim) - 1; j >= 0; --j) {
-        if (j == static_cast<int>(dim)) {
-          // for the indexed dimension, use position i
-          source_offset += i * stride;
-          stride *= indices_numel;
-        } else {
-          // for other dimensions use the same position
-          source_offset += pos[j] * stride;
-          stride *= sizes[j];
-        }
-      }
-
-      output[thread_index] = source[source_offset];
-      break;
-    }
-  }
+    constant long& dim_size,
+    constant long& inner,
+    constant long& indices_numel,
+    uint3 gid [[thread_position_in_grid]]) {
+  OffsetT after = gid.x;
+  OffsetT i = gid.y;
+  OffsetT before = gid.z;
+  OffsetT idx = indices[i];
+  output[(before * OffsetT(dim_size) + idx) * OffsetT(inner) + after] =
+      source[(before * OffsetT(indices_numel) + i) * OffsetT(inner) + after];
 }
 
-template <typename T, typename index_t>
+template <typename T, typename index_t, typename OffsetT>
 kernel void index_copy_strided(
     device T* output,
-    constant T* input,
     constant T* source,
     constant index_t* indices,
-    constant uint& dim,
-    constant long* sizes,
-    constant uint& ndim,
-    constant uint& indices_numel,
-    constant long* input_strides,
-    constant long* output_strides,
-    constant long* source_strides,
-    constant long& indices_stride,
+    constant long& dim_size,
+    constant long& dim_out_stride, // result.stride(dim)
+    constant long& dim_source_stride, // source.stride(dim)
+    constant long* slice_sizes, // result sizes with dim removed
+    constant long* slice_out_strides, // result strides with dim removed
+    constant long* slice_source_strides, // source strides with dim removed
+    constant uint& slice_ndim, // ndim - 1
+    constant long& slice_numel,
+    constant long& indices_stride, // index.stride(0)
     uint thread_index [[thread_position_in_grid]]) {
-  int pos[max_ndim];
-  pos_from_thread_index(int(thread_index), pos, sizes, ndim);
-
-  // compute offsets for the output and input tensors
-  long output_offset = offset_from_coord(pos, output_strides, ndim);
-  long input_offset = offset_from_coord(pos, input_strides, ndim);
-
-  output[output_offset] = input[input_offset];
-
-  // save the original coordinate along the dim we're updating
-  int orig_dim = pos[dim];
-
-  // find the last index in the indices array that equals this coordinate
-  int last_matching_index = -1;
-  for (uint i = 0; i < indices_numel; i++) {
-    if (indices[i * indices_stride] == orig_dim) {
-      last_matching_index = int(i);
-    }
+  OffsetT j = OffsetT(thread_index) % OffsetT(slice_numel);
+  OffsetT i = OffsetT(thread_index) / OffsetT(slice_numel);
+  OffsetT idx = indices[i * OffsetT(indices_stride)];
+  if (idx < 0) {
+    idx += OffsetT(dim_size);
   }
-
-  // if a matching index was found, use it to update the output
-  if (last_matching_index != -1) {
-    pos[dim] = last_matching_index;
-    long source_offset = offset_from_coord(pos, source_strides, ndim);
-    output[output_offset] = source[source_offset];
-  }
+  OffsetT slice_pos[max_ndim];
+  pos_from_thread_index(j, slice_pos, slice_sizes, slice_ndim);
+  OffsetT out_offset =
+      offset_from_coord(slice_pos, slice_out_strides, slice_ndim);
+  OffsetT src_offset =
+      offset_from_coord(slice_pos, slice_source_strides, slice_ndim);
+  output[out_offset + idx * OffsetT(dim_out_stride)] =
+      source[src_offset + i * OffsetT(dim_source_stride)];
 }
 
 // Scatter-based index_fill: each thread writes exactly one element.
@@ -673,34 +831,36 @@ kernel void index_fill_strided_from_mask(
       constant long&,                              \
       uint);
 
-#define INSTANTIATE_INDEX_COPY(T, index_t)                      \
-  template [[host_name("index_copy_dense_" #T "_" #index_t)]]   \
-  kernel void index_copy_dense<T, index_t>(                     \
-      device T*,                                                \
-      constant T*,                                              \
-      constant T*,                                              \
-      constant index_t*,                                        \
-      constant uint&,                                           \
-      constant long*,                                           \
-      constant uint&,                                           \
-      constant uint&,                                           \
-      uint);                                                    \
-                                                                \
-  template [[host_name("index_copy_strided_" #T "_" #index_t)]] \
-  kernel void index_copy_strided<T, index_t>(                   \
-      device T*,                                                \
-      constant T*,                                              \
-      constant T*,                                              \
-      constant index_t*,                                        \
-      constant uint&,                                           \
-      constant long*,                                           \
-      constant uint&,                                           \
-      constant uint&,                                           \
-      constant long*,                                           \
-      constant long*,                                           \
-      constant long*,                                           \
-      constant long&,                                           \
+#define INSTANTIATE_INDEX_COPY_W(T, index_t, OffsetT, OBITS)               \
+  template [[host_name("index_copy_dense_" #T "_" #index_t "_" #OBITS)]]   \
+  kernel void index_copy_dense<T, index_t, OffsetT>(                       \
+      device T*,                                                           \
+      constant T*,                                                         \
+      constant index_t*,                                                   \
+      constant long&,                                                      \
+      constant long&,                                                      \
+      constant long&,                                                      \
+      uint3);                                                              \
+                                                                           \
+  template [[host_name("index_copy_strided_" #T "_" #index_t "_" #OBITS)]] \
+  kernel void index_copy_strided<T, index_t, OffsetT>(                     \
+      device T*,                                                           \
+      constant T*,                                                         \
+      constant index_t*,                                                   \
+      constant long&,                                                      \
+      constant long&,                                                      \
+      constant long&,                                                      \
+      constant long*,                                                      \
+      constant long*,                                                      \
+      constant long*,                                                      \
+      constant uint&,                                                      \
+      constant long&,                                                      \
+      constant long&,                                                      \
       uint);
+
+#define INSTANTIATE_INDEX_COPY(T, index_t)      \
+  INSTANTIATE_INDEX_COPY_W(T, index_t, int, 32) \
+  INSTANTIATE_INDEX_COPY_W(T, index_t, long, 64)
 
 #define REGISTER_MASKED_FILL_SCALAR(SIZE, DTYPE)                            \
   template [[host_name("masked_fill_scalar_strided_" #SIZE)]] kernel void   \

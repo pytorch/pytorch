@@ -75,9 +75,10 @@ struct TORCH_API PyCompilerInterface {
       size_t hook_input_id) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
-  virtual void call_accumulate_grad(
+  virtual at::Tensor call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
+      const at::Tensor& variable_grad,
       const at::Tensor& grad,
       bool has_post_hooks) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
@@ -155,7 +156,7 @@ struct CacheKey {
 };
 
 struct NodeCall {
-  NodeCall(uint32_t id_, std::shared_ptr<Node> node_)
+  NodeCall(uint32_t id_, c10::intrusive_ptr<Node> node_)
       : id(id_), node(std::move(node_)) {}
 
   void mark_output(int input_nr, int output_idx) {
@@ -163,7 +164,7 @@ struct NodeCall {
   }
 
   uint32_t id;
-  std::shared_ptr<Node> node;
+  c10::intrusive_ptr<Node> node;
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<std::pair<int, int>> cpp_tensor_pre_hooks;
   std::vector<int> pre_hooks;
@@ -174,10 +175,10 @@ struct NodeCall {
 };
 
 struct NodeCalls : public std::unordered_map<Node*, NodeCall> {
-  NodeCall& lookup(const std::shared_ptr<Node>& function) {
-    auto it = find(function.get());
-    if (it == end()) {
-      it = emplace(function.get(), NodeCall(_next_id++, function)).first;
+  NodeCall& lookup(const c10::intrusive_ptr<Node>& function) {
+    auto [it, inserted] = try_emplace(function.get(), _next_id, function);
+    if (inserted) {
+      ++_next_id;
       nodes.emplace_back(function.get());
     }
     return it->second;
@@ -254,7 +255,9 @@ struct TensorArgs {
     return lookup(tensor, true);
   }
 
-  TensorArg& add(const SavedVariable& sv, const std::shared_ptr<Node>& node) {
+  TensorArg& add(
+      const SavedVariable& sv,
+      const c10::intrusive_ptr<Node>& node) {
     // no unpack hooks in this codepath
     at::Tensor tensor = sv.unpack(node);
     TensorArg& arg = add(tensor);
@@ -552,7 +555,7 @@ class CompiledNodeArgs {
   void collect(const caffe2::TypeMeta& t) {
     specialize_on_bytes(t.id());
   }
-  void collect(const std::shared_ptr<Node>& t) {
+  void collect(const c10::intrusive_ptr<Node>& t) {
     // Note: this is only capturing the ID of the node not everything
     // contained inside it.  This is used for tracking connections between
     // nodes and the actual details of the node itself must be handled by
@@ -1058,7 +1061,7 @@ class SwapSavedVariables {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   TraceState& state;
   // This is a borrowed reference, we do not increment ownership, or lower it,
-  // it's lifecycle is entirely longer than this objects.
+  // its lifecycle is entirely longer than this object's.
   PyObject* py_compiler;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const NodeCall& curr_node_call;

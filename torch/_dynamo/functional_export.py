@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 import inspect
 import logging
 import sys
 import traceback
 import types
 from collections import namedtuple
-from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from contextlib import nullcontext
+from typing import Any, cast, TYPE_CHECKING, TypeVar
 
 import sympy
 
@@ -16,22 +18,39 @@ from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_tr
 from torch._dynamo.decorators import disable as dynamo_disable
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
+from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
-from torch._guards import TracingContext
-from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
-from torch.fx import Node
+from torch._guards import detect_fake_mode, TracingContext
+from torch.export.dynamic_shapes import _IntWrapper, _RelaxedConstraint, Constraint
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
     StatelessSymbolicContext,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.fx.node import Argument, Target
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
+
+    from torch._dynamo.output_graph import OutputReturnInfo
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.export._trace import _DynamicShapesInput
+    from torch.fx import Node
+    from torch.fx.node import Argument, Target
+
+from torch.fx.experimental.dynamic_spec import (
+    DictSpec,
+    IntermediateSpec,
+    IntVar,
+    ObjectSpec,
+    ParamsSpec,
+    SeqSpec,
+    ShapesSpec,
+    TensorSpec,
+)
+
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -179,7 +198,10 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
             new_target = clean_export_root_string(old_target)
             if new_target != old_target:
                 node.target = new_target
-                assert hasattr(graph_module, old_target)
+                if not hasattr(graph_module, old_target):
+                    raise AssertionError(
+                        f"graph_module missing attribute {old_target!r}"
+                    )
                 # Move the parameter to the new name
                 param = torch.fx.graph_module._get_attr(graph_module, old_target)
                 torch.fx.graph_module._assign_attr(param, graph_module, new_target)
@@ -187,9 +209,15 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
         # Dynamo will only have one nested level
         if node.op == "call_module":
             old_target = node.target
-            assert isinstance(old_target, str)
+            if not isinstance(old_target, str):
+                raise AssertionError(
+                    f"expected old_target to be str, got {type(old_target)}"
+                )
             new_target = clean_export_root_string(old_target)
-            assert isinstance(new_target, str)
+            if not isinstance(new_target, str):
+                raise AssertionError(
+                    f"expected new_target to be str, got {type(new_target)}"
+                )
             new_name = clean_export_root_string(node.name)
             if new_target == old_target:
                 continue
@@ -213,7 +241,7 @@ class ModuleToTrace(torch.nn.Module):
         self._export_root = foo
         self.in_spec = in_spec
 
-    def forward(self, *flat_args: Any) -> "ExportTracerOutput":
+    def forward(self, *flat_args: Any) -> ExportTracerOutput:
         args, kwargs = pytree.tree_unflatten(flat_args, self.in_spec)
         res = self._export_root(*args, **kwargs)
         out_flat, out_spec = pytree.tree_flatten(res)
@@ -233,13 +261,17 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         flat_inputs: list[Any],
         flat_args_dynamic_dims: list[set[int]],
         graph_input_order: dict[int, int],
-        graph_output_map: dict[int, tuple[str, Any]],
+        graph_output_map: dict[int, OutputReturnInfo],
         fake_mode: Any | None = None,
         graph_inputs: dict[int, Any] | None = None,
     ) -> None:
         super().__init__(module)
 
-        assert len(flat_args_dynamic_dims) == len(flat_inputs)
+        if len(flat_args_dynamic_dims) != len(flat_inputs):
+            raise AssertionError(
+                f"flat_args_dynamic_dims length ({len(flat_args_dynamic_dims)}) "
+                f"must match flat_inputs length ({len(flat_inputs)})"
+            )
 
         self.flat_inputs = flat_inputs
         self.flat_args_dynamic_dims = flat_args_dynamic_dims
@@ -336,7 +368,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             placeholder_idx = self.placeholders.index(self.current_node)
             if placeholder_idx in self.graph_inputs:
                 source = self.graph_inputs[placeholder_idx]
-                if not isinstance(source, torch._dynamo.source.GetItemSource):
+                if not isinstance(source, GetItemSource):
                     example_val = self.current_node.meta.get(
                         "val"
                     ) or self.current_node.meta.get("example_value")
@@ -364,9 +396,9 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             output_type, val = self.graph_output_map[i]
 
             if output_type == "graph_out":
-                new_outputs.append(original_outputs[val])
+                new_outputs.append(original_outputs[cast(int, val)])
             elif output_type == "input":
-                input_idx = val.index
+                input_idx = cast(GetItemSource, val).index
                 new_outputs.append(self.new_input_nodes[input_idx])
             elif output_type == "constant":
                 new_outputs.append(val)
@@ -417,7 +449,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 def _suggest_or_raise_constraint_violation(
     module_to_trace: torch.nn.Module,
     orig_callable: Callable[..., Any],
-    fake_mode: Optional["FakeTensorMode"],
+    fake_mode: FakeTensorMode | None,
     graph_capture_output: CaptureOutput,
     args: Any,
     kwargs: Any,
@@ -518,14 +550,23 @@ class InputProcessor:
             args = args[: self.num_args]
         if self.root is not None:
             if isinstance(self.root, torch.fx.GraphModule):
-                assert isinstance(self.root.graph._codegen, _DynamoBytecodeCodeGen)
-                assert hasattr(
+                if not isinstance(self.root.graph._codegen, _DynamoBytecodeCodeGen):
+                    raise AssertionError(
+                        f"expected _DynamoBytecodeCodeGen, got {type(self.root.graph._codegen)}"
+                    )
+                if not hasattr(
                     self.root.graph._codegen.dynamo_bytecode_flatten, "input_processor"
-                )
-                assert (
+                ):
+                    raise AssertionError(
+                        "dynamo_bytecode_flatten missing input_processor attribute"
+                    )
+                if (
                     self.root.graph._codegen.dynamo_bytecode_flatten.input_processor
-                    is self
-                )
+                    is not self
+                ):
+                    raise AssertionError(
+                        "dynamo_bytecode_flatten.input_processor is not self"
+                    )
             args = (self.root, *args)
         return args, kwargs
 
@@ -558,7 +599,8 @@ class DynamoBytecodeFlatten:
                 compiled_fn=backend_dummy, extra_globals=self.f_globals
             )(*args, **kwargs)
         except Yield:
-            assert self.gm_inputs is not None
+            if self.gm_inputs is None:
+                raise AssertionError("gm_inputs must not be None after Yield") from None
             return self.gm_inputs
         raise RuntimeError
 
@@ -592,7 +634,8 @@ class DynamoBytecodeUnflatten:
 def create_fx_graph_from_captured_output(
     out: CaptureOutput, mod: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> torch.fx.GraphModule:
-    assert out.backend_input is not None
+    if out.backend_input is None:
+        raise AssertionError("out.backend_input must not be None")
     backend_input = out.backend_input
 
     _, root = torch._dynamo.convert_frame.get_traced_fn(mod)
@@ -607,7 +650,10 @@ def create_fx_graph_from_captured_output(
     if isinstance(root, torch.nn.Module):
         graph_module._parameters = root._parameters
         graph_module._buffers = root._buffers
-        assert all(not hasattr(graph_module, m) for m in root._modules)
+        if not all(not hasattr(graph_module, m) for m in root._modules):
+            raise AssertionError(
+                "graph_module already has attributes conflicting with root._modules"
+            )
         graph_module._modules.update(root._modules)
         graph_module._non_persistent_buffers_set = root._non_persistent_buffers_set
         if sys.version_info >= (3, 14):
@@ -628,14 +674,20 @@ def create_fx_graph_from_captured_output(
             # of state through closure. We need to make sure these data are
             # accessible through the captured module (but the hooks should be
             # disabled).
-            assert getattr(graph_module, "_wrapped_call", None) is not None
-            assert isinstance(
+            if getattr(graph_module, "_wrapped_call", None) is None:
+                raise AssertionError("graph_module._wrapped_call must not be None")
+            if not isinstance(
                 graph_module._wrapped_call, torch.fx.graph_module._WrappedCall
-            )
-            assert graph_module._wrapped_call.cls_call is None
+            ):
+                raise AssertionError(
+                    f"expected _WrappedCall, got {type(graph_module._wrapped_call)}"
+                )
+            if graph_module._wrapped_call.cls_call is not None:
+                raise AssertionError("graph_module._wrapped_call.cls_call must be None")
 
             def dynamo_wrapped_call(self, *args: object, **kwargs: object) -> object:
-                assert "forward" not in self.__dict__
+                if "forward" in self.__dict__:
+                    raise AssertionError("'forward' should not be in self.__dict__")
 
                 fwd_hooks = self._forward_hooks
                 fwd_pre_hooks = self._forward_pre_hooks
@@ -673,8 +725,14 @@ def create_fx_graph_from_captured_output(
         dynamo_bytecode_unflatten,
     )  # type: ignore[attr-defined]
     normalize_graph_module(graph_module)
-    assert not hasattr(graph_module, "_dynamo_bytecode_flatten")
-    assert not hasattr(graph_module, "_dynamo_bytecode_unflatten")
+    if hasattr(graph_module, "_dynamo_bytecode_flatten"):
+        raise AssertionError(
+            "graph_module already has _dynamo_bytecode_flatten attribute"
+        )
+    if hasattr(graph_module, "_dynamo_bytecode_unflatten"):
+        raise AssertionError(
+            "graph_module already has _dynamo_bytecode_unflatten attribute"
+        )
     # pyrefly: ignore [bad-argument-type]
     graph_module._dynamo_bytecode_flatten = dynamo_bytecode_flatten
     # pyrefly: ignore [bad-argument-type]
@@ -684,7 +742,8 @@ def create_fx_graph_from_captured_output(
     graph_module.meta["module_call_specs"] = (
         out.graph_capture_output.output_graph.export_metadata.module_call_spec
     )
-    assert out.backend_input is not None
+    if out.backend_input is None:
+        raise AssertionError("out.backend_input must not be None for fake_mode")
     graph_module.meta["fake_mode"] = out.backend_input.fake_mode  # type: ignore[attr-defined]
     graph_module.meta["fake_mode"].allow_non_fake_inputs = True
     tracing_context = TracingContext(graph_module.meta["fake_mode"])
@@ -712,6 +771,18 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
     def process_inputs(self, *inputs: Any) -> Any:
         self._inputs = inputs
         results = self.dynamo_bytecode_flatten(*inputs)
+        fake_mode = detect_fake_mode()
+        if fake_mode is not None and pytree.tree_any(
+            lambda x: isinstance(x, torch.Tensor) and not fake_mode.is_our_fake(x),
+            results,
+        ):
+            # Bytecode replay can recover tensors captured from module
+            # attributes as extra FX placeholder values. These tensors are not
+            # visible in AOTAutograd's user-facing call signature, so allow the
+            # active FakeTensorMode to convert them at dispatch time. This must
+            # remain enabled for AOT's backward trace too, since autograd can
+            # save the recovered tensors from the forward.
+            fake_mode.allow_non_fake_inputs = True
         return results
 
     def process_outputs(self, outputs: Any) -> Any:
@@ -732,6 +803,23 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
         has_orig_self = (fn_args[0] == "self") if len(fn_args) > 0 else False
         if has_orig_self:
             free_vars.insert(0, "self")
+        # Rename any non-first `self` in fn_args to a unique name. The base
+        # CodeGen.gen_fn_def prepends `"self"` for the GraphModule's bound-
+        # method receiver whenever fn_args[0] != "self", which collides with
+        # a schema param literally named `self` (e.g. `aten.where.self(Tensor
+        # cond, Tensor self, Tensor other)` -> `def forward(self, cond, self,
+        # other)` -> `SyntaxError: duplicate argument 'self' in function
+        # definition`). Both the function-def arg list (via super().gen_fn_def)
+        # and the body binding (via gen_var_bindings) reference fn_args, so
+        # the rename is consistent end-to-end.
+        fn_args = list(fn_args)
+        first_pos = 1 if has_orig_self else 0
+        for i in range(first_pos, len(fn_args)):
+            if fn_args[i] == "self":
+                new_name = "self_"
+                while new_name in fn_args:
+                    new_name += "_"
+                fn_args[i] = new_name
         fn_definition = super().gen_fn_def(
             fn_args[:], maybe_return_annotation, expanded_def=expanded_def
         )
@@ -797,7 +885,8 @@ def op_overload_wrapper({", ".join(arg_list)}):
         fn = out["op_overload_wrapper"]  # type: ignore[assignment]
 
     def inner(*args: Any, **kwargs: Any) -> Any:
-        assert not torch._dynamo.config.install_free_tensors
+        if torch._dynamo.config.install_free_tensors:
+            raise AssertionError("install_free_tensors must be False")
         with (
             _compiling_state_context(),
             torch._dynamo.config.patch(
@@ -818,11 +907,226 @@ def op_overload_wrapper({", ".join(arg_list)}):
     return inner
 
 
+def _check_leaf_spec_matches_value(
+    user_spec: IntermediateSpec,
+    arg_value: Any,
+    where: str,
+) -> None:
+    """Verify a user-provided spec is acceptable on the export path and
+    type-compatible with the actual arg value.
+    """
+    if isinstance(user_spec, (DictSpec, SeqSpec, ObjectSpec)):
+        raise NotImplementedError(
+            f"{where}: container specs ({type(user_spec).__name__}) are "
+            f"not yet supported on the export path. Use the `Dim`-based "
+            f"`dynamic_shapes` API instead."
+        )
+    match user_spec:
+        case TensorSpec():
+            if not isinstance(arg_value, torch.Tensor):
+                raise ValueError(
+                    f"{where}: spec is TensorSpec but the actual arg is "
+                    f"{type(arg_value).__name__}, not a Tensor."
+                )
+        case IntVar() | int():
+            # Scalar spec — arg must be a Python int, a SymInt, or the
+            # export-internal `_IntWrapper` (export wraps user ints in
+            # `_IntWrapper` upstream via `pytree.tree_map_only(int, ...)`).
+            if not isinstance(arg_value, (int, torch.SymInt, _IntWrapper)):
+                raise ValueError(
+                    f"{where}: spec is {type(user_spec).__name__} "
+                    f"(scalar spec) but the actual arg is "
+                    f"{type(arg_value).__name__}, not int/SymInt."
+                )
+        case _:
+            raise AssertionError(
+                f"{where}: unexpected leaf spec type {type(user_spec).__name__}"
+            )
+
+
+def _flatten_shapes_spec(
+    f: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+    shapes_spec: ShapesSpec,
+) -> ShapesSpec:
+    """Re-key a user ``ShapesSpec`` from the original module's parameter
+    names to export's intermediate trace layout.
+
+    Export traces ``ModuleToTrace`` instead of the user's module. Its
+    forward is ``forward(*flat_args)`` — a single varargs holding all
+    inputs flattened — so every source dynamo tracks is rooted at a
+    positional ``flat_args[i]``. The user wrote their spec against the
+    original parameter names, so we rewrite it to target ``flat_args``.
+
+    Limitations (v0): container specs (DictSpec / SeqSpec / ObjectSpec) on
+    any arg/kwarg slot are rejected inline with NotImplementedError.
+    """
+    params_spec = shapes_spec._params
+    kwargs = kwargs or {}
+    if params_spec is None:
+        # nothing to do all static no spec needed.
+        return shapes_spec
+
+    params_spec_named_args = params_spec._named_args
+    params_spec_varargs = params_spec._varargs  # may be None
+
+    assert isinstance(f, torch.nn.Module), (  # noqa: S101
+        "_flatten_shapes_spec only supports nn.Module (the only thing "
+        "torch.export.export accepts)."
+    )
+    sig = inspect.signature(f.forward)
+    pos_params = list(sig.parameters.values())
+
+    # The signature has up to four param regions, bound from the user's
+    # call as follows (spec lookup in parens):
+    #   1) named-positional: params before `*args`, from args[i] where
+    #      i < varargs_idx            (params_spec_named_args[name])
+    #   2) varargs (`*args`): from args[i] where i >= varargs_idx
+    #                                 (params_spec_varargs[i - varargs_idx])
+    #   3) keyword-named (KEYWORD_ONLY, or pos-or-kw passed by name): from
+    #      kwargs[name]               (params_spec_named_args[name])
+    #   4) var-keyword (`**kwargs`): from kwargs[name]
+    #                                 (params_spec_varkw[name])
+    # Python guarantees the call layout is [positionals][kwargs], so we
+    # walk `args` first (regions 1 + 2), then `kwargs.items()` (regions
+    # 3 + 4, same loop).
+    #
+    # Example: `def forward(self, x, y, *args, **kwargs)` called as
+    # `mod(T1, T2, T3, T4, foo=T5, bar=T6)` → varargs_idx=2;
+    # args[:2]=(T1,T2) named; args[2:]=(T3,T4) varargs; kwargs={foo,bar}.
+
+    # `varargs_idx` is how many positional params come before `*args` in the
+    # signature: the first `varargs_idx` of the caller's positional `args`
+    # bind to those named params, and any extras spill into `*args`. It is
+    # len(pos_params) when there is no `*args`.
+    varargs_idx = len(pos_params)
+    for i, p in enumerate(pos_params):
+        if p.kind is inspect.Parameter.VAR_POSITIONAL:
+            varargs_idx = i
+            break
+
+    # Walk the user's actual call structure.
+    _, in_spec = pytree.tree_flatten((args, kwargs))
+    total_leaves = in_spec.num_leaves
+    # out_leaf_specs[i] = leaf-spec for flat_args[i] (None = static); keyed
+    # under "*args" since ModuleToTrace.forward only has a varargs signature.
+    out_leaf_specs: list[IntermediateSpec | None] = [None] * total_leaves
+
+    flat_idx = 0
+
+    # Track which named / **kwargs spec entries get bound; leftovers (typo
+    # or spec for an omitted defaulted param) are rejected below.
+    matched_named_keys: set[str] = set()
+    matched_varkw_keys: set[str] = set()
+
+    # Loop 1: named-positional. Spec keyed by signature param name. A key
+    # present with value None means "explicitly static" — it skips binding
+    # but still counts as matched (not flagged as unmatched below).
+    for i, arg_value in enumerate(args[:varargs_idx]):
+        arg_name = pos_params[i].name
+        if arg_name in params_spec_named_args:
+            matched_named_keys.add(arg_name)
+            user_spec = params_spec_named_args[arg_name]
+        else:
+            user_spec = None
+        if user_spec is not None:
+            _check_leaf_spec_matches_value(
+                user_spec,
+                arg_value,
+                where=f"ParamsSpec entry for forward param {arg_name!r}",
+            )
+            out_leaf_specs[flat_idx] = user_spec
+            flat_idx += 1
+        else:
+            # No spec (or explicit-None spec) for this arg — just advance
+            # past its flat slots.
+            leaves, _ = pytree.tree_flatten(arg_value)
+            flat_idx += len(leaves)
+
+    # Pad varargs spec to the actual `*args` count (missing tail = static)
+    # so Loop 2 can index uniformly without a bounds check.
+    n_actual_varargs = len(args) - varargs_idx
+    params_spec_varargs = list(params_spec_varargs or [])
+    params_spec_varargs += [None] * max(0, n_actual_varargs - len(params_spec_varargs))
+
+    # Loop 2: varargs. Spec keyed by position within `*args`.
+    for user_idx, arg_value in enumerate(args[varargs_idx:]):
+        user_spec = params_spec_varargs[user_idx]
+        if user_spec is not None:
+            _check_leaf_spec_matches_value(
+                user_spec,
+                arg_value,
+                where=f"ParamsSpec varargs[{user_idx}]",
+            )
+            out_leaf_specs[flat_idx] = user_spec
+            flat_idx += 1
+        else:
+            sub_leaves, _ = pytree.tree_flatten(arg_value)
+            flat_idx += len(sub_leaves)
+
+    # Loop 3: kwargs. Spec comes from named_args[name] (kwarg matches a
+    # named param) or varkw[name] (kwarg flows through `**kwargs`).
+    params_spec_varkw = params_spec._varkw  # may be None
+    for arg_name, arg_value in kwargs.items():
+        if arg_name in params_spec_named_args:
+            user_spec = params_spec_named_args[arg_name]
+            matched_named_keys.add(arg_name)
+        elif params_spec_varkw is not None and arg_name in params_spec_varkw:
+            user_spec = params_spec_varkw[arg_name]
+            matched_varkw_keys.add(arg_name)
+        else:
+            user_spec = None
+        if user_spec is not None:
+            _check_leaf_spec_matches_value(
+                user_spec,
+                arg_value,
+                where=f"ParamsSpec entry for forward kwarg {arg_name!r}",
+            )
+            out_leaf_specs[flat_idx] = user_spec
+            flat_idx += 1
+        else:
+            leaves, _ = pytree.tree_flatten(arg_value)
+            flat_idx += len(leaves)
+
+    # Every named / **kwargs spec entry must bind to a passed argument; a
+    # leftover is almost always a typo or a spec for an omitted default.
+    unmatched = set(params_spec_named_args) - matched_named_keys
+    if params_spec_varkw is not None:
+        unmatched |= set(params_spec_varkw) - matched_varkw_keys
+    if unmatched:
+        n_named_positional = len(args[:varargs_idx])
+        passed = [p.name for p in pos_params[:n_named_positional]] + list(kwargs)
+        raise ValueError(
+            f"ParamsSpec has entries {sorted(unmatched)!r} that do not match "
+            f"any argument passed to export(). Spec keys must be forward "
+            f"parameter names that were actually passed. Inputs received: "
+            f"{passed!r}."
+        )
+
+    # Sanity: per-arg leaf count must equal the whole-tree flatten, else
+    # our per-arg walk drifted from the tracer's layout.
+    if flat_idx != total_leaves:
+        raise AssertionError(
+            f"_flatten_shapes_spec leaf-count drift: walked {flat_idx} leaves "
+            f"but pytree.tree_flatten((args, kwargs)) yields {total_leaves}. "
+            f"This means the translator and the export tracer disagree on the "
+            f"flat input layout."
+        )
+
+    # Re-keying only moves which slot each TensorSpec lands in; the
+    # ShapeVar/IntVar symbols in assumptions are unchanged, so carry them.
+    return ShapesSpec(
+        ParamsSpec({"*args": out_leaf_specs}),
+        assumptions=shapes_spec._assumptions or None,
+    )
+
+
 def _dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
     *,
     constraints: list[Constraint] | None = None,
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
+    dynamic_shapes: _DynamicShapesInput = None,
 ) -> Callable[..., torch.fx.GraphModule]:
     """
     Improved dynamo graph capture using transformer approach with proper fake tensor handling.
@@ -845,7 +1149,6 @@ def _dynamo_graph_capture_for_export(
     2. Need to attach guards
     """
 
-    _dynamic_shapes = dynamic_shapes
     _constraints = constraints
 
     def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
@@ -857,9 +1160,6 @@ def _dynamo_graph_capture_for_export(
             orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
 
             constraints: list[Constraint] | None = _constraints
-            dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = (
-                _dynamic_shapes
-            )
 
             from . import reset  # type: ignore[attr-defined]
 
@@ -882,10 +1182,29 @@ def _dynamo_graph_capture_for_export(
                 install_free_tensors=torch._dynamo.config.install_free_tensors_for_export,
             )
 
+            # If `dynamic_shapes` is a ShapesSpec/ParamsSpec, auto-wrap
+            # ParamsSpec → ShapesSpec, flatten into the (args, kwargs) layout
+            # the tracer builds above, and expose it via
+            # `torch._dynamo.config._shapes_spec` for the variable builder.
+            shapes_spec_in_use = False
+            shapes_spec_ctx = nullcontext()
+            if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
+                shapes_spec_in_use = True
+                user_spec = (
+                    ShapesSpec(dynamic_shapes)
+                    if isinstance(dynamic_shapes, ParamsSpec)
+                    else dynamic_shapes
+                )
+                flattened_spec = _flatten_shapes_spec(mod, args, kwargs, user_spec)
+                shapes_spec_ctx = torch._dynamo.config.patch(
+                    _shapes_spec=flattened_spec
+                )
+
             with (
                 get_metrics_context(),
                 dynamo_timed("fullgraph_capture"),
                 dynamo_config_ctx,
+                shapes_spec_ctx,
             ):
                 out = fullgraph_capture(
                     module_to_trace,
@@ -894,7 +1213,10 @@ def _dynamo_graph_capture_for_export(
                     _is_export_deprecated_do_not_use=True,
                 )
 
-                assert out.graph_capture_output.output_graph is not None
+                if out.graph_capture_output.output_graph is None:
+                    raise AssertionError(
+                        "output_graph must not be None after fullgraph_capture"
+                    )
 
                 example_inputs: list[Any] = []
                 if out.backend_input is not None:
@@ -907,15 +1229,18 @@ def _dynamo_graph_capture_for_export(
                     graph.recompile()
                     fake_mode = None
 
-                _suggest_or_raise_constraint_violation(
-                    module_to_trace,
-                    orig_callable,
-                    fake_mode,
-                    out,
-                    args,
-                    kwargs,
-                    dynamic_shapes,
-                )
+                # ShapesSpec is unbacked based, constraint violations are not
+                # relevant.
+                if not shapes_spec_in_use:
+                    _suggest_or_raise_constraint_violation(
+                        module_to_trace,
+                        orig_callable,
+                        fake_mode,
+                        out,
+                        args,
+                        kwargs,
+                        dynamic_shapes,  # type: ignore[arg-type]
+                    )
 
                 # Extract export metadata from the new location
                 export_metadata = out.graph_capture_output.output_graph.export_metadata

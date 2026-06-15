@@ -142,7 +142,7 @@ static void basicAutogradNotImplementedFallbackImpl(
   // by putting it after the requires_grad checks.
   any_input_requires_grad = any_input_requires_grad && GradMode::is_enabled();
 
-  std::shared_ptr<WarnNotImplemented> grad_fn;
+  c10::intrusive_ptr<WarnNotImplemented> grad_fn;
   if (any_input_requires_grad) {
     // NB: It is standard to collect edges from all tensors
     // (see generated/VariableTypeEverything.cpp for examples)
@@ -154,9 +154,8 @@ static void basicAutogradNotImplementedFallbackImpl(
         stack,
         stack_start,
         num_arguments);
-    grad_fn = std::shared_ptr<WarnNotImplemented>(
-        new WarnNotImplemented(op_name, all_tensors_on_stack.size()),
-        deleteNode);
+    grad_fn = c10::make_intrusive<WarnNotImplemented>(
+        op_name, all_tensors_on_stack.size());
     grad_fn->set_next_edges(collect_next_edges(all_tensors_on_stack));
   }
 
@@ -340,10 +339,9 @@ static void autogradNotImplementedFallbackImpl(
       stack_start,
       num_arguments);
 
-  std::shared_ptr<NotImplemented> grad_fn;
+  c10::intrusive_ptr<NotImplemented> grad_fn;
   if (any_requires_grad) {
-    grad_fn = std::shared_ptr<NotImplemented>(
-        new NotImplemented(op_name), deleteNode);
+    grad_fn = c10::make_intrusive<NotImplemented>(op_name);
     grad_fn->set_next_edges(
         collect_next_edges(tensors_requiring_grad_on_stack));
   }

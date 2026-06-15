@@ -18,7 +18,7 @@ which assumes accurate fake tensor metadata, without actually running fn.
 In the future, we may allow for a "meta" function associated with fn to allow for more interesting input-output patterns.
 
 Note that tensors / Python state are allowed to be mutated.
-This is relaxed constraint is not always sound, but it is sound for backward tracing with fake
+This relaxed constraint is not always sound, but it is sound for backward tracing with fake
 tensors as it takes place in AOTAutograd, as the backward pass is guaranteed not to depend on concrete
 tensor values (via fake tensor) or Python state (because the autograd engine doesn't depend on Python).
 
@@ -75,12 +75,15 @@ def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
     indices_indims = indims[1]
     expanded_indices = []
     for idx, idx_indim in zip(indices, indices_indims):
-        # The index is not a being batched, we should unsqueeze and expand to val
+        # The index is not being batched, we should unsqueeze and expand to val
         if idx_indim is None:
             expanded_indices.append(idx.expand(value.shape))
         else:
             # the index is being part of the vmap batch, it should be the same size as val
-            assert idx.shape == value.shape
+            if idx.shape != value.shape:
+                raise AssertionError(
+                    f"idx shape {idx.shape} must match value shape {value.shape}"
+                )
             expanded_indices.append(idx)
 
     out = torch.ops.flex_lib.zeros_and_scatter(
@@ -145,7 +148,10 @@ class TransformGetItemToIndex(TorchFunctionMode):
     ) -> object:
         if func is torch.Tensor.__getitem__:
             tensor_to_index = args[0]
-            assert isinstance(tensor_to_index, torch.Tensor)
+            if not isinstance(tensor_to_index, torch.Tensor):
+                raise AssertionError(
+                    f"expected torch.Tensor, got {type(tensor_to_index)}"
+                )
             index_args = pytree.tree_leaves(args[1])
             if all(isinstance(x, (torch.Tensor, int)) for x in index_args):
                 converted_indices = [
@@ -182,9 +188,12 @@ def _assert_meta(
     stride: tuple[int, ...],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    assert grad.size() == size, "size mismatch"
-    assert grad.stride() == stride, "stride mismatch"
-    assert grad.dtype == dtype, "dtype mismatch"
+    if grad.size() != size:
+        raise AssertionError("size mismatch")
+    if grad.stride() != stride:
+        raise AssertionError("stride mismatch")
+    if grad.dtype != dtype:
+        raise AssertionError("dtype mismatch")
     return grad
 
 
@@ -210,7 +219,10 @@ def inner_trace(
 
     proxy_kwargs = {}
     if bw_state is not None:
-        assert isinstance(bw_state, BackwardState) and bw_state.proxy is not None
+        if not isinstance(bw_state, BackwardState):
+            raise AssertionError(f"expected BackwardState, got {type(bw_state)}")
+        if bw_state.proxy is None:
+            raise AssertionError("bw_state.proxy must not be None")
         proxy_kwargs["bw_state"] = bw_state.proxy
     out_proxy = mode.tracer.create_proxy(
         "call_function",
@@ -237,7 +249,8 @@ def inner_fake(*args: Any, **kwargs: Any) -> None:
 @_trace_wrapped_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def _trace_wrapped_op_dense(*args: Any, fn: Any, **kwargs: Any) -> Any:
     mode = _get_current_dispatch_mode()
-    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+    if mode is not None:
+        raise AssertionError("Mode should never be enabled for CPU/CUDA key")
     return fn(*args, **kwargs)
 
 

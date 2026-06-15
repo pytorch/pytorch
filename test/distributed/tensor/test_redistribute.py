@@ -36,6 +36,7 @@ from torch.distributed.tensor._redistribute import (
     _FlattenedTransformInfo,
     _gen_transform_infos,
     _optimize_transform_infos,
+    _redistribute_cost_sort_key,
     _TransformInfo,
     disable_redistribute_transform_optimization,
     redistribute_local_tensor,
@@ -43,11 +44,13 @@ from torch.distributed.tensor._redistribute import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _MaskPartial, _StridedShard
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -430,9 +433,18 @@ class RedistributeTest(DTensorContinuousTestBase):
 
         comm_mode = CommDebugMode()
 
+        dt = replica_tensor.dtype
         with comm_mode:
             partial_tensor = Redistribute.apply(
-                replica_tensor, device_mesh, [partial_spec]
+                replica_tensor,
+                device_mesh,
+                [partial_spec],
+                False,
+                {
+                    "op_dtype": dt,
+                    "out_dtype": dt,
+                    "backward_options": {"op_dtype": dt, "out_dtype": dt},
+                },
             )
         self.assertEqual(partial_tensor.size(), local_tensor.size())
         # test it successfully zero out the contents on other ranks
@@ -451,9 +463,18 @@ class RedistributeTest(DTensorContinuousTestBase):
         replica_tensor = distribute_tensor(
             local_tensor, device_mesh, [replica_spec, replica_spec]
         )
+        dt = replica_tensor.dtype
         with comm_mode:
             partial_tensor = Redistribute.apply(
-                replica_tensor, device_mesh, [partial_spec, partial_spec]
+                replica_tensor,
+                device_mesh,
+                [partial_spec, partial_spec],
+                False,
+                {
+                    "op_dtype": dt,
+                    "out_dtype": dt,
+                    "backward_options": {"op_dtype": dt, "out_dtype": dt},
+                },
             )
         self.assertEqual(partial_tensor.size(), local_tensor.size())
 
@@ -625,6 +646,40 @@ class RedistributeTest(DTensorContinuousTestBase):
         self.assertEqual(shard_tensor.placements[0].dim, 1)
         reshard_tensor = shard_tensor.redistribute(device_mesh, shard_minus_spec)
         self.assertEqual(reshard_tensor.placements[0].dim, 1)
+
+    def test_shard_to_replicate_local_tensor_contiguous(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/173041.
+        # When the sharded dim is not evenly divisible by world_size the unpad
+        # step in Shard._to_replicate_tensor uses narrow(), which on a non-leading
+        # dim produces a non-contiguous view. The resulting local tensor then
+        # breaks downstream view ops (e.g. inside parallelized nn.Linear).
+        device_mesh = self.build_device_mesh()
+
+        # world_size=4 here, so sizes like 13/14/15/31 are uneven on the sharded dim.
+        test_cases = [
+            # (shape, shard_dim)
+            ((4, 13, 8), 1),
+            ((4, 14, 8), 1),
+            ((4, 15, 8), 1),
+            ((3, 31, 10), 1),  # shape from the original issue repro
+            ((4, 8, 13), 2),
+            ((13, 8), 0),
+            ((8, 13), 1),
+        ]
+
+        for shape, shard_dim in test_cases:
+            full_tensor = torch.randn(shape, device=self.device_type)
+            dt_rep = distribute_tensor(full_tensor, device_mesh, [Replicate()])
+            dt_shard = dt_rep.redistribute(device_mesh, [Shard(shard_dim)])
+            dt_back_rep = dt_shard.redistribute(device_mesh, [Replicate()])
+
+            self.assertTrue(
+                dt_back_rep._local_tensor.is_contiguous(),
+                f"Local tensor should be contiguous after Shard({shard_dim})->Replicate "
+                f"for shape {shape}. Got stride {dt_back_rep._local_tensor.stride()}",
+            )
+            self.assertTrue(dt_back_rep.is_contiguous())
+            self.assertEqual(dt_back_rep.to_local(), full_tensor)
 
     def test_redistribute_uneven_sharding(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
@@ -835,9 +890,18 @@ class RedistributeTest(DTensorContinuousTestBase):
 
             # Apply R->P transition with the specified reduce_op
             partial_spec = Partial(reduce_op)
+            dt = replica_tensor.dtype
             with comm_mode:
                 partial_tensor = Redistribute.apply(
-                    replica_tensor, device_mesh, [partial_spec]
+                    replica_tensor,
+                    device_mesh,
+                    [partial_spec],
+                    False,
+                    {
+                        "op_dtype": dt,
+                        "out_dtype": dt,
+                        "backward_options": {"op_dtype": dt, "out_dtype": dt},
+                    },
                 )
 
             self.assertEqual(partial_tensor.size(), local_tensor.size())
@@ -1348,6 +1412,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             expected_total_combination *= math.factorial(N)
             self.assertEqual(len(all_combinations), expected_total_combination)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/168197")
     def test_ordered_distribute_all_combination(self):
         """Exhaustively test all possible sharding combinations and verify correctness"""
         torch.manual_seed(21)
@@ -1470,6 +1535,19 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
                             f"{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",
                         )
 
+    def test_redistribute_cost_sort_key_uses_unbacked_hint(self):
+        shape_env = ShapeEnv()
+        unbacked = shape_env.create_unbacked_symint()
+        shape_env.var_to_hint_override[unbacked.node.expr] = 8
+
+        lower_cost = 1000000.0 * (unbacked / 87.7) + 7.2
+        higher_cost = 1000000.0 * (2 * unbacked / 87.7) + 7.8
+
+        self.assertLess(
+            _redistribute_cost_sort_key(lower_cost),
+            _redistribute_cost_sort_key(higher_cost),
+        )
+
     def test_redistribute_partial_to_different_partial_not_supported(self):
         # Test that redistributing from one Partial type to another raises an error
         device_mesh = self.build_device_mesh()
@@ -1480,7 +1558,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             (Partial("sum"),),
             tensor_meta=TensorMeta(
                 local_tensor.size(),
-                local_tensor.stride,
+                local_tensor.stride(),
                 local_tensor.dtype,
             ),
         )
@@ -1489,7 +1567,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             (Partial("avg"),),
             tensor_meta=TensorMeta(
                 local_tensor.size(),
-                local_tensor.stride,
+                local_tensor.stride(),
                 local_tensor.dtype,
             ),
         )
@@ -3066,6 +3144,88 @@ DistributeWithDeviceOrderTestWithLocalTensor = create_local_tensor_test_class(
     DistributeWithDeviceOrderTest,
     base_class=LocalDTensorContinuousTestBase,
 )
+
+
+class _CollectiveDtypeTracer(torch.utils._python_dispatch.TorchDispatchMode):
+    """Records the dtype of the first tensor argument for each _c10d_functional op."""
+
+    def __init__(self):
+        super().__init__()
+        self.events: list[tuple[str, torch.dtype]] = []
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        name = str(func)
+        if "_c10d_functional" in name and args and isinstance(args[0], torch.Tensor):
+            self.events.append((name, args[0].dtype))
+        return func(*args, **kwargs)
+
+    def dtypes_for(self, op_substr: str) -> list[torch.dtype]:
+        return [dt for name, dt in self.events if op_substr in name]
+
+
+class RedistributeBackwardDtypeTest(TestCase):
+    """Verify ``DTensor.redistribute(..., backward_dtype=...)`` actually runs the
+    backward collective at the requested dtype.
+
+    A fake process group lets us run this single-process; a TorchDispatchMode
+    tracer captures the dtype of each ``_c10d_functional`` collective.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+
+    @classmethod
+    def tearDownClass(cls):
+        dist.destroy_process_group()
+        super().tearDownClass()
+
+    def test_backward_dtype_runs_backward_collective_at_that_dtype(self):
+        mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("dp",))
+        local = torch.randn(16, 8, dtype=torch.float32, requires_grad=True)
+        dt = DTensor.from_local(local, mesh, [Shard(0)])
+
+        tracer = _CollectiveDtypeTracer()
+        with tracer:
+            out = dt.redistribute(
+                mesh,
+                [Replicate()],
+                forward_dtype=torch.bfloat16,
+                backward_dtype=torch.bfloat16,
+            )
+            grad_d = DTensor.from_local(
+                torch.ones(64, 8, dtype=out.dtype), mesh, [Partial()]
+            )
+            out.backward(grad_d)
+
+        self.assertEqual(tracer.dtypes_for("all_gather_into_tensor"), [torch.bfloat16])
+        self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [torch.bfloat16])
+        self.assertEqual(local.grad.dtype, torch.float32)
+
+    def test_forward_and_backward_dtype_differ(self):
+        mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("dp",))
+        local = torch.randn(16, 8, dtype=torch.float32, requires_grad=True)
+        dt = DTensor.from_local(local, mesh, [Shard(0)])
+
+        tracer = _CollectiveDtypeTracer()
+        with tracer:
+            out = dt.redistribute(
+                mesh,
+                [Replicate()],
+                forward_dtype=torch.bfloat16,
+                backward_dtype=torch.float32,
+            )
+            grad_d = DTensor.from_local(
+                torch.ones(64, 8, dtype=out.dtype), mesh, [Partial()]
+            )
+            out.backward(grad_d)
+
+        self.assertEqual(tracer.dtypes_for("all_gather_into_tensor"), [torch.bfloat16])
+        self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [torch.float32])
+        self.assertEqual(local.grad.dtype, torch.float32)
+
 
 if __name__ == "__main__":
     run_tests()

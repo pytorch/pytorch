@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
-from optim.test_swa_utils import TestSWAUtils  # noqa: F401
+from optim.test_swa_utils import TestSWAUtils
 
 import torch
 from torch.nn import Parameter
@@ -1181,13 +1181,12 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
 
-    @onlyCUDA
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float32],
     )
     def test_fused_does_not_step_if_foundinf(self, device, dtype, optim_info):
-        if device not in optim_info.supports_fused_on:
+        if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(
                 f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
             )
@@ -2532,6 +2531,7 @@ class TestOptimRenewed(TestCase):
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
+instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
 
 
 if __name__ == "__main__":

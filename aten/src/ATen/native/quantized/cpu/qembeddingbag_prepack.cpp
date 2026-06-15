@@ -333,7 +333,7 @@ Tensor& qembeddingbag_byte_prepack_out(
       weight_contig->scalar_type() == at::ScalarType::Half
       ? weight_contig->to(at::ScalarType::Float)
       : *weight_contig;
-  const auto weight_data = float_weight.data_ptr<float>();
+  const auto weight_data = float_weight.const_data_ptr<float>();
   constexpr float kEpsilon = 1e-8f;
   for (auto row : c10::irange(embedding_rows)) {
     const float* input_row = weight_data + row * embedding_cols;
@@ -489,7 +489,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
                 (is_valid_rowwise_min_max ? (rowwise_min_max_data + start_idx * kRowwiseMinMaxNumCols) : nullptr));
           });
     } else {
-      const auto weight_data = weight_contig.data_ptr<float>();
+      const auto weight_data = weight_contig.const_data_ptr<float>();
       const auto rowwise_min_max_data =
           is_valid_rowwise_min_max ? rowwise_min_max_contig->data_ptr<float>() : nullptr;
       at::parallel_for(
@@ -510,7 +510,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
         weight_contig.scalar_type() == at::ScalarType::Half
         ? weight_contig.to(at::ScalarType::Float)
         : std::move(weight_contig);
-    const auto weight_data = float_weight.data_ptr<float>();
+    const auto weight_data = float_weight.const_data_ptr<float>();
     for (const auto row : c10::irange(embedding_rows)) {
       const float* input_row = weight_data + row * embedding_cols;
       std::uint8_t* output_row = output_data + row * output_columns;

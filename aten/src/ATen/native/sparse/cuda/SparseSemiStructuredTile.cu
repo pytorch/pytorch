@@ -8,6 +8,8 @@
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
 
+#include <utility>
+
 #if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 #include <ATen/native/sparse/cuda/ComputeSparseTile.h>
@@ -140,7 +142,9 @@ struct MetadataCutlass {
                                  like.options().dtype(at::ScalarType::Short))
                                  .view({roundedy / 32, roundedx, 2})
                                  .permute({1, 2, 0});
-    return std::make_tuple(packed, packed, packed_meta);
+    auto packed_copy = packed;
+    return std::make_tuple(
+        std::move(packed), std::move(packed_copy), std::move(packed_meta));
   }
   MetadataCutlass(at::Tensor metaN, at::Tensor metaT, int rows, int cols) {
     _meta = (ElementInputE*)metaN.data_ptr();

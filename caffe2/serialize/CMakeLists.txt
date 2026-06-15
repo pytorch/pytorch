@@ -1,4 +1,4 @@
-file(GLOB tmp *_test.cc)
+file(GLOB tmp CONFIGURE_DEPENDS *_test.cc)
 
 set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} ${tmp})
 list(APPEND Caffe2_CPU_SRCS

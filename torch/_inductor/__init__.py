@@ -14,6 +14,7 @@ from .standalone_compile import CompiledArtifact, DynamicShapesType  # noqa: TC0
 
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
+    from torch._subclasses import FakeTensorMode
     from torch.export import ExportedProgram
     from torch.export.pt2_archive._package import AOTICompiledModel
     from torch.export.pt2_archive._package_weights import Weights
@@ -124,7 +125,7 @@ def aoti_compile_and_package(
             "as we can get this information from exported_program.example_inputs."
         )
 
-    assert (
+    if not (
         package_path is None
         or (
             isinstance(package_path, (io.IOBase, IO))
@@ -135,9 +136,10 @@ def aoti_compile_and_package(
             isinstance(package_path, (str, os.PathLike))
             and os.fspath(package_path).endswith(".pt2")
         )
-    ), (
-        f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
-    )
+    ):
+        raise AssertionError(
+            f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
+        )
 
     inductor_configs = inductor_configs or {}
     inductor_configs["aot_inductor.package"] = True
@@ -182,18 +184,23 @@ def _aoti_compile_and_package_inner(
     """
 
     if check_accuracy:
-        assert kwargs is None or len(kwargs) == 0, (
-            "when checking for accuracy, the inputs must have been flattened and kwargs is None"
-        )
+        if not (kwargs is None or len(kwargs) == 0):
+            raise AssertionError(
+                "when checking for accuracy, the inputs must have been flattened and kwargs is None"
+            )
 
     from .package import package_aoti
 
-    assert isinstance(gm, torch.fx.GraphModule)
+    if not isinstance(gm, torch.fx.GraphModule):
+        raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
 
     kwargs = kwargs or {}
 
     aoti_files = aot_compile(gm, args, kwargs, options=inductor_configs)
-    assert isinstance(aoti_files, list)
+    if not isinstance(aoti_files, list):
+        raise AssertionError(
+            f"expected aoti_files to be a list, got {type(aoti_files)}"
+        )
 
     if package_path is None:
         path = [
@@ -210,7 +217,10 @@ def _aoti_compile_and_package_inner(
         package_path = path[0] + ".pt2"
 
     res = package_aoti(package_path, aoti_files)
-    assert res == package_path
+    if res != package_path:
+        raise AssertionError(
+            f"expected res == package_path, got {res} != {package_path}"
+        )
 
     if load_and_run or check_accuracy:
         compiled_model = aoti_load_package(package_path)
@@ -411,6 +421,7 @@ def standalone_compile(
     options: dict[str, Any] | None = None,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
     donate_graph_module: bool = False,
+    fake_mode: FakeTensorMode | None = None,
 ) -> CompiledArtifact:
     """
     Precompilation API for inductor.
@@ -437,6 +448,9 @@ def standalone_compile(
         donate_graph_module: If True, standalone_compile takes ownership of
             the graph module and may mutate it, avoiding an internal deepcopy.
             Defaults to False for backwards compatibility.
+        fake_mode: Optional FakeTensorMode to use when
+            dynamic_shapes="from_example_inputs". The mode must have a ShapeEnv.
+            When omitted, a fresh FakeTensorMode is created as before.
 
     Returns:
         CompiledArtifact that can be saved to disk or invoked directly.
@@ -451,6 +465,7 @@ def standalone_compile(
         options=options,
         aot=aot,
         donate_graph_module=donate_graph_module,
+        fake_mode=fake_mode,
     )
 
 

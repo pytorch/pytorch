@@ -3,6 +3,7 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/macros.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_deprecated.h>
+#include <torch/csrc/stable/version.h>
 #include <torch/headeronly/util/Exception.h>
 
 // This header defines a stable C API for certain ATen functionality in

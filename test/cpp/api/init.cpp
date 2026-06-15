@@ -36,7 +36,7 @@ void check_exact_values(
 
       if (!tensor.allclose(expectedTensor, /*rtol=*/1e-3, /*atol=*/5e-4)) {
         std::cout << "layer " << i << ": " << tensor << " != " << expectedTensor
-                  << " (parameter " << p << ")" << std::endl;
+                  << " (parameter " << p << ')' << std::endl;
         ASSERT_TRUE(false);
       }
     }

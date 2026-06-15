@@ -7,12 +7,13 @@ import functools
 import operator
 import random
 import unittest
+import warnings
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
-    skipIfCrossRef
+    skipIfCrossRef, set_warn_always_context
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
@@ -35,6 +36,10 @@ from torch.testing._internal.opinfo.definitions.sparse import validate_sample_in
 from torch.testing._internal.opinfo.refs import (
     ElementwiseBinaryPythonRefInfo,
     ReductionPythonRefInfo
+)
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
 )
 
 def _op_supports_any_sparse(op):
@@ -463,6 +468,66 @@ class TestSparse(TestSparseBase):
             with self.assertWarnsRegex(UserWarning, msg):
                 x = torch.sparse_coo_tensor(indices, values, shape)
 
+    @dtypes(torch.float32)
+    @expectedFailureMPS
+    @skipIfCrossRef
+    def test_no_warn_when_check_invariants_is_explicit(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178274
+        def assert_invariant_warning(fn, check):
+            with torch.sparse.check_sparse_tensor_invariants(None), \
+                    set_warn_always_context(True):
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter("always")
+                    fn()
+                    invariant_warnings = [
+                        x for x in w if "implicitly disabled" in str(x.message)
+                    ]
+                    if check is None:
+                        self.assertNotEqual(len(invariant_warnings), 0)
+                    else:
+                        self.assertEqual(len(invariant_warnings), 0)
+
+        for check in [True, False, None]:
+            assert_invariant_warning(
+                lambda: torch.sparse_coo_tensor(
+                    torch.tensor([[0, 1], [2, 0]], device=device),
+                    torch.tensor([1, 2], dtype=dtype, device=device),
+                    check_invariants=check,
+                ), check
+            )
+            assert_invariant_warning(
+                lambda: torch.sparse_coo_tensor(
+                    torch.tensor([[0, 1], [2, 0]], device=device),
+                    torch.tensor([1, 2], dtype=dtype, device=device),
+                    (3, 3),
+                    check_invariants=check,
+                ), check
+            )
+            assert_invariant_warning(
+                lambda: torch.sparse_coo_tensor(
+                    (3, 3),
+                    device=device,
+                    check_invariants=check,
+                ), check
+            )
+            assert_invariant_warning(
+                lambda: torch.sparse_csr_tensor(
+                    torch.tensor([0, 2, 4], dtype=torch.int64, device=device),
+                    torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device),
+                    torch.tensor([1, 2, 3, 4], dtype=dtype, device=device),
+                    (2, 2),
+                    check_invariants=check,
+                ), check
+            )
+            assert_invariant_warning(
+                lambda: torch.sparse_csc_tensor(
+                    torch.tensor([0, 2, 4], dtype=torch.int64, device=device),
+                    torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device),
+                    torch.tensor([1, 2, 3, 4], dtype=dtype, device=device),
+                    check_invariants=check,
+                ), check
+            )
+
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
@@ -652,6 +717,7 @@ class TestSparse(TestSparseBase):
         b = a.to_sparse().to_dense()
         self.assertEqual(a, b)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/183891")
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/108667")
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1062,6 +1128,7 @@ class TestSparse(TestSparseBase):
         test_shape(4, 3, [7, 7, 7, 3, 3, 3, 0])
         test_shape(4, 0, [0, 0, 7, 3, 3, 3, 0])
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/184598")
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1487,10 +1554,6 @@ class TestSparse(TestSparseBase):
         test_shape(10, 100, 0, 0)
         test_shape(10, 100, 0, 20)
 
-    @unittest.skipIf(
-        IS_WINDOWS and TEST_CUDA,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
-    )
     @coalescedonoff
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
@@ -1550,10 +1613,6 @@ class TestSparse(TestSparseBase):
     @onlyCUDA
     @coalescedonoff
     @dtypes(torch.double)
-    @unittest.skipIf(
-        IS_WINDOWS,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
-    )
     def test_bmm_deterministic(self, device, dtype, coalesced):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
@@ -1588,10 +1647,6 @@ class TestSparse(TestSparseBase):
         test_shape(10, 10, 100, 0, 20)
 
     @onlyCUDA
-    @unittest.skipIf(
-        IS_WINDOWS and TEST_CUDA,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
-    )
     def test_bmm_oob(self, device):
         # Targets an out of bounds error when the sparse tensor has no non-zero
         # values in the first batch dimension (#131977).
@@ -1609,24 +1664,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(ab, torch.zeros((2, 1, 1), device=device))
 
     @onlyCUDA
-    @unittest.skipIf(
-        not IS_WINDOWS or not TEST_WITH_ROCM,
-        "this test ensures bmm sparse-dense CUDA gives an error when run on Windows with CUDA < 11.0"
-    )
-    @dtypes(torch.double)
-    def test_bmm_windows_error(self, device, dtype):
-        a = torch.rand(2, 2, 2, dtype=dtype).to_sparse().cuda()
-        b = torch.rand(2, 2, 2, dtype=dtype).cuda()
-        with self.assertRaisesRegex(
-                RuntimeError,
-                "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0"):
-            ab = a.bmm(b)
-
-    @onlyCUDA
-    @unittest.skipIf(
-        IS_WINDOWS and TEST_CUDA,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
-    )
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_bmm_coo_row_index_alignment(self, device, dtype):
@@ -1742,6 +1779,25 @@ class TestSparse(TestSparseBase):
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
+    @onlyCPU
+    @dtypes(torch.double, torch.cdouble)
+    def test_sspaddmm_wrong_mat_types_error_messages(self, device, dtype):
+        m, k, n = 2, 2, 2
+        self_sp = self._gen_sparse(2, 4, [m, n], dtype, device, True)[0]
+        mat1_dense = torch.randn(m, k, dtype=dtype, device=device)
+        mat2_dense = torch.randn(k, n, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: expected 'mat1' to have sparse layout, got 'mat1' with layout Strided"):
+            self_sp.sspaddmm(mat1_dense, mat2_dense)
+
+        mat1_sparse = self._gen_sparse(2, 3, [m, k], dtype, device, True)[0]
+        mat2_sparse = self._gen_sparse(2, 3, [k, n], dtype, device, True)[0]
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: expected 'mat2' to have strided layout, got 'mat2' with layout Sparse"):
+            self_sp.sspaddmm(mat1_sparse, mat2_sparse)
+
     @coalescedonoff
     @precisionOverride({torch.bfloat16: 5e-2, torch.float16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16, torch.float16)
@@ -1808,6 +1864,7 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
 
+    @unittest.skipIf(IS_LINUX or IS_MACOS or TEST_WITH_ROCM or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/174389")
     @coalescedonoff
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
@@ -3430,6 +3487,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182816")
     @coalescedonoff
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
@@ -3832,6 +3890,7 @@ class TestSparse(TestSparseBase):
         gradcheck(lambda x: func(x, 0).to_dense(), (t,), masked=True)
 
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/183435")
     @dtypes(torch.double, torch.float)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
@@ -3857,6 +3916,8 @@ class TestSparse(TestSparseBase):
         self.assertEqual(out, out_double.to(dtype=dtype))
 
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182600")
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/184329")
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
     @dtypesIfMPS(*all_mps_types())
@@ -5776,7 +5837,10 @@ class TestSparseAny(TestCase):
             self.assertEqual(res.shape, xs.shape + (2,))
             self.assertEqual(res._values()[..., 0], xs._values().real)
             self.assertEqual(res._values()[..., 1], xs._values().imag)
-            if not (dtype is torch.complex32 and torch.device(device).type == "cpu"):
+            if not (
+                dtype in (torch.complex32, torch.bcomplex32)
+                and torch.device(device).type == "cpu"
+            ):
                 # ComplexHalf to_dense() is not supported on CPU.
                 self.assertEqual(res.to_dense(), torch.view_as_real(xs.to_dense()))
             self.assertEqual(torch.view_as_complex(torch.view_as_real(xs)), xs)

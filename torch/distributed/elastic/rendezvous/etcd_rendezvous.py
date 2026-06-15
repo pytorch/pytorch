@@ -51,7 +51,7 @@ logger.setLevel(logging.INFO)
 logger.addHandler(_log_handler)
 
 
-# Retryable failure exception means the we were too late to make
+# Retryable failure exception means we were too late to make
 # a desired state transition (e.g. because of a race condition),
 # and should now restart from the beginning.
 # A small delay is recommended to avoid spamming Etcd.

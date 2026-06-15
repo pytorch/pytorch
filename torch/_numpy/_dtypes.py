@@ -382,7 +382,7 @@ def set_default_dtype(fp_dtype="numpy", int_dtype="numpy"):
 
     Notes
     ------------
-    This functions has a side effect: it sets the global state with the provided dtypes.
+    This function has a side effect: it sets the global state with the provided dtypes.
 
     The complex dtype has bit width of at least twice the width of the float
     dtype, i.e. it's complex128 for float64 and complex64 for float32.

@@ -6,14 +6,14 @@
 
 constexpr int DTYPE_NAME_LEN = 64;
 
-struct TORCH_API THPDtype {
+struct TORCH_PYTHON_API THPDtype {
   PyObject_HEAD
   at::ScalarType scalar_type;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char name[DTYPE_NAME_LEN + 1];
 };
 
-TORCH_API extern PyTypeObject THPDtypeType;
+TORCH_PYTHON_API extern PyTypeObject THPDtypeType;
 
 inline bool THPDtype_Check(PyObject* obj) {
   return Py_TYPE(obj) == &THPDtypeType;
@@ -25,8 +25,8 @@ inline bool THPPythonScalarType_Check(PyObject* obj) {
       obj == (PyObject*)(&PyLong_Type);
 }
 
-TORCH_API PyObject* THPDtype_New(
+TORCH_PYTHON_API PyObject* THPDtype_New(
     at::ScalarType scalar_type,
     const std::string& name);
 
-void THPDtype_init(PyObject* module);
+TORCH_PYTHON_API void THPDtype_init(PyObject* module);

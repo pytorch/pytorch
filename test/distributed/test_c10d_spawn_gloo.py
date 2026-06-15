@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
 
 class DistributedDataParallelSingleProcessTest(TestCase):
     def setUp(self):
+        super().setUp()
         self.rank = 0
         self.world_size = 1
         with tempfile.NamedTemporaryFile(delete=False) as f:

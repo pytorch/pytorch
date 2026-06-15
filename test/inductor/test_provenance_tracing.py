@@ -21,7 +21,9 @@ from torch._inductor.debug import (
     create_kernel_information_json,
     create_mapping_pre_post_grad_nodes,
     create_node_mapping_kernel_to_post_grad,
+    get_kernel_information_jsons,
     reset_inductor_kernel_provenance_debug_handle,
+    reset_provenance_globals,
 )
 from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
@@ -551,9 +553,66 @@ class TestProvenanceTracingStackTraces(TestCase):
         finally:
             trace_log.removeHandler(payload_handler)
 
-    def extract_code_line(self, s, i=-2):
-        # Extract ith line
-        return s.split("\n")[i].strip()
+    def extract_code_line(self, s):
+        # Extract the source code line from a stack trace entry.
+        # Filter out empty lines, "File ..." lines, and caret annotation
+        # lines (e.g. "~~^~~~~~") added in Python 3.13+.
+        lines = s.split("\n")
+        for line in reversed(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("File "):
+                continue
+            if all(c in " ~^" for c in stripped):
+                continue
+            return stripped
+        return lines[-2].strip()
+
+    @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
+    def test_tlparse_kernel_stack_traces_cpu(self):
+        model = Model4()
+        example_inputs = (
+            torch.randn(8, 10),
+            torch.randn(10, 20),
+            torch.randn(20, 30),
+            torch.randn(10, 30),
+        )
+
+        expected = {
+            "cpp_fused_mul_relu_sigmoid_threshold_backward_0:2": [
+                "d = a * 3.14",
+                "x = self.relu(x)",
+                "x = self.sigmoid(x)",
+            ],
+            "cpp_fused_gelu_1:4": [
+                "z = torch.nn.functional.gelu(y)",
+            ],
+            "extern_kernels.addmm:1": [
+                "x = self.fc1(x)",
+            ],
+            "extern_kernels.addmm:3": [
+                "y = torch.addmm(c, d, b)",
+            ],
+        }
+
+        compiled = torch.compile(model)
+        for _ in range(2):
+            torch._dynamo.reset()
+            reset_inductor_kernel_provenance_debug_handle()
+            with self._setup_provenance_capture() as payload_buffer:
+                compiled = torch.compile(model)
+                compiled(*example_inputs)
+                payload_content = payload_buffer.getvalue().strip()
+                data = json.loads(payload_content)
+                self.assertEqual(set(data.keys()), set(expected.keys()))
+                for key, expected_lines in expected.items():
+                    actual_lines = [self.extract_code_line(s) for s in data[key]]
+                    self.assertEqual(
+                        sorted(actual_lines),
+                        sorted(expected_lines),
+                        f"Mismatch for key: {key}",
+                    )
 
     @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
     @requires_gpu_and_triton
@@ -794,6 +853,20 @@ class TestProvenanceTracingStackTraces(TestCase):
         self.assertIsInstance(result, dict)
         self.assertEqual(len(result), 0)  # Should be empty with no provenance data
 
+    def test_reset_provenance_globals_preserves_kernel_information_jsons(self):
+        kernel_information_jsons = get_kernel_information_jsons()
+        previous = dict(kernel_information_jsons)
+        kernel_information_jsons.clear()
+        kernel_information_jsons["outer"] = {}
+        try:
+            with reset_provenance_globals():
+                self.assertEqual(get_kernel_information_jsons(), {"outer": {}})
+                get_kernel_information_jsons()["inner"] = {}
+            self.assertEqual(get_kernel_information_jsons(), {"outer": {}, "inner": {}})
+        finally:
+            get_kernel_information_jsons().clear()
+            get_kernel_information_jsons().update(previous)
+
     @unittest.skipIf(
         IS_MACOS,
         "MacOS generates different debug handles",
@@ -882,11 +955,38 @@ class ProvenanceTracingKernelContextTemplate:
         _, code = run_and_get_cpp_code(torch._inductor.aoti_compile_and_package, ep)
 
         self.assertTrue("KernelContextGuard" not in code)
+        FileCheck().check_not(
+            "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+        ).check_not("thread_local KernelContext* tls_kernel_context = nullptr;").run(
+            code
+        )
 
         with config.patch(
             {
                 "trace.provenance_tracking_level": 1,
                 "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": False,
+            }
+        ):
+            package_path, code = run_and_get_cpp_code(
+                torch._inductor.aoti_compile_and_package, ep
+            )
+
+            FileCheck().check_not(
+                "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+            ).check_not(
+                "thread_local KernelContext* tls_kernel_context = nullptr;"
+            ).check_not("KernelContextGuard").run(code)
+
+            compiled_model = torch._inductor.aoti_load_package(package_path)
+            result = compiled_model(*example_inputs)
+            self.assertEqual(result, model(*example_inputs))
+
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 1,
+                "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": True,
             }
         ):
             package_path, code = run_and_get_cpp_code(

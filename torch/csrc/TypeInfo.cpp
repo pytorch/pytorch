@@ -110,7 +110,7 @@ static PyObject* THPDTypeInfo_compare(
         Py_RETURN_FALSE;
       }
   }
-  return Py_INCREF(Py_NotImplemented), Py_NotImplemented;
+  Py_RETURN_NOTIMPLEMENTED;
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void* /*unused*/) {
@@ -200,7 +200,8 @@ static PyObject* THPIInfo_dtype(THPIInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   auto primary_name = c10::getDtypeNames(self->type).first;
   return AT_DISPATCH_IINFO_TYPES(self->type, "dtype", [&primary_name] {
-    return PyUnicode_FromString(primary_name.data());
+    return PyUnicode_FromStringAndSize(
+        primary_name.data(), static_cast<Py_ssize_t>(primary_name.size()));
   });
   END_HANDLE_TH_ERRORS
 }
@@ -233,7 +234,8 @@ static PyObject* THPFInfo_dtype(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   auto primary_name = c10::getDtypeNames(self->type).first;
   return _AT_DISPATCH_FINFO_TYPES(self->type, "dtype", [&primary_name] {
-    return PyUnicode_FromString(primary_name.data());
+    return PyUnicode_FromStringAndSize(
+        primary_name.data(), static_cast<Py_ssize_t>(primary_name.size()));
   });
   END_HANDLE_TH_ERRORS
 }
@@ -252,7 +254,8 @@ static PyObject* THPFInfo_str(THPFInfo* self) {
   if (dtypeStr != nullptr) {
     oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ')';
   }
-  return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
+  return !PyErr_Occurred() ? THPUtils_packString(std::move(oss).str().c_str())
+                           : nullptr;
 }
 
 static PyObject* THPIInfo_str(THPIInfo* self) {
@@ -265,7 +268,8 @@ static PyObject* THPIInfo_str(THPIInfo* self) {
     oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ')';
   }
 
-  return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
+  return !PyErr_Occurred() ? THPUtils_packString(std::move(oss).str().c_str())
+                           : nullptr;
 }
 
 static const std::initializer_list<PyGetSetDef> THPFInfo_properties = {

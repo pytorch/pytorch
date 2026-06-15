@@ -360,7 +360,7 @@ kernel void factorDiagonalBlock(
 
     if (linear_tid == 0) {
       float diagVal = tile[kk][kk] - diagElt;
-      if (diagVal <= 0.0f) {
+      if (!(diagVal > 0.0f)) {
         info[bid.x] = kk + 1;
         return;
       }

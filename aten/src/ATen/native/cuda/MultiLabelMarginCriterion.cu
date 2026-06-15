@@ -6,6 +6,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/block_reduce.cuh>
 
+#include <utility>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/CUDAFunctions.h>
@@ -410,7 +412,7 @@ std::tuple<Tensor, Tensor> multilabel_margin_loss_forward_cuda(
   auto is_target = at::empty({0}, self.options());
   multilabel_margin_loss_forward_out_cuda_template(
       self, target, reduction, output, is_target);
-  return std::make_tuple(output, is_target);
+  return std::make_tuple(std::move(output), std::move(is_target));
 }
 
 Tensor& multilabel_margin_loss_backward_cuda_out(

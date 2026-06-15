@@ -22,6 +22,7 @@ class TestControlFlowInCUDAGraphInitialization(TestCase):
     )
 
     def setUp(self):
+        super().setUp()
         # Ensure context has not been created beforehand
         self.assertFalse(
             torch._C._cuda_hasPrimaryContext(0),

@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -42,6 +43,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     is_iterable_of_tensors,
     numpy_to_torch_dtype_dict,
+    parametrize,
     run_tests,
     skipIfNoSciPy,
     slowTest,
@@ -241,7 +243,7 @@ class TestUnaryUfuncs(TestCase):
             torch_kwargs, numpy_kwargs = op.sample_kwargs(t.device, dtype, t)
             if dtype is torch.bfloat16:
                 a = t.cpu().to(torch.float32).numpy()
-            elif dtype is torch.complex32:
+            elif dtype in (torch.complex32, torch.bcomplex32):
                 a = t.cpu().to(torch.complex64).numpy()
             else:
                 a = t.cpu().numpy()
@@ -1548,7 +1550,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertGreater(math.copysign(1.0, v), 0.0)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float, torch.double)
     def test_abs_zero(self, device, dtype):
         # Both abs(0.0) and abs(-0.0) should result in 0.0
@@ -1556,7 +1558,7 @@ class TestUnaryUfuncs(TestCase):
         for num in abs_zeros:
             self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.bool, torch.int8)
     def test_narrow_dtypes(self, device, dtype):
         x_int = torch.randint(2, (8 * 1024,), device=device, dtype=torch.int)
@@ -1612,7 +1614,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.int8)
     @largeTensorTest("8GB")
     def test_nonzero_large(self, device, dtype):
@@ -1936,6 +1938,35 @@ class TestUnaryUfuncs(TestCase):
         y = x.to(torch.float8_e5m2)
         ref = x.cpu().float().to(torch.float8_e5m2)
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+
+    # Regression for https://github.com/pytorch/pytorch/issues/177839:
+    # when eps > 0.5 the scalar kernel clamps via `x < eps ? eps : ...` (so
+    # the lower bound wins over the upper bound when eps > 1 - eps), and the
+    # vectorized kernel must match.
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize("eps", [0.49, 0.51, 0.6, 0.9])
+    @parametrize("shape", [(2, 16), (4, 32), (8, 64)])
+    def test_logit_vectorized_matches_scalar(self, device, dtype, eps, shape):
+        torch.manual_seed(0)
+        # Slice from a wider tensor so the result is non-contiguous and
+        # bypasses the contiguous MKL fast-path — ensures the vectorized
+        # kernel we patched is actually exercised on MKL-enabled builds.
+        rows, cols = shape
+        t = torch.rand((rows, cols + 2), dtype=dtype, device=device) * 2 - 0.5
+        x = t[:, :cols]
+        self.assertFalse(x.is_contiguous())
+        got = torch.special.logit(x, eps=eps)
+        # Reference: apply the scalar kernel elementwise against a single-
+        # lane tensor of the same dtype. cpu_kernel_vec falls back to its
+        # scalar lambda for lengths below `Vectorized::size()`, so this
+        # always hits the scalar path and gives a bit-exact ground truth.
+        ref = torch.empty_like(x)
+        x_flat = x.reshape(-1)
+        ref_flat = ref.reshape(-1)
+        for i in range(x_flat.numel()):
+            ref_flat[i] = torch.special.logit(x_flat[i : i + 1], eps=eps)
+        self.assertEqual(got, ref)
 
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())

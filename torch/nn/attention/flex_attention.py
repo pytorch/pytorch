@@ -389,9 +389,11 @@ _DEFAULT_SPARSE_BLOCK_SIZE = 128
 _LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 
-def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor) -> Tensor:
+def _ordered_to_dense(
+    num_blocks_in_row: Tensor, col_indices: Tensor, num_cols: int
+) -> Tensor:
     num_rows = col_indices.shape[-2]
-    num_cols = col_indices.shape[-1]
+    max_entries = col_indices.shape[-1]
     batch_dims = num_blocks_in_row.shape[:-1]
     device = num_blocks_in_row.device
 
@@ -401,7 +403,7 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor) -> Tensor:
         row_indices = torch.arange(num_rows, dtype=torch.int, device=device).unsqueeze(
             -1
         )
-        col_range = torch.arange(num_cols, dtype=torch.int, device=device)
+        col_range = torch.arange(max_entries, dtype=torch.int, device=device)
         index_mask = col_range < kv_num_blocks.unsqueeze(-1)
 
         # We write to one spot "out of bounds"
@@ -422,7 +424,8 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor) -> Tensor:
 def _dense_to_ordered(dense_mask: Tensor) -> tuple[Tensor, Tensor]:
     dense_mask = dense_mask.to(dtype=torch.int32)
     num_blocks_in_row = dense_mask.sum(dim=-1)
-    col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
+    with torch.fx.traceback.annotate({"fallback_to_eager": True}):
+        col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
     return (
         num_blocks_in_row.to(torch.int32, memory_format=torch.contiguous_format),
         col_indices.to(torch.int32, memory_format=torch.contiguous_format),
@@ -432,7 +435,7 @@ def _dense_to_ordered(dense_mask: Tensor) -> tuple[Tensor, Tensor]:
 def _transpose_ordered(
     num_blocks_in_row: Tensor, col_indices: Tensor
 ) -> tuple[Tensor, Tensor]:
-    dense = _ordered_to_dense(num_blocks_in_row, col_indices)
+    dense = _ordered_to_dense(num_blocks_in_row, col_indices, col_indices.shape[-1])
     return _dense_to_ordered(dense.transpose(-2, -1))
 
 
@@ -466,20 +469,38 @@ class _ExtractedLeaf:
 _EXTRACTED_LEAF = _ExtractedLeaf()
 
 
-class _FunctionLeaf(typing.NamedTuple):
-    """Entry in _StrippedClosure.leaf_entries for a recursively processed
-    function.  Stores enough information to reconstruct the function from
-    the extracted leaves during unflattening."""
+class _CallableLeaf(typing.NamedTuple):
+    """Entry in stripped callable metadata for a recursively processed
+    nested callable. Stores enough information to reconstruct it from the
+    extracted leaves during unflattening."""
 
-    stripped: _StrippedClosure | Callable[..., Any]
-    closure_spec: TreeSpec
+    stripped: _CallableMetadata | Callable[..., Any]
+    callable_spec: TreeSpec
     n_extracted: int  # number of extracted leaves this function contributes
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _CallableLeaf):
+            return False
+        return (
+            _callable_entry_eq(self.stripped, other.stripped)
+            and self.callable_spec == other.callable_spec
+            and self.n_extracted == other.n_extracted
+        )
+
+    def __hash__(self) -> int:
+        return hash(
+            (
+                _callable_entry_hash(self.stripped),
+                self.callable_spec,
+                self.n_extracted,
+            )
+        )
 
 
 class _StrippedClosure(typing.NamedTuple):
     """Data container holding the parts of a function needed for reconstruction.
 
-    Created by _extract_closure_pytree when closure tensors are lifted into
+    Created by _extract_callable_pytree when closure tensors are lifted into
     pytree leaves.  Unlike a FunctionType with None-filled cells, this is not
     callable — it is pure data stored in the pytree context.
     """
@@ -493,38 +514,122 @@ class _StrippedClosure(typing.NamedTuple):
     extra_dict: dict[str, Any]
     # Per-position info for the closure's flattened leaves.
     # _EXTRACTED_LEAF → position filled from the extracted leaves list.
-    # _FunctionLeaf   → recursively processed function (not a valid pytree leaf).
-    leaf_entries: tuple[_ExtractedLeaf | _FunctionLeaf, ...]
+    # _CallableLeaf   → recursively processed nested callable.
+    leaf_entries: tuple[_ExtractedLeaf | _CallableLeaf, ...]
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _StrippedClosure):
+            return False
+        return self.code == other.code and self.leaf_entries == other.leaf_entries
+
+    def __hash__(self) -> int:
+        return hash((self.code, self.leaf_entries))
 
 
-def _extract_closure_pytree(
+class _StrippedPartial(typing.NamedTuple):
+    """Data container holding the parts of a functools.partial needed for reconstruction."""
+
+    leaf_entries: tuple[_ExtractedLeaf | _CallableLeaf, ...]
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _StrippedPartial):
+            return False
+        return self.leaf_entries == other.leaf_entries
+
+    def __hash__(self) -> int:
+        return hash(self.leaf_entries)
+
+
+class _PlainFunction(typing.NamedTuple):
+    fn: Callable[..., Any]
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _PlainFunction):
+            return False
+        return self.fn.__code__ == other.fn.__code__
+
+    def __hash__(self) -> int:
+        return hash(self.fn.__code__)
+
+
+_CallableMetadata: TypeAlias = _StrippedClosure | _StrippedPartial | _PlainFunction
+
+
+def _callable_entry_eq(
+    lhs: _CallableMetadata | types.FunctionType,
+    rhs: _CallableMetadata | types.FunctionType,
+) -> bool:
+    if inspect.isfunction(lhs) and inspect.isfunction(rhs):
+        return lhs.__code__ == rhs.__code__
+    return lhs == rhs
+
+
+def _callable_entry_hash(value: _CallableMetadata | types.FunctionType) -> int:
+    if inspect.isfunction(value):
+        return hash(value.__code__)
+    return hash(value)
+
+
+def _extract_callable_leaves(
+    leaves: list[Any], _seen: set[int]
+) -> tuple[tuple[BaseArgumentTypes, ...], tuple[_ExtractedLeaf | _CallableLeaf, ...]]:
+    extracted: list[BaseArgumentTypes] = []
+    leaf_entries: list[_ExtractedLeaf | _CallableLeaf] = []
+    for leaf in leaves:
+        if inspect.isfunction(leaf) or isinstance(leaf, functools.partial):
+            child_extracted, child_spec, child_stripped = _extract_callable_pytree(
+                leaf, _seen
+            )
+            if not isinstance(
+                child_stripped, (_StrippedClosure, _StrippedPartial, _PlainFunction)
+            ) and not inspect.isfunction(child_stripped):
+                raise AssertionError(
+                    "expected nested callable extraction to produce callable metadata"
+                )
+            extracted.extend(child_extracted)
+            leaf_entries.append(
+                _CallableLeaf(child_stripped, child_spec, len(child_extracted))
+            )
+        else:
+            extracted.append(leaf)
+            leaf_entries.append(_EXTRACTED_LEAF)
+    return tuple(extracted), tuple(leaf_entries)
+
+
+def _extract_callable_pytree(
     fn, _seen: set[int] | None = None
 ) -> tuple[
-    tuple[BaseArgumentTypes, ...], TreeSpec, _StrippedClosure | Callable[..., Any]
+    tuple[BaseArgumentTypes, ...],
+    TreeSpec,
+    _CallableMetadata | Callable[..., Any],
 ]:
     """Extract closure contents as a flattened sub-pytree.
 
-    Returns (extracted_leaves, closure_spec, fn_or_stripped) where:
+    Returns (extracted_leaves, callable_spec, fn_or_stripped) where:
     - extracted_leaves: flattened non-function contents from the closure,
-      plus any tensors/scalars recursively extracted from nested function
-      closures
-    - closure_spec: TreeSpec describing how to reconstruct the closure contents
-    - fn_or_stripped: either the original fn (no extraction) or a
-      _StrippedClosure carrying the function parts needed for reconstruction
+      functools.partial payload, plus any tensors/scalars recursively extracted
+      from nested function closures
+    - callable_spec: TreeSpec describing how to reconstruct the callable state
+    - fn_or_stripped: either the original fn (skipped extraction) or a
+      stripped callable carrying the parts needed for reconstruction
 
-    Functions found among the closure leaves are recursively processed: their
-    own closure tensors are extracted into the leaves list, and their skeleton
-    is stored in _StrippedClosure.leaf_entries as a _FunctionLeaf.  All other
-    values (tensors, scalars, None, etc.) remain as extracted leaves.
+    Functions found among the closure or partial leaves are recursively
+    processed: their own closure tensors are extracted into the leaves list,
+    and their skeleton is stored in the stripped metadata. All other values
+    (tensors, scalars, None, etc.) remain as extracted leaves.
 
-    If fn is not a plain function, has no closure, or has empty cells, returns
-    the original function unchanged with no closure leaves.
+    If fn is not a plain function or functools.partial, returns the original
+    function unchanged with no closure leaves. Plain functions without a
+    closure are wrapped as _PlainFunction so structural equality/hash can use
+    their __code__.
 
     Skipped under Dynamo tracing (torch.compiler.is_compiling) because Dynamo
     can't trace through closure cell introspection and handles freevars via its
     own lifting mechanism.
     """
-    if not inspect.isfunction(fn) or torch.compiler.is_compiling():
+    if torch.compiler.is_compiling() or not (
+        inspect.isfunction(fn) or isinstance(fn, functools.partial)
+    ):
         return (), _EMPTY_CLOSURE_SPEC, fn
 
     # Cycle detection for self-referencing closures.
@@ -534,32 +639,24 @@ def _extract_closure_pytree(
         return (), _EMPTY_CLOSURE_SPEC, fn
     _seen.add(id(fn))
 
+    if isinstance(fn, functools.partial):
+        partial_leaves, partial_spec = tree_flatten((fn.func, fn.args, fn.keywords))
+        extracted, leaf_entries = _extract_callable_leaves(partial_leaves, _seen)
+        return tuple(extracted), partial_spec, _StrippedPartial(tuple(leaf_entries))
+
     closure = fn.__closure__
     if not closure:
-        return (), _EMPTY_CLOSURE_SPEC, fn
+        return (), _EMPTY_CLOSURE_SPEC, _PlainFunction(fn)
 
     try:
         contents = tuple(cell.cell_contents for cell in closure)
     except ValueError:
         # Empty cell (created but not yet assigned) — can't extract
-        return (), _EMPTY_CLOSURE_SPEC, fn
+        return (), _EMPTY_CLOSURE_SPEC, _PlainFunction(fn)
 
-    closure_leaves, closure_spec = tree_flatten(contents)
+    closure_leaves, callable_spec = tree_flatten(contents)
 
-    extracted: list[BaseArgumentTypes] = []
-    leaf_entries: list[_ExtractedLeaf | _FunctionLeaf] = []
-    for leaf in closure_leaves:
-        if inspect.isfunction(leaf):
-            child_extracted, child_spec, child_stripped = _extract_closure_pytree(
-                leaf, _seen
-            )
-            extracted.extend(child_extracted)
-            leaf_entries.append(
-                _FunctionLeaf(child_stripped, child_spec, len(child_extracted))
-            )
-        else:
-            extracted.append(leaf)
-            leaf_entries.append(_EXTRACTED_LEAF)
+    extracted, leaf_entries = _extract_callable_leaves(closure_leaves, _seen)
 
     stripped = _StrippedClosure(
         code=fn.__code__,
@@ -572,22 +669,24 @@ def _extract_closure_pytree(
         leaf_entries=tuple(leaf_entries),
     )
 
-    return tuple(extracted), closure_spec, stripped
+    return tuple(extracted), callable_spec, stripped
 
 
-def _reconstruct_closure_fn(stripped, extracted_leaves, closure_spec):
-    """Rebuild a function from a _StrippedClosure and flattened extracted leaves."""
-    if not isinstance(stripped, _StrippedClosure):
+def _reconstruct_closure_fn(stripped, extracted_leaves, callable_spec):
+    """Rebuild a stripped callable from flattened extracted leaves."""
+    if isinstance(stripped, _PlainFunction):
+        return stripped.fn
+    if not isinstance(stripped, (_StrippedClosure, _StrippedPartial)):
         return stripped
 
     all_leaves: list[BaseArgumentTypes | Callable[..., Any]] = []
     idx = 0
     for entry in stripped.leaf_entries:
-        if isinstance(entry, _FunctionLeaf):
+        if isinstance(entry, _CallableLeaf):
             child_fn = _reconstruct_closure_fn(
                 entry.stripped,
                 extracted_leaves[idx : idx + entry.n_extracted],
-                entry.closure_spec,
+                entry.callable_spec,
             )
             all_leaves.append(child_fn)
             idx += entry.n_extracted
@@ -596,7 +695,11 @@ def _reconstruct_closure_fn(stripped, extracted_leaves, closure_spec):
             all_leaves.append(extracted_leaves[idx])
             idx += 1
 
-    contents = tree_unflatten(all_leaves, closure_spec)
+    if isinstance(stripped, _StrippedPartial):
+        fn, args, keywords = tree_unflatten(all_leaves, callable_spec)
+        return functools.partial(fn, *args, **keywords)
+
+    contents = tree_unflatten(all_leaves, callable_spec)
     new_cells = tuple(types.CellType(v) for v in contents)
 
     restored = types.FunctionType(
@@ -616,31 +719,31 @@ def _reconstruct_closure_fn(stripped, extracted_leaves, closure_spec):
 
 
 class _MaskModWrapper:
-    """Wraps a mask_mod or _StrippedClosure with value-based equality.
+    """Wraps a mask_mod or stripped callable metadata with value-based equality.
 
     BlockMask stores an arbitrary callable (mask_mod) in its pytree context.
     The default __eq__ for functions uses identity comparison, which is too
     strict when the same closure is recreated (e.g., defined inside forward()).
 
-    When closure tensors have been extracted (by _extract_closure_pytree), fn
-    is a _StrippedClosure (pure data, not callable).  Equality compares the
-    code objects + closure_spec — no tensor dispatch is triggered.
+    When callable state has been extracted (by _extract_callable_pytree), fn is
+    stripped metadata (pure data, not callable). Equality compares the stripped
+    callable structure + callable_spec without triggering tensor dispatch.
 
     When extraction is skipped (e.g., under Dynamo), fn is the original
-    callable and equality compares code objects + closure contents (for plain
-    functions) or delegates to __eq__ (for callable objects).
+    callable and equality compares code objects for plain functions or
+    delegates to __eq__ for callable objects.
     """
 
-    __slots__ = ("fn", "closure_spec")
+    __slots__ = ("fn", "callable_spec")
 
-    def __init__(self, fn, closure_spec=None) -> None:
+    def __init__(self, fn, callable_spec=None) -> None:
         self.fn = fn
-        self.closure_spec = closure_spec
+        self.callable_spec = callable_spec
 
     def __call__(self, b: Tensor, h: Tensor, q_idx: Tensor, kv_idx: Tensor) -> Tensor:
-        if isinstance(self.fn, _StrippedClosure):
+        if isinstance(self.fn, (_StrippedClosure, _StrippedPartial, _PlainFunction)):
             raise RuntimeError(
-                "_MaskModWrapper with _StrippedClosure is not callable — "
+                "_MaskModWrapper with stripped callable is not callable — "
                 "use _reconstruct_closure_fn to rebuild the function first"
             )
         return self.fn(b, h, q_idx, kv_idx)
@@ -648,29 +751,29 @@ class _MaskModWrapper:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _MaskModWrapper):
             return False
-        if self.fn is other.fn and self.closure_spec is other.closure_spec:
+        if self.fn is other.fn and self.callable_spec is other.callable_spec:
             return True
-        # Extracted case: _StrippedClosure — compare code + closure_spec
-        if isinstance(self.fn, _StrippedClosure) and isinstance(
-            other.fn, _StrippedClosure
+        if isinstance(
+            self.fn, (_StrippedClosure, _StrippedPartial, _PlainFunction)
+        ) and isinstance(
+            other.fn, (_StrippedClosure, _StrippedPartial, _PlainFunction)
         ):
-            return (
-                self.fn.code == other.fn.code
-                and self.closure_spec == other.closure_spec
-            )
-        # Non-extracted plain functions: compare code + closure contents
+            return self.fn == other.fn and self.callable_spec == other.callable_spec
+        # Non-extracted plain functions: compare code objects
         if inspect.isfunction(self.fn) and inspect.isfunction(other.fn):
             return self.fn.__code__ == other.fn.__code__
         # Callable objects: delegate to their __eq__
-        if not isinstance(self.fn, _StrippedClosure) and not isinstance(
-            other.fn, _StrippedClosure
+        if not isinstance(
+            self.fn, (_StrippedClosure, _StrippedPartial, _PlainFunction)
+        ) and not isinstance(
+            other.fn, (_StrippedClosure, _StrippedPartial, _PlainFunction)
         ):
             return self.fn == other.fn
         return False
 
     def __hash__(self) -> int:
-        if isinstance(self.fn, _StrippedClosure):
-            return hash(self.fn.code)
+        if isinstance(self.fn, (_StrippedClosure, _StrippedPartial, _PlainFunction)):
+            return hash((self.fn, self.callable_spec))
         if inspect.isfunction(self.fn):
             return hash(self.fn.__code__)
         return hash(self.fn)
@@ -720,8 +823,8 @@ class BlockMask:
 
     **Details**
 
-    The basics of our format require only kv_num_blocks and kv_indices. But, we
-    have up to 8 tensors on this object. This represents 4 pairs:
+    The basics of our format require only kv_num_blocks and kv_indices. The
+    primary block-sparse layout is represented by up to 4 tensor pairs:
 
     1. (kv_num_blocks, kv_indices): Used for the forwards pass of attention, as
     we reduce along the KV dimension.
@@ -738,6 +841,21 @@ class BlockMask:
 
     4. [GENERATED] (full_q_num_blocks, full_q_indices): Same as above, but for
     the backwards pass. These are autogenerated from 2.
+
+    Additional optional tensors may carry deterministic dQ metadata for
+    block-sparse FLASH backward:
+
+    5. [OPTIONAL] dq_write_order: Write-order metadata for partial blocks. This
+    is produced by create_block_mask when compute_dq_write_order=True, or passed
+    directly to BlockMask.from_kv_blocks by callers that precompute it.
+
+    6. [OPTIONAL] dq_write_order_full: Write-order metadata for full blocks,
+    produced or passed the same way as dq_write_order.
+
+    7. [OPTIONAL] dq_kv_order: Explicit KV scheduler order used to produce the
+    write-order metadata. create_block_mask currently accepts a boolean
+    dq_kv_order; BlockMask.from_kv_blocks also accepts a tensor for callers that
+    provide precomputed write-order metadata directly.
     """
 
     seq_lengths: tuple[int, int]
@@ -749,6 +867,10 @@ class BlockMask:
     q_indices: Tensor | None
     full_q_num_blocks: Tensor | None
     full_q_indices: Tensor | None
+    dq_write_order: Tensor | None
+    dq_write_order_full: Tensor | None
+    dq_kv_order: Tensor | None
+    dq_kv_order_spt: bool | None
     BLOCK_SIZE: tuple[int, int]
     mask_mod: _mask_mod_signature
 
@@ -762,12 +884,16 @@ class BlockMask:
         "q_indices",
         "full_q_num_blocks",
         "full_q_indices",
+        "dq_write_order",
+        "dq_write_order_full",
+        "dq_kv_order",
     ]
 
     _CONTEXT_ATTRS = [
         "seq_lengths",
         "BLOCK_SIZE",
         "mask_mod",
+        "dq_kv_order_spt",
     ]
 
     def __init__(
@@ -781,8 +907,16 @@ class BlockMask:
         q_indices: Tensor | None,
         full_q_num_blocks: Tensor | None,
         full_q_indices: Tensor | None,
-        BLOCK_SIZE: tuple[int, int],
-        mask_mod: _mask_mod_signature,
+        BLOCK_SIZE: tuple[int, int] = (
+            _DEFAULT_SPARSE_BLOCK_SIZE,
+            _DEFAULT_SPARSE_BLOCK_SIZE,
+        ),
+        mask_mod: _mask_mod_signature = noop_mask,
+        *,
+        dq_write_order: Tensor | None = None,
+        dq_write_order_full: Tensor | None = None,
+        dq_kv_order: Tensor | None = None,
+        dq_kv_order_spt: bool | None = None,
     ) -> None:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
@@ -808,8 +942,29 @@ class BlockMask:
         self.q_indices = q_indices
         self.full_q_num_blocks = full_q_num_blocks
         self.full_q_indices = full_q_indices
+        if dq_write_order_full is not None and dq_write_order is None:
+            raise ValueError("dq_write_order_full requires dq_write_order")
+
+        self.dq_write_order = dq_write_order
+        self.dq_write_order_full = dq_write_order_full
+        self.dq_kv_order = dq_kv_order
+        self.dq_kv_order_spt = dq_kv_order_spt
         self.BLOCK_SIZE = BLOCK_SIZE
         self.mask_mod = mask_mod
+
+    def _dq_kv_order(self) -> Tensor | bool | None:
+        if self.dq_kv_order is not None:
+            return self.dq_kv_order
+        return self.dq_kv_order_spt
+
+    @staticmethod
+    def _slice_dq_kv_order(
+        dq_kv_order: Tensor | None,
+        index: tuple[int | slice | Tensor, ...],
+    ) -> Tensor | None:
+        if dq_kv_order is None:
+            return None
+        return dq_kv_order[index[:2] + (slice(None),)]
 
     @classmethod
     def from_kv_blocks(
@@ -822,6 +977,10 @@ class BlockMask:
         mask_mod: _mask_mod_signature | None = None,
         seq_lengths: tuple[int, int] | None = None,
         compute_q_blocks: bool = True,
+        *,
+        dq_write_order: Tensor | None = None,
+        dq_write_order_full: Tensor | None = None,
+        dq_kv_order: Tensor | bool | None = None,
     ) -> Self:
         """
         Creates a BlockMask instance from key-value block information.
@@ -833,6 +992,9 @@ class BlockMask:
             full_kv_indices (Optional[Tensor]): Indices of full key-value blocks in each Q_BLOCK_SIZE row tile.
             BLOCK_SIZE (Union[int, tuple[int, int]]): Size of KV_BLOCK_SIZE x Q_BLOCK_SIZE tiles.
             mask_mod (Optional[Callable]): Function to modify the mask.
+            dq_write_order (Optional[Tensor]): Precomputed deterministic dQ write-order metadata.
+            dq_write_order_full (Optional[Tensor]): Precomputed deterministic dQ write-order metadata for full blocks.
+            dq_kv_order (Optional[Union[Tensor, bool]]): KV-column scheduler order used to produce dq_write_order. A bool selects a built-in order; a tensor gives an explicit scheduler-rank to n-block permutation.
 
         Returns:
             BlockMask: Instance with full Q information generated via _transposed_ordered
@@ -873,6 +1035,11 @@ class BlockMask:
             kv_length = kv_indices.shape[-1] * BLOCK_SIZE[1]
             seq_lengths = (q_length, kv_length)
 
+        if dq_kv_order is not None and not isinstance(dq_kv_order, (bool, Tensor)):
+            raise ValueError("dq_kv_order must be a bool, Tensor, or None")
+        dq_kv_order_tensor = dq_kv_order if isinstance(dq_kv_order, Tensor) else None
+        dq_kv_order_spt = dq_kv_order if isinstance(dq_kv_order, bool) else None
+
         return cls(
             seq_lengths=seq_lengths,
             kv_num_blocks=kv_num_blocks,
@@ -885,6 +1052,10 @@ class BlockMask:
             full_q_indices=full_q_indices,
             BLOCK_SIZE=BLOCK_SIZE,
             mask_mod=mask_mod,
+            dq_write_order=dq_write_order,
+            dq_write_order_full=dq_write_order_full,
+            dq_kv_order=dq_kv_order_tensor,
+            dq_kv_order_spt=dq_kv_order_spt,
         )
 
     @overload
@@ -901,6 +1072,10 @@ class BlockMask:
         Tensor | None,
         Tensor | None,
         Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        bool | None,
         int,
         int,
         _mask_mod_signature,
@@ -919,7 +1094,11 @@ class BlockMask:
         Tensor | None,
         Tensor | None,
         Tensor | None,
-        int | tuple[int, int],
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        bool | None,
+        tuple[int, int],
         _mask_mod_signature,
     ]: ...
 
@@ -948,6 +1127,10 @@ class BlockMask:
             self.q_indices,
             self.full_q_num_blocks,
             self.full_q_indices,
+            self.dq_write_order,
+            self.dq_write_order_full,
+            self.dq_kv_order,
+            self.dq_kv_order_spt,
             *block_size,
             self.mask_mod,
         )
@@ -1008,6 +1191,12 @@ class BlockMask:
                 assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
                 assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
         """
+        if self.dq_kv_order is not None:
+            raise NotImplementedError(
+                "Slicing BlockMask with tensor dq_kv_order is not supported yet. "
+                "Construct a new BlockMask with matching precomputed dq_write_order metadata."
+            )
+
         index = (index,) if not isinstance(index, tuple) else index
         padded = (*index, slice(None), slice(None), slice(None))[:3]
         sizes = self.kv_num_blocks.shape[:3]
@@ -1027,7 +1216,7 @@ class BlockMask:
         else:
             new_full_kv_num_blocks = None
             new_full_kv_indices = None
-        return BlockMask.from_kv_blocks(
+        new_block_mask = BlockMask.from_kv_blocks(
             new_kv_num_blocks,
             new_kv_indices,
             new_full_kv_num_blocks,
@@ -1037,6 +1226,15 @@ class BlockMask:
             seq_lengths=self.seq_lengths,
             compute_q_blocks=self.q_indices is not None,
         )
+        new_block_mask.dq_kv_order = self._slice_dq_kv_order(self.dq_kv_order, index)
+        new_block_mask.dq_kv_order_spt = self.dq_kv_order_spt
+        if self.dq_write_order is not None and new_block_mask.dq_kv_order is None:
+            dq_wo, dq_wo_full = _compute_dq_write_order_from_block_mask(
+                new_block_mask, dq_kv_order=new_block_mask.dq_kv_order_spt
+            )
+            new_block_mask.dq_write_order = dq_wo
+            new_block_mask.dq_write_order_full = dq_wo_full
+        return new_block_mask
 
     def __repr__(self) -> str:
         def shape_or_none(x: torch.Tensor | None):
@@ -1060,6 +1258,12 @@ class BlockMask:
         )
 
     def _adjust(self, new_q_len: int, new_kv_len: int) -> Self:
+        if self.dq_kv_order is not None:
+            raise NotImplementedError(
+                "Adjusting BlockMask with tensor dq_kv_order is not supported yet. "
+                "Construct a new BlockMask with matching precomputed dq_write_order metadata."
+            )
+
         new_num_rows = (new_q_len + self.BLOCK_SIZE[0] - 1) // self.BLOCK_SIZE[0]
         new_num_cols = (new_kv_len + self.BLOCK_SIZE[1] - 1) // self.BLOCK_SIZE[1]
         new_kv_num_blocks, new_kv_indices = _adjust_num_blocks_and_indices(
@@ -1080,14 +1284,25 @@ class BlockMask:
         else:
             new_full_kv_num_blocks = None
             new_full_kv_indices = None
-        return self.from_kv_blocks(
+        new_block_mask = self.from_kv_blocks(
             new_kv_num_blocks,
             new_kv_indices,
             new_full_kv_num_blocks,
             new_full_kv_indices,
-            self.BLOCK_SIZE,
-            self.mask_mod,
+            BLOCK_SIZE=self.BLOCK_SIZE,
+            mask_mod=self.mask_mod,
+            seq_lengths=(new_q_len, new_kv_len),
+            compute_q_blocks=self.q_indices is not None,
         )
+        new_block_mask.dq_kv_order = self.dq_kv_order
+        new_block_mask.dq_kv_order_spt = self.dq_kv_order_spt
+        if self.dq_write_order is not None and new_block_mask.dq_kv_order is None:
+            dq_wo, dq_wo_full = _compute_dq_write_order_from_block_mask(
+                new_block_mask, dq_kv_order=new_block_mask.dq_kv_order_spt
+            )
+            new_block_mask.dq_write_order = dq_wo
+            new_block_mask.dq_write_order_full = dq_wo_full
+        return new_block_mask
 
     def numel(self) -> int:
         """Returns the number of elements (not accounting for sparsity) in the mask."""
@@ -1111,13 +1326,17 @@ class BlockMask:
 
     def to_dense(self) -> Tensor:
         """Returns a dense block that is equivalent to the block mask."""
-        partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
+        partial_dense = _ordered_to_dense(
+            self.kv_num_blocks, self.kv_indices, self.kv_indices.shape[-1]
+        )
         if self.full_kv_num_blocks is not None:
             if self.full_kv_indices is None:
                 raise AssertionError("full_kv_indices must not be None")
             # pyrefly: ignore [bad-return]
             return partial_dense | _ordered_to_dense(
-                self.full_kv_num_blocks, self.full_kv_indices
+                self.full_kv_num_blocks,
+                self.full_kv_indices,
+                self.full_kv_indices.shape[-1],
             )
         return partial_dense
 
@@ -1206,12 +1425,18 @@ class BlockMask:
             may or may not be moved to the specified device, depending on their
             current device placement.
         """
-        mapped_attributes = tree_map_only(
+        mapped_tensors = tree_map_only(
             torch.Tensor,
             lambda x: x.to(device),
-            self.as_tuple(flatten=False),
+            tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS),
         )
-        return BlockMask(*mapped_attributes)
+        return BlockMask(
+            seq_lengths=self.seq_lengths,
+            **dict(zip(self._TENSOR_ATTRS, mapped_tensors, strict=True)),
+            BLOCK_SIZE=self.BLOCK_SIZE,
+            mask_mod=self.mask_mod,
+            dq_kv_order_spt=self.dq_kv_order_spt,
+        )
 
     @staticmethod
     def _wrap_context_value(attr: str, value: Any) -> Any:
@@ -1233,17 +1458,29 @@ class BlockMask:
         """Flatten BlockMask into a list of tensors and context.
 
         Closure tensors from mask_mod are extracted into the leaves via
-        _extract_closure_pytree so they are visible to the tracing
+        _extract_callable_pytree so they are visible to the tracing
         infrastructure (instead of being hidden in the pytree context).
         """
-        tensors = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
-        closure_leaves, closure_spec, stripped = _extract_closure_pytree(self.mask_mod)
+        optional_tensor_attrs = tuple(
+            attr for attr in self._TENSOR_ATTRS if getattr(self, attr) is None
+        )
+        tensors = tuple(
+            getattr(self, attr)
+            for attr in self._TENSOR_ATTRS
+            if attr not in optional_tensor_attrs
+        )
+        closure_leaves, callable_spec, stripped = _extract_callable_pytree(
+            self.mask_mod
+        )
         all_leaves = tensors + closure_leaves
-        context = tuple(
-            self._wrap_context_value(attr, getattr(self, attr))
-            if attr != "mask_mod"
-            else _MaskModWrapper(stripped, closure_spec)
-            for attr in self._CONTEXT_ATTRS
+        context = (
+            *(
+                self._wrap_context_value(attr, getattr(self, attr))
+                if attr != "mask_mod"
+                else _MaskModWrapper(stripped, callable_spec)
+                for attr in self._CONTEXT_ATTRS
+            ),
+            optional_tensor_attrs,
         )
         return all_leaves, context
 
@@ -1254,42 +1491,75 @@ class BlockMask:
         context: tuple[Any, ...],
     ) -> Self:
         """Unflatten leaves and context back into a BlockMask."""
-        n_regular = len(cls._TENSOR_ATTRS)
+        optional_tensor_attrs = context[-1]
+        tensor_attrs = tuple(
+            attr for attr in cls._TENSOR_ATTRS if attr not in optional_tensor_attrs
+        )
+        n_regular = len(tensor_attrs)
         regular_leaves = leaves[:n_regular]
         closure_leaves = leaves[n_regular:]
-        kwargs = {}
-        for attr, val in zip(cls._CONTEXT_ATTRS, context):
+        tensor_values = dict.fromkeys(optional_tensor_attrs)
+        tensor_values.update(zip(tensor_attrs, regular_leaves))
+        context_values = {}
+        for attr, val in zip(cls._CONTEXT_ATTRS, context[:-1]):
             if attr == "mask_mod" and isinstance(val, _MaskModWrapper):
-                kwargs[attr] = _reconstruct_closure_fn(
-                    val.fn, closure_leaves, val.closure_spec
+                context_values[attr] = _reconstruct_closure_fn(
+                    val.fn, closure_leaves, val.callable_spec
                 )
             else:
-                kwargs[attr] = cls._unwrap_context_value(attr, val)
-        kwargs.update(zip(cls._TENSOR_ATTRS, regular_leaves))
-        return cls(**kwargs)
+                context_values[attr] = cls._unwrap_context_value(attr, val)
+        return cls(
+            seq_lengths=cast(tuple[int, int], context_values["seq_lengths"]),
+            kv_num_blocks=cast(Tensor, tensor_values["kv_num_blocks"]),
+            kv_indices=cast(Tensor, tensor_values["kv_indices"]),
+            full_kv_num_blocks=cast(Tensor | None, tensor_values["full_kv_num_blocks"]),
+            full_kv_indices=cast(Tensor | None, tensor_values["full_kv_indices"]),
+            q_num_blocks=cast(Tensor | None, tensor_values["q_num_blocks"]),
+            q_indices=cast(Tensor | None, tensor_values["q_indices"]),
+            full_q_num_blocks=cast(Tensor | None, tensor_values["full_q_num_blocks"]),
+            full_q_indices=cast(Tensor | None, tensor_values["full_q_indices"]),
+            BLOCK_SIZE=cast(tuple[int, int], context_values["BLOCK_SIZE"]),
+            mask_mod=cast(_mask_mod_signature, context_values["mask_mod"]),
+            dq_write_order=cast(Tensor | None, tensor_values["dq_write_order"]),
+            dq_write_order_full=cast(
+                Tensor | None, tensor_values["dq_write_order_full"]
+            ),
+            dq_kv_order=cast(Tensor | None, tensor_values["dq_kv_order"]),
+            dq_kv_order_spt=cast(bool | None, context_values["dq_kv_order_spt"]),
+        )
 
     def _flatten_with_keys(
         self,
-    ) -> tuple[tuple[tuple[GetAttrKey, Any], ...], tuple[tuple[GetAttrKey, Any], ...]]:
+    ) -> tuple[tuple[tuple[GetAttrKey, Any], ...], tuple[Any, ...]]:
         """Flatten BlockMask with keys for better tracing.
 
         Closure tensors from mask_mod are extracted into the leaves via
-        _extract_closure_pytree so they are visible to the tracing
+        _extract_callable_pytree so they are visible to the tracing
         infrastructure (instead of being hidden in the pytree context).
         """
-        tensors = tuple(
-            (GetAttrKey(attr), getattr(self, attr)) for attr in self._TENSOR_ATTRS
+        optional_tensor_attrs = tuple(
+            attr for attr in self._TENSOR_ATTRS if getattr(self, attr) is None
         )
-        closure_leaves, closure_spec, stripped = _extract_closure_pytree(self.mask_mod)
+        tensors = tuple(
+            (GetAttrKey(attr), getattr(self, attr))
+            for attr in self._TENSOR_ATTRS
+            if attr not in optional_tensor_attrs
+        )
+        closure_leaves, callable_spec, stripped = _extract_callable_pytree(
+            self.mask_mod
+        )
         closure_with_keys = tuple(
             (GetAttrKey(f"_closure_{i}"), leaf) for i, leaf in enumerate(closure_leaves)
         )
         all_leaves = tensors + closure_with_keys
-        context = tuple(
-            (GetAttrKey(attr), self._wrap_context_value(attr, getattr(self, attr)))
-            if attr != "mask_mod"
-            else (GetAttrKey(attr), _MaskModWrapper(stripped, closure_spec))
-            for attr in self._CONTEXT_ATTRS
+        context = (
+            *(
+                self._wrap_context_value(attr, getattr(self, attr))
+                if attr != "mask_mod"
+                else _MaskModWrapper(stripped, callable_spec)
+                for attr in self._CONTEXT_ATTRS
+            ),
+            optional_tensor_attrs,
         )
         return all_leaves, context
 
@@ -1477,6 +1747,94 @@ def create_mask(
             raise AssertionError
 
 
+def _compute_dq_write_order_from_block_mask(
+    block_mask: BlockMask,
+    dq_kv_order: bool | None = False,
+) -> tuple[Tensor, Tensor | None]:
+    """Compute dQ write-order metadata for deterministic block-sparse backward.
+
+    Algorithm (per batch/head):
+    1. Convert the partial and full `kv` block lists into a dense `m_block -> n_block`
+       contributor mask and merge them.
+    2. Build a rank table in the requested scheduler order. ``dq_kv_order=False``
+       means ascending n-block order and ``True`` means descending/SPT order.
+    3. Gather ranks using backward `q_indices` order to produce semaphore values
+       used by deterministic dQ accumulation.
+    """
+    kv_num_blocks = block_mask.kv_num_blocks
+    kv_indices = block_mask.kv_indices
+    full_kv_num_blocks = block_mask.full_kv_num_blocks
+    full_kv_indices = block_mask.full_kv_indices
+    q_num_blocks = block_mask.q_num_blocks
+    q_indices = block_mask.q_indices
+    full_q_num_blocks = block_mask.full_q_num_blocks
+    full_q_indices = block_mask.full_q_indices
+
+    if q_num_blocks is None or q_indices is None:
+        raise ValueError(
+            "BlockMask must have q_num_blocks and q_indices to compute dq_write_order"
+        )
+
+    device = kv_indices.device
+
+    def _expand_bh(tensor: Tensor, target_b: int, target_h: int) -> Tensor:
+        return tensor.expand(target_b, target_h, *tensor.shape[2:])
+
+    broadcast_shapes = [
+        kv_indices.shape[:2],
+        q_indices.shape[:2],
+    ]
+    if full_kv_indices is not None:
+        broadcast_shapes.append(full_kv_indices.shape[:2])
+    if full_q_indices is not None:
+        broadcast_shapes.append(full_q_indices.shape[:2])
+    B, H = torch.broadcast_shapes(*broadcast_shapes)
+    kv_num_blocks = _expand_bh(kv_num_blocks, B, H)
+    kv_indices = _expand_bh(kv_indices, B, H)
+    if full_kv_num_blocks is not None:
+        full_kv_num_blocks = _expand_bh(full_kv_num_blocks, B, H)
+    if full_kv_indices is not None:
+        full_kv_indices = _expand_bh(full_kv_indices, B, H)
+
+    _, _, num_m, _ = kv_indices.shape
+    _, _, num_n, _ = q_indices.shape
+
+    has_full = full_kv_num_blocks is not None and full_kv_indices is not None
+
+    dense_partial = _ordered_to_dense(kv_num_blocks, kv_indices, num_n)
+    if has_full:
+        if full_kv_num_blocks is None or full_kv_indices is None:
+            raise AssertionError(
+                "full_kv_num_blocks and full_kv_indices must not be None"
+            )
+        dense_full = _ordered_to_dense(full_kv_num_blocks, full_kv_indices, num_n)
+        dense = (dense_partial + dense_full).clamp(max=1)
+    else:
+        dense = dense_partial
+
+    cumsum = dense.cumsum(dim=-1)
+    rank_table = (cumsum - dense).to(torch.int32)
+
+    if dq_kv_order:
+        total_per_m = cumsum[:, :, :, -1:]
+        rank_table = (total_per_m - 1 - rank_table).to(torch.int32)
+
+    def _gather_write_order(bwd_idx: Tensor) -> Tensor:
+        b_i = torch.arange(B, device=device)[:, None, None, None]
+        h_i = torch.arange(H, device=device)[None, :, None, None]
+        n_i = torch.arange(bwd_idx.shape[2], device=device)[None, None, :, None]
+        m_vals = bwd_idx.long().clamp(0, num_m - 1)
+        return rank_table[b_i, h_i, m_vals, n_i].to(torch.int32)
+
+    dq_write_order = _gather_write_order(q_indices)
+
+    dq_write_order_full = None
+    if has_full and full_q_num_blocks is not None and full_q_indices is not None:
+        dq_write_order_full = _gather_write_order(full_q_indices)
+
+    return dq_write_order, dq_write_order_full
+
+
 def create_block_mask(
     mask_mod: _mask_mod_signature,
     B: int | None,
@@ -1486,6 +1844,9 @@ def create_block_mask(
     device: DeviceLikeType | None = None,
     BLOCK_SIZE: int | tuple[int, int] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
+    separate_full_blocks: bool = True,
+    compute_dq_write_order: bool = False,
+    dq_kv_order: bool = True,
 ) -> BlockMask:
     r"""This function creates a block mask tuple from a mask_mod function.
 
@@ -1501,6 +1862,18 @@ def create_block_mask(
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
         BLOCK_SIZE (int or tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
+        separate_full_blocks (bool): If True, fully unmasked blocks are stored
+            separately so kernels can skip mask_mod on those blocks. If False,
+            all non-empty blocks are stored as partial blocks and mask_mod is
+            applied to every block.
+        compute_dq_write_order (bool): If True, precompute dQ write-order
+            metadata needed by deterministic block-sparse FLASH backward.
+        dq_kv_order (bool): KV-column scheduler order used for deterministic
+            dQ accumulation when compute_dq_write_order is True. False means
+            ascending n-block order and True means descending/SPT order.
+            Explicit tensor schedules are not supported by create_block_mask
+            yet; they are supported by BlockMask.from_kv_blocks for callers
+            that provide precomputed write-order metadata directly.
 
     Returns:
         BlockMask:  A BlockMask object that contains the block mask information.
@@ -1542,15 +1915,28 @@ def create_block_mask(
             stacklevel=2,
         )
         return torch.compile(create_block_mask)(
-            mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE
+            mask_mod,
+            B,
+            H,
+            Q_LEN,
+            KV_LEN,
+            device,
+            BLOCK_SIZE,
+            False,
+            separate_full_blocks,
+            compute_dq_write_order,
+            dq_kv_order,
         )
+
+    if not isinstance(dq_kv_order, bool):
+        raise ValueError("dq_kv_order must be a bool when using create_block_mask")
 
     mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device)
     partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
         mask_tensor,
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,
         KV_BLOCK_SIZE=KV_BLOCK_SIZE,
-        separate_full_blocks=True,
+        separate_full_blocks=separate_full_blocks,
     )
     block_mask = _create_sparse_block_from_block_mask(
         (partial_block_mask, full_block_mask),
@@ -1559,6 +1945,16 @@ def create_block_mask(
         Q_BLOCK_SIZE,
         KV_BLOCK_SIZE,
     )
+
+    if compute_dq_write_order:
+        dq_wo, dq_wo_full = _compute_dq_write_order_from_block_mask(
+            block_mask, dq_kv_order=dq_kv_order
+        )
+        block_mask.dq_write_order = dq_wo
+        block_mask.dq_write_order_full = dq_wo_full
+        block_mask.dq_kv_order = None
+        block_mask.dq_kv_order_spt = dq_kv_order
+
     return block_mask
 
 
@@ -1620,6 +2016,11 @@ def _apply_kernel_options(
         or key.device.type == "cpu"
         or value.device.type == "cpu"
     )
+    any_inputs_on_mps_device = (
+        query.device.type == "mps"
+        or key.device.type == "mps"
+        or value.device.type == "mps"
+    )
 
     # Determine what auxiliary outputs are needed
     output_lse = return_lse
@@ -1638,9 +2039,12 @@ def _apply_kernel_options(
         # We used to check if q,k,v required grads but since captured buffers can require grad
         # we always write unless in no_grad
         kernel_options["OUTPUT_LOGSUMEXP"] = torch.is_grad_enabled()
-        if any_inputs_on_cpu_device:
-            # CPU with torch.compile now supports inference, and will not return lse
+        if any_inputs_on_cpu_device or any_inputs_on_mps_device:
+            # CPU/MPS support inference only, no LSE/backward yet.
             # TODO: support CPU for training and return lse
+            kernel_options["OUTPUT_LOGSUMEXP"] = False
+        if any_inputs_on_mps_device:
+            # MPS supports inference only; backward / LSE not yet implemented
             kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     # If forward kernel needs to return max is decided by this rule internally.
@@ -1652,11 +2056,10 @@ def _apply_kernel_options(
             "Use return_aux=AuxRequest(lse=True) or omit max_scores."
         )
     kernel_options["OUTPUT_MAX"] = output_max
-    if any_inputs_on_cpu_device and output_max:
-        # CPU doesn't support returning max yet
-        # TODO: support CPU for returning max
-        raise NotImplementedError("Returning max scores is not supported on CPU.")
-        kernel_options["OUTPUT_MAX"] = False
+    if (any_inputs_on_cpu_device or any_inputs_on_mps_device) and output_max:
+        # CPU/MPS don't support returning max yet
+        # TODO: support CPU/MPS for returning max
+        raise NotImplementedError("Returning max scores is not supported on CPU/MPS.")
 
     return kernel_options
 
@@ -1679,11 +2082,26 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
         raise NotImplementedError(
             "FlexAttention does not support backward on CPU. Please set the input requires_grad to False or use another device."
         )
-    supported_devices = {"cuda", "cpu", "xpu", "hpu"}
+    if query.device.type == "mps" and (
+        query.requires_grad or key.requires_grad or value.requires_grad
+    ):
+        raise NotImplementedError(
+            "FlexAttention does not support backward on MPS. Please set the input requires_grad to False or use another device."
+        )
+    supported_devices = {"cuda", "cpu", "xpu", "hpu", "mps"}
     if query.device.type not in supported_devices:
         raise ValueError(
-            "FlexAttention is only supported on CUDA, CPU or HPU devices. "
+            "FlexAttention is only supported on CUDA, CPU, HPU, or MPS devices. "
             f"Found input tensors on {query.device.type} device."
+        )
+
+
+def _validate_no_nested_tensors(query: Tensor, key: Tensor, value: Tensor) -> None:
+    if query.is_nested or key.is_nested or value.is_nested:
+        raise NotImplementedError(
+            "flex_attention does not support NestedTensor inputs, including "
+            "torch.compile(flex_attention) with jagged NestedTensor inputs. "
+            "Convert inputs to dense tensors before calling flex_attention."
         )
 
 
@@ -1711,7 +2129,7 @@ def _enforce_mem_layouts(
         return tensor.stride()[-2] == 1
 
     # These memory layout constraint are only for FP8 GEMMs on NVIDIA GPU architectures >= SM89 and < SM100.
-    # This is because GPU arch < SM89 does not not support FP8 GEMMs, and
+    # This is because GPU arch < SM89 does not support FP8 GEMMs, and
     # SM100 has support for TN, NT, TT, NN layouts for FP8 GEMMs
     # (i.e., left and right operands can be in row or column major layouts)
     # so this check is only needed for older architectures.
@@ -1894,6 +2312,7 @@ def flex_attention(
 
     """
     # Some basic input validation
+    _validate_no_nested_tensors(query, key, value)
     _validate_sdpa_input(query, key, value, allow_lowp_kv=True)
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
@@ -2009,16 +2428,19 @@ def flex_attention(
         *,
         return_aux: AuxRequest | None,
         return_lse: bool,
+        stats_are_log2: bool,
     ):
         """Normalize stats and build return value (aux-aware, legacy-compatible)."""
         ln2 = math.log(2.0)
         return_lse = return_lse or return_aux is not None and return_aux.lse
         return_max = return_aux is not None and return_aux.max_scores
 
-        lse_scaled = lse * ln2 if (return_lse and lse.numel() > 0) else None
-        max_scaled = (
-            max_scores * ln2 if (return_max and max_scores.numel() > 0) else None
-        )
+        lse_scaled = lse if (return_lse and lse.numel() > 0) else None
+        max_scaled = max_scores if (return_max and max_scores.numel() > 0) else None
+
+        if stats_are_log2:
+            lse_scaled = lse_scaled * ln2 if lse_scaled is not None else None
+            max_scaled = max_scaled * ln2 if max_scaled is not None else None
 
         if return_aux is not None:
             return out, AuxOutput(
@@ -2047,7 +2469,12 @@ def flex_attention(
             kernel_options,  # type: ignore[union-attr]
         )
         return _finalize_outputs(
-            out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
+            out,
+            lse,
+            max_scores,
+            return_aux=return_aux,
+            return_lse=return_lse,
+            stats_are_log2=kernel_options["BACKEND"] != "FLASH",
         )
 
     if not _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
@@ -2088,5 +2515,11 @@ def flex_attention(
             kernel_options,
         )
     return _finalize_outputs(
-        out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
+        out,
+        lse,
+        max_scores,
+        return_aux=return_aux,
+        return_lse=return_lse,
+        stats_are_log2=_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG
+        or kernel_options["BACKEND"] != "FLASH",
     )

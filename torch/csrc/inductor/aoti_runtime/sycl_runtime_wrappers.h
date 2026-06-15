@@ -13,7 +13,7 @@
     if (status != ZE_RESULT_SUCCESS) {                                    \
       std::stringstream ss;                                               \
       ss << "L0 runtime error: " << std::hex << std::uppercase << status; \
-      throw std::runtime_error(ss.str());                                 \
+      throw std::runtime_error(std::move(ss).str());                      \
     }                                                                     \
   }
 
@@ -99,7 +99,7 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   std::ifstream IFS(filePath.c_str(), std::ios::binary);
   std::ostringstream OSS;
   OSS << IFS.rdbuf();
-  std::string data(OSS.str());
+  std::string data(std::move(OSS).str());
 
   bool isSpirv = filePath.size() >= 4 &&
       filePath.compare(filePath.size() - 4, 4, ".spv") == 0;

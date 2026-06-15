@@ -56,6 +56,7 @@ def read_resource_file(resource_file: str) -> str:
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
         self.test_error_file = os.path.join(self.test_dir, "error.json")
 

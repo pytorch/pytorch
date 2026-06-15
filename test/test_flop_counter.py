@@ -1263,5 +1263,174 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(fw_bw_flops), """146800640""")
 
 
+class TestFlexAttentionEstimation(TestCase):
+    def test_flex_attention_flop_registration(self):
+        """flex_attention HOPs are registered in flop_registry and recognized as compute nodes."""
+        from torch._inductor.fx_passes.overlap_scheduling import is_compute_node
+        from torch.utils.flop_counter import flop_registry
+
+        # Registered in flop_registry like sdpa
+        self.assertIn(torch.ops.higher_order.flex_attention, flop_registry)
+        self.assertIn(torch.ops.higher_order.flex_attention_backward, flop_registry)
+
+        # GQA: 16 query heads, 4 kv heads
+        q_shape = (2, 16, 1024, 64)
+        k_shape = (2, 4, 1024, 64)
+        v_shape = (2, 4, 1024, 64)
+
+        graph = torch.fx.Graph()
+        q = graph.placeholder("q")
+        k = graph.placeholder("k")
+        v = graph.placeholder("v")
+        q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
+        k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
+        v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
+
+        fwd = graph.call_function(torch.ops.higher_order.flex_attention, args=(q, k, v))
+        # Realistic output: (out_bf16, logsumexp_fp32, max_scores_fp32)
+        fwd.meta["val"] = (
+            torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+        )
+        mm = graph.call_function(torch.ops.aten.mm.default, args=(q, q))
+
+        # is_compute_node recognizes flex_attention alongside mm
+        self.assertTrue(is_compute_node(fwd))
+        self.assertTrue(is_compute_node(mm))
+        self.assertFalse(is_compute_node(q))
+
+        # Flops match sdpa_flop_count
+        fwd_flops = flop_registry[torch.ops.higher_order.flex_attention](
+            q.meta["val"], k.meta["val"], v.meta["val"], out_val=fwd.meta["val"]
+        )
+        expected_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
+        self.assertEqual(fwd_flops, expected_flops)
+
+    @unittest.skipIf(not HAS_CUDA, "requires CUDA")
+    def test_flex_attention_roofline_estimate(self):
+        """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            estimate_roofline_runtime_ms,
+        )
+
+        q_shape = (2, 16, 1024, 64)
+        k_shape = (2, 4, 1024, 64)
+        v_shape = (2, 4, 1024, 64)
+
+        graph = torch.fx.Graph()
+        q = graph.placeholder("q")
+        k = graph.placeholder("k")
+        v = graph.placeholder("v")
+        q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
+        k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
+        v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
+
+        fwd = graph.call_function(torch.ops.higher_order.flex_attention, args=(q, k, v))
+        fwd.meta["val"] = (
+            torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+        )
+
+        est_ms = estimate_roofline_runtime_ms(fwd)
+        self.assertGreater(est_ms, 0.0)
+
+    def test_sparsity_hint_annotate_propagates(self):
+        """fx_traceback.annotate propagates sparsity_hint to flex_attention node."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.traceback import annotate, preserve_node_meta
+        from torch.nn.attention.flex_attention import flex_attention
+
+        class M(torch.nn.Module):
+            def forward(self, q, k, v):
+                with annotate({"sparsity_hint": 0.9}):
+                    return flex_attention(q, k, v)
+
+        with FakeTensorMode():
+            q = torch.randn(1, 8, 64, 64, device="cpu", dtype=torch.bfloat16)
+            with preserve_node_meta():
+                ep = torch.export.export(M(), (q, q, q), strict=False)
+
+        flex_node = next(
+            (
+                n
+                for n in ep.graph.nodes
+                if n.op == "call_function" and "flex_attention" in str(n.target)
+            ),
+            None,
+        )
+        self.assertIsNotNone(flex_node)
+        custom = flex_node.meta.get("custom", {})
+        self.assertIn("sparsity_hint", custom)
+        self.assertAlmostEqual(custom["sparsity_hint"], 0.9)
+
+    def test_sparsity_hint_affects_flex_attention_flops(self):
+        """sparsity_hint via annotate reduces flex_attention flop count."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.traceback import annotate, preserve_node_meta
+        from torch.nn.attention.flex_attention import flex_attention
+        from torch.utils._pytree import tree_map
+
+        class Dense(torch.nn.Module):
+            def forward(self, q, k, v):
+                return flex_attention(q, k, v)
+
+        class Sparse(torch.nn.Module):
+            def forward(self, q, k, v):
+                with annotate({"sparsity_hint": 0.5}):
+                    return flex_attention(q, k, v)
+
+        with FakeTensorMode():
+            q = torch.randn(1, 8, 64, 64, device="cpu", dtype=torch.bfloat16)
+            with preserve_node_meta():
+                dense_ep = torch.export.export(Dense(), (q, q, q), strict=False)
+                sparse_ep = torch.export.export(Sparse(), (q, q, q), strict=False)
+
+        def find_flex(graph):
+            return next(
+                (
+                    n
+                    for n in graph.nodes
+                    if n.op == "call_function" and "flex_attention" in str(n.target)
+                ),
+                None,
+            )
+
+        dense_node = find_flex(dense_ep.graph)
+        sparse_node = find_flex(sparse_ep.graph)
+        self.assertIsNotNone(dense_node)
+        self.assertIsNotNone(sparse_node)
+
+        def get_flops(node):
+            from torch._inductor.fx_passes.overlap_scheduling import (
+                _get_flop_registry_key,
+            )
+
+            def _get_val(n):
+                return n.meta.get("val") if isinstance(n, torch.fx.Node) else n
+
+            args = tree_map(_get_val, node.args)
+            kwargs = tree_map(_get_val, node.kwargs)
+            out = _get_val(node)
+            flop_key = _get_flop_registry_key(node.target)
+            self.assertIsNotNone(flop_key)
+            flop_func = torch.utils.flop_counter.flop_registry[flop_key]
+            return flop_func(*args, **kwargs, out_val=out, _node_meta=node.meta)
+
+        dense_flops = get_flops(dense_node)
+        sparse_flops = get_flops(sparse_node)
+        self.assertGreater(dense_flops, 0)
+        self.assertEqual(sparse_flops, dense_flops // 2)
+
+
 if __name__ == "__main__":
     run_tests()

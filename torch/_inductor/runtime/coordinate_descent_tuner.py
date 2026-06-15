@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING
 from torch.utils._ordered_set import OrderedSet
 
 from ..utils import get_max_numwarps
-from .hints import TRITON_MAX_BLOCK
+from .hints import (
+    native_matmul_block_numel,
+    native_matmul_persistent_rblock,
+    TRITON_MAX_BLOCK,
+    TRITON_MAX_TENSOR_NUMEL,
+)
 from .runtime_utils import red_text, triton_config_to_hashable
 
 
@@ -66,7 +71,8 @@ class CoordescTuner:
         # This is because 3d tl.dot is slow and so we want to tile y and x only.
         # tl.dot also does not support size smaller than 16; we put this restriction.
         self.is_native_matmul = is_native_matmul
-        assert not (self.is_mm and self.is_native_matmul)
+        if self.is_mm and self.is_native_matmul:
+            raise AssertionError("is_mm and is_native_matmul are mutually exclusive")
         self.is_mix_order_reduction = is_mix_order_reduction
         self.cached_benchmark_results = {}
         self.name = name
@@ -75,7 +81,6 @@ class CoordescTuner:
         self.frozen_fields: OrderedSet[str] = (
             OrderedSet(frozen_fields) if frozen_fields is not None else OrderedSet()
         )
-        self._combo_tunable_fields: list[str] = []
 
     def get_config_max(self, prefix: str) -> int:
         max_block = TRITON_MAX_BLOCK[prefix.upper()]
@@ -107,8 +112,8 @@ class CoordescTuner:
         return timing
 
     @property
-    def tunable_fields(self):
-        out = [
+    def tunable_fields(self) -> list[str]:
+        out: list[str] = [
             "XBLOCK",
             "YBLOCK",
             "ZBLOCK",
@@ -137,7 +142,15 @@ class CoordescTuner:
             # control the stage of pipelining of tl.range.
             out.append("NUM_STAGES")
 
-        out = self._combo_tunable_fields + out
+        # Combo-kernel per-subkernel block fields (e.g. XBLOCK_0/1, YBLOCK_0/1)
+        # come from the worker-side metadata in ``inductor_meta``. Prepend
+        # them so coordesc iterates them alongside the base fields. Read
+        # live each call so any post-construction mutation of
+        # ``inductor_meta`` is observed.
+        combo_fields: list[str] = self.inductor_meta.get(
+            "combo_coordesc_field_order", []
+        )
+        out = combo_fields + out
         return [f for f in out if f not in self.frozen_fields]
 
     def value_too_large(self, name: str, val: int) -> bool:
@@ -157,6 +170,14 @@ class CoordescTuner:
         return False
 
     def value_too_small(self, name: str, val: int) -> bool:
+        min_block = None
+        if name == "XBLOCK":
+            min_block = self.inductor_meta.get("min_xblock")
+        elif name == "R0_BLOCK":
+            min_block = self.inductor_meta.get("min_rblock")
+        if min_block is not None and val < min_block:
+            return True
+
         # In native matmul, block size should be >= 16 for tl.dot
         if self.is_native_matmul:
             if name in ["YBLOCK", "XBLOCK", "R0_BLOCK"]:
@@ -168,7 +189,7 @@ class CoordescTuner:
     def get_neighbour_values(self, name, orig_val, radius=None, include_self=False):
         """
         Get neighbour values in 'radius' steps. The original value is not
-        returned as it's own neighbour.
+        returned as its own neighbour.
         """
         if radius is None:
             radius = 1
@@ -178,7 +199,8 @@ class CoordescTuner:
             # while NUM_STAGES=1 is worse than NUM_STAGES=3
             radius = max(radius, 2)
 
-        assert radius >= 1
+        if radius < 1:
+            raise AssertionError(f"radius must be >= 1, got {radius}")
 
         def update(cur_val, inc=True):
             if name in ["num_stages", "NUM_STAGES"]:
@@ -225,7 +247,56 @@ class CoordescTuner:
             xblock = config.kwargs["XBLOCK"]
             split_size = config.kwargs["RSPLIT_SIZE"]
             return xblock <= split_size
+        if self.is_native_matmul:
+            r0_block = None
+            if "R0_BLOCK" not in config.kwargs:
+                r0_block = self.inductor_meta.get("native_matmul_persistent_rblock")
+                if r0_block is None and self.size_hints is not None:
+                    r0_block_hint = self.size_hints.get("r0_")
+                    if r0_block_hint is not None:
+                        r0_block = native_matmul_persistent_rblock(r0_block_hint)
+            if (
+                native_matmul_block_numel(config.kwargs, r0_block=r0_block)
+                > TRITON_MAX_TENSOR_NUMEL
+            ):
+                return False
         return True
+
+    def get_all_tuning_directions(
+        self,
+        # pyrefly: ignore [missing-attribute]
+        config: "triton.Config",
+    ) -> list["triton.Config"]:  # pyrefly: ignore [missing-attribute]
+        """Return the Cartesian product of neighbour values across every
+        tunable field, as a list of valid candidate configs."""
+        candidate_values_list = []
+        effective_fields = []
+        for field in self.tunable_fields:
+            old_value = get_field(config, field)
+            if old_value is None:
+                continue
+            radius = self.inductor_meta.get("coordinate_descent_search_radius", 1)
+            candidate_values = self.get_neighbour_values(
+                field,
+                old_value,
+                radius=radius,
+                include_self=True,
+            )
+            candidate_values_list.append(candidate_values)
+            effective_fields.append(field)
+
+        configs = []
+        for choice in itertools.product(*candidate_values_list):
+            if len(choice) != len(effective_fields):
+                raise AssertionError(
+                    f"Expected {len(effective_fields)} values, got {len(choice)}"
+                )
+            candidate = copy.deepcopy(config)
+            for new_val, field in zip(choice, effective_fields):
+                set_field(candidate, field, new_val)
+            if self.is_valid_config(candidate):
+                configs.append(candidate)
+        return configs
 
     def check_all_tuning_directions(
         self,
@@ -239,31 +310,8 @@ class CoordescTuner:
         descent tuning find no better choices any more.
         We only have a few tunable fields, so this should be fine.
         """
-        candidate_values_list = []
-        effective_fields = []
-        for field in self.tunable_fields:
-            old_value = get_field(best_config, field)
-            if old_value is None:
-                continue
-            radius = self.inductor_meta.get("coordinate_descent_search_radius", 1)
-            candidate_values = self.get_neighbour_values(
-                field,
-                old_value,
-                radius=radius,
-                include_self=True,
-            )
-            candidate_values_list.append(candidate_values)
-            effective_fields.append(field)
-
-        choices = itertools.product(*candidate_values_list)
         improved = False
-        for choice in choices:
-            assert len(choice) == len(effective_fields)
-            candidate_config = copy.deepcopy(best_config)
-            for new_val, field in zip(choice, effective_fields):
-                set_field(candidate_config, field, new_val)
-            if not self.is_valid_config(candidate_config):
-                continue
+        for candidate_config in self.get_all_tuning_directions(best_config):
             cmp_res, candidate_timing = self.compare_config(
                 func, candidate_config, best_config, best_timing
             )
@@ -300,6 +348,29 @@ class CoordescTuner:
             return True, candidate_timing
         return False, candidate_timing
 
+    def get_neighbour_configs(
+        self,
+        # pyrefly: ignore [missing-attribute]
+        config: "triton.Config",
+        field: str,
+    ) -> list["triton.Config"]:  # pyrefly: ignore [missing-attribute]
+        """Return every valid neighbour of ``config`` along ``field``
+        only — the per-axis counterpart of ``get_neighbour_values``.
+
+        Precondition: ``field`` must be present on ``config``. Callers
+        iterating ``tunable_fields`` against arbitrary configs must
+        filter empty fields up front; ``autotune`` does."""
+        cur_val = get_field(config, field)
+        if cur_val is None:
+            raise AssertionError(f"field {field!r} not present on config")
+        neighbours = []
+        for next_val in self.get_neighbour_values(field, cur_val):
+            candidate = copy.deepcopy(config)
+            set_field(candidate, field, next_val)
+            if self.is_valid_config(candidate):
+                neighbours.append(candidate)
+        return neighbours
+
     def autotune(
         self,
         # pyrefly: ignore [missing-attribute]
@@ -325,32 +396,20 @@ class CoordescTuner:
         best_config = baseline_config
         best_timing = baseline_timing
 
-        self._combo_tunable_fields = self.inductor_meta.get(
-            "combo_coordesc_field_order", []
-        )
-
-        tunable_fields = self.tunable_fields
-
         while improved:
             improved = False
 
-            for name in tunable_fields:
-                cur_val = get_field(best_config, name)
-                # some kernel don't have R0_BLOCK/YBLOCK/ZBLOCK. So cur_val may be None
-                if cur_val is None:
+            # Gauss-Seidel: walk one field at a time, applying any
+            # improvement immediately so subsequent fields see the
+            # updated working point.
+            for field in self.tunable_fields:
+                # Some kernels don't have R0_BLOCK / YBLOCK / ZBLOCK,
+                # so the field may be absent from ``best_config``.
+                # Filter here so ``get_neighbour_configs`` can assume
+                # the field is present.
+                if get_field(best_config, field) is None:
                     continue
-
-                # It's possible that candidate_values is empty.
-                # E.g., if XBLOCK is 1 initially and size_hint for x is also 1.
-                # We would not try either larger or smaller XBLOCK in this case.
-                candidate_values = self.get_neighbour_values(name, cur_val)
-
-                for next_val in candidate_values:
-                    candidate_config = copy.deepcopy(best_config)
-                    set_field(candidate_config, name, next_val)
-
-                    if not self.is_valid_config(candidate_config):
-                        continue
+                for candidate_config in self.get_neighbour_configs(best_config, field):
                     cmp_res, candidate_timing = self.compare_config(
                         func, candidate_config, best_config, best_timing
                     )

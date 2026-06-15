@@ -65,8 +65,12 @@ static PyObject* MPSModule_isMacOSorNewer(PyObject* _unused, PyObject* args) {
 static PyObject* MPSModule_deviceSynchronize(
     PyObject* _unused,
     PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  at::detail::getMPSHooks().deviceSynchronize();
+  HANDLE_TH_ERRORS {
+    // Release GIL so Metal's completion thread can destroy Python-wrapped
+    // objects (e.g. storages captured in MTLBuffer deallocator blocks).
+    pybind11::gil_scoped_release no_gil;
+    at::detail::getMPSHooks().deviceSynchronize();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -114,6 +118,14 @@ static PyObject* MPSModule_recommendedMaxMemory(
   HANDLE_TH_ERRORS
   return THPUtils_packUInt64(
       at::detail::getMPSHooks().getRecommendedMaxMemory());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_maxBufferLength(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(at::detail::getMPSHooks().getMaxBufferLength());
   END_HANDLE_TH_ERRORS
 }
 
@@ -179,7 +191,11 @@ static PyObject* MPSModule_waitForEvent(PyObject* _unused, PyObject* args) {
 static PyObject* MPSModule_synchronizeEvent(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   const uint32_t event_id = THPUtils_unpackUInt32(args);
-  at::detail::getMPSHooks().synchronizeEvent(event_id);
+  {
+    // See MPSModule_deviceSynchronize.
+    pybind11::gil_scoped_release no_gil;
+    at::detail::getMPSHooks().synchronizeEvent(event_id);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -242,6 +258,7 @@ static struct PyMethodDef _MPSModule_methods[] = {
      MPSModule_recommendedMaxMemory,
      METH_NOARGS,
      nullptr},
+    {"_mps_maxBufferLength", MPSModule_maxBufferLength, METH_NOARGS, nullptr},
     {"_mps_profilerStartTrace",
      MPSModule_profilerStartTrace,
      METH_VARARGS,

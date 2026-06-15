@@ -16,8 +16,26 @@ namespace at {
 namespace cuda {
 namespace solver {
 
+#define CUDASOLVER_GETRF_BUFFERSIZE_ARGTYPES(Dtype)  \
+    cusolverDnHandle_t handle, int m, int n, Dtype* dA, int ldda, int* lwork
+
+template<class Dtype>
+void getrf_bufferSize(CUDASOLVER_GETRF_BUFFERSIZE_ARGTYPES(Dtype)) {
+  static_assert(false&&sizeof(Dtype), "at::cuda::solver::getrf_bufferSize: not implemented");
+}
+template<>
+void getrf_bufferSize<float>(CUDASOLVER_GETRF_BUFFERSIZE_ARGTYPES(float));
+template<>
+void getrf_bufferSize<double>(CUDASOLVER_GETRF_BUFFERSIZE_ARGTYPES(double));
+template<>
+void getrf_bufferSize<c10::complex<double>>(CUDASOLVER_GETRF_BUFFERSIZE_ARGTYPES(c10::complex<double>));
+template<>
+void getrf_bufferSize<c10::complex<float>>(CUDASOLVER_GETRF_BUFFERSIZE_ARGTYPES(c10::complex<float>));
+
+#undef CUDASOLVER_GETRF_BUFFERSIZE_ARGTYPES
+
 #define CUDASOLVER_GETRF_ARGTYPES(Dtype)  \
-    cusolverDnHandle_t handle, int m, int n, Dtype* dA, int ldda, int* ipiv, int* info
+    cusolverDnHandle_t handle, int m, int n, Dtype* dA, int ldda, Dtype* workspace, int* ipiv, int* info
 
 template<class Dtype>
 void getrf(CUDASOLVER_GETRF_ARGTYPES(Dtype)) {

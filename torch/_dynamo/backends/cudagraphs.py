@@ -22,6 +22,7 @@ Key components:
 """
 
 import functools
+import logging
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -49,6 +50,9 @@ from torch._inductor.utils import (
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from .registry import register_backend
+
+
+log = logging.getLogger(__name__)
 
 
 def find_input_mutations(g: torch.fx.Graph) -> set[int]:
@@ -132,13 +136,17 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | Non
 
 def get_device_index(gm: torch.fx.GraphModule) -> int:
     device = next(iter(get_device_node_mapping(gm)))
-    assert device.type == "cuda"
+    if device.type != "cuda":
+        raise AssertionError(f"Expected CUDA device, got {device.type}")
     return device.index
 
 
 def get_stack_traces(gm: torch.fx.GraphModule) -> list[str | None]:
     output = output_node(gm)
-    assert len(output.args) == 1
+    if len(output.args) != 1:
+        raise AssertionError(
+            f"Expected output node to have 1 arg, got {len(output.args)}"
+        )
     args = output.args[0]
     if not hasattr(args, "__iter__"):
         return []
@@ -203,7 +211,8 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
             manager = torch._inductor.cudagraph_trees.get_manager(
                 device_idx, create_if_none_exists=False
             )
-            assert manager is not None
+            if manager is None:
+                raise AssertionError("cudagraph manager must exist for backward")
 
             def fn(inputs: list[Any]) -> Any:
                 # pyrefly: ignore [missing-attribute]
@@ -246,7 +255,11 @@ class CudagraphsBackend:
         reset_cudagraph_trees()
 
     @staticmethod
-    def __call__(model: torch.fx.GraphModule, inputs: Sequence[Any]) -> Any:
+    def __call__(
+        model: torch.fx.GraphModule, inputs: Sequence[Any], **kwargs: Any
+    ) -> Any:
+        if kwargs:
+            log.warning("cudagraphs backend ignoring extra kwargs %s", kwargs)
         return cudagraphs(model, inputs)
 
 
@@ -262,7 +275,10 @@ def cudagraphs_inner(
     copy_inputs: bool = True,
 ) -> Callable[..., Sequence[Any]]:
     """This isn't registered as a backend, but is used in some benchmarks"""
-    assert isinstance(inputs, (list, tuple))
+    if not isinstance(inputs, (list, tuple)):
+        raise AssertionError(
+            f"Expected inputs to be a list or tuple, got {type(inputs)}"
+        )
     if copy_inputs:
         static_inputs = [torch.zeros_like(x) for x in inputs]
     else:
@@ -286,7 +302,10 @@ def cudagraphs_inner(
         static_outputs = (static_outputs,)
 
     def run(*new_inputs: Any) -> Sequence[Any]:
-        assert len(static_inputs) == len(new_inputs)
+        if len(static_inputs) != len(new_inputs):
+            raise AssertionError(
+                f"Expected {len(static_inputs)} inputs, got {len(new_inputs)}"
+            )
         if copy_inputs:
             for dst, src in zip(static_inputs, new_inputs):
                 dst.copy_(src)

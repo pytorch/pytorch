@@ -16,9 +16,8 @@ env
 echo "Testing FA3 stable wheel still works with currently built torch"
 
 echo "Installing ABI Stable FA3 wheel"
-# The wheel was built on https://github.com/Dao-AILab/flash-attention/commit/3e87e421f898c6919fa417d00e5afcec5909debe
-# on torch 2.10rc for CUDA 12.8
-$MAYBE_SUDO pip -q install https://s3.amazonaws.com/ossci-linux/wheels/flash_attn_3-3.0.0b1-cp39-abi3-linux_x86_64.whl
+$MAYBE_SUDO pip -q install einops ninja
+$MAYBE_SUDO pip -q install flash-attn-3 --index-url https://download.pytorch.org/whl/cu130
 
 pushd flash-attention/hopper
 export FLASH_ATTENTION_ENABLE_OPCHECK=TRUE  # Enable testing for compile on the smoke tests

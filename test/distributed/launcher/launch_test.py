@@ -26,6 +26,7 @@ def path(script):
 
 class LaunchTest(unittest.TestCase):
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp()
         # set a sentinel env var on the parent proc
         # this should be present on the child and gets

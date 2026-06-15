@@ -87,8 +87,8 @@ Value* symbolicToValue(
           }
           case torch::_export::SymIntArgument::Tag::AS_INT: {
             // These are concrete int values in the SymIntList, e.g [s0, 8]
-            // We convert them into a constant Value in graph. These value
-            // doesn't have producer node
+            // We convert them into a constant Value in graph. These values
+            // don't have producer node
             int64_t value = listEl.get_as_int();
             TORCH_CHECK(
                 value >= std::numeric_limits<int>::min() &&

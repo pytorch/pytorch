@@ -139,7 +139,7 @@ Because fake tensors are used in situations that are very sensitive to the exact
 
 You would think fake tensors are fast because they don't do any tensor compute. But at small tensor sizes we are actually entirely overhead bound, and, well, fake tensor is in Python, and we often do a LOT of work to do a single tensor operation (because they are implemented as decompositions). So fake tensors are actually pretty slow in practice, especially when symbolic shapes are involved. There are two important fastpaths we currently have in fake tensor that make a big difference in practice:
 
-- Pointwise ops don't go through PrimTorch decomps, instead we've hand-coded their propagation rule.
+- Pointwise ops don't go through decompositions, instead we've hand-coded their propagation rule.
 - If possible, we should.
 
 ## Fake tensor of fake tensor?

@@ -5,10 +5,10 @@
 #ifdef USE_C10D_GLOO
 
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
-#include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/gloo/GlooDeviceFactory.hpp>
+#include <torch/csrc/distributed/c10d/gloo/ProcessGroupGlooDetail.hpp>
 #include <chrono>
 #include <exception>
 
@@ -595,6 +595,10 @@ ProcessGroupGloo::ProcessGroupGloo(
       options_(std::move(options)),
 
       local_id_(process_group_id++) {
+  TORCH_CHECK(
+      !options_->enable_reconfigure,
+      "ProcessGroupGloo does not support enable_reconfigure "
+      "(reconfigure-based fault tolerance).");
   auto& devices = options_->devices;
   if (devices.empty()) {
     TORCH_CHECK(false, "No device(s) specified");
@@ -1080,7 +1084,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_sparse(
     const AllreduceOptions& opts) {
   // all reduce sparse calls into default allreduce which
   // implemented with all_gathering indices and values
-  // we do this we do not have a native cuda implementation
+  // we do this because we do not have a native cuda implementation
   return allreduce(inputs, opts);
 }
 
@@ -1509,23 +1513,24 @@ class LambdaWork : public Work {
 
 } // namespace
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::_reduce_scatter_base(
+c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts) {
   std::vector<at::Tensor> outputTensors = {outputTensor};
   std::vector<at::Tensor> inputTensors = {inputTensor};
-  return reduce_scatter_tensor_coalesced(outputTensors, inputTensors, opts);
+  return reduce_scatter_single_coalesced(outputTensors, inputTensors, opts);
 }
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single_coalesced(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ReduceScatterOptions& opts) {
-  if (outputTensors.size() != inputTensors.size()) {
-    TORCH_CHECK(
-        false, "requires input/output tensor lists to have the same length");
-  }
+  static auto invalidArgument = [](const std::string& msg) {
+    TORCH_CHECK(false, msg);
+  };
+  assertInputOutputTensorListsSameSize(
+      invalidArgument, outputTensors.size(), inputTensors.size());
   const auto rank = getRank();
   const auto worldSize = getSize();
   std::vector<at::Tensor> buffers;
@@ -1556,7 +1561,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_tensor_coalesced(
       });
 }
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupGloo::all_gather_single(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const AllgatherOptions& opts) {
@@ -1723,25 +1728,15 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
     TORCH_CHECK(false, "ProcessGroupGloo::allgather_coalesced: " + msg);
   };
 
-  if (input_list.empty()) {
-    invalidArgument("requires non-empty input tensor list");
-  }
-
-  if (output_lists.size() != static_cast<size_t>(getSize())) {
-    invalidArgument("output lists should be equal to world size");
-  }
+  assertNonEmptyInputTensorList(invalidArgument, input_list.size());
+  assertAllgatherCoalescedOutputTensorLists(
+      invalidArgument, output_lists, input_list.size(), getSize());
 
   assertSameDevice(invalidArgument, input_list);
 
   // Expect i'th tensor of each list from 'output_lists' match i'th tensor
   // from 'input_list' in type and size.
   for (const auto& output_list : output_lists) {
-    if (output_list.size() != input_list.size()) {
-      invalidArgument(
-          "invalid output size: (expected length " +
-          std::to_string(input_list.size()) + ", got " +
-          std::to_string(output_list.size()) + ")");
-    }
     for (const auto i : c10::irange(output_list.size())) {
       const auto expected = input_list[i].sizes();
       const auto actual = output_list[i].sizes();
@@ -1771,7 +1766,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
   return work;
 }
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_into_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupGloo::all_gather_single_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
@@ -1953,26 +1948,13 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::gather(
   assertDense(invalidArgument, inputs);
 
   if (getRank() == opts.rootRank) {
-    if (outputs.size() != 1) {
-      std::stringstream ss;
-      ss << "requires a single-element output list containing a list with "
-         << getSize() << " tensors.";
-      invalidArgument(ss.str());
-    } else if (outputs[0].size() != static_cast<size_t>(getSize())) {
-      std::stringstream ss;
-      ss << "Incorrect output list size " << outputs[0].size()
-         << ". Output list size should be " << getSize()
-         << ", same as size of the process group.";
-      invalidArgument(ss.str());
-    }
+    assertGatherOutputTensorList(invalidArgument, outputs, getSize());
 
     const auto& options = inputs[0].options();
     const auto& sizes = inputs[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, outputs[0], options, sizes);
   } else {
-    if (!outputs.empty()) {
-      invalidArgument("requires empty output on non-root");
-    }
+    assertEmptyOutputTensorList(invalidArgument, outputs);
   }
 
   const auto& device = inputs[0].device();
@@ -2166,25 +2148,12 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::scatter(
   assertDense(invalidArgument, outputs);
 
   if (getRank() == opts.rootRank) {
-    if (inputs.size() != 1) {
-      std::stringstream ss;
-      ss << "requires a single-element input list containing a list with "
-         << getSize() << " tensors";
-      invalidArgument(ss.str());
-    } else if (inputs[0].size() != static_cast<size_t>(getSize())) {
-      std::stringstream ss;
-      ss << "Incorrect input list size " << inputs[0].size()
-         << ". Input list size should be " << getSize()
-         << ", same as size of the process group.";
-      invalidArgument(ss.str());
-    }
+    assertScatterInputTensorList(invalidArgument, inputs, getSize());
     const auto& options = outputs[0].options();
     const auto& sizes = outputs[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, inputs[0], options, sizes);
   } else {
-    if (!inputs.empty()) {
-      invalidArgument("requires empty input on non-root");
-    }
+    assertEmptyInputTensorList(invalidArgument, inputs);
   }
 
   const auto& device = outputs[0].device();
@@ -2234,14 +2203,15 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
     const ReduceScatterOptions& opts) {
   const auto rank = getRank();
   const auto worldSize = getSize();
+  static auto invalidArgument = [](const std::string& msg) {
+    TORCH_CHECK(false, msg);
+  };
 
   TORCH_CHECK(outputs.size() == 1, "reduce_scatter only supports 1 output");
-  TORCH_CHECK(
-      outputs.size() == inputs.size(),
-      "requires input/output tensor lists to have the same length");
-  TORCH_CHECK(
-      static_cast<int>(inputs[0].size()) == worldSize,
-      "invalid input tensor list size, must be world size");
+  assertInputOutputTensorListsSameSize(
+      invalidArgument, outputs.size(), inputs.size());
+  assertInputTensorListSizeEqualsWorldSize(
+      invalidArgument, inputs[0].size(), worldSize);
 
   std::vector<at::Tensor> buffers;
   for (const auto i : c10::irange(worldSize)) {
@@ -2415,7 +2385,7 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
 
 } // namespace
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupGloo::all_to_all_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputCounts,
@@ -2618,17 +2588,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall(
   };
 
   // Validate input and output tensor lists
-  if (inputTensors.size() != static_cast<size_t>(getSize())) {
-    invalidArgument(
-        "input tensor list size " + std::to_string(inputTensors.size()) +
-        " does not match world size " + std::to_string(getSize()));
-  }
-
-  if (outputTensors.size() != static_cast<size_t>(getSize())) {
-    invalidArgument(
-        "output tensor list size " + std::to_string(outputTensors.size()) +
-        " does not match world size " + std::to_string(getSize()));
-  }
+  assertAllToAllTensorListSizes(
+      invalidArgument, outputTensors.size(), inputTensors.size(), getSize());
 
   assertDense(invalidArgument, inputTensors);
   assertDense(invalidArgument, outputTensors);

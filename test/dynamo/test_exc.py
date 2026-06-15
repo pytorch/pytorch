@@ -1,6 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
+import linecache
+import os
+import pickle
+import re
 import sys
+import tempfile
 import unittest
 from typing import cast
 
@@ -10,6 +15,10 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import (
+    BackendCompilerFailed,
+    InvalidBackend,
+    ResetRequired,
+    ShortenTraceback,
     TorchDynamoException,
     Unsupported,
     UserError,
@@ -37,26 +46,24 @@ def _capture_y_source_location(ctx) -> None:
         _source_location_capture["source_location"] = y_vt.source_location
 
 
-def _unsupported_error_source_attribution() -> str:
-    if sys.version_info < (3, 11):
-        return """\
-Stack variable source attribution:
-  ConstantVariable(int: 1) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
-"""
+def _format_multiline_source_location() -> str:
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as source_file:
+        source_file.write("value = (\n    foo\n    + bar\n)\n")
+        source_path = source_file.name
 
-    return """\
-Stack variable source attribution:
-  ConstantVariable(int: 1) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
-^
-  ConstantVariable(int: 2) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
-^
-"""
+    try:
+        source_location = SourceLocation(
+            filename=source_path,
+            lineno=1,
+            end_lineno=4,
+            # Span covers the parenthesized expression `( ... )`.
+            col_offset=8,
+            end_col_offset=1,
+        )
+        return source_location.format().replace(source_path, "<source_path>")
+    finally:
+        os.unlink(source_path)
+        linecache.clearcache()
 
 
 class ExcTests(LoggingTestCase):
@@ -82,6 +89,57 @@ class ExcTests(LoggingTestCase):
         self.assertEqual(err.msg, "bad input")
         self.assertEqual(err.message, "bad input")
         self.assertEqual(str(err), "bad input")
+
+    @torch._dynamo.config.patch(suppress_errors=False)
+    def test_backend_compiler_failed_pickles_without_frame(self):
+        def backend_fn(gm, example_inputs):
+            exc = RuntimeError("backend exploded")
+            exc.frame = sys._getframe()
+            raise exc
+
+        def fn(x):
+            return x + 1
+
+        with self.assertRaises(BackendCompilerFailed) as cm:
+            torch.compile(fn, backend=backend_fn)(torch.ones(1))
+
+        err = cm.exception
+
+        restored = pickle.loads(pickle.dumps(err))
+
+        self.assertIsInstance(restored, BackendCompilerFailed)
+        self.assertEqual(restored.args, err.args)
+        self.assertEqual(str(restored), str(err))
+        self.assertEqual(restored.backend_name, "backend_fn")
+        self.assertIsInstance(restored.inner_exception, RuntimeError)
+        self.assertEqual(str(restored.inner_exception), "backend exploded")
+        self.assertEqual(
+            restored.inner_exception._dynamo_original_exception_type,
+            "builtins.RuntimeError",
+        )
+        self.assertIsNone(restored.first_useful_frame)
+
+    def test_dynamo_exceptions_pickle_without_rerunning_init(self):
+        cases = [
+            InvalidBackend("bad_backend"),
+            ResetRequired(),
+            ShortenTraceback("shortened", first_useful_frame=sys._getframe()),
+            UserError(UserErrorType.INVALID_INPUT, "bad input"),
+        ]
+
+        for err in cases:
+            with self.subTest(exc_type=type(err).__name__):
+                restored = pickle.loads(pickle.dumps(err))
+
+                self.assertIsInstance(restored, type(err))
+                self.assertEqual(restored.args, err.args)
+                self.assertEqual(str(restored), str(err))
+
+        self.assertIsNone(pickle.loads(pickle.dumps(cases[2])).first_useful_frame)
+        self.assertEqual(
+            pickle.loads(pickle.dumps(cases[3])).error_type,
+            UserErrorType.INVALID_INPUT,
+        )
 
     def test_unsupported_real_stack(self):
         # exercise Unsupported constructor and augment_exc_message
@@ -190,31 +248,28 @@ from user code:
         torch.compile(fn001, backend="eager")(torch.randn(1))
 
         record = self.getRecord(records, "missing BUILD_SET handler")
-        expected = (
-            "Graph break in user code at test_exc.py:N\n"
-            "Graph Break Reason: Failed to handle graph break gracefully. "
-            "Skipping the function and falling back to eager. Graph break "
-            "encountered:\n"
-            "\n"
-            "missing BUILD_SET handler\n"
-            "  Explanation: Missing BUILD_SET bytecode handler (for testing purposes).\n"
-            "\n"
-            "\n"
-            "  Developer debug context:\n"
-            "\n"
-            " For more details about this graph break, please visit: "
-            "https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0200.html\n"
-            "\n" + _unsupported_error_source_attribution() + "\n"
-            "User code traceback:\n"
-            '  File "test_exc.py", line N, in test_unsupported_error\n'
-            '    torch.compile(fn001, backend="eager")(torch.randn(1))\n'
-            '  File "test_exc.py", line N, in fn001\n'
-            "    return {1, 2}\n"
-        )
-
         self.assertExpectedInline(
-            munge_exc(record.getMessage()),
-            expected,
+            munge_exc(record.getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break in user code at test_exc.py:N
+Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
+
+missing BUILD_SET handler
+  Explanation: Missing BUILD_SET bytecode handler (for testing purposes).
+
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0200.html
+
+Stack variable source attribution:
+
+User code traceback:
+  File "test_exc.py", line N, in test_unsupported_error
+    torch.compile(fn001, backend="eager")(torch.randn(1))
+  File "test_exc.py", line N, in fn001
+    return {1, 2}
+""",
         )
 
     @torch._dynamo.config.patch(suppress_errors=False)
@@ -470,6 +525,36 @@ Failed Source Expressions:
         )
         result = source_location.format()
         self.assertEqual(result, '  File "<string>", line 1\n')
+
+    def test_source_location_format_multiline(self):
+        result = _format_multiline_source_location()
+
+        self.assertExpectedInline(
+            re.sub(r"(?m)^[ ]*[~^]+\n?", "", result),
+            """\
+  File "<source_path>", line 1
+    value = (
+        foo
+        + bar
+    )
+""",
+        )
+
+        if sys.version_info >= (3, 11):
+            self.assertExpectedInline(
+                result,
+                """\
+  File "<source_path>", line 1
+    value = (
+            ~
+        foo
+        ~~~
+        + bar
+        ^~~~~
+    )
+    ~
+""",
+            )
 
     def test_vt_source_location_set_during_tracing(self):
         _source_location_capture.clear()

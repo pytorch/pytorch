@@ -4,7 +4,7 @@ import unittest
 
 import torch
 from torch._native.ops.bmm_outer_product.triton_impl import _is_outer_product
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfXpu, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -13,6 +13,7 @@ class TestBmmOuterProduct(TestCase):
     def _check_bmm(self, a, b, **kwargs):
         self.assertEqual(torch.bmm(a, b), a @ b, **kwargs)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180318")
     def test_shapes(self):
         shapes = [
             (4, 8, 16),
@@ -79,6 +80,18 @@ class TestBmmOuterProduct(TestCase):
         self.assertIsNotNone(b.grad)
         self.assertEqual(a.grad.shape, a.shape)
         self.assertEqual(b.grad.shape, b.shape)
+
+    def test_cpu_outer_product_fallback(self):
+        a = torch.randn(4, 8, 1)
+        b = torch.randn(4, 1, 16)
+        self.assertTrue(a.device.type == "cpu")
+        self.assertEqual(torch.bmm(a, b), a @ b)
+
+    def test_mixed_device_outer_product_fallback(self):
+        a = torch.randn(4, 8, 1)
+        b = torch.randn(4, 1, 16, device=GPU_TYPE)
+        with self.assertRaises(RuntimeError):
+            torch.bmm(a, b)
 
 
 class TestOuterProductDetection(TestCase):

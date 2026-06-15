@@ -814,9 +814,9 @@ struct SymbolicShapeGraphAnalyzer {
 
     auto stitched_shape_compute_graph = std::make_shared<Graph>();
     // We want to build up a computational graph which computes all shapes
-    // we dont know statically - that is, all symbolic shapes within
+    // we don't know statically - that is, all symbolic shapes within
     // the region [beg, end). it must be executable before beg.
-    // TODO: dont require dimensions of tensors to be set AOT ?
+    // TODO: don't require dimensions of tensors to be set AOT ?
 
     for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
       auto curr = *it;
@@ -849,7 +849,7 @@ struct SymbolicShapeGraphAnalyzer {
           return std::nullopt;
         }
         auto symbolic_sizes = tt->symbolic_sizes();
-        // TODO: dont require # of dimensions of tensors set ?
+        // TODO: don't require # of dimensions of tensors set ?
         if (!symbolic_sizes.rank()) {
           GRAPH_DEBUG("No rank on output ", getHeader(curr));
           return std::nullopt;

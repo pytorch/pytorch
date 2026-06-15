@@ -1,0 +1,47 @@
+--- a/rmsnorm.py
++++ b/rmsnorm.py
+@@ -19,7 +19,6 @@
+ import quack.copy_utils as copy_utils
+ import quack.layout_utils as layout_utils
+ from quack.compile_utils import make_fake_tensor as fake_tensor
+-from quack.dsl import cute_op
+ from quack.reduce import row_reduce
+ from quack.reduction_base import ReductionBase
+ from quack.cache import jit_cache
+@@ -351,13 +350,6 @@
+             copy(tXrO, tXgO)
+ 
+ 
+-@cute_op(
+-    "quack::_rmsnorm_fwd",
+-    mutates_args=("out", "rstd", "mean", "residual_out"),
+-    device_types="cuda",
+-    # We need to specify the schema manually since we're mutating an optional tensor
+-    schema="(Tensor x, Tensor? weight, Tensor(a2!) out, Tensor? bias, Tensor(a4!)? rstd, Tensor(a5!)? mean, Tensor? residual, Tensor(a7!)? residual_out, float eps=1e-6, bool is_layernorm=False) -> ()",
+-)
+ def _rmsnorm_fwd(
+     x: Tensor,
+     weight: Optional[Tensor],
+@@ -1140,13 +1132,6 @@
+             cute.arch.mbarrier_wait(mbar_empty_ptr + stage, producer_phase)
+ 
+ 
+-@cute_op(
+-    "quack::_rmsnorm_bwd",
+-    mutates_args={"dx", "dw_partial", "db_partial", "dresidual"},
+-    device_types="cuda",
+-    # We need to specify the schema manually since we're mutating an optional tensor
+-    schema="(Tensor x, Tensor? weight, Tensor dout, Tensor rstd, Tensor(a4!) dx, Tensor(a5!)? dw_partial, Tensor(a6!)? db_partial, Tensor? dresidual_out, Tensor(a8!)? dresidual, int? sm_count) -> ()",
+-)
+ def _rmsnorm_bwd(
+     x: Tensor,
+     weight: Optional[Tensor],
+@@ -1488,7 +1473,7 @@
+     """RMSNorm module that behaves like torch.nn.RMSNorm.
+ 
+     This class provides a drop-in replacement for torch.nn.RMSNorm that uses
+-    the quack.rmsnorm implementation under the hood.
++    the torch._vendor.quack.rmsnorm implementation under the hood.
+ 
+     Args:
+         dim (int): The dimension to normalize over
