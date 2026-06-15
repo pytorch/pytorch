@@ -1023,15 +1023,9 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   // cheap ops (neg/abs/sqr/bitwise_not) where the smaller threadgroup count
   // from the wider per-thread tile regresses real-world sizes, and complex
   // outputs lose because the wide per-thread state spills out of registers.
-  const bool ilp_eligible_dtype = c10::isFloatingType(outputTensor.scalar_type());
-  bool dense_ilp = is_contiguous && !alpha.has_value() && ilp_eligible_dtype && length >= ILP_DISPATCH_THRESHOLD;
-  // Opt-in ILP for non-floating (bool/int) output: such ops are excluded from
-  // the auto-ILP above, but a bandwidth-bound copy-style op (e.g. logical_not)
-  // can pass an ilp_threshold to use the wide per-thread tile above that size.
-  // Small tensors stay on the scalar path (gated by the threshold).
-  if (is_contiguous && !alpha.has_value() && ilp_threshold.has_value() && length >= ilp_threshold.value()) {
-    dense_ilp = true;
-  }
+  // Opt-in ILP for non-floating (bool/int) output if ilp_threshold_specified
+const bool ilp_eligible_dtype = c10::isFloatingType(outputTensor.scalar_type()) || ilp_threshold.has_value();
+bool dense_ilp = is_contiguous && !alpha.has_value() && ilp_eligible_dtype && length >= ilp_threshold.value_or(ILP_DISPATCH_THRESHOLD);
   // Bench-only override: force ILP or scalar dispatch.
   if (is_contiguous && !alpha.has_value()) {
     if (auto force = c10::utils::get_env("PYTORCH_UNARY_FORCE_FLAVOR")) {
