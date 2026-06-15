@@ -13,7 +13,6 @@ from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
     OpStrategy,
-    PlacementList,
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
@@ -22,7 +21,6 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 )
 from torch.distributed.tensor._ops.utils import (
     as_list,
-    expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
     is_tensor_evenly_shardable,
     is_tensor_evenly_shardable_on_dim,
@@ -959,51 +957,32 @@ register_single_dim_strategy(
 )(powsum_single_dim_strategy)
 
 
-@register_op_strategy(
-    [
-        aten._linalg_svd.default,
-        aten.linalg_qr.default,
-        # TODO: The diagonal ops can have an improved sharding strategy for
-        # shard placements that does not require redistributing to replicate.
-        aten.diagonal_copy.default,
-        aten.diag_embed.default,
-        aten.diag.default,
-        aten.diagonal.default,
-        aten.tril.default,
-        aten.triu.default,
-        aten._linalg_eigh.default,
-    ],
+_REPLICATE_ONLY_OPS = [
+    aten._linalg_svd.default,
+    aten.linalg_qr.default,
+    # TODO: The diagonal ops can have an improved sharding strategy for
+    # shard placements that does not require redistributing to replicate.
+    aten.diagonal_copy.default,
+    aten.diag_embed.default,
+    aten.diag.default,
+    aten.diagonal.default,
+    aten.tril.default,
+    aten.triu.default,
+    aten._linalg_eigh.default,
+]
+
+
+@register_single_dim_strategy(
+    _REPLICATE_ONLY_OPS,
     schema_info=RuntimeSchemaInfo(1),
 )
-def linalg_replicate_strategy(op_schema: OpSchema) -> OpStrategy:
-    """
-    Since we do not have a simple way to compute some linear algebra operations
-    like SVD or QR decomposition, always fall back to replicate.
-    """
-    args_schema = op_schema.args_schema
-    input_strategy = args_schema[0]
-    if not isinstance(input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-    mesh = input_strategy.mesh
-
-    output_strategies: list[OpSpec] = []
-    for placement_strategy in input_strategy.strategies:
-        replicate_placements = tuple(Replicate() for _ in range(mesh.ndim))
-        replicate_spec = DTensorSpec(
-            mesh=mesh,
-            placements=replicate_placements,
-            tensor_meta=placement_strategy.output_spec.tensor_meta,
-        )
-        redistribute_cost = [
-            generate_redistribute_costs(input_strategy, replicate_spec)
-        ]
-        replicate_strategy = OpSpec(
-            output_specs=replicate_spec,
-            input_specs=(replicate_spec,),
-            redistribute_cost=redistribute_cost,
-        )
-        output_strategies.append(replicate_strategy)
-    return OpStrategy(output_strategies)
+def linalg_replicate_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Replicate-only ops: only the all-Replicate strategy is valid."""
+    return []
 
 
 # Maps each pooling op to its spatial rank (number of spatial dimensions).
@@ -1047,33 +1026,43 @@ MAX_POOL_OPS = [
 ]
 
 
-@register_op_strategy(
+@register_single_dim_strategy(
     AVG_POOL_OPS + MAX_POOL_OPS,
     schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
 )
-def pooling_strategy(op_schema: OpSchema) -> OpStrategy:
-    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
-    mesh = input_strategy.mesh
-    num_outputs = 2 if op_schema.op in MAX_POOL_OPS else 1
-    num_inputs = len(op_schema.args_strategy) + len(op_schema.kwargs_strategy)
+def pooling_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+
+    ndim = len(input_meta.shape)
+    num_outputs = sum(1 for r in op._schema.returns if "Tensor" in str(r.type))
+    num_inputs = sum(1 for a in args_schema if isinstance(a, TensorMeta))
     n = num_outputs + num_inputs
-    single_mesh_dim_strategies: list[PlacementList] = [
-        [Replicate()] * n,
-        [Shard(0)] * n,
-    ]
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+
+    # S(0) for batch dim — always valid
+    strategies.append([_ShardingPlaceholder(0)] * n)
+
     # avg_pool is linear: Partial(sum) and Partial(avg) pass through unchanged.
-    if op_schema.op in AVG_POOL_OPS:
-        single_mesh_dim_strategies.append([Partial("sum")] * n)
-        single_mesh_dim_strategies.append([Partial("avg")] * n)
+    if op in AVG_POOL_OPS:
+        strategies.append([Partial("sum")] * n)
+        strategies.append([Partial("avg")] * n)
+
     # S(1) is safe when dim 1 is the channel dim (pooling never touches it).
     # Batched inputs have layout (N, C, *spatial) with ndim = spatial_rank + 2.
-    spatial_rank = POOL_SPATIAL_RANK[op_schema.op]
-    is_batched = input_strategy.ndim >= spatial_rank + 2
+    spatial_rank = POOL_SPATIAL_RANK[op]
+    is_batched = ndim >= spatial_rank + 2
     if is_batched:
-        single_mesh_dim_strategies.append([Shard(1)] * n)
-    return expand_to_full_mesh_op_strategy(
-        mesh, op_schema, single_mesh_dim_strategies, input_index=num_outputs
-    )
+        strategies.append([_ShardingPlaceholder(1)] * n)
+
+    return strategies
 
 
 # Category F: Softmax-like ops
@@ -1565,28 +1554,27 @@ def sort_stable_single_dim_strategy(
     )
 
 
-@register_op_strategy(
+@register_single_dim_strategy(
     [aten.histc.default],
-    # strategy choice depends on the value of 'min' and 'max' kwargs, which are position 2 and 3
     schema_info=RuntimeSchemaInfo(2),
+    allow_uneven_sharding=True,
 )
-def histc_strategy(op_schema: OpSchema) -> OpStrategy:
-    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
-    single_mesh_dim_strategies: list[PlacementList] = []
-    single_mesh_dim_strategies.append([Replicate(), Replicate()])
+def histc_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
 
-    # histc can support sharded input and partial output on any input dim, provided the min and max
-    # values are user-specified.  If not user-specified, the true min and max of the data in each local
-    # tensor will be used to compute bin boundaries, which will not be the same across ranks, leading to
-    # an incorrect final result
-    if len(op_schema.args_schema) == 4:
-        for dim in range(input_strategy.ndim):
-            dim_shardings: PlacementList = [Partial(), Shard(dim)]
-            single_mesh_dim_strategies.append(dim_shardings)
-
-    return expand_to_full_mesh_op_strategy(
-        input_strategy.mesh, op_schema, single_mesh_dim_strategies
-    )
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    # histc supports sharded input -> partial output only when min/max are specified
+    if len(args_schema) == 4:
+        for dim in range(ndim):
+            strategies.append([Partial(), _ShardingPlaceholder(dim)])
+    return strategies
 
 
 @register_single_dim_strategy(
