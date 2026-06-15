@@ -5446,6 +5446,13 @@ class TestMPS(TestCaseMPS):
             for _ in range(4):
                 self.assertEqual(x.sum().item(), ref, msg=f"unstable sum for N={N}")
 
+    def test_sum_reduction_non_contiguous(self):
+        x = torch.randn(64, 96, dtype=torch.bfloat16, device="mps")
+        for dim, keepdim in itertools.product((0, -1), [False, True]):
+            kw = {"dim": dim, "keepdim": keepdim}
+            for cpu, mps in ((x.cpu(), x), (x.t().cpu(), x.t())):
+                self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
+
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
         torch.manual_seed(42)

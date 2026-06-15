@@ -8,6 +8,8 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/ReduceOps.h>
 #include <c10/util/irange.h>
+#include <algorithm>
+#include <numeric>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -832,10 +834,20 @@ struct ReductionDispatch {
 };
 
 static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch& opts) {
-  const Tensor& output = iter.output(0);
-  const Tensor& input_orig = iter.input(0);
+  Tensor output = iter.output(0);
+  Tensor input_orig = iter.input(0);
   TORCH_INTERNAL_ASSERT(input_orig.numel() > 0 && output.numel() > 0);
   TORCH_INTERNAL_ASSERT(output.dim() == input_orig.dim());
+  if (!input_orig.is_contiguous()) {
+    c10::DimVector perm(input_orig.dim());
+    std::iota(perm.begin(), perm.end(), 0);
+    std::ranges::stable_sort(perm, std::greater{}, [&](int64_t d) { return input_orig.stride(d); });
+    auto permuted = input_orig.permute(perm);
+    if (permuted.is_contiguous()) {
+      input_orig = std::move(permuted);
+      output = output.permute(perm);
+    }
+  }
 
   const uint32_t reduction_size = input_orig.numel() / output.numel();
   constexpr uint32_t NCHAINS = SUM_NCHAINS;
