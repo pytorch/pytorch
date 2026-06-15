@@ -2004,6 +2004,20 @@ class TestProfiler(TestCase):
             copied = copy.deepcopy(config)
             self.assertIsInstance(copied, _ExperimentalConfig)
 
+    def test_profiler_range_metrics_deprecated(self):
+        # profiler_metrics and profiler_measure_per_kernel are deprecated
+        # no-ops: passing either must warn with FutureWarning and not error.
+        for cfg in (
+            _ExperimentalConfig(profiler_metrics=["m1", "m2"]),
+            _ExperimentalConfig(profiler_measure_per_kernel=True),
+        ):
+            with self.assertWarnsRegex(FutureWarning, "profiler_metrics"):
+                with profile(
+                    activities=[ProfilerActivity.CPU],
+                    experimental_config=cfg,
+                ):
+                    pass
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @parametrize("use_cuda", [False, True])
     def test_trace_only_export_matches_default(self, use_cuda):
