@@ -8189,24 +8189,18 @@ for dtype in (torch.int32, torch.int64):
             atol = 5e-4
             rtol = 3e-4
 
-        # MPS has correctness problem before MacOS15
-        with (
-            contextlib.nullcontext()
-            if self.device != "mps" or MACOS_VERSION >= 15.0
-            else self.assertRaises(AssertionError)
-        ):
-            self.common(
-                fn,
-                (
-                    torch.randn(256, 256),
-                    torch.randn(256, 1024),
-                    torch.randn(1024, 1600),
-                    torch.randn(100, 256),
-                ),
-                atol=atol,
-                rtol=rtol,
-                check_lowp=False,  # accuracy issues with relatively large matmuls
-            )
+        self.common(
+            fn,
+            (
+                torch.randn(256, 256),
+                torch.randn(256, 1024),
+                torch.randn(1024, 1600),
+                torch.randn(100, 256),
+            ),
+            atol=atol,
+            rtol=rtol,
+            check_lowp=False,  # accuracy issues with relatively large matmuls
+        )
 
     @skip_if_gpu_halide
     # Constant folding was explicitly turned off due to issue #108388
