@@ -40,6 +40,7 @@ WIN_CI_DIR = Path(__file__).resolve().parent
 COMMON_BUILD_ENV: dict[str, str] = {
     "PYTORCH_BINARY_BUILD": "1",
     "TH_BINARY_BUILD": "1",
+    "BUILD_TEST": "0",
     "INSTALL_TEST": "0",
     "MSSdk": "1",
     "DISTUTILS_USE_SDK": "1",
