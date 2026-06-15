@@ -26,28 +26,16 @@ namespace at::native::sparse::impl::cuda {
 
 namespace {
 
-c10::MaybeOwned<Tensor> prepare_column_major_matrix_for_cusparse(
-    const Tensor& tensor) {
-  if (is_blas_compatible_column_major_order(tensor)) {
-    return at::native::expect_resolved_conj(tensor);
-  } else {
-    return c10::MaybeOwned<Tensor>::owned(cloneBatchedColumnMajor(tensor));
-  }
-}
-
 c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
     const Tensor& tensor) {
 #if defined(USE_ROCM)
-  // CUDA < 11.0 doesn't support row-major layout, return column-major in this case
-  return prepare_column_major_matrix_for_cusparse(tensor);
+  // ROCm - only col-major dispatch.
+  return at::native::maybePrepareBatchedMatrices(tensor);
 #else
-  if (is_blas_compatible_row_major_order(tensor) ||
-      is_blas_compatible_column_major_order(tensor)) {
-    return at::native::expect_resolved_conj(tensor);
-  } else {
-    return c10::MaybeOwned<Tensor>::owned(
-        tensor.clone(at::MemoryFormat::Contiguous));
-  }
+  return at::native::maybePrepareBatchedMatrices(
+    tensor,
+    /*make_col_major_like=*/at::native::isColMajorLike(tensor)
+  );
 #endif
 }
 
@@ -241,8 +229,8 @@ void block_sparse_triangular_solve_mat(
       ? CUSPARSE_DIRECTION_ROW
       : CUSPARSE_DIRECTION_COLUMN;
 
-  c10::MaybeOwned<Tensor> X_ = prepare_column_major_matrix_for_cusparse(X);
-  c10::MaybeOwned<Tensor> B_ = prepare_column_major_matrix_for_cusparse(B);
+  c10::MaybeOwned<Tensor> X_ = at::native::maybePrepareBatchedMatrices(X);
+  c10::MaybeOwned<Tensor> B_ = at::native::maybePrepareBatchedMatrices(B);
 
   int ldb = cuda_int_cast(B_->stride(-1), "ldb");
   int ldx = cuda_int_cast(X_->stride(-1), "ldx");
@@ -445,10 +433,6 @@ void block_sparse_mm(
     return;
   }
 
-  if (beta.toComplexDouble() != 0. && !result.is_same(input)) {
-    result.copy_(input);
-  }
-
   const cusparseDirection_t block_layout = mat1.values().is_contiguous()
       ? CUSPARSE_DIRECTION_ROW
       : CUSPARSE_DIRECTION_COLUMN;
@@ -458,7 +442,11 @@ void block_sparse_mm(
   // cuSPARSE expects column-major strides for result and we can't manipulate
   // transpose flag of mat1
   c10::MaybeOwned<Tensor> result_ =
-      prepare_column_major_matrix_for_cusparse(result);
+      at::native::maybePrepareBatchedMatrices(result);
+
+  if (beta.toComplexDouble() != 0. && !result_->is_same(input)) {
+    result_->copy_(input);
+  }
 
   IntArrayRef result_strides = result_->strides();
   IntArrayRef mat2_strides = mat2_->strides();
