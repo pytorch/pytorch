@@ -3465,9 +3465,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
                 self.node.codegen(wrapper)
                 inner_lines = wrapper.lines[n_before:]
                 del wrapper.lines[n_before:]
-                wrapper.writeline(
-                    AnnotatedExternKernelBlock(inner_lines, module_fqn)
-                )
+                wrapper.writeline(AnnotatedExternKernelBlock(inner_lines, module_fqn))
                 return
         return self.node.codegen(wrapper)
 
