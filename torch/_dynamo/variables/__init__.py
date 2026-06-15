@@ -107,6 +107,7 @@ from .higher_order_ops import (
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
+    ChainVariable,
     CountIteratorVariable,
     FilterVariable,
     IteratorVariable,
@@ -213,6 +214,7 @@ __all__ = [
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
+    "ChainVariable",
     "CountIteratorVariable",
     "CreateTMADescriptorExperimentalVariable",
     "CreateTMADescriptorStableVariable",
