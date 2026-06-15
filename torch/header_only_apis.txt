@@ -241,3 +241,23 @@ is_compile_time_function_pointer
 DeviceCapability
 ScalarTypeIndex
 NUMBER_OF_DEVICE_CAPABILITIES
+
+# torch/headeronly/util/overloaded.h
+overloaded
+
+# torch/headeronly/util/IdWrapper.h
+IdWrapper
+# C10_DEFINE_HASH_FOR_IDWRAPPER is tested through IdWrapper
+
+# torch/headeronly/util/FunctionRef.h
+function_ref
+
+# torch/headeronly/util/Enumerate.h
+enumerate
+
+# torch/headeronly/util/C++17.h
+# guts::apply is only defined for HIP device code (__HIP__) and is not tested
+
+# torch/headeronly/util/ConstexprCrc.h
+crc64
+crc64_t
