@@ -1357,6 +1357,34 @@ class TestMPS(TestCaseMPS):
         tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
         self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("case", [
+        ((2, 2, 2, 2), "inner"),
+        ((2, 2, 2, 2), "transposed"),
+        ((2, 2, 2, 2), "outer"),
+        ((4, 8, 64, 12), "inner"),
+        ((4, 8, 64, 12), "transposed"),
+        ((4, 8, 64, 12), "outer"),
+        ((3, 33, 17, 49), "inner"),
+        ((3, 33, 17, 49), "transposed"),
+        ((3, 33, 17, 49), "outer"),
+    ])
+    def test_bmm_strided_output(self, case, dtype):
+        (B, M, K, N), layout = case
+        a = torch.randn(B, M, K, device="mps", dtype=dtype)
+        b = torch.randn(B, K, N, device="mps", dtype=dtype)
+        if layout == "transposed":
+            out = torch.empty(B, N, M, device="mps", dtype=dtype).transpose(-1, -2)
+        elif layout == "outer":
+            out = torch.empty(2 * B, M, N, device="mps", dtype=dtype)[::2]
+        else:
+            out = torch.empty(B, M, N, 2, device="mps", dtype=dtype)[..., 0]
+        self.assertFalse(out.is_contiguous())
+        torch.bmm(a, b, out=out)
+        ref = torch.bmm(a.cpu(), b.cpu())
+        tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
+        self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
+
     @xfailIf(MACOS_VERSION < 15.0)
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_large_bmm(self, dtype):
