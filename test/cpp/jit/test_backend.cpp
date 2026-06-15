@@ -369,7 +369,6 @@ TEST(BackendTest, TestCompilerNotSupport) {
 }
 
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-
 TEST(BackendTestDebugInfo, TestCompiler) {
   Module m("m");
   m.define(R"(
@@ -858,8 +857,7 @@ Traceback of TorchScript (most recent call last):
   )";
   ASSERT_THROWS_WITH_MESSAGE(c_loaded.forward(inputs), error_pattern);
 }
-
-#endif
+#endif // defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
 
 } // namespace jit
 } // namespace torch

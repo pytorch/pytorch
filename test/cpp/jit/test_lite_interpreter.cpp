@@ -1425,6 +1425,7 @@ TEST(LiteInterpreterTest, DefaultArgsWithOutArg) {
       op->second.num_schema_args.value() == 3);
 }
 
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
 TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
   Module a("A");
   a.define(R"(
@@ -1474,6 +1475,7 @@ Traceback of TorchScript (most recent call last):
   )";
   ASSERT_THROWS_WITH_MESSAGE(lite_m.forward(inputs), error_pattern);
 }
+#endif // defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
 #endif // !defined(FB_XPLAT_BUILD)
 
 namespace {
