@@ -104,14 +104,14 @@ file(GLOB miopen_h CONFIGURE_DEPENDS "miopen/*.h")
 file(GLOB miopen_cpp CONFIGURE_DEPENDS "miopen/*.cpp")
 
 file(GLOB mkl_cpp CONFIGURE_DEPENDS "mkl/*.cpp")
-file(GLOB mkldnn_cpp CONFIGURE_DEPENDS "mkldnn/*.cpp")
+file(GLOB mkldnn_cpp CONFIGURE_DEPENDS "onednn/*.cpp")
 
-file(GLOB mkldnn_xpu_h CONFIGURE_DEPENDS "native/mkldnn/xpu/*.h" "native/mkldnn/xpu/detail/*.h")
-file(GLOB mkldnn_xpu_cpp CONFIGURE_DEPENDS "native/mkldnn/xpu/*.cpp" "native/mkldnn/xpu/detail/*.cpp")
+file(GLOB mkldnn_xpu_h CONFIGURE_DEPENDS "native/onednn/xpu/*.h" "native/onednn/xpu/detail/*.h")
+file(GLOB mkldnn_xpu_cpp CONFIGURE_DEPENDS "native/onednn/xpu/*.cpp" "native/onednn/xpu/detail/*.cpp")
 
 file(GLOB native_cpp CONFIGURE_DEPENDS "native/*.cpp")
 file(GLOB native_mkl_cpp CONFIGURE_DEPENDS "native/mkl/*.cpp")
-file(GLOB native_mkldnn_cpp CONFIGURE_DEPENDS "native/mkldnn/*.cpp")
+file(GLOB native_mkldnn_cpp CONFIGURE_DEPENDS "native/onednn/*.cpp")
 file(GLOB vulkan_cpp CONFIGURE_DEPENDS "vulkan/*.cpp")
 file(GLOB native_vulkan_cpp CONFIGURE_DEPENDS "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/impl/*.cpp" "native/vulkan/ops/*.cpp")
 
@@ -560,8 +560,8 @@ if(USE_XPU)
   list(APPEND ATen_XPU_SRCS ${native_transformers_xpu_cpp})
   list(APPEND ATen_XPU_DEPENDENCY_LIBS xpu_mkldnn)
 
-  list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/mkldnn/xpu)
-  list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/mkldnn/xpu/detail)
+  list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/onednn/xpu)
+  list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/onednn/xpu/detail)
   list(APPEND ATen_XPU_INCLUDE ${XPU_MKLDNN_INCLUDE})
 
   list(APPEND ATen_XPU_INCLUDE ${SYCL_INCLUDE_DIR})

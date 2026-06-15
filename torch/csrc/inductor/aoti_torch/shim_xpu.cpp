@@ -79,9 +79,9 @@ AOTITorchError aoti_torch_get_current_sycl_queue(void** ret) {
 }
 
 #if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/xpu/Conv.h>
-#include <ATen/native/mkldnn/xpu/qconv.h>
-#include <ATen/native/mkldnn/xpu/qlinear.h>
+#include <ATen/native/onednn/xpu/Conv.h>
+#include <ATen/native/onednn/xpu/qconv.h>
+#include <ATen/native/onednn/xpu/qlinear.h>
 
 AOTITorchError aoti_torch_xpu_mkldnn__convolution_pointwise_binary(
     AtenTensorHandle X,

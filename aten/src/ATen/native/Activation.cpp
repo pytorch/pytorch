@@ -16,8 +16,8 @@
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
 #if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
-#include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/Utils.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS

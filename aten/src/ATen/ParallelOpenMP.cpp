@@ -11,7 +11,7 @@
 #endif
 
 #if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/IDeepRegistration.h>
+#include <ATen/native/onednn/IDeepRegistration.h>
 #endif
 
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>

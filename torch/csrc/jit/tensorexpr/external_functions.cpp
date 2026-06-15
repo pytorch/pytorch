@@ -5,7 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/native/mkldnn/OpContext.h>
+#include <ATen/native/onednn/OpContext.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/BinaryOps.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
