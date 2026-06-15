@@ -878,6 +878,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             f"bad operand type for abs(): '{self.python_type_name()}'",
         )
 
+    def nb_invert_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        m = self._maybe_get_baseclass_method("__invert__")
+        if m:
+            source = self.source and AttrSource(self.source, "__invert__")
+            return variables.UserMethodVariable(
+                m, self, source_fn=source
+            ).call_function(tx, [], {})
+        raise_type_error(
+            tx,
+            f"bad operand type for unary ~: '{self.python_type_name()}'",
+        )
+
     def mp_ass_subscript_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2018,6 +2030,31 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         return self.call_method(tx, "__abs__", [], {})
+
+    def nb_invert_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        # CPython: slot_nb_invert calls __invert__() via vectorcall_method.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9426
+
+        type_attr = self.lookup_class_mro_attr("__invert__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            raise_type_error(
+                tx,
+                f"bad operand type for unary ~: '{self.python_type_name()}'",
+            )
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+
+        method = self._maybe_get_baseclass_method("__invert__")
+        if method is None:
+            raise_type_error(
+                tx,
+                f"bad operand type for unary ~: '{self.python_type_name()}'",
+            )
+
+        return self.call_method(tx, "__invert__", [], {})
 
     def torch_function_check(self) -> None:
         if not has_torch_function(self):
