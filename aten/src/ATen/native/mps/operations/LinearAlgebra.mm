@@ -304,6 +304,12 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
     return true;
   }
+  // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
+  // kernels honor the output strides.
+  static const bool is_macos_26_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+  if (!output.is_contiguous() && !is_macos_26_0_or_newer) {
+    return true;
+  }
   // multiplicationWithPrimaryTensor: returns incorrect results if inner size exceeds 2048
   // See https://github.com/pytorch/pytorch/issues/167727#issuecomment-3529308548
   if (c10::isComplexType(self.scalar_type()) && self.size(1) > max_complex_inner_size) {
@@ -1120,6 +1126,13 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   }
 
   if (c10::isIntegralType(batch1.scalar_type(), true)) {
+    return do_metal_bmm(batch1, batch2, result);
+  }
+
+  // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
+  // kernel honors the output strides.
+  static const bool is_macos_26_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+  if (!result.is_contiguous() && !is_macos_26_0_or_newer) {
     return do_metal_bmm(batch1, batch2, result);
   }
 

@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_LINUX,
     IS_WINDOWS,
-    MACOS_VERSION,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
@@ -1708,15 +1707,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=(torch.float32,),
-                active_if=MACOS_VERSION < 26.0,
-            ),
         ),
         sample_inputs_func=sample_inputs_linalg_matrix_power,
     ),
@@ -1756,15 +1746,6 @@ op_db: list[OpInfo] = [
                 "test_nnc_correctness",
                 device_type="cpu",
                 dtypes=(torch.long,),
-            ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=(torch.float32,),
-                active_if=MACOS_VERSION < 26.0,
             ),
         ),
         decorators=[
