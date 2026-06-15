@@ -128,8 +128,7 @@ inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
         AT_EXPAND(AT_FLOAT8_TYPES),
         kBFloat16,
         kHalf,
-        kComplexHalf,
-        kBComplex32);
+        kComplexHalf);
   } else {
     AT_DISPATCH_V2(
         tensor.scalar_type(),

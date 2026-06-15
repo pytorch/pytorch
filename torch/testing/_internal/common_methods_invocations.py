@@ -18462,13 +18462,7 @@ op_db: list[OpInfo] = [
     OpInfo(
         "to",
         op=lambda x, *args, **kwargs: x.to(*args, **kwargs),
-        dtypes=all_types_and_complex_and(
-            torch.bfloat16,
-            torch.float16,
-            torch.bool,
-            torch.complex32,
-            torch.bcomplex32,
-        ),
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
