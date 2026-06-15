@@ -43,6 +43,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def default_custom_runtime_estimation(
+    node: fx.Node,
+    size: int | None,
+) -> float | None:
+    return 0.0
+
+
 def _collect_nodes_must_be_after(node: fx.Node) -> list[fx.Node]:
     """BFS forward collecting node and its transitive users with no external inputs."""
     result: list[fx.Node] = [node]
@@ -398,14 +405,8 @@ class ManualOverlapScheduler(OverlapScheduler):
         # Keep a no-op estimator by default so the inherited OverlapScheduler
         # initialization path does not enter analytical NCCL estimation for
         # compile-on-one-rank graphs where group_name may be an FX Node.
+
         if custom_runtime_estimation is None:
-
-            def default_custom_runtime_estimation(
-                node: fx.Node,
-                size: int | None,
-            ) -> float | None:
-                return 0.0
-
             custom_runtime_estimation = default_custom_runtime_estimation
 
         super().__init__(
@@ -655,7 +656,10 @@ def manual_overlap_bucketing(
             detailed documentation on signature, return format, and usage examples.
         bucket_mode: Bucket mode for collective bucketing. None uses default.
     """
+
     # decode abbreviated FQNs to actual FQNs
+    if custom_runtime_estimation is None:
+        custom_runtime_estimation = default_custom_runtime_estimation
     overlapped_gm = ManualOverlapScheduler(
         gm,
         module_bucket_plans,
