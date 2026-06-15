@@ -455,13 +455,6 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.bool,
             ],
-            "nn.functional.logsigmoid": [
-                torch.int16,
-                torch.int32,
-                torch.uint8,
-                torch.bool,
-                torch.int8,
-            ],
             "nn.functional.max_pool1d": [
                 torch.uint8,
                 torch.bool,

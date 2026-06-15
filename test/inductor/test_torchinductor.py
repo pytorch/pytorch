@@ -15952,6 +15952,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(x, source)
 
+    @parametrize("inplace", [False, True])
+    def test_index_add_source_shape_mismatch(self, inplace):
+        def fn(x, source):
+            index = torch.arange(source.numel(), device=x.device)
+            if inplace:
+                x = x.clone()
+                x.index_add_(0, index, source)
+                return x
+            return torch.index_add(x, 0, index, source)
+
+        x = torch.randn(10, 5, device=self.device)
+        source = torch.randn(5, device=self.device)
+        msg = "source tensor shape must match self tensor shape"
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(x, source)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(x, source)
+
     @skip_if_gpu_halide  # cuda error
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):
@@ -18472,6 +18492,36 @@ if RUN_CPU:
     class CpuTests(TestCase):
         common = check_model
         device = "cpu"
+
+        def test_uint8_abs_codegen_issue_187018(self):
+            """
+            Ensures torch.compile does not emit std::abs or .abs() for unsigned integers,
+            which causes implicit promotion to signed int and downstream miscompilation.
+            """
+            from torch._inductor.utils import run_and_get_cpp_code
+            from torch.testing import FileCheck
+
+            def f(x):
+                y = -x.abs()
+                return torch.cat([y, y]).sum()
+
+            # Small tensor triggers the scalar codegen path
+            x_scalar = torch.tensor([200, 200], dtype=torch.uint8)
+            # Large tensor (>= 256) triggers the vectorized codegen path
+            x_vec = torch.full((256,), 200, dtype=torch.uint8)
+
+            opt_f = torch.compile(f)
+
+            # 1. Numeric equivalence tests
+            self.assertEqual(opt_f(x_scalar), f(x_scalar))
+            self.assertEqual(opt_f(x_vec), f(x_vec))
+
+            # 2. FileCheck tests to strictly guarantee bypass in generated C++
+            _, code_scalar = run_and_get_cpp_code(opt_f, x_scalar)
+            FileCheck().check_not("std::abs(").run(code_scalar)
+
+            _, code_vec = run_and_get_cpp_code(opt_f, x_vec)
+            FileCheck().check_not(".abs()").run(code_vec)
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 

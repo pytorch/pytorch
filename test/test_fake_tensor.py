@@ -832,6 +832,54 @@ class FakeTensorTest(TestCase):
                     torch._C._dispatch_key_set(y)
                 )
 
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
+    def test_mkldnn_to_dense(self):
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+        real = torch.randn(2, 3).to_mkldnn()
+        with FakeTensorMode() as fake_mode:
+            x = fake_mode.from_tensor(real)
+            self.assertTrue(x.is_mkldnn)
+            self.assertEqual(x.layout, torch._mkldnn)  # type: ignore[attr-defined]
+
+            y = x.to_dense()
+            self.assertFalse(y.is_mkldnn)
+            self.assertEqual(y.layout, torch.strided)
+            self.assertEqual(y.stride(), (3, 1))
+
+            y = torch.ops.aten.to_dense.default(x)
+            self.assertFalse(y.is_mkldnn)
+            self.assertEqual(y.layout, torch.strided)
+            self.assertEqual(y.stride(), (3, 1))
+
+            detached = x.detach()
+            self.assertTrue(detached.is_mkldnn)
+            y = detached.to_dense()
+            self.assertFalse(y.is_mkldnn)
+            self.assertEqual(y.layout, torch.strided)
+            self.assertEqual(y.stride(), (3, 1))
+
+            dense = torch.randn(2, 3)
+            mkldnn = torch.ops.aten.to_mkldnn.default(dense)
+            self.assertTrue(mkldnn.is_mkldnn)
+            y = torch.ops.aten.to_dense.default(mkldnn)
+            self.assertFalse(y.is_mkldnn)
+            self.assertEqual(y.layout, torch.strided)
+            self.assertEqual(y.stride(), (3, 1))
+
+            with FunctionalTensorMode():
+                functional = FunctionalTensor.to_functional(x)
+                y = functional.detach().to_dense()
+                y_unwrapped = torch._from_functional_tensor(y.elem)
+                self.assertFalse(y_unwrapped.is_mkldnn)
+                self.assertEqual(y_unwrapped.layout, torch.strided)
+                self.assertEqual(y_unwrapped.stride(), (3, 1))
+
     def test_compare_tensor_meta_unbacked_numel(self):
         from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
@@ -866,6 +914,77 @@ class FakeTensorTest(TestCase):
 
         self.assertTrue(isinstance(x, FakeTensor))
         self.assertTrue(x.device.type == "cpu")
+
+    def test_constructor_like_custom_op_without_device_arg(self):
+        with torch.library._scoped_library(
+            "fake_tensor_issue_163196", "FRAGMENT"
+        ) as lib:
+            lib.define("moo(int x) -> Tensor")
+
+            @torch.library.impl(
+                "fake_tensor_issue_163196::moo",
+                "CompositeExplicitAutograd",
+                lib=lib,
+            )
+            def moo(x):
+                return torch.empty(3).fill_(x)
+
+            def f(x):
+                return torch.ops.fake_tensor_issue_163196.moo(x.item())
+
+            gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(4))
+            target = torch.ops.fake_tensor_issue_163196.moo.default
+            (node,) = [n for n in gm.graph.nodes if n.target is target]
+            self.assertIsInstance(node.meta["val"], FakeTensor)
+            self.assertEqual(node.meta["val"].shape, (3,))
+            self.assertEqual(node.meta["val"].device.type, "cpu")
+
+    def test_constructor_like_custom_op_with_device_arg(self):
+        with torch.library._scoped_library(
+            "fake_tensor_issue_163196_device_arg", "FRAGMENT"
+        ) as lib:
+            lib.define("moo(int x, *, Device? device=None) -> Tensor")
+            seen_devices = []
+
+            @torch.library.impl(
+                "fake_tensor_issue_163196_device_arg::moo",
+                "CompositeExplicitAutograd",
+                lib=lib,
+            )
+            def moo(x, device=None):
+                seen_devices.append(device)
+                return torch.empty(3, device=device).fill_(x)
+
+            with FakeTensorMode():
+                out = torch.ops.fake_tensor_issue_163196_device_arg.moo(4, device="cpu")
+
+            self.assertIsInstance(out, FakeTensor)
+            self.assertEqual(out.device.type, "cpu")
+            self.assertTrue(torch.device("meta") in seen_devices)
+
+    def test_constructor_like_custom_op_with_non_device_arg_named_device(self):
+        with torch.library._scoped_library(
+            "fake_tensor_issue_163196_non_device_arg", "FRAGMENT"
+        ) as lib:
+            lib.define("moo(str device) -> Tensor")
+
+            @torch.library.impl(
+                "fake_tensor_issue_163196_non_device_arg::moo",
+                "CompositeExplicitAutograd",
+                lib=lib,
+            )
+            def moo(device):
+                return torch.empty(len(device))
+
+            def f(x):
+                return torch.ops.fake_tensor_issue_163196_non_device_arg.moo("cpu")
+
+            gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(4))
+            target = torch.ops.fake_tensor_issue_163196_non_device_arg.moo.default
+            (node,) = [n for n in gm.graph.nodes if n.target is target]
+            self.assertIsInstance(node.meta["val"], FakeTensor)
+            self.assertEqual(node.meta["val"].shape, (3,))
+            self.assertEqual(node.meta["val"].device.type, "cpu")
 
     def test_mode(self):
         with FakeTensorMode():

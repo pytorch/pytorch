@@ -907,7 +907,7 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
         iter,
         [&](scalar_t qx) -> scalar_t {
           auto x = at::native::dequantize_val(scale, zero_point, qx);
-          const auto y = std::min(std::max(x + 3.0f, 0.0f), 6.0f) / 6.0f;
+          const auto y = std::clamp(x + 3.0f, 0.0f, 6.0f) / 6.0f;
           return at::native::quantize_val<scalar_t>(
               output_scale, output_zero_point, y);
         },
@@ -1106,7 +1106,7 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
         [&](scalar_t value) -> scalar_t {
           const auto x =
               at::native::dequantize_val(i_scale, i_zero_point, value);
-          const auto y = x * std::min(std::max(x + 3.0f, 0.0f), 6.0f) / 6.0f;
+          const auto y = x * std::clamp(x + 3.0f, 0.0f, 6.0f) / 6.0f;
           return at::native::quantize_val<scalar_t>(o_scale, o_zero_point, y);
         },
         [&](qVec value) -> qVec {

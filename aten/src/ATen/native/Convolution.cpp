@@ -767,8 +767,8 @@ static void check_shape_forward(const at::Tensor& input,
         separator = " x ";
       }
 
-      TORCH_CHECK(false, "Calculated padded input size per channel: (", input_ss.str(), "). "
-               "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
+      TORCH_CHECK(false, "Calculated padded input size per channel: (", std::move(input_ss).str(), "). "
+               "Kernel size: (", std::move(kernel_ss).str(), "). Kernel size can't be greater than actual input size");
     }
   } else { // transposed
     for (const auto i : c10::irange(2, k)) {
@@ -2074,6 +2074,22 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   params.deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   params.cudnn_enabled = ctx.userEnabledCuDNN();
   params.allow_tf32 = ctx.allowTF32CuDNN(at::Float32Op::CONV);
+
+  // Unbatched input (no leading batch dim) is supported by the slow dilated
+  // backward kernels, which insert the batch dim internally and return an
+  // unbatched grad_input. Route such inputs directly to them; the generic path
+  // below requires a batch dim. Other backends fall through and raise the usual
+  // dimensionality error.
+  if (!transposed && groups == 1 && (k == 4 || k == 5) &&
+      input.dim() == k - 1 && grad_output.dim() == k - 1) {
+    ConvBackend dilated_backend = select_conv_backend(
+        input.unsqueeze(0), weight, bias_sizes_opt, /*need_backward=*/true, params);
+    if (dilated_backend == ConvBackend::SlowDilated2d ||
+        dilated_backend == ConvBackend::SlowDilated3d) {
+      return _convolution_backward_nogroup_backend(
+          grad_output, input, weight, output_mask, dilated_backend, params);
+    }
+  }
 
   // Validate inputs.
   check_shape_backward(input, weight.sizes(), params);

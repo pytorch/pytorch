@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     is_iterable_of_tensors,
     numpy_to_torch_dtype_dict,
+    parametrize,
     run_tests,
     skipIfNoSciPy,
     slowTest,
@@ -1937,6 +1938,35 @@ class TestUnaryUfuncs(TestCase):
         y = x.to(torch.float8_e5m2)
         ref = x.cpu().float().to(torch.float8_e5m2)
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+
+    # Regression for https://github.com/pytorch/pytorch/issues/177839:
+    # when eps > 0.5 the scalar kernel clamps via `x < eps ? eps : ...` (so
+    # the lower bound wins over the upper bound when eps > 1 - eps), and the
+    # vectorized kernel must match.
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize("eps", [0.49, 0.51, 0.6, 0.9])
+    @parametrize("shape", [(2, 16), (4, 32), (8, 64)])
+    def test_logit_vectorized_matches_scalar(self, device, dtype, eps, shape):
+        torch.manual_seed(0)
+        # Slice from a wider tensor so the result is non-contiguous and
+        # bypasses the contiguous MKL fast-path — ensures the vectorized
+        # kernel we patched is actually exercised on MKL-enabled builds.
+        rows, cols = shape
+        t = torch.rand((rows, cols + 2), dtype=dtype, device=device) * 2 - 0.5
+        x = t[:, :cols]
+        self.assertFalse(x.is_contiguous())
+        got = torch.special.logit(x, eps=eps)
+        # Reference: apply the scalar kernel elementwise against a single-
+        # lane tensor of the same dtype. cpu_kernel_vec falls back to its
+        # scalar lambda for lengths below `Vectorized::size()`, so this
+        # always hits the scalar path and gives a bit-exact ground truth.
+        ref = torch.empty_like(x)
+        x_flat = x.reshape(-1)
+        ref_flat = ref.reshape(-1)
+        for i in range(x_flat.numel()):
+            ref_flat[i] = torch.special.logit(x_flat[i : i + 1], eps=eps)
+        self.assertEqual(got, ref)
 
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
