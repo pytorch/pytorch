@@ -2352,8 +2352,8 @@ class TestCutlassBackend(TestCase):
 
         M = 1024
         N = 512
-        a = torch.ones(M, N).to(GPU_TYPE).half()
-        b = torch.ones(N, N).to(GPU_TYPE).half().t()
+        a = torch.randn(M, N).to(GPU_TYPE).half()
+        b = torch.randn(N, N).to(GPU_TYPE).half().t()
         extra_args = gen_args(op, (M, N))
         model = TestModel().to(GPU_TYPE)
 
@@ -2364,7 +2364,63 @@ class TestCutlassBackend(TestCase):
             torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
             1,
         )
-        torch.testing.assert_close(result, ref_result)
+        torch.testing.assert_close(result, ref_result, atol=1e-2, rtol=1e-2)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    def test_evt_scalar_constant(self):
+        # Python scalar literals in the epilogue (e.g. * 0.5, - 1.0) are lowered
+        # by the CUTLASS EVT frontend into immediate-constant ("imm_*") nodes.
+        # These are not input buffers, so EVT arg rendering must recover the
+        # constant value and emit it as a scalar (see get_constant_value /
+        # constant handling in evt_extensions.py); without it the renderer
+        # raises KeyError on the imm_ name. The negative literal additionally
+        # exercises the name-parsing fallback for signed immediates.
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b):
+                return (a @ b) * 0.5 - 1.0
+
+        M = 1024
+        N = 512
+        a = torch.randn(M, N).to(GPU_TYPE).half()
+        b = torch.randn(N, N).to(GPU_TYPE).half().t()
+        model = TestModel().to(GPU_TYPE)
+
+        result = torch.compile(model)(a, b)
+        ref_result = model(a, b)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result, atol=1e-2, rtol=1e-2)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    def test_evt_gelu(self):
+        # gelu is decomposed by Inductor into x * 0.5 * (1 + erf(x / sqrt(2)));
+        # the EVT codegen re-folds this back into the native CUTLASS GELU
+        # functor (see _fuse_activations in python_evt.py).
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.nn.functional.gelu(a @ b)
+
+        M = 1024
+        N = 512
+        a = torch.randn(M, N).to(GPU_TYPE).half()
+        b = torch.randn(N, N).to(GPU_TYPE).half().t()
+        model = TestModel().to(GPU_TYPE)
+
+        result = torch.compile(model)(a, b)
+        ref_result = model(a, b)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result, atol=1e-2, rtol=1e-2)
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
