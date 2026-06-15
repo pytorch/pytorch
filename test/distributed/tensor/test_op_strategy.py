@@ -904,6 +904,42 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertEqual(indices_plc.dim, 0)
         self.assertEqual(input_plc.dim, 1)
 
+    def test_var_mean_single_dim_strategy(self):
+        from torch.distributed.tensor._ops._math_ops import std_var_single_dim_strategy
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
+        )
+        output_meta = TensorMeta(
+            shape=torch.Size([8]), stride=(1,), dtype=torch.float32
+        )
+
+        strategies = std_var_single_dim_strategy(
+            torch.ops.aten.var_mean.correction,
+            (input_meta, [1]),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        self.assertEqual(len(strategies[0]), 3)
+        var_out, mean_out, inp = strategies[0]
+        self.assertEqual(var_out.dim, 0)
+        self.assertEqual(mean_out.dim, 0)
+        self.assertEqual(inp.dim, 0)
+
+        strategies = std_var_single_dim_strategy(
+            torch.ops.aten.var_mean.correction_out,
+            (input_meta, [1]),
+            {"out0": output_meta, "out1": output_meta},
+        )
+        self.assertEqual(len(strategies), 1)
+        self.assertEqual(len(strategies[0]), 5)
+        var_out, mean_out, inp, out0, out1 = strategies[0]
+        self.assertEqual(var_out.dim, 0)
+        self.assertEqual(mean_out.dim, 0)
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(out0.dim, 0)
+        self.assertEqual(out1.dim, 0)
+
     def test_layer_norm_fwd_single_dim_strategy(self):
         """layer_norm produces sharding rules for each outer dim."""
         from torch.distributed.tensor._ops._math_ops import (
