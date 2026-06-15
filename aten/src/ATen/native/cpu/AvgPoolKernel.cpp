@@ -780,8 +780,8 @@ void cpu_avg_pool3d_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<BFloat16>();
-  auto output_data = output.data_ptr<BFloat16>();
+  auto input_data = input.const_data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
   int64_t channels = input.size(1);
@@ -792,7 +792,7 @@ void cpu_avg_pool3d_channels_last(
   int64_t output_height = output.size(3);
   int64_t output_width = output.size(4);
 
-  using bVec = vec::Vectorized<BFloat16>;
+  using bVec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * output_depth * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
@@ -803,7 +803,7 @@ void cpu_avg_pool3d_channels_last(
     data_index_init(begin, n, nbatch, od, output_depth, oh, output_height, ow, output_width);
 
     // temp buffer for sum, use float as accumulation type
-    // can't reuse output buffer to store sum since it is BFloat16
+    // can't reuse output buffer to store sum since it is BFloat16/Half
     auto sum_arr = std::make_unique<float []>(channels);
     float* sum = sum_arr.get();
 
@@ -835,7 +835,7 @@ void cpu_avg_pool3d_channels_last(
         }
       }
 
-      BFloat16* out = output_data + i * channels;
+      scalar_t* out = output_data + i * channels;
 
       // Pass I: zero the out lane
       int64_t d1 = 0;
@@ -862,13 +862,13 @@ void cpu_avg_pool3d_channels_last(
       for (const auto id : c10::irange(id0, id1)) {
         for (const auto ih : c10::irange(ih0, ih1)) {
           for (const auto iw : c10::irange(iw0, iw1)) {
-            BFloat16* in = input_data + n * input_depth * input_height * input_width * channels +
+            const scalar_t* in = input_data + n * input_depth * input_height * input_width * channels +
                 id * input_height * input_width * channels + ih * input_width * channels + iw * channels;
 
             int64_t d2 = 0;
             for (; d2 < size - (size % bVec::size()); d2 += bVec::size()) {
               bVec data_bvec = bVec::loadu(in + d2);
-              auto [data_fvec0, data_fvec1] = convert_bfloat16_float(data_bvec);
+              auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
 
               fVec sum_fvec0 = fVec::loadu(sum + d2) + data_fvec0;
               fVec sum_fvec1 = fVec::loadu(sum + d2 + fVec::size()) + data_fvec1;
@@ -888,11 +888,11 @@ void cpu_avg_pool3d_channels_last(
         fVec out_fvec0 = fVec::loadu(sum + d3) / fVec(float(divide_factor));
         fVec out_fvec1 = fVec::loadu(sum + d3 + fVec::size()) / fVec(float(divide_factor));
 
-        bVec out_bvec = convert_float_bfloat16(out_fvec0, out_fvec1);
+        bVec out_bvec = convert_from_float<scalar_t>(out_fvec0, out_fvec1);
         out_bvec.store(out + d3);
       }
       for (; d3 < size; d3++) {
-        out[d3] = BFloat16(sum[d3] / divide_factor);
+        out[d3] = scalar_t(sum[d3] / divide_factor);
       }
 
       // move on to next output index
@@ -949,6 +949,7 @@ void cpu_avg_pool3d_backward(
             id0 = std::max(id0, (int64_t) 0);
             ih0 = std::max(ih0, (int64_t) 0);
             iw0 = std::max(iw0, (int64_t) 0);
+            id1 = std::min(id1, input_depth);
             ih1 = std::min(ih1, input_height);
             iw1 = std::min(iw1, input_width);
 
@@ -1090,13 +1091,34 @@ void avg_pool3d_kernel_impl(
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
+      AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(), "avg_pool3d", [&] {
+        auto output_5d = output.unsqueeze(0);
+        auto input_5d = input.unsqueeze(0);
+        cpu_avg_pool3d_channels_last<scalar_t>(
+            output_5d,
+            input_5d,
+            kW,
+            kH,
+            kD,
+            dW,
+            dH,
+            dD,
+            padW,
+            padH,
+            padD,
+            count_include_pad,
+            divisor_override);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast3d: {
       AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(), "avg_pool3d_channels_last", [&] {
         cpu_avg_pool3d_channels_last<scalar_t>(output, input, kW, kH, kD, dW, dH, dD, padW, padH, padD, count_include_pad, divisor_override);
       });
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, ChannelsLast, Contiguous");
   }
 }
 
@@ -1116,6 +1138,27 @@ void avg_pool3d_backward_kernel_impl(
       });
       break;
     }
+    case at::MemoryFormat::ChannelsLast: {
+      AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, grad_output.scalar_type(), "avg_pool3d_backward", [&] {
+        auto grad_input_5d = grad_input.unsqueeze(0);
+        auto grad_output_5d = grad_output.unsqueeze(0);
+        cpu_avg_pool3d_backward_channels_last<scalar_t>(
+            grad_input_5d,
+            grad_output_5d,
+            kW,
+            kH,
+            kD,
+            dW,
+            dH,
+            dD,
+            padW,
+            padH,
+            padD,
+            count_include_pad,
+            divisor_override);
+      });
+      break;
+    }
     case at::MemoryFormat::ChannelsLast3d: {
       AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, grad_output.scalar_type(), "avg_pool3d_backward_channels_last", [&] {
         cpu_avg_pool3d_backward_channels_last<scalar_t>(grad_input, grad_output, kW, kH, kD, dW, dH, dD, padW, padH, padD, count_include_pad, divisor_override);
@@ -1123,7 +1166,7 @@ void avg_pool3d_backward_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, ChannelsLast, Contiguous");
   }
 }
 
