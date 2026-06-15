@@ -269,6 +269,7 @@ def cudagraph_post_compile(
             constants=tuple(tensor_constants.values()),
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
+            kernel_free_cudagraph=compiled_graph.kernel_free_cudagraph,
         )
 
         policy = config.cudagraph_policy
@@ -394,6 +395,7 @@ def cudagraph_partition_post_compile(
             constants=tuple(partition_metadata.constants.values()),
             placeholders=partition_metadata.placeholders,
             mutated_input_idxs=tuple(partition_metadata.mutated_input_idxs),
+            kernel_free_cudagraph=compiled_graph.kernel_free_cudagraph,
         )
         cudagraphify_fns.append(cudagraphify_fn)
 
@@ -519,6 +521,7 @@ class CompiledFxGraph(OutputCode):
     extern_libs_key: str | None
     inductor_provenance_mapping_str: str | None
     inductor_provenance_stack_traces_str: str | None
+    kernel_free_cudagraph: bool
 
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
@@ -605,6 +608,7 @@ class CompiledFxGraph(OutputCode):
         self.opaque_value_type_classes = graph.opaque_value_type_classes
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
+        self.kernel_free_cudagraph = graph.kernel_free_cudagraph
         self.metrics_deltas = metrics_deltas
         self.counter_deltas = counter_deltas
         self.guards_expr = None

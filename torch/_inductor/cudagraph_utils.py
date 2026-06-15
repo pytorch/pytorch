@@ -171,6 +171,7 @@ class WrappedFunction:
     constants: tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
+    kernel_free_cudagraph: bool = False
 
 
 def get_mutating_use_stack_trace_from_node(
