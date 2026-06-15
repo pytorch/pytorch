@@ -217,16 +217,25 @@ class TimmRunner(BenchmarkRunner):
 
     @download_retry_decorator
     def _download_model(self, model_name):
-        model = create_model(
-            model_name,
-            in_chans=3,
-            scriptable=False,
-            num_classes=None,
-            drop_rate=0.0,
-            drop_path_rate=None,
-            drop_block_rate=None,
-            pretrained=True,
-        )
+        try:
+            model = create_model(
+                model_name,
+                in_chans=3,
+                scriptable=False,
+                num_classes=None,
+                drop_rate=0.0,
+                drop_path_rate=None,
+                drop_block_rate=None,
+                pretrained=True,
+            )
+        except TypeError:
+            model = create_model(
+                model_name,
+                in_chans=3,
+                scriptable=False,
+                num_classes=None,
+                pretrained=True,
+            )
         return model
 
     def load_model(
