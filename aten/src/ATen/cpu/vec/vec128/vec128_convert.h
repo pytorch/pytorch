@@ -17,7 +17,7 @@ inline void convertImpl(
     int64_t n) {
   uint64_t len = static_cast<uint64_t>(n);
   for (uint64_t i = 0; i < len; i++) {
-    dst[i] = static_cast<to_type>(src[i]);
+    dst[i] = convert_scalar<to_type>(src[i]);
   }
 }
 
