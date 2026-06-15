@@ -204,6 +204,7 @@ exclude_patterns = [
     'c10/util/flat_hash_map.h',
     'torch/headeronly/util/flat_hash_map.h',
     'torch/headeronly/util/order_preserving_flat_hash_map.h',
+    'torch/headeronly/util/sparse_bitset.h',
     'c10/util/logging*.h',
     'c10/metal/*.h',
     'c10/util/hash.h',
