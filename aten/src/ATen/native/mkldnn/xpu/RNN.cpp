@@ -29,9 +29,8 @@ void lstm_onednn_xpu(
   TORCH_INTERNAL_ASSERT(
       !train, "oneDNN LSTM on XPU only supports inference mode");
   TORCH_INTERNAL_ASSERT(
-      input.scalar_type() == kFloat || input.scalar_type() == kHalf ||
-          input.scalar_type() == kBFloat16,
-      "oneDNN LSTM on XPU only supports float, half, and bfloat16");
+      input.scalar_type() == kFloat || input.scalar_type() == kHalf,
+      "oneDNN LSTM on XPU only supports float and half");
 
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
