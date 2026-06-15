@@ -3151,10 +3151,6 @@ Example::
     >>> torch.cosh(a)
     tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
 
-.. note::
-   When :attr:`input` is on the CPU, the implementation of torch.cosh may use
-   the Sleef library, which rounds very large results to infinity or negative
-   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args),
 )
 
@@ -10036,10 +10032,6 @@ Example::
     >>> torch.sinh(a)
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
 
-.. note::
-   When :attr:`input` is on the CPU, the implementation of torch.sinh may use
-   the Sleef library, which rounds very large results to infinity or negative
-   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args),
 )
 
