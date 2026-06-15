@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, cast, Union
+from typing import Any, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -264,15 +264,13 @@ def handle_effects(
             raise AssertionError(
                 f"Could not find a token for effect {key} which came from the function {op}"
             )
-        proxy_tensor_mode = cast(
-            "ProxyTorchDispatchMode | None",
-            torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY),
+        proxy_tensor_mode = torch._C._get_dispatch_mode(
+            torch._C._TorchDispatchModeKey.PROXY
         )
         if proxy_tensor_mode is not None:
             # If we discovered a new token during tracing, we are in backward.
             # Then we patch the graph, adding additional tangents_token as input to the joint graph.
-            proxy_mode = cast(ProxyTorchDispatchMode, proxy_tensor_mode)
-            tracer = proxy_mode.tracer
+            tracer = proxy_tensor_mode.tracer  # type: ignore[attr-defined]
 
             from torch.fx.experimental.proxy_tensor import (
                 disable_proxy_modes_tracing,
@@ -282,7 +280,7 @@ def handle_effects(
             with disable_proxy_modes_tracing():
                 token_tensor = new_token_tensor()
 
-            token_proxy = proxy_mode.tracer.create_proxy(
+            token_proxy = proxy_tensor_mode.tracer.create_proxy(  # type: ignore[attr-defined]
                 "placeholder", "tangents_token", (), {}, name="tangents_token"
             )
             track_tensor_tree(token_tensor, token_proxy, constant=None, tracer=tracer)
