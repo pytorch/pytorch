@@ -1533,6 +1533,12 @@ class TritonTemplateKernel(TritonKernel):
                         range_val = range_tree.var_ranges[old_name]
                         del range_tree.var_ranges[old_name]
                         range_tree.var_ranges[symbol] = range_val
+                        # Keep block-shape inference metadata in sync with the
+                        # renamed epilogue range symbols used below.
+                        if self.range_tree_nodes.get(old_name) is lookup_output:
+                            del self.range_tree_nodes[old_name]
+                        if self.range_tree_nodes.get(symbol) is None:
+                            self.range_tree_nodes[symbol] = lookup_output
                         intermediate_lines.extend(
                             self._generate_index_from_tma_index(
                                 name,
