@@ -775,7 +775,12 @@ class MPSGraphCacheCallback : public IMpsAllocatorCallback {
  public:
   MPSGraphCacheCallback() : graph_cache(MPSGraphCache::getInstance()) {}
 
-  void executeMPSAllocatorCallback(void* ptr, EventType event) override {}
+  void executeMPSAllocatorCallback(void* ptr, EventType event) override {
+    if (event == EventType::ALLOCATION_FAILED) {
+      graph_cache->clear();
+      MPSKernelCache::getInstance()->clear();
+    }
+  }
 
  private:
   MPSGraphCache* graph_cache;
