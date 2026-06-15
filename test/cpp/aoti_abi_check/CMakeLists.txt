@@ -9,7 +9,10 @@ set(AOTI_ABI_CHECK_TEST_ROOT ${TORCH_ROOT}/test/cpp/aoti_abi_check)
 set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/main.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_accessor.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_alignment.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_cast.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_compiletimefunctionpointer.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_devicecapability.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_devicetype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dispatch.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dispatch_v2.cpp

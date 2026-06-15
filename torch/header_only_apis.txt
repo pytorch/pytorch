@@ -225,3 +225,19 @@ HeaderOnlyGenericPackedTensorAccessor
 # C10_DEFINE_DEPRECATED_USING functionalities are expressed at compile
 # time that have no effect to runtime. Therefore, these macros are not
 # tested under test/.
+
+# torch/headeronly/core/alignment.h
+gAlignment
+gPagesize
+gAlloc_threshold_thp
+hardware_destructive_interference_size
+
+# torch/headeronly/core/CompileTimeFunctionPointer.h
+CompileTimeFunctionPointer
+is_compile_time_function_pointer
+# TORCH_FN and TORCH_FN_TYPE are tested through CompileTimeFunctionPointer
+
+# torch/headeronly/core/DeviceCapability.h
+DeviceCapability
+ScalarTypeIndex
+NUMBER_OF_DEVICE_CAPABILITIES
