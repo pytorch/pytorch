@@ -1714,6 +1714,8 @@ if(APPLE AND USE_PYTORCH_METAL)
 endif()
 
 
+target_include_directories(torch_cpu BEFORE PRIVATE
+  ${PROJECT_SOURCE_DIR}/third_party/flatbuffers/include)
 target_link_libraries(torch_cpu PRIVATE flatbuffers)
 
 # Note [Global dependencies]
