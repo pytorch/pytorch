@@ -7243,8 +7243,10 @@ def use_two_step_variance(x, axis, keepdim, input_dtype):
     # Welford does more work per element. Preserve the old tiny-reduction
     # two-step path, keep Welford for the rest of the small reductions where
     # the speedup is limited and training gradients are more sensitive to the
-    # different accumulation order, and keep Welford for larger or split
-    # reductions where avoiding another full pass over the data is profitable.
+    # different accumulation order. It is also faster for L2-sized CUDA inputs,
+    # where the second pass usually reloads from L2 instead of DRAM. Keep
+    # Welford for split reductions where avoiding another full pass over the
+    # data is profitable.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
@@ -7253,32 +7255,56 @@ def use_two_step_variance(x, axis, keepdim, input_dtype):
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
     device = x.get_device()
-    check_for_split = False
-    min_numel = 0
-    is_cuda_two_step_dtype = input_dtype in (torch.bfloat16, torch.float16)
+    has_multiple_outputs = sympy_product(ranges) != 1
+    if not (isinstance(reduction_numel, sympy.Integer) and has_multiple_outputs):
+        return False
+
+    reduction_numel = int(reduction_numel)
     if device and device.type == "cpu":
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-    elif device and device.type == "cuda" and is_triton(x) and is_cuda_two_step_dtype:
-        min_numel = config.triton.use_two_step_variance_min_numel
-        threshold = config.triton.use_two_step_variance_threshold
-        check_for_split = True
-    else:
-        threshold = config.unroll_reductions_threshold
+        return reduction_numel <= threshold
 
-    if not isinstance(reduction_numel, sympy.Integer):
-        return False
-
-    reduction_numel = int(reduction_numel)
-    if reduction_numel > threshold or sympy_product(ranges) == 1:
-        return False
-
-    if min_numel and config.unroll_reductions_threshold < reduction_numel < min_numel:
-        return False
-
-    if not check_for_split:
+    if reduction_numel <= config.unroll_reductions_threshold:
         return True
+
+    if not (device and device.type == "cuda" and is_triton(x)):
+        return False
+
+    is_cuda_two_step_dtype = input_dtype in (torch.bfloat16, torch.float16)
+    threshold = config.triton.use_two_step_variance_threshold
+    min_numel = config.triton.use_two_step_variance_min_numel
+    small_lowp_reduction = (
+        is_cuda_two_step_dtype
+        and config.unroll_reductions_threshold < reduction_numel < min_numel
+    )
+    use_two_step_cuda_threshold = (
+        is_cuda_two_step_dtype
+        and reduction_numel <= threshold
+        and not small_lowp_reduction
+    )
+
+    use_two_step_l2 = False
+    if (
+        config.triton.two_pass_variance_l2_fraction
+        and not small_lowp_reduction
+        and torch.version.hip is None
+    ):
+        input_numel = x.get_numel()
+        if isinstance(input_numel, sympy.Integer):
+            device_idx = (
+                device.index
+                if device.index is not None
+                else torch.cuda.current_device()
+            )
+            input_dtype = input_dtype or x.get_dtype()
+            l2_cache_size = torch.cuda.get_device_properties(device_idx).L2_cache_size
+            l2_threshold = l2_cache_size * config.triton.two_pass_variance_l2_fraction
+            use_two_step_l2 = int(input_numel) * input_dtype.itemsize <= l2_threshold
+
+    if not (use_two_step_cuda_threshold or use_two_step_l2):
+        return False
 
     _, split = ir.Reduction.num_splits(
         reduction_numel=reduction_numel,
