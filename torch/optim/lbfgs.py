@@ -247,6 +247,8 @@ class LBFGS(Optimizer):
         tolerance_change: float = 1e-9,
         history_size: int = 100,
         line_search_fn: str | None = None,
+        *,
+        maximize: bool = False,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -262,6 +264,7 @@ class LBFGS(Optimizer):
             "tolerance_change": tolerance_change,
             "history_size": history_size,
             "line_search_fn": line_search_fn,
+            "maximize": maximize,
         }
         super().__init__(params, defaults)
 
@@ -294,7 +297,10 @@ class LBFGS(Optimizer):
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
-        return torch.cat(views, 0)
+        flat_grad = torch.cat(views, 0)
+        if self.param_groups[0].get("maximize", False):
+            flat_grad.neg_()
+        return flat_grad
 
     def _add_grad(self, step_size, update) -> None:
         offset = 0
@@ -318,6 +324,8 @@ class LBFGS(Optimizer):
     def _directional_evaluate(self, closure, x, t, d):
         self._add_grad(t, d)
         loss = float(closure())
+        if self.param_groups[0].get("maximize", False):
+            loss = -loss
         flat_grad = self._gather_flat_grad()
         self._set_param(x)
         return loss, flat_grad
@@ -346,6 +354,7 @@ class LBFGS(Optimizer):
         tolerance_change = group["tolerance_change"]
         line_search_fn = group["line_search_fn"]
         history_size = group["history_size"]
+        maximize = group.get("maximize", False)
 
         # NOTE: LBFGS has only global state, but we register it as state for
         # the first param, because this helps with casting in load_state_dict
@@ -355,7 +364,7 @@ class LBFGS(Optimizer):
 
         # evaluate initial f(x) and df/dx
         orig_loss = closure()
-        loss = float(orig_loss)
+        loss = -float(orig_loss) if maximize else float(orig_loss)
         current_evals = 1
         state["func_evals"] += 1
 
@@ -489,7 +498,7 @@ class LBFGS(Optimizer):
                     # no use to re-evaluate that function here
                     with torch.enable_grad():
                         loss = closure()
-                    loss = float(loss)
+                    loss = -float(loss) if maximize else float(loss)
                     flat_grad = self._gather_flat_grad()
                     opt_cond = flat_grad.abs().max() <= tolerance_grad
                     ls_func_evals = 1
