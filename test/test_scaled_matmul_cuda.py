@@ -1860,7 +1860,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
 
     @skipIfRocm
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("mkn", [
         # Nice shapes
