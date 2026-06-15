@@ -46,6 +46,7 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
     PolynomialLR,
     ReduceLROnPlateau,
+    SequentialLR,
     StepLR,
 )
 from torch.testing._internal.common_device_type import (
@@ -58,18 +59,19 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
-from torch.testing._internal.common_utils import parametrize, skipIfRocm, skipIfWindows
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfWindows,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
     has_triton,
 )
-from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
-    requires_gpu,
-    requires_gpu_and_triton,
-)
+from torch.testing._internal.triton_utils import requires_gpu, requires_gpu_and_triton
 
 
 def get_inputs(optim):
@@ -151,11 +153,9 @@ LR_SCHEDULER_TO_KWARGS = {
     StepLR: {"step_size": 1, "gamma": 100},
     MultiStepLR: {"milestones": [1, 2], "gamma": 100},
     ExponentialLR: {"gamma": 100},
+    SequentialLR: {"schedulers": None, "milestones": [1, 2]},
     CosineAnnealingLR: {"T_max": 7},
-    # These schedulers have memory leaks in eager
-    # https://github.com/pytorch/pytorch/issues/126131
-    # SequentialLR: {"schedulers": None, "milestones": [1, 2]},
-    # ChainedScheduler: {"schedulers": None},
+    ChainedScheduler: {"schedulers": None},
     CyclicLR: {"base_lr": 0.001, "max_lr": 0.02, "cycle_momentum": False},
     CosineAnnealingWarmRestarts: {"T_0": 1},
     OneCycleLR: {
@@ -172,7 +172,7 @@ LR_SCHEDULER_TO_KWARGS = {
 
 
 def create_scheduler(scheduler, optim):
-    kwargs = LR_SCHEDULER_TO_KWARGS[scheduler]
+    kwargs = deepcopy(LR_SCHEDULER_TO_KWARGS[scheduler])
     if "schedulers" in kwargs:
         kwargs["schedulers"] = [
             create_scheduler(torch.optim.lr_scheduler.ConstantLR, optim)
@@ -200,6 +200,12 @@ class KernelCounts(NamedTuple):
 KERNEL_COUNT_OVERRIDES = {
     "test_rmsprop_foreach_weight_decay_cpu": lambda x: assert_expected_inline(x, """12""") ,
     "test_nadam_foreach_weight_decay_momentum_decay_cpu": lambda x: assert_expected_inline(x, """20"""),
+    "test_adam_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_amsgrad_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_maximize_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
     "test_adamw_amsgrad_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """3"""),
     "test_adamw_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """3"""),
     "test_adamw_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
@@ -244,10 +250,6 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_cuda": lambda x: assert_expected_inline(x, """4"""),
     "test_sgd_cpu": lambda x: assert_expected_inline(x, """4"""),
     "test_sgd_xpu": lambda x: assert_expected_inline(x, """4"""),
-    "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
-    "test_adagrad_lr_decay_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
-    "test_adagrad_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
-    "test_adagrad_weight_decay_maximize_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
     "test_adagrad_tensor_lr_cpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adagrad_tensor_lr_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adagrad_tensor_lr_xpu": lambda x: assert_expected_inline(x, """6"""),
@@ -255,8 +257,8 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adamax_tensor_lr_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": lambda x: assert_expected_inline(x, """5"""),
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": lambda x: assert_expected_inline(x, """5"""),
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),  # noqa: B950
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),  # noqa: B950
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_sgd_tensor_lr_cpu": lambda x: assert_expected_inline(x, """2"""),
@@ -554,10 +556,16 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
                 compiled_step()
 
             # perturb state to force recompile
-            # Adagrad doesn't reinitialize state on each step
             # SGD has an empty state
-            if optim_cls in (Adagrad, SGD):
+            if optim_cls is SGD:
                 opt_compiled.param_groups[0]["lr"] = 0.02
+            elif optim_cls is Adagrad:
+                state_tensor = opt_compiled.state[
+                    opt_compiled.param_groups[0]["params"][0]
+                ]["sum"]
+                opt_compiled.state[opt_compiled.param_groups[0]["params"][0]]["sum"] = (
+                    torch.zeros_like(state_tensor)
+                )
             elif optim_cls is Adam:  # ensure we are guarding on the data_ptr of states
                 state_tensor = opt_compiled.state[
                     opt_compiled.param_groups[0]["params"][0]
@@ -570,7 +578,7 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
             compiled_step()
 
-        if self.check_kernel_count:
+        if self.check_kernel_count and kernel_count is not None:
             # currently, we compile the step and the rest of the computation
             # separately because the step is a single element tensor
             # hence, the usual kernel count is 2
@@ -591,7 +599,7 @@ class CompiledOptimizerParityTests(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("use_closure", [True, False])
     def test_correctness(self, device, dtype, optim_info, use_closure):
-        torch.cuda.manual_seed_all(0)
+        torch.get_device_module(device).manual_seed_all(0)
         torch.manual_seed(0)
         random.seed(0)
         optim_cls = optim_info.optim_cls
@@ -718,6 +726,16 @@ class CompiledOptimizerTests(TestCase):
         self.assertIsNotNone(manager)
         self.assertEqual(manager.new_graph_id().id, 1)
 
+    def test_create_scheduler_does_not_mutate_kwargs(self):
+        for scheduler_cls in (ChainedScheduler, SequentialLR):
+            expected_kwargs = deepcopy(LR_SCHEDULER_TO_KWARGS[scheduler_cls])
+            model = torch.nn.Linear(1, 1)
+            opt = SGD(model.parameters(), lr=0.1)
+
+            create_scheduler(scheduler_cls, opt)
+
+            self.assertEqual(LR_SCHEDULER_TO_KWARGS[scheduler_cls], expected_kwargs)
+
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
@@ -725,7 +743,7 @@ class CompiledOptimizerTests(TestCase):
     test_rprop_recompile = make_recompile_test(Rprop, lr=0.01, kernel_count=2)
     test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
-    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
+    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01, kernel_count=None)
     test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
         ASGD, kernel_count=8, lr=0.01, foreach=False
@@ -931,7 +949,7 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertLess(end - start, 90)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_S429861(self):
         # Just verify we can compile this function without error
         try:
@@ -947,7 +965,7 @@ class CompiledOptimizerTests(TestCase):
         from torch._inductor.utils import fresh_cache
 
         with fresh_cache():
-            kwargs = aot_graph_input_parser(forward)
+            kwargs = aot_graph_input_parser(forward, device=GPU_TYPE)
             torch.compile(forward)(**kwargs)
 
     @requires_gpu_and_triton
@@ -992,7 +1010,7 @@ class CompiledOptimizerTests(TestCase):
 
 
 @skipIfRocm(msg="ROCm may have different numerical behavior")
-@requires_cuda_and_triton
+@requires_gpu_and_triton
 class CompiledOptimizerBitwiseTests(TestCase):
     """
     Tests that compiled optimizers produce bitwise identical results to eager
@@ -1085,7 +1103,8 @@ for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
 
 def _make_bitwise_test(optim_cls, kernel_count=None, **optim_kwargs):
     @skipIfRocm(msg="ROCm may have different numerical behavior")
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="AttributeError, torch-xpu-ops: #2999")
+    @requires_gpu_and_triton
     @config.patch(
         {
             "score_fusion_memory_threshold": 1,

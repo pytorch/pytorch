@@ -510,6 +510,8 @@ class DeviceCachingAllocator {
   ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       graph_pools_freeable;
 
+  std::vector<AllocatorTraceTracker> trace_trackers_;
+
   size_t try_merge_blocks(Block* dst, Block* src, BlockPool& pool) {
     if (!src || src->allocated || src->event_count > 0 ||
         !src->stream_uses.empty() || dst->mapped != src->mapped) {
@@ -1545,10 +1547,7 @@ class DeviceCachingAllocator {
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
       std::shared_ptr<GatheredContext> context) {
-    if (!record_history)
-      return;
-    bool should_skip = skip_actions_list.count(action) > 0;
-    if (should_skip)
+    if (!record_history && trace_trackers_.empty())
       return;
     TraceEntry te(
         action,
@@ -1559,7 +1558,15 @@ class DeviceCachingAllocator {
         mempool_id,
         getApproximateTime(),
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr);
-    alloc_buffer.insertEntries(te);
+
+    for (const auto& cb : trace_trackers_) {
+      cb(te);
+    }
+
+    bool should_skip = skip_actions_list.count(action) > 0;
+    if (record_history && !should_skip) {
+      alloc_buffer.insertEntries(te);
+    }
   }
 
   std::vector<SegmentInfo> snapshot(MempoolId_t mempool_id) {
@@ -1677,6 +1684,11 @@ class DeviceCachingAllocator {
     if (!enabled || clearHistory) {
       alloc_buffer.clear();
     }
+  }
+
+  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+    trace_trackers_.emplace_back(std::move(tracker));
   }
 
   std::pair<size_t, size_t> getMemoryInfo() {
@@ -2004,6 +2016,12 @@ class NativeCachingAllocator : public XPUAllocator {
     }
   }
 
+  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
+    for (auto& allocator : device_allocators) {
+      allocator->attachAllocatorTraceTracker(tracker);
+    }
+  }
+
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
@@ -2081,6 +2099,10 @@ void recordHistory(
       when,
       clearHistory,
       skip_actions);
+}
+
+void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
+  native_allocator.attachAllocatorTraceTracker(tracker);
 }
 
 SnapshotInfo snapshot(MempoolId_t mempool_id) {

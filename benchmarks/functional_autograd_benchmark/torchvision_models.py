@@ -794,7 +794,7 @@ class SetCriterion(nn.Module):
         losses = {
             "loss_mask": sigmoid_focal_loss(  # noqa: F821
                 src_masks, target_masks, num_boxes
-            ),  # noqa: F821
+            ),
             "loss_dice": dice_loss(src_masks, target_masks, num_boxes),  # noqa: F821
         }
         return losses

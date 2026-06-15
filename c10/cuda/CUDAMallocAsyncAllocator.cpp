@@ -668,6 +668,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         "If you need it, please file an issue describing your use case.");
   }
 
+  void attachOomRejectionObserver(OomRejectionObserver observer) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support attachOomRejectionObserver. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
     TORCH_CHECK(
         false,
@@ -790,8 +797,6 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         "(For backend:native, snapshot returns a detailed summary of all "
         "blocks tracked by the allocator, but the cudaMallocAsync backend "
         "does not track individual blocks.)");
-    // Alternative: TORCH_WARN
-    return {};
   }
 
   // CUDAGraph interactions

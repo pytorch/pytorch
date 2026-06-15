@@ -52,7 +52,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
       index++;
     }
     oss << ']';
-    throw std::runtime_error(oss.str());
+    throw std::runtime_error(std::move(oss).str());
   }
   return iter->second;
 }
@@ -103,7 +103,6 @@ void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
     default:
       throw unsupported_dtype();
   }
-  return nullptr;
 }
 
 void CodeGen::call_with_numel(void** args, int64_t numel) {

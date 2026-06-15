@@ -85,6 +85,39 @@ Tensor& addmm_out(
       " but got:",
       self.sizes());
 
+  TORCH_CHECK(
+      result_shape.size() >= (size_t)self.dim(),
+      "The number of sizes provided (",
+      result_shape.size(),
+      ") ",
+      "must be greater or equal to the number of dimensions in the tensor (",
+      self.dim(),
+      ")");
+
+  // Bypass OneDNN optimization path for float64 due to lack of full double
+  // precision support.
+  if (mat1.scalar_type() == at::kDouble) {
+    bool is_inplace = self.is_same(result);
+    bool is_beta_ne_zero = beta.to<double>() != 0.0;
+
+    Tensor self_copy;
+    if (is_inplace && is_beta_ne_zero) {
+      self_copy = self.clone();
+    }
+
+    onednn::matmul(result, mat1, mat2, Tensor(), true, onednn::Attr());
+
+    if (alpha.to<double>() != 1.0) {
+      result.mul_(alpha);
+    }
+
+    if (is_beta_ne_zero) {
+      result.add_(is_inplace ? self_copy : self, beta);
+    }
+
+    return result;
+  }
+
   // general case
   Tensor bias = Tensor();
   onednn::Attr attr;
@@ -223,6 +256,31 @@ Tensor& baddbmm_out(
     return result;
   }
 
+  // Bypass OneDNN optimization path for float64 due to lack of full double
+  // precision support.
+  if (batch1.scalar_type() == at::kDouble ||
+      batch2.scalar_type() == at::kDouble) {
+    bool is_inplace = input.is_same(result);
+    bool is_beta_ne_zero = beta.to<double>() != 0.0;
+
+    Tensor input_copy;
+    if (is_inplace && is_beta_ne_zero) {
+      input_copy = input.clone();
+    }
+
+    onednn::matmul(result, batch1, batch2, Tensor(), true, onednn::Attr());
+
+    if (alpha.to<double>() != 1.0) {
+      result.mul_(alpha);
+    }
+
+    if (is_beta_ne_zero) {
+      result.add_(is_inplace ? input_copy : input, beta);
+    }
+
+    return result;
+  }
+
   // general case
   onednn::Attr attr;
   float beta_ = beta.to<float>();
@@ -279,12 +337,6 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
   return result;
 }
 
-Tensor bmm(const Tensor& self, const Tensor& batch2) {
-  auto result = at::empty({0}, self.options());
-  at::native::xpu::bmm_out(self, batch2, result);
-  return result;
-}
-
 Tensor& addmv_out(
     const Tensor& self,
     const Tensor& mat,
@@ -326,8 +378,27 @@ Tensor& addmv_out(
   }
 
   Tensor vec_v = vec.view({vec.size(0), 1});
-  at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
-  out.resize_({mat.size(0)});
+
+  bool is_float64 =
+      mat.scalar_type() == at::kDouble || vec.scalar_type() == at::kDouble;
+  bool need_preserve_strides =
+      out.dim() == 1 && out.stride(0) != 1 && out.numel() > 0;
+
+  if (is_float64 && self.is_same(out) && !need_preserve_strides) {
+    self_v = self_v.clone();
+  }
+
+  // addmm_out resizes its output to 2D, destroying stride information.
+  // When out has noncontiguous strides, compute into a temporary and copy back.
+  if (need_preserve_strides) {
+    Tensor tmp = at::empty({mat.size(0)}, out.options());
+    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, tmp);
+    tmp.resize_({mat.size(0)});
+    out.copy_(tmp);
+  } else {
+    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
+    out.resize_({mat.size(0)});
+  }
   return out;
 }
 
@@ -513,13 +584,17 @@ Tensor& _int_mm_out_xpu(
       mat2.size(0));
 
   TORCH_CHECK(
-      self.dtype() == at::kChar,
-      "Expected self dtype to be of type int8 but got ",
-      self.dtype());
+      self.scalar_type() == at::kChar,
+      "expected scalar type ",
+      at::kChar,
+      " but found ",
+      self.scalar_type());
   TORCH_CHECK(
-      mat2.dtype() == at::kChar,
-      "Expected mat2 dtype to be of type int8 but got ",
-      mat2.dtype());
+      mat2.scalar_type() == at::kChar,
+      "expected scalar type ",
+      at::kChar,
+      " but found ",
+      mat2.scalar_type());
   TORCH_CHECK(
       result.dtype() == at::kInt,
       "Expected result dtype to be of type kInt but got ",

@@ -49,7 +49,7 @@ convolution_notes = {
         In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
         a depthwise convolution with a depthwise multiplier `K` can be performed with the arguments
         :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`.""",
-}  # noqa: B950
+}
 
 
 class _ConvNd(Module):
@@ -400,9 +400,11 @@ class Conv2d(_ConvNd):
 
 
     where :math:`\star` is the valid 2D `cross-correlation`_ operator,
-    :math:`N` is a batch size, :math:`C` denotes a number of channels,
-    :math:`H` is a height of input planes in pixels, and :math:`W` is
-    width in pixels.
+    :math:`N` is a batch size, :math:`C_{\text{in}}` and :math:`C_{\text{out}}` correspond to
+    :attr:`in_channels` and :attr:`out_channels` respectively,
+    :math:`H` and :math:`W` are the input height and width in pixels.
+    See the Shape section below for how :math:`H_{\text{out}}` and :math:`W_{\text{out}}`
+    are derived from :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, and :attr:`dilation`.
     """
         + r"""
 
@@ -860,7 +862,7 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
-        amount of zero padding to both sizes of the input. This is set so that
+        amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv1d` and a :class:`~torch.nn.ConvTranspose1d`
         are initialized with same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,
@@ -1050,7 +1052,7 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
-        amount of zero padding to both sizes of the input. This is set so that
+        amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv2d` and a :class:`~torch.nn.ConvTranspose2d`
         are initialized with same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,
@@ -1247,7 +1249,7 @@ class ConvTranspose3d(_ConvTransposeNd):
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
-        amount of zero padding to both sizes of the input. This is set so that
+        amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv3d` and a :class:`~torch.nn.ConvTranspose3d`
         are initialized with same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,

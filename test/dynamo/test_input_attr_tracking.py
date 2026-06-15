@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa: B950
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
@@ -333,9 +332,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    # Note - this does not actually get captured in the graph yet.
-    # The plan of record is to introduce a set_data op, entirely subsume the operation into a call_function
-    # in the fx graph, and let aot_autograd handle it.
+    # See [Note: set_data_on_scoped_tensor] This does not actually get captured in the graph yet.
     def test_set_data_on_scoped_tensor(self):
         def fn(x):
             z = torch.zeros([4, 4])

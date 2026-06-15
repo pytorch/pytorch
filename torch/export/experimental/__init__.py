@@ -325,7 +325,7 @@ class _ExportPackage:
             return ep.module()(*args, **kwargs)
 
         if isinstance(fn, torch.nn.Module):
-            _exporter_context = torch._dynamo.eval_frame.OptimizedModule(  # type: ignore[assignment] # noqa: F811
+            _exporter_context = torch._dynamo.eval_frame.OptimizedModule(  # type: ignore[assignment]
                 fn,
                 lambda _: _exporter_context,  # type: ignore[arg-type]
             )

@@ -1,6 +1,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <filesystem>
+
 #include <ATen/Parallel.h>
 #include <c10/core/DeviceType.h>
 #include <test/cpp/jit/test_utils.h>
@@ -198,9 +200,15 @@ TEST(InterpreterTest, runAsyncBasicTest) {
   demo = DemoModule()
   torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pt')
   */
-  std::string filePath(__FILE__);
-  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("test_interpreter_async.pt");
+  auto testModelFile = []() -> std::string {
+    std::string dir(__FILE__);
+    dir = dir.substr(0, dir.find_last_of("/\\") + 1);
+    auto candidate = dir + "test_interpreter_async.pt";
+    if (std::filesystem::exists(candidate))
+      return candidate;
+    auto exeDir = std::filesystem::read_symlink("/proc/self/exe").parent_path();
+    return (exeDir / "test_interpreter_async.pt").string();
+  }();
   auto model = load(testModelFile);
   auto graph = model.get_method("forward").graph();
   Code function(graph, "");

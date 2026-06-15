@@ -73,7 +73,7 @@ def run_command(
             if remaining_retries == 0:
                 raise err
             remaining_retries -= 1
-            logging.warning(  # noqa: G200
+            logging.warning(
                 "(%s/%s) Retrying because command failed with: %r",
                 retries - remaining_retries,
                 retries,

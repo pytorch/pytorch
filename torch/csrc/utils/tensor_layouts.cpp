@@ -6,49 +6,36 @@
 
 namespace torch::utils {
 
-#define REGISTER_LAYOUT(layout, LAYOUT)                                     \
-  PyObject* layout##_layout =                                               \
-      THPLayout_New(at::Layout::LAYOUT, "torch." #layout);                  \
-  Py_INCREF(layout##_layout);                                               \
-  if (PyModule_AddObject(torch_module, "" #layout, layout##_layout) != 0) { \
-    throw python_error();                                                   \
-  }                                                                         \
-  registerLayoutObject((THPLayout*)layout##_layout, at::Layout::LAYOUT);
+static void registerLayout(
+    PyObject* torch_module,
+    at::Layout layout,
+    const char* name,
+    const char* qualified_name) {
+  THPObjectPtr obj(THPLayout_New(layout, qualified_name));
+  if (PyModule_AddObjectRef(torch_module, name, obj.get()) != 0) {
+    throw python_error();
+  }
+  registerLayoutObject((THPLayout*)obj.get(), layout);
+}
 
 void initializeLayouts() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!torch_module)
     throw python_error();
 
-  PyObject* strided_layout =
-      THPLayout_New(at::Layout::Strided, "torch.strided");
-  Py_INCREF(strided_layout);
-  if (PyModule_AddObject(torch_module, "strided", strided_layout) != 0) {
-    throw python_error();
-  }
-  registerLayoutObject((THPLayout*)strided_layout, at::Layout::Strided);
-
-  PyObject* sparse_coo_layout =
-      THPLayout_New(at::Layout::Sparse, "torch.sparse_coo");
-  Py_INCREF(sparse_coo_layout);
-  if (PyModule_AddObject(torch_module, "sparse_coo", sparse_coo_layout) != 0) {
-    throw python_error();
-  }
-  registerLayoutObject((THPLayout*)sparse_coo_layout, at::Layout::Sparse);
-
-  REGISTER_LAYOUT(sparse_csr, SparseCsr)
-  REGISTER_LAYOUT(sparse_csc, SparseCsc)
-  REGISTER_LAYOUT(sparse_bsr, SparseBsr)
-  REGISTER_LAYOUT(sparse_bsc, SparseBsc)
-
-  PyObject* mkldnn_layout = THPLayout_New(at::Layout::Mkldnn, "torch._mkldnn");
-  Py_INCREF(mkldnn_layout);
-  if (PyModule_AddObject(torch_module, "_mkldnn", mkldnn_layout) != 0) {
-    throw python_error();
-  }
-  registerLayoutObject((THPLayout*)mkldnn_layout, at::Layout::Mkldnn);
-
-  REGISTER_LAYOUT(jagged, Jagged);
+  registerLayout(torch_module, at::Layout::Strided, "strided", "torch.strided");
+  registerLayout(
+      torch_module, at::Layout::Sparse, "sparse_coo", "torch.sparse_coo");
+  registerLayout(
+      torch_module, at::Layout::SparseCsr, "sparse_csr", "torch.sparse_csr");
+  registerLayout(
+      torch_module, at::Layout::SparseCsc, "sparse_csc", "torch.sparse_csc");
+  registerLayout(
+      torch_module, at::Layout::SparseBsr, "sparse_bsr", "torch.sparse_bsr");
+  registerLayout(
+      torch_module, at::Layout::SparseBsc, "sparse_bsc", "torch.sparse_bsc");
+  registerLayout(torch_module, at::Layout::Mkldnn, "_mkldnn", "torch._mkldnn");
+  registerLayout(torch_module, at::Layout::Jagged, "jagged", "torch.jagged");
 }
 
 } // namespace torch::utils

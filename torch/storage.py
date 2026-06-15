@@ -352,11 +352,11 @@ class _StorageBase:
         """Casts this storage to float8_e4m3fnuz type"""
         return self._to(torch.float8_e4m3fnuz)
 
-    def is_pinned(self, device: str | torch.device = "cuda"):
+    def is_pinned(self, device: DeviceLikeType | None = None):
         r"""Determine whether the CPU storage is already pinned on device.
 
         Args:
-            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+            device (str or torch.device): The device to pin memory on (default: ``None``).
                 This argument is discouraged and subject to deprecated.
 
         Returns:
@@ -368,11 +368,11 @@ class _StorageBase:
             .is_pinned(device)
         )
 
-    def pin_memory(self, device: str | torch.device = "cuda"):
+    def pin_memory(self, device: DeviceLikeType | None = None):
         r"""Copy the CPU storage to pinned memory, if it's not already pinned.
 
         Args:
-            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+            device (str or torch.device): The device to pin memory on (default: ``None``).
                 This argument is discouraged and subject to deprecated.
 
         Returns:
@@ -392,8 +392,8 @@ class _StorageBase:
         """See :meth:`torch.UntypedStorage.share_memory_`"""
         from torch.multiprocessing import get_sharing_strategy
 
-        if self.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
-            pass  # CUDA or PrivateUse1 doesn't use POSIX shared memory
+        if self.device.type not in ("cpu", "meta"):
+            pass  # only CPU uses POSIX shared memory
         elif get_sharing_strategy() == "file_system":
             self._share_filename_cpu_()
         else:
@@ -406,7 +406,7 @@ class _StorageBase:
         from torch.multiprocessing import get_sharing_strategy
 
         device = torch.device(device)
-        if device.type in ["cuda", torch._C._get_privateuse1_backend_name(), "hpu"]:
+        if device.type != "cpu":
             return cls(size, device=device)
         elif get_sharing_strategy() == "file_system":
             return cls._new_using_filename_cpu(size)
@@ -552,6 +552,7 @@ def _new_dtypes():
         torch.bits2x4,
         torch.bits4x2,
         torch.complex32,
+        torch.bcomplex32,
         torch.uint16,
         torch.uint32,
         torch.uint64,
@@ -1164,11 +1165,11 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
-    def is_pinned(self, device: str | torch.device = "cuda"):
+    def is_pinned(self, device: DeviceLikeType | None = None):
         r"""Determine whether the CPU TypedStorage is already pinned on device.
 
         Args:
-            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+            device (str or torch.device): The device to pin memory on (default: ``None``).
                 This argument is discouraged and subject to deprecated.
 
         Returns:
@@ -1177,11 +1178,11 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._untyped_storage.is_pinned(device)
 
-    def pin_memory(self, device: str | torch.device = "cuda"):
+    def pin_memory(self, device: DeviceLikeType | None = None):
         r"""Copy the CPU TypedStorage to pinned memory, if it's not already pinned.
 
         Args:
-            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+            device (str or torch.device): The device to pin memory on (default: ``None``).
                 This argument is discouraged and subject to deprecated.
 
         Returns:

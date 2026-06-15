@@ -81,7 +81,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 namespace at:: native {
 
 template <typename func_t>
-void gpu_kernel_nocast(TensorIteratorBase& iter, const func_t& f) {
+void gpu_kernel_nocast(TensorIteratorBase& iter, const func_t& f, bool check_cast = true) {
 
   for (int arg = 0; arg < iter.ntensors(); arg++) {
     TORCH_INTERNAL_ASSERT(
@@ -95,12 +95,20 @@ void gpu_kernel_nocast(TensorIteratorBase& iter, const func_t& f) {
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_kernel_nocast(sub_iter, f);
+      gpu_kernel_nocast(sub_iter, f, check_cast);
     }
     return;
   }
 
+  if (check_cast) {
+    TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  }
   gpu_kernel_impl_nocast(iter, f);
+}
+
+template <typename func_t>
+void gpu_kernel_opaque(TensorIteratorBase& iter, const func_t& f) {
+  gpu_kernel_nocast(iter, f, false);
 }
 
 template <typename func_t>

@@ -173,13 +173,14 @@ class JitScalarType(enum.IntEnum):
         """
         if onnx_type not in _ONNX_TO_SCALAR_TYPE:
             raise errors.OnnxExporterError(f"Unknown onnx_type: {onnx_type}")
+        # pyrefly: ignore [redundant-cast]
         return _ONNX_TO_SCALAR_TYPE[typing.cast(_C_onnx.TensorProtoDataType, onnx_type)]
 
     @classmethod
     def from_value(
         cls, value: torch._C.Value | torch.Tensor | None, default=None
     ) -> JitScalarType:
-        """Create a JitScalarType from an value's scalar type.
+        """Create a JitScalarType from a value's scalar type.
 
         Args:
             value: An object to fetch scalar type from.

@@ -1,7 +1,14 @@
+# composable_kernel's ck_tile/01_fmha/generate.py registers its codegen ops via
+# importlib's Loader.load_module(), removed in Python 3.15. Route it through a
+# small compatibility shim so ROCm wheels build on 3.15 without bumping the CK
+# submodule. See https://github.com/pytorch/pytorch/issues/184900.
+set(CK_FMHA_GENERATE python3 ${CMAKE_CURRENT_LIST_DIR}/generate_compat.py
+    ${CMAKE_SOURCE_DIR}/third_party/composable_kernel/example/ck_tile/01_fmha/generate.py)
+
 # generate a list of kernels, but not actually emit files at config stage
 execute_process(
-  COMMAND python3 ${CMAKE_SOURCE_DIR}/third_party/composable_kernel/example/ck_tile/01_fmha/generate.py
-  --api fwd --receipt 4 --list_blobs ${CMAKE_CURRENT_LIST_DIR}/fwd_blob_list.txt
+  COMMAND ${CK_FMHA_GENERATE} --optdim=32,64,128,256
+  --api fwd --receipt 4 --filter "*_lse*ntrload*nsink*" --list_blobs ${CMAKE_CURRENT_LIST_DIR}/fwd_blob_list.txt
   RESULT_VARIABLE ret
 )
 
@@ -10,8 +17,8 @@ if(ret AND NOT ret EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND python3 ${CMAKE_SOURCE_DIR}/third_party/composable_kernel/example/ck_tile/01_fmha/generate.py
-  --api fwd_splitkv --receipt 4 --list_blobs ${CMAKE_CURRENT_LIST_DIR}/fwd_splitkv_blob_list.txt
+  COMMAND ${CK_FMHA_GENERATE} --optdim=32,64,128,256
+  --api fwd_splitkv --receipt 4 --filter "*psdv*_lse*_nsquant*" --list_blobs ${CMAKE_CURRENT_LIST_DIR}/fwd_splitkv_blob_list.txt
   RESULT_VARIABLE ret
 )
 
@@ -20,8 +27,8 @@ if(ret AND NOT ret EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND python3 ${CMAKE_SOURCE_DIR}/third_party/composable_kernel/example/ck_tile/01_fmha/generate.py
-  --api fwd_appendkv --receipt 4 --list_blobs ${CMAKE_CURRENT_LIST_DIR}/fwd_appendkv_blob_list.txt
+  COMMAND ${CK_FMHA_GENERATE} --optdim=32,64,128,256
+  --api fwd_appendkv --receipt 4 --filter "*psskddv_*" --list_blobs ${CMAKE_CURRENT_LIST_DIR}/fwd_appendkv_blob_list.txt
   RESULT_VARIABLE ret
 )
 
@@ -30,8 +37,8 @@ if(ret AND NOT ret EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND python3 ${CMAKE_SOURCE_DIR}/third_party/composable_kernel/example/ck_tile/01_fmha/generate.py
-  --api bwd --receipt 4 --list_blobs ${CMAKE_CURRENT_LIST_DIR}/bwd_blob_list.txt
+  COMMAND ${CK_FMHA_GENERATE}
+  --api bwd --optdim=32,64,128,256 --receipt 4 --filter "*psdv*@*psd*@*_pd1dv1*_ntrload*" --list_blobs ${CMAKE_CURRENT_LIST_DIR}/bwd_blob_list.txt
   RESULT_VARIABLE ret
 )
 
@@ -40,28 +47,28 @@ if(ret AND NOT ret EQUAL 0)
 endif()
 
 # Generate the files for both fwd, fwd_splitkv, fwd_appendkv, and bwd
-execute_process(COMMAND python3 ${CMAKE_SOURCE_DIR}/third_party/composable_kernel/example/ck_tile/01_fmha/generate.py --api fwd --receipt 4 --output_dir ${CMAKE_CURRENT_LIST_DIR}
+execute_process(COMMAND ${CK_FMHA_GENERATE} --api fwd  --optdim=32,64,128,256 --receipt 4 --filter "*_lse*ntrload*nsink*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
 )
 
 if(ret AND NOT ret EQUAL 0)
   message( FATAL_ERROR "CK Tile FMHA FAILED to generate FWD kernels.")
 endif()
 
-execute_process(COMMAND python3 ${CMAKE_SOURCE_DIR}/third_party/composable_kernel/example/ck_tile/01_fmha/generate.py --api fwd_splitkv --receipt 4 --output_dir ${CMAKE_CURRENT_LIST_DIR}
+execute_process(COMMAND ${CK_FMHA_GENERATE} --api fwd_splitkv --optdim=32,64,128,256 --receipt 4 --filter "*psdv*_lse*_nsquant*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
 )
 
 if(ret AND NOT ret EQUAL 0)
     message( FATAL_ERROR "CK Tile FMHA FAILED to generate FWD_SPLITKV kernels.")
 endif()
 
-execute_process(COMMAND python3 ${CMAKE_SOURCE_DIR}/third_party/composable_kernel/example/ck_tile/01_fmha/generate.py --api fwd_appendkv --receipt 4 --output_dir ${CMAKE_CURRENT_LIST_DIR}
+execute_process(COMMAND ${CK_FMHA_GENERATE} --api fwd_appendkv --optdim=32,64,128,256 --receipt 4 --filter "*psskddv_*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
 )
 
 if(ret AND NOT ret EQUAL 0)
     message( FATAL_ERROR "CK Tile FMHA FAILED to generate FWD_APPENDKV kernels.")
 endif()
 
-execute_process(COMMAND python3 ${CMAKE_SOURCE_DIR}/third_party/composable_kernel/example/ck_tile/01_fmha/generate.py --api bwd --receipt 4 --output_dir ${CMAKE_CURRENT_LIST_DIR}
+execute_process(COMMAND ${CK_FMHA_GENERATE} --api bwd --optdim=32,64,128,256 --receipt 4 --filter "*psdv*@*psd*@*_pd1dv1*_ntrload*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
   RESULT_VARIABLE ret
 )
 

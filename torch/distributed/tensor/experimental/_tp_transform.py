@@ -430,6 +430,7 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
             return local_shard
 
         for idx, placement in enumerate(spec.placements):
+            # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
             if placement.is_shard():
                 placement = cast(Shard, placement)
                 num_chunks = spec.mesh.size(mesh_dim=idx)

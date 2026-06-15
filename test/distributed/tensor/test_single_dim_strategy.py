@@ -22,7 +22,10 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
+from torch.distributed.tensor._ops._matrix_ops import (
+    mm_single_dim_strategy,
+    scaled_dot_product_efficient_attention_single_dim_strategy,
+)
 from torch.distributed.tensor._ops._pointwise_ops import (
     _BINARY_ADDITIVE_RULES,
     _common_pointwise_single_dim_strategy,
@@ -992,6 +995,72 @@ class TestExpandPlaceholder(TestCase):
                 self.assertIsInstance(out_spec, DTensorSpec)
 
             self.assertEqual(len(op_spec.input_specs), 1, "Should have 1 input tensor")
+
+    def test_sdpa_efficient_attention_preserves_none_scalar_outputs(self):
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+
+        op = torch.ops.aten._scaled_dot_product_efficient_attention.default
+        q = torch.empty((4, 4, 8, 16), device="meta")
+        outputs = op(q, q, q, None, True)
+        output_metas = tuple(TensorMeta(t.shape, t.stride(), t.dtype) for t in outputs)
+
+        input_meta = TensorMeta(q.shape, q.stride(), q.dtype)
+        input_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Shard(1)),
+            tensor_meta=input_meta,
+        )
+        input_strategy = OpStrategy([OpSpec(input_spec)])
+        op_schema = OpSchema(
+            op=op,
+            args_schema=(input_strategy,) * 3 + (None, True),
+            kwargs_schema={},
+        )
+
+        expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+            mesh,
+            op_schema,
+            _SingleDimStrategyInfo(
+                scaled_dot_product_efficient_attention_single_dim_strategy
+            ),
+            output_metas,
+        )
+        strategy = expanded_strategy_fn(
+            op_schema.op,
+            op_schema.args_meta,
+            op_schema.kwargs_meta,
+        )
+
+        for op_spec in strategy.strategies:
+            output_specs = op_spec.output_specs
+            self.assertIsInstance(output_specs, tuple)
+            self.assertEqual(output_specs[2:4], (None, None))
+
+    def test_expand_rejects_mixed_none_output_placements(self):
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+        input_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Replicate()),
+            tensor_meta=meta,
+        )
+        op_schema = OpSchema(
+            op=torch.ops.aten.add.Tensor,
+            args_schema=(OpStrategy([OpSpec(input_spec)]),),
+            kwargs_schema={},
+        )
+
+        with self.assertRaisesRegex(AssertionError, "mixes None with placements"):
+            expand_to_full_mesh_op_strategy(
+                mesh,
+                op_schema,
+                [
+                    [Replicate(), Replicate()],
+                    [None, Replicate()],
+                ],
+                output_tensor_meta=meta,
+                input_index=1,
+            )
 
     def test_inplace_op_partial_input_raises_clear_error(self):
         """Test that inplace ops with Partial input raise a clear error.

@@ -98,17 +98,26 @@
             offs_bn = pid_n * BLOCK_N
 
         offs_k = ki * BLOCK_K
+        offs_am_desc = offs_am.to(tl.int32)
+        offs_bn_desc = offs_bn.to(tl.int32)
+        offs_k_desc = offs_k.to(tl.int32)
 
         {%- if TMA_EXPERIMENTAL_API %}
         a = tl._experimental_descriptor_load(
-            a_desc_ptr, [offs_am, offs_k], [BLOCK_M, BLOCK_K],  A.dtype.element_ty
+            a_desc_ptr,
+            [offs_am_desc, offs_k_desc],
+            [BLOCK_M, BLOCK_K],
+            A.dtype.element_ty,
         )
         b = tl._experimental_descriptor_load(
-            b_desc_ptr, [offs_bn, offs_k], [BLOCK_N, BLOCK_K],  B.dtype.element_ty
+            b_desc_ptr,
+            [offs_bn_desc, offs_k_desc],
+            [BLOCK_N, BLOCK_K],
+            B.dtype.element_ty,
         )
         {%- else %}
-        a = tl.load_tensor_descriptor(a_desc, [offs_am, offs_k])
-        b = tl.load_tensor_descriptor(b_desc, [offs_bn, offs_k])
+        a = tl.load_tensor_descriptor(a_desc, [offs_am_desc, offs_k_desc])
+        b = tl.load_tensor_descriptor(b_desc, [offs_bn_desc, offs_k_desc])
         {%- endif %}
         if USE_FAST_ACCUM:
             accumulator = tl.dot(a, b.T, accumulator)

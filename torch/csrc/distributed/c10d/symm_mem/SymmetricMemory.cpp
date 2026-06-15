@@ -295,6 +295,14 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
   return allocator->rendezvous(tensor.storage().data_ptr().get(), group_name);
 }
 
+TORCH_API bool is_symm_mem_tensor(const at::Tensor& tensor) {
+  if (!has_allocator(tensor.device().type())) {
+    return false;
+  }
+  auto allocator = get_allocator(tensor.device().type());
+  return allocator->has_allocation(tensor.storage().data_ptr().get());
+}
+
 TORCH_API bool has_multicast_support(
     c10::DeviceType device_type,
     int device_idx) {
@@ -551,6 +559,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def("nccl_get(Tensor(a!) tensor, int peer) -> ()");
   m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
   m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
+  m.def(
+      "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(

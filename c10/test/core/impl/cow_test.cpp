@@ -160,6 +160,7 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
       /*resizable=*/false);
+  original_storage.set_materializer(&cow::materialize_cow);
 
   ASSERT_THAT(original_storage, is_copy_on_write());
 
@@ -203,6 +204,7 @@ TEST(materialize_test, copy_on_write_single_reference) {
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
       /*resizable=*/false);
+  storage.set_materializer(&cow::materialize_cow);
 
   ASSERT_THAT(storage, is_copy_on_write());
 
@@ -251,6 +253,85 @@ TEST(materialize_test, copy_on_write) {
   ASSERT_TRUE(new_storage->nbytes() == original_storage.nbytes());
   ASSERT_TRUE(buffers_are_equal(
       new_storage->data(), original_storage.data(), new_storage->nbytes()));
+}
+
+TEST(lazy_clone_storage_test, sets_materializer) {
+  StorageImpl original_storage(
+      {}, /*size_bytes=*/7, GetDefaultCPUAllocator(), /*resizable=*/false);
+  ASSERT_FALSE(original_storage.has_materializer());
+
+  intrusive_ptr<StorageImpl> new_storage =
+      cow::lazy_clone_storage(original_storage);
+  ASSERT_THAT(new_storage.get(), testing::NotNull());
+
+  // Both storages should have materializers set.
+  ASSERT_TRUE(original_storage.has_materializer());
+  ASSERT_TRUE(new_storage->has_materializer());
+}
+
+TEST(materialize_test, one_shot_materializer) {
+  StorageImpl original_storage(
+      {}, /*size_bytes=*/4, GetCPUAllocator(), /*resizable=*/false);
+
+  auto new_storage = cow::lazy_clone_storage(original_storage);
+  ASSERT_THAT(new_storage, testing::NotNull());
+  ASSERT_TRUE(new_storage->has_materializer());
+
+  // Materializing via mutable access should clear the materializer.
+  (void)new_storage->mutable_data();
+  ASSERT_FALSE(new_storage->has_materializer());
+
+  // Second mutable access should work fine (no materializer to trigger).
+  (void)new_storage->mutable_data();
+}
+
+TEST(materialize_test, read_does_not_materialize_cow) {
+  StorageImpl original_storage(
+      {}, /*size_bytes=*/4, GetCPUAllocator(), /*resizable=*/false);
+
+  auto new_storage = cow::lazy_clone_storage(original_storage);
+  ASSERT_THAT(new_storage, testing::NotNull());
+  ASSERT_TRUE(new_storage->has_materializer());
+
+  // Read-only access should NOT trigger COW materialization.
+  (void)new_storage->data();
+  ASSERT_TRUE(new_storage->has_materializer());
+  ASSERT_THAT(*new_storage, is_copy_on_write());
+
+  // Data should still be shared.
+  ASSERT_THAT(new_storage->data(), testing::Eq(original_storage.data()));
+}
+
+TEST(materialize_test, set_data_ptr_materializes) {
+  StorageImpl original_storage(
+      {}, /*size_bytes=*/4, GetCPUAllocator(), /*resizable=*/false);
+
+  auto new_storage = cow::lazy_clone_storage(original_storage);
+  ASSERT_THAT(new_storage, testing::NotNull());
+  ASSERT_TRUE(new_storage->has_materializer());
+  ASSERT_THAT(*new_storage, is_copy_on_write());
+
+  // set_data_ptr should trigger materialization.
+  auto old_ptr = new_storage->set_data_ptr(GetCPUAllocator()->allocate(4));
+  ASSERT_FALSE(new_storage->has_materializer());
+  ASSERT_THAT(*new_storage, testing::Not(is_copy_on_write()));
+}
+
+TEST(materialize_test, swap_data_ptr_materializes_both) {
+  StorageImpl storage_a(
+      {}, /*size_bytes=*/4, GetCPUAllocator(), /*resizable=*/false);
+  StorageImpl storage_b(
+      {}, /*size_bytes=*/4, GetCPUAllocator(), /*resizable=*/false);
+
+  auto clone_a = cow::lazy_clone_storage(storage_a);
+  auto clone_b = cow::lazy_clone_storage(storage_b);
+  ASSERT_TRUE(clone_a->has_materializer());
+  ASSERT_TRUE(clone_b->has_materializer());
+
+  // swap_data_ptr should materialize both before swapping.
+  clone_a->swap_data_ptr(*clone_b);
+  ASSERT_FALSE(clone_a->has_materializer());
+  ASSERT_FALSE(clone_b->has_materializer());
 }
 
 } // namespace

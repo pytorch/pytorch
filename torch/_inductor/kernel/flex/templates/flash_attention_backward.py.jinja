@@ -1,4 +1,14 @@
-{% if HAS_BLOCK_MASK %}
+{% if HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER and HAS_DQ_WRITE_ORDER_FULL and HAS_DQ_KV_ORDER %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_WRITE_ORDER_FULL", "DQ_KV_ORDER")}}
+{% elif HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER and HAS_DQ_WRITE_ORDER_FULL %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_WRITE_ORDER_FULL")}}
+{% elif HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER and HAS_DQ_KV_ORDER %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_KV_ORDER")}}
+{% elif HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER")}}
+{% elif HAS_BLOCK_MASK and HAS_DQ_KV_ORDER %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_KV_ORDER")}}
+{% elif HAS_BLOCK_MASK %}
 {{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX")}}
 {% else %}
 {{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV")}}
@@ -70,7 +80,31 @@
         ) | indent_except_first(2) }}
         return mask_mod_output
     {{ set_cute_hash("mask_mod", "mask") }}
-    block_sparse_tensors = BlockSparseTensorsTorch(Q_NUM_BLKS, Q_IDX, FULL_Q_NUM_BLKS, FULL_Q_IDX, block_size=({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}))
+    block_sparse_kwargs = {
+        "block_size": ({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}),
+    }
+    {% if HAS_DQ_WRITE_ORDER %}
+    block_sparse_kwargs["dq_write_order"] = DQ_WRITE_ORDER
+    {% endif %}
+    {% if HAS_DQ_WRITE_ORDER_FULL %}
+    block_sparse_kwargs["dq_write_order_full"] = DQ_WRITE_ORDER_FULL
+    {% endif %}
+    {% if SUPPORTS_DQ_KV_ORDER %}
+    {% if HAS_DQ_KV_ORDER %}
+    block_sparse_kwargs["dq_kv_order"] = DQ_KV_ORDER
+    {% elif DQ_KV_ORDER_SPT is not none %}
+    block_sparse_kwargs["dq_kv_order"] = {{DQ_KV_ORDER_SPT}}
+    {% endif %}
+    {% elif SUPPORTS_SPT %}
+    {% if HAS_DQ_KV_ORDER %}
+    raise RuntimeError("Explicit tensor dq_kv_order requires flash-attn-4 with dq_kv_order support")
+    {% elif DQ_KV_ORDER_SPT is not none %}
+    block_sparse_kwargs["spt"] = {{DQ_KV_ORDER_SPT}}
+    {% endif %}
+    {% endif %}
+    block_sparse_tensors = BlockSparseTensorsTorch(
+        Q_NUM_BLKS, Q_IDX, FULL_Q_NUM_BLKS, FULL_Q_IDX, **block_sparse_kwargs
+    )
     {% else %}
     mask_mod = None
     block_sparse_tensors = None
@@ -100,5 +134,5 @@
         dk=dk_out_transposed,
         dv=dv_out_transposed,
         block_sparse_tensors=block_sparse_tensors,
-        deterministic=torch.are_deterministic_algorithms_enabled() and not torch.is_deterministic_algorithms_warn_only_enabled()
+        deterministic={{DETERMINISTIC_BACKWARD_ENABLED}},
     )

@@ -10,9 +10,9 @@ from torch.fx.graph_module import _USER_PRESERVED_ATTRIBUTES_KEY
 from .backend_config import BackendConfig, get_tensorrt_backend_config  # noqa: F401
 from .fx.convert import convert
 from .fx.custom_config import ConvertCustomConfig, FuseCustomConfig, PrepareCustomConfig
-from .fx.fuse import fuse  # noqa: F401
+from .fx.fuse import fuse
 from .fx.graph_module import ObservedGraphModule  # noqa: F401
-from .fx.prepare import prepare  # noqa: F401
+from .fx.prepare import prepare
 from .fx.tracer import QuantizationTracer, Scope, ScopeContextManager  # noqa: F401
 from .fx.utils import (  # noqa: F401
     get_custom_module_class_keys,

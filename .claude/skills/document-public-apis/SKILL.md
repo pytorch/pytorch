@@ -7,7 +7,9 @@ description: Document undocumented public APIs in PyTorch by removing functions 
 
 This skill documents undocumented public APIs in PyTorch by removing entries from the coverage ignore lists in `docs/source/conf.py` and adding Sphinx autodoc directives (e.g., `autosummary`, `currentmodule`, `autoclass`, `automodule`) to the corresponding `.md` or `.rst` doc source files in `docs/source/`.
 
-**"Documenting" means adding autodoc directives to doc source files — NEVER modifying Python source code.** Do not add or edit docstrings in `.py` files. Do not read or inspect Python source files. Sphinx will pull whatever docstring exists (or render an empty entry if none exists). Your only job is to add the correct directive to the correct doc file.
+**"Documenting" means adding autodoc directives to doc source files — NEVER modifying Python source code.** Do not add or edit docstrings in `.py` files. Your only job is to add the correct directive to the correct doc file.
+
+**IMPORTANT: Before adding any function to the sphinx doctree, verify it has a real docstring.** Use a quick Python check (e.g., `python -c "from torch.module import func; print(bool(func.__doc__))"`) to confirm the function has actual documentation content — not just an empty docstring or a bare `.. warning:: This API is experimental` stub. Functions without meaningful docstrings should be left in the `coverage_ignore_functions`/`coverage_ignore_classes` lists. Adding undocumented functions to the doctree creates empty or near-empty pages that degrade documentation quality.
 
 ## Overview
 
@@ -71,9 +73,24 @@ Work through the lists top-to-bottom. Choose enough groups to make meaningful pr
 
 If a module group has a **mix** of regular entries and entries with inline comments, still process the group — but only comment out the regular entries. Leave entries with inline comments untouched in the ignore list.
 
+### Step 1b: Verify functions have actual docstrings
+
+For each function selected in Step 1, check that it has a meaningful docstring by running:
+
+```bash
+python -c "from torch.module.path import func_name; doc = func_name.__doc__; print('HAS DOC' if doc and len(doc.strip()) > 80 else 'NO DOC'); print(repr(doc[:120]) if doc else 'None')"
+```
+
+A function has a **meaningful docstring** if it has real descriptive content — not just:
+- `None` or empty string
+- Only a `.. warning:: This API is experimental` stub with no description
+- Only a one-line auto-generated signature
+
+**Functions without meaningful docstrings must stay in the ignore list.** Remove them from your batch. If an entire module group has no functions with docstrings, skip the whole group.
+
 ### Step 2: Present the batch to the user
 
-**Before making any edits**, present the selected module groups and their functions to the user. Show them organized by module:
+**Before making any edits**, present the selected module groups and their functions to the user. Indicate which functions passed the docstring check and which were excluded. Show them organized by module:
 
 ```
 Module: torch.ao.quantization.fx.convert
@@ -315,8 +332,8 @@ Also delete any module label comments that no longer have active entries beneath
 
 ## Important notes
 
-- **Follow the steps exactly as written.** Do not add extra investigation steps like importing Python modules to check docstrings, inspecting source code to verify function signatures, or running any commands not specified in the instructions. The `make coverage` step is the only verification needed — let it tell you what's wrong.
-- **Never modify Python source files (`.py`).** This skill only edits `docs/source/conf.py` and doc source files (`.md`/`.rst`) in `docs/source/`. Do not add or edit docstrings, do not read Python source to check function signatures, do not inspect implementations.
+- **Follow the steps exactly as written.** The `make coverage` step is the primary verification for correct Sphinx directives, and Step 1b's docstring check ensures you only document functions that have real content.
+- **Never modify Python source files (`.py`).** This skill only edits `docs/source/conf.py` and doc source files (`.md`/`.rst`) in `docs/source/`. Do not add or edit docstrings. The only reason to inspect Python modules is in Step 1b to check whether a docstring exists — never to modify source code.
 - Entries are commented out in Step 3, verified in Step 6, and cleaned up in Step 8 after verification passes. Never delete uncommented entries directly.
 - **Read inline comments** on entries before deciding to document them. Entries marked `# deprecated`, `# documented as ...`, `# looks unintentionally public`, or `# legacy helper` should stay in the ignore list.
 - The `coverage_ignore_functions` list uses bare function names (not fully qualified), so the same name can appear multiple times for different modules. Use the module label comment above each entry to identify which module it belongs to. Be careful during Step 8 cleanup to only delete the correct commented-out lines — commented-out string entries have **quotes** (`# "func_name",`), module label comments do not.

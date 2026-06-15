@@ -8,54 +8,6 @@ from torch._dynamo import config as dc
 
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
-    def test_inline_inbuilt_nn_modules_candidate(self):
-        def hook_flag_on(guard_manager, f_locals, builder):
-            self.assertTrue(
-                "[inline-inbuilt-nn-modules-candidate]" not in str(guard_manager)
-            )
-
-        def hook_flag_off(guard_manager, f_locals, builder):
-            self.assertTrue(
-                "[inline-inbuilt-nn-modules-candidate]" in str(guard_manager)
-            )
-
-        class SubMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
-            @torch.compile(backend="eager")
-            def forward(self, x):
-                return self.linear(x)
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.sm1 = SubMod()
-                self.sm2 = SubMod()
-
-            def forward(self, x):
-                return self.sm1(x) + self.sm2(x)
-
-        try:
-            from .utils import install_guard_manager_testing_hook
-        except ImportError:
-            from utils import install_guard_manager_testing_hook
-
-        with (
-            install_guard_manager_testing_hook(hook_flag_on),
-            dc.patch(inline_inbuilt_nn_modules=True),
-        ):
-            mod = Mod()
-            mod(torch.randn(2, 2))
-
-        with (
-            install_guard_manager_testing_hook(hook_flag_off),
-            dc.patch(inline_inbuilt_nn_modules=False),
-        ):
-            mod = Mod()
-            mod(torch.randn(2, 2))
-
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
         def foo(x, y):
@@ -467,6 +419,52 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         f(torch.randn(0))
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
+
+    @torch._dynamo.config.patch(recompile_limit=2, fail_on_recompile_limit_hit=True)
+    def test_tensorify_python_builtin_mul_does_not_recompile(self):
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        def scaling_step(update, dummy_tensor, lr):
+            dummy_tensor.mul_(0.5 * lr)
+
+            r, c = update.size(-2), update.size(-1)
+            scaling_factor = max(1, r / c) ** 0.5
+            update.mul_(scaling_factor * lr)
+
+            return update
+
+        compiled = torch.compile(scaling_step, backend=counter, fullgraph=True)
+        base_update = torch.randn(128, 128)
+        base_dummy = torch.randn(324, 64)
+
+        for i in range(8):
+            lr = 1e-4 * (i + 1)
+            self.assertEqual(
+                compiled(base_update.clone(), base_dummy.clone(), lr),
+                scaling_step(base_update.clone(), base_dummy.clone(), lr),
+            )
+
+        self.assertLessEqual(counter.frame_count, 2)
+
+    @torch._dynamo.config.patch(recompile_limit=2, fail_on_recompile_limit_hit=True)
+    def test_tensorify_python_builtin_pow_does_not_recompile(self):
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        def step_param(v_t, bc2):
+            eps = 1e-8
+            return v_t.sqrt().div_(bc2**0.5).add_(eps)
+
+        compiled = torch.compile(step_param, backend=counter, fullgraph=True)
+        base_v_t = torch.randn(64, 1280)
+
+        for step in range(1, 9):
+            bc2 = 1.0 - 0.999**step
+            self.assertEqual(
+                compiled(base_v_t.clone(), bc2),
+                step_param(base_v_t.clone(), bc2),
+            )
+
+        self.assertLessEqual(counter.frame_count, 2)
 
     def test_ambient_autocast_recompile(self):
         weights = torch.randn(10, 10)

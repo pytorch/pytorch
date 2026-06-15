@@ -1,6 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -69,7 +68,10 @@ static void pool2d_template(const Tensor& input,
   const bool is_backward_pass = grad_output.defined();
   const bool has_indices = indices.defined();
   const bool has_divisor = divisor_override.has_value() && divisor_override.value() != 0;
-  const auto suggested_memory_format = input.suggest_memory_format();
+  // Use exact-match: a channel-slice of a channels-last tensor has CL-like
+  // strides but is not NHWC-packed, so the raw-buffer NHWC path would misread
+  // it. See https://github.com/pytorch/pytorch/issues/180984
+  const auto suggested_memory_format = input.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
   // for max_pool2d_with_indices() we cannot pass ChannelsLast (i.e., NHWC) to 'desc.dataLayout' in MPSGraph.
   // Because the returned indices will be selected based on NHWC memory layout which will
   // be incompatible with the PyTorch's global NCHW layout.
@@ -334,6 +336,7 @@ static PoolSizes process_pool_sizes(const Tensor& input,
                                                           : std::vector<int32_t>(pooling_dims, 1);
 
   for (const auto dim : c10::irange(pooling_dims)) {
+    TORCH_CHECK(stride_expanded[dim] > 0, op_name, ": stride should not be zero");
     TORCH_CHECK(padding_expanded[dim] >= 0, op_name, ": pad must be non-negative");
     TORCH_CHECK(padding_expanded[dim] * 2 <= kernel_size_expanded[dim],
                 op_name,
@@ -585,6 +588,15 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
   auto dims = input.dim();
   auto leading_dims = input.dim() - pooling_dims;
+  for (int64_t i = 1; i < dims; ++i) {
+    TORCH_CHECK(input.size(i) > 0,
+                op_name,
+                ": Expected input to have non-zero size for non-batch dimensions, but got ",
+                input.sizes(),
+                " with dimension ",
+                i,
+                " being empty.");
+  }
 
   const auto memory_format = input.suggest_memory_format();
   std::vector<int64_t> output_size(dims);
@@ -592,15 +604,27 @@ static void max_unpool_out_mps_template(const Tensor& input,
     output_size[dim] = input.sizes()[dim];
   }
   for (int dim : c10::irange(pooling_dims)) {
+    TORCH_CHECK(output_size_[dim] >= 0,
+                op_name,
+                ": output_size must contain non-negative spatial dimensions, but got output_size[",
+                dim,
+                "]=",
+                output_size_[dim]);
     output_size[leading_dims + dim] = output_size_[dim];
   }
 
   output.resize_(output_size, memory_format);
+  if (output.numel() == 0) {
+    return;
+  }
   output.fill_(0);
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto numThreads = input.numel();
+  if (numThreads == 0) {
+    return;
+  }
   MaxUnpoolingParams<5> params;
 
   params.dims = dims;
@@ -1064,8 +1088,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(const Tensor& input,
                                                        IntArrayRef padding,
                                                        IntArrayRef dilation,
                                                        bool ceil_mode) {
-  NoNamesGuard guard;
-
   Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
   Tensor indices = at::empty({0}, input.options().dtype(kLong), MemoryFormat::Contiguous);
   mps::max_pool_with_indices_out_mps_template(output,
@@ -1078,10 +1100,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(const Tensor& input,
                                               ceil_mode,
                                               /*pooling_dims=*/3,
                                               "max_pool3d");
-
-  guard.reset();
-  namedinference::propagate_names(output, input);
-  namedinference::propagate_names(indices, input);
 
   return std::tuple<Tensor, Tensor>(output, indices);
 }

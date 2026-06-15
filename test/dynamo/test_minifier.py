@@ -1,5 +1,8 @@
 # Owner(s): ["module: dynamo"]
-import unittest
+
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
@@ -7,13 +10,8 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
 
-requires_gpu = unittest.skipUnless(
-    torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
-)
-
-
 class MinifierTests(MinifierTestBase):
-    # Test that compile, runtime, and accuracy errors after dynamo can be repro'd (both CPU and CUDA/XPU)
+    # Test that compile, runtime, and accuracy errors after dynamo can be repro'd
     def _test_after_dynamo(self, device, backend, expected_error):
         run_code = f"""\
 @torch.compile(backend={backend!r})
@@ -25,50 +23,32 @@ def inner(x):
         x = torch.cos(x)
     return x
 
-inner(torch.randn(20, 20).to("{device}"))
+inner(torch.randn(20, 20, device="{device}"))
 """
         self._run_full_test(run_code, "dynamo", expected_error, isolate=False)
 
-    def test_after_dynamo_cpu_compile_error(self):
-        self._test_after_dynamo(
-            "cpu", "relu_compile_error_TESTING_ONLY", "ReluCompileError"
-        )
-
-    def test_after_dynamo_cpu_runtime_error(self):
-        self._test_after_dynamo(
-            "cpu", "relu_runtime_error_TESTING_ONLY", "ReluRuntimeError"
-        )
-
-    def test_after_dynamo_cpu_accuracy_error(self):
-        self._test_after_dynamo(
-            "cpu", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
-        )
-
-    @requires_gpu
-    def test_after_dynamo_cuda_compile_error(self, device):
+    def test_after_dynamo_compile_error(self, device):
         self._test_after_dynamo(
             device, "relu_compile_error_TESTING_ONLY", "ReluCompileError"
         )
 
-    @requires_gpu
-    def test_after_dynamo_cuda_runtime_error(self, device):
+    def test_after_dynamo_runtime_error(self, device):
         self._test_after_dynamo(
             device, "relu_runtime_error_TESTING_ONLY", "ReluRuntimeError"
         )
 
-    @requires_gpu
-    def test_after_dynamo_cuda_accuracy_error(self, device):
+    def test_after_dynamo_accuracy_error(self, device):
         self._test_after_dynamo(
             device, "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
         )
 
-    def test_after_dynamo_non_leaf_compile_error(self):
-        run_code = """\
+    def test_after_dynamo_non_leaf_compile_error(self, device):
+        run_code = f"""\
 @torch.compile(backend="non_leaf_compile_error_TESTING_ONLY")
 def inner(x):
     return x + 1
 
-inner(torch.randn(20, 20, requires_grad=True) + 1)
+inner(torch.randn(20, 20, requires_grad=True, device="{device}") + 1)
 """
         self._run_full_test(
             run_code, "dynamo", "TestingOnlyCompileError", isolate=False
@@ -84,44 +64,31 @@ inner(torch.randn(20, 20, requires_grad=True) + 1)
                 x = torch.cos(x)
             return x
 
-        inner(torch.randn(20, 20).to(device))
+        inner(torch.randn(20, 20, device=device))
 
-    def test_after_dynamo_cpu_compile_backend_passes(self):
-        self._test_after_dynamo_backend_passes("cpu", "relu_compile_error_TESTING_ONLY")
-
-    def test_after_dynamo_cpu_runtime_backend_passes(self):
-        self._test_after_dynamo_backend_passes("cpu", "relu_runtime_error_TESTING_ONLY")
-
-    def test_after_dynamo_cpu_accuracy_backend_passes(self):
-        self._test_after_dynamo_backend_passes(
-            "cpu", "relu_accuracy_error_TESTING_ONLY"
-        )
-
-    @requires_gpu
-    def test_after_dynamo_cuda_compile_backend_passes(self, device):
+    def test_after_dynamo_compile_backend_passes(self, device):
         self._test_after_dynamo_backend_passes(
             device, "relu_compile_error_TESTING_ONLY"
         )
 
-    @requires_gpu
-    def test_after_dynamo_cuda_runtime_backend_passes(self, device):
+    def test_after_dynamo_runtime_backend_passes(self, device):
         self._test_after_dynamo_backend_passes(
             device, "relu_runtime_error_TESTING_ONLY"
         )
 
-    @requires_gpu
-    def test_after_dynamo_cuda_accuracy_backend_passes(self, device):
+    def test_after_dynamo_accuracy_backend_passes(self, device):
         self._test_after_dynamo_backend_passes(
             device, "relu_accuracy_error_TESTING_ONLY"
         )
 
-    # Test that a module with mixed cpu/(cuda|xpu) parts with an error after dynamo can be repro'd
+    # Test that a module with mixed cpu/device parts  with an error after dynamo can be repro'd
     @skipIfNNModuleInlined()
-    @requires_gpu
-    def test_cpu_cuda_module_after_dynamo(self, device):
+    def test_cpu_device_module_after_dynamo(self, device):
         backend_name = "relu_compile_error_TESTING_ONLY"
         run_code = f"""\
-class CpuCudaModule(torch.nn.Module):
+device = "{device}"
+
+class CpuDeviceModule(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.m_x = torch.nn.Linear(20, 20).to(device)
@@ -134,7 +101,7 @@ class CpuCudaModule(torch.nn.Module):
     def forward(self, x, y):
         return self.m_x(x) + self.p_x + self.b_x, self.m_y(y) + self.p_y + self.b_y
 
-mod = CpuCudaModule()
+mod = CpuDeviceModule()
 
 @torch.compile(backend={backend_name!r})
 def inner(x1, y1):
@@ -186,7 +153,7 @@ class Repro(torch.nn.Module):
         )
 
     # Test if we can actually get a minified graph
-    def test_if_graph_minified(self):
+    def test_if_graph_minified(self, device):
         backend_name = "relu_compile_error_TESTING_ONLY"
         run_code = f"""\
 @torch.compile(backend={backend_name!r})
@@ -198,7 +165,7 @@ def inner(x):
         x = torch.cos(x)
     return x
 
-inner(torch.randn(20, 20))
+inner(torch.randn(20, 20, device="{device}"))
 """
 
         res = self._run_full_test(run_code, "dynamo", "ReluCompileError", isolate=False)
@@ -216,10 +183,245 @@ class Repro(torch.nn.Module):
         )
 
 
-devices = ["cuda", "xpu", "cpu"]
-instantiate_device_type_tests(
-    MinifierTests, globals(), only_for=devices, allow_xpu=True
-)
+class TestAutocastDeviceDetection(torch._dynamo.test_case.TestCase):
+    def _make_options(
+        self, accuracy="", autocast=False, backend="eager", only_fwd=True
+    ):
+        import argparse
+
+        return argparse.Namespace(
+            accuracy=accuracy,
+            autocast=autocast,
+            backend=backend,
+            only_fwd=only_fwd,
+        )
+
+    def test_repro_minify_autocast_uses_tensor_device(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("device detection only meaningful for non-CPU devices")
+
+        from torch._dynamo.repro.after_dynamo import repro_minify
+
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        args = [torch.randn(4, device=device)]
+        options = self._make_options()
+
+        def fake_compiler(gm, example_inputs, compiler_name=None):
+            return gm.forward
+
+        mock_autocast = MagicMock()
+
+        with (
+            patch("torch._dynamo.repro.after_dynamo.run_load_args", return_value=args),
+            patch(
+                "torch._dynamo.repro.after_dynamo.lookup_backend",
+                return_value=fake_compiler,
+            ),
+            patch("torch._dynamo.optimize", new=lambda backend: lambda m: m),
+            patch("torch.amp.autocast", mock_autocast),
+        ):
+            repro_minify(options, gm, None)
+
+        mock_autocast.assert_called_once_with(torch.device(device).type, enabled=False)
+
+    def test_repro_run_accuracy_branch_autocast_uses_tensor_device(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("device detection only meaningful for non-CPU devices")
+
+        from torch._dynamo.repro.after_dynamo import repro_run
+
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        args = [torch.randn(4, device=device)]
+        options = self._make_options(accuracy="strict")
+        mock_autocast = MagicMock()
+
+        with (
+            patch("torch._dynamo.repro.after_dynamo.run_load_args", return_value=args),
+            patch("torch._dynamo.optimize", new=lambda backend: lambda m: m),
+            patch(
+                "torch._dynamo.repro.after_dynamo.same_two_models", return_value=True
+            ),
+            patch("torch.amp.autocast", mock_autocast),
+        ):
+            repro_run(options, gm, None)
+
+        mock_autocast.assert_called_once_with(torch.device(device).type, enabled=False)
+
+
+instantiate_device_type_tests(TestAutocastDeviceDetection, globals(), allow_xpu=True)
+
+
+class ReproGenerationTests(torch._dynamo.test_case.TestCase):
+    def test_after_dynamo_repro_uses_constructor_for_fake_quant_with_child_repr(self):
+        from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
+        from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_module("fake_quant", (x,))
+        graph.output((y,))
+        fake_quant = torch.ao.quantization.get_default_qat_qconfig(
+            "fbgemm"
+        ).activation()
+        fake_quant.register_parameter(
+            "secret_weight", torch.nn.Parameter(torch.full((8,), 123456.0))
+        )
+        fake_quant.register_buffer("secret_buffer", torch.full((8,), 654321.0))
+        gm = torch.fx.GraphModule({"fake_quant": fake_quant}, graph)
+
+        with tempfile.TemporaryDirectory() as save_dir:
+            for module_save_dir in (save_dir, None):
+                with self.subTest(save_dir=module_save_dir):
+                    code = generate_dynamo_fx_repro_string(
+                        gm, [torch.randn(2)], "eager", save_dir=module_save_dir
+                    )
+
+                    self.assertIn(
+                        "self.fake_quant = "
+                        "torch.ao.quantization.fake_quantize."
+                        "FusedMovingAvgObsFakeQuantize(",
+                        code,
+                    )
+                    self.assertNotIn("(activation_post_process):", code)
+                    self.assertNotIn("base64", code)
+                    self.assertNotIn("weights_only=False", code)
+                    self.assertNotIn("nn_module_", code)
+                    if module_save_dir is not None:
+                        self.assertEqual(
+                            list(Path(module_save_dir).glob("nn_module_*.pt")), []
+                        )
+                    compile(code, "<generated minifier repro>", "exec")
+
+                    namespace = {"__name__": "not_main"}
+                    exec(code, namespace)
+                    mod = namespace["mod"]
+
+                    self.assertIsInstance(mod.fake_quant, FusedMovingAvgObsFakeQuantize)
+                    self.assertEqual(mod.fake_quant.quant_min, fake_quant.quant_min)
+                    self.assertEqual(mod.fake_quant.quant_max, fake_quant.quant_max)
+                    self.assertEqual(
+                        mod.fake_quant.activation_post_process.reduce_range,
+                        fake_quant.activation_post_process.reduce_range,
+                    )
+                    self.assertFalse(hasattr(mod.fake_quant, "secret_weight"))
+                    self.assertFalse(hasattr(mod.fake_quant, "secret_buffer"))
+                    self.assertEqual(mod(torch.randn(2))[0].shape, (2,))
+
+    def test_after_dynamo_repro_preserves_fake_quant_buffer_device(self):
+        from torch._dynamo.debug_utils import NNModuleToString
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_module("fake_quant", (x,))
+        graph.output((y,))
+        fake_quant = torch.ao.quantization.get_default_qat_qconfig(
+            "fbgemm"
+        ).activation()
+        fake_quant.to("meta")
+        gm = torch.fx.GraphModule({"fake_quant": fake_quant}, graph)
+
+        code = NNModuleToString.convert(gm)
+
+        self.assertIn('.to("meta")', code)
+
+    def test_after_dynamo_repro_uses_constructor_for_qat_fused_module(self):
+        from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
+
+        for backend, expected_backend in (
+            ("fbgemm", "fbgemm"),
+            ("x86", "fbgemm"),
+            ("qnnpack", "qnnpack"),
+        ):
+            with self.subTest(backend=backend):
+                qconfig = torch.ao.quantization.get_default_qat_qconfig(backend)
+                conv = torch.ao.nn.intrinsic.qat.ConvBnReLU2d(
+                    3,
+                    4,
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                    bias=False,
+                    qconfig=qconfig,
+                )
+
+                graph = torch.fx.Graph()
+                x = graph.placeholder("x")
+                y = graph.call_module("conv", (x,))
+                graph.output((y,))
+                gm = torch.fx.GraphModule({"conv": conv}, graph)
+
+                code = generate_dynamo_fx_repro_string(
+                    gm, [torch.randn(2, 3, 8, 8)], "eager"
+                )
+
+                self.assertIn(
+                    "self.conv = "
+                    "torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvBnReLU2d(",
+                    code,
+                )
+                self.assertIn(
+                    "qconfig=torch.ao.quantization.get_default_qat_qconfig"
+                    f"('{expected_backend}')",
+                    code,
+                )
+                self.assertNotIn("(weight_fake_quant):", code)
+                self.assertNotIn("(activation_post_process):", code)
+                self.assertNotIn("base64", code)
+                self.assertNotIn("weights_only=False", code)
+                compile(code, "<generated minifier repro>", "exec")
+
+                namespace = {"__name__": "not_main"}
+                exec(code, namespace)
+                mod = namespace["mod"]
+
+                self.assertIsInstance(mod.conv, torch.ao.nn.intrinsic.qat.ConvBnReLU2d)
+                self.assertEqual(mod(torch.randn(2, 3, 8, 8))[0].shape, (2, 4, 4, 4))
+
+    def test_after_dynamo_repro_rejects_custom_qat_qconfig(self):
+        from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
+
+        qconfig = torch.ao.quantization.QConfig(
+            activation=torch.ao.quantization.default_fake_quant,
+            weight=torch.ao.quantization.default_weight_fake_quant,
+        )
+        conv = torch.ao.nn.intrinsic.qat.ConvBnReLU2d(
+            3,
+            4,
+            kernel_size=3,
+            qconfig=qconfig,
+        )
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_module("conv", (x,))
+        graph.output((y,))
+        gm = torch.fx.GraphModule({"conv": conv}, graph)
+
+        with self.assertRaisesRegex(AssertionError, "Cannot convert module"):
+            generate_dynamo_fx_repro_string(gm, [torch.randn(2, 3, 8, 8)], "eager")
+
+    def test_after_aot_repro_falls_back_for_unconvertible_module_repr(self):
+        from torch._dynamo.repro.after_aot import generate_compiler_repro_string
+
+        class UnsupportedModule(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+            def __repr__(self):
+                return "<lambda>()"
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_module("submod", (x,))
+        graph.output((y,))
+        gm = torch.fx.GraphModule({"submod": UnsupportedModule()}, graph)
+
+        code = generate_compiler_repro_string(gm, [torch.randn(2)], stable_output=True)
+
+        self.assertIn("self.submod = <lambda>()", code)
+
+
+instantiate_device_type_tests(MinifierTests, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

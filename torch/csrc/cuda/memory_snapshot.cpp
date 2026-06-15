@@ -146,8 +146,7 @@ at::CallbackHandle _initCompileContexts() {
               -> std::unique_ptr<at::ObserverContext> {
             std::string functionName = fn.name();
             const std::string functionNamePrefix = "Torch-Compiled Region";
-            if (functionName.compare(
-                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+            if (functionName.starts_with(functionNamePrefix)) {
               c10::cuda::CUDACachingAllocator::pushCompileContext(functionName);
             }
             return nullptr;
@@ -155,8 +154,7 @@ at::CallbackHandle _initCompileContexts() {
           [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
             std::string functionName = fn.name();
             const std::string functionNamePrefix = "Torch-Compiled Region";
-            if (functionName.compare(
-                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+            if (functionName.starts_with(functionNamePrefix)) {
               c10::cuda::CUDACachingAllocator::popCompileContext();
             }
           })
@@ -315,6 +313,7 @@ std::string _memory_snapshot_pickled() {
   IValue time_us_s = "time_us";
   IValue compile_contexts_s = "compile_context";
   IValue user_metadata_s = "user_metadata";
+  IValue pool_id_s = "pool_id";
 
   auto empty_frames = new_list();
 
@@ -439,6 +438,7 @@ std::string _memory_snapshot_pickled() {
         frame_dict.push_back(trace_entry);
       }
       trace_entry.insert(time_us_s, te.time_.t_);
+      trace_entry.insert(pool_id_s, std::tuple<int64_t, int64_t>(te.mempool_));
       trace.push_back(trace_entry);
     }
     traces.push_back(trace);
@@ -466,6 +466,8 @@ std::string _memory_snapshot_pickled() {
   IValue roundup_power2_divisions_s = "roundup_power2_divisions";
   IValue graph_capture_record_stream_reuse_s =
       "graph_capture_record_stream_reuse";
+  IValue max_round_threshold_s = "max_round_threshold";
+  IValue max_cached_size_s = "max_cached_size";
 
   allocator_settings.insert(
       last_allocator_settings_s,
@@ -489,6 +491,11 @@ std::string _memory_snapshot_pickled() {
   allocator_settings.insert(
       graph_capture_record_stream_reuse_s,
       snapshot.config_metadata.graph_capture_record_stream_reuse);
+  allocator_settings.insert(
+      max_round_threshold_s,
+      int64_t(snapshot.config_metadata.max_round_threshold));
+  allocator_settings.insert(
+      max_cached_size_s, int64_t(snapshot.config_metadata.max_cached_size));
   unsigned int roundup_key = 1;
   auto roundup_settings = new_dict();
   for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {

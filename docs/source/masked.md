@@ -304,6 +304,20 @@ The following ops are currently supported:
     Tensor.view
 ```
 
+## torch.masked.maskedtensor.core
+
+```{eval-rst}
+.. currentmodule:: torch.masked.maskedtensor.core
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_masked_tensor
+```
+
 ```{eval-rst}
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes

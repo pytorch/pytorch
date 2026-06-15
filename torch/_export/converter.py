@@ -663,7 +663,7 @@ class TS2FXGraphConverter:
         def to_float_tensor(t):
             return t.to(dtype=torch.float).item()
 
-        inp_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]  # noqa: C416
+        inp_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]
         fx_node = self.fx_graph.call_function(
             to_float_tensor,
             tuple(inp_list),
@@ -702,11 +702,11 @@ class TS2FXGraphConverter:
         # special handle python list append: "aten::append.t(t[](a!) self, t(c -> *) el) -> t[](a!)"
 
         # inplace append to the list!! This is kinda crazy, as we are inplace mutating the list
-        # This makes the converter "non-functional", and the result depends on the order of the nodes being converter
-        # In a sense, the converter now becomes an stateful interpreter
+        # This makes the converter "non-functional", and the result depends on the order of the nodes being converted
+        # In a sense, the converter now becomes a stateful interpreter
         warnings.warn(
-            "Converting aten::append.t, which is a inplace mutation of the list. "
-            "This makes the converter non-functional: the result depends on the order of the append nodes being converter!",
+            "Converting aten::append.t, which is an inplace mutation of the list. "
+            "This makes the converter non-functional: the result depends on the order of the append nodes being converted!",
             stacklevel=2,
         )
 
@@ -750,7 +750,7 @@ class TS2FXGraphConverter:
         self.name_to_constant[name] = value
 
     def convert_prim_CallMethod(self, node: torch._C.Node):
-        inp_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]  # noqa: C416
+        inp_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]
         fx_node = self.fx_graph.call_method(
             node.s("name"),
             tuple(inp_list),

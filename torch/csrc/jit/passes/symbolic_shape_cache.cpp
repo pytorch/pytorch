@@ -92,7 +92,7 @@ ShapeCacheKey get_cache_key(
     std::unordered_map<int64_t, int64_t>& ss_map,
     bool deep_copy = true) {
   CanonicalArgVec canonical_args = cannonicalizeVec(arg_vec, ss_map, deep_copy);
-  return std::make_tuple(schema->operator_name(), canonical_args);
+  return std::make_tuple(schema->operator_name(), std::move(canonical_args));
 }
 
 } // namespace

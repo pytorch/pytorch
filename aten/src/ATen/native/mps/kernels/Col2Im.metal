@@ -1,11 +1,11 @@
 #include <metal_stdlib>
 using namespace metal;
 
-template <typename T>
+template <typename T, typename IdxT>
 kernel void col2im_kernel(
     device const T* data_col [[buffer(0)]],
     device T* data_im [[buffer(1)]],
-    constant uint& col_batch_stride [[buffer(2)]],
+    constant IdxT& col_batch_stride [[buffer(2)]],
     constant uint& channels [[buffer(3)]],
     constant uint2& im_hw [[buffer(4)]],
     constant uint2& kernel_hw [[buffer(5)]],
@@ -13,7 +13,8 @@ kernel void col2im_kernel(
     constant uint2& stride_hw [[buffer(7)]],
     constant uint2& dilation_hw [[buffer(8)]],
     constant uint2& col_hw [[buffer(9)]],
-    constant uint& im_batch_stride [[buffer(10)]],
+    constant IdxT& im_batch_stride [[buffer(10)]],
+    constant vec<IdxT, 2>& col_inner_strides [[buffer(11)]],
     uint3 gid [[thread_position_in_grid]]) {
   const uint output_height = im_hw.x;
   const uint output_width = im_hw.y;
@@ -49,7 +50,9 @@ kernel void col2im_kernel(
   uint h_col_end = min((h_im / stride_h + 1), height_col);
 
   float accumulator = 0.0;
-  uint col_batch_offset = batch_idx * col_batch_stride;
+  IdxT col_batch_offset = IdxT(batch_idx) * col_batch_stride;
+  IdxT col_channel_stride = col_inner_strides.x;
+  IdxT col_spatial_stride = col_inner_strides.y;
 
   for (uint h_col = h_col_start; h_col < h_col_end; h_col++) {
     for (uint w_col = w_col_start; w_col < w_col_end; w_col++) {
@@ -60,11 +63,10 @@ kernel void col2im_kernel(
         h_k /= dilation_h;
         w_k /= dilation_w;
         if (h_k < kernel_h && w_k < kernel_w) {
-          uint col_index =
-              (((c_im * kernel_h + h_k) * kernel_w + w_k) * height_col +
-               h_col) *
-                  width_col +
-              w_col;
+          IdxT dim1_idx = (IdxT(c_im) * kernel_h + h_k) * kernel_w + w_k;
+          IdxT dim2_idx = IdxT(h_col) * width_col + w_col;
+          IdxT col_index =
+              dim1_idx * col_channel_stride + dim2_idx * col_spatial_stride;
           accumulator +=
               static_cast<float>(data_col[col_batch_offset + col_index]);
         }
@@ -72,26 +74,31 @@ kernel void col2im_kernel(
     }
   }
 
-  uint im_batch_offset = batch_idx * im_batch_stride;
-  uint im_index = (c_im * output_height + y) * output_width + x;
+  IdxT im_batch_offset = IdxT(batch_idx) * im_batch_stride;
+  IdxT im_index = (IdxT(c_im) * output_height + y) * output_width + x;
   data_im[im_batch_offset + im_index] = static_cast<T>(accumulator);
 }
 
-#define INSTANTIATE_COL2IM(DTYPE)                             \
-  template [[host_name("col2im_kernel_" #DTYPE)]] kernel void \
-  col2im_kernel<DTYPE>(                                       \
-      device const DTYPE* data_col [[buffer(0)]],             \
-      device DTYPE* data_im [[buffer(1)]],                    \
-      constant uint& col_batch_stride [[buffer(2)]],          \
-      constant uint& channels [[buffer(3)]],                  \
-      constant uint2& im_hw [[buffer(4)]],                    \
-      constant uint2& kernel_hw [[buffer(5)]],                \
-      constant uint2& pad_hw [[buffer(6)]],                   \
-      constant uint2& stride_hw [[buffer(7)]],                \
-      constant uint2& dilation_hw [[buffer(8)]],              \
-      constant uint2& col_hw [[buffer(9)]],                   \
-      constant uint& im_batch_stride [[buffer(10)]],          \
+#define INSTANTIATE_COL2IM_IDX(DTYPE, IDX, SUFFIX)                        \
+  template [[host_name("col2im_kernel_" #DTYPE "_" #SUFFIX)]] kernel void \
+  col2im_kernel<DTYPE, IDX>(                                              \
+      device const DTYPE* data_col [[buffer(0)]],                         \
+      device DTYPE* data_im [[buffer(1)]],                                \
+      constant IDX& col_batch_stride [[buffer(2)]],                       \
+      constant uint& channels [[buffer(3)]],                              \
+      constant uint2& im_hw [[buffer(4)]],                                \
+      constant uint2& kernel_hw [[buffer(5)]],                            \
+      constant uint2& pad_hw [[buffer(6)]],                               \
+      constant uint2& stride_hw [[buffer(7)]],                            \
+      constant uint2& dilation_hw [[buffer(8)]],                          \
+      constant uint2& col_hw [[buffer(9)]],                               \
+      constant IDX& im_batch_stride [[buffer(10)]],                       \
+      constant vec<IDX, 2>& col_inner_strides [[buffer(11)]],             \
       uint3 gid [[thread_position_in_grid]]);
+
+#define INSTANTIATE_COL2IM(DTYPE)          \
+  INSTANTIATE_COL2IM_IDX(DTYPE, uint, u32) \
+  INSTANTIATE_COL2IM_IDX(DTYPE, ulong, u64)
 
 INSTANTIATE_COL2IM(bool);
 INSTANTIATE_COL2IM(float);

@@ -23,6 +23,7 @@ from typing import (
     Any,
     ForwardRef,
     Generic,
+    get_args,
     get_type_hints,
     TypeVar,
     Union,
@@ -111,7 +112,7 @@ def _decompose_type(t, to_list=True):
             # For T_co, __constraints__ is ()
             ts = list(t.__constraints__)
     elif hasattr(t, "__origin__") and t.__origin__ == Union:
-        ts = t.__args__
+        ts = get_args(t)
     else:
         if not to_list:
             return None
@@ -153,8 +154,7 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
     # Variant is not TypeVar or Union
     if hasattr(variant, "__origin__") and variant.__origin__ is not None:
         v_origin = variant.__origin__
-        # In Python-3.9 typing library untyped generics do not have args
-        v_args = getattr(variant, "__args__", None)
+        v_args = get_args(variant) or None
     else:
         v_origin = variant
         v_args = None
@@ -175,8 +175,7 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
                 if v_origin == c_origin:
                     if not recursive:
                         return True
-                    # In Python-3.9 typing library untyped generics do not have args
-                    c_args = getattr(constraint, "__args__", None)
+                    c_args = get_args(constraint) or None
                     if c_args is None or len(c_args) == 0:
                         return True
                     if (
@@ -200,8 +199,7 @@ def issubinstance(data, data_type):
     if not issubtype(type(data), data_type, recursive=False):
         return False
 
-    # In Python-3.9 typing library __args__ attribute is not defined for untyped generics
-    dt_args = getattr(data_type, "__args__", None)
+    dt_args = get_args(data_type) or None
     if isinstance(data, tuple):
         if dt_args is None or len(dt_args) == 0:
             return True
@@ -455,7 +453,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs) -> None:
                         sub_cls.__name__, _type_repr(hints["return"])
                     )
                 )
-            data_type = return_hint.__args__[0]
+            data_type = get_args(return_hint)[0]
             if not issubtype(data_type, sub_cls.type.param):
                 raise TypeError(
                     f"Expected return type of '__iter__' as a subtype of {sub_cls.type},"

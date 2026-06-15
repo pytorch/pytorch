@@ -125,10 +125,15 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
   __m512i result = _mm512_setzero_si512();
 
   // Step 1: Handle case of overflow
-  // (f_bits >= fp8_max): set result = 0x7f
+  // NaN (f_bits > fp32_inf): set result = 0x7f
+  // Finite overflow or inf (fp8_max <= f_bits <= fp32_inf): saturate to 0x7e
+  const __m512i fp32_inf = _mm512_set1_epi32(UINT32_C(0x7F800000));
   __mmask16 overflow_mask = _mm512_cmpge_epu32_mask(f_bits, fp8_max);
   if (overflow_mask) {
-    result = _mm512_mask_set1_epi32(result, overflow_mask, 0x7f);
+    __mmask16 nan_mask = _mm512_cmpgt_epu32_mask(f_bits, fp32_inf);
+    __mmask16 sat_mask = overflow_mask & ~nan_mask;
+    result = _mm512_mask_set1_epi32(result, nan_mask, 0x7f);
+    result = _mm512_mask_set1_epi32(result, sat_mask, 0x7e);
   }
 
   // Step 2: Handle small numbers (denormals)
@@ -158,6 +163,10 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
     rounded = _mm512_add_epi32(rounded, mant_odd);
     // Shift right by 20 bits
     __m512i normal_result = _mm512_srli_epi32(rounded, 20);
+    // Rounding may carry into the NaN bit pattern (0x7f); saturate to max
+    __mmask16 round_overflow =
+        _mm512_cmpeq_epi32_mask(normal_result, _mm512_set1_epi32(0x7f));
+    normal_result = _mm512_mask_set1_epi32(normal_result, round_overflow, 0x7e);
     result = _mm512_mask_mov_epi32(result, normal_mask, normal_result);
   }
 
@@ -338,7 +347,7 @@ class Vectorizedf8 {
   static constexpr size_type size() {
     return 64;
   }
-  Vectorizedf8() {}
+  Vectorizedf8() = default;
   Vectorizedf8(__m512i v) : values(v) {}
   Vectorizedf8(T val) {
     value_type uw = val.x;
@@ -375,6 +384,15 @@ class Vectorizedf8 {
         _mm512_mask_storeu_epi8(ptr, mask, values);
       }
     }
+  }
+
+  static Vectorized<T> blendv(
+      const Vectorized<T>& a,
+      const Vectorized<T>& b,
+      const Vectorized<T>& mask) {
+    auto msb_one = _mm512_set1_epi8(0xFF);
+    auto mask_ = _mm512_cmp_epu8_mask((__m512i)mask, msb_one, _MM_CMPINT_EQ);
+    return _mm512_mask_blend_epi8(mask_, (__m512i)a, (__m512i)b);
   }
 
   Vectorized<T> abs() const {

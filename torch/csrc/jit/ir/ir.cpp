@@ -34,7 +34,7 @@ std::string getNodesModuleHierarchy(const Node& n) {
     if (opt_module_info.has_value()) {
       const auto& module_instance_info = opt_module_info.value();
       if (!module_hierarchy.empty()) {
-        module_hierarchy.append(".");
+        module_hierarchy.push_back('.');
       }
       module_hierarchy.append(utils::get_module_info(module_instance_info));
     } else {
@@ -170,7 +170,7 @@ static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
     // TODO: This is awful code.  Also it doesn't work on Windows.
     std::ostringstream tensor_ss;
     tensor_ss << tensor;
-    std::string tensor_s{tensor_ss.str()};
+    std::string tensor_s{std::move(tensor_ss).str()};
     // Remove newlines
     std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
     out << tensor_s;
@@ -886,7 +886,7 @@ Value* Value::setDebugName(const std::string& name) {
       ss.imbue(c_locale);
 #endif
       ss << name_base << '.' << suffix++;
-      replacement_name = ss.str();
+      replacement_name = std::move(ss).str();
     } while (names.count(replacement_name) > 0);
 
     names_suffixes[name_base] = suffix;
@@ -929,12 +929,7 @@ void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
     }
   });
 
-  uses_.erase(
-      std::remove_if(
-          uses_.begin(),
-          uses_.end(),
-          [&node](const Use& u) { return u.user->isAfter(node); }),
-      uses_.end());
+  std::erase_if(uses_, [&node](const Use& u) { return u.user->isAfter(node); });
 }
 
 void Value::replaceAllUsesDominatedByNodeWith(
@@ -947,12 +942,8 @@ void Value::replaceAllUsesDominatedByNodeWith(
     }
   });
 
-  uses_.erase(
-      std::remove_if(
-          uses_.begin(),
-          uses_.end(),
-          [&node](const Use& u) { return u.user->isDominatedBy(node); }),
-      uses_.end());
+  std::erase_if(
+      uses_, [&node](const Use& u) { return u.user->isDominatedBy(node); });
 }
 
 static size_t findArgument(
@@ -1218,7 +1209,6 @@ bool Node::hasSideEffects() const {
       return true;
   }
   TORCH_INTERNAL_ASSERT(false, "Unhandled AliasAnalysisKind case");
-  return false; // silence compiler warning
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
@@ -1985,7 +1975,7 @@ Value* Graph::insertConstant(
 std::string Graph::toString(bool print_source_locations) const {
   std::ostringstream oss;
   print(oss, print_source_locations);
-  return oss.str();
+  return std::move(oss).str();
 }
 
 Graph::~Graph() {

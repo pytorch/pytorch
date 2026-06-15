@@ -114,6 +114,11 @@ kernel void histogramdd(
 REGISTER_HISTOGRAMDD_OP(float);
 REGISTER_HISTOGRAMDD_OP(half);
 REGISTER_HISTOGRAMDD_OP(bfloat);
+REGISTER_HISTOGRAMDD_OP(int);
+REGISTER_HISTOGRAMDD_OP(long);
+REGISTER_HISTOGRAMDD_OP(short);
+REGISTER_HISTOGRAMDD_OP(char);
+REGISTER_HISTOGRAMDD_OP(uchar);
 
 kernel void kernel_index_offset(
     constant uint* strides [[buffer(0)]],

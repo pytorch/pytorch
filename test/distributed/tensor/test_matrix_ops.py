@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfRocm,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -452,6 +453,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         expected_placements = (Replicate(),)
         self.assertEqual(out.placements, expected_placements)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
     @with_comms
     @skip_unless_torch_gpu
     @unittest.skipIf(
@@ -526,6 +528,69 @@ class DistMatrixOpsTest(DTensorTestBase):
             self.assertEqual(full_dist_res, full_ref_res, atol=1.5, rtol=7e-2)
 
             self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    def test_scaled_mm_blockwise_1d_scale_placement(self):
+        """Test that _scaled_mm_scale_placement handles 1D blockwise scales correctly.
+
+        1D blockwise scales arise in MX (microscaling) formats where a data
+        tensor [M, K] has a flattened scale of shape [M * K / block_size].
+        Shard(>=1) is invalid on a 1D tensor, so the strategy must map
+        non-contracting shards to Shard(0) and reject contracting-dim shards.
+        """
+        from torch.distributed.tensor._ops._matrix_ops import _scaled_mm_scale_placement
+
+        # --- Tensor-wise scale (single element) -> always Replicate ---
+        result = _scaled_mm_scale_placement(
+            Shard(0), torch.Size([1]), contracting_dim=1
+        )
+        self.assertEqual(result, Replicate())
+        result = _scaled_mm_scale_placement(Shard(0), torch.Size([]), contracting_dim=1)
+        self.assertEqual(result, Replicate())
+
+        # --- 2D scale -> copy data placement directly (row-wise) ---
+        result = _scaled_mm_scale_placement(
+            Shard(0), torch.Size([16, 1]), contracting_dim=1
+        )
+        self.assertEqual(result, Shard(0))
+
+        # --- 1D blockwise + non-contracting shard -> Shard(0) ---
+        # A (mk): dim 0 = m (non-contracting), dim 1 = k (contracting)
+        result = _scaled_mm_scale_placement(
+            Shard(0), torch.Size([64]), contracting_dim=1
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result, Shard(0))
+
+        # B_t (kn): dim 1 = n (non-contracting), dim 0 = k (contracting)
+        result = _scaled_mm_scale_placement(
+            Shard(1), torch.Size([64]), contracting_dim=0
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result, Shard(0))
+
+        # --- 1D blockwise + contracting shard -> None (unsupported) ---
+        result = _scaled_mm_scale_placement(
+            Shard(1), torch.Size([64]), contracting_dim=1
+        )
+        self.assertIsNone(result)
+        result = _scaled_mm_scale_placement(
+            Shard(0), torch.Size([64]), contracting_dim=0
+        )
+        self.assertIsNone(result)
+
+        # --- 1D blockwise + Replicate -> Replicate ---
+        result = _scaled_mm_scale_placement(
+            Replicate(), torch.Size([64]), contracting_dim=1
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result, Replicate())
+
+        # --- 1D blockwise + Partial -> Replicate ---
+        result = _scaled_mm_scale_placement(
+            Partial(), torch.Size([64]), contracting_dim=0
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result, Replicate())
 
     @with_comms
     def test_matmul(self):

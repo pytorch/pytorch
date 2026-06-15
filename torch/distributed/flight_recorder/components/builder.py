@@ -311,7 +311,12 @@ def build_collectives(
                 # This extra cleanup is needed because we need to pop all collectives within a coalesced collective.
                 for i, k in idx_map.items():
                     for _ in range(1, num_coalesced_entries):
-                        all_entries[i].pop(k)
+                        try:
+                            all_entries[i].pop(k)
+                        except IndexError:
+                            # In the case of a missing rank symptom that a rank didn't schedule the coalesced collective,
+                            # we should not fail the analysis script here.
+                            pass
         else:
             # Iterate through all the ranks and check if there is a mismatch for the current entry.
             check_current_entry_match(
@@ -355,7 +360,7 @@ def build_collectives(
 
             # 2. we found a partial match but some ranks are missing
             # 3. we found no match
-            #  -> since its not a complete collective, no entry goes into collectives but we still record a nccl call
+            #  -> since it's not a complete collective, no entry goes into collectives but we still record a nccl call
             #     TODO should there be a way to mark 'mismatches'?
             else:
                 logger.debug("appending a non-matching collective")

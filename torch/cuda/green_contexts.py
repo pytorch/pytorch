@@ -1,6 +1,10 @@
 import torch
 
 
+__all__ = [
+    "GreenContext",
+]
+
 _GreenContext = object
 SUPPORTED = False
 
@@ -19,18 +23,59 @@ class GreenContext(_GreenContext):
     """
 
     @staticmethod
-    def create(num_sms: int, device_id: int = 0) -> _GreenContext:
+    def create(
+        *,
+        num_sms: int | None = None,
+        workqueue_scope: str | None = None,
+        workqueue_concurrency_limit: int | None = None,
+        device_id: int | None = None,
+    ) -> _GreenContext:
         r"""Create a CUDA green context.
 
+        At least one of ``num_sms`` or ``workqueue_scope`` must be specified.
+        Both can be combined to partition SMs and configure workqueues in the
+        same green context.
+
         Arguments:
-            num_sms (int): The number of SMs to use in the green context.
+            num_sms (int, optional): The number of SMs to use in the green
+                context. When ``None``, SMs are not partitioned.
+            workqueue_scope (str, optional): Workqueue sharing scope. One of
+                ``"device_ctx"`` (shared across all contexts, default driver
+                behaviour) or ``"balanced"`` (non-overlapping workqueues with
+                other balanced green contexts). When ``None``, no workqueue
+                configuration is applied.
+            workqueue_concurrency_limit (int, optional): Maximum number of
+                concurrent stream-ordered workloads for the workqueue. Requires
+                ``workqueue_scope`` to be set.
             device_id (int, optional): The device index of green context.
+                When ``None``, the current device is used.
         """
         if not SUPPORTED:
             raise RuntimeError("PyTorch was not built with Green Context support!")
-        return _GreenContext.create(num_sms, device_id)  # type: ignore[attr-defined]
+        return _GreenContext.create(  # type: ignore[attr-defined]
+            device_id=device_id,
+            num_sms=num_sms,
+            workqueue_scope=workqueue_scope,
+            workqueue_concurrency_limit=workqueue_concurrency_limit,
+        )
 
-    # Note that these functions are bypassed by we define them here
+    @staticmethod
+    def max_workqueue_concurrency(device_id: int | None = None) -> int:
+        r"""Return the maximum workqueue concurrency limit for the device.
+
+        This queries the device for the default number of concurrent
+        stream-ordered workloads supported by workqueue configuration
+        resources.
+
+        Arguments:
+            device_id (int, optional): The device index to query. When
+                ``None``, the current device is used.
+        """
+        if not SUPPORTED:
+            raise RuntimeError("PyTorch was not built with Green Context support!")
+        return _GreenContext.max_workqueue_concurrency(device_id=device_id)  # type: ignore[attr-defined]
+
+    # Note that these functions are bypassed but we define them here
     # for Sphinx documentation purposes
     def set_context(self) -> None:  # pylint: disable=useless-parent-delegation
         r"""Make the green context the current context."""
@@ -42,6 +87,6 @@ class GreenContext(_GreenContext):
         """
         return super().pop_context()  # type: ignore[misc]
 
-    def Stream(self) -> torch.Stream:
+    def Stream(self) -> "torch.cuda.Stream":
         r"""Return the CUDA Stream used by the green context."""
         return super().Stream()

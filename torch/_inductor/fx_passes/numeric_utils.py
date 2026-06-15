@@ -207,7 +207,7 @@ def numeric_check_if_enabled(
                 precision=precision,
             )
     except Exception as e:
-        logger.warning(  # noqa: G200
+        logger.warning(
             "Runtime numeric check failed in pre grad fx passes with error: %s", e
         )
         traceback.print_exc()

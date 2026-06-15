@@ -230,7 +230,7 @@ def _map_to_rank_local_val(val: Any, rank: int) -> Any:
 
 def _collect_accelerator_rng_states() -> dict[int, torch.Tensor]:
     """
-    Collects RNG state from all available acceleator devices.
+    Collects RNG state from all available accelerator devices.
 
     Returns:
         List of RNG state tensors, one for each accelerator device.
@@ -1240,6 +1240,10 @@ class LocalTensorMode(TorchDispatchMode):
     functions over ranks.
     """
 
+    @classmethod
+    def ignore_compile_internals(cls) -> bool:
+        return True
+
     # What ranks this local tensor mode is operating over
     def __init__(self, ranks: int | frozenset[int]):
         if isinstance(ranks, int):
@@ -1319,6 +1323,44 @@ class LocalTensorMode(TorchDispatchMode):
                 "LocalTensorMode unrecognized subclass(es): %s", unrecognized_types
             )
             return NotImplemented
+
+        # device_mesh::_runtime_compute_coordinate_on_dim is checked before the
+        # no-LocalTensor early return because compile-on-one-rank calls it with
+        # only a plain mesh-tensor argument, but the result must still vary per
+        # simulated rank under LocalTensorMode.
+        if (
+            not self._disable
+            and func.namespace == "device_mesh"
+            and func is torch.ops.device_mesh._runtime_compute_coordinate_on_dim.default
+        ):
+            from torch.fx.operator_schemas import normalize_function
+
+            normalized = normalize_function(
+                func,
+                args,
+                kwargs,
+                normalize_to_only_use_kwargs=True,
+            )
+            if normalized is None:
+                raise AssertionError(
+                    "LocalTensorMode could not normalize arguments for "
+                    "device_mesh::_runtime_compute_coordinate_on_dim"
+                )
+            full_mesh = normalized.kwargs["full_mesh"]
+            index = normalized.kwargs["index"]
+            rank_results: dict[int, int] = {}
+            for r in self.ranks:
+                mesh_tensor = DeviceMesh._get_mesh_tensor_from_full_mesh(
+                    full_mesh, current_rank=r
+                )
+                mesh_coords = DeviceMesh._compute_coordinates_from_mesh(mesh_tensor, r)
+                if mesh_coords is None:
+                    raise RuntimeError(
+                        f"Rank {r} not found in mesh tensor for "
+                        "_runtime_compute_coordinate_on_dim"
+                    )
+                rank_results[r] = mesh_coords[index]
+            return _combine_int_rank_results(rank_results)
 
         # Factory functions convert into LocalTensor, so we don't have to
         # transmute a Tensor into a LocalTensor if mutation happens...
@@ -1891,7 +1933,7 @@ class _ExceptionRaisingThread(threading.Thread):
     def run(self):
         try:
             super().run()
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             self.exception = e
 
     def join(self, timeout=None):

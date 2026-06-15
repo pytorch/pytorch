@@ -36,12 +36,8 @@ inline bool isAcceleratorExcluded(
     c10::DeviceType device_type,
     c10::DeviceType first_excluded,
     T... rest_excluded) {
-  if constexpr (sizeof...(rest_excluded) > 0) {
-    return device_type != first_excluded &&
-        isAcceleratorExcluded(device_type, rest_excluded...);
-  } else {
-    return device_type != first_excluded && isAccelerator(device_type);
-  }
+  return isAccelerator(device_type) && (device_type != first_excluded) &&
+      ((device_type != rest_excluded) && ...);
 }
 
 // Return the number of the device available. Note that this is *REQUIRED* to
@@ -78,10 +74,18 @@ TORCH_API c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index);
 TORCH_API c10::DeviceCapability getDeviceCapability(
     c10::DeviceIndex device_index);
 
+// Releases all unused device memory currently held by the accelerator's
+// device-side caching allocator. The freed memory becomes available for reuse
+// by other applications or processes.
 TORCH_API inline void emptyCache() {
   const auto device_type = getAccelerator(true).value();
   at::getDeviceAllocator(device_type)->emptyCache();
 }
+
+// Releases all unused host (pinned) memory currently held by the accelerator's
+// host-side caching allocator. The freed memory becomes available for reuse by
+// other applications or processes.
+TORCH_API void emptyHostCache();
 
 TORCH_API inline at::CachingDeviceAllocator::DeviceStats getDeviceStats(
     c10::DeviceIndex device_index) {

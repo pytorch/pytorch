@@ -1,4 +1,3 @@
-# flake8: noqa: F401
 r"""Quantized Dynamic Modules.
 
 This file is in the process of migration to `torch/ao/nn/quantized/dynamic`,

@@ -74,7 +74,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // Returns exception if isSuccess() returned false.
   virtual std::exception_ptr exception() const;
 
-  // Returns source rank if this objects represents a recv-from-any.
+  // Returns source rank if this object represents a recv-from-any.
   virtual int sourceRank() const;
 
   // Returns result tensors, if applicable.
@@ -182,5 +182,8 @@ struct TORCH_API WorkInfo {
   std::chrono::time_point<std::chrono::steady_clock> timeFinished;
   std::chrono::duration<float> activeDuration;
 };
+
+TORCH_API void set_comm_profiling_name(const std::string& name);
+TORCH_API const std::string& get_comm_profiling_name();
 
 } // namespace c10d

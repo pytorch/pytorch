@@ -636,7 +636,7 @@ std::string _format_non_converging_batches(const std::vector<int64_t>& batches) 
     ss << "and other " << batches.size() - too_long << " batches";
   }
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 // This function returns V, not V^H.
@@ -802,7 +802,7 @@ void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& inf
     return;
   }
 
-  if (use_cusolver_potrf_batched_ && batchCount(input) > 1) {
+  if (batchCount(input) > 1) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cusolver", [&] {
       apply_cholesky_cusolver_potrfBatched<scalar_t>(input, upper, info);
     });
@@ -825,7 +825,7 @@ static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, const Tenso
   const int64_t self_matrix_stride = matrixStride(self_working_copy);
   scalar_t* self_working_copy_ptr = self_working_copy.data_ptr<scalar_t>();
 
-  scalar_t* A_ptr = A_column_major_copy.data_ptr<scalar_t>();
+  const scalar_t* A_ptr = A_column_major_copy.const_data_ptr<scalar_t>();
   const int64_t A_matrix_stride = matrixStride(A_column_major_copy);
   const int64_t ldb = std::max<int64_t>(1, A_column_major_copy.size(-1));
 
@@ -1664,11 +1664,20 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
     const auto pivots_stride = get_pivots ? pivots.size(-1) : 0;
 
     const auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+    int lwork;
+    at::cuda::solver::getrf_bufferSize<scalar_t>(
+      handle, m, n, self_data, lda, &lwork);
+    auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+    auto workspace = allocator.allocate(sizeof(scalar_t) * lwork);
+    auto workspace_ptr = static_cast<scalar_t*>(workspace.get());
+
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
       at::cuda::solver::getrf<scalar_t>(
         handle, m, n,
         self_data + batch * self_stride,
         lda,
+        workspace_ptr,
         get_pivots ? pivots_data + batch * pivots_stride : nullptr,
         infos_data + batch
       );

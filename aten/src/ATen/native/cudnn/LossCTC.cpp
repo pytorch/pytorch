@@ -22,6 +22,8 @@
 #include <ATen/ops/lt.h>
 #endif
 
+#include <utility>
+
 #if (!AT_CUDNN_ENABLED())
 
 namespace at {
@@ -134,7 +136,7 @@ bool _use_cudnn_ctc_loss_tensor(
     if (at::cuda::currentStreamCaptureStatus() ==
         at::cuda::CaptureStatus::None) {
       Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-      IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+      IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
       for (const auto b : c10::irange(tl.size())) {
         // target length < 256 is documented, but we see illegal memory accesses
         // when target lengths > input lengths for CuDNN
@@ -142,7 +144,7 @@ bool _use_cudnn_ctc_loss_tensor(
         Tensor tlc =
             target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
         IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
-        IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+        IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
         use_cudnn = use_cudnn && (tl[b] < 256) && (tl[b] <= il[b]);
         if (!use_cudnn) {
           break;
@@ -246,7 +248,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
       ctc_loss_desc.desc(),
       workspace.data_ptr(),
       workspace_size));
-  return std::make_tuple(costs, grad);
+  return std::make_tuple(std::move(costs), std::move(grad));
 }
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
@@ -342,7 +344,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
       workspace.data_ptr()
 
           ));
-  return std::make_tuple(costs, grad);
+  return std::make_tuple(std::move(costs), std::move(grad));
 }
 
 } // namespace at::native

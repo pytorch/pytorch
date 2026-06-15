@@ -275,9 +275,9 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
 
 std::vector<SchemaSpecialCasePair> SchemaInfo::getTrainingOps() {
   // This is a list of pairs of ops to sets of strings
-  //  where the a boolean variable (either "training",
+  //  where a boolean variable (either "training",
   // "train" or "use_input_stats") affects the mutability
-  // of the unorderered set of strings.
+  // of the unordered set of strings.
   static const std::vector<std::pair<std::string, std::unordered_set<std::string>>> training_op_pairs =
       {{"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
         {"running_mean", "running_var"}},

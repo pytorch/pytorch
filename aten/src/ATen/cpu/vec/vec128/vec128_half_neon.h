@@ -4,7 +4,6 @@
 // See Note [Do not compile initializers with AVX]
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec128/vec128_convert.h>
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_reduced_precision_common_neon.h>
 #include <ATen/cpu/vec/vec_base.h>
@@ -200,14 +199,12 @@ class Vectorized<c10::Half> : public Vectorized16<
     if (count == size()) {
       return vld1q_f16(reinterpret_cast<const float16_t*>(ptr));
     }
-    __at_align__ float16_t tmp_values[size()];
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
-    }
+    // Zero tail past `count`.
+    __at_align__ float16_t tmp_values[size()] = {};
     std::memcpy(
         tmp_values,
         reinterpret_cast<const float16_t*>(ptr),
-        count * sizeof(float16_t));
+        std::min<int64_t>(count, size()) * sizeof(float16_t));
     return vld1q_f16(reinterpret_cast<const float16_t*>(tmp_values));
   }
   void store(void* ptr, int64_t count = size()) const {
@@ -217,7 +214,10 @@ class Vectorized<c10::Half> : public Vectorized16<
     } else {
       float16_t tmp_values[size()];
       vst1q_f16(reinterpret_cast<float16_t*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(float16_t));
+      std::memcpy(
+          ptr,
+          tmp_values,
+          std::min<int64_t>(count, size()) * sizeof(float16_t));
     }
   }
   int zero_mask() const {

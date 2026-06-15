@@ -91,7 +91,7 @@ void inlineBody(Node* loop) {
 }
 
 // inserts a copy of body, passing inputs to the inputs of the block
-// it returns the a list of the Values for the output of the block
+// it returns a list of the Values for the output of the block
 std::vector<Value*> insertBlockCopy(
     Graph& graph,
     Block* body,

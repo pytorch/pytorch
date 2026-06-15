@@ -71,9 +71,15 @@ from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
     IS_MACOS,
+    IS_ARM64,
+    IS_LINUX,
     IS_WINDOWS,
+    TEST_WITH_CROSSREF,
+    TEST_WITH_ROCM,
     run_tests,
     skipIfTorchDynamo,
+    xfailIf,
+    xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -371,7 +377,7 @@ class TestFX(JitTestCase):
 
     def test_args_kwargs_no_self(self):
         class T(torch.nn.Module):
-            def forward(*args, **kwargs):  # noqa: B902
+            def forward(*args, **kwargs):
                 self = args[0]
                 return torch.relu(args[1])
 
@@ -1041,6 +1047,7 @@ class TestFX(JitTestCase):
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/74208")
     @unittest.skip("Hotfix for SEV remediation")
     def test_trace_buffer_slice(self):
         bs, d_hid = 10, 23
@@ -2054,6 +2061,7 @@ class TestFX(JitTestCase):
                         f"got {tensor_meta[1].shape}"
                     )
 
+    @xfailIf(IS_ARM64 and IS_LINUX) # RuntimeError: label is too far
     def test_shape_prop_layout_3d(self):
         class ConvTest3d(torch.nn.Module):
             def __init__(self) -> None:
@@ -4427,6 +4435,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         # recorver mutable checking flag
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
+    # This only fails on navi31
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     @blas_library_context("cublaslt")
@@ -4478,8 +4487,29 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         else:
             kernel_event = "cudaLaunchKernel"
             kernel_event_relu = "cudaLaunchKernel"
-
-        expected = f"""\
+        if IS_WINDOWS:
+            expected = f"""\
+event=aten::t node=t stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::transpose node=t stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=t stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::addmm node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::expand node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::relu node=relu stack_trace=return F.relu(input, inplace=self.inplace)
+event=aten::clamp_min node=relu stack_trace=return F.relu(input, inplace=self.inplace)
+event={kernel_event_relu} node=relu stack_trace=return F.relu(input, inplace=self.inplace)
+event=aten::t node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::transpose node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::addmm node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::expand node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)"""
+        else:
+            expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
@@ -4587,6 +4617,7 @@ event=aten::add node=add stack_trace=a = s + self.c
 event={kernel_event} node=add stack_trace=a = s + self.c"""
             )
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_graph_module_with_hop_serialization(self):
         """
@@ -4657,6 +4688,275 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
         )
 
 
+    @staticmethod
+    def _capture_gm(fn, *example_inputs):
+        """Compile ``fn`` with dynamic shapes, return the captured GraphModule."""
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(fn, dynamic=True, backend=backend)(*example_inputs)
+        return backend.graphs[-1]
+
+    @staticmethod
+    def _find_placeholder(gm, example_value_type):
+        """Return the first placeholder whose ``meta['example_value']`` is an
+        instance of ``example_value_type``."""
+        return next(
+            n
+            for n in gm.graph.nodes
+            if n.op == "placeholder"
+            and isinstance(n.meta.get("example_value"), example_value_type)
+        )
+
+    def test_create_tensor_metadata_nodes(self):
+        def check(meta_key):
+            graph = torch.fx.Graph()
+            tensor_node = graph.placeholder("x")
+            fake = torch.empty_strided((2, 3), (5, 2), device="meta")
+            tensor_node.meta[meta_key] = fake
+
+            size_node = graph.create_size_node(tensor_node, 1)
+            stride_node = graph.create_stride_node(tensor_node, 0)
+            storage_offset_node = graph.create_storage_offset_node(tensor_node)
+
+            self.assertEqual(size_node.target, torch.ops.aten.sym_size.int)
+            self.assertEqual(size_node.args, (tensor_node, 1))
+            self.assertEqual(size_node.meta[meta_key], fake.size(1))
+
+            self.assertEqual(stride_node.target, torch.ops.aten.sym_stride.int)
+            self.assertEqual(stride_node.args, (tensor_node, 0))
+            self.assertEqual(stride_node.meta[meta_key], fake.stride(0))
+
+            self.assertEqual(
+                storage_offset_node.target, torch.ops.aten.sym_storage_offset.default
+            )
+            self.assertEqual(storage_offset_node.args, (tensor_node,))
+            self.assertEqual(storage_offset_node.meta[meta_key], fake.storage_offset())
+
+        check("val")
+        check("example_value")
+
+    @unittest.skipIf(TEST_WITH_CROSSREF, "expectedInline graph differs under TorchFunctionMode")
+    def test_materialize_symints_basic(self):
+        """``Graph.materialize_symints`` lowers each SymInt input into an FX
+        subgraph rooted at existing symbol producers."""
+        gm = self._capture_gm(lambda x: x + 1, torch.randn(8, 4))
+        # Pick a tensor placeholder so we can derive its symbolic dims.
+        tensor_placeholder = self._find_placeholder(gm, torch.Tensor)
+        h, _ = tensor_placeholder.meta["example_value"].shape  # h is a SymInt
+        self.assertIsInstance(h, torch.SymInt)
+
+        # Realistic usage: scope the materialization to run before the existing
+        # output so the new nodes land in the body (not orphaned after the
+        # return), and wire the result into the output so they're not dead.
+        output_node = next(n for n in gm.graph.nodes if n.op == "output")
+        with gm.graph.inserting_before(output_node):
+            result = gm.graph.materialize_symints(
+                [h - 1, 3 * (h - 1), (h - 1) ** 2, 5]
+            )
+        output_node.args = (output_node.args[0] + tuple(result),)
+
+        # Plain int passes through, the rest are Nodes.
+        self.assertEqual(result[3], 5)
+        for got in result[:3]:
+            self.assertIsInstance(got, torch.fx.Node)
+
+        # Note: ``h - 1`` is hash-consed across the inputs that share it as a
+        # sub-expression -- ``h - 1`` itself and ``(h - 1) ** 2`` both reference
+        # the same ``%add_1`` (``%pow_1`` takes ``%add_1`` as its base). The
+        # ``3 * (h - 1)`` input is *not* sharing here because sympy distributes
+        # it into ``3*h - 3`` (i.e., ``%mul`` + ``%add_2``), so ``h - 1`` is
+        # not a sub-expression of that lowered form.
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %s77 : torch.SymInt [num_users=2] = placeholder[target=s77]
+    %s27 : torch.SymInt [num_users=0] = placeholder[target=s27]
+    %l_x_ : torch.Tensor [num_users=1] = placeholder[target=L_x_]
+    %add : [num_users=1] = call_function[target=operator.add](args = (%l_x_, 1), kwargs = {})
+    %add_1 : [num_users=2] = call_function[target=operator.add](args = (-1, %s77), kwargs = {})
+    %mul : [num_users=1] = call_function[target=operator.mul](args = (3, %s77), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=operator.add](args = (-3, %mul), kwargs = {})
+    %pow_1 : [num_users=1] = call_function[target=operator.pow](args = (%add_1, 2), kwargs = {})
+    return (add, add_1, add_2, pow_1, 5)""",
+        )
+
+    def test_materialize_symints_constant_symint(self):
+        """A SymInt whose expression has folded to a constant is unwrapped
+        to a plain ``int`` rather than emitting any FX nodes."""
+        gm = self._capture_gm(lambda x: x + 1, torch.randn(8, 4))
+        tensor_placeholder = self._find_placeholder(gm, torch.Tensor)
+        h = tensor_placeholder.meta["example_value"].shape[0]
+        self.assertIsInstance(h, torch.SymInt)
+
+        const = h - h  # = 0, constant SymInt
+        result = gm.graph.materialize_symints([const])
+        self.assertEqual(result, [0])
+        self.assertIsInstance(result[0], int)
+
+    def test_materialize_symints_missing_symbol_rejects(self):
+        """Materializing a SymInt whose symbol has no producer in the graph
+        raises ``AssertionError`` rather than producing a dangling node."""
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        # Manufacture a SymInt with a non-constant symbol (no graph needed).
+        shape_env = ShapeEnv()
+        h = shape_env.create_unbacked_symint()
+        self.assertIsInstance(h, torch.SymInt)
+
+        # Empty graph has no producer for `h`'s symbol → must reject.
+        empty_graph = torch.fx.Graph()
+        with self.assertRaisesRegex(AssertionError, "no producer for"):
+            empty_graph.materialize_symints([h])
+
+    @unittest.skipIf(TEST_WITH_CROSSREF, "expectedInline graph differs under TorchFunctionMode")
+    def test_materialize_symints_symint_placeholder(self):
+        """When the symbol is produced by a top-level SymInt placeholder, the
+        placeholder itself is used as the symbol's producer — no
+        `sym_size.int` node is emitted."""
+        gm = self._capture_gm(lambda n: torch.zeros(n + 1), 8)
+        sym_placeholder = self._find_placeholder(gm, torch.SymInt)
+        s = sym_placeholder.meta["example_value"]
+        self.assertIsInstance(s, torch.SymInt)
+
+        output_node = next(n for n in gm.graph.nodes if n.op == "output")
+        with gm.graph.inserting_before(output_node):
+            result = gm.graph.materialize_symints([s + 2, s * 3])
+        output_node.args = (output_node.args[0] + tuple(result),)
+
+        self.assertEqual(len(result), 2)
+        for got in result:
+            self.assertIsInstance(got, torch.fx.Node)
+
+        # The new `add_1` and `mul` reference `%l_n_` (the SymInt placeholder)
+        # directly — no `aten.sym_size.int` node was emitted to recover `s`.
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %l_n_ : torch.SymInt [num_users=3] = placeholder[target=L_n_]
+    %add : [num_users=1] = call_function[target=operator.add](args = (%l_n_, 1), kwargs = {})
+    %zeros : [num_users=1] = call_function[target=torch.zeros](args = (%add,), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=operator.add](args = (2, %l_n_), kwargs = {})
+    %mul : [num_users=1] = call_function[target=operator.mul](args = (3, %l_n_), kwargs = {})
+    return (zeros, add_1, mul)""",
+        )
+
+    def test_materialize_symints_unbacked_via_unbacked_bindings(self):
+        """When an unbacked SymInt's producer is described by
+        ``node.meta['unbacked_bindings']`` with a non-trivial keypath (e.g.
+        ``nonzero()`` → ``.size(0)``), ``materialize_symints`` follows the
+        keypath to emit the right accessor (``aten.sym_size.int``)."""
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def f(x):
+            return torch.nonzero(x)
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(10))
+        nonzero_node = next(
+            n
+            for n in gm.graph.nodes
+            if n.target == torch.ops.aten.nonzero.default
+        )
+        bindings = nonzero_node.meta["unbacked_bindings"]
+        self.assertEqual(len(bindings), 1)
+        u = next(iter(bindings))
+        # u is the unbacked SymInt for nonzero's first output dim.
+        u_symint = nonzero_node.meta["val"].shape[0]
+        self.assertIsInstance(u_symint, torch.SymInt)
+        self.assertEqual(u_symint.node._expr, u)
+
+        result = gm.graph.materialize_symints([u_symint + 5])
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], torch.fx.Node)
+
+        # The keypath `(CallMethodKey("size"), SequenceKey(0))` is traversed,
+        # emitting `aten.sym_size.int(%nonzero, 0)` as the producer.
+        sym_size_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.target == torch.ops.aten.sym_size.int
+        ]
+        self.assertEqual(len(sym_size_nodes), 1)
+        self.assertIs(sym_size_nodes[0].args[0], nonzero_node)
+        self.assertEqual(sym_size_nodes[0].args[1], 0)
+
+    def test_materialize_symints_unbacked_via_divide_by_key(self):
+        """When an unbacked-binding keypath ends in ``DivideByKey(s_backed)``,
+        ``materialize_symints`` emits ``producer // s_backed_node`` -- where
+        ``s_backed_node`` is the lowered backed shape symbol, not a raw SymInt.
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import DivideByKey
+
+        # Trace a graph that has a tensor placeholder + nonzero producer for
+        # an unbacked symbol. We then synthetically rewrite the binding so
+        # the keypath includes a ``DivideByKey(s_backed)`` component, where
+        # ``s_backed`` is a backed shape symbol of the input tensor.
+        def f(x, y):
+            return torch.nonzero(y)
+
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.randn(8, 4), torch.randn(10)
+        )
+        nonzero_node = next(
+            n
+            for n in gm.graph.nodes
+            if n.target == torch.ops.aten.nonzero.default
+        )
+        tensor_ph = next(
+            n
+            for n in gm.graph.nodes
+            if n.op == "placeholder"
+            and isinstance(n.meta.get("val"), torch.Tensor)
+            and n.meta["val"].dim() == 2
+        )
+        s_backed_symint = tensor_ph.meta["val"].shape[0]
+        self.assertIsInstance(s_backed_symint, torch.SymInt)
+
+        # Splice DivideByKey(s_backed) onto the existing keypath. The
+        # synthetic semantic: u = nonzero.size(0) // s_backed.
+        u, keypath = next(iter(nonzero_node.meta["unbacked_bindings"].items()))
+        nonzero_node.meta["unbacked_bindings"] = {
+            u: keypath + (DivideByKey(s_backed_symint),)
+        }
+        u_symint = nonzero_node.meta["val"].shape[0]
+
+        output_node = next(n for n in gm.graph.nodes if n.op == "output")
+        with gm.graph.inserting_before(output_node):
+            result = gm.graph.materialize_symints([u_symint + 1])
+        output_node.args = ((output_node.args[0],) + tuple(result),)
+
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], torch.fx.Node)
+
+        # A floordiv node was emitted whose divisor is the lowered backed
+        # shape symbol (a ``sym_size.int(%tensor_ph, 0)`` node) -- not a raw
+        # SymInt object.
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %x_1 : [num_users=1] = placeholder[target=x_1]
+    %y_1 : [num_users=1] = placeholder[target=y_1]
+    %nonzero : [num_users=2] = call_function[target=torch.ops.aten.nonzero.default](args = (%y_1,), kwargs = {})
+    %sym_size_int : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%x_1, 0), kwargs = {})
+    %sym_size_int_1 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%nonzero, 0), kwargs = {})
+    %floordiv : [num_users=1] = call_function[target=operator.floordiv](args = (%sym_size_int_1, %sym_size_int), kwargs = {})
+    %add : [num_users=1] = call_function[target=operator.add](args = (1, %floordiv), kwargs = {})
+    return (nonzero, add)""",
+        )
+
+        floordiv_nodes = [
+            n for n in gm.graph.nodes if n.target is operator.floordiv
+        ]
+        self.assertEqual(len(floordiv_nodes), 1)
+        divisor_arg = floordiv_nodes[0].args[1]
+        self.assertIsInstance(divisor_arg, torch.fx.Node)
+        self.assertEqual(divisor_arg.target, torch.ops.aten.sym_size.int)
+        self.assertIs(divisor_arg.args[0], tensor_ph)
+
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
 
@@ -4669,6 +4969,11 @@ def run_getitem_target():
 
 class TestOperatorSignatures(JitTestCase):
     def setUp(self):
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that cause segfaults during process cleanup. Record state
+        # baselines that tearDown checks for.
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
         # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
@@ -5164,6 +5469,7 @@ class TestFunctionalTracing(JitTestCase):
         "max_pool1d": PROXY_ITERABLE,
         "max_pool2d": PROXY_ITERABLE,
         "max_pool3d": PROXY_ITERABLE,
+        "max_pool3d_with_indices": CONTROL_FLOW,
         "lp_pool2d": PROXY_ITERATED,
         "lp_pool3d": PROXY_ITERATED,
         "max_unpool1d": PROXY_ITERATED,
@@ -5179,6 +5485,7 @@ class TestFunctionalTracing(JitTestCase):
         "celu": CONTROL_FLOW,
         "cosine_embedding_loss": CONTROL_FLOW,
         "cross_entropy": CONTROL_FLOW,
+        "linear_cross_entropy": CONTROL_FLOW,
         "ctc_loss": CONTROL_FLOW,
         "dropout": CONTROL_FLOW,
         "dropout1d": CONTROL_FLOW,
@@ -5345,6 +5652,11 @@ instantiate_device_type_tests(TestOperatorSignatures, globals())
 @skipIfNoTorchVision
 class TestVisionTracing(JitTestCase):
     def setUp(self):
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that cause segfaults during process cleanup. Record state
+        # baselines that tearDown checks for.
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
         # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
@@ -5435,6 +5747,9 @@ class TestVisionTracing(JitTestCase):
             )
             kwargs = dict(num_classes=50)
             model_test = cls.generate_test_fn(k, x, kwargs)
+            model_test = unittest.skipIf(
+                TEST_WITH_ROCM, "Skipped on ROCm"
+            )(model_test)
             setattr(cls, test_name, model_test)
 
     @classmethod

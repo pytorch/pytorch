@@ -495,7 +495,7 @@ static onnx::AttributeProto_AttributeType ATenAttributeKindToOnnxAttributeType(
       std::ostringstream err_msg;
       err_msg << "attribute \"" << name.toDisplayString()
               << "\" has unexpected kind: " << toString(at_kind);
-      throw std::runtime_error(err_msg.str());
+      throw std::runtime_error(std::move(err_msg).str());
   }
 }
 
@@ -1162,7 +1162,7 @@ void GraphEncoder::AddAttribute(
       std::ostringstream err_msg;
       err_msg << "attribute \"" << name.toDisplayString()
               << "\" has unexpected kind: " << toString(node->kindOf(name));
-      throw std::runtime_error(err_msg.str());
+      throw std::runtime_error(std::move(err_msg).str());
   }
 }
 
@@ -1446,7 +1446,6 @@ void check_onnx_proto(const std::string& proto_string) {
   onnx::ModelProto model;
   if (!ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size())) {
     throw std::runtime_error("Invalid ONNX proto string.");
-    return;
   }
   // 1. baseline check
   // These two checks prevent broken graph being generated

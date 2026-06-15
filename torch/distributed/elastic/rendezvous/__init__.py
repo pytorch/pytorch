@@ -54,7 +54,7 @@ rendezvous is destroyed first.
 
 When a rendezvous is completed, all its members will agree on the job membership
 and everyone's role in it. This role is represented using an integer, called
-rank, that is between between 0 and world size.
+rank, that is between 0 and world size.
 
 Note that ranks are *not stable*, in the sense that the same node can be
 assigned a different rank in the next (re-)rendezvous.

@@ -726,12 +726,23 @@ statements more clearly show whether they are referring to packaged code or not.
   :members:
 ```
 
-<!-- This module needs to be documented. Adding here in the meantime
-for tracking purposes -->
+## Analysis Utilities
 ```{eval-rst}
 .. py:module:: torch.package.analyze.find_first_use_of_broken_modules
 .. py:module:: torch.package.analyze.is_from_package
 .. py:module:: torch.package.analyze.trace_dependencies
+
+.. currentmodule:: torch.package.analyze.find_first_use_of_broken_modules
+
+.. autofunction:: find_first_use_of_broken_modules
+
+.. currentmodule:: torch.package.analyze.is_from_package
+
+.. autofunction:: is_from_package
+
+.. currentmodule:: torch.package.analyze.trace_dependencies
+
+.. autofunction:: trace_dependencies
 .. py:module:: torch.package.file_structure_representation
 .. py:module:: torch.package.find_file_dependencies
 .. py:module:: torch.package.glob_group

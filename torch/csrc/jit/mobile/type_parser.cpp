@@ -4,6 +4,7 @@
 #include <ATen/core/type_factory.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/custom_class.h>
+#include <array>
 #include <string_view>
 
 using torch::jit::valid_single_char_tokens;
@@ -158,7 +159,6 @@ TypePtr TypeParser::parse() {
         " is not supported in the parser, ",
         "or the token is in wrong format.");
   }
-  return nullptr;
 }
 
 // NamedTuple custom type will be following structure:
@@ -243,13 +243,12 @@ TypePtr TypeParser::parseCustomType() {
       TORCH_CHECK(
           false, "Can't find definition for the type: ", qualified_name);
     }
-    return nullptr;
   }
 }
 
 TypePtr TypeParser::parseTorchbindClassType() {
-  static constexpr std::array<const char*, 4> expected_atoms = {
-      "torch", ".", "classes", "."};
+  static constexpr auto expected_atoms =
+      std::to_array<std::string_view>({"torch", ".", "classes", "."});
   for (const auto& atom : expected_atoms) {
     expect(atom);
   }
@@ -265,7 +264,7 @@ TypePtr TypeParser::parseTorchbindClassType() {
   return torch::getCustomClass(customClassName);
 }
 
-void TypeParser::expect(const char* s) {
+void TypeParser::expect(std::string_view s) {
   std::string_view token = cur();
   TORCH_CHECK(
       token == s,

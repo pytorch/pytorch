@@ -1542,7 +1542,7 @@ class TestModuleHookNN(NNTestCase):
                 # Input inplace error should throw an error
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "Output 0 of BackwardHookFunctionBackward is "
+                    "Output 0 of BackwardHookFunction is "
                     "a view and is being modified inplace.",
                 ):
                     mod(inp.clone(), True)
@@ -1554,7 +1554,7 @@ class TestModuleHookNN(NNTestCase):
                 local_inp[0] *= 1
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "Output 0 of BackwardHookFunctionBackward is "
+                    "Output 0 of BackwardHookFunction is "
                     "a view and its base or another view",
                 ):
                     # Any operation involving the view will fail here
@@ -1564,8 +1564,7 @@ class TestModuleHookNN(NNTestCase):
                 out = mod(inp, False)
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "BackwardHookFunctionBackward is a view "
-                    "and is being modified inplace.",
+                    "BackwardHookFunction is a view and is being modified inplace.",
                 ):
                     out += 1
 

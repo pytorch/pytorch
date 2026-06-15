@@ -193,6 +193,7 @@ class TestOneArrAndShape(TestCase):
     """Smoke test of functions (array_like, shape_like) -> array_like"""
 
     def setUp(self):
+        super().setUp()
         self.shape = (2, 3)
         self.shape_arg_name = {
             w.reshape: "newshape",

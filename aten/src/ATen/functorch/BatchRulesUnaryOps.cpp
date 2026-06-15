@@ -39,12 +39,12 @@ clone_batch_rule(
     // philosophically vmap hides the batch dims and operates on a per-sample level.
     auto self_ = moveBatchDimToFront(self, self_bdim);
     auto result = at::clone(self_, memory_format);
-    return std::make_tuple(result, 0);
+    return std::make_tuple(std::move(result), 0);
   }
 
   TORCH_INTERNAL_ASSERT(!memory_format.has_value() || memory_format == MemoryFormat::Preserve);
   auto result = at::clone(self, memory_format);
-  return std::make_tuple(result, self_bdim);
+  return std::make_tuple(std::move(result), self_bdim);
 }
 
 std::tuple<Tensor, std::optional<int64_t>>
@@ -55,7 +55,7 @@ view_as_complex_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim)
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto result = at::view_as_complex(self_);
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 }

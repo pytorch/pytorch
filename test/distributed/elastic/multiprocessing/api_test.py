@@ -15,6 +15,7 @@ import signal
 import sys
 import tempfile
 import time
+import unittest
 from collections.abc import Callable
 from itertools import product
 from unittest import mock
@@ -35,6 +36,7 @@ from torch.distributed.elastic.multiprocessing.api import (
 from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
@@ -42,6 +44,7 @@ from torch.testing._internal.common_utils import (
     skip_if_pytest,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -447,6 +450,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     for i in range(pc.nprocs):
                         self.assertEqual(size, len(results.return_values[i]))
 
+        @unittest.skipIf(
+            TEST_WITH_ROCM,
+            "Skipped on ROCm due to hang in MultiprocessContext.wait after Kineto bump (PR #177101, 1fd9c49); investigating",
+        )
         def test_function_raise(self):
             """
             run 2x copies of echo2, raise an exception on the first
@@ -716,6 +723,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                                 [f"hello stderr from {i}"], results.stderrs[i]
                             )
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/163230",
+        )
         def test_binary_redirect_and_tee(self):
             pc = start_processes(
                 name="trainer",
@@ -1022,6 +1033,92 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                 del os.environ[mp.ENV_VAR_PARALLEL_START]
             else:
                 os.environ[mp.ENV_VAR_PARALLEL_START] = self.orig_paralell_env_val
+
+
+class BoundedCloseTest(TestCase):
+    """Verify that _close in MultiprocessContext / SubprocessContext returns
+    within a bounded time when child processes refuse to die (simulating a
+    Linux D-state worker, which SIGKILL cannot reap).
+    """
+
+    def _make_multiprocess_context(self) -> MultiprocessContext:
+        log_dir = tempfile.mkdtemp(prefix="BoundedCloseTest")
+        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
+        return MultiprocessContext(
+            name="test",
+            entrypoint=time.sleep,
+            args={0: (0,)},
+            envs={0: {}},
+            start_method="spawn",
+            logs_specs=DefaultLogsSpecs(log_dir=log_dir),
+        )
+
+    def test_multiprocess_context_close_bounded_when_unkillable(self):
+        ctx = self._make_multiprocess_context()
+        unkillable = mock.Mock()
+        unkillable.pid = 99999
+        unkillable.is_alive.return_value = True
+        # Simulate a process that never exits: every bounded join honors
+        # the timeout the caller passes. We assert below that _close still
+        # returns promptly because it now passes a bounded timeout.
+        join_calls: list[float | None] = []
+
+        def _join(t: float | None = None) -> None:
+            join_calls.append(t)
+
+        unkillable.join.side_effect = _join
+        ctx._pc = mock.Mock()
+        ctx._pc.processes = [unkillable]
+        with mock.patch("os.kill"):
+            ctx._close(death_sig=signal.SIGTERM, timeout=1)
+        # _close must pass a bounded timeout to every join() call;
+        # without the fix the final join would be unbounded (timeout=None).
+        self.assertTrue(join_calls, "expected proc.join() to be called")
+        for t in join_calls:
+            self.assertIsNotNone(t, "proc.join() must be called with a bounded timeout")
+            assert t is not None  # noqa: S101  # for type narrowing
+            self.assertGreater(t, 0)
+
+    def test_subprocess_context_close_bounded_when_unkillable(self):
+        log_dir = tempfile.mkdtemp(prefix="BoundedCloseTest")
+        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
+        from torch.distributed.elastic.multiprocessing.api import SubprocessContext
+
+        ctx = SubprocessContext(
+            name="test",
+            entrypoint="/bin/true",
+            args={0: ()},
+            envs={0: {}},
+            logs_specs=DefaultLogsSpecs(log_dir=log_dir),
+        )
+        handler = mock.Mock()
+        handler.proc = mock.Mock()
+        handler.proc.pid = 99999
+        handler.proc.poll.return_value = None  # always "alive"
+
+        import subprocess as _subprocess
+
+        # Every bounded wait() raises TimeoutExpired immediately; the
+        # unbounded form (timeout=None) is what we want to make sure
+        # _close never invokes.
+        wait_calls: list[float | None] = []
+
+        def _wait(t: float | None = None) -> None:
+            wait_calls.append(t)
+            if t is None:
+                return None
+            raise _subprocess.TimeoutExpired(cmd="test", timeout=t)
+
+        handler.proc.wait.side_effect = _wait
+        ctx.subprocess_handlers = {0: handler}
+        ctx._close(death_sig=signal.SIGTERM, timeout=1)
+        # _close must pass a bounded timeout to every wait() call;
+        # without the fix the final wait would be unbounded (timeout=None).
+        self.assertTrue(wait_calls, "expected proc.wait() to be called")
+        for t in wait_calls:
+            self.assertIsNotNone(t, "proc.wait() must be called with a bounded timeout")
+            assert t is not None  # noqa: S101  # for type narrowing
+            self.assertGreater(t, 0)
 
 
 if __name__ == "__main__":

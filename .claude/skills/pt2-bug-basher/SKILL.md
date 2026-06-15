@@ -10,17 +10,19 @@ Debug test failures and runtime errors in the PyTorch 2 compiler stack (Dynamo, 
 
 ## Workflow Summary
 
-1. **Reproduce** -- Get a consistent reproduction of the failure
-2. **Minimize** -- Reduce the repro to the smallest possible standalone case. Strip away unrelated model logic, use minimal tensor shapes, and isolate the specific op or pattern that triggers the bug.
-3. **Add a unit test** -- **Do this BEFORE diving into code search or root cause investigation.** Add a failing test to the codebase that captures the bug. Place it in a specific, topic-appropriate test file (e.g., `test/dynamo/test_repros.py`, `test/inductor/test_torchinductor.py`, `test/export/test_export.py`). **Avoid `test/dynamo/test_misc.py`** — it is already oversized; find a more specific test file that matches the area of the bug. Use `torch.testing._internal.common_utils.TestCase` and `run_tests`. The test must fail before the fix and pass after. Having the test first keeps you grounded — you know exactly what "fixed" looks like before you start exploring the codebase.
-4. **Gather logs** -- Run with appropriate `TORCH_LOGS` settings
-5. **Classify** -- Use the [Error Triage](#error-triage) table to identify the category
-6. **Inspect artifacts** -- Check FX graphs, IR, and generated code via `TORCH_COMPILE_DEBUG=1`
-7. **Identify root cause** -- Trace from the error back through the compilation pipeline
-8. **Fix** -- Apply the fix
-9. **Verify** -- Run the new unit test AND nearby related existing tests (e.g., if you changed how `is_exporting` works, also run the existing `test_is_exporting` export test). Use `pytest -k` to quickly run related tests by name. The task is not complete until all pass.
-10. **Self-review** -- Use the `/pr-review` skill to review your own changes before presenting them. Fix any issues it flags.
-11. **Celebrate** -- Summarize the changes: explain the root cause, what was changed and why, and which tests were added/verified. Then tell the user the bug is squashed. Include a fun, varied motivational message or easter egg to keep spirits high (e.g., a pun, a quote, an ASCII art bug getting squashed). Keep it short and different each time.
+1. **Environment check** -- Ask the user which conda environment to use. Verify it is active by checking `$CONDA_DEFAULT_ENV`. Then run `python -c "import torch; print(torch.__version__)"` to confirm torch is importable and report the version. If the environment is not active or torch cannot be imported, stop and ask the user to activate the correct environment before proceeding.
+2. **Reproduce** -- Get a consistent reproduction of the failure
+3. **Minimize** -- Reduce the repro to the smallest possible standalone case. Strip away unrelated model logic, use minimal tensor shapes, and isolate the specific op or pattern that triggers the bug.
+4. **Add a unit test** -- **Do this BEFORE diving into code search or root cause investigation.** Add a failing test to the codebase that captures the bug. Place it in a specific, topic-appropriate test file (e.g., `test/dynamo/test_repros.py`, `test/inductor/test_torchinductor.py`, `test/export/test_export.py`). **Avoid `test/dynamo/test_misc.py`** — it is already oversized; find a more specific test file that matches the area of the bug. Use `torch.testing._internal.common_utils.TestCase` and `run_tests`. The test must fail before the fix and pass after. Having the test first keeps you grounded — you know exactly what "fixed" looks like before you start exploring the codebase.
+5. **Validate on main** -- Use `EnterWorktree` to create a worktree checked out at `main`. Copy the new test file into the worktree and run the test there to confirm it **fails** on main. If the test passes on main, stop — the test may not be capturing the right bug, or the bug may already be fixed. Exit the worktree with `ExitWorktree` (action: remove) and return to the working branch before continuing.
+6. **Gather logs** -- Run with appropriate `TORCH_LOGS` settings
+7. **Classify** -- Use the [Error Triage](#error-triage) table to identify the category
+8. **Inspect artifacts** -- Check FX graphs, IR, and generated code via `TORCH_COMPILE_DEBUG=1`
+9. **Identify root cause** -- Trace from the error back through the compilation pipeline
+10. **Fix** -- Apply the fix
+11. **Verify** -- Run the new unit test AND nearby related existing tests (e.g., if you changed how `is_exporting` works, also run the existing `test_is_exporting` export test). Use `pytest -k` to quickly run related tests by name. The task is not complete until all pass.
+12. **Self-review** -- Use the `/pr-review` skill to review your own changes before presenting them. Fix any issues it flags.
+13. **Celebrate** -- Summarize the changes: explain the root cause, what was changed and why, and which tests were added/verified. Then tell the user the bug is squashed. Include a fun, varied motivational message or easter egg to keep spirits high (e.g., a pun, a quote, an ASCII art bug getting squashed). Keep it short and different each time.
 
 ## Investigation Strategy
 

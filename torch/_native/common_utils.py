@@ -3,7 +3,7 @@ import importlib.metadata
 import os
 from functools import cache
 
-import packaging.version
+from torch._vendor.packaging import version as _packaging_version
 
 
 @cache
@@ -24,8 +24,13 @@ def _unavailable_reason(deps: list[tuple[str, str]]) -> None | str:
     NOTE: Doesn't actually import anything.
     """
     for package_name, module_name in deps:
-        # Note this doesn't actually import the packages
-        if importlib.util.find_spec(module_name) is None:
+        # find_spec raises ModuleNotFoundError for dotted names (e.g.
+        # "nvmath.bindings") when the parent package is absent.
+        try:
+            found = importlib.util.find_spec(module_name) is not None
+        except (ModuleNotFoundError, ValueError):
+            found = False
+        if not found:
             return (
                 f"missing optional dependency `{package_name}` "
                 f"(importlib.util.find_spec({package_name}) failed)"
@@ -33,7 +38,7 @@ def _unavailable_reason(deps: list[tuple[str, str]]) -> None | str:
     return None
 
 
-def _available_version(package: str) -> packaging.version.Version | None:
+def _available_version(package: str) -> _packaging_version.Version | None:
     """
     Get the installed version of a package as (major, minor, patch).
 
@@ -47,8 +52,8 @@ def _available_version(package: str) -> packaging.version.Version | None:
         return None
 
     try:
-        v = packaging.version.parse(version)
-    except packaging.version.InvalidVersion:
+        v = _packaging_version.parse(version)
+    except _packaging_version.InvalidVersion:
         return None
 
     return v

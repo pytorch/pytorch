@@ -82,6 +82,11 @@ struct OpMathType<bfloat> {
   using type = float;
 };
 
+template <>
+struct OpMathType<half2> {
+  using type = float2;
+};
+
 // Type promotion structure for higher precision accumulation
 template <typename T>
 struct AccumulationType {
@@ -134,6 +139,26 @@ template <>
 inline bfloat max(bfloat a, bfloat b) {
   return bfloat(
       ::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
+}
+
+// Less-than that sorts NaNs last. Uses a != a instead of metal::isnan,
+// which gave wrong results at large threadgroup sizes on M2.
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> less(
+    T a,
+    T b) {
+  if (a != a)
+    return false;
+  if (b != b)
+    return true;
+  return a < b;
+}
+
+template <typename T>
+inline ::metal::enable_if_t<!::metal::is_floating_point_v<T>, bool> less(
+    T a,
+    T b) {
+  return a < b;
 }
 
 template <typename T>
@@ -250,11 +275,22 @@ template <
 inline T cast_to(const U from) {
   return T(float(from), 0.0);
 }
-// - Complex to scalar (should not really be used, but exists for compliteness)
+// - Complex to bool: nonzero test over both components (matches bool(complex)).
 template <
     typename T,
     typename U,
-    ::metal::enable_if_t<!is_complex_v<T> && is_complex_v<U>, bool> = true>
+    ::metal::enable_if_t<::metal::is_same_v<T, bool> && is_complex_v<U>, bool> =
+        true>
+inline T cast_to(const U from) {
+  return from.x != 0 || from.y != 0;
+}
+// - Complex to non-bool scalar (discards the imaginary part, matching CPU).
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        !is_complex_v<T> && !::metal::is_same_v<T, bool> && is_complex_v<U>,
+        bool> = true>
 inline T cast_to(const U from) {
   return static_cast<T>(from.x);
 }
@@ -290,6 +326,11 @@ template <
     typename U,
     ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
 inline common_dtype<T, U> div(const T x, const U y) {
+  // Purely real divisor: bypass the cross-term to avoid inf*0 / nan*0 = NaN
+  // tainting the imag part. Mathematically equivalent for finite y.x.
+  if (y.y == 0) {
+    return T(x.x / y.x, x.y / y.x);
+  }
   return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
 }
 

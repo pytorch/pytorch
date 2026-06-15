@@ -918,9 +918,10 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       // average attention weights over heads
       attn_output_weights = attn_output_weights.sum(/*dim=*/1) / num_heads;
     }
-    return std::make_tuple(attn_output, attn_output_weights);
+    return std::make_tuple(
+        std::move(attn_output), std::move(attn_output_weights));
   } else {
-    return std::make_tuple(attn_output, Tensor());
+    return std::make_tuple(std::move(attn_output), Tensor());
   }
 }
 } // namespace detail

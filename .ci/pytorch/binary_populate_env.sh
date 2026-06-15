@@ -72,7 +72,7 @@ export PYTORCH_BUILD_NUMBER=1
 
 # Set triton version as part of PYTORCH_EXTRA_INSTALL_REQUIREMENTS
 TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
-TRITON_CONSTRAINT="platform_system == 'Linux'"
+TRITON_CONSTRAINT="platform_system == 'Linux' and python_version < '3.15'"
 
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" && ! "$PYTORCH_BUILD_VERSION" =~ .*xpu.* ]]; then
   TRITON_REQUIREMENT="triton==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
@@ -112,9 +112,8 @@ if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_B
     fi
 fi
 
-USE_GLOO_WITH_OPENSSL="ON"
+USE_GLOO_WITH_OPENSSL="OFF"
 if [[ "$GPU_ARCH_TYPE" =~ .*aarch64.* ]]; then
-  USE_GLOO_WITH_OPENSSL="OFF"
   USE_GOLD_LINKER="OFF"
 fi
 

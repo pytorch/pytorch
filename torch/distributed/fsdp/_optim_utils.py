@@ -226,9 +226,7 @@ def _communicate_optim_state(
             # has the same shape as the sharded flat parameter
             buffer_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
             tensor_buffer = value.new_zeros(*buffer_size)
-            dist.all_gather_into_tensor(
-                tensor_buffer, value, group=fsdp_state.process_group
-            )
+            dist.all_gather_single(tensor_buffer, value, group=fsdp_state.process_group)
             fsdp_state._device_handle.synchronize()
             unpadded_numel = cast(
                 nn.Parameter, flat_param._unpadded_unsharded_size
@@ -1539,7 +1537,7 @@ def _allgather_orig_param_states(
         return output_states
 
     has_state_params: list[bool] = [
-        fqn in output_states for fqn, idx in fsdp_param_info.param_indices.items()
+        fqn in output_states for fqn in fsdp_param_info.param_indices
     ]
 
     # Loop through the ``state_buffers`` and construct the flattened, concatenated,
@@ -1547,7 +1545,7 @@ def _allgather_orig_param_states(
     # flat_param (also sharded).
     # Then we perform an allgather_into_tensor to get the full flat_param state.
     # The full flat_param state is the result of concatenation of multiple states
-    # the order of of flat_param._fqns.
+    # the order of flat_param._fqns.
     # The final step is to split the flat_param state into original param states
     # and return the result.
     flat_param = fsdp_param_info.handle.flat_param
@@ -1648,7 +1646,7 @@ def _allgather_orig_param_states(
             )
         fsdp_state._device_handle.synchronize()
         with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
-            dist.all_gather_into_tensor(
+            dist.all_gather_single(
                 gathered_tensor, local_shard, group=fsdp_state.process_group
             )
             # Synchronize can be slow but this will be easier for us to debug.
@@ -2104,9 +2102,9 @@ def _set_optim_use_dtensor(
         state_dict_type = state_dict_settings.state_dict_type
         if state_dict_type == StateDictType.LOCAL_STATE_DICT:
             raise RuntimeError(
-                "Found state_dict_type LOCAL_STATE_DICT.",
-                "DeviceMesh is not compatible with LOCAL_STATE_DICT.",
-                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict.",
+                "Found state_dict_type LOCAL_STATE_DICT. "
+                "DeviceMesh is not compatible with LOCAL_STATE_DICT. "
+                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict."
             )
         else:
             state_dict_settings.optim_state_dict_config._use_dtensor = True

@@ -1,7 +1,9 @@
+# Owner(s): ["module: pytree"]
+
 """
 Contains utility functions for working with nested python data structures.
 
-A *pytree* is Python nested data structure. It is a tree in the sense that
+A *pytree* is a Python nested data structure. It is a tree in the sense that
 nodes are Python collections (e.g., list, tuple, dict) and the leaves are
 Python values. Furthermore, a pytree should not contain reference cycles.
 
@@ -20,6 +22,7 @@ import functools
 import importlib
 import importlib.metadata
 import json
+import logging
 import sys
 import threading
 import types
@@ -43,6 +46,9 @@ from typing import (
 from typing_extensions import deprecated, NamedTuple, Self, TypeIs
 
 from torch.torch_version import TorchVersion as _TorchVersion
+
+
+log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -615,10 +621,24 @@ def _private_register_pytree_node(
     from torch._library.opaque_object import is_opaque_type
 
     if isinstance(cls, type) and is_opaque_type(cls):
-        raise ValueError(
-            f"{cls} cannot be registered as a pytree as it has been "
-            "registered as an opaque object. Opaque objects must be pytree leaves."
-        )
+        # TODO: remove this allowance once downstream callers stop calling
+        # register_constant on Enum subclasses. Enums are now natively
+        # supported as opaque value types and don't need pytree registration.
+        import enum
+
+        if issubclass(cls, enum.Enum):
+            log.warning(
+                "%s is an Enum subclass and is now natively supported by "
+                "torch.compile as an opaque value type. Calling "
+                "register_constant() on Enum subclasses is deprecated and "
+                "will be an error in a future release.",
+                cls,
+            )
+        else:
+            raise ValueError(
+                f"{cls} cannot be registered as a pytree as it has been "
+                "registered as an opaque object. Opaque objects must be pytree leaves."
+            )
 
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
@@ -1029,6 +1049,7 @@ _private_register_pytree_node(
 STANDARD_DICT_TYPES: frozenset[type] = frozenset({dict, OrderedDict, defaultdict})
 # pyrefly: ignore [no-matching-overload]
 BUILTIN_TYPES: frozenset[type] = frozenset(
+    # pyrefly: ignore [bad-argument-type]
     {
         tuple,
         list,
@@ -1105,6 +1126,8 @@ def _is_leaf(tree: PyTree, is_leaf: Callable[[PyTree], bool] | None = None) -> b
 #   is_leaf(): whether the root Node is a leaf
 @dataclasses.dataclass(init=False, frozen=True, eq=True, repr=False, slots=True)
 class TreeSpec:
+    """Representing the structure of the pytree."""
+
     type: Any
     _context: Context
     _children: list[Self]
@@ -1188,15 +1211,20 @@ class TreeSpec:
         return self._children
 
     def is_leaf(self) -> bool:
+        """Test whether the treespec represents a leaf."""
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def children(self) -> list[Self]:
+        """Get all the child treespecs."""
         return self._children.copy()
 
     def child(self, index: int) -> Self:
+        """Get the child treespec at the given index."""
         return self._children[index]
 
     def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
+        """Flatten the subtrees in ``tree`` up to the structure of this treespec and return a list of subtrees."""
+
         def helper(treespec: TreeSpec, node: PyTree, subtrees: list[PyTree]) -> None:
             if treespec.is_leaf():
                 subtrees.append(node)
@@ -1280,6 +1308,7 @@ class TreeSpec:
         return subtrees
 
     def unflatten(self, leaves: Iterable[Any]) -> PyTree:
+        """Reconstruct a pytree from the leaves."""
         if not isinstance(leaves, (list, tuple)):
             leaves = list(leaves)
         if len(leaves) != self.num_leaves:
@@ -2064,16 +2093,22 @@ def treespec_loads(serialized: str) -> TreeSpec:
     )
 
 
-class _DummyLeaf:
+class _Asterisk(str):
+    __slots__ = ()
+
+    def __new__(cls) -> Self:
+        return super().__new__(cls, "*")
+
     def __repr__(self) -> str:
-        return "*"
+        return "*"  # no quotes
+
+
+_asterisk = _Asterisk()
+del _Asterisk
 
 
 def treespec_pprint(treespec: TreeSpec) -> str:
-    dummy_tree = tree_unflatten(
-        [_DummyLeaf() for _ in range(treespec.num_leaves)],
-        treespec,
-    )
+    dummy_tree = tree_unflatten([_asterisk] * treespec.num_leaves, treespec)
     return repr(dummy_tree)
 
 

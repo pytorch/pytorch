@@ -4,7 +4,7 @@
 # don't expect CPU/CUDA to address to the same hash, don't expect it to be
 # portable across devices) that is NOT cryptographically secure.  In return,
 # we are able to hash 40G of tensor data on GPU in less than a second,
-# compared to running SHA-1 in CPU which would a minute or so.  The primary
+# compared to running SHA-1 in CPU which would take a minute or so.  The primary
 # use case is for efficiently snapshotting intermediate tensor data for
 # offline debugging, but it's been put in this module in case you think of
 # another use case for it.  The hash function could be replaced with a

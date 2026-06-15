@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/GridSamplerUtils.h>
@@ -138,6 +139,7 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
   TORCH_CHECK(
       cond_cudnn_grid_sampler(input_t, grid_t),
       "Invalid arguments to cudnn_grid_sampler_backward");
+  globalContext().alertNotDeterministic("cudnn_grid_sampler_backward");
 
   auto input_contig = contiguousIfZeroInStrides(input_t);
   auto grid_contig = grid_t.contiguous();

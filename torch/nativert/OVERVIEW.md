@@ -5,8 +5,8 @@ high-performance CPU inference on the PT2 stack, it's designed to be a drop-in
 replacement for
 [Static Runtime](https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/runtime/static/README.md).
 
-However, it's support doesn't end there; by default it integrates with the torch
-dispatcher, inheriting it's backend
+However, its support doesn't end there; by default it integrates with the torch
+dispatcher, inheriting its backend
 [support matrix](https://docs.pytorch.org/docs/stable/backends.html). Moreover,
 it supports the execution of
 [AOTInductor](https://github.com/pytorch/pytorch/blob/main/docs/source/torch.compiler_aot_inductor.rst)-lowered
@@ -120,7 +120,7 @@ output values.
 
 ### Value
 
-Values are a internal construct that represent the edges of our graph. In the
+Values are an internal construct that represent the edges of our graph. In the
 graph, a value could only carry one of these permissible types: Tensor,
 TensorList, SymInt, SymIntList and CustomObj. Values are uniquely identifiable
 by an integer. Values also have a string name for logging purposes, but we don’t
@@ -160,7 +160,7 @@ Weights is a class that manages the static states of a model, which remains
 immutable throughout the execution. For example module parameters, buffers, and
 constants are all managed in Weights. These tensors are "read-only constants" in
 a single inference run(). As such, they can be shared across all threads.
-Weights is also an user-facing class that provides some APIs for advanced weight
+Weights is also a user-facing class that provides some APIs for advanced weight
 management, such as customized weight loading, weight swapping, and/or in-place
 updates.
 
@@ -249,7 +249,7 @@ one, the dispatcher doesn't deal with kernel out-variants.
 
 In addition, the dispatcher acts as a stack machine. You push the inputs to the
 stack, run the op on the specified device, and then pop the outputs. This in
-itself is much more inefficient then accessing the values directly without
+itself is much more inefficient than accessing the values directly without
 having to play musical chairs.
 
 Registering statically-dispatched cpu kernels is pretty easy. Here is an example

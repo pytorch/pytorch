@@ -84,7 +84,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       type = CUDA_R_32F;
       break;
 #endif
-#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 && !defined(USE_ROCM)
+#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 || defined(USE_ROCM)
     case at::ScalarType::Float8_e4m3fn:
       type = CUDA_R_8F_E4M3;
       break;
@@ -203,12 +203,18 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       compute_type = CUSPARSE_COMPUTE_32F;
       break;
 #endif
-// if cuSPARSELt >= 6.2.3, we can add Float8 support
-#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 && !defined(USE_ROCM)
+// cuSPARSELt >= 0.6.2 or hipSparseLt: add Float8 support
+#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 || defined(USE_ROCM)
     case at::ScalarType::Float8_e4m3fn:
       input_type = CUDA_R_8F_E4M3;
+#ifdef USE_ROCM
+      // hipSparseLt 0.2.7: FP8 input only supports FP32 output
+      output_type = CUDA_R_32F;
+      C_type = CUDA_R_32F;
+#else
       output_type = CUDA_R_8F_E4M3;
       C_type = CUDA_R_16F;
+#endif
       compute_type = CUSPARSE_COMPUTE_32F;
       break;
 #endif
@@ -265,10 +271,11 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
           break;
       }
     }
-// cslt 0.6.2+: fp8 fp8 -> {fp8, fp16, bf16, fp32} support
-#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 && !defined(USE_ROCM)
+// cslt 0.6.2+ or hipSparseLt: fp8 output dtype support
+#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 || defined(USE_ROCM)
     else if (input_type == CUDA_R_8F_E4M3) {
       switch (out_dtype) {
+#ifndef USE_ROCM
         case at::ScalarType::Float8_e4m3fn:
           output_type = CUDA_R_8F_E4M3;
           C_type = CUDA_R_16F;
@@ -281,6 +288,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
           output_type = CUDA_R_16BF;
           C_type = CUDA_R_16BF;
           break;
+#endif
         case at::ScalarType::Float:
           output_type = CUDA_R_32F;
           C_type = CUDA_R_32F;
@@ -288,7 +296,11 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
         default:
           TORCH_CHECK(
               false,
-              "Unsupported out_dtype passed, must be one of {fp16, bf16, float32} for fp8 inputs");
+#ifdef USE_ROCM
+              "Unsupported out_dtype passed, must be float32 for fp8 inputs on ROCm");
+#else
+              "Unsupported out_dtype passed, must be one of {fp8, fp16, bf16, float32} for fp8 inputs");
+#endif
           break;
       }
     }
@@ -468,6 +480,8 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
         &alg_id,
         sizeof(alg_id)));
 
+#ifndef USE_ROCM
+    // hipSPARSELt does not support querying SPLIT_K attributes
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle,
         &alg_sel,
@@ -481,6 +495,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
         CUSPARSELT_MATMUL_SPLIT_K_MODE,
         &splitKMode,
         sizeof(splitKMode)));
+#endif
 
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle,

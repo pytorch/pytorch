@@ -55,7 +55,7 @@ struct SmallBitonicSort {
     constexpr int sort_size = 32;
     constexpr int max_block_y = 16;
     constexpr int items_per_thread = 2;
-    static_assert(sort_size % items_per_thread == 0, "");
+    static_assert(sort_size % items_per_thread == 0);
     constexpr int block_x = sort_size / items_per_thread;
 
     TORCH_INTERNAL_ASSERT(keySliceSize <= sort_size);
@@ -107,7 +107,7 @@ struct SmallBitonicSort {
 // For small sorts (n <= 128) we use warpMergeSortKVInPlace which
 // sorts one slice per warp and potentially multiple slices in the
 // same block for improved occupancy with large batch sizes.
-template <int sort_size>
+template <int sort_size, int WARP_SIZE>
 struct WarpMergeSort {
 
   template <int A, typename K, typename V, typename IndexType>
@@ -128,7 +128,7 @@ struct WarpMergeSort {
     const auto min_grid = minimum_grid_for_occupancy(
         warpMergeSortKVInPlace<
             A, -1, sort_size, max_block_y,
-            K, V, LTOp<K, true>, IndexType>,
+            K, V, LTOp<K, true>, IndexType, WARP_SIZE>,
         block_x * max_block_y);
     const auto max_batch = std::max(IndexType{1}, keySlices / min_grid);
     const int block_y = std::min(IndexType(max_block_y), max_batch);
@@ -142,7 +142,9 @@ struct WarpMergeSort {
 
     if (descending) {
       const K invalid_key = at::numeric_limits<K>::lower_bound();
-      warpMergeSortKVInPlace<A, -1, sort_size, max_block_y>
+      warpMergeSortKVInPlace<
+          A, -1, sort_size, max_block_y,
+          K, V, GTOp<K, true>, IndexType, WARP_SIZE>
         <<<grid, block, 0, stream>>>(
           keyInfo,
           keySlices,
@@ -161,7 +163,9 @@ struct WarpMergeSort {
         }
         return at::numeric_limits<K>::upper_bound();
       }();
-      warpMergeSortKVInPlace<A, -1, sort_size, max_block_y>
+      warpMergeSortKVInPlace<
+          A, -1, sort_size, max_block_y,
+          K, V, LTOp<K, true>, IndexType, WARP_SIZE>
         <<<grid, block, 0, stream>>>(
           keyInfo,
           keySlices,
@@ -258,7 +262,7 @@ struct MediumRadixSort {
       at::cuda::detail::TensorInfo<V, IndexType> valueInfo,
       IndexType valueSliceStride,
       bool descending) {
-    static_assert(sort_size % items_per_thread == 0, "");
+    static_assert(sort_size % items_per_thread == 0);
     constexpr int block = sort_size / items_per_thread;
     dim3 grid;
     TORCH_INTERNAL_ASSERT(getGridFromTiles(keySlices, grid),
@@ -375,7 +379,16 @@ void sortKeyValueInplace(
     sortCommon(SmallBitonicSort{}, key, value, dim, descending);
 #if HAS_WARP_MERGE_SORT()
   } else if (sort_size <= 128) {
-    sortCommon(WarpMergeSort<128>{}, key, value, dim, descending);
+#ifdef USE_ROCM
+    if (at::cuda::warp_size() == 32) {
+      sortCommon(WarpMergeSort<128, 32>{}, key, value, dim, descending);
+    }
+    else {
+      sortCommon(WarpMergeSort<128, 64>{}, key, value, dim, descending);
+    }
+#else
+    sortCommon(WarpMergeSort<128, C10_WARP_SIZE>{}, key, value, dim, descending);
+#endif
 #endif
   } else {
     sortCommon(MediumRadixSort{}, key, value, dim, descending);

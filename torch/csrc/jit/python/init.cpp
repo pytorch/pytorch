@@ -567,7 +567,7 @@ void initJITBindings(PyObject* module) {
             arg_spec_creator.specializeTypes(*graph, spec);
             // We only get partial specialization from the arg_spec_creator, but
             // we want full shape specialization. The alternative would be to
-            // have a "complete type inference" function in ArguemntSpecCreator.
+            // have a "complete type inference" function in ArgumentSpecCreator.
             auto g_inputs = graph->inputs();
             for (const auto i : c10::irange(inputs.size())) {
               if (stack[i].isTensor()) {
@@ -1336,7 +1336,7 @@ void initJITBindings(PyObject* module) {
       .def("__repr__", [](CompleteArgumentSpec& self) {
         std::ostringstream s;
         s << self;
-        return s.str();
+        return std::move(s).str();
       });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
@@ -1666,6 +1666,11 @@ void initJITBindings(PyObject* module) {
              uint64_t storage_alignment) {
             return self.getRecordOffsetNoRead(
                 zipfile_header_offset, filename, size, storage_alignment);
+          })
+      .def(
+          "get_record_size",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordSize(key);
           });
 
   // Used by torch.Package to coordinate deserialization of storages across
@@ -1796,7 +1801,7 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_jit_get_operation",
-      [](const std::string& op_name) {
+      [](const std::string& op_name) -> py::tuple {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           const auto sortedOps = getAllSortedOperatorsFor(symbol);
@@ -1828,7 +1833,7 @@ void initJITBindings(PyObject* module) {
                     sortedOps, symbol, args, kwargs, false);
               },
               py::name(symbol.toUnqualString()),
-              py::doc(docstring.str().c_str()));
+              py::doc(std::move(docstring).str().c_str()));
           return py::make_tuple(func, overload_names);
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
@@ -1843,7 +1848,7 @@ void initJITBindings(PyObject* module) {
       "_maybe_call_torch_function_for_op_packet",
       [](py::handle op_overload_packet,
          const py::args& args,
-         const py::kwargs& kwargs) {
+         const py::kwargs& kwargs) -> py::tuple {
         py::list ns_method =
             op_overload_packet.attr("_qualified_op_name").attr("split")("::");
         auto res = _maybe_handle_torch_function(
@@ -1896,7 +1901,7 @@ void initJITBindings(PyObject* module) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
     if (!type) {
-      throw std::runtime_error(s.str());
+      throw std::runtime_error(std::move(s).str());
     }
     return type.value();
   });
@@ -2014,7 +2019,7 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
             std::ostringstream out;
             auto result = self.isForwardCompatibleWith(old_schema, out);
-            return std::make_pair(result, out.str());
+            return std::make_pair(result, std::move(out).str());
           })
       .def(
           "__eq__",
@@ -2031,20 +2036,20 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(
           "__repr__",
           [](const FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(py::pickle(
           [](const FunctionSchema& self) { // __getstate__
             std::stringstream ss;
             ss << self;
-            return py::str(ss.str());
+            return py::str(std::move(ss).str());
           },
           [](const py::str& schema) { // __setstate__, note: no `self` argument
             return parseSchema(schema);
@@ -2183,20 +2188,12 @@ void initJITBindings(PyObject* module) {
       .def(
           py::pickle(
               /* __getstate__ */
-              [](const PythonFutureWrapper& /* unused */) {
+              [](const PythonFutureWrapper& /* unused */) -> py::tuple {
                 TORCH_CHECK(false, "Can not pickle torch.futures.Future");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy Pybind API's
-                // requirement.
-                return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) {
+              [](const py::tuple& /* unused */) -> std::nullptr_t {
                 TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy PyBind's API
-                // requirement.
-                return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
 
@@ -2220,20 +2217,12 @@ void initJITBindings(PyObject* module) {
       .def(
           py::pickle(
               /* __getstate__ */
-              [](const PythonAwaitWrapper& /* unused */) {
+              [](const PythonAwaitWrapper& /* unused */) -> py::tuple {
                 TORCH_CHECK(false, "Can not pickle torch.jit._Await");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy Pybind API's
-                // requirement.
-                return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) {
+              [](const py::tuple& /* unused */) -> std::nullptr_t {
                 TORCH_CHECK(false, "Can not unpickle torch.jit._Await");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy PyBind's API
-                // requirement.
-                return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
 

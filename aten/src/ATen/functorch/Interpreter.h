@@ -123,7 +123,8 @@ struct VmapInterpreterMeta {
 };
 
 struct GradInterpreterMeta {
-  explicit GradInterpreterMeta(bool prevGradMode): prevGradMode_(prevGradMode) {}
+  explicit GradInterpreterMeta(bool prevGradMode, bool prevInferenceMode = false)
+    : prevGradMode_(prevGradMode), prevInferenceMode_(prevInferenceMode) {}
   GradInterpreterMeta() = default;
   GradInterpreterMeta(const GradInterpreterMeta&) = default;
   GradInterpreterMeta(GradInterpreterMeta&&) = default;
@@ -132,19 +133,23 @@ struct GradInterpreterMeta {
   ~GradInterpreterMeta() = default;
 
   bool prevGradMode_;
+  bool prevInferenceMode_;
   template <typename T>
   friend void to_json(T& json_j, const GradInterpreterMeta& json_t) {
     json_j["prevGradMode"] = json_t.prevGradMode_;
+    json_j["prevInferenceMode"] = json_t.prevInferenceMode_;
   }
 
   template <typename T>
   friend void from_json(const T& json_j, GradInterpreterMeta& json_t) {
     json_t.prevGradMode_ = json_j["prevGradMode"];
+    json_t.prevInferenceMode_ = json_j.value("prevInferenceMode", false);
   }
 };
 
 struct JvpInterpreterMeta {
-  explicit JvpInterpreterMeta(bool prevFwdGradMode) : prevFwdGradMode_(prevFwdGradMode) {}
+  explicit JvpInterpreterMeta(bool prevFwdGradMode, bool prevInferenceMode = false)
+    : prevFwdGradMode_(prevFwdGradMode), prevInferenceMode_(prevInferenceMode) {}
   JvpInterpreterMeta() = default;
   JvpInterpreterMeta(const JvpInterpreterMeta&) = default;
   JvpInterpreterMeta(JvpInterpreterMeta&&) = default;
@@ -153,14 +158,17 @@ struct JvpInterpreterMeta {
   ~JvpInterpreterMeta() = default;
 
   bool prevFwdGradMode_;
+  bool prevInferenceMode_;
   template <typename T>
   friend void to_json(T& json_j, const JvpInterpreterMeta& json_t) {
     json_j["prevFwdGradMode"] = json_t.prevFwdGradMode_;
+    json_j["prevInferenceMode"] = json_t.prevInferenceMode_;
   }
 
   template <typename T>
   friend void from_json(const T& json_j, JvpInterpreterMeta& json_t) {
     json_t.prevFwdGradMode_ = json_j["prevFwdGradMode"];
+    json_t.prevInferenceMode_ = json_j.value("prevInferenceMode", false);
   }
 };
 
@@ -200,11 +208,11 @@ struct Interpreter {
   static Interpreter Vmap(int64_t level, c10::SymInt batchSize, RandomnessType randomness) {
     return Interpreter(TransformType::Vmap, level, VmapInterpreterMeta(std::move(batchSize), randomness));
   }
-  static Interpreter Grad(int64_t level, bool prevGradMode) {
-    return Interpreter(TransformType::Grad, level, GradInterpreterMeta(prevGradMode));
+  static Interpreter Grad(int64_t level, bool prevGradMode, bool prevInferenceMode = false) {
+    return Interpreter(TransformType::Grad, level, GradInterpreterMeta(prevGradMode, prevInferenceMode));
   }
-  static Interpreter Jvp(int64_t level, bool prevFwdGradMode) {
-    return Interpreter(TransformType::Jvp, level, JvpInterpreterMeta(prevFwdGradMode));
+  static Interpreter Jvp(int64_t level, bool prevFwdGradMode, bool prevInferenceMode = false) {
+    return Interpreter(TransformType::Jvp, level, JvpInterpreterMeta(prevFwdGradMode, prevInferenceMode));
   }
   static Interpreter Functionalize(int64_t level, bool functionalizeAddBackViews) {
     return Interpreter(TransformType::Functionalize, level, FunctionalizeInterpreterMeta(functionalizeAddBackViews));

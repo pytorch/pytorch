@@ -72,7 +72,7 @@ _global_parameter_registration_hooks: dict[int, Callable] = OrderedDict()
 
 
 class _WrappedHook:
-    def __init__(self, hook: Callable, module: Optional["Module"] = None) -> None:  # noqa: UP007
+    def __init__(self, hook: Callable, module: Optional["Module"] = None) -> None:
         self.hook: Callable = hook
         functools.update_wrapper(self, hook)
 
@@ -475,7 +475,7 @@ class Module:
     _load_state_dict_pre_hooks: dict[int, Callable]
     _state_dict_pre_hooks: dict[int, Callable]
     _load_state_dict_post_hooks: dict[int, Callable]
-    _modules: dict[str, Optional["Module"]]  # noqa: UP007
+    _modules: dict[str, Optional["Module"]]
     call_super_init: bool = False
     _compiled_call_impl: Callable | None = None
 
@@ -639,7 +639,7 @@ class Module:
                     param = output
             self._parameters[name] = param
 
-    def add_module(self, name: str, module: Optional["Module"]) -> None:  # noqa: UP007
+    def add_module(self, name: str, module: Optional["Module"]) -> None:
         r"""Add a child module to the current module.
 
         The module can be accessed as an attribute using the given name.
@@ -667,7 +667,7 @@ class Module:
                 module = output
         self._modules[name] = module
 
-    def register_module(self, name: str, module: Optional["Module"]) -> None:  # noqa: UP007
+    def register_module(self, name: str, module: Optional["Module"]) -> None:
         r"""Alias for :func:`add_module`."""
         self.add_module(name, module)
 
@@ -2520,7 +2520,7 @@ class Module:
             for key in state_dict:
                 if key.startswith(prefix) and key != extra_state_key:
                     input_name = key[len(prefix) :].split(".", 1)
-                    # Must be Module if it have attributes
+                    # Must be Module if it has attributes
                     if len(input_name) > 1:
                         if input_name[0] not in self._modules:
                             unexpected_keys.append(key)
@@ -2610,8 +2610,8 @@ class Module:
                 out = hook(module, incompatible_keys)
                 if out is not None:
                     raise AssertionError(
-                        "Hooks registered with ``register_load_state_dict_post_hook`` are not"
-                        "expected to return new values, if incompatible_keys need to be modified,"
+                        "Hooks registered with ``register_load_state_dict_post_hook`` are not "
+                        "expected to return new values, if incompatible_keys need to be modified, "
                         "it should be done inplace."
                     )
 
@@ -2835,7 +2835,7 @@ class Module:
 
     def named_modules(
         self,
-        memo: Optional[set["Module"]] = None,  # noqa: UP007
+        memo: set["Module"] | None = None,
         prefix: str = "",
         remove_duplicate: bool = True,
     ):

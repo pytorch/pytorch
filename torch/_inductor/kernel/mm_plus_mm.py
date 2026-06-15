@@ -155,7 +155,8 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     # Note: This is a special case with 4 matrices, but we use the first pair for M, N, K extraction
     kernel_inputs = MMKernelInputs([mat1, mat2, mat3, mat4], mat1_idx=0, mat2_idx=1)
 
-    assert layout1 == layout2
+    if layout1 != layout2:
+        raise AssertionError("layout1 and layout2 must be equal")
     # options to tune from
     choices: list[ChoiceCaller] = []
 
@@ -172,6 +173,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         V.choices.get_template_configs(kernel_inputs, templates_to_use, "mm_plus_mm")
     )
 
-    return autotune_select_algorithm(
+    node, _ = autotune_select_algorithm(
         "mm_plus_mm", choices, kernel_inputs.nodes(), layout1
     )
+    return node
