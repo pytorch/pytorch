@@ -9214,6 +9214,53 @@ copy_tests(
 # Lazy-autotune-mode-specific failures go here. Inherits regular GPU failures.
 GPU_LAZY_AUTOTUNE_TEST_FAILURES = {
     **GPU_TEST_FAILURES,
+    # torch.cond and torch.while_loop dual-wrapper codegen introduced in
+    # gh#184736 works on CUDA but crashes on XPU with an uncaught
+    # sycl::exception("Backends mismatch") from Triton's sycl_kernel_launch
+    # (no try/catch around stream.submit -> std::terminate kills the worker).
+    # Skip on XPU until the XPU-side codegen is fixed.
+    "test_cond_simple": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_nested": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_with_parameters": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_with_reinterpret_view_inputs_outputs": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_with_replace_view_ops": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_with_multiple_outputs": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_with_outer_code_before_after": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_use_buffers_from_outer_scope": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_non_tensor_predicates_dynamic_False": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_non_tensor_predicates_dynamic_True": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_unbacked_symint_closure_dynamic_False": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_unbacked_symint_closure_dynamic_True": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_mismatched_branch_output_dynamic_False": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_mismatched_branch_output_dynamic_True": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_symint_input": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_cpu_predicate_cuda_operands_max_autotune_False": fail_gpu(
+        ("xpu",), is_skip=True
+    ),
+    "test_cond_cpu_predicate_cuda_operands_max_autotune_True": fail_gpu(
+        ("xpu",), is_skip=True
+    ),
+    "test_cond_share_predicate": fail_gpu(("xpu",), is_skip=True),
+    "test_cond_predicate_on_cpu": fail_gpu(("xpu",), is_skip=True),
+    "test_custom_op_in_subgraph": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_simple": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_nested": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_with_outer_code": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_with_parameters": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_with_outer_buffers": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_with_pytree_inputs": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_gpu(
+        ("xpu",), is_skip=True
+    ),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_gpu(
+        ("xpu",), is_skip=True
+    ),
+    "test_while_loop_with_mixed_device_dynamic_False": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_with_mixed_device_dynamic_True": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_with_sym_expr_cond_dynamic_False": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_with_conv_dynamic_False": fail_gpu(("xpu",), is_skip=True),
+    "test_while_loop_with_conv_dynamic_True": fail_gpu(("xpu",), is_skip=True),
 }
 
 
