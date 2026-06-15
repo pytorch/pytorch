@@ -79,6 +79,9 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
 #if ROCM_VERSION >= 60500
         "gfx950"
 #endif
+#if ROCM_VERSION >= 70200
+        , "gfx1250"
+#endif
     };
     return at::detail::getCUDAHooks().isGPUArch(archs);
 #else
@@ -624,8 +627,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   else if (scaling_choice_a == ScalingType::BlockWise1x32 && scaling_choice_b == ScalingType::BlockWise1x32) {
 #ifdef USE_ROCM
     #if ROCM_VERSION >= 70000
-    TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+    TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950", "gfx1250"}),
+                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950/gfx1250");
 
     int packed_factor = 1;
     if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
@@ -1069,8 +1072,8 @@ _scaled_mxfp8_mxfp8(
 
 #ifdef USE_ROCM
 #if ROCM_VERSION >= 70000
-  TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+  TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950", "gfx1250"}),
+              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950/gfx1250");
 
   TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
               mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
@@ -1156,8 +1159,8 @@ _scaled_mxfp4_mxfp4(
   auto scaling_choice_b = ScalingType::BlockWise1x32;
 
 #if ROCM_VERSION >= 70000
-  TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+  TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950", "gfx1250"}),
+              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950/gfx1250");
 
   TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
               mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,

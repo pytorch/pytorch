@@ -73,6 +73,12 @@ def blaslt_supported_device():
                 archs.extend(['gfx110', 'gfx120'])
             if ROCM_VERSION >= (6, 5):
                 archs.append('gfx95')
+            # We extend this in a way not assuming the exact ROCm version
+            # where gfx1250 lands, so we don't pin a ROCm_VERSION gate here
+            # because the exact landing version may shift.
+            # Prefix checks rather than exact matches treat MI-series / gfx1250
+            # as BLASLt-capabile.
+            archs.append('gfx125')
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True

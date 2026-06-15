@@ -50,19 +50,16 @@ static void initHipSparseLtSupport() {
   // Default to not supported
   g_hipSparseLtSupported = false;
 
-  // Check only the first available device
-  try {
-    if (at::cuda::device_count() > 0) {
-      g_hipSparseLtSupported =
-          at::detail::getCUDAHooks().isGPUArch({"gfx950", "gfx942"}, 0);
-    }
-  } catch (const std::exception&) {
-    // If an exception occurs during device property check, we assume
-    // hipSparseLt is not supported This could happen due to driver issues,
-    // device access problems, or other runtime errors
-    g_hipSparseLtSupported = false;
-    TORCH_WARN(
-        "Exception occurred while checking hipSparseLt support. Assuming not supported.");
+    // Check only the first available device
+    try {
+        if (at::cuda::device_count() > 0) {
+            g_hipSparseLtSupported = at::detail::getCUDAHooks().isGPUArch({"gfx950", "gfx942", "gfx1250"}, 0);
+        }
+    } catch (const std::exception&) {
+        // If an exception occurs during device property check, we assume hipSparseLt is not supported
+        // This could happen due to driver issues, device access problems, or other runtime errors
+        g_hipSparseLtSupported = false;
+        TORCH_WARN("Exception occurred while checking hipSparseLt support. Assuming not supported.");
   }
 }
 
@@ -70,15 +67,15 @@ static bool isHipSparseLtSupported() {
   // Initialize support check only once
   c10::call_once(g_hipSparseLtSupportInitFlag, initHipSparseLtSupport);
 
-  // Return cached result (platform-wide)
-  if (!g_hipSparseLtSupported) {
-    TORCH_CHECK(
-        false,
-        "hipSparseLt not supported on this device, supported architectures: "
-        "gfx950, gfx942. "
-        "required ROCM version: 6.4.0 or later.");
-  }
-  return g_hipSparseLtSupported;
+    // Return cached result (platform-wide)
+    if (!g_hipSparseLtSupported) {
+        TORCH_CHECK(
+            false,
+            "hipSparseLt not supported on this device, supported architectures: "
+            "gfx1250, gfx950, gfx942. "
+            "required ROCM version: 6.4.0 or later.");
+    }
+    return g_hipSparseLtSupported;
 }
 #endif
 

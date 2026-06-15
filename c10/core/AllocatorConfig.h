@@ -19,7 +19,13 @@ constexpr size_t kMinBlockSize = 512;
 // largest "small" allocation is 1 MiB
 constexpr size_t kSmallSize = 1048576;
 // allocations between 1 and 10 MiB may use kLargeBuffer
-constexpr size_t kMinLargeAlloc = 10485760;
+#if defined(USE_ROCM) && defined(__gfx1250__)
+// Increase the buffer threshold for gfx1250
+// to avoid fragmentation on 432GB devices.
+constexpr size_t kMinLargeAlloc = 20 * 1024 * 1024;  // 20 MiB
+#else
+constexpr size_t kMinLargeAlloc = 10485760;  // 10 MiB
+#endif
 // round up large allocations to 2 MiB
 constexpr size_t kRoundLarge = 2097152;
 

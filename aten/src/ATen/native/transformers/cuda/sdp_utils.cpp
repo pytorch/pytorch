@@ -415,6 +415,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   using sm121 = SMVersion<12, 1>;
 #if USE_ROCM
 #if USE_ROCM_ATTENTION
+// TODO: gfx1250
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
     // User explicitly set CK as the flash attention backend. Return true for now
     // TODO: Flesh out sanity checks

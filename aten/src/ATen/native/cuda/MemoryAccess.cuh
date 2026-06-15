@@ -192,7 +192,8 @@ __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_p
   using vec_t = aligned_vector<scalar_t, vec_size>;
   auto *from = reinterpret_cast<const vec_t *>(base_ptr);
 #if defined(USE_ROCM)
-  if(__builtin_amdgcn_processor_is("gfx942")) {
+  if(__builtin_amdgcn_processor_is("gfx942") ||
+     __builtin_amdgcn_processor_is("gfx1250")) {
     using longx2 = __attribute__((__vector_size__(4*sizeof(int)))) int;
     if constexpr (sizeof(vec_t) == sizeof(int)) {
     union {

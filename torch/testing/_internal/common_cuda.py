@@ -80,6 +80,10 @@ def evaluate_gfx_arch_within(arch_list):
     # Hence the matching should be done reversely
     return any(arch in effective_arch for arch in arch_list)
 
+# CDNA 5 (CDNA-next / UDAN) arch helper
+def CDNA5OrLater():
+    return evaluate_gfx_arch_within(["gfx1250"])
+
 def CDNA3OrLater():
     return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
@@ -189,6 +193,8 @@ def evaluate_platform_supports_fp8():
                 archs.extend(['gfx120'])
             if ROCM_VERSION >= (6, 5):
                 archs.append('gfx95')
+            if ROCM_VERSION >= (7, 2):
+                archs.append('gfx1250')
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
@@ -205,7 +211,7 @@ def evaluate_platform_supports_fp8_grouped_gemm():
         if torch.version.hip:
             if "USE_MSLK" not in torch.__config__.show():
                 return False
-            archs = ['gfx942', 'gfx950']
+            archs = ['gfx942', 'gfx950', 'gfx1250']
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
@@ -217,7 +223,8 @@ def evaluate_platform_supports_mx_gemm():
     if torch.cuda.is_available():
         if torch.version.hip:
             if ROCM_VERSION >= (7, 0):
-                return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+                gcn_name = torch.cuda.get_device_properties(0).gcnArchName
+                return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 2))
         else:
             return SM100OrLater
     return False
