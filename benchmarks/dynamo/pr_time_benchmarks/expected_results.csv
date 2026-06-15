@@ -98,7 +98,7 @@ dtensor_dispatch_to_from_local,instruction_count,228200,0.1
 
 
 
-dtensor_dispatch_collectives,instruction_count,28890000,0.1
+dtensor_dispatch_collectives,instruction_count,31800000,0.1
 
 
 
