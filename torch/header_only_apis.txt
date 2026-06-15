@@ -285,3 +285,16 @@ copysign
 # torch/headeronly/util/BFloat16-math.h
 is_reduced_floating_point
 is_reduced_floating_point_v
+
+# torch/headeronly/util/Array.h
+array_of
+
+# torch/headeronly/util/Bitset.h
+bitset
+
+# torch/headeronly/util/FbcodeMaps.h
+FastMap
+FastSet
+
+# torch/headeronly/util/SmallBuffer.h
+SmallBuffer
