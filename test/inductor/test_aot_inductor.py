@@ -6661,6 +6661,9 @@ class AOTInductorTestsTemplate:
         self.check_model(sin_triton, not_none_inputs)
 
     @skipIfRocm  # RoCM does not support the config block size in test suite.
+    @skipIfXpu(
+        msg="SYCL work-item index overflow issue when block sizes are used in this test."
+    )
     def test_autotune_int64_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
