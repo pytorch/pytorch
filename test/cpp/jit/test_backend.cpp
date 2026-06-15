@@ -368,6 +368,8 @@ TEST(BackendTest, TestCompilerNotSupport) {
       "The node of aten::mul is not supported in this compiler. Source code:");
 }
 
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+
 TEST(BackendTestDebugInfo, TestCompiler) {
   Module m("m");
   m.define(R"(
@@ -856,6 +858,8 @@ Traceback of TorchScript (most recent call last):
   )";
   ASSERT_THROWS_WITH_MESSAGE(c_loaded.forward(inputs), error_pattern);
 }
+
+#endif
 
 } // namespace jit
 } // namespace torch
