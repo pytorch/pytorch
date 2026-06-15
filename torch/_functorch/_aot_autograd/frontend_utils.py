@@ -28,13 +28,71 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
+def _resolve_nested_acts(
+    arg: Any,
+    arg_idx: int,
+    nested_paths: list[tuple[int, tuple[str, ...]]],
+    AsyncCollectiveTensor: type,
+    path: tuple[str, ...] = (),
+) -> Any:
+    """Resolve AsyncCollectiveTensors nested inside a wrapper subclass input.
+
+    When a DTensor (or other traceable wrapper subclass) carries an
+    AsyncCollectiveTensor in one of its inner tensor slots (e.g.
+    ``DTensor._local_tensor`` after ``redistribute(async_op=True)``), the
+    top-level ACT scan in ``process_inputs`` misses it.
+
+    This helper walks ``__tensor_flatten__`` attrs recursively and, for any
+    nested ACT, records the attribute path (so the runtime codegen can emit a
+    matching ``trigger_wait()``) and resolves it.
+
+    IMPORTANT: it does NOT mutate ``arg`` in place. The same input object is
+    still referenced by Dynamo's ``TENSOR_SUBCLASS_METADATA_MATCH`` guard,
+    which calls ``__tensor_flatten__()`` on the inner tensor while building
+    guards *after* this runs; mutating ``_local_tensor`` to a plain tensor
+    there raises ``AttributeError: 'Tensor' object has no attribute
+    '__tensor_flatten__'``. Instead we reconstruct a fresh wrapper subclass
+    (via ``__tensor_unflatten__``) with the resolved inner tensors and return
+    it for the caller to swap into ``flat_args``; the original guarded object
+    is left untouched.
+
+    Returns the resolved object (a new wrapper subclass when an ACT was found
+    somewhere inside it, otherwise ``arg`` unchanged).
+    """
+    if not is_traceable_wrapper_subclass(arg):
+        return arg
+    attrs, ctx = arg.__tensor_flatten__()
+    new_inner: dict[str, Any] = {}
+    changed = False
+    for attr in attrs:
+        inner = getattr(arg, attr)
+        current_path = path + (attr,)
+        if isinstance(inner, AsyncCollectiveTensor):
+            nested_paths.append((arg_idx, current_path))
+            new_inner[attr] = inner.trigger_wait()
+            changed = True
+        elif is_traceable_wrapper_subclass(inner):
+            resolved = _resolve_nested_acts(
+                inner, arg_idx, nested_paths, AsyncCollectiveTensor, current_path
+            )
+            new_inner[attr] = resolved
+            changed = changed or (resolved is not inner)
+        else:
+            new_inner[attr] = inner
+    if not changed:
+        return arg
+    return type(arg).__tensor_unflatten__(
+        new_inner, ctx, arg.size(), arg.stride()
+    )
+
+
 def process_inputs(
     flat_args: list[Any],
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
     shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
-) -> tuple[FakifiedFlatArgs, list[int]]:
+) -> tuple[FakifiedFlatArgs, list[int], list[tuple[int, tuple[str, ...]]]]:
     """Convert real tensor inputs into fake tensors for AOT autograd tracing.
 
     Called at compile time (not runtime) to produce the fake inputs that AOT
@@ -53,10 +111,13 @@ def process_inputs(
     graph capture.
 
     Returns:
-        A tuple of (fakified_args, act_input_indices) where act_input_indices
-        records which positions held AsyncCollectiveTensors. These indices are
-        stored on ViewAndMutationMeta so that the runtime wrapper can emit
-        direct trigger_wait() calls on those positions.
+        A tuple of (fakified_args, act_input_indices, nested_act_input_paths)
+        where act_input_indices records which positions held top-level
+        AsyncCollectiveTensors, and nested_act_input_paths records
+        (arg_index, attr_path) tuples for ACTs found nested inside wrapper
+        subclass inputs (e.g. DTensor._local_tensor). These are stored on
+        ViewAndMutationMeta so that the runtime wrapper can emit direct
+        trigger_wait() calls.
     """
     # Resolve AsyncCollectiveTensors before tracing. ACTs are transient
     # eager-mode wrappers for async collective overlap; if they leak into the
@@ -70,11 +131,21 @@ def process_inputs(
         AsyncCollectiveTensor = None
 
     act_input_indices: list[int] = []
+    nested_act_input_paths: list[tuple[int, tuple[str, ...]]] = []
     if AsyncCollectiveTensor is not None:
         for i, a in enumerate(flat_args):
             if isinstance(a, AsyncCollectiveTensor):
                 act_input_indices.append(i)
                 flat_args[i] = a.trigger_wait()
+            else:
+                # Resolve ACTs nested inside wrapper subclass inputs without
+                # mutating the original (Dynamo still guards on it); swap the
+                # reconstructed, resolved object into flat_args for tracing.
+                resolved = _resolve_nested_acts(
+                    a, i, nested_act_input_paths, AsyncCollectiveTensor
+                )
+                if resolved is not a:
+                    flat_args[i] = resolved
 
     with fake_mode:
 
@@ -161,9 +232,13 @@ def process_inputs(
             )
             return result
 
-        return FakifiedFlatArgs(
-            [convert(idx, x) for idx, x in enumerate(flat_args)]
-        ), act_input_indices
+        return (
+            FakifiedFlatArgs(
+                [convert(idx, x) for idx, x in enumerate(flat_args)]
+            ),
+            act_input_indices,
+            nested_act_input_paths,
+        )
 
 
 def construct_fake_mode(
