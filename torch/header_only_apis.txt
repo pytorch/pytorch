@@ -278,3 +278,10 @@ OptimisticLazy
 LazyValue
 OptimisticLazyValue
 PrecomputedLazyValue
+
+# torch/headeronly/util/copysign.h
+copysign
+
+# torch/headeronly/util/BFloat16-math.h
+is_reduced_floating_point
+is_reduced_floating_point_v
