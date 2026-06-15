@@ -351,7 +351,6 @@ struct cuda_scatter_gather_base_kernel {
           AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
           AT_EXPAND(AT_FLOAT8_TYPES),
           kComplexHalf,
-          kBComplex32,
           kHalf,
           kBool,
           kBFloat16);

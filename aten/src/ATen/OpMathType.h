@@ -8,7 +8,6 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
-#include <torch/headeronly/core/Dispatch_v2.h>
 
 namespace at {
 
@@ -49,10 +48,6 @@ template <>
 struct OpMathType<c10::complex<Half>> {
   using type = c10::complex<float>;
 };
-template <>
-struct OpMathType<c10::complex<BFloat16>> {
-  using type = c10::complex<float>;
-};
 
 template <typename T>
 using opmath_type = typename OpMathType<T>::type;
@@ -62,11 +57,10 @@ namespace {
 inline c10::ScalarType toOpMathType(const c10::ScalarType type) {
   switch (type) {
 #define DEFINE_CASE(scalar_t, TypeNum) \
-  case TypeNum:                        \
+  case ScalarType::TypeNum:            \
     return CppTypeToScalarType<at::opmath_type<scalar_t>>::value;
 
-    AT_FORALL_SCALAR_TYPES_V2(
-        AT_WRAP(DEFINE_CASE), AT_EXPAND(AT_ALL_SCALAR_TYPES_WITH_COMPLEX))
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
 #undef DEFINE_CASE
 
     default:
