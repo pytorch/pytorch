@@ -1239,7 +1239,7 @@ get the same thing to run on your local machine.
 
 First, install LLVM 8. The easiest way is to get [prebuilt
 binaries](http://releases.llvm.org/download.html#8.0.0) and extract them to
-folder (later called `$LLVM_ROOT`).
+a folder (later called `$LLVM_ROOT`).
 
 Then set up the appropriate scripts. You can put this in your `.bashrc`:
 
