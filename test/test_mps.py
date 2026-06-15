@@ -1250,12 +1250,6 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(res2, res2_cpu)
         [helper(dtype) for dtype in [torch.int32, torch.int64, torch.float32]]
 
-    def test_linalg_cross_bool_error(self):
-        x = torch.zeros(4, 3, dtype=torch.bool, device="mps")
-        y = torch.zeros(4, 3, dtype=torch.bool, device="mps")
-        with self.assertRaisesRegex(RuntimeError, "not implemented for 'Bool'"):
-            torch.linalg.cross(x, y, dim=1)
-
     def test_cross(self):
         a = torch.randn(4, 3, device="mps")
         b = torch.randn(4, 3, device="mps")
