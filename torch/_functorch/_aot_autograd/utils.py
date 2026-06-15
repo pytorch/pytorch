@@ -6,6 +6,7 @@ import copy
 import dataclasses
 import logging
 import operator
+import sys
 import warnings
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
@@ -26,6 +27,8 @@ from torch.fx.experimental.proxy_tensor import py_sym_types
 
 _T = TypeVar("_T")
 if TYPE_CHECKING:
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
     from .schemas import AOTConfig, ViewAndMutationMeta
 
 
@@ -46,6 +49,22 @@ aot_graphs_effects_log = getArtifactLogger(__name__, "aot_graphs_effects")
 annotation_log = getArtifactLogger(__name__, "annotation")
 
 strict_zip = partial(zip, strict=True)
+
+
+def get_loaded_async_collective_tensor_type() -> type["AsyncCollectiveTensor"] | None:
+    """Return the ACT type if distributed collectives are already loaded."""
+    if "torch.distributed._functional_collectives" not in sys.modules:
+        return None
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+    return AsyncCollectiveTensor
+
+
+def import_async_collective_tensor_type() -> type["AsyncCollectiveTensor"]:
+    """Import and return the ACT type."""
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+    return AsyncCollectiveTensor
 
 
 def partial_flatten_asdict(obj: object) -> Any:
