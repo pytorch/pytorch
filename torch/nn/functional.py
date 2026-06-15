@@ -6574,7 +6574,7 @@ def rotary_embedding(
             ``(N, D//2)`` where ``N >= max(position_ids) + 1``.  When
             ``position_ids`` is ``None`` this should be broadcastable against
             ``(B, H, S, D//2)``, e.g. shape ``(S, D//2)`` or
-            ``(B, S, D//2)`` or ``(B, 1, S, D//2)``.
+            ``(1, S, D//2)`` or ``(B, 1, S, D//2)``.
         sin (Tensor): Sine values for the rotation, same shape requirements
             as ``cos``.
         position_ids (Tensor, optional): 2-D integer tensor of shape
@@ -6584,15 +6584,15 @@ def rotary_embedding(
             indices (``x[..., 0::2]`` and ``x[..., 1::2]``), matching the
             GPT-NeoX / gpt-fast convention. If ``False`` (default), splits
             the head dimension in half (``x[..., :D//2]`` and
-            ``x[..., D//2:]``), matching the LLaMA / HuggingFace convention.
+            ``x[..., D//2:]``), matching the LLaMA convention.
 
     Returns:
         Tensor: Rotated tensor with the same shape as ``x``.
 
     Shape:
         - ``x``: :math:`(B, H, S, D)`
-        - ``cos``, ``sin``: :math:`(N, D/2)` when ``position_ids`` given,
-          otherwise broadcastable to :math:`(B, H, S, D/2)`
+        - ``cos``, ``sin``: :math:`(N, D//2)` when ``position_ids`` given,
+          otherwise broadcastable to :math:`(B, H, S, D//2)`
         - ``position_ids``: :math:`(B, S)`
         - Output: :math:`(B, H, S, D)`
 
