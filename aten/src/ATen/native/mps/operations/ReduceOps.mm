@@ -841,7 +841,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
   if (!input_orig.is_contiguous()) {
     c10::DimVector perm(input_orig.dim());
     std::iota(perm.begin(), perm.end(), 0);
-     std::ranges::stable_sort(perm, std::greater{}, [&](int64_t d) { return input_orig.stride(d); });
+    std::ranges::stable_sort(perm, std::greater{}, [&](int64_t d) { return input_orig.stride(d); });
     auto permuted = input_orig.permute(perm);
     if (permuted.is_contiguous()) {
       input_orig = std::move(permuted);
