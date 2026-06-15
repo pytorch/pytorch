@@ -15,6 +15,10 @@ skip:
 
 # TODO - Figure out the reason of cold start memory spike
 batch_size:
+  # Use lower CUDA Inductor CI accuracy batch sizes where fp64 golden refs OOM
+  # at the default TIMM accuracy batch size.
+  ci_accuracy:
+    vit_base_patch14_dinov2.lvd142m: 4
   divisors:
     beit_base_patch16_224: 2
     deit_base_distilled_patch16_224: 2
