@@ -806,8 +806,8 @@ void apply_triangular_solve(const Tensor& A, const Tensor& B, bool left, bool up
   // This allows to pass rectangular A and B when left = True
   auto m = left ? A.size(-1) : B.size(-2);
   auto n = B.size(-1);
-  auto lda = std::max<int64_t>(1, A.size(-2));
-  auto ldb = std::max<int64_t>(1, B.size(-2));
+  auto lda = leadingDim(A);
+  auto ldb = leadingDim(B);
 
   for (const auto i : c10::irange(batch_size)) {
     const scalar_t* A_working_ptr = &A_data[i * A_mat_stride];

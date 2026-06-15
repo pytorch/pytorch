@@ -172,8 +172,8 @@ static void apply_triangular_solve(const Tensor& A, const Tensor& B, bool left, 
   // This allows to pass rectangular A and B when left = True
   auto m = cuda_int_cast(left ? A.size(-1) : B.size(-2), "m");
   auto n = cuda_int_cast(B.size(-1), "n");
-  auto lda = std::max<int>(1, cuda_int_cast(A.size(-2), "lda"));
-  auto ldb = std::max<int>(1, cuda_int_cast(B.size(-2), "ldb"));
+  auto lda = cuda_int_cast(leadingDim(A), "lda");
+  auto ldb = cuda_int_cast(leadingDim(B), "ldb");
 
   auto alpha = scalar_t{1};
 
@@ -202,8 +202,8 @@ static void apply_triangular_solve_batched(const Tensor& A, const Tensor& B, boo
   // This allows to pass rectangular A and B when left = True
   auto m = cuda_int_cast(left ? A.size(-1) : B.size(-2), "m");
   auto n = cuda_int_cast(B.size(-1), "n");
-  auto lda = std::max<int>(1, cuda_int_cast(A.size(-2), "lda"));
-  auto ldb = std::max<int>(1, cuda_int_cast(B.size(-2), "ldb"));
+  auto lda = cuda_int_cast(leadingDim(A), "lda");
+  auto ldb = cuda_int_cast(leadingDim(B), "ldb");
 
   auto alpha = scalar_t{1};
 
