@@ -52,6 +52,10 @@ static void erfcx_kernel(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "erfcx");
 }
 
+static void logical_not_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "logical_not", std::nullopt, std::nullopt, /*ilp_threshold=*/1u << 18);
+}
+
 static void polygamma_kernel(TensorIteratorBase& iter, int64_t order) {
   if (order == 0) {
     return lib.exec_unary_kernel(iter, "digamma");
@@ -93,6 +97,7 @@ REGISTER_UNARY_TI_DISPATCH(digamma);
 REGISTER_UNARY_TI_DISPATCH(bitwise_not);
 REGISTER_UNARY_TI_DISPATCH(round);
 REGISTER_UNARY_TI_DISPATCH(sigmoid);
+REGISTER_DISPATCH(logical_not_stub, logical_not_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 REGISTER_DISPATCH(pow_tensor_scalar_stub, pow_tensor_scalar_kernel);
