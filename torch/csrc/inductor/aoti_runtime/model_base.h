@@ -1,6 +1,6 @@
 #pragma once
 #ifdef _WIN32
-#include <windows.h>
+#include <torch/headeronly/util/win32-headers.h>
 #include <functional> // std::function
 #ifdef USE_MMAP_SELF
 #include <errno.h>
