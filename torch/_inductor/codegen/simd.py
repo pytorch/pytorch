@@ -961,7 +961,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return_getters_groups.append(return_getters)
 
         if not all(V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining):
-            raise AssertionError(f"failed to set ranges {remaining} {lengths}")
+            # Non-unit leftover extents mean the node's iteration space does not
+            # tile onto the kernel groups -- e.g. fusing an epilogue whose row
+            # count is a strict sub-multiple of a template's tiling ([s, N] into
+            # [K*s, N]). Raise CantSplit (consistent with the divisibility exits
+            # in add_range above) so callers like is_compatible and
+            # Scheduler.speedup_by_fusion skip this fusion and fall back to
+            # unfused codegen instead of hard-failing the whole compile.
+            raise CantSplit(remaining, lengths)
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
