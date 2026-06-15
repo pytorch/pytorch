@@ -2167,32 +2167,32 @@ def _cuda_get_out(
 def get(
     dst: torch.Tensor,
     hdl: _SymmetricMemory,
-    offset: int,
-    size: int,
     peer: int,
+    offset: int = 0,
 ) -> None:
     r"""
-    get(dst, hdl, offset, size, peer) -> ()
+    get(dst, hdl, peer, offset=0) -> ()
 
-    Copy ``size`` elements starting at ``offset`` from ``peer``'s symmetric
-    allocation into local ``dst`` using one-sided symmetric memory access.
+    Copy ``dst.numel()`` elements starting at ``offset`` from ``peer``'s
+    symmetric allocation into local ``dst`` using one-sided symmetric memory
+    access.
 
     ``hdl`` is the symmetric memory handle returned by
     :func:`torch.distributed._symmetric_memory.rendezvous`; the remote source
-    is ``peer``'s allocation backing that handle. ``offset`` and ``size`` are
-    expressed in elements of ``dst``'s dtype. ``dst`` can be a regular CUDA
-    tensor or a symmetric-memory tensor; it must be on the same device as
-    ``hdl``, backed by contiguous memory, and contain at least ``size``
-    elements. The copy is issued on the current CUDA stream.
+    is ``peer``'s allocation backing that handle. The number of elements copied
+    is inferred from ``dst``; pass a view (e.g. ``dst[:n]``) to fill only part
+    of a tensor. ``offset`` is expressed in elements of ``dst``'s dtype.
+    ``dst`` can be a regular CUDA tensor or a symmetric-memory tensor; it must
+    be on the same device as ``hdl`` and backed by contiguous memory. The copy
+    is issued on the current CUDA stream.
 
     Args:
         dst (Tensor): local destination tensor.
         hdl (SymmetricMemory): handle whose peer allocation is the remote
             source.
-        offset (int): element offset into the peer allocation to start reading
-            from.
-        size (int): number of elements to copy.
         peer (int): rank to copy from.
+        offset (int, optional): element offset into the peer allocation to
+            start reading from. Defaults to ``0``.
     """
     if dst.device != hdl.device:
         raise ValueError("get: dst must be on the same device as hdl")
@@ -2200,12 +2200,9 @@ def get(
         raise ValueError("get: dst must be backed by contiguous memory")
     if offset < 0:
         raise ValueError("get: offset must be non-negative")
-    if size < 0:
-        raise ValueError("get: size must be non-negative")
-    if dst.numel() < size:
-        raise ValueError("get: dst must contain at least `size` elements")
     if peer < 0 or peer >= hdl.world_size:
         raise ValueError("get: invalid peer")
+    size = dst.numel()
     element_size = dst.element_size()
     if hdl.offset % element_size != 0:
         raise RuntimeError("get: handle offset is not element-aligned")
