@@ -146,8 +146,37 @@ class SIMDKernelFeatures:
         from .simd import SIMDScheduling
 
         if SIMDScheduling.can_use_32bit_indexing(total_numel, buffers):
+            # Fused address expressions may carry a constant term that
+            # overflows int32 even when numel/storage_size are within range.
+            if self.any_index_expr_const_overflows_int32():
+                return torch.int64
             return torch.int32
         return torch.int64
+
+    @cache_on_self
+    def any_index_expr_const_overflows_int32(self) -> bool:
+        """Return True if any MemoryDep index has a constant term outside
+        [-2**31, 2**31 - 1]."""
+        int32_max = sympy.Integer(2**31 - 1)
+        int32_min = sympy.Integer(-(2**31))
+        for node in self.scheduler_nodes():
+            for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes):
+                if not isinstance(dep, MemoryDep):
+                    continue
+                index = dep.index
+                if not isinstance(index, sympy.Expr):
+                    continue
+                try:
+                    const_part = index.subs(
+                        {s: sympy.Integer(0) for s in index.free_symbols}
+                    )
+                    if not isinstance(const_part, sympy.Expr):
+                        continue
+                    if const_part > int32_max or const_part < int32_min:
+                        return True
+                except (ZeroDivisionError, TypeError, ValueError):
+                    continue
+        return False
 
     def get_reduction_hint(
         self, tiling_scores: dict[str, int] | None = None
