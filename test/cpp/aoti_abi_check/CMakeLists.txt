@@ -26,6 +26,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_enumerate.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_exception.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_fbcodemaps.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_filesystem.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_functionref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_headeronlyarrayref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_idwrapper.cpp
@@ -40,6 +41,8 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_overloaded.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scopeexit.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_smallbuffer.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_stringutils.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_stringview.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_synchronized.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_unroll.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
