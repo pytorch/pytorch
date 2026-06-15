@@ -17641,6 +17641,35 @@ class TestMetalLibrary(TestCaseMPS):
             self.assertEqual(destination, source.permute(2, 3, 4, 1, 0))
 
 
+class TestEmptyCacheClearing(TestCaseMPS):
+    """Tests for empty_cache() also releasing graph/kernel compilation caches
+    and the standalone torch.mps.clear_graph_cache() entry point."""
+
+    def test_clear_graph_cache_runs(self):
+        # Smoke: API exists, callable, no crash on a clean cache.
+        torch.mps.clear_graph_cache()
+
+    def test_empty_cache_does_not_break_subsequent_ops(self):
+        # Populate cache, clear via empty_cache(), then re-run the op.
+        # Result must still match CPU after the cache is repopulated from scratch.
+        x = torch.randn(8, 8, device="mps")
+        torch.relu(x)
+        torch.mps.empty_cache()
+        result = torch.relu(x).cpu()
+        ref = torch.relu(x.cpu())
+        self.assertEqual(result, ref)
+
+    def test_clear_graph_cache_does_not_break_subsequent_ops(self):
+        # Same contract, but via the targeted clear_graph_cache() API
+        # (does not touch the buffer pool).
+        x = torch.randn(8, 8, device="mps")
+        torch.relu(x)
+        torch.mps.clear_graph_cache()
+        result = torch.relu(x).cpu()
+        ref = torch.relu(x.cpu())
+        self.assertEqual(result, ref)
+
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342

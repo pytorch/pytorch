@@ -92,6 +92,12 @@ void* MPSHooks::getDispatchQueue() const {
 void MPSHooks::emptyCache() const {
   at::mps::getIMPSAllocator()->emptyCache();
   at::native::mps::MPSGraphCache::getInstance()->clear();
+  at::native::mps::MPSKernelCache::getInstance()->clear();
+}
+
+void MPSHooks::clearGraphCache() const {
+  at::native::mps::MPSGraphCache::getInstance()->clear();
+  at::native::mps::MPSKernelCache::getInstance()->clear();
 }
 
 size_t MPSHooks::getCurrentAllocatedMemory() const {
