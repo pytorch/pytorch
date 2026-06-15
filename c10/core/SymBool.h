@@ -64,6 +64,8 @@ class C10_API SymBool {
   // bool, so it's not so common to have to call this
   bool guard_bool(const char* file, int64_t line) const;
   bool expect_true(const char* file, int64_t line) const;
+  bool expect_true(const char* file, int64_t line, const char* error_message)
+      const;
   bool guard_size_oblivious(const char* file, int64_t line) const;
   bool statically_known_true(const char* file, int64_t line) const;
   bool guard_or_false(const char* file, int64_t line) const;

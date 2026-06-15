@@ -210,6 +210,12 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     // with a better implementation!
     return guard_bool(file, line);
   }
+  virtual bool expect_true(
+      const char* file,
+      int64_t line,
+      const char* error_message [[maybe_unused]]) {
+    return expect_true(file, line);
+  }
   virtual int64_t int_() {
     TORCH_CHECK(false, "NYI");
   }

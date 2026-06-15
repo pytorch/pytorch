@@ -7467,7 +7467,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         em.module()(torch.randn(4, 3))
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, s77 \- 1\), 0\)",
+            r"shape .* is invalid for input of size .*",
         ):
             em.module()(torch.randn(4, 5))
 
@@ -10825,7 +10825,7 @@ def forward(self, b_a_buffer, x):
         ep = export(f, (torch.tensor(6),))
         ep.module()(torch.tensor(6))
         with self.assertRaisesRegex(
-            RuntimeError, r"Runtime assertion failed for .* u.* 6"
+            RuntimeError, r"Runtime assertion failed for .*(u.* 6|6 .* u)"
         ):
             ep.module()(torch.tensor(5))
 
@@ -14785,6 +14785,38 @@ def forward(self, x, b_t, y):
         ):
             ep.module()(*inputs)
 
+    def test_torch_check_deferred_runtime_assert_preserves_message(self):
+        class Msg:
+            def __call__(self):
+                return "custom original check message"
+
+            def __eq__(self, other):
+                return self is other
+
+        class BadMsg:
+            def __call__(self):
+                raise RuntimeError("message evaluated")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                u = x.item()
+                torch._check(u > 0, Msg())
+                return x + 1
+
+        ep = torch.export.export(Model(), (torch.tensor(1),))
+        self.assertIn("custom original check message", ep.graph_module.code)
+        with self.assertRaisesRegex(RuntimeError, "custom original check message"):
+            ep.module()(torch.tensor(0))
+
+        class DuplicateCheckModel(torch.nn.Module):
+            def forward(self, x):
+                u = x.item()
+                torch._check(u > 0, Msg())
+                torch._check(u > 0, BadMsg())
+                return x + 1
+
+        torch.export.export(DuplicateCheckModel(), (torch.tensor(1),))
+
     def test_predispatch_grad_wrappers(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -15688,7 +15720,7 @@ def forward(self, x, y):
             self.assertEqual(out2.shape, torch.ones(11, 4, 3).shape)
             with self.assertRaisesRegex(
                 RuntimeError,
-                r"^Runtime assertion failed for expression Eq\(Mod\(s\d+\*s\d+, 4\*s\d+\s*-\s*4\), 0\) on node 'eq[^']*'$",
+                r"shape '\[s\d+ - 1, 4, -1\]' is invalid for input of size s\d+\*s\d+",
             ):
                 ep.module()(torch.randn(8, 8))  # fail
 
@@ -15725,7 +15757,7 @@ def forward(self, x, y):
             if private_api:
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    r"Runtime assertion failed for expression Eq\((.*)\) on node '.*'",
+                    r"The size of tensor a .* must match the size of tensor b .* at non-singleton dimension 0",
                 ):  # fail only at runtime
                     ep.module()(
                         torch.randn(5, 8), torch.randn(4, 5), torch.randn(30)
@@ -15764,7 +15796,7 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(126).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\((.*)\) on node '.*'",
+            r"The size of tensor a .* must match the size of tensor b .* at non-singleton dimension 0",
         ):  # fail only at runtime
             ep.module()(torch.randn(4, 3, 2), torch.randn(10))  # fail
 
@@ -15872,7 +15904,7 @@ def forward(self, x, y):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(u0, u1\) .*",
+            r"non-broadcasting semantics require u0 == u1",
         ):
             ep.module()(torch.tensor([1, 5]))
 
@@ -17397,7 +17429,7 @@ def forward(self, x):
                 self.assertEqual(num_asserts, 6)
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, s77 - 1\), 0\)",
+                    r"shape .* is invalid for input of size .*",
                 ):
                     ep.module()(torch.randn(4, 2))
             else:
@@ -19156,11 +19188,11 @@ def forward(self, x, mask):
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 1188864 on node 'le'");  le = _assert_scalar_default_1 = None
     mod = sym_size_int_1 % 1548
     eq_2 = mod == 0;  mod = None
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(Mod(u0, 1548), 0) on node 'eq_2'");  eq_2 = _assert_scalar_default_2 = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq_2, "shape '[-1, 1548]' is invalid for input of size u0");  eq_2 = _assert_scalar_default_2 = None
     floordiv = sym_size_int_1 // 1548
     mul_2 = 1548 * floordiv;  floordiv = None
     eq_3 = sym_size_int_1 == mul_2;  sym_size_int_1 = mul_2 = None
-    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(eq_3, "Runtime assertion failed for expression Eq(u0, 1548*((u0//1548))) on node 'eq_3'");  eq_3 = _assert_scalar_default_3 = None
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(eq_3, 'Could not reshape a tensor with shape torch.Size([u0]) as a tensor with shape ((u0//1548), 1548)!');  eq_3 = _assert_scalar_default_3 = None
     view = torch.ops.aten.view.default(masked_select, [-1, 1548]);  masked_select = None
     add = torch.ops.aten.add.Tensor(view, 1);  view = None
     return (add,)""",
