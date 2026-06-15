@@ -962,6 +962,7 @@ class AnnotatedExternKernelBlock(WrapperLine):
         with code.indent():
             for line in self.inner_lines:
                 if isinstance(line, WrapperLine):
+                    # pyrefly: ignore [missing-attribute]
                     line.codegen(code)
                 else:
                     code.writeline(line)

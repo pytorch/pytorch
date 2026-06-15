@@ -493,6 +493,8 @@ class GraphLowering(torch.fx.Interpreter):
         # Populated during codegen so Pass 2 of get_fused_kernel_module_fqn
         # skips ops already annotated by their own extern kernel wrapper.
         self.fx_extern_fqns: OrderedSet[str] = OrderedSet()
+        # Set per-kernel during SIMD codegen so the wrapper can bake the FQN.
+        self._current_kernel_module_fqn: str | None = None
         self.const_output_index: dict[str, int] = (
             const_output_index if const_output_index else {}
         )
