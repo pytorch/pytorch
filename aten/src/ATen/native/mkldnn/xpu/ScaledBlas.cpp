@@ -218,7 +218,7 @@ Tensor& _scaled_gemm(
     TORCH_WARN(
         "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
   }
-  // TODO: scale_result and alpha is not defined or used!
+  // TODO: scale_result is not defined or used!
   std::optional<Tensor> scaled_result = std::nullopt;
   at::native::onednn::scaled_matmul(
       mat1,
@@ -230,7 +230,8 @@ Tensor& _scaled_gemm(
       scaling_choice_b,
       bias,
       scaled_result,
-      false /* use_fast_accum */);
+      false /* use_fast_accum */,
+      alpha);
 
   return out;
 }
@@ -466,7 +467,7 @@ using scaled_blas::convert_int_to_enum;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::ScaleKernelDispatchEntry;
 
-std::array<ScaleKernelDispatchEntry, 8> scale_kernel_dispatch = {{
+std::array<ScaleKernelDispatchEntry, 9> scale_kernel_dispatch = {{
     {"tensorwise_tensorwise",
      scaled_blas::check_tensorwise_recipe,
      ScaledGemmImplementation::TENSORWISE_TENSORWISE},
@@ -515,6 +516,9 @@ std::array<ScaleKernelDispatchEntry, 8> scale_kernel_dispatch = {{
     {"mxfp4_mxfp4",
      scaled_blas::check_mxfp4_recipe,
      ScaledGemmImplementation::MXFP4_MXFP4},
+    {"nvfp4_nvfp4",
+     scaled_blas::check_nvfp4_recipe,
+     ScaledGemmImplementation::NVFP4_NVFP4},
     {"nvfp4_nvfp4_single_scale",
      scaled_blas::check_nvfp4_recipe_single_scale,
      ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE},
@@ -973,12 +977,16 @@ Tensor& _scaled_nvfp4_nvfp4(
     const std::optional<Tensor>& bias,
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
-    Tensor& out) {
+    Tensor& out,
+    const std::optional<Tensor>& global_scale_a = std::nullopt,
+    const std::optional<Tensor>& global_scale_b = std::nullopt) {
   // Restrictions:
-  // A, B are FP4, scales are float8_e4m3fn, scale_a: [M, K//16],
-  // scale_b: [N, K//16]. Single-level scaling (no global scale). Unlike CUDA,
-  // oneDNN does not swizzle scales; it needs real row-major 2D data, so scale_b
-  // is transposed to [K//16, N] below.
+  // A, B are FP4, block scales are float8_e4m3fn, scale_a: [M, K//16],
+  // scale_b: [N, K//16]. Two-level scaling additionally takes per-tensor fp32
+  // global scales; the product alpha = global_scale_a * global_scale_b is
+  // applied to the matmul output (matching CUDA). Single-level scaling omits
+  // the global scales. Unlike CUDA, oneDNN does not swizzle scales; it needs
+  // real row-major 2D data, so scale_b is transposed to [K//16, N] below.
   TORCH_CHECK_VALUE(
       mat_a.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2 &&
           mat_b.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2,
@@ -986,6 +994,31 @@ Tensor& _scaled_nvfp4_nvfp4(
       mat_a.scalar_type(),
       ", ",
       mat_b.scalar_type());
+
+  // Note: "Or" here means that if only one global scale is passed, we still
+  // require the other; otherwise we would silently ignore a provided scale.
+  std::optional<Tensor> alpha = std::nullopt;
+  if (global_scale_a.has_value() || global_scale_b.has_value()) {
+    TORCH_CHECK_VALUE(
+        global_scale_a.has_value(),
+        "For two-level-scaled NVFP4, global_scale_a must have a value");
+    TORCH_CHECK_VALUE(
+        global_scale_b.has_value(),
+        "For two-level-scaled NVFP4, global_scale_b must have a value");
+    TORCH_CHECK_VALUE(
+        global_scale_a->numel() == 1 && global_scale_a->scalar_type() == kFloat,
+        "global_scale_a must be a single fp32 element, got ",
+        global_scale_a->sizes(),
+        " ",
+        global_scale_a->scalar_type());
+    TORCH_CHECK_VALUE(
+        global_scale_b->numel() == 1 && global_scale_b->scalar_type() == kFloat,
+        "global_scale_b must be a single fp32 element, got ",
+        global_scale_b->sizes(),
+        " ",
+        global_scale_b->scalar_type());
+    alpha = global_scale_a->mul(global_scale_b.value());
+  }
 
   // Packed FP4 format means actual-K = 2 * reported-K -- adjust
   constexpr int64_t K_multiplier = 2;
@@ -1032,7 +1065,8 @@ Tensor& _scaled_nvfp4_nvfp4(
       scaling_choice_b,
       bias,
       use_fast_accum,
-      out);
+      out,
+      alpha);
 
   return out;
 }
@@ -1216,6 +1250,7 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
       ", ",
       ceil_div<int64_t>(mat_b.size(0) * 2, 16),
       ").\n"
+      "  For two-level NVFP4, additionally pass per-tensor fp32 global scales as scale_a[1] and scale_b[1] with recipe TensorWise.\n"
       "Got mat_a.dtype()=",
       mat_a.scalar_type(),
       ", scale_a[0].dtype()=",
@@ -1304,6 +1339,18 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
         out_dtype_,
         use_fast_accum,
         out_mut);
+  } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4) {
+    _scaled_nvfp4_nvfp4(
+        mat_a,
+        mat_b,
+        scale_a[0],
+        scale_b[0],
+        bias_opt,
+        out_dtype_,
+        use_fast_accum,
+        out_mut,
+        scale_a[1],
+        scale_b[1]);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE) {
     _scaled_nvfp4_nvfp4(
         mat_a,

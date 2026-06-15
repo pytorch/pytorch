@@ -507,7 +507,8 @@ sycl::event scaled_matmul(
     at::blas::ScalingType scaling_choice_b,
     const std::optional<at::Tensor>& bias,
     const std::optional<at::Tensor>& scale_result,
-    bool use_fast_accum) {
+    bool use_fast_accum,
+    const std::optional<at::Tensor>& alpha) {
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
@@ -562,6 +563,16 @@ sycl::event scaled_matmul(
     }
   }
 
+  // alpha applies a per-tensor multiplier to the matmul product (used by
+  // two-level NVFP4 global scaling: alpha = global_scale_a * global_scale_b).
+  // CUDA computes alpha*(A@B)+bias. oneDNN applies DNNL_ARG_BIAS *before*
+  // post-ops, so when alpha is present we apply bias as a binary_add post-op
+  // *after* the alpha multiply to preserve the same math. Without alpha, bias
+  // stays on the native DNNL_ARG_BIAS path.
+  bool with_alpha = alpha.has_value() && alpha->defined();
+  bool bias_as_arg = with_bias && !with_alpha;
+  bool bias_as_post_op = with_bias && with_alpha;
+
   // 1.2 Create primitive descriptor and set scales mask
   const ScaleSpec src_spec = make_scale_spec(scaling_choice_a, M, K, N, "src");
   const ScaleSpec wei_spec = make_scale_spec(scaling_choice_b, M, K, N, "wei");
@@ -585,10 +596,27 @@ sycl::event scaled_matmul(
     op_attr.set_scales(DNNL_ARG_DST, 0, {}, dnnl::memory::data_type::f32);
   }
 
+  // Assemble post-ops: optional alpha (binary_mul) followed by optional bias
+  // (binary_add). Order matters -- alpha must be applied to the product before
+  // bias is added.
+  dnnl::memory::desc alpha_md;
+  dnnl::post_ops po;
+  if (with_alpha) {
+    alpha_md = dnnl::memory::desc(
+        {1, 1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::ab);
+    po.append_binary(dnnl::algorithm::binary_mul, alpha_md);
+  }
+  if (bias_as_post_op) {
+    po.append_binary(dnnl::algorithm::binary_add, bias_md);
+  }
+  if (po.len() > 0) {
+    op_attr.set_post_ops(po);
+  }
+
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   // 1.3 Create the matmul primitive descriptor
-  dnnl::matmul::primitive_desc matmul_pd = with_bias
+  dnnl::matmul::primitive_desc matmul_pd = bias_as_arg
       ? dnnl::matmul::primitive_desc(
             engine, src_md, weights_md, bias_md, dst_md, op_attr)
       : dnnl::matmul::primitive_desc(
@@ -610,7 +638,6 @@ sycl::event scaled_matmul(
     b_usr_m =
         make_onednn_memory(bias_md, engine, possible_reshaped_bias.data_ptr());
   }
-
   // Prepare scale memory for oneDNN.
   auto make_scale_mem_from_spec =
       [&](const ScaleSpec& spec,
@@ -636,7 +663,7 @@ sycl::event scaled_matmul(
   args.insert({DNNL_ARG_WEIGHTS, weights_usr_m});
   args.insert({DNNL_ARG_DST, dst_usr_m});
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
-  if (with_bias) {
+  if (bias_as_arg) {
     args.insert({DNNL_ARG_BIAS, b_usr_m});
   }
 
@@ -648,6 +675,24 @@ sycl::event scaled_matmul(
 
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_mem});
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_sc_mem});
+
+  // Bind post-op operands in the same order they were appended above.
+  at::Tensor alpha_f32;
+  int post_op_idx = 0;
+  if (with_alpha) {
+    alpha_f32 = alpha->to(at::kFloat).contiguous();
+    auto alpha_mem = make_onednn_memory(alpha_md, engine, alpha_f32.data_ptr());
+    args.insert(
+        {DNNL_ARG_ATTR_MULTIPLE_POST_OP(post_op_idx) | DNNL_ARG_SRC_1,
+         alpha_mem});
+    post_op_idx++;
+  }
+  if (bias_as_post_op) {
+    args.insert(
+        {DNNL_ARG_ATTR_MULTIPLE_POST_OP(post_op_idx) | DNNL_ARG_SRC_1,
+         b_usr_m});
+    post_op_idx++;
+  }
 
   at::Tensor dst_scale_tensor;
   if (with_dst_scale) {
