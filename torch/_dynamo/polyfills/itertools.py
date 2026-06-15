@@ -19,8 +19,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "accumulate",
-    "chain",
-    "chain_from_iterable",
     "combinations",
     "combinations_with_replacement",
     "compress",
@@ -45,13 +43,6 @@ _U = TypeVar("_U")
 _Predicate: TypeAlias = Callable[[_T], object]
 _T1 = TypeVar("_T1")
 _T2 = TypeVar("_T2")
-
-
-# Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
-@substitute_in_graph(itertools.chain, is_embedded_type=True)  # type: ignore[arg-type]
-def chain(*iterables: Iterable[_T]) -> Iterator[_T]:
-    for iterable in iterables:
-        yield from iterable
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.accumulate
@@ -81,18 +72,6 @@ def accumulate(
             yield total
 
     return _accumulate(iterator)
-
-
-@substitute_in_graph(itertools.chain.from_iterable)  # type: ignore[arg-type]
-def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
-    # previous version of this code was:
-    #   return itertools.chain(*iterable)
-    # If iterable is an infinite generator, this will lead to infinite recursion
-    for it in iterable:
-        yield from it
-
-
-chain.from_iterable = chain_from_iterable  # type: ignore[attr-defined]
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.combinations
