@@ -1276,8 +1276,7 @@
 - func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA, XPU: logical_not_out
-    MPS: logical_not_out_mps
+    CPU, CUDA, MPS, MTIA, XPU: logical_not_out
   tags: pointwise
 
 - func: logical_xor(Tensor self, Tensor other) -> Tensor
