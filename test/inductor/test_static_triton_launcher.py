@@ -599,6 +599,35 @@ class TestStaticTritonCompileResult(TestCase):
         x2 = x.clone().detach_()
         self.assertEqual(foo(x), x2 + 5)
 
+    @skipIfXpu(msg="Tests CUDA static launcher dtype validation")
+    @torch._inductor.config.patch({"compile_threads": 1, "fx_graph_cache": False})
+    def test_custom_op_bad_fake_dtype_fails_fast(self):
+        namespace = f"test_static_launcher_dtype_validation_{random.randint(0, 2**32)}"
+
+        @torch.library.custom_op(f"{namespace}::bad_meta_mul", mutates_args=())
+        def bad_meta_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a * b
+
+        @bad_meta_mul.register_fake
+        def _(a, b):
+            return torch.empty_like(a, dtype=torch.bfloat16)
+
+        op = getattr(torch.ops, namespace).bad_meta_mul
+
+        @torch.compile(fullgraph=True)
+        def f(a, b):
+            x = op(a, b)
+            return x + 1
+
+        a = torch.randn(1 << 20, device=GPU_TYPE, dtype=torch.float32)
+        b = torch.randn(1 << 20, device=GPU_TYPE, dtype=torch.float32)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"(?s)expected dtype torch\.bfloat16 but got torch\.float32.*incorrect fake",
+            lambda: f(a, b),
+        )
+
     def test_empty_tensor(self):
         @torch.compile()
         def foo(x, y):
