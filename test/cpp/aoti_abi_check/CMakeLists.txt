@@ -27,6 +27,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_exception.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_fbcodemaps.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_filesystem.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_flathashmap.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_functionref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_headeronlyarrayref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_idwrapper.cpp
@@ -34,15 +35,18 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_layout.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_lazy.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_load.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_llvmmathextras.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_macros.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_math.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_memoryformat.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_metaprogramming.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_orderpreservingflathashmap.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_overloaded.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scopeexit.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_smallbuffer.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_stringutils.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_stringview.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_strongtype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_synchronized.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_unroll.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
