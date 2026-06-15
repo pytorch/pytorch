@@ -12,6 +12,23 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
 
+def _import_nccl_ep() -> Any:
+    # The EP bindings live in the optional torch._nccl_ep extension, built only
+    # with USE_NCCL_EP. It statically links libnccl_ep (its nccl* symbols bind to
+    # torch's own NCCL) and bakes in the JIT header paths, so it is fully
+    # self-contained -- no libnccl_ep.so to preload and no nccl4py dependency.
+    try:
+        # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
+        import torch._nccl_ep as _ep
+    except ImportError as e:
+        raise ImportError(
+            "torch._nccl_ep is unavailable; this PyTorch was not built with "
+            "USE_NCCL_EP."
+        ) from e
+
+    return _ep
+
+
 @dataclass(frozen=True, slots=True)
 class Routing:
     handle: object
@@ -200,13 +217,9 @@ class TokenSwitchNCCL(TokenSwitch):
         max_recv_tokens_per_rank: int,
         max_token_bytes: int,
     ) -> None:
-        c10d = torch._C._distributed_c10d
-        if not hasattr(c10d, "_NcclEpGroup"):
-            raise RuntimeError(
-                "TokenSwitchNCCL requires a build with NCCL EP (USE_NCCL_EP)."
-            )
+        self._ep = _import_nccl_ep()
         self._max_recv_tokens_per_rank = max_recv_tokens_per_rank
-        self._group = c10d._NcclEpGroup.create(
+        self._group = self._ep._NcclEpGroup.create(
             process_group,
             num_experts,
             max_dispatch_tokens_per_rank,
@@ -220,8 +233,7 @@ class TokenSwitchNCCL(TokenSwitch):
         per_expert_token_counts: torch.Tensor | None = None,
     ) -> Routing:
         """Create expert routing for this phase; pass to :meth:`dispatch` / :meth:`combine`."""
-        c10d = torch._C._distributed_c10d
-        handle = c10d._NcclEpHandle.create(
+        handle = self._ep._NcclEpHandle.create(
             self._group,
             topk_idx,
             per_expert_token_counts,
@@ -237,7 +249,7 @@ class TokenSwitchNCCL(TokenSwitch):
         out_topk_weights: torch.Tensor,
         out_topk_idx: torch.Tensor,
     ) -> None:
-        torch._C._distributed_c10d._nccl_ep_dispatch(
+        self._ep._nccl_ep_dispatch(
             routing.handle,
             tokens,
             topk_weights,
@@ -252,7 +264,7 @@ class TokenSwitchNCCL(TokenSwitch):
         expert_tokens: torch.Tensor,
         out_tokens: torch.Tensor,
     ) -> None:
-        torch._C._distributed_c10d._nccl_ep_combine(
+        self._ep._nccl_ep_combine(
             routing.handle,
             expert_tokens,
             out_tokens,

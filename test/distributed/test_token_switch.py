@@ -1,9 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
 
+import logging
+
 import torch
 import torch.distributed as dist
-from torch.distributed._token_switch import TokenSwitchNCCL
+from torch.distributed._token_switch import _import_nccl_ep, TokenSwitchNCCL
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     skip_if_lt_x_gpu,
@@ -14,13 +16,28 @@ from torch.testing._internal.common_utils import (
 )
 
 
+log = logging.getLogger(__name__)
+
+
+def _nccl_ep_available() -> bool:
+    # The torch._nccl_ep extension is built only with USE_NCCL_EP, and a
+    # USE_SYSTEM_NCCL=ON build additionally needs the nccl4py wheel at runtime.
+    # Actually importing it is the real check: find_spec would only locate the
+    # extension without dlopening it, so it would miss a missing libnccl_ep.so.
+    if not torch.cuda.is_available():
+        return False
+    try:
+        _import_nccl_ep()
+    except Exception:
+        log.debug("torch._nccl_ep unavailable; skipping EP tests", exc_info=True)
+        return False
+    return True
+
+
 def requires_nccl_ep():
-    # The NCCL EP bindings are not_supported() stubs unless torch is built with
-    # USE_NCCL_EP, and there is no reliable availability signal yet. A later
-    # change adds the torch._nccl_ep extension and flips this to a real check;
-    # until then these tests cannot run, so skip unconditionally.
     return skip_but_pass_in_sandcastle_if(
-        True, "NCCL EP tests are enabled with the torch._nccl_ep extension"
+        not _nccl_ep_available(),
+        "Test requires a USE_NCCL_EP build (plus nccl4py for USE_SYSTEM_NCCL=ON)",
     )
 
 
