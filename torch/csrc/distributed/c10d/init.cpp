@@ -57,10 +57,6 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.hpp>
 #endif
 
-#ifdef USE_C10D_NCCL
-#include <torch/csrc/distributed/c10d/symm_mem/nccl_ep.hpp>
-#endif
-
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
 #include <torch/csrc/distributed/c10d/logger.hpp>
@@ -1452,53 +1448,6 @@ Example:
       py::arg("group_name"),
       py::arg("device"));
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-
-  // nccl_ep.cu (which defines these symbols) is only compiled into torch_cuda
-  // for CUDA + NCCL distributed builds; guard the registration with the same
-  // condition so non-NCCL builds of libtorch_python don't reference undefined
-  // symbols (e.g. typeinfo for c10d::nccl_ep::NcclEpGroup).
-  using NcclEpGroup = ::c10d::nccl_ep::NcclEpGroup;
-  using NcclEpHandle = ::c10d::nccl_ep::NcclEpHandle;
-
-  py::class_<NcclEpGroup, c10::intrusive_ptr<NcclEpGroup>>(
-      module, "_NcclEpGroup")
-      .def_static(
-          "create",
-          &::c10d::nccl_ep::nccl_ep_create_group,
-          py::arg("pg"),
-          py::arg("num_experts"),
-          py::arg("max_dispatch_tokens_per_rank"),
-          py::arg("max_recv_tokens_per_rank"),
-          py::arg("max_token_bytes"));
-
-  py::class_<NcclEpHandle, c10::intrusive_ptr<NcclEpHandle>>(
-      module, "_NcclEpHandle")
-      .def_static(
-          "create",
-          &::c10d::nccl_ep::nccl_ep_create_handle,
-          py::arg("group"),
-          py::arg("topk_idx"),
-          py::arg("recv_expert_counter") = py::none())
-      .def(
-          "get_num_recv_tokens",
-          &::c10d::nccl_ep::nccl_ep_handle_get_num_recv_tokens);
-
-  module.def(
-      "_nccl_ep_dispatch",
-      &::c10d::nccl_ep::nccl_ep_dispatch,
-      py::arg("handle"),
-      py::arg("tokens"),
-      py::arg("topk_weights"),
-      py::arg("out_tokens"),
-      py::arg("out_topk_weights"),
-      py::arg("out_topk_idx"));
-
-  module.def(
-      "_nccl_ep_combine",
-      &::c10d::nccl_ep::nccl_ep_combine,
-      py::arg("handle"),
-      py::arg("expert_tokens"),
-      py::arg("out_tokens"));
 #endif // USE_C10D_NCCL
 
   auto store =

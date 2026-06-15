@@ -45,10 +45,19 @@ if(NOT __NCCL_EP_INCLUDED)
       -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
       -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DCMAKE_CUDA_COMPILER=${CMAKE_CUDA_COMPILER}
+      # Link the CUDA runtime dynamically (CMake defaults to static). The static
+      # cudart does not support CUDA minor-version (enhanced) compatibility, so a
+      # static-cudart libnccl_ep cannot run on a minor-older driver; the shared
+      # libcudart does, matching how libtorch_cuda links it.
+      -DCMAKE_CUDA_RUNTIME_LIBRARY=Shared
       ${__NCCL_EP_ARCH_ARG}
       -DNCCL_HOME=${__NCCL_BUILD_DIR}
       -DNCCL_EP_BUILDDIR=${__NCCL_BUILD_DIR}
       -DNCCL_EP_SOURCE_DIR=${PROJECT_SOURCE_DIR}/third_party/nccl/contrib/nccl_ep
+    # Build the static lib; the _nccl_ep extension statically links it, so its
+    # ncclEp* symbols are embedded in the extension and its nccl* references
+    # resolve against torch_cuda's own (statically-linked) NCCL. No runtime
+    # libnccl_ep.so and no nccl4py dependency.
     BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_ep.a"
     INSTALL_COMMAND ""
     # NCCL (Makefile) must finish first: nccl_ep links -lnccl and includes its headers.
@@ -57,12 +66,16 @@ if(NOT __NCCL_EP_INCLUDED)
 
   set(NCCL_EP_LIBRARIES "${__NCCL_BUILD_DIR}/lib/libnccl_ep.a")
   set(NCCL_EP_INCLUDE_DIRS "${__NCCL_BUILD_DIR}/include")
+  # The runtime JIT resolves NCCL_EP_HOME -> include/nccl_ep and NCCL_HOME ->
+  # include/nccl.h; the submodule build installs both under this one dir, which
+  # the extension bakes in as the default (see torch/CMakeLists.txt).
+  set(NCCL_EP_JIT_HOME "${__NCCL_BUILD_DIR}" CACHE INTERNAL "nccl-ep JIT header home")
 
   add_library(__caffe2_nccl_ep INTERFACE)
   add_dependencies(__caffe2_nccl_ep nccl_ep_external)
   target_link_libraries(__caffe2_nccl_ep INTERFACE ${NCCL_EP_LIBRARIES})
   target_include_directories(__caffe2_nccl_ep INTERFACE ${NCCL_EP_INCLUDE_DIRS})
-  # libnccl_ep.a's JIT calls CUDA Driver APIs; pull in libcuda.so.
+  # libnccl_ep's JIT calls CUDA Driver APIs; pull in libcuda.so.
   if(TARGET CUDA::cuda_driver)
     target_link_libraries(__caffe2_nccl_ep INTERFACE CUDA::cuda_driver)
   endif()
