@@ -100,7 +100,6 @@ TensorImpl::TensorImpl(
 // the Python and PythonTLSSnapshot dispatch keys will be set and all is well.
 // The point is to delay the dispatch key setting until that point.
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     ImplType /*type*/,
     Storage&& storage,
@@ -111,7 +110,6 @@ TensorImpl::TensorImpl(
       data_type_(data_type),
       device_opt_(storage_.device()),
       key_set_(key_set - c10::python_ks) { // See [Note: Python key removal]
-  init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
@@ -124,7 +122,6 @@ TensorImpl::TensorImpl(
     std::optional<c10::Device> device_opt)
     : TensorImpl({}, key_set, data_type, device_opt) {}
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
@@ -134,8 +131,6 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
-  init_bitfields();
-
   if (!key_set.empty()) {
     TORCH_INTERNAL_ASSERT(
         data_type == ScalarType::Undefined || device_opt_.has_value());
@@ -430,6 +425,8 @@ c10::Device TensorImpl::device_custom() const {
     if (c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
       return device_default();
     }
+    // has_value() is checked above; the dataflow check misses it here.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *extra_meta_->fake_device_;
   }
   return device_default();
