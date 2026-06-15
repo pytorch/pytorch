@@ -19,6 +19,8 @@ from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
 
 
+log = logging.getLogger(__name__)
+
 # Enable FX graph caching
 if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
     torch._inductor.config.fx_graph_cache = True
@@ -217,25 +219,23 @@ class TimmRunner(BenchmarkRunner):
 
     @download_retry_decorator
     def _download_model(self, model_name):
+        kwargs = dict(in_chans=3, scriptable=False, num_classes=None, pretrained=True)
         try:
             model = create_model(
                 model_name,
-                in_chans=3,
-                scriptable=False,
-                num_classes=None,
+                **kwargs,
                 drop_rate=0.0,
                 drop_path_rate=None,
                 drop_block_rate=None,
-                pretrained=True,
             )
-        except TypeError:
-            model = create_model(
+        except TypeError as e:
+            if "unexpected keyword argument" not in str(e):
+                raise
+            log.warning(
+                "Model %s does not support drop_rate kwargs, loading without them",
                 model_name,
-                in_chans=3,
-                scriptable=False,
-                num_classes=None,
-                pretrained=True,
             )
+            model = create_model(model_name, **kwargs)
         return model
 
     def load_model(
