@@ -710,6 +710,15 @@ class Tensor(torch._C.TensorBase):
         accumulate grad hook is ONLY applicable for leaf tensors (tensors without a
         .grad_fn field). Registering this hook on a non-leaf tensor will error!
 
+        .. warning::
+            Unlike :meth:`~torch.Tensor.register_hook`, the hook registered here is
+            passed the **tensor itself** (the leaf parameter), not its gradient. The
+            method name and the phrase "after grad accumulation" are easy to misread as
+            implying the hook receives the gradient -- it does not. To read the gradient
+            inside the hook, access the tensor's ``.grad`` field (for example
+            ``param.grad``). Treating the argument as the gradient is a silent error
+            that can corrupt training without raising any exception.
+
         The hook should have the following signature::
 
             hook(param: Tensor) -> None
