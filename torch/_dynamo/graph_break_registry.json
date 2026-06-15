@@ -2865,6 +2865,16 @@
       ]
     }
   ],
+  "GB9192": [
+    {
+      "Gb_type": "Unsupported kwargs for itertools.zip_longest",
+      "Context": "call_function {self} {args} {kwargs}",
+      "Explanation": "Expected kwargs: 'fillvalue', but got {','.join(set(kwargs.keys()) - {'fillvalue'})}",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0200": [
     {
       "Gb_type": "missing BUILD_SET handler",
