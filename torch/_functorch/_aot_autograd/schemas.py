@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import collections
 import functools
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeVar
+from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -28,7 +29,7 @@ from .utils import strict_zip
 
 if TYPE_CHECKING:
     import contextlib
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable
 
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode
@@ -42,6 +43,9 @@ if TYPE_CHECKING:
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 zip = strict_zip
+
+ActInputPath: TypeAlias = tuple[int, tuple[str, ...]]
+ActInputPaths: TypeAlias = Sequence[ActInputPath]
 
 
 OutputType = Enum(
@@ -515,10 +519,11 @@ class ViewAndMutationMeta:
     # Keeps track of which input indices store parameters (which we will treat as static)
     static_input_indices: list[int] = field(default_factory=list)
 
-    # Input indices that held AsyncCollectiveTensors at compile time.
-    # Used to emit direct trigger_wait() calls at runtime instead of
+    # Input paths that held AsyncCollectiveTensors at compile time. A path is
+    # (input_index, attr_path), where an empty attr_path means the top-level
+    # input. Used to emit direct trigger_wait() calls at runtime instead of
     # scanning every arg on every graph invocation.
-    act_input_indices: list[int] = field(default_factory=list)
+    act_input_paths: list[ActInputPath] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
