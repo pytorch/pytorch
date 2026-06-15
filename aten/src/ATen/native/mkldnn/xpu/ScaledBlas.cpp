@@ -474,8 +474,8 @@ Tensor& _scaled_mm_out_xpu(
 
   // TODO: Scale_result is not supported by now!!
   // API shapes match CUDA v1. oneDNN needs row-major contiguous.
-  // scale_a: [M, K//128] or [M//128, K//128] or [M, K//32]
-  // scale_b: [K//128, N] or [K//128, N//128] or [K//32, N]
+  // scale_a: [M, K//128] or [M//128, K//128] or [M, K//32] or [M, K//16]
+  // scale_b: [K//128, N] or [K//128, N//128] or [K//32, N] or [K//16, N]
   // Because the user might passed in the CUDA's stride (col-major because of
   // swizzling)
   // call a contiguous() to ensure row-major for oneDNN
