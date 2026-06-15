@@ -462,6 +462,10 @@ class TestRotaryEmbeddingModule(TestCase):
         x = torch.randn(1, 4, 128, 64, device=device)
         self.assertEqual(rope(x).device.type, torch.device(device).type)
 
+    def test_odd_dim_raises(self, device):
+        with self.assertRaisesRegex(ValueError, "dim must be even"):
+            nn.RotaryEmbedding(dim=63)
+
     def test_output_shape(self, device):
         rope = nn.RotaryEmbedding(dim=64, max_seq_len=128).to(device)
         for B, H, S in [(1, 1, 8), (2, 8, 32), (4, 16, 128)]:

@@ -73,6 +73,8 @@ class RotaryEmbedding(Module):
         base: int = 10000,
     ) -> None:
         super().__init__()
+        if dim % 2 != 0:
+            raise ValueError(f"dim must be even, got {dim}")
         self.dim = dim
         self.max_seq_len = max_seq_len
         self.base = base
@@ -94,11 +96,11 @@ class RotaryEmbedding(Module):
             max_seq_len (int): New maximum sequence length.
         """
         self.max_seq_len = max_seq_len
-        # Infer device from existing buffers so that a rebuild after .to(device)
-        # keeps the new cache on the same device rather than silently falling back to CPU.
-        device = (
-            self.cos_cache.device if hasattr(self, "cos_cache") else torch.device("cpu")
-        )
+        # Query _buffers directly so we don't go through __getattr__ twice and
+        # so a None-valued buffer (register_buffer("cos_cache", None)) doesn't
+        # trick hasattr() into returning True and then blow up on .device.
+        existing = self._buffers.get("cos_cache")
+        device = existing.device if existing is not None else torch.device("cpu")
         theta = 1.0 / (
             self.base
             ** (
