@@ -1116,7 +1116,7 @@ class TestFastLauncherDeviceSupport(TestCase):
         return CachingAutotuner(
             fn=triton_,
             triton_meta=triton_meta,
-            configs=[triton_config({"x": 1}, 1)],
+            configs=[triton_config({"x": 1}, 1, warp_size=device.warp_size_or_default)],
             save_cache_hook=False,
             mutated_arg_names=[],
             reset_to_zero_arg_names=[],
@@ -1427,7 +1427,15 @@ class TestWarpSizeUnification(TestCase):
         none_props = DeviceProperties(
             type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=None
         )
-        self.assertEqual(none_props.warp_size_or_default, 32)
+        with self.assertRaisesRegex(
+            RuntimeError, "cuda device properties must report warp_size"
+        ):
+            none_props.warp_size_or_default
+
+        cpu_props = DeviceProperties(
+            type="cpu", index=0, multi_processor_count=80, cc=80, warp_size=None
+        )
+        self.assertEqual(cpu_props.warp_size_or_default, 32)
 
         w32 = DeviceProperties(
             type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=32
