@@ -176,20 +176,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         ),
     ),
     BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="libtorch",
-        build_variant=generate_binary_build_matrix.DEBUG,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS,
-            generate_binary_build_matrix.DEBUG,
-            libtorch_variants=["shared-with-deps"],
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS_ARM64,
         package_type="wheel",
         build_configs=_WINDOWS_ARM64_WHEEL_CONFIGS,
@@ -204,21 +190,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         libtorch_extraction_configs=generate_binary_build_matrix.generate_libtorch_extraction_configs(
             OperatingSystem.WINDOWS_ARM64,
             _WINDOWS_ARM64_WHEEL_CONFIGS,
-        ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS_ARM64,
-        package_type="libtorch",
-        build_variant=generate_binary_build_matrix.DEBUG,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS_ARM64,
-            generate_binary_build_matrix.DEBUG,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
         ),
     ),
 ]
