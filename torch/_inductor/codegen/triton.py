@@ -6474,6 +6474,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             if not need_pointwise_loop:
                 self._splice_body_sections()
+
         self.body.splice(self.post_loop_combine)
         if self.cooperative_reduction and (
             self.post_loop_combine or self.post_loop_store

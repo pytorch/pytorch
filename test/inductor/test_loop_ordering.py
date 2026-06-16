@@ -1047,6 +1047,29 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, q, norm_weight, cos, sin)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @inductor_config.patch(polyhedral_fusion=True)
+    def test_polyhedral_rms_norm_residual_chunk_fusion(self):
+        """
+        Residual add + RMSNorm + chunk + SiLU gating should fuse into a
+        single kernel under polyhedral fusion.
+        """
+
+        HIDDEN_DIM, SEQ_LEN = 256, 16
+
+        def rms_norm_residual_block(x, residual, weight):
+            x = x + residual
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x_normed = x * torch.rsqrt(variance + 1e-6) * weight
+            gate, up = x_normed.chunk(2, dim=-1)
+            return F.silu(gate) * up
+
+        x = torch.randn(SEQ_LEN, HIDDEN_DIM, device=GPU_TYPE)
+        res = torch.randn(SEQ_LEN, HIDDEN_DIM, device=GPU_TYPE)
+        w = torch.randn(HIDDEN_DIM, device=GPU_TYPE)
+
+        self.do_acc_test(rms_norm_residual_block, x, res, w)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
 
 @inductor_config.patch(
     {

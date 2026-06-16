@@ -402,7 +402,8 @@ class MemoryEstimator:
                 self.inside_reduction = False
                 self.kernel_sizes = kernel_size_outside_loop
                 continue
-            assert isinstance(node, SchedulerNode)
+            if not isinstance(node, SchedulerNode):
+                raise AssertionError(f"expected SchedulerNode, got {type(node)}")
             rw = extract_loop_body_with_args(
                 node._body,
                 SIMDKernel.map_kernel_groups_to_node_sizes(

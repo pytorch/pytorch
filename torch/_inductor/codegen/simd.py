@@ -966,9 +966,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(V.graph.sizevars.statically_known_leq(1, s) for s in remaining), (
-            f"over-allocated iteration space: remaining={remaining}, groups may be smaller than node ranges"
-        )
+        if not all(V.graph.sizevars.statically_known_leq(1, s) for s in remaining):
+            raise AssertionError(
+                f"over-allocated iteration space: remaining={remaining}, groups may be smaller than node ranges"
+            )
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
@@ -1034,7 +1035,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         # pointwise node after DisableReduction needs the
         # reduction dim set to its actual iteration size
-        if self.pointwise_loop_numel is not None:
+        if (
+            config.polyhedral_fusion
+            and V.graph.is_inference
+            and self.pointwise_loop_numel is not None
+        ):
             for prefix in tiling:
                 if prefix_is_reduction(prefix):
                     tiling[prefix] = self.pointwise_loop_numel
@@ -1070,17 +1075,22 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         ):
             return set_ranges(*lengths)
 
-        try:
-            new_ranges, return_getters_groups = cls._split_iteration_ranges(
-                groups, lengths
-            )
-            itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
-            return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
-        except CantSplit:
-            perf_hint_log.debug(
-                "CantSplit fallback: groups=%s, lengths=%s", groups, lengths
-            )
-            return set_ranges(*lengths)
+        if config.polyhedral_fusion and V.graph.is_inference:
+            try:
+                new_ranges, return_getters_groups = cls._split_iteration_ranges(
+                    groups, lengths
+                )
+                itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
+                return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
+            except CantSplit:
+                perf_hint_log.debug(
+                    "CantSplit fallback: groups=%s, lengths=%s", groups, lengths
+                )
+                return set_ranges(*lengths)
+
+        new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
+        itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
+        return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
     def is_indirect_indexing(self, index: sympy.Expr) -> bool:
         # tmpX  means indirect indexing
@@ -2239,7 +2249,7 @@ class SIMDScheduling(BaseScheduling):
                     return is_reduction_tiling_valid
                 return True
 
-            if config.polyhedral_fusion:
+            if config.polyhedral_fusion and V.graph.is_inference:
                 reduction_writes = [
                     w for w in node2.read_writes.writes if isinstance(w, MemoryDep)
                 ]
@@ -2374,7 +2384,7 @@ class SIMDScheduling(BaseScheduling):
                 return False
             if node_numel == numel:
                 return True
-            if not config.polyhedral_fusion:
+            if not (config.polyhedral_fusion and V.graph.is_inference):
                 return False
             if not (not_ready_yet_nodes & n.ancestors):
                 return False
@@ -2459,14 +2469,19 @@ class SIMDScheduling(BaseScheduling):
                 schedule_node_in_loop(node)
             elif fits_outside_reduction(node):
                 with end_current_reduction_loop():
-                    _, (node_numel_here, _) = node.group
-                    inner_numel = V.graph.sizevars.simplify(node_numel_here // numel)
-                    if not V.graph.sizevars.statically_known_equals(
-                        inner_numel, sympy.S.One
-                    ):
-                        node_schedule.append(EnablePointwiseLoop(inner_numel))
-                        node_schedule.append(node)
-                        node_schedule.append(DisablePointwiseLoop)
+                    if config.polyhedral_fusion and V.graph.is_inference:
+                        _, (node_numel_here, _) = node.group
+                        inner_numel = V.graph.sizevars.simplify(
+                            node_numel_here // numel
+                        )
+                        if not V.graph.sizevars.statically_known_equals(
+                            inner_numel, sympy.S.One
+                        ):
+                            node_schedule.append(EnablePointwiseLoop(inner_numel))
+                            node_schedule.append(node)
+                            node_schedule.append(DisablePointwiseLoop)
+                        else:
+                            node_schedule.append(node)
                     else:
                         node_schedule.append(node)
             else:
@@ -3420,6 +3435,7 @@ class SIMDScheduling(BaseScheduling):
                     pass
                 else:
                     indexing_dtype_strength_reduction(node._body)
+                    convert_index_expr_to_value_expr(node._body)
                     node_ranges = node.get_ranges()
                     index_vars = kernel.split_and_set_ranges(node_ranges)
                     node.codegen(index_vars)
