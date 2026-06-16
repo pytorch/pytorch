@@ -162,8 +162,12 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # Enable XCCL build
   export USE_XCCL=1
   export USE_MPI=0
-  export TORCH_XPU_ARCH_LIST=pvc
   export USE_STATIC_MKL=1
+  export TORCH_XPU_ARCH_LIST=pvc
+  # Use different AOT target list for different runner tests
+  if [[ "$BUILD_ENVIRONMENT" == *client* ]]; then
+    export TORCH_XPU_ARCH_LIST=bmg
+  fi
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -259,9 +263,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
   # s390x builds currently fail when WERROR=1
+  # Release xpu build stress with WERROR=1
   # set only when building other architectures
   # or building non-XLA tests.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *xpu* ]]; then
     # TODO: Remove me and may be just focus on numpy-2.x testing
     if [[ "$ANACONDA_PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
