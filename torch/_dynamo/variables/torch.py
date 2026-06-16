@@ -4038,11 +4038,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
         ) and can_dispatch_torch_function(tx, args, kwargs)
 
-    def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, VariableTracker):
-            return False
-        return self.as_python_constant() == other.as_python_constant()
-
 
 class DispatchKeySetVariable(BaseTorchVariable):
     """represents torch.DispatchKeySet"""
