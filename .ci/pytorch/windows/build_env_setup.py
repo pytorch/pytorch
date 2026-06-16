@@ -411,11 +411,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    gpu_arch_type = os.environ.get("GPU_ARCH_TYPE") or os.environ.get(
-        "DESIRED_CUDA", "cpu"
-    )
-    if gpu_arch_type.startswith("cu") and gpu_arch_type != "cpu":
-        gpu_arch_type = "cuda"
+    # The bash wrapper always exports GPU_ARCH_TYPE as one of cpu/cuda/xpu.
+    gpu_arch_type = os.environ.get("GPU_ARCH_TYPE", "cpu")
     vc_year = os.environ.get("VC_YEAR", "2022")
     print(f"build_env_setup.py: GPU_ARCH_TYPE={gpu_arch_type} VC_YEAR={vc_year}")
 
