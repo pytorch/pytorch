@@ -11,7 +11,7 @@ from torchfuzz.tensor_fuzzer import Spec, TensorSpec
 # Type promotion imports removed since we now use explicit casting in codegen
 
 
-class MatrixMultiplyOperator(Operator):
+class MatrixMultiplyOperatorBase(Operator):
     """Base class for matrix multiplication operations."""
 
     def __init__(self, name: str):
@@ -43,7 +43,7 @@ class MatrixMultiplyOperator(Operator):
         return [output_dtype, output_dtype]
 
 
-class MMOperator(MatrixMultiplyOperator):
+class MMOperator(MatrixMultiplyOperatorBase):
     """Operator for matrix multiplication (torch.mm)."""
 
     def __init__(self):
@@ -128,7 +128,7 @@ class MMOperator(MatrixMultiplyOperator):
             return f"{output_name} = torch.mm({input_names[0]}, {input_names[1]})"
 
 
-class AddmmOperator(MatrixMultiplyOperator):
+class AddmmOperator(MatrixMultiplyOperatorBase):
     """Operator for additive matrix multiplication (torch.addmm)."""
 
     def __init__(self):
@@ -221,7 +221,7 @@ class AddmmOperator(MatrixMultiplyOperator):
             return f"{output_name} = torch.addmm({input_names[0]}, {input_names[1]}, {input_names[2]})"
 
 
-class BmmOperator(MatrixMultiplyOperator):
+class BmmOperator(MatrixMultiplyOperatorBase):
     """Operator for batch matrix multiplication (torch.bmm)."""
 
     def __init__(self):
@@ -306,7 +306,7 @@ class BmmOperator(MatrixMultiplyOperator):
             return f"{output_name} = torch.bmm({input_names[0]}, {input_names[1]})"
 
 
-class MatmulOperator(MatrixMultiplyOperator):
+class MatmulOperator(MatrixMultiplyOperatorBase):
     """Operator for general matrix multiplication (torch.matmul)."""
 
     def __init__(self):
