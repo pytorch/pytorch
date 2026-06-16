@@ -7,7 +7,7 @@ import tempfile
 import types
 import unittest
 from unittest import skipUnless
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -463,6 +463,33 @@ class TestTritonHeuristics(TestCase):
 _PLUGIN_FACTORY_PATH = (
     "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"
 )
+
+
+class TestCachingAutotunerPrecompileDriverSetup(TestCase):
+    @skipIfRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_warm_cache_only_precompile_skips_driver_setup_in_context(self):
+        from torch._inductor.runtime import triton_helpers
+
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        num_configs = len(args["configs"])
+        self.assertGreaterEqual(num_configs, 2)
+        autotuner = CachingAutotuner(**args)
+
+        with (
+            triton_helpers.skip_gpu_driver_setup(),
+            patch.object(
+                type(triton.runtime.driver),
+                "active",
+                new_callable=PropertyMock,
+                side_effect=RuntimeError("driver.active should not be read"),
+            ) as mock_driver_active,
+        ):
+            autotuner.precompile(warm_cache_only=True)
+
+        # Covers every synchronous _precompile_config() iteration.
+        mock_driver_active.assert_not_called()
+        self.assertEqual(len(autotuner.compile_results), num_configs)
 
 
 # Triton's HIP MLIR pipeline raises AttributeError("'NoneType' object has no
