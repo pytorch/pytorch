@@ -761,11 +761,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       C10_CUDA_CHECK(cudaMemPoolGetAttribute(
           mempool, cudaMemPoolAttrUsedMemHigh, &used_mem_peak));
 
-      // Allocations captured into a CUDA graph live in the device's graph-memory
-      // pool, not the default mempool, so add that pool's stats here -- otherwise
-      // memory_reserved() undercounts any graph-capturing workload. Tolerate
-      // cudaErrorNotSupported on drivers without graph-mem attributes (treat as 0).
-      auto get_graph_attr = [device](cudaGraphMemAttributeType attr) -> uint64_t {
+      // Allocations captured into a CUDA graph live in the device's
+      // graph-memory pool, not the default mempool, so add that pool's stats
+      // here -- otherwise memory_reserved() undercounts any graph-capturing
+      // workload. Tolerate cudaErrorNotSupported on drivers without graph-mem
+      // attributes (treat as 0).
+      auto get_graph_attr =
+          [device](cudaGraphMemAttributeType attr) -> uint64_t {
         uint64_t value = 0;
         cudaError_t err = cudaDeviceGetGraphMemAttribute(device, attr, &value);
         if (err == cudaErrorNotSupported) {
@@ -787,8 +789,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       reserved_mem_current += graph_reserved_current;
       used_mem_current += graph_used_current;
 
-      // The two high-water marks need not peak at the same instant, so their sum
-      // is a conservative upper bound on the true simultaneous peak.
+      // The two high-water marks need not peak at the same instant, so their
+      // sum is a conservative upper bound on the true simultaneous peak.
       reserved_mem_peak += graph_reserved_peak;
       used_mem_peak += graph_used_peak;
     }
@@ -852,7 +854,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // getDeviceStats adds for graph-captured allocations. Setting High to 0
     // resets it to Current (same as the default-pool attributes above).
     uint64_t graph_zero = 0;
-    auto reset_graph_high = [device, &graph_zero](cudaGraphMemAttributeType attr) {
+    auto reset_graph_high = [device,
+                             &graph_zero](cudaGraphMemAttributeType attr) {
       cudaError_t err =
           cudaDeviceSetGraphMemAttribute(device, attr, &graph_zero);
       if (err == cudaErrorNotSupported) {

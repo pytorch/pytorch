@@ -4071,9 +4071,7 @@ exit(2)
             buffers = []
             with torch.cuda.graph(g):
                 for _ in range(NCHUNK):
-                    buffers.append(
-                        torch.empty(CHUNK, dtype=torch.uint8, device=device)
-                    )
+                    buffers.append(torch.empty(CHUNK, dtype=torch.uint8, device=device))
             g.replay()  # graph-mem commits at first replay, not at capture
             torch.cuda.synchronize()
             return g, buffers
