@@ -67,6 +67,7 @@ class InductorCompiledCode(HigherOrderOperator):
 
     def __init__(self) -> None:
         super().__init__("inductor_compiled_code")
+        self._boxed_arg_indices = (1,)
 
     def __call__(self, func, inputs, *, name: str | None = None):
         # pyrefly: ignore [missing-attribute]
