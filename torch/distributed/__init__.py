@@ -141,7 +141,7 @@ if is_available():
         # avoid having the default timeout (if short) interrupt your debug session
         if timeout_s is not None:
             for group in torch.distributed.distributed_c10d._pg_map:
-                torch.distributed.distributed_c10d._set_pg_timeout(
+                torch.distributed.distributed_c10d.set_timeout(
                     timedelta(seconds=timeout_s), group
                 )
 

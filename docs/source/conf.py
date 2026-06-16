@@ -469,6 +469,7 @@ coverage_ignore_functions = [
     "scatter",
     "scatter_object_list",
     "send",
+    "set_timeout",
     "supports_complex",
     # torch.distributed.elastic.events.handlers
     "get_logging_handler",
