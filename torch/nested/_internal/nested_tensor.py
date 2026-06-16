@@ -261,12 +261,12 @@ class NestedTensor(torch.Tensor):
     # Convenience accessors that return a min / max seqlen if one is present and do NOT
     # compute / cache them if they're not.
     @property
-    def _maybe_max_seqlen(self) -> Optional[int]:
+    def _maybe_max_seqlen(self) -> int | torch.SymInt | None:
         mt = self._max_seqlen_tensor
         return None if mt is None else _load_val_from_tensor(mt)
 
     @property
-    def _maybe_min_seqlen(self) -> Optional[int]:
+    def _maybe_min_seqlen(self) -> int | torch.SymInt | None:
         mt = self._min_seqlen_tensor
         return None if mt is None else _load_val_from_tensor(mt)
 
