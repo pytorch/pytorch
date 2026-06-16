@@ -2630,8 +2630,11 @@ class TestMaxAutotune(TestCase):
             compile_results = torch.compile(func_test1, dynamic=False)(a, b, a, b)
             eager_results = func_test1(a, b, a, b)
             self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
-            self.assertEqual(hits(), 4)
-            self.assertEqual(misses(), 4)
+            # XPU skips the Triton mm_plus_mm template (#184490, #173473)
+            # so no Triton module is generated or cached.
+            expected = 0 if GPU_TYPE == "xpu" else 4
+            self.assertEqual(hits(), expected)
+            self.assertEqual(misses(), expected)
 
     @fresh_cache()
     @unittest.skipIf(
