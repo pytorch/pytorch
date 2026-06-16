@@ -178,6 +178,41 @@ class FxirTestCase(InductorTestCase):
         args = [torch.randn(length, device=self.device) for length in [517, 1029]]
         self._compile_and_check(foo, args, expected_num_triton_kernels=2)
 
+    def test_backend_options_not_in_kernel_call_args(self):
+        """
+        Backend compiler options attached to a kernel Config via extra_options
+        (as out-of-tree backends can do) must not be routed into the Triton
+        kernel call args and through _generate_sym_node -- non-numeric options
+        (str/dict) used to crash FXIR conversion there. They are carried to the
+        backend via node meta instead.
+        """
+        extra_options = {
+            "mock_str_option": "mock_value",
+            "mock_dict_option": {"mock_key": ["mock_value"]},
+        }
+
+        orig_generate_triton_call = FxConverter._generate_triton_call
+
+        def generate_triton_call(conv_self, line):
+            tuner = conv_self.kernels[line.kernel_name].tuner
+            tuner.compile_results[0].config.extra_options = extra_options
+            return orig_generate_triton_call(conv_self, line)
+
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        with unittest.mock.patch.object(
+            FxConverter, "_generate_triton_call", generate_triton_call
+        ):
+            (gm,) = self._run_and_capture_graphs(torch.compile(torch.add), args)
+
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+        # Pure backend options must not leak into the kernel call kwargs.
+        for name in extra_options:
+            self.assertNotIn(name, triton_node.kwargs["kwargs"])
+        # They are carried to the backend via node meta instead.
+        self.assertEqual(triton_node.meta["extra_options"], extra_options)
+
     def test_free(self):
         """
         Test a program that frees a buffer which is no longer in use.
