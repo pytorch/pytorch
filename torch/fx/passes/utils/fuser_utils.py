@@ -120,8 +120,7 @@ def fuse_as_graphmodule(
     Returns:
         fused_gm (GraphModule): fused graph module, where its node is a copy of `nodes` in `gm`
 
-        original_inputs (Tuple[Node, ...]): input nodes to `nodes` in original `gm`,
-            ordered by their position in ``gm.graph``
+        original_inputs (Tuple[Node, ...]): input nodes to `nodes` in original `gm`
 
         original_outputs (Tuple[Node, ...]): consumer nodes of `nodes` in original `gm`
 
@@ -156,22 +155,6 @@ def fuse_as_graphmodule(
     ] = {}  # mapping of nodes from old graph to placeholder in new graph
     node_map: dict[Node, Node] = {}  # mapping of nodes from old graph to new graph
 
-    external_inputs: set[Node] = set()
-    for node in nodes:
-        for input_node in node.all_input_nodes:
-            if input_node not in partition_lookup_table:
-                external_inputs.add(input_node)
-
-    for input_node in gm.graph.nodes:
-        if input_node not in external_inputs:
-            continue
-        placeholder_node = subgraph.placeholder(
-            input_node.name, type_expr=input_node.type
-        )
-        # copy all meta fields, even if some fields might be irrelevant for the placeholder node
-        placeholder_node.meta = copy.copy(input_node.meta)
-        node_to_placeholder[input_node] = placeholder_node
-
     # handles inputs through graph.node_copy's arg_transform functions
     def remap_inputs(x: Node) -> Node:
         if x.op == "get_attr":
@@ -183,6 +166,13 @@ def fuse_as_graphmodule(
             # x is inside subgraph, return the copied node
             # the node should have been copied already, as we are copying graph in the topological order
             return node_map[x]
+
+        if x not in node_to_placeholder:
+            # x is not in subgraph, create a new placeholder for subgraph
+            placeholder_node = subgraph.placeholder(x.name, type_expr=x.type)
+            # copy all meta fields, even if some fields might be irrelevant for the placeholder node
+            placeholder_node.meta = copy.copy(x.meta)
+            node_to_placeholder[x] = placeholder_node
 
         return node_to_placeholder[x]
 
