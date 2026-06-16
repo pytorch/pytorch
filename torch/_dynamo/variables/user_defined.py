@@ -878,6 +878,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             f"bad operand type for abs(): '{self.python_type_name()}'",
         )
 
+    def nb_invert_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        m = self._maybe_get_baseclass_method("__invert__")
+        if m:
+            source = self.source and AttrSource(self.source, "__invert__")
+            return variables.UserMethodVariable(
+                m, self, source_fn=source
+            ).call_function(tx, [], {})
+        raise_type_error(
+            tx,
+            f"bad operand type for unary ~: '{self.python_type_name()}'",
+        )
+
     def mp_ass_subscript_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1001,6 +1013,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
+        elif (
+            self.value is collections.defaultdict
+            and name == "__copy__"
+            and len(args) == 1
+            and not kwargs
+        ):
+            # copy.copy(dd) resolves type(dd).__copy__ and calls it with the
+            # instance as the sole argument; dispatch to the instance so the
+            # default_factory and contents are preserved.
+            return args[0].call_method(tx, name, [], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_len
 
@@ -2009,6 +2031,31 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return self.call_method(tx, "__abs__", [], {})
 
+    def nb_invert_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        # CPython: slot_nb_invert calls __invert__() via vectorcall_method.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9426
+
+        type_attr = self.lookup_class_mro_attr("__invert__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            raise_type_error(
+                tx,
+                f"bad operand type for unary ~: '{self.python_type_name()}'",
+            )
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+
+        method = self._maybe_get_baseclass_method("__invert__")
+        if method is None:
+            raise_type_error(
+                tx,
+                f"bad operand type for unary ~: '{self.python_type_name()}'",
+            )
+
+        return self.call_method(tx, "__invert__", [], {})
+
     def torch_function_check(self) -> None:
         if not has_torch_function(self):
             raise AssertionError(
@@ -2598,6 +2645,44 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             nb_slot=PyNumberSlots.NB_DIVMOD,
             reverse=reverse,
         )
+
+    def nb_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10319-L10322
+        if z is not None:
+            # Ternary pow(x, y, mod): __rpow__ is never called for 3-arg pow.
+            base, exp = (other, self) if reverse else (self, other)
+            return base.call_method(tx, "__pow__", [exp, z], {})
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__pow__",
+            "__rpow__",
+            nb_slot=PyNumberSlots.NB_POWER,
+            reverse=reverse,
+        )
+
+    def nb_inplace_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        z: VariableTracker | None,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__ipow__", [other], {})
+
+    def nb_power_z_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        v: VariableTracker,
+        w: VariableTracker,
+    ) -> VariableTracker:
+        # CPython: type(z)->nb_power(v, w, z) for a Python class calls v.__pow__(w, z).
+        return v.call_method(tx, "__pow__", [w, self], {})
 
     def call_method(
         self,
@@ -4900,9 +4985,9 @@ class DefaultDictVariable(UserDefinedDictVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return self.nb_inplace_or_impl(tx, args[0])
-        elif name == "copy":
-            # defaultdict.copy() creates a new defaultdict with same factory
-            # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2282
+        elif name in ("copy", "__copy__"):
+            # defaultdict.copy() / copy.copy(dd) both create a new defaultdict
+            # https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Modules/_collectionsmodule.c#L2290-L2293
             from .builder import SourcelessBuilder
 
             if self._base_vt is None:

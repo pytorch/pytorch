@@ -1,6 +1,4 @@
 import collections
-import contextlib
-import functools
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -22,7 +20,7 @@ from ..graph_bytecode_inputs import (
 from ..source import CurrentStreamSource
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .ctx_manager import ContextWrappingVariable
+from .ctx_manager import FxTracebackAnnotateVariable
 from .lazy import LazyVariableTracker
 
 
@@ -321,7 +319,7 @@ class SymbolicStreamState:
         return id(stream.value)
 
 
-class StreamContextVariable(ContextWrappingVariable):
+class StreamContextVariable(FxTracebackAnnotateVariable):
     """This represents torch.cuda.StreamContext"""
 
     @staticmethod
@@ -338,7 +336,7 @@ class StreamContextVariable(ContextWrappingVariable):
     def __init__(self, stream: Optional["StreamVariable"], **kwargs: Any) -> None:
         self.stream = stream
         super().__init__(
-            target_values=(),
+            target_values={"stream": self.get_stream().user_object_index},
             initial_values=None,
             **kwargs,
         )
@@ -346,22 +344,10 @@ class StreamContextVariable(ContextWrappingVariable):
     def enter(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
-        strm: StreamVariable = self.get_stream()
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
-        tx.symbolic_stream_state.enter_stream(strm)
-
-        # annotate + preserve_node_meta: this ensures the captured
-        # nodes have appropriate node.meta["custom"]["stream"] annotations.
-        if strm.user_object_index is None:
-            raise AssertionError("stream not registered")
-        stream_idx: int = strm.user_object_index
-        annotation: dict[str, Any] = {"stream": stream_idx}
-        stack = contextlib.ExitStack()
-        stack.enter_context(torch.fx.traceback.annotate(annotation))
-        stack.enter_context(torch.fx.traceback.preserve_node_meta())
-        self.set_cleanup_hook(tx, lambda: stack.close())
-        return ConstantVariable.create(None)
+        tx.symbolic_stream_state.enter_stream(self.get_stream())
+        return super().enter(tx)
 
     def exit(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
@@ -376,36 +362,6 @@ class StreamContextVariable(ContextWrappingVariable):
 
     def supports_graph_breaks(self) -> bool:
         return True
-
-    def reconstruct_type(self, codegen: "PyCodegen") -> None:
-        # Override our parent's reconstruct_type, as that implementation tries
-        # to access "torch._C.fn_name()" which does not exist. Unfortunately we
-        # cannot just directly reference the stream in the generated code.
-        #
-        # Instead, we push a 0-arg callable that returns the ctx mgr value
-        # at runtime.  The partial is installed as a global on the compiled
-        # function so the resume prologue can LOAD_GLOBAL it.
-
-        # self.stream is None when we're really a StreamVariable
-        # entering itself as a ctx mgr (with foo: where foo is a
-        # bare Stream), in which case self IS the stream and
-        # self.value holds it.  Otherwise we're a true
-        # StreamContextVariable wrapping someone else's StreamVariable
-        # and the value lives on the wrapped stream.
-        if self.stream is not None:
-            stream_value = self.stream.value
-        else:
-            stream_value = getattr(self, "value", None)
-        if stream_value is None:
-            raise AssertionError(
-                "StreamContextVariable.reconstruct_type called without a "
-                "stream value to rebuild; this should be impossible for "
-                "a properly-constructed ctx manager."
-            )
-
-        thunk = functools.partial(torch.cuda.stream, stream_value)
-        name = codegen.tx.output.install_global_by_id("_stream_ctx_thunk", thunk)
-        codegen.append_output(codegen.create_load_global(name, add=True))
 
     def get_stream(self) -> "StreamVariable":
         if not self.stream:

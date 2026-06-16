@@ -253,15 +253,15 @@ case "$tag" in
     PYTHON_VERSION=3.10
     CUDA_VERSION=13.0.2
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc13)
+  pytorch-linux-jammy-aarch64-py3.10-gcc15)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=13
+    GCC_VERSION=15
     ACL=yes
     OPENBLAS=yes
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
+  pytorch-linux-jammy-aarch64-py3.10-gcc15-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=13
+    GCC_VERSION=15
     ACL=yes
     OPENBLAS=yes
     INDUCTOR_BENCHMARKS=yes
@@ -333,7 +333,8 @@ if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
 fi
 
 # Build image
-docker buildx build \
+build_image() {
+  docker buildx build \
        ${progress_flag} \
        ${cache_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
@@ -371,6 +372,39 @@ docker buildx build \
        ${output_flag} \
        "$@" \
        .
+}
+
+if [[ -z "${REMOTE_BUILDKIT:-}" ]]; then
+  build_image "$@"
+else
+  # The autoscaled pool may be cold / at capacity at start, where buildx's ~20s
+  # connect (gRPC default) fails before scale-up. Retry connection failures (not
+  # build errors) for ~2h so a capacity-limited build waits for a free pod instead
+  # of hard-failing — still within the 240m job timeout.
+  attempts="${REMOTE_BUILDKIT_CONNECT_ATTEMPTS:-360}"
+  delay="${REMOTE_BUILDKIT_CONNECT_DELAY:-15}"
+  for attempt in $(seq 1 "${attempts}"); do
+    build_log="$(mktemp)"
+    set +e
+    build_image "$@" 2>&1 | tee "${build_log}"
+    rc="${PIPESTATUS[0]}"
+    set -e
+    if [[ "${rc}" -eq 0 ]]; then
+      rm -f "${build_log}"
+      break
+    fi
+    if [[ "${attempt}" -lt "${attempts}" ]] && grep -qiE \
+      "waiting for connection|context deadline exceeded|server preface|failed to (dial|list workers)|connection (refused|reset)|no such host|transport: Error|i/o timeout|use of closed network connection|EOF" \
+      "${build_log}"; then
+      echo "Remote BuildKit not ready yet (attempt ${attempt}/${attempts}); retrying in ${delay}s..." >&2
+      rm -f "${build_log}"
+      sleep "${delay}"
+      continue
+    fi
+    rm -f "${build_log}"
+    exit "${rc}"
+  done
+fi
 
 # NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
 # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could

@@ -511,6 +511,38 @@ print(match1, match0)
         )
         self.assertEqual("True True", r)
 
+    def test_device_telemetry_api_without_ze_loader(self):
+        # Simulate libze_loader.so.1 missing: pyzes raises OSError at import
+        # time. Discovery must degrade gracefully; query APIs must surface a
+        # RuntimeError (not leak OSError).
+        import builtins
+
+        real_import = builtins.__import__
+        oserror_msg = (
+            "libze_loader.so.1: cannot open shared object file: "
+            "No such file or directory"
+        )
+
+        def fake_import(name, *args, **kwargs):
+            if name == "pyzes":
+                raise OSError(oserror_msg)
+            return real_import(name, *args, **kwargs)
+
+        torch.xpu._cached_zes_device_infos.clear()
+        with unittest.mock.patch.object(builtins, "__import__", fake_import):
+            self.assertEqual(torch.xpu._device_count_zes(), -1)
+
+            for api in (
+                torch.xpu.temperature,
+                torch.xpu.clock_rate,
+                torch.xpu.power_draw,
+                torch.xpu.utilization,
+                torch.xpu.memory_usage,
+                torch.xpu.device_memory_used,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Failed to import pyzes"):
+                    api()
+
     @unittest.skipIf(
         IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
     )
@@ -1545,6 +1577,18 @@ if __name__ == "__main__":
             self.assertEqual(len(results), 1)
             for result in results:
                 self.assertTrue(b"libsycl.so" in result)
+
+    def test_xpu_header_installed(self):
+        include_dir = os.path.join(os.path.dirname(torch.__file__), "include")
+        aten_dir = os.path.join(include_dir, "ATen")
+        aten_ops_dir = os.path.join(aten_dir, "ops")
+        self.assertTrue(os.path.exists(os.path.join(aten_dir, "XPUFunctions.h")))
+        self.assertTrue(
+            os.path.exists(os.path.join(aten_ops_dir, "cat_xpu_dispatch.h"))
+        )
+        self.assertTrue(os.path.exists(os.path.join(aten_ops_dir, "col2im_native.h")))
+        with open(os.path.join(aten_ops_dir, "col2im_native.h")) as fr:
+            self.assertIn("col2im_xpu", fr.read())
 
     def test_dlpack_conversion(self):
         if self.expandable_segments:

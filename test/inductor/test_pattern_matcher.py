@@ -10,10 +10,11 @@ import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
 import torch._inductor.pattern_matcher as pattern_matcher
 import torch.nn.functional as F
-from torch._dynamo.utils import count_calls, counters
+from torch._dynamo.utils import count_calls, counters, detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
+from torch._inductor.fx_passes.replace_random import replace_random_passes
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -2635,6 +2636,68 @@ class TestPatternMatcher(TestCase):
                 node.meta["_numeric_debug_handle"] = 42
                 node.meta["custom"] = {"test_key": "test_value"}
 
+    def test_replace_random_pass_preserves_stack_trace_on_rng_prims(self):
+        def fn(x):
+            return x + torch.randn(x.shape, device=x.device)
+
+        gm = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+
+        fake_inputs = [
+            node.meta.get("val") for node in gm.graph.nodes if node.op == "placeholder"
+        ]
+        fake_mode = detect_fake_mode(fake_inputs)
+        self.assertIsNotNone(fake_mode)
+
+        stack_trace = '  File "test_replace_random.py", line 1, in fn\n'
+        source_fn_stack = [("randn", torch.randn)]
+
+        randn_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.randn.default
+        )
+        randn_node.meta["stack_trace"] = stack_trace
+        randn_node.meta["source_fn_stack"] = source_fn_stack
+
+        with V.set_fake_mode(fake_mode):
+            replace_random_passes(gm)
+        gm.graph.lint()
+
+        for target in (
+            torch.ops.prims.inductor_seeds.default,
+            torch.ops.prims.inductor_lookup_seed.default,
+            torch.ops.prims.inductor_random.default,
+        ):
+            node = next(node for node in gm.graph.nodes if node.target == target)
+            self.assertEqual(
+                node.meta.get("stack_trace"), stack_trace, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta.get("source_fn_stack"),
+                source_fn_stack,
+                msg=f"{target}: {node.meta}",
+            )
+
+        expected_metadata = {
+            torch.ops.prims.inductor_seeds.default: (torch.Size([1]), torch.int64),
+            torch.ops.prims.inductor_lookup_seed.default: (torch.Size([]), torch.int64),
+            torch.ops.prims.inductor_random.default: (torch.Size([4]), torch.float32),
+        }
+        for target, (shape, dtype) in expected_metadata.items():
+            node = next(node for node in gm.graph.nodes if node.target == target)
+            self.assertEqual(
+                node.meta["val"].shape, shape, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta["val"].dtype, dtype, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta["tensor_meta"].shape, shape, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta["tensor_meta"].dtype, dtype, msg=f"{target}: {node.meta}"
+            )
+
     def test_metadata_propagation_register_replacement(self):
         """Verify metadata from matched nodes transfers to replacement nodes."""
 
@@ -2851,6 +2914,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(counter, 1)
 
 
+@inductor_config.patch(fx_graph_cache=False)
 class TestPatternMatcherLogging(LoggingTestCase):
     device_type = GPU_TYPE
 
@@ -3061,65 +3125,63 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
     def test_per_pattern_counter(self):
         """Test that per-pattern counters track individual pattern matches"""
-        with inductor_config.patch(fx_graph_cache=False):
-            with unittest.mock.patch.dict(
-                os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
-            ):
-                counters.clear()
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
+        ):
+            counters.clear()
 
-                def fn(x, y):
-                    return torch.bmm(x, y)
+            def fn(x, y):
+                return torch.bmm(x, y)
 
-                x = torch.randn(4, 10, 10, device=GPU_TYPE)
-                y = torch.randn(4, 10, 10, device=GPU_TYPE)
+            x = torch.randn(4, 10, 10, device=GPU_TYPE)
+            y = torch.randn(4, 10, 10, device=GPU_TYPE)
 
-                compiled = torch.compile(fn)
-                compiled(x, y)
+            compiled = torch.compile(fn)
+            compiled(x, y)
 
-                counter_key = "inductor_pattern_matcher_per_pattern"
-                per_pattern = counters.get(counter_key, None)
+            counter_key = "inductor_pattern_matcher_per_pattern"
+            per_pattern = counters.get(counter_key, None)
 
-                self.assertIsInstance(per_pattern, dict)
-                self.assertGreater(len(per_pattern), 0)
-                self.assertIn("CallFunction_aten.bmm.default", per_pattern)
-                self.assertEqual(per_pattern["CallFunction_aten.bmm.default"], 1)
+            self.assertIsInstance(per_pattern, dict)
+            self.assertGreater(len(per_pattern), 0)
+            self.assertIn("CallFunction_aten.bmm.default", per_pattern)
+            self.assertEqual(per_pattern["CallFunction_aten.bmm.default"], 1)
 
     def test_per_pattern_counter_accumulation(self):
         """Test that per-pattern counters accumulate across compilations"""
-        with inductor_config.patch(fx_graph_cache=False):
-            with unittest.mock.patch.dict(
-                os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
-            ):
-                counter_key = "inductor_pattern_matcher_per_pattern"
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
+        ):
+            counter_key = "inductor_pattern_matcher_per_pattern"
 
-                counters.clear()
+            counters.clear()
 
-                x = torch.randn(2, 10, 10, device=GPU_TYPE)
-                y = torch.randn(2, 10, 10, device=GPU_TYPE)
+            x = torch.randn(2, 10, 10, device=GPU_TYPE)
+            y = torch.randn(2, 10, 10, device=GPU_TYPE)
 
-                def fn1(a, b):
-                    return torch.bmm(a, b)
+            def fn1(a, b):
+                return torch.bmm(a, b)
 
-                compiled1 = torch.compile(fn1)
-                compiled1(x, y)
-                count1 = sum(counters.get(counter_key, {}).values())
+            compiled1 = torch.compile(fn1)
+            compiled1(x, y)
+            count1 = sum(counters.get(counter_key, {}).values())
 
-                # Compile second function without clearing counters
-                def fn2(a, b):
-                    return torch.bmm(a, b) * 2
+            # Compile second function without clearing counters
+            def fn2(a, b):
+                return torch.bmm(a, b) * 2
 
-                compiled2 = torch.compile(fn2)
-                compiled2(x, y)
-                accumulated_count = sum(counters.get(counter_key, {}).values())
+            compiled2 = torch.compile(fn2)
+            compiled2(x, y)
+            accumulated_count = sum(counters.get(counter_key, {}).values())
 
-                # Verify accumulation
-                counters.clear()
-                torch._dynamo.reset()
-                compiled2 = torch.compile(fn2)
-                compiled2(x, y)
-                count2 = sum(counters.get(counter_key, {}).values())
+            # Verify accumulation
+            counters.clear()
+            torch._dynamo.reset()
+            compiled2 = torch.compile(fn2)
+            compiled2(x, y)
+            count2 = sum(counters.get(counter_key, {}).values())
 
-                self.assertEqual(accumulated_count, count1 + count2)
+            self.assertEqual(accumulated_count, count1 + count2)
 
     def test_list_tensor_pattern_replacement(self):
         with torch.library._scoped_library("_test_pm_list", "FRAGMENT") as lib:

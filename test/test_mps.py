@@ -1300,6 +1300,91 @@ class TestMPS(TestCaseMPS):
         result_cpu = torch.addmm(bias.cpu().conj(), a.cpu(), b.cpu())
         self.assertEqual(result_cpu, result_mps)
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("case", [
+        ((1, 64, 12), "inner"),
+        ((12, 64, 1), "inner"),
+        ((8, 64, 12), "inner"),
+        ((8, 64, 12), "transposed"),
+        ((8, 64, 12), "outer"),
+        ((33, 17, 49), "inner"),
+        ((33, 17, 49), "transposed"),
+        ((33, 17, 49), "outer"),
+    ])
+    def test_mm_strided_output(self, case, dtype):
+        # Non-contiguous out= is mis-written by the MPSGraph matmul before macOS 26.4.
+        (M, K, N), layout = case
+        a = torch.randn(M, K, device="mps", dtype=dtype)
+        b = torch.randn(K, N, device="mps", dtype=dtype)
+        if layout == "transposed":
+            out = torch.empty(N, M, device="mps", dtype=dtype).t()
+        elif layout == "outer":
+            out = torch.empty(2 * M, N, device="mps", dtype=dtype)[::2]
+        else:
+            out = torch.empty(M, N, 2, device="mps", dtype=dtype)[..., 0]
+        self.assertFalse(out.is_contiguous())
+        torch.mm(a, b, out=out)
+        ref = torch.mm(a.cpu(), b.cpu())
+        tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
+        self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("case", [
+        ((1, 64, 12), "inner"),
+        ((12, 64, 1), "inner"),
+        ((8, 64, 12), "inner"),
+        ((8, 64, 12), "transposed"),
+        ((8, 64, 12), "outer"),
+        ((33, 17, 49), "inner"),
+        ((33, 17, 49), "transposed"),
+        ((33, 17, 49), "outer"),
+    ])
+    def test_addmm_strided_output(self, case, dtype):
+        # addmm shares mm's strided-output fallback; same contract.
+        (M, K, N), layout = case
+        bias = torch.randn(M, N, device="mps", dtype=dtype)
+        a = torch.randn(M, K, device="mps", dtype=dtype)
+        b = torch.randn(K, N, device="mps", dtype=dtype)
+        if layout == "transposed":
+            out = torch.empty(N, M, device="mps", dtype=dtype).t()
+        elif layout == "outer":
+            out = torch.empty(2 * M, N, device="mps", dtype=dtype)[::2]
+        else:
+            out = torch.empty(M, N, 2, device="mps", dtype=dtype)[..., 0]
+        self.assertFalse(out.is_contiguous())
+        torch.addmm(bias, a, b, out=out)
+        ref = torch.addmm(bias.cpu(), a.cpu(), b.cpu())
+        tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
+        self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("case", [
+        ((2, 2, 2, 2), "inner"),
+        ((2, 2, 2, 2), "transposed"),
+        ((2, 2, 2, 2), "outer"),
+        ((4, 8, 64, 12), "inner"),
+        ((4, 8, 64, 12), "transposed"),
+        ((4, 8, 64, 12), "outer"),
+        ((3, 33, 17, 49), "inner"),
+        ((3, 33, 17, 49), "transposed"),
+        ((3, 33, 17, 49), "outer"),
+    ])
+    def test_bmm_strided_output(self, case, dtype):
+        (B, M, K, N), layout = case
+        a = torch.randn(B, M, K, device="mps", dtype=dtype)
+        b = torch.randn(B, K, N, device="mps", dtype=dtype)
+        if layout == "transposed":
+            out = torch.empty(B, N, M, device="mps", dtype=dtype).transpose(-1, -2)
+        elif layout == "outer":
+            out = torch.empty(2 * B, M, N, device="mps", dtype=dtype)[::2]
+        else:
+            out = torch.empty(B, M, N, 2, device="mps", dtype=dtype)[..., 0]
+        self.assertFalse(out.is_contiguous())
+        torch.bmm(a, b, out=out)
+        ref = torch.bmm(a.cpu(), b.cpu())
+        tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
+        self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
+
     @xfailIf(MACOS_VERSION < 15.0)
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_large_bmm(self, dtype):
@@ -2491,6 +2576,45 @@ class TestMPS(TestCaseMPS):
         freq_cpu = torch.fft.fftfreq(10**4, device='cpu')
         freq_mps = torch.fft.fftfreq(10**4, device='mps')
         self.assertEqual(freq_cpu, freq_mps)
+
+    def test_fft_transform_dims_outside_last_four(self):
+        # MPSGraph FFT only handles the last four dims; the backend transposes
+        # outer transform dims into that window. See https://github.com/pytorch/pytorch/issues/124096
+        def check(fn, x_cpu, **kwargs):
+            x_mps = x_cpu.detach().to("mps")
+            self.assertEqual(fn(x_cpu, **kwargs), fn(x_mps, **kwargs).cpu())
+
+        # Exact repro from the issue.
+        check(torch.fft.fftn, torch.randn(2, 1, 1, 1, 2, 2, dtype=torch.complex64), dim=(1, 2))
+
+        # complex-to-complex over outer dims
+        cdata = torch.randn(3, 4, 2, 1, 2, dtype=torch.complex64)
+        check(torch.fft.fftn, cdata, dim=(0, 1))
+        check(torch.fft.ifftn, cdata, dim=(0, 1))
+        check(torch.fft.fft, cdata, dim=0)
+
+        # real-to-complex over outer dims
+        rdata = torch.randn(3, 4, 2, 1, 4)
+        check(torch.fft.rfftn, rdata, dim=(0, 4))
+        check(torch.fft.rfftn, rdata, dim=(0, 1, 4))
+        check(torch.fft.rfft, torch.randn(3, 1, 1, 1, 1), dim=0)
+
+        # complex-to-real round trip
+        fwd = torch.fft.rfftn(rdata, dim=(0, 4))
+        check(lambda y: torch.fft.irfftn(y, s=(rdata.size(0), rdata.size(4)), dim=(0, 4)), fwd)
+
+        # Unsorted dims: dim.back() is an outer axis, exercising the inverse permutation.
+        check(torch.fft.fftn, cdata, dim=(2, 0))
+        check(torch.fft.ifftn, cdata, dim=(2, 0))
+        check(torch.fft.rfftn, rdata, dim=(3, 0))
+        rev = torch.fft.rfftn(rdata, dim=(3, 0))
+        check(lambda y: torch.fft.irfftn(y, s=(rdata.size(3), rdata.size(0)), dim=(3, 0)), rev)
+
+    def test_fftn_too_many_dims(self):
+        # MPSGraph cannot transform more than four dims.
+        x = torch.randn(2, 2, 2, 2, 2, device="mps", dtype=torch.complex64)
+        with self.assertRaisesRegex(RuntimeError, "up to 4 dimensions"):
+            torch.fft.fftn(x, dim=(0, 1, 2, 3, 4))
 
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
@@ -5322,6 +5446,13 @@ class TestMPS(TestCaseMPS):
             for _ in range(4):
                 self.assertEqual(x.sum().item(), ref, msg=f"unstable sum for N={N}")
 
+    def test_sum_reduction_non_contiguous(self):
+        x = torch.randn(64, 96, dtype=torch.bfloat16, device="mps")
+        for dim, keepdim in itertools.product((0, -1), [False, True]):
+            kw = {"dim": dim, "keepdim": keepdim}
+            for cpu, mps in ((x.cpu(), x), (x.t().cpu(), x.t())):
+                self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
+
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
         torch.manual_seed(42)
@@ -5456,6 +5587,46 @@ class TestMPS(TestCaseMPS):
         helper_dtype_float32(10, 10, 10)
         helper_dtype_float32(3, 3, 3)
         helper_dtype_float32(1, 1, 1)
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int32, torch.int64])
+    @parametrize("op", ["median", "nanmedian"])
+    def test_median_comprehensive(self, dtype, op):
+        op = getattr(torch, op)
+
+        def check(cpu_x):
+            mps_x = cpu_x.to('mps')
+            self.assertEqual(op(cpu_x), op(mps_x))
+            dims = range(cpu_x.dim()) if cpu_x.dim() else [0]
+            for dim, keepdim in product(dims, [True, False]):
+                self.assertEqual(op(cpu_x, dim=dim, keepdim=keepdim), op(mps_x, dim=dim, keepdim=keepdim))
+
+        def make(shape):
+            if dtype.is_floating_point:
+                return torch.randn(shape, dtype=dtype)
+            return torch.randint(-50, 50, shape, dtype=dtype)
+
+        # contiguous shapes (rank-5 from issue #187017), then sizes crossing the
+        # single-block/multi-block/u16 sort path boundaries
+        shapes = [(), (5,), (10, 10, 10), (1, 2, 3), (2, 1, 3, 1, 2), (3, 4, 5, 6, 7),
+                  (4099,), (3, 4099), (70001,), (3, 70001)]
+        cases = [make(s) for s in shapes]
+        # strided / sliced / non-contiguous layouts
+        base = make((64, 97))
+        cases += [base.t(), base[::3, 1:], make((8, 6, 10, 4)).movedim(1, 2)[:, 2:7]]
+        if dtype.is_floating_point:
+            nanx = make((37, 53))
+            nanx[nanx > 1] = float('nan')
+            nanx[5] = float('nan')  # scattered NaNs plus an all-NaN row
+            cases += [nanx, torch.full((4, 5), float('nan'), dtype=dtype)]
+        for x in cases:
+            check(x)
+
+        if dtype.is_floating_point:
+            # empty: NaN global, empty outputs on non-zero dim, raise on zero dim
+            empty = torch.empty(0, 3, dtype=dtype)
+            self.assertTrue(op(empty.to('mps')).isnan())
+            self.assertEqual(op(empty, dim=1), op(empty.to('mps'), dim=1))
+            self.assertRaises(IndexError, lambda: op(empty.to('mps'), dim=0))
 
     def test_any(self):
         def helper(shape):
@@ -7768,6 +7939,8 @@ class TestMPS(TestCaseMPS):
         helper(2, 0, 1, 1, 6)
         # test float16
         helper((2,), 0, [1], (1,), 6.0, x_dtype=torch.float16)
+        # test size-0 source/self, see https://github.com/pytorch/pytorch/issues/186972
+        helper((0, 1, 1, 1), -3, [0], (0, 1, 1, 1), -0.25)
 
     def test_index_64bit(self):
         """ Test that index operations work for 4Gb+ tensors """
@@ -8878,6 +9051,57 @@ class TestMPS(TestCaseMPS):
         for _ in range(100):
             a = torch.empty(32_000, device="mps", dtype=dtype).exponential_()
             self.assertTrue((a != 0).all())
+
+    @parametrize("dtype", [torch.float32])
+    def test_poisson(self, dtype):
+        """Test poisson on MPS matches expected statistical properties and CPU."""
+        n_samples = 10000
+
+        # Cover both code paths in the Metal kernel: Knuth for lambda < 10,
+        # Hoermann PTRD for lambda >= 10.
+        for rate_val in [0.5, 1.0, 5.0, 10.0, 50.0]:
+            rate_mps = torch.full((n_samples,), rate_val, device='mps', dtype=dtype)
+            rate_cpu = rate_mps.cpu()
+            samples_mps = torch.poisson(rate_mps)
+            samples_cpu = torch.poisson(rate_cpu)
+
+            self.assertTrue((samples_mps >= 0).all(),
+                            f"Poisson samples should be non-negative for rate={rate_val}")
+
+            mps_f = samples_mps.float()
+            self.assertTrue(torch.allclose(mps_f, mps_f.floor()),
+                            f"Poisson samples should be integers for rate={rate_val}")
+
+            # Theoretical Poisson has mean == var == rate. Sampling error on
+            # n=10k is roughly sqrt(rate / n); compare MPS to CPU within a few
+            # standard errors so we catch implementation drift without being
+            # flaky on legitimate RNG noise.
+            tol_mean = max(0.1, 5.0 * (rate_val / n_samples) ** 0.5)
+            tol_var = max(0.2, 5.0 * rate_val * (2.0 / n_samples) ** 0.5)
+
+            mps_mean = mps_f.mean().item()
+            cpu_mean = samples_cpu.float().mean().item()
+            self.assertAlmostEqual(mps_mean, rate_val, delta=tol_mean,
+                                   msg=f"MPS mean should match rate={rate_val}")
+            self.assertAlmostEqual(mps_mean, cpu_mean, delta=tol_mean,
+                                   msg=f"MPS mean should match CPU mean for rate={rate_val}")
+
+            mps_var = mps_f.var(unbiased=False).item()
+            cpu_var = samples_cpu.float().var(unbiased=False).item()
+            self.assertAlmostEqual(mps_var, rate_val, delta=tol_var,
+                                   msg=f"MPS variance should match rate={rate_val}")
+            self.assertAlmostEqual(mps_var, cpu_var, delta=tol_var,
+                                   msg=f"MPS variance should match CPU variance for rate={rate_val}")
+
+        # Test zero rate
+        zero_rate = torch.zeros(100, device='mps', dtype=dtype)
+        zero_samples = torch.poisson(zero_rate)
+        self.assertTrue((zero_samples == 0).all(), "Poisson(0) should return all zeros")
+
+        # Test empty tensor
+        empty_rate = torch.empty(0, device='mps', dtype=dtype)
+        empty_samples = torch.poisson(empty_rate)
+        self.assertEqual(empty_samples.numel(), 0)
 
     def test_distributions(self):
         ops = [

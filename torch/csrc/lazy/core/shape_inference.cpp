@@ -86,7 +86,7 @@ static std::vector<int64_t> expand_param_if_needed(
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
        << "dimensions, but got " << param_name << '=' << list_param;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   } else {
     return list_param.vec();
   }
@@ -113,7 +113,7 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
         // The problem with using accscalar_t is that accscalar_t might be
         // float32 on gpu for a float32 scalar_t, but double on cpu for the
         // same, and the effective output size starts differing on CPU vs GPU
-        // because of precision issues, which we dont want. the corner-case we
+        // because of precision issues, which we don't want. the corner-case we
         // do want to take into account is int64_t, which has higher precision
         // than double NOLINTNEXTLINE(bugprone-branch-clone)
         if constexpr (std::is_same_v<scalar_t, int64_t>) {

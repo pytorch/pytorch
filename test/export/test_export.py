@@ -33,7 +33,7 @@ from torch import Tensor
 from torch._decomp import decomposition_table, get_decompositions
 from torch._dynamo._trace_wrapped_higher_order_op import mod_index
 from torch._dynamo.test_case import TestCase
-from torch._dynamo.testing import normalize_gm
+from torch._dynamo.testing import CompileCounter, normalize_gm
 from torch._export import config
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
@@ -594,6 +594,27 @@ class TestExport(TestCase):
         # self.assertEqual(
         #     exported_program.module()(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
         # )
+
+    def test_guards_fn_recovers_from_unparse_recursion_error(self):
+        # Regression test: guards-fn codegen pretty-prints each guard for the
+        # assert error message via ast.unparse(ast.parse(...)), which recurses
+        # once per AST node. A deeply-nested guard (e.g. a sum over thousands of
+        # symbolic sizes) overflowed the recursion limit there, crashing export
+        # even though the pretty-printing is cosmetic and the executed guard
+        # does not depend on it. Codegen must fall back to the raw guard string
+        # instead of propagating the error.
+        #
+        # We inject the overflow via a mocked ast.unparse rather than building a
+        # genuinely deep expression: the test target is ASAN-instrumented, where
+        # deep ast.parse/compile recursion can abort the process before the
+        # pure-Python RecursionError is reached.
+        from torch.export._unlift import _convert_guards_code_to_fn
+
+        guard = "args[0] == 0"
+        with patch("ast.unparse", side_effect=RecursionError):
+            guards_fn = _convert_guards_code_to_fn([guard], [])
+
+        self.assertIsNotNone(guards_fn)
 
     def _check_dynamic_shapes_specs_and_shapes(
         self,
@@ -2564,6 +2585,26 @@ graph():
         self.assertEqual(exp_out, ep_decomposed.module()(x, y, out_copy2))
         # For non-functional graph module, out_copy is not mutated
         self.assertEqual(out_copy2, out_copy3)
+
+    @requires_cuda_and_triton
+    def test_export_raw_triton_kernel_non_strict_error(self):
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_kernel[(1,)](x, y, out, x.numel(), BLOCK_SIZE=16)
+                return out
+
+        args = (
+            torch.randn(3, device="cuda"),
+            torch.randn(3, device="cuda"),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Raw Triton kernel calls are not supported by non-strict torch.export",
+        ):
+            export(M(), args, strict=False)
 
     def test_masked_select_dynamic(self):
         class M(torch.nn.Module):
@@ -9796,6 +9837,170 @@ def forward(self, x):
         ):
             test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
             _ = ep.module()(*test_inp)
+
+    def test_linspace_logspace_unbacked_steps(self):
+        class Linspace(torch.nn.Module):
+            def forward(self, x):
+                steps = x.item()
+                torch._check(steps >= 2)
+                torch._check(steps <= 8)
+                return torch.linspace(0, 3, steps=x, device=x.device)
+
+        class Logspace(torch.nn.Module):
+            def forward(self, x):
+                steps = x.item()
+                torch._check(steps >= 2)
+                torch._check(steps <= 8)
+                return torch.logspace(0, 2, steps=x, device=x.device)
+
+        class LinspaceVmap(torch.nn.Module):
+            def forward(self, start, end, x):
+                steps = x.item()
+                torch._check(steps >= 2)
+                torch._check(steps <= 8)
+                return torch.vmap(
+                    lambda s, e: torch.linspace(s, e, steps=x, device=x.device)
+                )(start, end)
+
+        class LogspaceVmap(torch.nn.Module):
+            def forward(self, start, end, x):
+                steps = x.item()
+                torch._check(steps >= 2)
+                torch._check(steps <= 8)
+                return torch.vmap(
+                    lambda s, e: torch.logspace(s, e, steps=x, device=x.device)
+                )(start, end)
+
+        for module in (Linspace(), Logspace()):
+            for strict in (False, True):
+                with self.subTest(module=type(module).__name__, strict=strict):
+                    ep = export(module, (torch.tensor(4),), strict=strict)
+                    exported_module = ep.module()
+                    self.assertEqual(
+                        exported_module(torch.tensor(5)), module(torch.tensor(5))
+                    )
+
+                    torchdynamo.reset()
+                    counter = CompileCounter()
+                    compiled_module = torch.compile(
+                        exported_module,
+                        backend=counter,
+                        dynamic=True,
+                        fullgraph=True,
+                    )
+                    self.assertEqual(
+                        compiled_module(torch.tensor(4)), module(torch.tensor(4))
+                    )
+                    self.assertEqual(
+                        compiled_module(torch.tensor(6)), module(torch.tensor(6))
+                    )
+                    self.assertEqual(counter.frame_count, 1)
+
+                    with self.assertRaisesRegex(
+                        (RuntimeError, AssertionError),
+                        "Runtime assertion failed|Guard failed",
+                    ):
+                        exported_module(torch.tensor(1))
+
+        start = torch.tensor([0.0, 1.0])
+        end = torch.tensor([2.0, 3.0])
+        for op in (torch.linspace, torch.logspace):
+            for step_count in (0, 1, 4):
+                steps = torch.tensor(step_count)
+                with self.subTest(op=op.__name__, steps=step_count):
+                    self.assertEqual(
+                        torch.vmap(lambda s, e: op(s, e, steps=steps, device=s.device))(
+                            start, end
+                        ),
+                        torch.stack(
+                            [
+                                op(s, e, steps=steps, device=s.device)
+                                for s, e in zip(start, end)
+                            ]
+                        ),
+                    )
+            vmap_inputs = [
+                (start, end, 0, torch.complex64),
+                (start, end, 1, torch.complex64),
+                (start, end, 4, torch.complex64),
+                (start.double(), end.double(), 4, None),
+                (start.to(torch.complex64) + 1j, end.to(torch.complex64), 0, None),
+                (start.to(torch.complex64) + 1j, end.to(torch.complex64), 1, None),
+                (start.to(torch.complex64) + 1j, end.to(torch.complex64), 4, None),
+                (
+                    start.to(torch.complex128) + 1j,
+                    end.to(torch.complex128),
+                    4,
+                    None,
+                ),
+            ]
+            if op is torch.linspace:
+                vmap_inputs.append(
+                    (
+                        torch.tensor([2**54 + 1, 2**54 + 3], dtype=torch.int64),
+                        torch.tensor([2**54 + 5, 2**54 + 7], dtype=torch.int64),
+                        1,
+                        torch.int64,
+                    )
+                )
+            if op is torch.logspace:
+                vmap_inputs.extend(
+                    [
+                        (
+                            torch.tensor([0.5, 1.5]),
+                            torch.tensor([2.5, 3.5]),
+                            1,
+                            torch.int64,
+                        ),
+                        (
+                            torch.tensor([0.5, 1.5], dtype=torch.float64),
+                            torch.tensor([2.5, 3.5], dtype=torch.float64),
+                            1,
+                            None,
+                        ),
+                        (
+                            torch.tensor([0.5, 1.5], dtype=torch.complex128),
+                            torch.tensor([2.5, 3.5], dtype=torch.complex128),
+                            1,
+                            None,
+                        ),
+                    ]
+                )
+            for case_start, case_end, step_count, dtype in vmap_inputs:
+                with self.subTest(op=op.__name__, steps=step_count, dtype=dtype):
+
+                    def call_op(s, e):
+                        kwargs = {"device": s.device}
+                        if dtype is not None:
+                            kwargs["dtype"] = dtype
+                        return op(s, e, steps=step_count, **kwargs)
+
+                    self.assertEqual(
+                        torch.vmap(call_op)(case_start, case_end),
+                        torch.stack(
+                            [call_op(s, e) for s, e in zip(case_start, case_end)]
+                        ),
+                    )
+
+        for module in (LinspaceVmap(), LogspaceVmap()):
+            with self.subTest(module=type(module).__name__):
+                torchdynamo.reset()
+                counter = CompileCounter()
+                compiled_module = torch.compile(
+                    module,
+                    backend=counter,
+                    dynamic=True,
+                    fullgraph=True,
+                )
+                self.assertEqual(
+                    compiled_module(start, end, torch.tensor(4)),
+                    module(start, end, torch.tensor(4)),
+                )
+                self.assertEqual(
+                    compiled_module(start, end, torch.tensor(6)),
+                    module(start, end, torch.tensor(6)),
+                )
+                self.assertEqual(counter.frame_count, 1)
 
     def test_while_loop_simple(self):
         class Simple(torch.nn.Module):
@@ -19148,6 +19353,22 @@ def forward(self, x, y):
             ignore_empty_lines=True,
         )
 
+    def test_scalar_tensor_index(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x[y]
+
+        x = torch.randn((3, 4))
+        for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            with self.subTest(dtype=dtype):
+                y = torch.tensor(1, dtype=dtype)
+                traced = export(MyModel(), (x, y))
+                y2 = torch.tensor(2, dtype=dtype)
+                self.assertEqual(
+                    traced.module()(x, y2),
+                    MyModel()(x, y2),
+                )
+
     def test_is_fx_tracing(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -19223,6 +19444,20 @@ def forward(self, x, y):
             export_result = exported.module()(boundaries)
             self.assertEqual(eager_result, export_result)
             self.assertEqual(export_result.dtype, expected_dtype)
+
+    def test_constant_pad_nd_run_decompositions(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167068
+        # constant_pad_nd's ref decomposition must be fully functional so that
+        # run_decompositions (used by ONNX dynamo export) doesn't trip
+        # assert_functional_graph.
+        class Pad(torch.nn.Module):
+            def forward(self, x):
+                return F.pad(x, (0, 0, 0, 240, 0, 0))
+
+        ep = export(Pad(), (torch.randn(1, 16, 64),), strict=False)
+        decomposed = ep.run_decompositions(decomposition_table)
+        result = decomposed.module()(torch.randn(1, 16, 64))
+        self.assertEqual(result.shape, (1, 256, 64))
 
 
 if __name__ == "__main__":

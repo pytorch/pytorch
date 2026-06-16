@@ -12,31 +12,20 @@ from torch.distributed.tensor._op_schema import (
     ArgsType,
     KwargsType,
     OpSchema,
-    OpSpec,
     OpStrategy,
     PlacementList,
     RuntimeSchemaInfo,
 )
-from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _ShardingPlaceholder,
     register_single_dim_strategy,
 )
-from torch.distributed.tensor._ops.utils import (
-    expand_to_full_mesh_op_strategy,
-    generate_redistribute_costs,
-    infer_broadcast_dims_map,
-    is_tensor_shardable,
-    map_placements_after_broadcast,
-    prod,
-    register_op_strategy,
-)
+from torch.distributed.tensor._ops.utils import prod
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
 )
 from torch.distributed.tensor.placement_types import (
-    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -48,140 +37,26 @@ from torch.fx.experimental.symbolic_shapes import guard_or_false
 aten = torch.ops.aten
 
 
-@register_op_strategy(aten.t.default)
-def transpose_strategy(op_schema: OpSchema) -> OpStrategy:
-    self_strategy = op_schema.args_schema[0]
-    if not isinstance(self_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(self_strategy)}")
+@register_single_dim_strategy(aten.t.default, allow_unbacked_sharding=False)
+def transpose_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
 
-    transpose_strategies = []
-    for input_strategy in self_strategy.strategies:
-        input_spec = input_strategy.output_spec
-        ndim = input_spec.ndim
-        # t() on 1D tensor is a no-op, preserve placements
-        # t() on 2D tensor swaps dims 0 and 1
-        if ndim <= 1:
-            output_placements = list(input_spec.placements)
-        else:
-            output_placements: list[Placement] = []
-            for p in input_spec.placements:
-                if isinstance(p, _StridedShard):
-                    output_placements.append(
-                        _StridedShard(1 - p.dim, split_factor=p.split_factor)
-                    )
-                elif isinstance(p, Shard):
-                    output_placements.append(Shard(1 - p.dim))
-                else:
-                    output_placements.append(p)
-        transpose_strategy = OpSpec(
-            output_specs=DTensorSpec(
-                mesh=input_strategy.mesh,
-                placements=tuple(output_placements),
-            ),
-            input_specs=(input_strategy.output_spec,),
-        )
-        transpose_strategies.append(transpose_strategy)
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    if ndim <= 1:
+        for dim in range(ndim):
+            strategies.append([_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)])
+    else:
+        strategies.append([_ShardingPlaceholder(1), _ShardingPlaceholder(0)])
+        strategies.append([_ShardingPlaceholder(0), _ShardingPlaceholder(1)])
 
-    return OpStrategy(strategies=transpose_strategies)
-
-
-def _mm_like_strategy(
-    mm_equation: str, mesh: DeviceMesh, op_schema: OpSchema
-) -> OpStrategy:
-    self_strategy, mat2_strategy = op_schema.args_schema
-    if not isinstance(self_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(self_strategy)}")
-    if not isinstance(mat2_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat2_strategy)}")
-    # generate all possible strategies for mm
-    mm_strategy = gen_einsum_strategies(mm_equation, mesh)
-    # filter out invalid strategies and associate costs
-    strategies = mm_strategy.strategies
-    filtered_strategies = []
-    for strtg in strategies:
-        if strtg.input_specs is None:
-            raise AssertionError(
-                f"Expected input_specs to be not None, got {strtg.input_specs}"
-            )
-        self_spec = strtg.input_specs[0]
-        mat2_spec = strtg.input_specs[1]
-        if is_tensor_shardable(
-            self_strategy.shape, self_spec, allow_unbacked_sharding=True
-        ) and is_tensor_shardable(
-            mat2_strategy.shape, mat2_spec, allow_unbacked_sharding=True
-        ):
-            redistribute_cost = [
-                generate_redistribute_costs(self_strategy, self_spec),
-                generate_redistribute_costs(mat2_strategy, mat2_spec),
-            ]
-            strtg.redistribute_cost = redistribute_cost
-            filtered_strategies.append(strtg)
-
-    mm_strategy.strategies = filtered_strategies
-
-    return mm_strategy
-
-
-def _addmm_like_strategy(
-    mm_equation: str, mesh: DeviceMesh, op_schema: OpSchema
-) -> OpStrategy:
-    self_strategy, mat1_strategy, mat2_strategy = op_schema.args_schema
-    if not isinstance(self_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(self_strategy)}")
-    if not isinstance(mat1_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat1_strategy)}")
-    if not isinstance(mat2_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat2_strategy)}")
-    self_shape = self_strategy.shape
-    mm_out_shape = torch.Size(
-        [
-            mat2_strategy.shape[-1] if i == len(mat1_strategy.shape) - 1 else dim_size
-            for i, dim_size in enumerate(mat1_strategy.shape)
-        ]
-    )
-    # generate all possible strategies for mm
-    mm_strategy = gen_einsum_strategies(mm_equation, mesh)
-    # filter out invalid strategies and associate costs
-    strategies = mm_strategy.strategies
-    filtered_strategies = []
-    for strtg in strategies:
-        # construct new strategy by consider the self arg
-        if strtg.input_specs is None:
-            raise AssertionError(
-                f"Expected input_specs to be not None, got {strtg.input_specs}"
-            )
-        mat1_spec = strtg.input_specs[0]
-        mat2_spec = strtg.input_specs[1]
-        out_spec = strtg.output_spec
-
-        # self arg's spec should follow the output of mm, but need
-        # to consider broadcast for the self arg
-        broadcast_dims_map = infer_broadcast_dims_map(mm_out_shape, self_shape)
-        self_placements = map_placements_after_broadcast(
-            out_spec.placements, mm_out_shape, broadcast_dims_map
-        )
-        self_spec = DTensorSpec(mesh=mesh, placements=self_placements)
-
-        if is_tensor_shardable(
-            mat1_strategy.shape, mat1_spec, allow_unbacked_sharding=True
-        ) and is_tensor_shardable(
-            mat2_strategy.shape, mat2_spec, allow_unbacked_sharding=True
-        ):
-            # update input specs with new self spec
-            strtg.input_specs = (self_spec, mat1_spec, mat2_spec)
-
-            # associate costs
-            redistribute_cost = [
-                generate_redistribute_costs(self_strategy, self_spec),
-                generate_redistribute_costs(mat1_strategy, mat1_spec),
-                generate_redistribute_costs(mat2_strategy, mat2_spec),
-            ]
-            strtg.redistribute_cost = redistribute_cost
-            filtered_strategies.append(strtg)
-
-    mm_strategy.strategies = filtered_strategies
-
-    return mm_strategy
+    for reduce_op in ("sum", "avg", "max", "min"):
+        strategies.append([Partial(reduce_op), Partial(reduce_op)])
+    return strategies
 
 
 def _scaled_mm_scale_placement(
@@ -220,18 +95,6 @@ def _scaled_mm_scale_placement(
     elif isinstance(data_placement, (Replicate, Partial)):
         return Replicate()
     return data_placement
-
-
-@register_op_strategy(aten.dot.default)
-def dot_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    return _mm_like_strategy("i,i->", mesh, op_schema)
-
-
-@register_op_strategy(aten.mm.default)
-def mm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    return _mm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
 from ._einsum_strategy import EinsumDims
@@ -403,17 +266,18 @@ def gen_single_dim_einsum_strategies(
     return strategies_over_one_mesh_dim
 
 
+@register_single_dim_strategy(aten.dot.default, allow_unbacked_sharding=True)
+def dot_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return gen_single_dim_einsum_strategies("i,i->")
+
+
 @register_single_dim_strategy(aten.mm.default, allow_unbacked_sharding=True)
 def mm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     return gen_single_dim_einsum_strategies("mk,kn->mn")
-
-
-@register_op_strategy(aten.addmm.default)
-def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
 @register_single_dim_strategy(aten.addmm.default, allow_unbacked_sharding=True)
@@ -426,23 +290,11 @@ def addmm_single_dim_strategy(
     return gen_single_dim_einsum_strategies("mk,kn->mn", bias_shape=bias_meta.shape)
 
 
-@register_op_strategy(aten.bmm.default)
-def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
-
-
 @register_single_dim_strategy(aten.bmm.default, allow_unbacked_sharding=True)
 def bmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     return gen_single_dim_einsum_strategies("bmk,bkn->bmn")
-
-
-@register_op_strategy(aten.baddbmm.default)
-def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
 @register_single_dim_strategy(aten.baddbmm.default, allow_unbacked_sharding=True)
@@ -566,21 +418,54 @@ def _scaled_dot_product_flash_attention_base_strategies(
     return single_mesh_dim_strategies
 
 
-@register_op_strategy(
+@register_single_dim_strategy(
     aten._scaled_dot_product_flash_attention.default, schema_info=RuntimeSchemaInfo(5)
 )
-def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrategy:
-    # NOTE: currently we only support some simple strategies to support tensor parallelism
-    # TODO: sdpa might be a good candidate for us to explore decomposed sharding propagation
-    # as it involves: matmul, pointwise, reduction ops together.
+def scaled_dot_product_flash_attention_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    q_meta = args_schema[0]
+    if not isinstance(q_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(q_meta)}")
 
-    mesh = op_schema.get_mesh_from_args()
-    single_mesh_dim_strategies = _scaled_dot_product_flash_attention_base_strategies(
-        op_schema
+    return_debug_mask = len(args_schema) >= 6 and args_schema[5]
+    debug_attn_mask_head: Placement | _ShardingPlaceholder = (
+        _ShardingPlaceholder(1) if return_debug_mask else Replicate()
     )
-    return expand_to_full_mesh_op_strategy(
-        mesh, op_schema, single_mesh_dim_strategies, input_index=9
+    debug_attn_mask_batch: Placement | _ShardingPlaceholder = (
+        _ShardingPlaceholder(0) if return_debug_mask else Replicate()
     )
+
+    return [
+        [
+            _ShardingPlaceholder(1),  # output
+            _ShardingPlaceholder(1),  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            Replicate(),  # rng_state
+            None,  # unused
+            debug_attn_mask_head,
+            _ShardingPlaceholder(1),  # q
+            _ShardingPlaceholder(1),  # k
+            _ShardingPlaceholder(1),  # v
+        ],
+        [
+            _ShardingPlaceholder(0),  # output
+            _ShardingPlaceholder(0),  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            Replicate(),  # rng_state
+            None,  # unused
+            debug_attn_mask_batch,
+            _ShardingPlaceholder(0),  # q
+            _ShardingPlaceholder(0),  # k
+            _ShardingPlaceholder(0),  # v
+        ],
+    ]
 
 
 def _scaled_dot_product_flash_attention_backward_base_strategies(
@@ -654,18 +539,43 @@ def _scaled_dot_product_flash_attention_backward_base_strategies(
     return single_mesh_dim_strategies
 
 
-@register_op_strategy(aten._scaled_dot_product_flash_attention_backward.default)
-def scaled_dot_product_flash_attention_backward_strategy(
-    op_schema: OpSchema,
-) -> OpStrategy:
-    # backward op does not need to validate the mesh since forward op has already done it
-    mesh = op_schema.get_mesh_from_args(validate=False)
-    single_mesh_dim_strategies = (
-        _scaled_dot_product_flash_attention_backward_base_strategies(op_schema)
-    )
-    return expand_to_full_mesh_op_strategy(
-        mesh, op_schema, single_mesh_dim_strategies, input_index=3
-    )
+@register_single_dim_strategy(aten._scaled_dot_product_flash_attention_backward.default)
+def scaled_dot_product_flash_attention_backward_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    num_tensor_inputs = sum(isinstance(arg, TensorMeta) for arg in args_schema)
+    if num_tensor_inputs < 6:
+        raise AssertionError(
+            f"Expected at least 6 tensor inputs, got {num_tensor_inputs}"
+        )
+
+    num_heads_dim_sharding: list[Placement | _ShardingPlaceholder] = [
+        _ShardingPlaceholder(1),  # grad_q
+        _ShardingPlaceholder(1),  # grad_k
+        _ShardingPlaceholder(1),  # grad_v
+        _ShardingPlaceholder(1),  # grad_out
+        _ShardingPlaceholder(1),  # q
+        _ShardingPlaceholder(1),  # k
+        _ShardingPlaceholder(1),  # v
+        _ShardingPlaceholder(1),  # output
+        _ShardingPlaceholder(1),  # logsumexp
+    ]
+    num_heads_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
+
+    batch_dim_sharding: list[Placement | _ShardingPlaceholder] = [
+        _ShardingPlaceholder(0),  # grad_q
+        _ShardingPlaceholder(0),  # grad_k
+        _ShardingPlaceholder(0),  # grad_v
+        _ShardingPlaceholder(0),  # grad_out
+        _ShardingPlaceholder(0),  # q
+        _ShardingPlaceholder(0),  # k
+        _ShardingPlaceholder(0),  # v
+        _ShardingPlaceholder(0),  # output
+        _ShardingPlaceholder(0),  # logsumexp
+    ]
+    batch_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
+
+    return [num_heads_dim_sharding, batch_dim_sharding]
 
 
 @register_single_dim_strategy(
@@ -793,22 +703,52 @@ def _scaled_dot_product_efficient_attention_base_strategies(
     return single_mesh_dim_strategies
 
 
-@register_op_strategy(
+@register_single_dim_strategy(
     aten._scaled_dot_product_efficient_attention.default,
     schema_info=RuntimeSchemaInfo(4),
 )
-def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpStrategy:
-    # NOTE: currently we only support some simple strategies to support tensor parallelism
-    mesh = op_schema.get_mesh_from_args()
-    single_mesh_dim_strategies = (
-        _scaled_dot_product_efficient_attention_base_strategies(op_schema)
+def scaled_dot_product_efficient_attention_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    q_meta = args_schema[0]
+    if not isinstance(q_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(q_meta)}")
+
+    has_attn_bias = args_schema[3] is not None
+    compute_log_sumexp = args_schema[4]
+
+    logsumexp_head: Placement | _ShardingPlaceholder = (
+        _ShardingPlaceholder(1) if compute_log_sumexp else Replicate()
     )
-    return expand_to_full_mesh_op_strategy(
-        mesh,
-        op_schema,
-        single_mesh_dim_strategies,
-        input_index=4,
+    logsumexp_batch: Placement | _ShardingPlaceholder = (
+        _ShardingPlaceholder(0) if compute_log_sumexp else Replicate()
     )
+
+    num_heads_dim_sharding: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(1),  # output
+        logsumexp_head,
+        None,  # philox_seed
+        None,  # philox_offset
+        _ShardingPlaceholder(1),  # q
+        _ShardingPlaceholder(1),  # k
+        _ShardingPlaceholder(1),  # v
+    ]
+    if has_attn_bias:
+        num_heads_dim_sharding.append(_ShardingPlaceholder(1))
+
+    batch_dim_sharding: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(0),  # output
+        logsumexp_batch,
+        None,  # philox_seed
+        None,  # philox_offset
+        _ShardingPlaceholder(0),  # q
+        _ShardingPlaceholder(0),  # k
+        _ShardingPlaceholder(0),  # v
+    ]
+    if has_attn_bias:
+        batch_dim_sharding.append(_ShardingPlaceholder(0))
+
+    return [num_heads_dim_sharding, batch_dim_sharding]
 
 
 def _scaled_dot_product_efficient_attention_backward_base_strategies(
@@ -889,21 +829,57 @@ def _scaled_dot_product_efficient_attention_backward_base_strategies(
     return single_mesh_dim_strategies
 
 
-@register_op_strategy(aten._scaled_dot_product_efficient_attention_backward.default)
-def scaled_dot_product_efficient_attention_backward_strategy(
-    op_schema: OpSchema,
-) -> OpStrategy:
-    # backward op does not need to validate the mesh since forward op has already done it
-    mesh = op_schema.get_mesh_from_args(validate=False)
-    single_mesh_dim_strategies = (
-        _scaled_dot_product_efficient_attention_backward_base_strategies(op_schema)
+@register_single_dim_strategy(
+    aten._scaled_dot_product_efficient_attention_backward.default
+)
+def scaled_dot_product_efficient_attention_backward_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    has_attn_bias = args_schema[4] is not None
+
+    num_heads_dim_sharding: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(1),  # grad_q
+        _ShardingPlaceholder(1),  # grad_k
+        _ShardingPlaceholder(1),  # grad_v
+        _ShardingPlaceholder(1) if has_attn_bias else None,  # grad_bias
+        _ShardingPlaceholder(1),  # grad_out
+        _ShardingPlaceholder(1),  # q
+        _ShardingPlaceholder(1),  # k
+        _ShardingPlaceholder(1),  # v
+    ]
+    if has_attn_bias:
+        num_heads_dim_sharding.append(_ShardingPlaceholder(1))
+    num_heads_dim_sharding.extend(
+        [
+            _ShardingPlaceholder(1),  # output
+            _ShardingPlaceholder(1),  # logsumexp
+            Replicate(),  # philox_seed
+            Replicate(),  # philox_offset
+        ]
     )
-    return expand_to_full_mesh_op_strategy(
-        mesh,
-        op_schema,
-        single_mesh_dim_strategies,
-        input_index=4,
+
+    batch_dim_sharding: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(0),  # grad_q
+        _ShardingPlaceholder(0),  # grad_k
+        _ShardingPlaceholder(0),  # grad_v
+        _ShardingPlaceholder(0) if has_attn_bias else None,  # grad_bias
+        _ShardingPlaceholder(0),  # grad_out
+        _ShardingPlaceholder(0),  # q
+        _ShardingPlaceholder(0),  # k
+        _ShardingPlaceholder(0),  # v
+    ]
+    if has_attn_bias:
+        batch_dim_sharding.append(_ShardingPlaceholder(0))
+    batch_dim_sharding.extend(
+        [
+            _ShardingPlaceholder(0),  # output
+            _ShardingPlaceholder(0),  # logsumexp
+            Replicate(),  # philox_seed
+            Replicate(),  # philox_offset
+        ]
     )
+
+    return [num_heads_dim_sharding, batch_dim_sharding]
 
 
 def _scaled_dot_product_cudnn_attention_base_strategies(
@@ -1000,18 +976,69 @@ def _scaled_dot_product_cudnn_attention_base_strategies(
     return single_mesh_dim_strategies
 
 
-@register_op_strategy(
+@register_single_dim_strategy(
     aten._scaled_dot_product_cudnn_attention.default,
     schema_info=RuntimeSchemaInfo(4),
 )
-def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    single_mesh_dim_strategies = _scaled_dot_product_cudnn_attention_base_strategies(
-        op_schema
+def scaled_dot_product_cudnn_attention_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    query_meta = args_schema[0]
+    if not isinstance(query_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(query_meta)}")
+
+    has_attn_bias = args_schema[3] is not None
+    compute_log_sumexp = args_schema[4]
+    return_debug_mask = len(args_schema) >= 8 and args_schema[7]
+
+    logsumexp_head: Placement | _ShardingPlaceholder = (
+        _ShardingPlaceholder(1) if compute_log_sumexp else Replicate()
     )
-    return expand_to_full_mesh_op_strategy(
-        mesh, op_schema, single_mesh_dim_strategies, input_index=9
+    logsumexp_batch: Placement | _ShardingPlaceholder = (
+        _ShardingPlaceholder(0) if compute_log_sumexp else Replicate()
     )
+    debug_attn_mask_head: Placement | _ShardingPlaceholder | None = (
+        _ShardingPlaceholder(1) if return_debug_mask else None
+    )
+    debug_attn_mask_batch: Placement | _ShardingPlaceholder | None = (
+        _ShardingPlaceholder(0) if return_debug_mask else None
+    )
+
+    num_heads_dim_sharding: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(1),  # output
+        logsumexp_head,
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        debug_attn_mask_head,
+        _ShardingPlaceholder(1),  # q
+        _ShardingPlaceholder(1),  # k
+        _ShardingPlaceholder(1),  # v
+    ]
+    if has_attn_bias:
+        num_heads_dim_sharding.append(_ShardingPlaceholder(1))
+
+    batch_dim_sharding: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(0),  # output
+        logsumexp_batch,
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        debug_attn_mask_batch,
+        _ShardingPlaceholder(0),  # q
+        _ShardingPlaceholder(0),  # k
+        _ShardingPlaceholder(0),  # v
+    ]
+    if has_attn_bias:
+        batch_dim_sharding.append(_ShardingPlaceholder(0))
+
+    return [num_heads_dim_sharding, batch_dim_sharding]
 
 
 def _scaled_dot_product_cudnn_attention_backward_base_strategies(
@@ -1116,212 +1143,226 @@ def _scaled_dot_product_cudnn_attention_backward_base_strategies(
     return single_mesh_dim_strategies
 
 
-@register_op_strategy(aten._scaled_dot_product_cudnn_attention_backward.default)
-def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
-    op_schema: OpSchema,
-) -> OpStrategy:
-    # backward op does not need to validate the mesh since forward op has already done it
-    mesh = op_schema.get_mesh_from_args(validate=False)
-    single_mesh_dim_strategies = (
-        _scaled_dot_product_cudnn_attention_backward_base_strategies(op_schema)
-    )
-    return expand_to_full_mesh_op_strategy(
-        mesh, op_schema, single_mesh_dim_strategies, input_index=3
-    )
+@register_single_dim_strategy(aten._scaled_dot_product_cudnn_attention_backward.default)
+def scaled_dot_product_cudnn_attention_backward_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    if len(args_schema) < 15:
+        raise AssertionError(f"Expected at least 15 args, got {len(args_schema)}")
 
+    for arg_index in range(6):
+        arg = args_schema[arg_index]
+        if not isinstance(arg, TensorMeta):
+            raise AssertionError(f"Expected TensorMeta, got {type(arg)}")
 
-@register_op_strategy(aten._grouped_mm.default)
-def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
+    philox_placements: list[Placement] = []
+    for arg_index in (6, 7):
+        arg = args_schema[arg_index]
+        if isinstance(arg, TensorMeta):
+            philox_placements.append(Replicate())
+        elif not isinstance(arg, torch.Tensor):
+            raise AssertionError(f"Expected TensorMeta or Tensor, got {type(arg)}")
 
-    mat1_strategy = op_schema.args_schema[0]
-    if not isinstance(mat1_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat1_strategy)}")
-    mat2_strategy = op_schema.args_schema[1]
-    if not isinstance(mat2_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat2_strategy)}")
-    if len(op_schema.args_schema) > 3:
-        bias_strategy = op_schema.args_schema[3]
-        if bias_strategy is not None:
-            raise AssertionError("grouped_mm doesn't support bias yet")
-
-    single_mesh_dim_strategies = []
-
-    offs_placement = None
-    if len(op_schema.args_schema) > 2 and op_schema.args_schema[2] is not None:
-        offs_placement = Replicate()  # offs should always be replicated
-
-    all_replicate: PlacementList = [
-        Replicate(),
-        Replicate(),  # mat1
-        Replicate(),  # mat2
-        offs_placement,  # offs
-        None,  # bias
-    ]
-    partial_replicate: PlacementList = [
-        Partial(),
-        Partial(),  # mat1
-        Replicate(),  # mat2
-        offs_placement,  # offs
-        None,  # bias
-    ]
-    replicate_partial: PlacementList = [
-        Partial(),
-        Replicate(),  # mat1
-        Partial(),  # mat2
-        offs_placement,  # offs
-        None,  # bias
-    ]
-    single_mesh_dim_strategies = [all_replicate, partial_replicate, replicate_partial]
-
-    if mat1_strategy.ndim == 2 and mat2_strategy.ndim == 3:
-        # rowwise_replicate for 2dx3d not supported
-        replicate_colwise_2x3: PlacementList = [
-            Shard(1),
-            Replicate(),  # mat1
-            Shard(2),  # mat2
-            offs_placement,  # offs
-            None,  # bias
-        ]
-        colwise_rowwise_2x3: PlacementList = [
-            Partial(),
-            Shard(1),  # mat1
-            Shard(1),  # mat2
-            offs_placement,  # offs
-            None,  # bias
-        ]
-        single_mesh_dim_strategies.extend([replicate_colwise_2x3, colwise_rowwise_2x3])
-
-    if mat1_strategy.ndim == 3 and mat2_strategy.ndim == 2:
-        # replicate_colwise for 3dx2d not supported
-        colwise_rowwise_3x2: PlacementList = [
-            Partial(),
-            Shard(2),  # mat1
-            Shard(0),  # mat2
-            offs_placement,  # offs
-            None,  # bias
-        ]
-        rowwise_replicate_3x2: PlacementList = [
-            Shard(0),
-            Shard(1),  # mat1
-            Replicate(),  # mat2
-            offs_placement,  # offs
-            None,  # bias
-        ]
-        single_mesh_dim_strategies.extend([colwise_rowwise_3x2, rowwise_replicate_3x2])
-
-    if mat1_strategy.ndim == 2 and mat2_strategy.ndim == 2:
-        # colwise_rowwise for 2dx2d not supported
-        replicate_colwise_2x2: PlacementList = [
-            Shard(2),
-            Replicate(),  # mat1
-            Shard(1),  # mat2
-            offs_placement,  # offs
-            None,  # bias
-        ]
-        rowwise_replicate_2x2: PlacementList = [
-            Shard(1),
-            Shard(0),  # mat1
-            Replicate(),  # mat2
-            offs_placement,  # offs
-            None,  # bias
-        ]
-        single_mesh_dim_strategies.extend(
-            [replicate_colwise_2x2, rowwise_replicate_2x2]
+    has_attn_bias = args_schema[8] is not None
+    if has_attn_bias and not isinstance(args_schema[8], (TensorMeta, torch.Tensor)):
+        raise AssertionError(
+            f"Expected TensorMeta or Tensor, got {type(args_schema[8])}"
         )
 
-    if mat1_strategy.ndim == 3 and mat2_strategy.ndim == 3:
-        replicate_colwise_3x3: PlacementList = [
-            Shard(2),
-            Replicate(),  # mat1
-            Shard(2),  # mat2
-            offs_placement,  # offs
-            None,  # bias
-        ]
-        rowwise_replicate_3x3: PlacementList = [
-            Shard(1),
-            Shard(1),  # mat1
-            Replicate(),  # mat2
-            offs_placement,  # offs
-            None,  # bias
-        ]
-        colwise_rowwise_3x3: PlacementList = [
-            Partial(),
-            Shard(2),  # mat1
-            Shard(1),  # mat2
-            offs_placement,  # offs
-            None,  # bias
-        ]
-        batch_dim_sharding: PlacementList = [
-            Shard(0),
-            Shard(0),  # mat1
-            Shard(0),  # mat2
-            offs_placement,  # offs
-            None,  # bias
-        ]
-        single_mesh_dim_strategies.extend(
+    cum_seq_placements: list[None] = []
+    for arg_index in (9, 10):
+        arg = args_schema[arg_index]
+        if isinstance(arg, TensorMeta):
+            cum_seq_placements.append(None)
+        elif arg is None or isinstance(arg, torch.Tensor):
+            pass
+        else:
+            raise AssertionError(f"Expected TensorMeta or Tensor, got {type(arg)}")
+
+    num_heads_dim_sharding: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(1),  # grad_q
+        _ShardingPlaceholder(1),  # grad_k
+        _ShardingPlaceholder(1),  # grad_v
+        _ShardingPlaceholder(1),  # grad_out
+        _ShardingPlaceholder(1),  # q
+        _ShardingPlaceholder(1),  # k
+        _ShardingPlaceholder(1),  # v
+        _ShardingPlaceholder(1),  # output
+        _ShardingPlaceholder(1),  # logsumexp
+    ]
+    num_heads_dim_sharding.extend(philox_placements)
+    if has_attn_bias and isinstance(args_schema[8], TensorMeta):
+        num_heads_dim_sharding.append(_ShardingPlaceholder(1))
+    num_heads_dim_sharding.extend(cum_seq_placements)
+
+    batch_dim_sharding: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(0),  # grad_q
+        _ShardingPlaceholder(0),  # grad_k
+        _ShardingPlaceholder(0),  # grad_v
+        _ShardingPlaceholder(0),  # grad_out
+        _ShardingPlaceholder(0),  # q
+        _ShardingPlaceholder(0),  # k
+        _ShardingPlaceholder(0),  # v
+        _ShardingPlaceholder(0),  # output
+        _ShardingPlaceholder(0),  # logsumexp
+    ]
+    batch_dim_sharding.extend(philox_placements)
+    if has_attn_bias and isinstance(args_schema[8], TensorMeta):
+        batch_dim_sharding.append(_ShardingPlaceholder(0))
+    batch_dim_sharding.extend(cum_seq_placements)
+
+    return [num_heads_dim_sharding, batch_dim_sharding]
+
+
+def _valid_grouped_mm_strides(
+    mesh: DeviceMesh,
+    op_schema: OpSchema,
+    input_specs: list[DTensorSpec],
+    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
+) -> bool:
+    def local_meta(spec: DTensorSpec) -> TensorMeta:
+        if not isinstance(spec.tensor_meta, TensorMeta):
+            raise AssertionError(f"Expected TensorMeta, got {type(spec.tensor_meta)}")
+        meta: TensorMeta = spec.tensor_meta
+        local_shape, _ = compute_local_shape_and_global_offset(
+            meta.shape, mesh, spec.placements, skip_offset=True
+        )
+        local_stride = compute_local_stride(meta.stride, local_shape)
+        return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype)
+
+    def check_valid_strides(meta: TensorMeta) -> bool:
+        # copied from `_meta_grouped_mm_common` in meta_registrations.py
+        end_dim = len(meta.shape) - 1
+        alignment = 16 // meta.dtype.itemsize
+        if meta.stride[end_dim - 1] == 1 and meta.stride[end_dim] >= max(
+            1, meta.shape[end_dim - 1]
+        ):
+            return meta.stride[end_dim] % alignment == 0
+        elif meta.stride[end_dim] == 1 and meta.stride[end_dim - 1] >= max(
+            1, meta.shape[end_dim]
+        ):
+            return meta.stride[end_dim - 1] % alignment == 0
+        else:
+            return False
+
+    mat1_meta = local_meta(input_specs[0])
+    mat2_meta = local_meta(input_specs[1])
+    return check_valid_strides(mat1_meta) and check_valid_strides(mat2_meta)
+
+
+@register_single_dim_strategy(
+    aten._grouped_mm.default,
+    full_mesh_strategy_filter=_valid_grouped_mm_strides,
+)
+def grouped_mm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    mat1_meta = args_schema[0]
+    if not isinstance(mat1_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(mat1_meta)}")
+    mat2_meta = args_schema[1]
+    if not isinstance(mat2_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(mat2_meta)}")
+
+    if len(args_schema) > 3 and args_schema[3] is not None:
+        raise AssertionError("grouped_mm doesn't support bias yet")
+
+    tensor_inputs_tail: list[Placement | None] = []
+    if len(args_schema) > 2 and args_schema[2] is not None:
+        if not isinstance(args_schema[2], TensorMeta):
+            raise AssertionError(f"Expected TensorMeta, got {type(args_schema[2])}")
+        tensor_inputs_tail.append(Replicate())
+
+    strategies: list[list[Placement | _ShardingPlaceholder | None]] = [
+        [Partial(), Partial(), Replicate(), *tensor_inputs_tail],
+        [Partial(), Replicate(), Partial(), *tensor_inputs_tail],
+    ]
+
+    mat1_ndim = len(mat1_meta.shape)
+    mat2_ndim = len(mat2_meta.shape)
+
+    if mat1_ndim == 2 and mat2_ndim == 3:
+        strategies.extend(
             [
-                replicate_colwise_3x3,
-                rowwise_replicate_3x3,
-                colwise_rowwise_3x3,
-                batch_dim_sharding,
+                [
+                    _ShardingPlaceholder(1),
+                    Replicate(),
+                    _ShardingPlaceholder(2),
+                    *tensor_inputs_tail,
+                ],
+                [
+                    Partial(),
+                    _ShardingPlaceholder(1),
+                    _ShardingPlaceholder(1),
+                    *tensor_inputs_tail,
+                ],
             ]
         )
 
-    def valid_grouped_mm_strides(
-        input_specs: list[DTensorSpec],
-        output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
-    ) -> bool:
-        # 1. compute the local-tensor shape/strides given this sharding proposal
-        # 2. apply the logic from the grouped_mm meta function
-        # UGH the input DTensorSpecs are missing their tensormetas... so i can get them another way
-        def local_meta(spec: OpSpec, placements: tuple[Placement, ...]) -> TensorMeta:
-            if not isinstance(spec.output_specs, DTensorSpec):
-                raise AssertionError(
-                    f"Expected DTensorSpec, got {type(spec.output_specs)}"
-                )
-            if not isinstance(spec.output_specs.tensor_meta, TensorMeta):
-                raise AssertionError(
-                    f"Expected TensorMeta, got {type(spec.output_specs.tensor_meta)}"
-                )
-            meta: TensorMeta = spec.output_specs.tensor_meta
-            local_shape, _ = compute_local_shape_and_global_offset(
-                meta.shape, mesh, placements, skip_offset=True
-            )
-            local_stride = compute_local_stride(meta.stride, local_shape)
-            return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype)
+    if mat1_ndim == 3 and mat2_ndim == 2:
+        strategies.extend(
+            [
+                [
+                    Partial(),
+                    _ShardingPlaceholder(2),
+                    _ShardingPlaceholder(0),
+                    *tensor_inputs_tail,
+                ],
+                [
+                    _ShardingPlaceholder(0),
+                    _ShardingPlaceholder(1),
+                    Replicate(),
+                    *tensor_inputs_tail,
+                ],
+            ]
+        )
 
-        # pyrefly: ignore [missing-attribute]
-        mat1_meta = local_meta(mat1_strategy.strategies[0], input_specs[0].placements)
-        # pyrefly: ignore [missing-attribute]
-        mat2_meta = local_meta(mat2_strategy.strategies[0], input_specs[1].placements)
+    if mat1_ndim == 2 and mat2_ndim == 2:
+        strategies.extend(
+            [
+                [
+                    _ShardingPlaceholder(2),
+                    Replicate(),
+                    _ShardingPlaceholder(1),
+                    *tensor_inputs_tail,
+                ],
+                [
+                    _ShardingPlaceholder(1),
+                    _ShardingPlaceholder(0),
+                    Replicate(),
+                    *tensor_inputs_tail,
+                ],
+            ]
+        )
 
-        def check_valid_strides(meta: TensorMeta) -> bool:
-            # copied from `_meta_grouped_mm_common` in meta_registrations.py
-            end_dim = len(meta.shape) - 1
-            alignment = 16 // meta.dtype.itemsize
-            if meta.stride[end_dim - 1] == 1 and meta.stride[end_dim] >= max(
-                1, meta.shape[end_dim - 1]
-            ):
-                if meta.stride[end_dim] % alignment != 0:
-                    return False
-            elif meta.stride[end_dim] == 1 and meta.stride[end_dim - 1] >= max(
-                1, meta.shape[end_dim]
-            ):
-                if meta.stride[end_dim - 1] % alignment != 0:
-                    return False
-            else:
-                return False
-            return True
+    if mat1_ndim == 3 and mat2_ndim == 3:
+        strategies.extend(
+            [
+                [
+                    _ShardingPlaceholder(2),
+                    Replicate(),
+                    _ShardingPlaceholder(2),
+                    *tensor_inputs_tail,
+                ],
+                [
+                    _ShardingPlaceholder(1),
+                    _ShardingPlaceholder(1),
+                    Replicate(),
+                    *tensor_inputs_tail,
+                ],
+                [
+                    Partial(),
+                    _ShardingPlaceholder(2),
+                    _ShardingPlaceholder(1),
+                    *tensor_inputs_tail,
+                ],
+                [
+                    _ShardingPlaceholder(0),
+                    _ShardingPlaceholder(0),
+                    _ShardingPlaceholder(0),
+                    *tensor_inputs_tail,
+                ],
+            ]
+        )
 
-        mat1_valid = check_valid_strides(mat1_meta)
-        mat2_valid = check_valid_strides(mat2_meta)
-        return mat1_valid and mat2_valid
-
-    return expand_to_full_mesh_op_strategy(
-        mesh,
-        op_schema,
-        single_mesh_dim_strategies,
-        input_index=1,
-        is_valid_strategy_cb=valid_grouped_mm_strides,
-    )
+    return strategies

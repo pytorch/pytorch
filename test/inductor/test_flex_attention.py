@@ -74,7 +74,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (  # noqa: F401
     IS_LINUX,
+    isRocmArchAnyOf,
     MI200_ARCH,
+    serialTest,
     skipIfRocm,
     skipIfRocmArch,
     TEST_WITH_ROCM,
@@ -2845,7 +2847,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
-    @common_utils.skipIfRocmArch(common_utils.MI200_ARCH)
     @expected_not_implemented_on_mps
     def test_autocast(self, device, dtype):
         """Test torch autocast functionality"""
@@ -2853,10 +2854,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         k = torch.randn(1, 1, 1024, 64, device=device, dtype=dtype)
         v = torch.randn(1, 1, 1024, 64, device=device, dtype=dtype)
 
+        atol = 1e-3
+        rtol = 1e-3
+
+        if isRocmArchAnyOf(MI200_ARCH) and dtype == torch.float16:
+            # this behavior matches known subnormal (denormal) handling on MI200 for float16
+            atol = 0.002
+            rtol = 0.41  # relative difference can become large at small tensor values
+
         with torch.autocast(dtype=torch.float16, enabled=True, device_type=device):
             sdpa_output = torch.nn.functional.scaled_dot_product_attention(q, k, v)
             flex_output = flex_attention(q, k, v)
-            torch.testing.assert_close(sdpa_output, flex_output, atol=1e-3, rtol=1e-3)
+            torch.testing.assert_close(sdpa_output, flex_output, atol=atol, rtol=rtol)
             self.assertEqual(flex_output.dtype, torch.float16)
 
     @supported_platform
@@ -3983,6 +3992,29 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             v_grad, v_grad2, atol=tolerance.atol, rtol=tolerance.rtol
         )
 
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps
+    def test_score_mod_without_score_gradient_errors(self, device):
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        dtype = torch.float16 if torch.device(device).type == "cuda" else torch.float32
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 1, 128, 16),
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "flex_attention backward requires the output of score_mod to depend on score",
+        ):
+            torch.compile(flex_attention, dynamic=False)(q, k, v, score_mod=score_mod)
+
     # Use weird mask to test reusing block_mask does work well.
     @supported_platform
     @skip_on_cpu
@@ -4443,6 +4475,174 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps
+    @skip_on_xpu
+    def test_backward_kernel_options_filtering(self, device):
+        if not PLATFORM_SUPPORTS_BF16:
+            self.skipTest("bf16 is required for this regression test")
+
+        b, h, n, c = 1, 8, 234, 16
+        block_size = 32
+
+        def mask_mod(b, h, q, kv):
+            return q > kv
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=n,
+            KV_LEN=n,
+            device=device,
+            BLOCK_SIZE=block_size,
+        )
+        kernel_options = {
+            "BLOCK_M": block_size,
+            "BLOCK_M1": block_size,
+            "BLOCK_M2": block_size,
+            "BLOCK_N": block_size,
+            "BLOCK_N1": block_size,
+            "BLOCK_N2": block_size,
+        }
+        make_tensor = functools.partial(
+            torch.randn,
+            (b, h, n, c),
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        out = torch.compile(flex_attention)(
+            query, key, value, block_mask=block_mask, kernel_options=kernel_options
+        )
+        out.mean().backward()
+
+        self.assertEqual(query.grad.shape, query.shape)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    def test_invalid_forward_kernel_options_error(self, device):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=64,
+            KV_LEN=64,
+            device=device,
+            BLOCK_SIZE=32,
+        )
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 1, 64, 16),
+            device=device,
+            dtype=torch.float16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        with self.assertRaisesRegex(
+            (InductorError, ValueError),
+            "Invalid FlexAttention forward kernel options.*fwd_BLOCK_M.*fwd_num_stages",
+        ):
+            torch.compile(flex_attention)(
+                query,
+                key,
+                value,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "TRITON", "BLOCK_M": 64, "BLOCK_N": 32},
+            )
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    def test_invalid_backward_kernel_options_error(self, device):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=64,
+            KV_LEN=64,
+            device=device,
+            BLOCK_SIZE=32,
+        )
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 1, 64, 16),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        out = torch.compile(flex_attention)(
+            query,
+            key,
+            value,
+            block_mask=block_mask,
+            kernel_options={
+                "BLOCK_M": 32,
+                "BLOCK_N": 32,
+                "bwd_BLOCK_M1": 64,
+                "bwd_BLOCK_N1": 64,
+                "bwd_BLOCK_M2": 64,
+                "bwd_BLOCK_N2": 64,
+            },
+        )
+        with self.assertRaisesRegex(
+            (InductorError, ValueError),
+            "Invalid FlexAttention backward kernel options.*"
+            "bwd_BLOCK_M1.*bwd_num_stages",
+        ):
+            out.mean().backward()
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    def test_invalid_decode_kernel_options_error(self, device):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=1,
+            KV_LEN=256,
+            device=device,
+            BLOCK_SIZE=128,
+        )
+        query = torch.randn(1, 2, 1, 64, device=device, dtype=torch.float16)
+        key = torch.randn(1, 2, 256, 64, device=device, dtype=torch.float16)
+        value = torch.randn(1, 2, 256, 64, device=device, dtype=torch.float16)
+
+        with self.assertRaisesRegex(
+            (InductorError, ValueError),
+            "Invalid FlexAttention decode kernel options.*fwd_BLOCK_M.*fwd_num_stages",
+        ):
+            torch.compile(flex_attention)(
+                query,
+                key,
+                value,
+                block_mask=block_mask,
+                kernel_options={
+                    "BACKEND": "TRITON_DECODE",
+                    "fwd_BLOCK_M": 96,
+                    "fwd_BLOCK_N": 64,
+                },
+            )
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
     def test_backend_auto_matches_triton_large(self, device):
         """BACKEND='AUTO' should follow Triton heuristics on large shapes."""
         make_tensor = functools.partial(
@@ -4890,7 +5090,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = (torch.randn(1, 8, 128, 64, device=device) for _ in range(3))
 
         expected_error_message = (
-            "ValueError: Q and KV block size must be divisible by BLOCK_M and BLOCK_N."
+            "Invalid FlexAttention forward kernel options: Q and KV block sizes "
+            "must be divisible by the selected tile sizes.*"
+            "SPARSE_Q_BLOCK_SIZE=96.*SPARSE_KV_BLOCK_SIZE=96.*"
+            "BLOCK_M=128.*BLOCK_N=32"
         )
         block_mask = create_block_mask(
             noop_mask, 1, 8, 128, 128, BLOCK_SIZE=96, device=device
@@ -6414,6 +6617,65 @@ class GraphModule(torch.nn.Module):
             flexible_layout_called,
             "get_stride_and_maybe_freeze_layout should be called with FlexibleLayout nodes",
         )
+
+    @unittest.skip(
+        "Too large to run reliably in CI. Kept as a manual repro for #185262"
+    )
+    @supported_platform
+    @skip_on_cpu
+    @largeTensorTest("12GB", inductor=True)
+    @serialTest()
+    def test_large_kv_int64_pointer_math(self, device):
+        # Regression test for #185262: load_checked_2d (and a few inline
+        # pointer-arithmetic sites in the backwards template) computed
+        # `offs * stride` in int32 even when Inductor had already promoted
+        # INDEX_DTYPE to int64 because some input buffer exceeded 2**31
+        # elements. The product silently overflowed and caused an IMA.
+        #
+        # We construct K/V so that (a) each tensor's storage exceeds 2**31
+        # elements (so Inductor uses int64 indexing), and (b) the last KV
+        # index times its KV-dim stride also exceeds 2**31 (so the
+        # in-kernel pointer math would overflow without the .to(INDEX_DTYPE)
+        # cast). Without the fix this raises a CUDA illegal memory access.
+        H, D = 1, 128
+        KV_S = 2**24 + 1024
+        Q_S = 128
+        dtype = torch.bfloat16
+
+        q = torch.randn(1, H, Q_S, D, device=device, dtype=dtype)
+        k = torch.randn(1, H, KV_S, D, device=device, dtype=dtype)
+        v = torch.randn(1, H, KV_S, D, device=device, dtype=dtype)
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            return kv_idx >= (KV_S - tail)
+
+        BLOCK = _DEFAULT_SPARSE_BLOCK_SIZE
+        tail = BLOCK
+        last_kv_block = KV_S // BLOCK - 1
+        kv_num_blocks = torch.ones(1, 1, 1, dtype=torch.int32, device=device)
+        kv_indices = torch.full(
+            (1, 1, 1, 1), last_kv_block, dtype=torch.int32, device=device
+        )
+        block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks,
+            kv_indices,
+            BLOCK_SIZE=BLOCK,
+            mask_mod=mask_mod,
+            seq_lengths=(Q_S, KV_S),
+        )
+
+        compiled = torch.compile(flex_attention, fullgraph=True)
+        out = compiled(q, k, v, block_mask=block_mask)
+
+        # Reference: only the last `tail` KV positions are unmasked.
+        k_tail = k[:, :, -tail:, :].to(torch.float32)
+        v_tail = v[:, :, -tail:, :].to(torch.float32)
+        q_f32 = q.to(torch.float32)
+        scale = D**-0.5
+        scores = (q_f32 @ k_tail.transpose(-1, -2)) * scale
+        ref = (torch.softmax(scores, dim=-1) @ v_tail).to(dtype)
+
+        torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
 
 class TestBlockMask(InductorTestCase):

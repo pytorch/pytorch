@@ -332,6 +332,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(Unsupported, fn)
         self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
         self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], -1)
 
     @make_test
     def test_itertools_permutations_various_iterators(a, b):
@@ -360,6 +361,41 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for x in itertools.chain.from_iterable([[a, b], [1, 2]]):
             v = v + x
         return v
+
+    def test_itertools_chain_fullgraph(self):
+        def fn(a, b):
+            result = a
+            for x in itertools.chain([a, b], [1, 2], [3]):
+                result = result + x
+            return result
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a, b = torch.tensor(1.0), torch.tensor(2.0)
+        self.assertEqual(fn(a, b), opt_fn(a, b))
+
+    def test_itertools_chain_from_iterable_fullgraph(self):
+        def fn(a, b):
+            result = a
+            for x in itertools.chain.from_iterable([[a, b], [1, 2]]):
+                result = result + x
+            return result
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a, b = torch.tensor(1.0), torch.tensor(2.0)
+        self.assertEqual(fn(a, b), opt_fn(a, b))
+
+    def test_itertools_chain_reconstruct(self):
+        def fn(a):
+            it = itertools.chain([a + 1, a + 2], [a + 3])
+            result = next(it)
+            return it, result
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a = torch.tensor(0.0)
+        it_ref, r_ref = fn(a)
+        it_opt, r_opt = opt_fn(a)
+        self.assertEqual(r_ref, r_opt)
+        self.assertEqual(list(it_ref), list(it_opt))
 
     def test_itertools_reconstruct(self):
         def fn(a):
@@ -520,6 +556,40 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for size in itertools.combinations((1, 2, 3, 4), 2):
             combs.append(torch.ones(size))
         return combs
+
+    def test_itertools_combinations_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            return list(itertools.combinations(*args, **kwargs))
+
+        self.assertRaises(Unsupported, fn)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], -1)
+
+    @make_test
+    def test_itertools_combinations_various_iterators(a, b):
+        itertools.combinations([a, b], 1)
+        itertools.combinations(zip([1, 2], [3, 4]), 1)
+        itertools.combinations(map(lambda x: x, [1, 2]), 1)
+        itertools.combinations(filter(lambda x: True, [1, 2]), 1)
+        return a
+
+    @make_test
+    def test_itertools_combinations_with_replacement(a, b):
+        combs = []
+        for size in itertools.combinations_with_replacement((1, 2, 3, 4), 2):
+            combs.append(torch.ones(size))
+        return combs
+
+    if sys.version_info >= (3, 12):
+
+        @make_test
+        def test_itertools_batched(a):
+            batches = []
+            for size in itertools.batched((1, 2, 3, 4, 5), 2):
+                batches.append(torch.ones(size))
+            return batches
 
     @make_test
     def test_itertools_pairwise(a):

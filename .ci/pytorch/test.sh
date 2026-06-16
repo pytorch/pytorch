@@ -439,6 +439,7 @@ test_python_smoke_b200() {
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
       inductor/test_flex_flash \
+      inductor/test_flex_gemm \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
@@ -1058,12 +1059,16 @@ test_single_dynamo_benchmark() {
       "${DYNAMO_BENCHMARK_FLAGS[@]}" \
       "$@" "${partition_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+    local validation_status=0
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv" \
+      || validation_status=$?
     python benchmarks/dynamo/check_graph_breaks.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv" \
+      || validation_status=$?
+    return "$validation_status"
   fi
 }
 
@@ -1482,12 +1487,15 @@ test_libtorch_jit() {
   python cpp/jit/tests_setup.py setup
   popd
 
-  # Run jit and lazy tensor cpp tests together to finish them faster
+  # Run jit and lazy tensor cpp tests one at a time; running them concurrently
+  # has been observed to hang pytest-xdist worker teardown on some runners.
   if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
-    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy
+    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_jit
+    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_lazy
   else
     # CUDA tests have already been skipped when CUDA is not available
-    python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy -k "not CUDA"
+    python test/run_test.py --cpp --verbose -i cpp/test_jit -k "not CUDA"
+    python test/run_test.py --cpp --verbose -i cpp/test_lazy -k "not CUDA"
   fi
 
   # Cleaning up test artifacts in the test folder
@@ -1509,6 +1517,9 @@ test_libtorch_profiler() {
 
   # Tests for torch/csrc/profiler/collection.cpp.
   python test/run_test.py --cpp --verbose -i cpp/test_profiler_collection
+
+  # Tests for torch/csrc/profiler/util.h GlobalStateManager.
+  python test/run_test.py --cpp --verbose -i cpp/test_global_state_manager
 }
 
 test_libtorch_api() {

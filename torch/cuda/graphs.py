@@ -103,10 +103,14 @@ class CUDAGraph(_CUDAGraph):
     """
 
     _tracker: _CUDAGraphInputLivenessTracker | None
+    # Stays None unless mark_kernels stamps it during capture (requires
+    # annotations enabled and cudaGraphNodeGetToolsId available).
+    _capture_graph_id: int | None
 
     def __new__(cls, keep_graph: bool = False) -> Self:
         instance = super().__new__(cls, keep_graph)
         instance._tracker = None
+        instance._capture_graph_id = None
         return instance
 
     def __del__(self) -> None:
@@ -190,6 +194,7 @@ class CUDAGraph(_CUDAGraph):
         if self._tracker is not None:
             self._tracker.stop()
             self._tracker = None
+        self._capture_graph_id = None
         super().reset()
 
     def pool(self) -> _POOL_HANDLE:

@@ -5,10 +5,10 @@
 #ifdef USE_C10D_GLOO
 
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
-#include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/gloo/GlooDeviceFactory.hpp>
+#include <torch/csrc/distributed/c10d/gloo/ProcessGroupGlooDetail.hpp>
 #include <chrono>
 #include <exception>
 
@@ -595,6 +595,10 @@ ProcessGroupGloo::ProcessGroupGloo(
       options_(std::move(options)),
 
       local_id_(process_group_id++) {
+  TORCH_CHECK(
+      !options_->enable_reconfigure,
+      "ProcessGroupGloo does not support enable_reconfigure "
+      "(reconfigure-based fault tolerance).");
   auto& devices = options_->devices;
   if (devices.empty()) {
     TORCH_CHECK(false, "No device(s) specified");
@@ -1509,16 +1513,16 @@ class LambdaWork : public Work {
 
 } // namespace
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::_reduce_scatter_base(
+c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts) {
   std::vector<at::Tensor> outputTensors = {outputTensor};
   std::vector<at::Tensor> inputTensors = {inputTensor};
-  return reduce_scatter_tensor_coalesced(outputTensors, inputTensors, opts);
+  return reduce_scatter_single_coalesced(outputTensors, inputTensors, opts);
 }
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single_coalesced(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ReduceScatterOptions& opts) {
@@ -1557,7 +1561,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_tensor_coalesced(
       });
 }
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupGloo::all_gather_single(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const AllgatherOptions& opts) {
@@ -1762,7 +1766,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
   return work;
 }
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_into_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupGloo::all_gather_single_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
@@ -2381,7 +2385,7 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
 
 } // namespace
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupGloo::all_to_all_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputCounts,

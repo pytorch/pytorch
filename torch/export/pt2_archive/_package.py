@@ -1048,6 +1048,16 @@ def _load_aoti(
         file, model_name
     )
 
+    aoti_compiled_model = AOTICompiledModel(
+        torch._C._aoti.AOTIModelPackageLoader(
+            file,
+            model_name,
+            run_single_threaded,
+            num_runners,
+            device_idx,
+        )
+    )
+
     device = loaded_metadata["AOTI_DEVICE_KEY"]
     from torch._inductor.codecache import get_device_information
 
@@ -1063,16 +1073,6 @@ def _load_aoti(
                     v,
                     loaded_metadata[k],
                 )
-
-    aoti_compiled_model = AOTICompiledModel(
-        torch._C._aoti.AOTIModelPackageLoader(
-            file,
-            model_name,
-            run_single_threaded,
-            num_runners,
-            device_idx,
-        )
-    )
 
     return aoti_compiled_model
 

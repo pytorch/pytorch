@@ -55,7 +55,7 @@ class CircularPad1d(_CircularPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 2-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
             Note that padding size should be less than or equal to the corresponding input dimension.
@@ -106,7 +106,7 @@ class CircularPad2d(_CircularPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 4-`tuple`, uses (:math:`\text{padding\_left}`,
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
             Note that padding size should be less than or equal to the corresponding input dimension.
@@ -167,7 +167,7 @@ class CircularPad3d(_CircularPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 6-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`,
             :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`,
@@ -230,7 +230,7 @@ class ConstantPad1d(_ConstantPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in both boundaries. If a 2-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
@@ -282,7 +282,7 @@ class ConstantPad2d(_ConstantPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 4-`tuple`, uses (:math:`\text{padding\_left}`,
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
 
@@ -334,7 +334,7 @@ class ConstantPad3d(_ConstantPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 6-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`,
             :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`,
@@ -386,7 +386,7 @@ class ReflectionPad1d(_ReflectionPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 2-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
             Note that padding size should be less than the corresponding input dimension.
@@ -429,7 +429,7 @@ class ReflectionPad2d(_ReflectionPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 4-`tuple`, uses (:math:`\text{padding\_left}`,
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
             Note that padding size should be less than the corresponding input dimension.
@@ -483,7 +483,7 @@ class ReflectionPad3d(_ReflectionPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 6-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`,
             :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`,
@@ -550,7 +550,7 @@ class ReplicationPad1d(_ReplicationPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 2-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
             Note that the output dimensions must remain positive.
@@ -593,7 +593,7 @@ class ReplicationPad2d(_ReplicationPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 4-`tuple`, uses (:math:`\text{padding\_left}`,
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
             Note that the output dimensions must remain positive.
@@ -647,7 +647,7 @@ class ReplicationPad3d(_ReplicationPadNd):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 6-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`,
             :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`,
@@ -690,7 +690,7 @@ class ZeroPad1d(ConstantPad1d):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in both boundaries. If a 2-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
@@ -746,7 +746,7 @@ class ZeroPad2d(ConstantPad2d):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 4-`tuple`, uses (:math:`\text{padding\_left}`,
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
 
@@ -803,7 +803,7 @@ class ZeroPad3d(ConstantPad3d):
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is `int`, uses the same
+        padding (int, tuple): the size of the padding. If it is `int`, uses the same
             padding in all boundaries. If a 6-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`,
             :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`,

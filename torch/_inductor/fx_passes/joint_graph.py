@@ -404,7 +404,8 @@ class UniformValueConstantFolder(ConstantFolder):
             node.target.overloadpacket in self.view_op_packets
             or node.target.overloadpacket in self.indexing_op_packets
         ):
-            assert isinstance(node.args[0], torch.fx.Node)
+            if not isinstance(node.args[0], torch.fx.Node):
+                raise AssertionError(f"expected fx.Node, got {type(node.args[0])}")
             return self.env[node.args[0]]
 
         # we don't want to return unknown value for symints so that we can
@@ -488,7 +489,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
 
         for node, value in node_replacements.items():
-            # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
+            # we don't have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
             # hasn't shown up to be important yet
             if "val" not in node.meta:
                 # This can only happen in AOTI
@@ -586,7 +587,10 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
 
         quant_options_node = kwargs.pop("quant_options", None)
         if quant_options_node is not None:
-            assert isinstance(quant_options_node, torch.fx.Node)
+            if not isinstance(quant_options_node, torch.fx.Node):
+                raise AssertionError(
+                    f"expected fx.Node, got {type(quant_options_node)}"
+                )
             quant_options = torch._higher_order_ops.InvokeQuant(
                 *invoke_quant.kwargs["quant_options"].args,
                 **invoke_quant.kwargs["quant_options"].kwargs,
@@ -621,10 +625,13 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             ):
                 subgraph_graph = getattr(gm, subgraph.target)
                 output_node = torch._inductor.utils.output_node(subgraph_graph)
-                assert (
+                if not (
                     isinstance(output_node.args[0], (list, tuple))
                     and len(output_node.args[0]) == 1
-                )
+                ):
+                    raise AssertionError(
+                        "expected subgraph output to be a single-element list or tuple"
+                    )
 
                 unpacked_output = output_node.args[0][0]
                 # pyrefly: ignore [bad-argument-type]
@@ -839,8 +846,10 @@ def definitely_equal(
         if isinstance(rhs_item, torch.fx.Node):
             rhs_item = rhs_item.meta["val"]
 
-        assert isinstance(lhs_item, (int, torch.SymInt)), type(lhs_item)
-        assert isinstance(rhs_item, (int, torch.SymInt)), type(rhs_item)
+        if not isinstance(lhs_item, (int, torch.SymInt)):
+            raise AssertionError(type(lhs_item))
+        if not isinstance(rhs_item, (int, torch.SymInt)):
+            raise AssertionError(type(rhs_item))
 
         # It still makes sense to call guard_or_true/false since lhs_item
         # rhs_item are torch.SymInt rather than sympy expressions when
@@ -904,7 +913,8 @@ def pointless_view_pair(match: Match, arg, size1, size2):
 )
 def pointless_permute_pair(match: Match, arg, perm1, perm2):
     rank = len(perm1)
-    assert len(perm2) == rank
+    if len(perm2) != rank:
+        raise AssertionError(f"expected len(perm2) == {rank}, got {len(perm2)}")
 
     for i in range(rank):
         if perm1[perm2[i]] != i:
@@ -1101,7 +1111,10 @@ def scatter_upon_const_tensor_extra_check(m):
         dim += len(full_shape)
 
     selector_ft = selector.meta["val"]
-    assert selector_ft.dim() == len(full_shape)
+    if selector_ft.dim() != len(full_shape):
+        raise AssertionError(
+            f"expected selector_ft.dim() == {len(full_shape)}, got {selector_ft.dim()}"
+        )
 
     for idx, select_sz, full_sz in zip(
         itertools.count(), selector_ft.shape, full_shape

@@ -35,6 +35,17 @@ class TestUtils(TestCase):
         res = utils.same(a, b, fp64_ref=fp64_ref, equal_nan=True)
         self.assertTrue(res)
 
+    def test_same_iou_for_bool_propagates_to_instances(self):
+        Instances = type("Instances", (), {})
+        ref = Instances()
+        res = Instances()
+        ref.pred_masks = torch.ones((4, 16, 16), dtype=torch.bool)
+        res.pred_masks = ref.pred_masks.clone()
+        res.pred_masks[0, 0, 0] = False
+
+        self.assertFalse(utils.same(ref, res))
+        self.assertTrue(utils.same(ref, res, use_iou_for_bool=True))
+
     def test_larger_multiplier_for_smaller_tensor(self):
         """
         Tensor numel between (10, 500]

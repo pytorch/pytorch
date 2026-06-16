@@ -365,7 +365,6 @@ if torch.backends.mps.is_available():
             "linalg.norm": [torch.float32],
             "linalg.normsubgradients_at_zero": [torch.float32],
             "linalg.svdvals": None,
-            "masked.median": None,
             "matrix_exp": None,
             "max_pool2d_with_indices_backward": [
                 torch.int8,
@@ -455,13 +454,6 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.uint8,
                 torch.bool,
-            ],
-            "nn.functional.logsigmoid": [
-                torch.int16,
-                torch.int32,
-                torch.uint8,
-                torch.bool,
-                torch.int8,
             ],
             "nn.functional.max_pool1d": [
                 torch.uint8,

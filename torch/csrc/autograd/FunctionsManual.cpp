@@ -599,9 +599,10 @@ Tensor pow_backward_exponent(
   auto grad_lambda = [](const Tensor& a, const Scalar& b) {
     return (a * b.log()).conj();
   };
-  auto base_ = exponent.is_complex() && !base.isComplex()
-      ? base.toComplexDouble()
-      : base;
+  auto promoted_dtype = at::result_type(base, exponent);
+  auto base_ = at::isComplexType(promoted_dtype)
+      ? Scalar(base.toComplexDouble())
+      : Scalar(base.toDouble());
   if (base.equal(0.0)) {
     auto cond = [](const auto& exp) {
       if (exp.is_complex()) {

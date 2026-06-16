@@ -885,7 +885,7 @@ class profile(_KinetoProfile):
             # In this example with wait=1, warmup=1, active=2, repeat=1,
             # profiler will skip the first step/iteration,
             # start warming up on the second, record
-            # the third and the forth iterations,
+            # the third and the fourth iterations,
             # after which the trace will become available
             # and on_trace_ready (when set) is called;
             # the cycle repeats starting with the next step

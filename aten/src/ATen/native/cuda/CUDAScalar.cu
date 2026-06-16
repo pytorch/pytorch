@@ -70,7 +70,7 @@ Scalar _local_scalar_dense_cuda(const Tensor& self) {
     AT_DISPATCH_V2(
       self.scalar_type(), "_local_scalar_dense_cuda", AT_WRAP([&] {
         _local_scalar_dense_cuda_impl<scalar_t>(self, r);
-      }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+      }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   return r;
 }
 

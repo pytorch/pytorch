@@ -192,7 +192,7 @@ _BACKEND_KEYS_TO_OVERRIDE = [
 def _override_composite_implicit_decomp(cia_ops_to_callable):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
-    # ALL composite ops but today's C++ functinalization relies on
+    # ALL composite ops but today's C++ functionalization relies on
     # the fact that it is working with the opset after decomp is run.
     # Hence we can only do it for functional ops. One caveat is that
     # there are some composite ops that lie about their schema (claimed to be
@@ -505,7 +505,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 new_graph_signature = aten_export_artifact.sig
 
                 # In the previous step, we assume constants as buffers for AOTDispatcher to
-                # functianalize properly, so undo that here
+                # functionalize properly, so undo that here
                 new_graph_signature = (
                     _override_graph_signature_for_temp_registered_constants(
                         new_graph_signature, temp_registered_constants
@@ -800,13 +800,15 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # values; since these become specialized, we replace such metadata with
     # the original values.
     # Also, set the param/buffer metadata back to the placeholders.
+    inputs_to_parameters = new_graph_signature.inputs_to_parameters
+    inputs_to_buffers = new_graph_signature.inputs_to_buffers
     for old_node, new_node in zip(old_placeholders, new_placeholders):
         if not isinstance(old_node.meta["val"], torch.Tensor):
             new_node.meta["val"] = old_node.meta["val"]
 
         if (
-            new_node.target in new_graph_signature.inputs_to_parameters
-            or new_node.target in new_graph_signature.inputs_to_buffers
+            new_node.target in inputs_to_parameters
+            or new_node.target in inputs_to_buffers
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
@@ -819,14 +821,16 @@ def _remove_unnecessary_copy_op_pass(
     """
     Removes redundant copy_ node that was introduced due to mutated buffer.
     """
+    buffers_to_mutate = new_graph_signature.buffers_to_mutate
+    parameters_to_mutate = new_graph_signature.parameters_to_mutate
     with gm._set_replace_hook(new_graph_signature.get_replace_hook()):
         for node in gm.graph.nodes:
             if node.op == "output":
                 args, _ = pytree.tree_flatten(node.args)
                 for out in args:
                     if isinstance(out, torch.fx.Node) and (
-                        out.name in new_graph_signature.buffers_to_mutate
-                        or out.name in new_graph_signature.parameters_to_mutate
+                        out.name in buffers_to_mutate
+                        or out.name in parameters_to_mutate
                     ):
                         if (
                             out.op == "call_function"
@@ -1454,10 +1458,12 @@ class ExportedProgram:
             print_output=False, colored=False
         ).replace("\n", "\n    ")
         graph_signature = str(self.graph_signature).replace("\n", "\n    ")
+        # No space after "Graph signature:" — graph_signature starts with
+        # a newline; trailing whitespace breaks expecttest snapshots.
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph signature: {graph_signature}\n"
+            f"Graph signature:{graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
         )
         return string

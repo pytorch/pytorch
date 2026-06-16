@@ -5,7 +5,7 @@ import random
 import torch
 
 from torchfuzz.operators.base import Operator
-from torchfuzz.tensor_fuzzer import Spec, TensorSpec
+from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 from torchfuzz.type_promotion import (
     get_dtype_map,
     get_dtype_name,
@@ -13,12 +13,43 @@ from torchfuzz.type_promotion import (
 )
 
 
+def _contiguous_stride(size: tuple[int, ...]) -> tuple[int, ...]:
+    if not size:
+        return ()
+    strides: list[int] = [1]
+    for dim in reversed(size[1:]):
+        strides.append(strides[-1] * dim)
+    return tuple(reversed(strides))
+
+
+def _random_broadcast_shape(output_size: tuple[int, ...]) -> tuple[int, ...]:
+    if not output_size:
+        return ()
+    result = list(output_size)
+    changed = False
+    for i in range(len(result)):
+        if random.random() < 0.3:
+            result[i] = 1
+            changed = True
+    if not changed:
+        return output_size
+    while len(result) > 1 and result[0] == 1 and random.random() < 0.5:
+        result.pop(0)
+    return tuple(result)
+
+
 class PointwiseOperator(Operator):
     """Base class for element-wise pointwise operations."""
 
-    def __init__(self, name: str, symbol: str):
+    _scalar_input_positions: tuple[int, ...] = (0, 1)
+
+    def __init__(self, name: str, symbol: str = ""):
         super().__init__(name)
         self.symbol = symbol
+
+    @property
+    def torch_op_name(self) -> str:
+        return self.name
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Tensor pointwise operations can produce tensors but not scalars."""
@@ -53,7 +84,7 @@ class PointwiseOperator(Operator):
         # Convert dtype strings back to torch dtypes
         dtype_map = get_dtype_map()
 
-        return [
+        input_specs: list[Spec] = [
             TensorSpec(
                 size=output_spec.size,
                 stride=output_spec.stride,
@@ -61,6 +92,23 @@ class PointwiseOperator(Operator):
             )
             for dt in dtypes
         ]
+
+        if num_inputs >= 2:
+            r = random.random()
+            if self._scalar_input_positions and r < 0.3:
+                idx = random.choice(self._scalar_input_positions)
+                input_specs[idx] = ScalarSpec(dtype=input_specs[idx].dtype)
+            elif r < 0.5:
+                idx = random.randint(0, 1)
+                bcast_size = _random_broadcast_shape(tuple(output_spec.size))
+                if bcast_size != tuple(output_spec.size):
+                    input_specs[idx] = TensorSpec(
+                        size=bcast_size,
+                        stride=_contiguous_stride(bcast_size),
+                        dtype=input_specs[idx].dtype,
+                    )
+
+        return input_specs
 
     def codegen(
         self, output_name: str, input_names: list[str], output_spec: Spec
@@ -84,6 +132,24 @@ class AddOperator(PointwiseOperator):
     @property
     def torch_op_name(self) -> str:
         return "torch.add"
+
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
+        if len(input_names) == 2 and random.random() < 0.3:
+            alpha = round(random.uniform(-5.0, 5.0), 4)
+            if isinstance(output_spec, TensorSpec) and output_spec.dtype not in (
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ):
+                alpha = int(alpha)
+            return (
+                f"{output_name} = torch.add("
+                f"{input_names[0]}, {input_names[1]}, alpha={alpha!r})"
+            )
+        return super().codegen(output_name, input_names, output_spec)
 
 
 class MulOperator(PointwiseOperator):

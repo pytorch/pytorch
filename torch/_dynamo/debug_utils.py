@@ -216,6 +216,10 @@ class NNModuleToString:
     def can_convert_to_string(gm: torch.fx.GraphModule) -> bool:
         cant_convert = set()
         for _, module in gm.named_children():
+            # Nested GraphModules (e.g. torch.cond / torch.while_loop subgraphs)
+            # are serialized recursively by convert().
+            if isinstance(module, torch.fx.GraphModule):
+                continue
             if NNModuleToString._module_constructor_string(module) is None:
                 cant_convert.add(module)
 
@@ -359,78 +363,95 @@ class NNModuleToString:
 
         tab = " " * 4
 
-        model_str = textwrap.dedent(
-            """
-            from torch.nn import *
-            class Repro(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-            """
-        )
+        # Higher-order ops (torch.cond, torch.while_loop, ...) attach their
+        # subgraphs as nested GraphModule children. These have no
+        # constructor-style repr, so serialize each nested GraphModule as its
+        # own top-level class (defined before Repro so it is in scope) and
+        # instantiate it in __init__. Leaf nn.Modules use the constructor-string
+        # path below.
+        subgraph_classes: dict[int, str] = {}
+        subgraph_defs: list[str] = []
 
-        for module_name, module in gm.named_children():
-            module_str = NNModuleToString._module_constructor_string(
-                module, allow_unsafe_repr=allow_unsafe_repr
+        def register_subgraph(name_hint: str, sub: torch.fx.GraphModule) -> str:
+            # Reserve the name before recursing so nested/shared subgraphs are
+            # deduplicated by identity and cannot recurse infinitely.
+            if id(sub) in subgraph_classes:
+                return subgraph_classes[id(sub)]
+            class_name = f"{name_hint}_{len(subgraph_classes)}"
+            subgraph_classes[id(sub)] = class_name
+            body = emit_module_body(sub)
+            subgraph_defs.append(f"class {class_name}(torch.nn.Module):\n{body}")
+            return class_name
+
+        def emit_module_body(module: torch.nn.Module) -> str:
+            model_str = (
+                f"{tab}def __init__(self) -> None:\n{tab * 2}super().__init__()\n"
             )
-            if module_str is None:
-                raise UnsupportedNNModuleError(
-                    f"Cannot convert module to string: {module!r}"
+
+            for module_name, child in module.named_children():
+                if isinstance(child, torch.fx.GraphModule):
+                    class_name = register_subgraph(module_name, child)
+                    model_str += f"{tab * 2}self.{module_name} = {class_name}()\n"
+                    continue
+                module_str = NNModuleToString._module_constructor_string(
+                    child, allow_unsafe_repr=allow_unsafe_repr
                 )
-            # module should be a core torch.nn.Module, so all parameters
-            # and buffers should be on the same device.
-            example_param = next(module.parameters(), None)
-            example_tensor = (
-                example_param
-                if example_param is not None
-                else next(module.buffers(), None)
-            )
-            if example_tensor is not None and example_tensor.device.type != "cpu":
-                module_str = f'{module_str}.to("{example_tensor.device}")'
-            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
-
-        for buffer_name, buffer in gm._buffers.items():
-            if buffer is None:
-                continue
-            # Serialize full data for small buffers
-            if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
-                from torch._tensor_str import PRINT_OPTS
-
-                if PRINT_OPTS.threshold < MAX_CONSTANT_NUMEL_INLINE:
-                    raise AssertionError(
-                        f"PRINT_OPTS.threshold ({PRINT_OPTS.threshold}) must be >= "
-                        f"MAX_CONSTANT_NUMEL_INLINE ({MAX_CONSTANT_NUMEL_INLINE})"
+                if module_str is None:
+                    raise UnsupportedNNModuleError(
+                        f"Cannot convert module to string: {child!r}"
                     )
-                tensor_str = repr(buffer)
-            elif torch.is_floating_point(buffer):
-                tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
-            else:
-                tensor_str = (
-                    f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
+                # module should be a core torch.nn.Module, so all parameters
+                # and buffers should be on the same device.
+                example_param = next(child.parameters(), None)
+                example_tensor = (
+                    example_param
+                    if example_param is not None
+                    else next(child.buffers(), None)
                 )
-            if buffer.device.type != "cpu":
-                tensor_str = f'{tensor_str}.to("{buffer.device}")'
-            model_str += (
-                f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
-            )
+                if example_tensor is not None and example_tensor.device.type != "cpu":
+                    module_str = f'{module_str}.to("{example_tensor.device}")'
+                model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
-        for param_name, param in gm._parameters.items():
-            if param is None:
-                continue
-            maybe_device = ""
-            if param.device.type != "cpu":
-                maybe_device = f', device="{param.device}"'
-            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
-            model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
+            for buffer_name, buffer in module._buffers.items():
+                if buffer is None:
+                    continue
+                # Serialize full data for small buffers
+                if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
+                    from torch._tensor_str import PRINT_OPTS
 
-        # TODO - Keep this code for now. But, I don't think we will need this.
-        # attrs = dir(gm)
-        # for attr in attrs:
-        #     if "_tensor_constant" in attr:
-        #         val = getattr(gm, attr)
-        #         model_str += f"    {attr} = {val!r}\n"
+                    if PRINT_OPTS.threshold < MAX_CONSTANT_NUMEL_INLINE:
+                        raise AssertionError(
+                            f"PRINT_OPTS.threshold ({PRINT_OPTS.threshold}) must be >= "
+                            f"MAX_CONSTANT_NUMEL_INLINE ({MAX_CONSTANT_NUMEL_INLINE})"
+                        )
+                    tensor_str = repr(buffer)
+                elif torch.is_floating_point(buffer):
+                    tensor_str = (
+                        f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
+                    )
+                else:
+                    tensor_str = f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
+                if buffer.device.type != "cpu":
+                    tensor_str = f'{tensor_str}.to("{buffer.device}")'
+                model_str += (
+                    f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+                )
 
-        model_str += f"{_addindent(gm.code, 4)}\n"
-        return model_str
+            for param_name, param in module._parameters.items():
+                if param is None:
+                    continue
+                maybe_device = ""
+                if param.device.type != "cpu":
+                    maybe_device = f', device="{param.device}"'
+                tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
+                model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
+
+            model_str += f"{_addindent(module.code, len(tab))}\n"
+            return model_str
+
+        repro_class = f"class Repro(torch.nn.Module):\n{emit_module_body(gm)}"
+        # Subgraph classes must be defined before Repro instantiates them.
+        return "\nfrom torch.nn import *\n" + "\n".join(subgraph_defs + [repro_class])
 
 
 @functools.cache  # subprocess is expensive
@@ -447,7 +468,7 @@ def _cuda_system_info_comment() -> str:
             model_str += f"{comment}\n"
         else:
             model_str += "# Not searching for nvcc on ROCM setup\n"
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except (OSError, subprocess.CalledProcessError):
         model_str += "# nvcc not found\n"
 
     gpu_names = Counter(

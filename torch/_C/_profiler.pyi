@@ -73,6 +73,9 @@ class _ExperimentalConfig:
         trace_only: bool = ...,
     ) -> None: ...
     trace_only: bool
+    # Deprecated no-ops; retained only so the Python layer can detect and warn.
+    profiler_metrics: list[str]
+    profiler_measure_per_kernel: bool
 
 class ProfilerConfig:
     def __init__(

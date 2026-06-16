@@ -604,7 +604,7 @@ def _build_proxy_for_sym_expr(
     To handle this we decompose the sympy.Expr and look for the pieces as
     inputs. But there are problems with this approach:
 
-    - We lose operation provanance: We end up figuring out where to get the
+    - We lose operation provenance: We end up figuring out where to get the
       inputs - but those may not actually be correct. If we have "s1" coming in
       from both tensor1 and tensor2 and we pick the wrong one we could end up
       keeping a tensor alive longer than intended.
@@ -1007,7 +1007,7 @@ def track_tensor_tree(
             set_meta(proxy, e)
             e.proxy = proxy
         else:
-            # intentionally pass on primitives
+            # intentionally pass on unsupported primitives
             pass
 
     wrap_with_proxy(inner_res, proxy_res, constant)
@@ -1367,9 +1367,11 @@ class _SymNodeDict:
         self.sym_node_dict: dict[PySymType, _PySymProxyType] = {}
 
     def __setitem__(self, key: PySymType, value: _PySymProxyType) -> None:
+        # pyrefly: ignore [unsupported-operation]
         self.sym_node_dict[key.node] = value
 
     def __getitem__(self, key: PySymType) -> _PySymProxyType:
+        # pyrefly: ignore [bad-index]
         return self.sym_node_dict[key.node]
 
     def __contains__(self, key: PySymType) -> bool:
@@ -1463,7 +1465,8 @@ class PythonKeyTracer(Tracer):
         elif isinstance(a, py_sym_types):
             if a.node.constant is None:
                 raise AssertionError("a.node.constant should not be None")
-            return a.node.constant
+            # pyrefly: ignore [bad-return]
+            return a.constant
 
         # Try reconstructing untracked opaque reference types from existing
         # graph inputs (e.g. derive a DeviceMesh submesh from its root mesh).
@@ -1748,6 +1751,14 @@ def wrap_key(
             if not isinstance(m, ProxyTorchDispatchMode):
                 raise AssertionError(f"Expected ProxyTorchDispatchMode, got {type(m)}")
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
+            # `wrap_key` is the make_fx input-placeholder path. Keep scalar
+            # metadata here instead of teaching recursive output tracking to
+            # treat arbitrary primitive leaves as proxy-trackable values.
+            for input_value, proxy in zip(flat_tensors, flat_proxies):
+                if isinstance(input_value, (int, float, bool)) and isinstance(
+                    proxy, fx.Proxy
+                ):
+                    set_meta(proxy, input_value)
 
         if getattr(tracer, "proxy_module_inputs", False):
             tensors = [  # type: ignore[assignment, var-annotated]
@@ -2166,6 +2177,11 @@ class DecompositionInterpreter(fx.Interpreter):
         out = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         proxy = fx.Proxy(self.new_graph.placeholder(target), self.tracer)
         track_tensor_tree(out, proxy, constant=None, tracer=self.tracer)
+        # Primitive scalar placeholders are real graph inputs. Record their
+        # value on the placeholder itself without making recursive output
+        # tracking treat all primitive leaves as proxy-trackable values.
+        if isinstance(out, (int, float, bool)):
+            set_meta(proxy, out)
         # TODO handle case where the first character of target is '*'
         return out
 
@@ -2376,7 +2392,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             self.module_id_cache[id(mod)].append(name)
 
         # Build a wrapper around _AttrProxy to provide the tracer. We can't
-        # store it on _AttrProxy itself beceause we mimic the underlying class
+        # store it on _AttrProxy itself because we mimic the underlying class
         # (including its attributes).
         tracer = self
 
@@ -3050,7 +3066,7 @@ def make_fx(
         _allow_fake_constant,
         _error_on_data_dependent_ops,
         record_stack_traces=record_stack_traces
-        or config.trace.provenance_tracking_level == 1,
+        or config.effective_provenance_tracking_level() == 1,
         proxy_module_inputs=proxy_module_inputs,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
@@ -3084,7 +3100,7 @@ def get_proxy_mode() -> ProxyTorchDispatchMode | None:
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     if not (pre_dispatch_mode is None or mode is None):
         raise AssertionError(f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}")
-    return pre_dispatch_mode or mode
+    return typing.cast("ProxyTorchDispatchMode | None", pre_dispatch_mode or mode)
 
 
 def handle_sym_dispatch(
@@ -3170,9 +3186,45 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     #
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
-    fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+    fake_mode = typing.cast(
+        "FakeTensorMode | None",
+        torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
+    )
     if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
-            if not isinstance(out_proxy, Proxy):
-                raise AssertionError(f"Expected Proxy, got {out_proxy}")
-            out_proxy.node.meta["unbacked_bindings"] = symbol_to_path
+            # `symbol_to_path` is keyed by the fresh unbacked symbol; each path
+            # is relative to the *whole* output pytree (`out`). Route each
+            # binding to the proxy that owns it. If `out_proxy` is already a
+            # Proxy, it owns the whole output and keeps the original path.
+            bindings_by_proxy: dict[Proxy, dict[sympy.Symbol, pytree.KeyPath]] = {}
+            for symbol, path in symbol_to_path.items():
+                proxy: _NestedProxys = out_proxy
+                local_path = path
+                # `out` and `out_proxy` are structurally congruent, so the
+                # leading container keys index identically into both. Consume
+                # them off `out_proxy` until we reach the owning Proxy leaf; the
+                # remaining suffix (e.g. `.size()[0]`, or an InnerTensorKey for
+                # a wrapper subclass) is the tensor-local accessor that the
+                # per-node consumer resolves against that node's own value.
+                while not isinstance(proxy, Proxy) and local_path:
+                    try:
+                        proxy = local_path[0].get(proxy)
+                    except (IndexError, KeyError, AttributeError) as e:
+                        raise AssertionError(
+                            f"unbacked_bindings path {pytree.keystr(path)} does "
+                            f"not index into the proxy pytree {out_proxy}"
+                        ) from e
+                    local_path = local_path[1:]
+
+                if not isinstance(proxy, Proxy):
+                    raise AssertionError(
+                        f"Expected Proxy at binding path {pytree.keystr(path)}, "
+                        f"got {type(proxy)}"
+                    )
+
+                bindings_by_proxy.setdefault(proxy, {})[symbol] = local_path
+
+            # Merge rather than overwrite: multiple symbols (e.g. two unbacked
+            # dims on one tensor) can route to the same node.
+            for proxy, bindings in bindings_by_proxy.items():
+                proxy.node.meta.setdefault("unbacked_bindings", {}).update(bindings)

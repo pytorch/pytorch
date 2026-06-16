@@ -187,6 +187,8 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         cutlass_template_node_name: str,
         epilogue_nodes: list[BaseSchedulerNode],
         removed_buffers: OrderedSet[str],
+        fn_name: str = "fn",
+        as_standalone_function: bool = False,
     ) -> tuple[list[str], list[str], dict[str, Any], str]:
         codegen = CutlassEVTCodegen(cutlass_template_node_name, removed_buffers)
         handler = _AssignmentFormatter(codegen)
@@ -194,7 +196,10 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         with virtualized.V.set_ops_handler(handler):
             for s_node in epilogue_nodes:
                 node = s_node.node
-                assert isinstance(node, ComputedBuffer)
+                if not isinstance(node, ComputedBuffer):
+                    raise AssertionError(
+                        f"expected node to be a ComputedBuffer, got {type(node)}"
+                    )
                 with codegen.set_cur_node(node):
                     index_vars = CutlassEVTCodegen.get_index_vars(node)
                     node.get_store_function()(index_vars)
@@ -205,15 +210,25 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             codegen.get_reads(),
             codegen.get_writes(),
             codegen.get_renames(),
-            codegen.get_value(),
+            codegen.get_value(
+                fn_name=fn_name,
+                as_standalone_function=as_standalone_function,
+            ),
         )
 
-    def get_value(self) -> str:
+    def get_value(
+        self,
+        fn_name: str = "fn",
+        as_standalone_function: bool = False,
+    ) -> str:
+        ret = self._render_return_statement()
+        if as_standalone_function:
+            ret = "    " + ret
         return linesep.join(
             [
-                self._render_input_signature(),
+                self._render_input_signature(fn_name),
                 self.body.getvalue(),
-                self._render_return_statement(),
+                ret,
             ]
         )
 
@@ -263,23 +278,24 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         if name not in self.removed_buffers:
             if index:
                 self._check_indexing(name, index)
-            assert value.value != _ACCUMULATOR_ARG_NAME, (
-                "Cannot store accumulator arg name"
-            )
+            if value.value == _ACCUMULATOR_ARG_NAME:
+                raise AssertionError("Cannot store accumulator arg name")
             self.var_name_to_buffer_name[value.value] = name
             self.store_name_to_value[name] = value
             self.last_stored_var_name = value.value
         return None
 
     def _get_cur_node(self) -> ComputedBuffer:
-        assert self.cur_node
+        if not self.cur_node:
+            raise AssertionError("expected cur_node to be set")
         return self.cur_node
 
     @staticmethod
     def get_index_vars(node: ComputedBuffer) -> Sequence[sympy.Expr]:
         data = node.data
         # TODO mlazos: relax this, cutlass supports reductions and other ops
-        assert isinstance(data, Pointwise)
+        if not isinstance(data, Pointwise):
+            raise AssertionError(f"expected data to be Pointwise, got {type(data)}")
         return data._index(data.ranges)
 
     def _get_current_index_vars(self) -> Sequence[sympy.Expr]:
@@ -343,18 +359,19 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             for i in range(n)
         )
 
-    def _render_input_signature(self) -> str:
+    def _render_input_signature(self, fn_name: str = "fn") -> str:
         arguments = ", ".join(
             [_ACCUMULATOR_ARG_NAME]
             + [name for name in self.reads if name != self.accumulator_node_name]
         )
-        return f"def fn({arguments}):"
+        return f"def {fn_name}({arguments}):"
 
     def _render_return_statement(self) -> str:
         return_vars = OrderedSet(
             op_v.value for op_v in self.store_name_to_value.values()
         )
-        assert "D" in return_vars
+        if "D" not in return_vars:
+            raise AssertionError(f"expected 'D' in return_vars, got {return_vars}")
         return f"return {', '.join(return_vars)}"
 
     def _tmp_var(self) -> str:

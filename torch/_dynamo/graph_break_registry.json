@@ -15,6 +15,15 @@
       "Context": "{self}.as_subclass({cls})",
       "Explanation": "Currently not supported",
       "Hints": [
+        "Avoid this call or move it outside `torch.compile` region",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Argument of `as_subclass` must be a non-dispatcher-style tensor subclass",
+      "Context": "{self}.as_subclass({cls})",
+      "Explanation": "Currently not supported",
+      "Hints": [
         "Avoid this call or move it outside `torch.compile` regione",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -325,6 +334,16 @@
     }
   ],
   "GB0026": [
+    {
+      "Gb_type": "Calling subclass default constructor with more than tensor argument",
+      "Context": "{self.value}(args={args}, kwargs={kwargs})",
+      "Explanation": "Currently not supported",
+      "Hints": [
+        "Avoid this constructor call or move it outside ",
+        "`torch.compile` region",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Calling subclass default constructor with more than tensor argument",
       "Context": "{self.value}(args={args}, kwargs={kwargs})",
@@ -709,6 +728,26 @@
       "Context": "",
       "Explanation": "Dynamo attempted to trace the same frame 100+ times. Giving up on compiling as the compile time tradeoff is likely not worth the performance gain.",
       "Hints": []
+    }
+  ],
+  "GB8593": [
+    {
+      "Gb_type": "flex_gemm: unexpected kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "flex_gemm internal HOP expects positional args only.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB7072": [
+    {
+      "Gb_type": "flex_gemm: improper args/kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "flex_gemm expects 5 positional arguments: gemm_op, body_fn, args, kwargs, kernel_options. args is expected to be list/tuple and kwargs/kernel_options are expected to be dicts.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
     }
   ],
   "GB0053": [
@@ -1973,6 +2012,16 @@
       ]
     }
   ],
+  "GB1075": [
+    {
+      "Gb_type": "torch.scan: combine_fn mutates init or xs",
+      "Context": "init={init_part}, xs={xs_part}",
+      "Explanation": "scan only supports in-place mutation of additional_inputs (loop-invariant tensors). init is the *initial* carry only -- from step 1 on the driver feeds combine_fn's returned carry, so an in-place write to init would only affect step 0. xs[t] is a fresh, storage-disjoint slice each step, so a mutation cannot be observed by step t+1. Update the carry via the combine_fn return value; for in-place lifted buffers use additional_inputs.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0143": [
     {
       "Gb_type": "Unsupported conversion for slice assignment",
@@ -2816,6 +2865,16 @@
       ]
     }
   ],
+  "GB9192": [
+    {
+      "Gb_type": "Unsupported kwargs for itertools.zip_longest",
+      "Context": "call_function {self} {args} {kwargs}",
+      "Explanation": "Expected kwargs: 'fillvalue', but got {','.join(set(kwargs.keys()) - {'fillvalue'})}",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0200": [
     {
       "Gb_type": "missing BUILD_SET handler",
@@ -2934,6 +2993,15 @@
     }
   ],
   "GB0207": [
+    {
+      "Gb_type": "sort with non-constant keys",
+      "Context": "str(self.key)",
+      "Explanation": "Cannot perform sort whose key comparison is not a compile-time constant. Key type: {self.key.python_type()}. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.",
+      "Hints": [
+        "Use something else as the key.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "sort with non-constant keys",
       "Context": "str(first_non_constant_key)",
@@ -4789,6 +4857,16 @@
       "Gb_type": "autograd.grad with non-constant dict key",
       "Context": "non-constant key in {arg_name}",
       "Explanation": "autograd.grad/backward dict inputs must have constant keys.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4234": [
+    {
+      "Gb_type": "nb_invert_impl not implemented",
+      "Context": "{type(self).__name__} has nb_invert slot but no nb_invert_impl override",
+      "Explanation": "The type {self.python_type_name()} has an nb_invert C slot but the corresponding VariableTracker doesn't implement nb_invert_impl.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

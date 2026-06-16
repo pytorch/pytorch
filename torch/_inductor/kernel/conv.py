@@ -465,16 +465,20 @@ def convolution(
     output_padding = tuple(output_padding)
     if not isinstance(groups, int):
         groups = V.graph.sizevars.guard_int(groups)
-    assert isinstance(groups, int)
+    if not isinstance(groups, int):
+        raise AssertionError(f"Expected int for groups, got {type(groups)}")
 
     # Need use hint for triton template since the template does not
     # work with a dynamic shape.
     #
-    # No need to guard_int for dilation and output_padding
-    # since the template is only used when dilation is 1 and output_padding
-    # is 0.
+    # Dilation must also be guarded for transposed convolutions because the
+    # backward-input template substitutes DILATION_H/W as tl.constexpr.
+    # For non-transposed convolutions the forward template gates on
+    # dilation==1, so guarding is unnecessary.
     stride = tuple(V.graph.sizevars.guard_int_seq(stride))
     padding = tuple(V.graph.sizevars.guard_int_seq(padding))
+    if transposed:
+        dilation = tuple(V.graph.sizevars.guard_int_seq(dilation))
 
     kwargs: ConvLayoutParams = {
         "stride": stride,
@@ -597,7 +601,8 @@ def convolution(
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
         bias = ir.ExternKernel.realize_input(bias)  # type: ignore[assignment]
-        assert bias is not None
+        if bias is None:
+            raise AssertionError("bias must not be None after realize_input")
         args = [x, weight, bias]
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())
@@ -704,6 +709,42 @@ def convolution(
                     num_warps=num_warps,
                     **cfg.kwargs,
                 )
+    if (
+        torch._inductor.utils._use_conv_autotune_backend("TRITON")
+        and use_triton_template(layout)
+        and transposed
+        and ndim == 2
+    ):
+        # ConvTranspose2d is mathematically identical to conv_backward_input:
+        # the input plays the role of grad_output and the same weight layout
+        # is used. Reuse the backward-input Triton template.
+        conv_configs = V.choices.get_conv_configs(device_type)
+        dtype_size = x.get_dtype().itemsize
+        for cfg in conv_configs(
+            sympy_product([layout.size[0], layout.size[2], layout.size[3]]),
+            out_chan,
+            in_chan,
+            dtype_size=dtype_size,
+        ):
+            conv2d_bwd_input_template.maybe_append_choice(
+                choices,
+                input_nodes=(x, weight),
+                layout=layout,
+                KERNEL_H=kernel_shape[0],
+                KERNEL_W=kernel_shape[1],
+                PADDING_H=padding[0],
+                PADDING_W=padding[1],
+                STRIDE_H=stride[0],
+                STRIDE_W=stride[1],
+                DILATION_H=dilation[0],
+                DILATION_W=dilation[1],
+                GROUPS=groups,
+                ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
+                num_stages=cfg.num_stages,
+                num_warps=cfg.num_warps,
+                **cfg.kwargs,
+            )
+
     if use_ck_conv_template(layout):
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
@@ -715,6 +756,17 @@ def convolution(
             groups=groups,
             n_spatial_dimensions=ndim,
         )
+
+    if not choices and config.max_autotune_conv_backends.strip():
+        choices.append(
+            aten_convolution.bind(
+                args,
+                layout,
+                ordered_kwargs_for_cpp_kernel,
+                **kwargs,
+            )
+        )
+
     node, _ = autotune_select_algorithm("convolution", choices, args, layout)
     return node
 
@@ -741,7 +793,8 @@ def _convolution(
 
 
 def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
-    assert fx_node.target is torch.ops.aten.convolution.default
+    if fx_node.target is not torch.ops.aten.convolution.default:
+        raise AssertionError(f"Expected aten.convolution.default, got {fx_node.target}")
     if V.graph.layout_opt:
         return args, kwargs
     else:
@@ -1018,6 +1071,12 @@ def convolution_backward_lowering(
 
     device_type = ir.get_device_type(input)
 
+    # The Triton conv2d backward kernels hit a ptxas miscompile (illegal memory
+    # access) on NVIDIA sm100 and show no perf win on CUDA, so keep them on ROCm
+    # only and fall back to ATEN. See
+    # https://github.com/pytorch/pytorch/issues/187081.
+    disable_triton_conv_bwd = device_type == "cuda" and not torch.version.hip
+
     conv_configs = V.choices.get_conv_configs(device_type)
     dtype_size = input.get_dtype().itemsize
 
@@ -1041,7 +1100,8 @@ def convolution_backward_lowering(
         args_w = [input, grad_out]
 
         if (
-            torch._inductor.utils._use_conv_bwd_weight_autotune_backend("TRITON")
+            not disable_triton_conv_bwd
+            and torch._inductor.utils._use_conv_bwd_weight_autotune_backend("TRITON")
             and use_triton_template(layout_dw)
             and not transposed
             and is_zeros(output_padding)
@@ -1095,7 +1155,8 @@ def convolution_backward_lowering(
         args_x = [grad_out, weight]
 
         if (
-            torch._inductor.utils._use_conv_bwd_input_autotune_backend("TRITON")
+            not disable_triton_conv_bwd
+            and torch._inductor.utils._use_conv_bwd_input_autotune_backend("TRITON")
             and use_triton_template(layout_dx)
             and not transposed
             and is_zeros(output_padding)
@@ -1222,7 +1283,10 @@ def convolution_backward_lowering(
 
 
 def constrain_conv_bwd_to_fx_strides(fx_node, *args, **kwargs):
-    assert fx_node.target == torch.ops.aten.convolution_backward.default
+    if fx_node.target != torch.ops.aten.convolution_backward.default:
+        raise AssertionError(
+            f"expected convolution_backward target, got {fx_node.target}"
+        )
     if V.graph.layout_opt:
         return args, kwargs
     else:
