@@ -799,7 +799,7 @@
     {
       "Gb_type": "Failed to mutate tensor data attribute",
       "Context": "setattr({obj}, {name}, {val})",
-      "Explanation": "Dyanmo only supports mutating `.data` of tensor created outside `torch.compile` region",
+      "Explanation": "Dynamo only supports mutating `.data` of tensor created outside `torch.compile` region",
       "Hints": [
         "Don't mutate `.data` on this tensor, or move ",
         "the mutation out of `torch.compile` region"
@@ -841,7 +841,7 @@
     {
       "Gb_type": "Failed to set tensor attribute",
       "Context": "setattr({obj}, {name}, {val})",
-      "Explanation": "Dyanmo doesn't support setting these tensor attributes",
+      "Explanation": "Dynamo doesn't support setting these tensor attributes",
       "Hints": [
         "Don't mutate attribute '{name}' on tensors, or ",
         "move the mutation out of `torch.compile` region"
@@ -3193,7 +3193,7 @@
     {
       "Gb_type": "Failed to mutate tensor data attribute to different dtype",
       "Context": "setattr({obj}, {name}, {val})",
-      "Explanation": "Dyanmo only supports mutating `.data` of tensor to a new one with the same dtype",
+      "Explanation": "Dynamo only supports mutating `.data` of tensor to a new one with the same dtype",
       "Hints": [
         "Don't mutate `.data` on this tensor, or move ",
         "the mutation out of `torch.compile` region"
@@ -3721,7 +3721,7 @@
     {
       "Gb_type": "TypedDict with optional keys",
       "Context": "str(self.value)",
-      "Explanation": "Dyanmo does not support tracing TypedDict with optional keys",
+      "Explanation": "Dynamo does not support tracing TypedDict with optional keys",
       "Hints": [
         "Avoid using TypedDict with optional keys",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
@@ -3995,7 +3995,7 @@
     {
       "Gb_type": "Class attribute mutation when the __dict__ was already materialized",
       "Context": "str(self.value)",
-      "Explanation": "Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
+      "Explanation": "Dynamo does not support tracing mutations on a class when its __dict__ is materialized",
       "Hints": []
     }
   ],
