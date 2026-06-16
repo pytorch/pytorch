@@ -5075,12 +5075,19 @@ class TestLinalg(TestCase):
 
     @onlyCPU
     @dtypes(torch.float)
-    def test_matmul_folds_viewable_size_one_dim(self, device, dtype):
-        x = torch.randn((1, 4, 8), device=device, dtype=dtype).transpose(0, 1)
+    @parametrize(
+        "shape, stride",
+        [
+            ((4, 1, 8), (8, 32, 1)),
+            ((1, 4, 8), (8, 8, 1)),
+        ],
+    )
+    def test_matmul_folds_viewable_size_one_dim(self, device, dtype, shape, stride):
+        x = torch.empty_strided(shape, stride, device=device, dtype=dtype).normal_()
         y = torch.randn((8, 5), device=device, dtype=dtype)
 
-        self.assertEqual(x.shape, (4, 1, 8))
-        self.assertEqual(x.stride(), (8, 32, 1))
+        self.assertEqual(x.shape, shape)
+        self.assertEqual(x.stride(), stride)
         self.assertEqual(x.reshape(-1, x.shape[-1]).stride(), (8, 1))
 
         with torch.profiler.profile(
