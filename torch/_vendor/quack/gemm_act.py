@@ -56,6 +56,12 @@ from .rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_out_sr_
 _tensor_epilogue_fns: dict[str, Callable] = {}
 
 
+def register_tensor_epilogue_fn(
+    tensor_epilogue_key: str, tensor_epilogue_fn: Callable
+) -> None:
+    _tensor_epilogue_fns[tensor_epilogue_key] = tensor_epilogue_fn
+
+
 class GemmActMixin(ComposableEpiMixin):
     _epi_ops = (
         Scalar("alpha"),
@@ -71,7 +77,6 @@ class GemmActMixin(ComposableEpiMixin):
     _extra_param_fields = (
         ("act_fn", cutlass.Constexpr, None),
         ("tensor_epilogue_fn", cutlass.Constexpr, None),
-        ("tensor_epilogue_uses_c", cutlass.Constexpr, False),
         ("tensor_epilogue_arg_kinds", cutlass.Constexpr, ()),
     )
 
@@ -80,7 +85,6 @@ class GemmActMixin(ComposableEpiMixin):
         mAuxOut: cute.Tensor
         act_fn: cutlass.Constexpr[Optional[Callable]] = None
         tensor_epilogue_fn: cutlass.Constexpr[Optional[Callable]] = None
-        tensor_epilogue_uses_c: cutlass.Constexpr[bool] = False
         tensor_epilogue_arg_kinds: cutlass.Constexpr[tuple] = ()
         alpha: Optional[Float32 | cute.Tensor] = None
         beta: Optional[Float32 | cute.Tensor] = None
@@ -102,7 +106,6 @@ class GemmActMixin(ComposableEpiMixin):
         d = self._epi_ops_to_params_dict(args)
         d["act_fn"] = args.act_fn
         d["tensor_epilogue_fn"] = args.tensor_epilogue_fn
-        d["tensor_epilogue_uses_c"] = args.tensor_epilogue_uses_c
         d["tensor_epilogue_arg_kinds"] = args.tensor_epilogue_arg_kinds
         for key in ("mRowVecBroadcast", "mColVecBroadcast"):
             if key in self.concat_layout and key in d:
@@ -193,12 +196,12 @@ class GemmActMixin(ComposableEpiMixin):
         tRS_rD: cute.Tensor,
         tRS_rC: Optional[cute.Tensor] = None,
     ) -> Optional[cute.Tensor]:
-        if const_expr(params.tensor_epilogue_fn is None or not params.tensor_epilogue_uses_c):
+        if const_expr(params.tensor_epilogue_fn is None or not params.tensor_epilogue_arg_kinds):
             GemmDefaultEpiMixin.epi_visit_subtile(self, params, epi_loop_tensors, tRS_rD, tRS_rC)
         if const_expr(params.tensor_epilogue_fn is not None):
             tRS_rEpilogueIn = cute.make_rmem_tensor_like(tRS_rD, self.acc_dtype)
             tRS_rEpilogueIn.store(tRS_rD.load())
-            if const_expr(params.tensor_epilogue_uses_c):
+            if const_expr(params.tensor_epilogue_arg_kinds):
                 tDrRowVecs = epi_loop_tensors.get("mTensorEpilogueRowVecBroadcasts")
                 tDrColVecs = epi_loop_tensors.get("mTensorEpilogueColVecBroadcasts")
                 tRsTileAuxes = epi_loop_tensors.get("mTensorEpilogueTiles")
@@ -409,7 +412,6 @@ def _compile_gemm_act(
     is_dynamic_persistent,
     activation,
     tensor_epilogue_key,
-    tensor_epilogue_uses_c,
     tensor_epilogue_arg_kinds,
     tensor_epilogue_rowvec_dtypes,
     tensor_epilogue_colvec_dtypes,
@@ -517,7 +519,6 @@ def _compile_gemm_act(
         mAuxOut,
         act_fn,
         tensor_epilogue_fn,
-        tensor_epilogue_uses_c,
         tensor_epilogue_arg_kinds,
         alpha=fake_scalar(alpha_mode, Float32),
         beta=fake_scalar(beta_mode, Float32),
@@ -584,13 +585,13 @@ def gemm_act(
     concat_layout: tuple | None = None,
     tensor_epilogue_fn: Optional[Callable] = None,
     tensor_epilogue_key: Optional[str] = None,
-    tensor_epilogue_uses_c: bool = False,
     tensor_epilogue_arg_kinds: tuple[str, ...] = (),
     tensor_epilogue_rowvec_biases: tuple[Tensor, ...] = (),
     tensor_epilogue_colvec_biases: tuple[Tensor, ...] = (),
     tensor_epilogue_tile_biases: tuple[Tensor, ...] = (),
     alpha: float | Tensor = 1.0,
     beta: float | Tensor = 1.0,
+    device_capacity_override: tuple[int, int] | None = None,
 ) -> None:
     if tensor_epilogue_fn is not None:
         assert activation is None, "tensor_epilogue_fn and activation are mutually exclusive"
@@ -599,7 +600,7 @@ def gemm_act(
             if tensor_epilogue_key is not None
             else repr(tensor_epilogue_fn)
         )
-        _tensor_epilogue_fns[tensor_epilogue_key] = tensor_epilogue_fn
+        register_tensor_epilogue_fn(tensor_epilogue_key, tensor_epilogue_fn)
         gemm_cls_name = "act"
     elif activation in gate_fn_map:
         gemm_cls_name = "gated"
@@ -656,16 +657,16 @@ def gemm_act(
         raise RuntimeError(
             "tensor_epilogue_arg_kinds must match row/col/tile tensor epilogue args"
         )
-    if tensor_epilogue_uses_c != bool(tensor_epilogue_arg_kinds):
-        raise RuntimeError(
-            "tensor_epilogue_uses_c must match tensor_epilogue_arg_kinds"
-        )
     tensor_epilogue_arg_kind_codes = tuple(
         {"tile": 1, "row": 2, "col": 3}[kind] for kind in tensor_epilogue_arg_kinds
     )
     colvec_ndim = colvec_bias.ndim if colvec_bias is not None else 0
 
-    device_capacity = get_device_capacity(A.device)
+    device_capacity = (
+        device_capacity_override
+        if device_capacity_override is not None
+        else get_device_capacity(A.device)
+    )
     assert device_capacity[0] in [8, 9, 10, 11, 12], (
         "Only SM8x, SM90, SM100, SM110, and SM120 are supported"
     )
@@ -682,7 +683,7 @@ def gemm_act(
     )
     alpha_mode = 2 if isinstance(alpha, Tensor) else (1 if alpha != 1.0 else 0)
     beta_mode = 2 if isinstance(beta, Tensor) else (1 if beta != 1.0 else 0)
-    if tensor_epilogue_uses_c and (C is not None or alpha_mode != 0 or beta_mode != 0):
+    if tensor_epilogue_arg_kinds and (C is not None or alpha_mode != 0 or beta_mode != 0):
         raise NotImplementedError(
             "QUACK tensor epilogue aux args cannot be combined with C/alpha/beta yet"
         )
@@ -705,7 +706,6 @@ def gemm_act(
         is_dynamic_persistent,
         activation,
         tensor_epilogue_key,
-        tensor_epilogue_uses_c,
         tensor_epilogue_arg_kind_codes,
         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_rowvec_biases),
         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_colvec_biases),
@@ -744,7 +744,6 @@ def gemm_act(
 
     epi_args = GemmActMixin.EpilogueArguments(
         PostAct_p,
-        None,
         None,
         None,
         None,

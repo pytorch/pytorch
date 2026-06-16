@@ -7,8 +7,6 @@
 # and SM100 tile-arg plumbing. Deferred scaled, grouped, local-reduce,
 # blockscaled, and autotune-worker deltas are kept outside this PyTorch PR.
 #
-
-
 diff --git a/epi_ops.py b/epi_ops.py
 index a02a4e7..9633276 100644
 --- a/epi_ops.py
@@ -237,7 +235,7 @@ index a02a4e7..9633276 100644
  def vec_multiply(gemm, tRS_rD, tDrColVec, tDrRowVec):
      """Multiply tRS_rD by colvec and/or rowvec in-place. Uses packed f32x2 on SM100."""
 diff --git a/gemm_act.py b/gemm_act.py
-index f2bf896..bb51674 100644
+index f2bf896..ab18e36 100644
 --- a/gemm_act.py
 +++ b/gemm_act.py
 @@ -20,7 +20,15 @@ from quack.cute_dsl_utils import (
@@ -257,17 +255,23 @@ index f2bf896..bb51674 100644
  from quack.gemm_sm80 import GemmSm80
  from quack.gemm_sm90 import GemmSm90
  from quack.gemm_sm100 import GemmSm100
-@@ -45,6 +53,9 @@ from quack.activation import act_fn_map, gate_fn_map
+@@ -45,6 +53,15 @@ from quack.activation import act_fn_map, gate_fn_map
  from quack.rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_out_sr_seed
 
 
 +_tensor_epilogue_fns: dict[str, Callable] = {}
 +
 +
++def register_tensor_epilogue_fn(
++    tensor_epilogue_key: str, tensor_epilogue_fn: Callable
++) -> None:
++    _tensor_epilogue_fns[tensor_epilogue_key] = tensor_epilogue_fn
++
++
  class GemmActMixin(ComposableEpiMixin):
      _epi_ops = (
          Scalar("alpha"),
-@@ -52,18 +63,32 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -52,18 +69,30 @@ class GemmActMixin(ComposableEpiMixin):
          Scalar("sr_seed", dtype=Int32),
          RowVecLoad("mRowVecBroadcast"),
          ColVecLoad("mColVecBroadcast"),
@@ -280,7 +284,6 @@ index f2bf896..bb51674 100644
 +    _extra_param_fields = (
 +        ("act_fn", cutlass.Constexpr, None),
 +        ("tensor_epilogue_fn", cutlass.Constexpr, None),
-+        ("tensor_epilogue_uses_c", cutlass.Constexpr, False),
 +        ("tensor_epilogue_arg_kinds", cutlass.Constexpr, ()),
 +    )
 
@@ -289,7 +292,6 @@ index f2bf896..bb51674 100644
          mAuxOut: cute.Tensor
          act_fn: cutlass.Constexpr[Optional[Callable]] = None
 +        tensor_epilogue_fn: cutlass.Constexpr[Optional[Callable]] = None
-+        tensor_epilogue_uses_c: cutlass.Constexpr[bool] = False
 +        tensor_epilogue_arg_kinds: cutlass.Constexpr[tuple] = ()
          alpha: Optional[Float32 | cute.Tensor] = None
          beta: Optional[Float32 | cute.Tensor] = None
@@ -301,17 +303,16 @@ index f2bf896..bb51674 100644
          rounding_mode: cutlass.Constexpr[int] = RoundingMode.RN
          sr_seed: Optional[Int32 | cute.Tensor] = None
 
-@@ -76,6 +101,9 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -76,6 +105,8 @@ class GemmActMixin(ComposableEpiMixin):
          self.cta_tile_shape_aux_out_mn = self.cta_tile_shape_mnk[:2]
          d = self._epi_ops_to_params_dict(args)
          d["act_fn"] = args.act_fn
 +        d["tensor_epilogue_fn"] = args.tensor_epilogue_fn
-+        d["tensor_epilogue_uses_c"] = args.tensor_epilogue_uses_c
 +        d["tensor_epilogue_arg_kinds"] = args.tensor_epilogue_arg_kinds
          for key in ("mRowVecBroadcast", "mColVecBroadcast"):
              if key in self.concat_layout and key in d:
                  d[key] = layout_utils.concat_to_interleave(d[key], 1)
-@@ -165,10 +193,41 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -165,10 +196,41 @@ class GemmActMixin(ComposableEpiMixin):
          tRS_rD: cute.Tensor,
          tRS_rC: Optional[cute.Tensor] = None,
      ) -> Optional[cute.Tensor]:
@@ -319,12 +320,12 @@ index f2bf896..bb51674 100644
 -        # Apply activation function if provided
 -        # If we don't have .shape here, the compiler generates local stores and loads
 -        if const_expr(params.act_fn is not None):
-+        if const_expr(params.tensor_epilogue_fn is None or not params.tensor_epilogue_uses_c):
++        if const_expr(params.tensor_epilogue_fn is None or not params.tensor_epilogue_arg_kinds):
 +            GemmDefaultEpiMixin.epi_visit_subtile(self, params, epi_loop_tensors, tRS_rD, tRS_rC)
 +        if const_expr(params.tensor_epilogue_fn is not None):
 +            tRS_rEpilogueIn = cute.make_rmem_tensor_like(tRS_rD, self.acc_dtype)
 +            tRS_rEpilogueIn.store(tRS_rD.load())
-+            if const_expr(params.tensor_epilogue_uses_c):
++            if const_expr(params.tensor_epilogue_arg_kinds):
 +                tDrRowVecs = epi_loop_tensors.get("mTensorEpilogueRowVecBroadcasts")
 +                tDrColVecs = epi_loop_tensors.get("mTensorEpilogueColVecBroadcasts")
 +                tRsTileAuxes = epi_loop_tensors.get("mTensorEpilogueTiles")
@@ -357,7 +358,7 @@ index f2bf896..bb51674 100644
              tRS_rAuxOut = cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype)
              if const_expr(self.arch != 100):
                  for i in cutlass.range(cute.size(tRS_rAuxOut), unroll_full=True):
-@@ -206,6 +265,7 @@ def _gated_epi_tile_fn(gemm, epi_tile):
+@@ -206,6 +268,7 @@ def _gated_epi_tile_fn(gemm, epi_tile):
      return (epi_tile[0], epi_tile[1] // 2)
 
 
@@ -365,12 +366,11 @@ index f2bf896..bb51674 100644
  class GemmGatedMixin(GemmActMixin):
      _epi_ops = (
          Scalar("alpha"),
-@@ -348,6 +408,16 @@ def _compile_gemm_act(
+@@ -348,6 +411,15 @@ def _compile_gemm_act(
      persistent,
      is_dynamic_persistent,
      activation,
 +    tensor_epilogue_key,
-+    tensor_epilogue_uses_c,
 +    tensor_epilogue_arg_kinds,
 +    tensor_epilogue_rowvec_dtypes,
 +    tensor_epilogue_colvec_dtypes,
@@ -382,7 +382,7 @@ index f2bf896..bb51674 100644
      rowvec_dtype,
      colvec_dtype,
      colvec_ndim,
-@@ -397,14 +467,43 @@ def _compile_gemm_act(
+@@ -397,14 +469,43 @@ def _compile_gemm_act(
      mAuxOut = fake_tensor(postact_dtype, pa_shape, leading_dim=pa_leading_dim, divisibility=div_pa)
 
      mRowVec = fake_tensor(rowvec_dtype, (l, n), leading_dim=1, divisibility=4)
@@ -427,12 +427,11 @@ index f2bf896..bb51674 100644
 
      def fake_scalar(mode, dtype=Int32):
          if mode == 0:
-@@ -417,15 +516,25 @@ def _compile_gemm_act(
+@@ -417,15 +518,24 @@ def _compile_gemm_act(
      epi_args = GemmCls.EpilogueArguments(
          mAuxOut,
          act_fn,
 +        tensor_epilogue_fn,
-+        tensor_epilogue_uses_c,
 +        tensor_epilogue_arg_kinds,
 +        alpha=fake_scalar(alpha_mode, Float32),
 +        beta=fake_scalar(beta_mode, Float32),
@@ -454,13 +453,12 @@ index f2bf896..bb51674 100644
      return compile_gemm_kernel(
          GemmCls,
          a_dtype,
-@@ -473,8 +582,26 @@ def gemm_act(
+@@ -473,8 +583,25 @@ def gemm_act(
      sr_seed: int | Tensor = 0,
      use_tma_gather: bool = False,
      concat_layout: tuple | None = None,
 +    tensor_epilogue_fn: Optional[Callable] = None,
 +    tensor_epilogue_key: Optional[str] = None,
-+    tensor_epilogue_uses_c: bool = False,
 +    tensor_epilogue_arg_kinds: tuple[str, ...] = (),
 +    tensor_epilogue_rowvec_biases: tuple[Tensor, ...] = (),
 +    tensor_epilogue_colvec_biases: tuple[Tensor, ...] = (),
@@ -476,7 +474,7 @@ index f2bf896..bb51674 100644
 +            if tensor_epilogue_key is not None
 +            else repr(tensor_epilogue_fn)
 +        )
-+        _tensor_epilogue_fns[tensor_epilogue_key] = tensor_epilogue_fn
++        register_tensor_epilogue_fn(tensor_epilogue_key, tensor_epilogue_fn)
 +        gemm_cls_name = "act"
 +    elif activation in gate_fn_map:
          gemm_cls_name = "gated"
@@ -501,7 +499,7 @@ index f2bf896..bb51674 100644
 
      a_major = get_major(A_p, "m", "k")
      b_major = get_major(B_p, "n", "k")
-@@ -509,6 +639,30 @@ def gemm_act(
+@@ -509,6 +639,26 @@ def gemm_act(
      d_dtype = torch2cute_dtype_map[D.dtype] if D is not None else None
      c_dtype = torch2cute_dtype_map[C.dtype] if C is not None else None
      postact_dtype = torch2cute_dtype_map[PostAct.dtype]
@@ -522,35 +520,30 @@ index f2bf896..bb51674 100644
 +        raise RuntimeError(
 +            "tensor_epilogue_arg_kinds must match row/col/tile tensor epilogue args"
 +        )
-+    if tensor_epilogue_uses_c != bool(tensor_epilogue_arg_kinds):
-+        raise RuntimeError(
-+            "tensor_epilogue_uses_c must match tensor_epilogue_arg_kinds"
-+        )
 +    tensor_epilogue_arg_kind_codes = tuple(
 +        {"tile": 1, "row": 2, "col": 3}[kind] for kind in tensor_epilogue_arg_kinds
 +    )
      colvec_ndim = colvec_bias.ndim if colvec_bias is not None else 0
 
      device_capacity = get_device_capacity(A.device)
-@@ -526,6 +680,12 @@ def gemm_act(
+@@ -526,6 +676,12 @@ def gemm_act(
      sr_seed_mode = (
          2 if isinstance(sr_seed, Tensor) else (1 if rounding_mode == RoundingMode.RS else 0)
      )
 +    alpha_mode = 2 if isinstance(alpha, Tensor) else (1 if alpha != 1.0 else 0)
 +    beta_mode = 2 if isinstance(beta, Tensor) else (1 if beta != 1.0 else 0)
-+    if tensor_epilogue_uses_c and (C is not None or alpha_mode != 0 or beta_mode != 0):
++    if tensor_epilogue_arg_kinds and (C is not None or alpha_mode != 0 or beta_mode != 0):
 +        raise NotImplementedError(
 +            "QUACK tensor epilogue aux args cannot be combined with C/alpha/beta yet"
 +        )
      concat_layout = tuple(sorted(concat_layout)) if concat_layout else ()
      compiled_fn = _compile_gemm_act(
          a_dtype,
-@@ -544,6 +704,16 @@ def gemm_act(
+@@ -544,6 +700,15 @@ def gemm_act(
          persistent,
          is_dynamic_persistent,
          activation,
 +        tensor_epilogue_key,
-+        tensor_epilogue_uses_c,
 +        tensor_epilogue_arg_kind_codes,
 +        tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_rowvec_biases),
 +        tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_colvec_biases),
@@ -562,12 +555,11 @@ index f2bf896..bb51674 100644
          torch2cute_dtype_map[rowvec_bias.dtype] if rowvec_bias is not None else None,
          torch2cute_dtype_map[colvec_bias.dtype] if colvec_bias is not None else None,
          colvec_ndim,
-@@ -574,9 +744,17 @@ def gemm_act(
+@@ -574,9 +739,16 @@ def gemm_act(
 
      epi_args = GemmActMixin.EpilogueArguments(
          PostAct_p,
 -        None,  # act_fn is Constexpr, pass None at call time
-+        None,
 +        None,
 +        None,
 +        None,
