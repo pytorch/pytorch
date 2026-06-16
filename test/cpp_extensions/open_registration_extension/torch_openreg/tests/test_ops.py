@@ -680,12 +680,19 @@ class TestStructuredCodegen(TestCase):
 
     def test_define_meta_meta_override_is_scoped(self):
         """A `define_meta` op registers its meta() on aten's device-agnostic global
-        Meta key, which torch.compile / FakeTensor shape propagation use (the generated
-        registration is covered by the gen_backend_stubs unit tests). openreg deliberately
-        does NOT register globally -- a static registration is permanent and would override
-        aten's meta for every device in the test process. Exercise the same mechanism with a
-        RAII-scoped registration: plugin -> verify FakeTensor routes through it -> plugout
-        (scope exit) -> verify it is gone, leaving aten's meta intact."""
+        Meta key, which torch.compile / FakeTensor shape propagation use. The generated
+        registration is only checked by the gen_backend_stubs string-golden unit tests --
+        it is not compiled or executed anywhere, because openreg drops define_meta (a static
+        Meta registration cannot be unregistered, and openreg autoloads into every process).
+        TODO: add a non-autoloaded torch_openreg_test_only extension marking a MetaBase op
+        define_meta: true, plus a subprocess test that imports it, asserts FakeTensor routes
+        through the generated meta with the right shape+dtype, then exits -- so the generated
+        path is compiled AND run without leaking the global Meta registration.
+
+        openreg deliberately does NOT register globally -- a static registration is permanent
+        and would override aten's meta for every device in the test process. Exercise the same
+        mechanism with a RAII-scoped registration: plugin -> verify FakeTensor routes through it
+        -> plugout (scope exit) -> verify it is gone, leaving aten's meta intact."""
         import torch.library
         from torch._subclasses.fake_tensor import FakeTensorMode
 
