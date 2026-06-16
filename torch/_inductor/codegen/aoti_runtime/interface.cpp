@@ -649,6 +649,18 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
       {container->update_constants_from_blob(weight_blob_ptr); })
     }
 
+AOTIRuntimeError AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    torch::aot_inductor::setUsePinnedAsyncConstantsCopy(enabled);
+  })
+}
+
+AOTIRuntimeError AOTInductorSetPinnedAsyncConstantsCopyStageBufferBytes(
+    size_t bytes) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    torch::aot_inductor::setPinnedAsyncConstantsCopyStageBufferBytes(bytes);
+  })
+}
 
 AOTIRuntimeError AOTInductorGetLastError(
     const char** error_msg) {
