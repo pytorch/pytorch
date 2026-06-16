@@ -418,13 +418,6 @@ def main() -> None:
 
     env_out: dict[str, str] = {**COMMON_BUILD_ENV}
 
-    # Point CMake at the running Python's Library/ tree so it can find
-    # MKL (installed by build_install_deps.py via pip mkl-include/mkl-static).
-    # Without this, BLAS_LIBRARIES is unset and the MSVC TH_BINARY_BUILD
-    # branch in aten/src/ATen/CMakeLists.txt appends a literal NOTFOUND to
-    # ATen_CUDA_DEPENDENCY_LIBS, which breaks linking torch_cuda.dll.
-    env_out["CMAKE_PREFIX_PATH"] = str(Path(sys.prefix) / "Library")
-
     # Locate vcvarsall.bat up front so XPU can hand the VS install root to
     # oneAPI's vars.bat. vcvarsall lives at
     # <VS_INSTALL>/VC/Auxiliary/Build/vcvarsall.bat.
@@ -444,6 +437,19 @@ def main() -> None:
             f"build_env_setup.py: GPU_ARCH_TYPE={gpu_arch_type!r} not supported. "
             "Expected one of: cpu, cuda, xpu."
         )
+
+    # Point CMake at the running Python's Library/ tree so it finds the pip
+    # MKL (mkl-static/mkl-include). Without it, BLAS resolves to Eigen and
+    # torch.backends.mkl.is_available() is False (the smoke test fails on it).
+    # Prepend rather than assign: the XPU oneAPI vars.bat sets its own
+    # CMAKE_PREFIX_PATH, and an earlier assignment was being overwritten by
+    # that merge, so XPU silently lost the MKL prefix. cpu/cuda are unaffected
+    # since nothing else touches CMAKE_PREFIX_PATH there.
+    mkl_prefix = str(Path(sys.prefix) / "Library")
+    device_prefix = env_out.get("CMAKE_PREFIX_PATH", "")
+    env_out["CMAKE_PREFIX_PATH"] = (
+        f"{mkl_prefix};{device_prefix}" if device_prefix else mkl_prefix
+    )
 
     # Push our env into the current process so vcvarsall's PATH extension
     # layers on top of (rather than replaces) our additions when captured.
