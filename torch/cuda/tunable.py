@@ -655,7 +655,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         # Warnings for unsupported cases:
         if m == 1 or n == 1 or k == 1:
             warnings.warn(
-                "Offline tuning is not support for this GEMM. Use online tuning instead. "
+                "Offline tuning is not supported for this GEMM. Use online tuning instead. "
                 + f"Skipped tuning for: {untuned_gemm[1]}",
                 stacklevel=2,
             )
