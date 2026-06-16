@@ -326,6 +326,15 @@ class FSDPParam:
             self.to_sharded_dtensor(sharded_param),
             requires_grad=param.requires_grad,
         )
+        # Propagate user-set grad_dtype to match single-device AccumulateGrad
+        # semantics. All params in the same FSDP group must agree on grad_dtype.
+        # NOTE: grad_dtype returns param.dtype by default, so this condition
+        # won't detect an explicit setting of grad_dtype == param.dtype. That
+        # case is behaviorally identical to the default, so this is fine.
+        self._explicit_grad_dtype: torch.dtype | None = None
+        if param.requires_grad and param.grad_dtype != param.dtype:
+            self.sharded_param.grad_dtype = param.grad_dtype
+            self._explicit_grad_dtype = param.grad_dtype
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
@@ -677,6 +686,8 @@ class FSDPParam:
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
+        if self._explicit_grad_dtype is not None:
+            self._unsharded_param.grad_dtype = self._explicit_grad_dtype
 
     def _get_unsharded_dtensor_spec(self, unsharded_param: torch.Tensor) -> DTensorSpec:
         if self._unsharded_dtensor_spec is None:
@@ -741,6 +752,8 @@ class FSDPParam:
             self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor),
             requires_grad=self.sharded_param.requires_grad,
         )
+        if self._explicit_grad_dtype is not None:
+            self._sharded_post_forward_param.grad_dtype = self._explicit_grad_dtype
         self._setattr_on_modules(self._sharded_post_forward_param)
         self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
@@ -1005,6 +1018,8 @@ class FSDPParam:
                     f"instead of {self.sharded_param}"
                 )
             self.sharded_param = new_param
+            if self._explicit_grad_dtype is not None:
+                self.sharded_param.grad_dtype = self._explicit_grad_dtype
 
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:

@@ -600,7 +600,20 @@ def foreach_reduce(
         device=device,
     )
 
-    foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
+    # _chunk_cat handles widening casts (e.g. bf16 → fp32) natively but
+    # rejects narrowing casts. Use a temp buffer only for narrowing.
+    if (
+        grad_dtype != reduce_dtype
+        and torch.promote_types(grad_dtype, reduce_dtype) != reduce_dtype
+    ):
+        grad_buffer = torch.empty_like(reduce_scatter_input, dtype=grad_dtype)
+        foreach_reduce_scatter_copy_in(unsharded_grads, grad_buffer, world_size)
+        reduce_scatter_input.copy_(grad_buffer)
+        del grad_buffer
+    else:
+        foreach_reduce_scatter_copy_in(
+            unsharded_grads, reduce_scatter_input, world_size
+        )
 
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
@@ -693,7 +706,14 @@ def foreach_reduce(
         # AR to finish. The reduce-dtype buffer is held across layers by
         # FSDPParamGroup._all_reduce_state (captured above) to prevent
         # this. See PR #140044, regression test PR #180900.
-        reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
+        # Cast directly to grad_dtype if set, skipping orig_dtype to
+        # avoid a lossy round-trip (e.g. fp32 reduce → bf16 → fp32).
+        target_dtype = orig_dtype
+        if fsdp_params:
+            param_grad_dtype = fsdp_params[0].sharded_param.grad_dtype
+            if param_grad_dtype != fsdp_params[0].sharded_param.dtype:
+                target_dtype = param_grad_dtype
+        grad_output = _to_dtype_if_needed(reduce_output, target_dtype)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(
@@ -702,7 +722,7 @@ def foreach_reduce(
             # Assume even sharding for Shard(i), i > 0; otherwise would require
             # copy-out for contiguous strides
             new_sharded_grad = torch.as_strided(
-                reduce_output,
+                grad_output,
                 size=fsdp_param.sharded_size,
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,

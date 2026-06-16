@@ -9,12 +9,12 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
-from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
 )
-from torch.distributed.tensor import Shard
+from torch.distributed.tensor import distribute_tensor, Shard
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -405,6 +405,240 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         for param in module.parameters():
             if param.grad is not None:
                 param.grad.div_(group.size())
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_grad_dtype_preserved(self):
+        meshes = [init_device_mesh(device_type.type, (self.world_size,))]
+        if self.world_size == 4:  # test HSDP too if enough GPUs
+            shard_size, replicate_size = 2, self.world_size // 2
+            meshes.append(
+                init_device_mesh(
+                    device_type.type,
+                    (replicate_size, shard_size),
+                    mesh_dim_names=("dp_replicate", "dp_shard"),
+                )
+            )
+        self.run_subtests(
+            {
+                "mesh": meshes,
+                "model_grad_dtypes": [
+                    (torch.bfloat16, torch.float32),
+                    (torch.float32, torch.bfloat16),
+                ],
+                "param_dtype": [None, torch.bfloat16],
+                "reduce_dtype": [torch.bfloat16, torch.float32],
+            },
+            self._test_grad_dtype_preserved,
+        )
+
+    def _test_grad_dtype_preserved(
+        self,
+        mesh: DeviceMesh,
+        model_grad_dtypes: tuple[torch.dtype, torch.dtype],
+        param_dtype: torch.dtype | None,
+        reduce_dtype: torch.dtype,
+    ):
+        model_dtype, grad_dtype = model_grad_dtypes
+
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        model.to(device=device_type, dtype=model_dtype)
+
+        for param in model.parameters():
+            param.grad_dtype = grad_dtype
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=param_dtype, reduce_dtype=reduce_dtype
+        )
+        for mlp in model:
+            fully_shard(mlp, mesh=mesh, mp_policy=mp_policy)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+
+        for param in model.parameters():
+            self.assertEqual(param.grad_dtype, grad_dtype)
+
+        forward_grad_dtype_ok = []
+
+        def check_unsharded_grad_dtype(module, input):
+            for param in module.parameters():
+                forward_grad_dtype_ok.append(param.grad_dtype == grad_dtype)
+
+        hooks = []
+        for mlp in model:
+            hooks.append(mlp.register_forward_pre_hook(check_unsharded_grad_dtype))
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp_dtype = param_dtype or model_dtype
+        inp = torch.randn(2, 16, device=device_type, dtype=inp_dtype)
+        model(inp).sum().backward()
+
+        for hook in hooks:
+            hook.remove()
+        self.assertTrue(len(forward_grad_dtype_ok) > 0)
+        self.assertTrue(all(forward_grad_dtype_ok))
+
+        for param in model.parameters():
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(param.grad.dtype, grad_dtype)
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_grad_dtype_preserved_grad_acc(self):
+        meshes = [init_device_mesh(device_type.type, (self.world_size,))]
+        if self.world_size == 4:  # test HSDP too if enough GPUs
+            shard_size, replicate_size = 2, self.world_size // 2
+            meshes.append(
+                init_device_mesh(
+                    device_type.type,
+                    (replicate_size, shard_size),
+                    mesh_dim_names=("dp_replicate", "dp_shard"),
+                )
+            )
+        self.run_subtests(
+            {
+                "mesh": meshes,
+                "model_grad_dtypes": [
+                    (torch.bfloat16, torch.float32),
+                    (torch.float32, torch.bfloat16),
+                ],
+                "param_dtype": [None, torch.bfloat16],
+                "reduce_dtype": [torch.bfloat16, torch.float32],
+            },
+            self._test_grad_dtype_preserved_grad_acc,
+        )
+
+    def _test_grad_dtype_preserved_grad_acc(
+        self,
+        mesh: DeviceMesh,
+        model_grad_dtypes: tuple[torch.dtype, torch.dtype],
+        param_dtype: torch.dtype | None,
+        reduce_dtype: torch.dtype,
+    ):
+        model_dtype, grad_dtype = model_grad_dtypes
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        model.to(device=device_type, dtype=model_dtype)
+
+        for param in model.parameters():
+            param.grad_dtype = grad_dtype
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=param_dtype, reduce_dtype=reduce_dtype
+        )
+        for mlp in model:
+            fully_shard(mlp, mesh=mesh, mp_policy=mp_policy)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp_dtype = param_dtype or model_dtype
+        num_microbatches = 3
+        inp = torch.randn(2 * num_microbatches, 16, device=device_type, dtype=inp_dtype)
+        microbatch_inps = inp.chunk(num_microbatches)
+
+        for microbatch_idx in range(num_microbatches):
+            is_last_microbatch = microbatch_idx == num_microbatches - 1
+            model.set_requires_gradient_sync(is_last_microbatch)
+            model(microbatch_inps[microbatch_idx]).sum().backward()
+
+        for param in model.parameters():
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(param.grad.dtype, grad_dtype)
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_numerics_grad_acc(self):
+        """
+        Tests that FSDP gradient accumulation with grad_dtype matches single-device
+        numerics.
+        """
+        self.run_subtests(
+            {
+                "model_grad_dtypes": [
+                    (torch.float32, torch.bfloat16),
+                    (torch.bfloat16, torch.float32),
+                ],
+                "reduce_dtype": [torch.float32],
+            },
+            self._test_grad_dtype_numerics_grad_acc,
+        )
+
+    def _test_grad_dtype_numerics_grad_acc(
+        self,
+        model_grad_dtypes: tuple[torch.dtype, torch.dtype],
+        reduce_dtype: torch.dtype,
+    ):
+        model_dtype, grad_dtype = model_grad_dtypes
+
+        torch.manual_seed(42)
+        ref_model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        ref_model.to(device=device_type, dtype=model_dtype)
+        for param in ref_model.parameters():
+            param.grad_dtype = grad_dtype
+
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        model.to(device=device_type, dtype=model_dtype)
+        for param in model.parameters():
+            param.grad_dtype = grad_dtype
+        mp_policy = MixedPrecisionPolicy(reduce_dtype=reduce_dtype)
+        for mlp in model:
+            fully_shard(mlp, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        torch.manual_seed(42 + self.rank + 1)
+        num_microbatches = 3
+        inp = torch.randn(
+            2 * num_microbatches, 16, device=device_type, dtype=model_dtype
+        )
+        microbatch_inps = inp.chunk(num_microbatches)
+        for microbatch_idx in range(num_microbatches):
+            is_last = microbatch_idx == num_microbatches - 1
+            model.set_requires_gradient_sync(is_last)
+            fsdp_loss = model(microbatch_inps[microbatch_idx]).sum()
+            ref_loss = ref_model(microbatch_inps[microbatch_idx]).sum()
+            self.assertEqual(fsdp_loss, ref_loss)
+            fsdp_loss.backward()
+            ref_loss.backward()
+
+        # simulate FSDP's reduce on the single-device reference grads.
+        for param in ref_model.parameters():
+            self.assertEqual(param.grad.dtype, grad_dtype)
+            grad = param.grad.to(reduce_dtype)
+            dist.all_reduce(grad)
+            grad.div_(self.world_size)
+            param.grad = grad.to(grad_dtype)
+
+        for ref_param, fsdp_param in zip(ref_model.parameters(), model.parameters()):
+            self.assertIsNotNone(fsdp_param.grad)
+            sharded_ref_grad = distribute_tensor(
+                ref_param.grad, fsdp_param.device_mesh, fsdp_param.placements
+            )
+            self.assertEqual(
+                fsdp_param.grad.to_local(),
+                sharded_ref_grad.to_local(),
+                atol=1e-4,
+                rtol=8e-3,
+            )
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_non_uniform_raises(self):
+        """Tests that non-uniform grad_dtype across params in an FSDP group raises."""
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        model.to(device=device_type, dtype=torch.float32)
+
+        # set different grad_dtype on different params within the same MLP
+        params = list(model[0].parameters())
+        params[0].grad_dtype = torch.bfloat16
+        params[1].grad_dtype = torch.float16
+
+        fully_shard(model[0])
+        fully_shard(model)
+        inp = torch.randn(2, 16, device=device_type)
+        with self.assertRaisesRegex(AssertionError, "uniform grad_dtype"):
+            model(inp).sum().backward()
 
     @skip_if_lt_x_gpu(2)
     def test_structured_input_output(self):
