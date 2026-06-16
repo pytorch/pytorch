@@ -165,9 +165,9 @@ def select_score_mod_vec_size(
 ) -> int | None:
     """Select score_mod vector width for captured aux loads.
 
-    Wider score_mod.__vec_size__ values remain legal when score_mod has no
-    captured tensors. For captured tensors, direct vector loads are capped to
-    the SM100 CuTe score_mod aux-load path's supported width of 8.
+    A return value of None means there are no captured tensor loads constraining
+    score_mod.__vec_size__. For captured tensors, direct vector loads are capped
+    to the SM100 CuTe score_mod aux-load path's supported width of 8.
     """
     if not has_score_mod or not has_aux_tensors:
         return None

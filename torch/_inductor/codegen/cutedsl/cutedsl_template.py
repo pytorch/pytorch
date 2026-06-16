@@ -117,12 +117,25 @@ class CuteDSLTemplate(KernelTemplate):
             input_nodes = list(input_nodes) + extra_capture_nodes
 
             kernel.set_capture_input_nodes(capture_nodes_by_name)
+            with kernel._patch_get_dtype_for_captures():
+                _, call_args, _, _ = kernel.args.python_argdefs()
+            expected_args = list(input_call_args)
+            expected_args.append(self.output_node.get_name())
+            if list(call_args)[: len(expected_args)] != expected_args:
+                raise RuntimeError(
+                    "CuteDSL template benchmark argument order changed while "
+                    "collecting dynamic scalar args. Expected prefix "
+                    f"{expected_args}, got {list(call_args)}."
+                )
+            extra_args = tuple(
+                V.graph.sizevars.optimization_hints(call_args[len(expected_args) :])
+            )
 
             bmreq = CuteDSLBenchmarkRequest(
                 kernel_name=kernel_name,
                 input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
                 output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
-                extra_args=tuple(),
+                extra_args=extra_args,
                 source_code=code,
             )
 
