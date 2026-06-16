@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -592,6 +593,10 @@ class AOTInductorModelContainer {
     // nullptr (default / on allocation failure) keeps the throttled path.
     auto staging_pool = tryMakeConstantsStagingPool();
 #endif
+    auto _update_start = std::chrono::steady_clock::now();
+    AOTI_LOG_LOADING(
+        "update_constant_buffer: starting copy of " << num_constants
+                                                    << " constants");
     for (size_t idx = 0; idx < num_constants; idx++) {
       if (models_[0]->constant_from_folded(static_cast<int64_t>(idx))) {
         continue;
@@ -758,6 +763,11 @@ class AOTInductorModelContainer {
     }
     staging_pool.reset();
 #endif
+    auto _update_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - _update_start)
+                          .count();
+    AOTI_LOG_LOADING(
+        "update_constant_buffer: copy completed in " << _update_ms << " ms");
     target.update_array(models_[0].get());
   }
 
