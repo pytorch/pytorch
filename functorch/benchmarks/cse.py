@@ -18,7 +18,8 @@ def profile_it(f, inp):
             torch.cuda.synchronize() 
 
     timing = prof.key_averages()
-    cuda_time_total = sum(e.cuda_time_total for e in timing)
+    # FIXED: Accessing device_time_total to accumulate total GPU processing time
+    cuda_time_total = sum(e.device_time_total for e in timing)
     return cuda_time_total / itr
 
 def profile_function(name, f, inp):
