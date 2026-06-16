@@ -456,6 +456,36 @@ supported:
             """Operator 'div.out' sets 'device_guard: True' but the backend sets 'device_guard: False'. A per-op device_guard can only disable the backend-level guard, not enable it; set the backend-level device_guard: True and disable it per-op where unwanted.""",
         )
 
+    # Deriving the functional from a multi-output op's '.out' would type every output as the input
+    # dtype, but multi-output ops mix dtypes (a Long index). Reject it for both a structured op
+    # (sort) and a non-structured one (_ctc_loss); a single-output op like div still derives.
+    def test_multi_output_out_as_primary_rejected_structured(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+supported:
+- sort.values_stable"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertIn(
+            "'sort.values_stable' is a multi-output op registered out-as-primary via its "
+            "'.out' only",
+            output_error,
+        )
+
+    def test_multi_output_out_as_primary_rejected_non_structured(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+supported:
+- _ctc_loss.out"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertIn(
+            "'_ctc_loss.out' is a multi-output op registered out-as-primary via its '.out' only",
+            output_error,
+        )
+
     # structured kernels are out-primary; structured: true without use_out_as_primary would
     # silently emit a plain non-structured out kernel (no meta reuse, no functional), so reject.
     def test_structured_requires_use_out_as_primary(self) -> None:
