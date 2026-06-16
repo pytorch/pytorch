@@ -1367,9 +1367,11 @@ class _SymNodeDict:
         self.sym_node_dict: dict[PySymType, _PySymProxyType] = {}
 
     def __setitem__(self, key: PySymType, value: _PySymProxyType) -> None:
+        # pyrefly: ignore [unsupported-operation]
         self.sym_node_dict[key.node] = value
 
     def __getitem__(self, key: PySymType) -> _PySymProxyType:
+        # pyrefly: ignore [bad-index]
         return self.sym_node_dict[key.node]
 
     def __contains__(self, key: PySymType) -> bool:
@@ -1463,7 +1465,8 @@ class PythonKeyTracer(Tracer):
         elif isinstance(a, py_sym_types):
             if a.node.constant is None:
                 raise AssertionError("a.node.constant should not be None")
-            return a.node.constant
+            # pyrefly: ignore [bad-return]
+            return a.constant
 
         # Try reconstructing untracked opaque reference types from existing
         # graph inputs (e.g. derive a DeviceMesh submesh from its root mesh).
@@ -3084,7 +3087,7 @@ def get_proxy_mode() -> ProxyTorchDispatchMode | None:
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     if not (pre_dispatch_mode is None or mode is None):
         raise AssertionError(f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}")
-    return pre_dispatch_mode or mode
+    return typing.cast("ProxyTorchDispatchMode | None", pre_dispatch_mode or mode)
 
 
 def handle_sym_dispatch(
@@ -3170,7 +3173,10 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     #
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
-    fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+    fake_mode = typing.cast(
+        "FakeTensorMode | None",
+        torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
+    )
     if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
             if not isinstance(out_proxy, Proxy):

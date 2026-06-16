@@ -4715,7 +4715,7 @@ def diagonal(
         storage_offset -= offset * self.stride()[dim1]
 
     sizes = [s for i, s in enumerate(self.size()) if i not in (dim1, dim2)]
-    sizes.append(diag_size)
+    sizes.append(diag_size)  # type: ignore[arg-type]
 
     strides = [s for i, s in enumerate(self.stride()) if i not in (dim1, dim2)]
     strides.append(self.stride()[dim1] + self.stride()[dim2])
@@ -6030,7 +6030,9 @@ def _uniform_helper(
         raise AssertionError(f"low must be Number, got {type(low)}")
     if not isinstance(high, Number):
         raise AssertionError(f"high must be Number, got {type(high)}")
+    # pyrefly: ignore [bad-assignment]
     low = sym_float(low)
+    # pyrefly: ignore [bad-assignment]
     high = sym_float(high)
 
     if not isinstance(dtype, torch.dtype):
