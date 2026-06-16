@@ -3577,6 +3577,25 @@ class TestMPS(TestCaseMPS):
         helper(torch.not_equal)
         helper(torch.eq)
 
+    def test_cpu_scalar_storage_offset_binary(self):
+        # https://github.com/pytorch/pytorch/issues/187117
+        # CPU 0-dim view with storage_offset > 0 was ignored; the kernel read
+        # element 0 of the backing storage instead of the correct element.
+        cpu_vals = torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0])
+        mps_tensor = torch.ones(3, device="mps")
+        for i in range(len(cpu_vals)):
+            scalar_cpu = cpu_vals[i]  # 0-dim view, storage_offset = i
+            self.assertEqual((mps_tensor + scalar_cpu).cpu(), torch.full((3,), 1.0 + i))
+            self.assertEqual((scalar_cpu + mps_tensor).cpu(), torch.full((3,), 1.0 + i))
+            self.assertEqual((mps_tensor * scalar_cpu).cpu(), torch.full((3,), float(i)))
+
+        # also verify with integer dtype
+        cpu_ints = torch.tensor([10, 20, 30, 40], dtype=torch.int32)
+        mps_ints = torch.ones(3, dtype=torch.int32, device="mps")
+        for i in range(len(cpu_ints)):
+            scalar_int = cpu_ints[i]
+            self.assertEqual((mps_ints + scalar_int).cpu(), torch.full((3,), 1 + (i + 1) * 10, dtype=torch.int32))
+
     def test_slice_contiguous_view(self):
         # https://github.com/pytorch/pytorch/issues/77750
 
