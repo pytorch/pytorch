@@ -27,21 +27,24 @@ fi
 
 WIN_CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-case "$DESIRED_PYTHON" in
-    3.14t)
-        echo "Python version is set to 3.14 or 3.14t"
-        PYTHON_INSTALLER_URL="https://www.python.org/ftp/python/3.14.0/python-3.14.0-amd64.exe"
-        ADDITIONAL_OPTIONS="Include_freethreaded=1"
-        PYTHON_EXE_NAME="python3.14t.exe"
-        ;;
-    *)
-        echo "Python version is set to ${DESIRED_PYTHON}"
-        # shellcheck disable=SC2034  # URL pattern is per python.org
-        PYTHON_INSTALLER_URL="https://www.python.org/ftp/python/${DESIRED_PYTHON}.0/python-${DESIRED_PYTHON}.0-amd64.exe"
-        ADDITIONAL_OPTIONS=""
-        PYTHON_EXE_NAME="python.exe"
-        ;;
-esac
+# DESIRED_PYTHON is e.g. "3.13" or, for free-threaded builds, "3.13t".
+# Strip the trailing "t" to get the base version and add the freethreaded
+# installer option so a single branch covers every t-variant; the legacy
+# internal/install_python.bat special-cased only 3.14t.
+PYTHON_BASE="${DESIRED_PYTHON%t}"
+if [[ "$DESIRED_PYTHON" == *t ]]; then
+    echo "Python version is set to ${DESIRED_PYTHON} (free-threaded)"
+    ADDITIONAL_OPTIONS="Include_freethreaded=1"
+    PYTHON_EXE_NAME="python${PYTHON_BASE}t.exe"
+else
+    echo "Python version is set to ${DESIRED_PYTHON}"
+    ADDITIONAL_OPTIONS=""
+    PYTHON_EXE_NAME="python.exe"
+fi
+# Patch level is pinned to .0 to mirror the legacy internal/install_python.bat
+# for reproducible installs; python.org keeps every .0 installer available.
+# shellcheck disable=SC2034  # consumed below in the install loop
+PYTHON_INSTALLER_URL="https://www.python.org/ftp/python/${PYTHON_BASE}.0/python-${PYTHON_BASE}.0-amd64.exe"
 
 INSTALLER="$WIN_CI_DIR/python-amd64.exe"
 INSTALLER_W="$(cygpath -w "$INSTALLER")"
