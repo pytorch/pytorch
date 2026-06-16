@@ -59,6 +59,31 @@ from .constants import default_pg_nccl_timeout, default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
 
+def _register_process_group_opaque_type() -> None:
+    from torch._library.opaque_object import (
+        is_opaque_type,
+        MemberType,
+        register_opaque_type,
+    )
+
+    if is_opaque_type(ProcessGroup):
+        return
+
+    register_opaque_type(
+        ProcessGroup,
+        typ="reference",
+        members={
+            "size": MemberType.USE_REAL,
+            "rank": MemberType.USE_REAL,
+            "_get_backend_name": MemberType.USE_REAL,
+            "group_name": MemberType.USE_REAL,
+            "group_desc": MemberType.USE_REAL,
+            "__eq__": MemberType.USE_REAL,
+            "__ne__": MemberType.USE_REAL,
+        },
+    )
+
+
 __all__ = [
     "Backend",
     "BackendConfig",

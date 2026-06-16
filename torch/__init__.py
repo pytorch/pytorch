@@ -2706,6 +2706,12 @@ from torch._classes import classes as classes  # usort: skip
 sys.modules.setdefault(f"{__name__}.ops", ops)
 sys.modules.setdefault(f"{__name__}.classes", classes)
 
+if hasattr(torch._C, "_c10d_init"):
+    from torch.distributed.distributed_c10d import _register_process_group_opaque_type
+
+    _register_process_group_opaque_type()
+    del _register_process_group_opaque_type
+
 # quantization depends on torch.fx and torch.ops
 # Import quantization
 from torch import quantization as quantization  # usort: skip
