@@ -95,7 +95,13 @@ def install_libuv(workdir: Path, python_prefix: Path) -> Path:
     subprocess.run(["7z", "x", "-aoa", str(tarball_bz2), f"-o{workdir}"], check=True)
     python_prefix.mkdir(parents=True, exist_ok=True)
     subprocess.run(["tar", "-xvf", str(tarball), "-C", str(python_prefix)], check=True)
-    return python_prefix / "Library"
+    libuv_root = python_prefix / "Library"
+    if not libuv_root.is_dir():
+        sys.exit(
+            f"libuv extraction did not produce {libuv_root}; "
+            "the ossci-windows tarball layout may have changed"
+        )
+    return libuv_root
 
 
 def main() -> None:
