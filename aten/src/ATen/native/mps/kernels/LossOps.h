@@ -35,3 +35,14 @@ struct CTCLossBackwardCollectParams {
   index_t grad_out_batch_stride;
   bool zero_infinity;
 };
+
+// Shared by LossOps.metal and LossOps.mm; layout must stay identical on both.
+struct FusedLossParams {
+  uint32_t numel; // filled by fused_loss_reduce
+  uint32_t has_weight; // filled by fused_loss_reduce
+  uint32_t aligned; // filled by fused_loss_reduce: all operands 4-elem aligned
+  uint32_t reduction; // ATen: 1=Mean, 2=Sum (set by caller)
+  float p0; // op scalar: beta/delta, clamp-lo; norm for fused_loss_bwd
+  float p1; // op scalar: clamp-hi
+  uint32_t flag; // op flag: is_huber, ...; scalar-grad for fused_loss_bwd
+};

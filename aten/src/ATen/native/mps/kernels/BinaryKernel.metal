@@ -18,6 +18,36 @@ struct sub_functor {
   }
 };
 
+// MSE elementwise (input - target)^2 in float32, cast to the output dtype
+// (OPMATH op). Used for reduction=None; mean/sum use the fused LossOps
+// reduction.
+struct mse_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    const T d = a - b;
+    return static_cast<T>(d * d);
+  }
+};
+
+// Fused MSE backward: grad_input = norm * (input - target) * grad_output in
+// a single pass; the ternary iterator supplies broadcast (0-dim grad for
+// mean/sum), strides, and mixed-dtype casts. norm is exactly 2 for
+// reduction none/sum, so mse_backward2 bakes it in; for mean the host
+// pre-scales the 0-dim grad_output by 2/N and uses mse_backward_scaled.
+struct mse_backward2_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T g) {
+    return static_cast<T>(T(2) * (a - b) * g);
+  }
+};
+
+struct mse_backward_scaled_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T g) {
+    return static_cast<T>((a - b) * g);
+  }
+};
+
 struct add_alpha_functor {
   template <typename T>
   inline T operator()(const T a, const T b, const T alpha) {
@@ -601,6 +631,13 @@ REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_he);
 REGISTER_FLOAT_BINARY_OP(add);
 REGISTER_INTEGER_BINARY_OP(add);
 REGISTER_OPMATH_FLOAT_BINARY_OP(mul);
+REGISTER_OPMATH_FLOAT_BINARY_OP(mse);
+REGISTER_OPMATH_TERNARY_OP(mse_backward2, float, float);
+REGISTER_OPMATH_TERNARY_OP(mse_backward2, half, half);
+REGISTER_OPMATH_TERNARY_OP(mse_backward2, bfloat, bfloat);
+REGISTER_OPMATH_TERNARY_OP(mse_backward_scaled, float, float);
+REGISTER_OPMATH_TERNARY_OP(mse_backward_scaled, half, half);
+REGISTER_OPMATH_TERNARY_OP(mse_backward_scaled, bfloat, bfloat);
 REGISTER_INTEGER_BINARY_OP(mul);
 REGISTER_FLOAT_BINARY_OP(sub);
 REGISTER_INTEGER_BINARY_OP(sub);
