@@ -207,8 +207,12 @@ def requires_grad_variable_sharing(queue, ready):
     queue.put(var.requires_grad)
 
 
-def integer_parameter_serialization(iparam):
+def integer_parameter_serialization(queue, done, finish):
+    iparam = queue.get()
     iparam + 1
+    del iparam
+    done.set()
+    finish.wait()
 
 
 def autograd_sharing(queue, ready, master_modified, device, is_parameter):
@@ -464,9 +468,22 @@ class _MultiprocessingTestMixin:
         )
 
         ctx = mp.get_context("spawn")
-        p = ctx.Process(target=integer_parameter_serialization, args=(param,))
+        done = ctx.Event()
+        finish = ctx.Event()
+        queue = ctx.Queue()
+        p = ctx.Process(
+            target=integer_parameter_serialization, args=(queue, done, finish)
+        )
         p.start()
-        p.join()
+        try:
+            queue.put(param)
+            self.assertTrue(done.wait(MAX_WAITING_TIME_IN_SECONDS))
+            del param
+            if torch.device(device).type == "cuda":
+                torch.cuda.ipc_collect()
+        finally:
+            finish.set()
+            p.join(100)
 
         self.assertEqual(
             0,
