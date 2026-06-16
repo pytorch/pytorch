@@ -34,7 +34,7 @@ class _BadCmpExc(Exception):
     pass
 
 
-class _BadCmpValue:
+class _BadCmp:
     # Hashable (so it can be a dict value compared via PyObject_RichCompareBool)
     # but its __eq__ raises.
     def __eq__(self, other: object) -> bool:
@@ -2285,13 +2285,13 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # on the stored value, so a value whose __eq__ raises must propagate that
         # exception. Equal-length views push the comparison past
         # dictview_richcompare's length short-circuit for eq/ne/le/ge.
-        d1 = self.thetype({1: _BadCmpValue()})
-        d2 = self.thetype({1: _BadCmpValue()})
+        d1 = self.thetype({1: _BadCmp()})
+        d2 = self.thetype({1: _BadCmp()})
         for op in (operator.eq, operator.ne, operator.le, operator.ge):
             with self.assertRaises(_BadCmpExc):
                 op(d1.items(), d2.items())
         # lt/gt reach the value comparison only on a proper-subset length match.
-        d3 = self.thetype({1: _BadCmpValue(), 2: _BadCmpValue()})
+        d3 = self.thetype({1: _BadCmp(), 2: _BadCmp()})
         with self.assertRaises(_BadCmpExc):
             d1.items() < d3.items()  # noqa: B015
         with self.assertRaises(_BadCmpExc):
@@ -2310,6 +2310,15 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d1.items() == d3.items(), False)
         self.assertEqual(d1.items() <= d3.items(), False)
         self.assertEqual(d2.items() >= d1.items(), True)
+
+    @make_dynamo_test
+    def test_cmp_eq_key_raises(self):
+        # A key whose __eq__ raises must propagate that exception during dict
+        # comparison, mirroring CPython's PyObject_RichCompareBool lookup.
+        d1 = self.thetype({_BadCmp(): 1})
+        d2 = self.thetype({1: 1})
+        with self.assertRaises(_BadCmpExc):
+            d1 == d2  # noqa: B015
 
     @make_dynamo_test
     def test_cmp_eq(self):

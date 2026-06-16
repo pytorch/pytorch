@@ -459,16 +459,6 @@ class ConstantVariable(VariableTracker):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
-    def is_python_equal(self, other: object) -> bool:
-        from .tensor import SymNodeVariable
-
-        if isinstance(other, SymNodeVariable):
-            return self.as_python_constant() == other.evaluate_expr()
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
-
     def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
         if self.value is None or self.value is True or self.value is False:
@@ -945,11 +935,6 @@ class FakeIdVariable(VariableTracker):
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
-
-    def is_python_equal(self, other: object) -> bool:
-        if isinstance(other, (FakeIdVariable, ConstantVariable)):
-            return self.value == other.as_python_constant()
-        return False
 
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(

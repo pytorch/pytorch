@@ -75,7 +75,7 @@ if TYPE_CHECKING:
 # [Adding a new supported class within the keys of ConstDictVariable]
 # - Implement hash_impl(self, tx) on the VariableTracker subclass (or rely on the
 #   base class default which uses get_real_python_backed_value())
-# - Implement is_python_equal() for key equality
+# - Implement richcompare_impl() for key equality
 
 
 def pydict_check(obj: VariableTracker) -> bool:

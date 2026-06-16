@@ -1002,12 +1002,6 @@ class FrozensetVariable(SetVariable):
             raw_hashes.append(RawHash(h))
         return hash(frozenset(raw_hashes)), is_fake
 
-    def is_python_equal(self, other: object) -> bool:
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
-
 
 class DictKeySetVariable(SetVariable):
     def debug_repr(self) -> str:
