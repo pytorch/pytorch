@@ -3,7 +3,6 @@ import abc
 import copy
 import logging
 import operator
-import re
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -101,11 +100,19 @@ def _assign_attr(
         for to_module in to_modules:
             if not hasattr(to_module, item):
                 setattr(to_module, item, torch.nn.Module())
-            ts.update(
-                t_call  # type: ignore[misc]
-                for k, t_call in to_module._modules.items()
-                if _is_call_name(k, item)
-            )
+            if item in to_module._modules:
+                module = to_module._modules[item]
+                if module is not None:
+                    ts.add(module)
+            i = 1
+            while True:
+                variant = f"{item}@{i}"
+                if variant not in to_module._modules:
+                    break
+                module = to_module._modules[variant]
+                if module is not None:
+                    ts.add(module)
+                i += 1
         to_modules = ts
 
     for to_module in to_modules:
@@ -1088,11 +1095,6 @@ def _call_name(base: str, n: int) -> str:
     # Given n >= 0, generate call names to a submodule `base` of the form
     # `base`, `base@1`, `base@2`, etc.
     return base if n == 1 else f"{base}@{n - 1}"
-
-
-def _is_call_name(call_name: str, base: str) -> bool:
-    # Recognize when call_name = _call_name(base, n) for some n >= 0.
-    return re.match(re.escape(base) + r"(@\d+)?$", call_name) is not None
 
 
 class _ModuleFrame:

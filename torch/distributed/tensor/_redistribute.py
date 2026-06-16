@@ -36,6 +36,7 @@ from torch.distributed.tensor.placement_types import (
 )
 from torch.types import FloatLikeType, IntLikeType
 from torch.utils._debug_mode import get_active_debug_mode
+from torch.utils._typing_utils import not_none
 
 
 logger = logging.getLogger(__name__)
@@ -65,11 +66,12 @@ def _redistribute_cost_sort_key(cost: FloatLikeType) -> float:
     if not free_symbols:
         return float(expr)
 
-    hint_overrides = cost.node.shape_env.var_to_hint_override
+    shape_env = not_none(cost.node.shape_env)
+    hint_overrides = shape_env.var_to_hint_override
     if free_symbols.issubset(hint_overrides):
         return float(expr.xreplace(hint_overrides))
 
-    return float(cost.node.shape_env.optimization_hint(expr, fallback=None))
+    return float(shape_env.optimization_hint(expr, fallback=None))
 
 
 @contextlib.contextmanager

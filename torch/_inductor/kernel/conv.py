@@ -1071,6 +1071,12 @@ def convolution_backward_lowering(
 
     device_type = ir.get_device_type(input)
 
+    # The Triton conv2d backward kernels hit a ptxas miscompile (illegal memory
+    # access) on NVIDIA sm100 and show no perf win on CUDA, so keep them on ROCm
+    # only and fall back to ATEN. See
+    # https://github.com/pytorch/pytorch/issues/187081.
+    disable_triton_conv_bwd = device_type == "cuda" and not torch.version.hip
+
     conv_configs = V.choices.get_conv_configs(device_type)
     dtype_size = input.get_dtype().itemsize
 
@@ -1094,7 +1100,8 @@ def convolution_backward_lowering(
         args_w = [input, grad_out]
 
         if (
-            torch._inductor.utils._use_conv_bwd_weight_autotune_backend("TRITON")
+            not disable_triton_conv_bwd
+            and torch._inductor.utils._use_conv_bwd_weight_autotune_backend("TRITON")
             and use_triton_template(layout_dw)
             and not transposed
             and is_zeros(output_padding)
@@ -1148,7 +1155,8 @@ def convolution_backward_lowering(
         args_x = [grad_out, weight]
 
         if (
-            torch._inductor.utils._use_conv_bwd_input_autotune_backend("TRITON")
+            not disable_triton_conv_bwd
+            and torch._inductor.utils._use_conv_bwd_input_autotune_backend("TRITON")
             and use_triton_template(layout_dx)
             and not transposed
             and is_zeros(output_padding)

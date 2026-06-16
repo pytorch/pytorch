@@ -362,6 +362,41 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             v = v + x
         return v
 
+    def test_itertools_chain_fullgraph(self):
+        def fn(a, b):
+            result = a
+            for x in itertools.chain([a, b], [1, 2], [3]):
+                result = result + x
+            return result
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a, b = torch.tensor(1.0), torch.tensor(2.0)
+        self.assertEqual(fn(a, b), opt_fn(a, b))
+
+    def test_itertools_chain_from_iterable_fullgraph(self):
+        def fn(a, b):
+            result = a
+            for x in itertools.chain.from_iterable([[a, b], [1, 2]]):
+                result = result + x
+            return result
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a, b = torch.tensor(1.0), torch.tensor(2.0)
+        self.assertEqual(fn(a, b), opt_fn(a, b))
+
+    def test_itertools_chain_reconstruct(self):
+        def fn(a):
+            it = itertools.chain([a + 1, a + 2], [a + 3])
+            result = next(it)
+            return it, result
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a = torch.tensor(0.0)
+        it_ref, r_ref = fn(a)
+        it_opt, r_opt = opt_fn(a)
+        self.assertEqual(r_ref, r_opt)
+        self.assertEqual(list(it_ref), list(it_opt))
+
     def test_itertools_reconstruct(self):
         def fn(a):
             it1 = itertools.repeat(1)

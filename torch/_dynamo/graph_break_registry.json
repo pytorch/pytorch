@@ -2865,6 +2865,16 @@
       ]
     }
   ],
+  "GB9192": [
+    {
+      "Gb_type": "Unsupported kwargs for itertools.zip_longest",
+      "Context": "call_function {self} {args} {kwargs}",
+      "Explanation": "Expected kwargs: 'fillvalue', but got {','.join(set(kwargs.keys()) - {'fillvalue'})}",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0200": [
     {
       "Gb_type": "missing BUILD_SET handler",
@@ -4847,6 +4857,16 @@
       "Gb_type": "autograd.grad with non-constant dict key",
       "Context": "non-constant key in {arg_name}",
       "Explanation": "autograd.grad/backward dict inputs must have constant keys.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4234": [
+    {
+      "Gb_type": "nb_invert_impl not implemented",
+      "Context": "{type(self).__name__} has nb_invert slot but no nb_invert_impl override",
+      "Explanation": "The type {self.python_type_name()} has an nb_invert C slot but the corresponding VariableTracker doesn't implement nb_invert_impl.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
