@@ -6688,14 +6688,11 @@ def multi_head_attention_forward(
             leads to a significant performance degradation.*
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
-        is_causal: If specified, applies a causal mask as attention mask, and ignores
-            attn_mask for computing scaled dot product attention.
+        is_causal: If specified, applies a causal mask as attention mask when
+            ``attn_mask`` is not provided, ``need_weights=False``, and no
+            key padding, bias, zero attention, or static key/value is used.
+            If ``attn_mask`` is provided, it is applied as supplied.
             Default: ``False``.
-            .. warning::
-                is_causal is provides a hint that the attn_mask is the
-                causal mask.Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
@@ -6807,19 +6804,28 @@ def multi_head_attention_forward(
         target_type=query.dtype,
     )
 
-    if is_causal and attn_mask is None:
+    if (
+        is_causal
+        and attn_mask is None
+        and (
+            need_weights
+            or key_padding_mask is not None
+            or bias_k is not None
+            or bias_v is not None
+            or add_zero_attn
+            or static_k is not None
+            or static_v is not None
+        )
+    ):
         raise RuntimeError(
             "Need attn_mask if specifying the is_causal hint. "
             "You may use the Transformer module method "
             "`generate_square_subsequent_mask` to create this mask."
         )
 
-    if is_causal and key_padding_mask is None and not need_weights:
-        # when we have a kpm or need weights, we need attn_mask
-        # Otherwise, we use the is_causal hint go as is_causal
-        # indicator to SDPA.
-        attn_mask = None
-    else:
+    if attn_mask is not None:
+        # An explicit mask must be honored as supplied.
+        is_causal = False
         attn_mask = _canonical_mask(
             mask=attn_mask,
             mask_name="attn_mask",
@@ -6829,11 +6835,11 @@ def multi_head_attention_forward(
             check_other=False,
         )
 
-        if key_padding_mask is not None:
-            # We have the attn_mask, and use that to merge kpm into it.
-            # Turn off use of is_causal hint, as the merged mask is no
-            # longer causal.
-            is_causal = False
+    if key_padding_mask is not None:
+        # We have the attn_mask, and use that to merge kpm into it.
+        # Turn off use of is_causal hint, as the merged mask is no
+        # longer causal.
+        is_causal = False
 
     if embed_dim != embed_dim_to_check:
         raise AssertionError(

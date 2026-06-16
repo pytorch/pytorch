@@ -903,6 +903,271 @@ class TestTransformers(NNTestCase):
 
         self.assertEqual(masked_output, is_causal_output)
 
+    def _causal_and_custom_masks(self, seq_len, batch_size, num_heads, mask_kind):
+        if mask_kind.startswith("bool"):
+            causal_mask = torch.ones(seq_len, seq_len, dtype=torch.bool).triu_(1)
+            custom_mask = causal_mask.clone()
+            custom_mask[-1, :-1] = True
+        else:
+            causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(seq_len)
+            custom_mask = causal_mask.clone()
+            custom_mask[-1, :-1] = float("-inf")
+
+        if mask_kind.endswith("3d"):
+            causal_mask = causal_mask.repeat(batch_size * num_heads, 1, 1)
+            custom_mask = custom_mask.repeat(batch_size * num_heads, 1, 1)
+
+        return causal_mask, custom_mask
+
+    def test_encoder_is_causal_custom_src_mask(self):
+        for mask_kind in ("float2d", "bool2d", "float3d", "bool3d"):
+            with self.subTest(mask_kind=mask_kind):
+                torch.manual_seed(0)
+                d_model = 4
+                seq_len = 5
+                batch_size = 2
+                num_heads = 2
+                layer = torch.nn.TransformerEncoderLayer(
+                    d_model, num_heads, 8, dropout=0.0, batch_first=True
+                )
+                layer.eval()
+                x = torch.randn(batch_size, seq_len, d_model)
+                causal_mask, custom_mask = self._causal_and_custom_masks(
+                    seq_len, batch_size, num_heads, mask_kind
+                )
+
+                causal_output = layer(x, src_mask=causal_mask, is_causal=True)
+                expected_custom_output = layer(x, src_mask=custom_mask)
+                custom_output = layer(x, src_mask=custom_mask, is_causal=True)
+
+                self.assertEqual(expected_custom_output, custom_output)
+                self.assertFalse(torch.allclose(causal_output, custom_output))
+
+    def test_encoder_is_causal_wrong_shape_src_mask_errors(self):
+        torch.manual_seed(0)
+        d_model = 4
+        seq_len = 5
+        layer = torch.nn.TransformerEncoderLayer(
+            d_model, 2, 8, dropout=0.0, batch_first=True
+        )
+        x = torch.randn(2, seq_len, d_model)
+        bad_mask = torch.zeros(seq_len - 1, seq_len)
+
+        with self.assertRaisesRegex(RuntimeError, "The shape of the 2D attn_mask is"):
+            layer(x, src_mask=bad_mask, is_causal=True)
+
+        bad_batched_mask = torch.zeros(4, seq_len - 1, seq_len)
+        with self.assertRaisesRegex(RuntimeError, "The shape of the 3D attn_mask is"):
+            layer(x, src_mask=bad_batched_mask, is_causal=True)
+
+        layer.eval()
+        bad_fastpath_mask = torch.zeros(1, seq_len * seq_len, dtype=torch.bool)
+        with torch.no_grad(), self.assertRaisesRegex(
+            RuntimeError, "The shape of the 2D attn_mask is"
+        ):
+            layer(x, src_mask=bad_fastpath_mask, is_causal=True)
+
+    def test_encoder_is_causal_without_src_mask_matches_causal_mask_in_eval(self):
+        torch.manual_seed(0)
+        d_model = 4
+        seq_len = 5
+        layer = torch.nn.TransformerEncoderLayer(
+            d_model, 2, 8, dropout=0.0, batch_first=True
+        )
+        layer.eval()
+        x = torch.randn(2, seq_len, d_model)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(seq_len)
+
+        with torch.no_grad():
+            expected = layer(x, src_mask=mask)
+            actual = layer(x, is_causal=True)
+
+        self.assertEqual(expected, actual)
+
+    def test_encoder_is_causal_without_src_mask_keeps_sdpa_hint(self):
+        torch.manual_seed(0)
+        d_model = 4
+        seq_len = 5
+        layer = torch.nn.TransformerEncoderLayer(
+            d_model, 2, 8, dropout=0.0, batch_first=True
+        )
+        layer.train()
+        x = torch.randn(2, seq_len, d_model)
+
+        with patch(
+            "torch.nn.functional.scaled_dot_product_attention",
+            wraps=torch.nn.functional.scaled_dot_product_attention,
+        ) as sdp_mock:
+            layer(x, is_causal=True)
+
+        self.assertTrue(sdp_mock.called)
+        sdp_args, _ = sdp_mock.call_args
+        self.assertIsNone(sdp_args[3])
+        self.assertTrue(sdp_args[5])
+
+    def test_encoder_is_causal_key_padding_mask_errors_before_nested_fastpath(self):
+        torch.manual_seed(0)
+        d_model = 4
+        seq_len = 5
+        layer = torch.nn.TransformerEncoderLayer(
+            d_model, 2, 8, dropout=0.0, batch_first=True
+        )
+        encoder = torch.nn.TransformerEncoder(layer, 1, enable_nested_tensor=True)
+        encoder.eval()
+        x = torch.randn(2, seq_len, d_model)
+        src_key_padding_mask = torch.tensor(
+            [
+                [False, False, False, True, True],
+                [False, False, False, False, True],
+            ]
+        )
+
+        with torch.no_grad(), self.assertRaisesRegex(RuntimeError, "Need attn_mask"):
+            encoder(
+                x,
+                src_key_padding_mask=src_key_padding_mask,
+                is_causal=True,
+            )
+
+    def test_mha_is_causal_without_attn_mask_matches_causal_mask_in_eval(self):
+        torch.manual_seed(0)
+        mha = torch.nn.MultiheadAttention(
+            embed_dim=4, num_heads=2, dropout=0.0, batch_first=True
+        )
+        mha.eval()
+        x = torch.randn(2, 5, 4)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(x.size(1))
+
+        with torch.no_grad():
+            expected, _ = mha(x, x, x, attn_mask=mask, need_weights=False)
+            actual, _ = mha(x, x, x, need_weights=False, is_causal=True)
+
+        self.assertEqual(expected, actual)
+
+    def test_mha_is_causal_custom_attn_mask(self):
+        for mask_kind in ("float2d", "bool2d", "float3d", "bool3d"):
+            with self.subTest(mask_kind=mask_kind):
+                torch.manual_seed(0)
+                batch_size = 2
+                seq_len = 5
+                num_heads = 2
+                mha = torch.nn.MultiheadAttention(
+                    embed_dim=4, num_heads=num_heads, dropout=0.0, batch_first=True
+                )
+                mha.eval()
+                x = torch.randn(batch_size, seq_len, 4)
+                causal_mask, custom_mask = self._causal_and_custom_masks(
+                    seq_len, batch_size, num_heads, mask_kind
+                )
+
+                causal_output, _ = mha(x, x, x, need_weights=False, is_causal=True)
+                expected_custom_output, _ = mha(
+                    x, x, x, attn_mask=custom_mask, need_weights=False
+                )
+                custom_output, _ = mha(
+                    x,
+                    x,
+                    x,
+                    attn_mask=custom_mask,
+                    need_weights=False,
+                    is_causal=True,
+                )
+
+                self.assertEqual(expected_custom_output, custom_output)
+                self.assertFalse(torch.allclose(causal_output, custom_output))
+
+    def test_mha_is_causal_wrong_shape_attn_mask_errors_in_fastpath(self):
+        torch.manual_seed(0)
+        seq_len = 5
+        mha = torch.nn.MultiheadAttention(
+            embed_dim=4, num_heads=2, dropout=0.0, batch_first=True
+        )
+        mha.eval()
+        x = torch.randn(2, seq_len, 4)
+        bad_mask = torch.zeros(1, seq_len * seq_len, dtype=torch.bool)
+
+        with torch.no_grad(), self.assertRaisesRegex(
+            RuntimeError, "The shape of the 2D attn_mask is"
+        ):
+            mha(x, x, x, attn_mask=bad_mask, need_weights=False, is_causal=True)
+
+    def test_mha_is_causal_without_attn_mask_keeps_sdpa_hint(self):
+        torch.manual_seed(0)
+        mha = torch.nn.MultiheadAttention(
+            embed_dim=4, num_heads=2, dropout=0.0, batch_first=True
+        )
+        mha.train()
+        x = torch.randn(2, 5, 4)
+
+        with patch(
+            "torch.nn.functional.scaled_dot_product_attention",
+            wraps=torch.nn.functional.scaled_dot_product_attention,
+        ) as sdp_mock:
+            mha(x, x, x, need_weights=False, is_causal=True)
+
+        self.assertTrue(sdp_mock.called)
+        sdp_args, _ = sdp_mock.call_args
+        self.assertIsNone(sdp_args[3])
+        self.assertTrue(sdp_args[5])
+
+    def test_decoder_layer_tgt_is_causal_custom_tgt_mask(self):
+        for mask_kind in ("float2d", "bool2d", "float3d", "bool3d"):
+            with self.subTest(mask_kind=mask_kind):
+                torch.manual_seed(0)
+                d_model = 4
+                seq_len = 5
+                batch_size = 2
+                num_heads = 2
+                layer = torch.nn.TransformerDecoderLayer(
+                    d_model, num_heads, 8, dropout=0.0, batch_first=True
+                )
+                layer.eval()
+                tgt = torch.randn(batch_size, seq_len, d_model)
+                memory = torch.randn(batch_size, seq_len, d_model)
+                causal_mask, custom_mask = self._causal_and_custom_masks(
+                    seq_len, batch_size, num_heads, mask_kind
+                )
+
+                causal_output = layer(
+                    tgt, memory, tgt_mask=causal_mask, tgt_is_causal=True
+                )
+                expected_custom_output = layer(tgt, memory, tgt_mask=custom_mask)
+                custom_output = layer(
+                    tgt, memory, tgt_mask=custom_mask, tgt_is_causal=True
+                )
+
+                self.assertEqual(expected_custom_output, custom_output)
+                self.assertFalse(torch.allclose(causal_output, custom_output))
+
+    def test_decoder_layer_memory_is_causal_custom_memory_mask(self):
+        for mask_kind in ("float2d", "bool2d", "float3d", "bool3d"):
+            with self.subTest(mask_kind=mask_kind):
+                torch.manual_seed(0)
+                d_model = 4
+                seq_len = 5
+                batch_size = 2
+                num_heads = 2
+                layer = torch.nn.TransformerDecoderLayer(
+                    d_model, num_heads, 8, dropout=0.0, batch_first=True
+                )
+                layer.eval()
+                tgt = torch.randn(batch_size, seq_len, d_model)
+                memory = torch.randn(batch_size, seq_len, d_model)
+                causal_mask, custom_mask = self._causal_and_custom_masks(
+                    seq_len, batch_size, num_heads, mask_kind
+                )
+
+                causal_output = layer(
+                    tgt, memory, memory_mask=causal_mask, memory_is_causal=True
+                )
+                expected_custom_output = layer(tgt, memory, memory_mask=custom_mask)
+                custom_output = layer(
+                    tgt, memory, memory_mask=custom_mask, memory_is_causal=True
+                )
+
+                self.assertEqual(expected_custom_output, custom_output)
+                self.assertFalse(torch.allclose(causal_output, custom_output))
+
     @onlyCUDA
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not supposrt pre-SM80 hardware"

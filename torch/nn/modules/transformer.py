@@ -208,28 +208,20 @@ class Transformer(Module):
             src_key_padding_mask: the Tensor mask for src keys per batch (optional).
             tgt_key_padding_mask: the Tensor mask for tgt keys per batch (optional).
             memory_key_padding_mask: the Tensor mask for memory keys per batch (optional).
-            src_is_causal: If specified, applies a causal mask as ``src_mask``.
-                Default: ``None``; try to detect a causal mask.
-                Warning:
-                ``src_is_causal`` provides a hint that ``src_mask`` is
-                the causal mask. Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
-            tgt_is_causal: If specified, applies a causal mask as ``tgt_mask``.
-                Default: ``None``; try to detect a causal mask.
-                Warning:
-                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
-                the causal mask. Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
-            memory_is_causal: If specified, applies a causal mask as
-                ``memory_mask``.
-                Default: ``False``.
-                Warning:
-                ``memory_is_causal`` provides a hint that
-                ``memory_mask`` is the causal mask. Providing incorrect
-                hints can result in incorrect execution, including
-                forward and backward compatibility.
+            src_is_causal: If specified and ``src_mask`` is not provided,
+                applies a causal mask as ``src_mask`` when no
+                ``src_key_padding_mask`` is supplied. If ``src_mask`` is
+                provided, it is applied as supplied. Default: ``None``; try
+                to detect a causal mask from ``src_mask`` when it is provided.
+            tgt_is_causal: If specified and ``tgt_mask`` is not provided,
+                applies a causal mask as ``tgt_mask`` when no
+                ``tgt_key_padding_mask`` is supplied. If ``tgt_mask`` is
+                provided, it is applied as supplied. Default: ``None``; try
+                to detect a causal mask from ``tgt_mask`` when it is provided.
+            memory_is_causal: If specified and ``memory_mask`` is not provided,
+                applies a causal mask as ``memory_mask`` when no
+                ``memory_key_padding_mask`` is supplied. If ``memory_mask`` is
+                provided, it is applied as supplied. Default: ``False``.
 
         Shape:
             - src: :math:`(S, E)` for unbatched input, :math:`(S, N, E)` if `batch_first=False` or
@@ -415,13 +407,11 @@ class TransformerEncoder(Module):
             src: the sequence to the encoder (required).
             mask: the mask for the src sequence (optional).
             src_key_padding_mask: the mask for the src keys per batch (optional).
-            is_causal: If specified, applies a causal mask as ``mask``.
-                Default: ``None``; try to detect a causal mask.
-                Warning:
-                ``is_causal`` provides a hint that ``mask`` is the
-                causal mask. Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
+            is_causal: If specified and ``mask`` is not provided, applies a
+                causal mask as ``mask`` when no ``src_key_padding_mask`` is
+                supplied. If ``mask`` is provided, it is applied as supplied.
+                Default: ``None``; try to detect a causal mask from ``mask``
+                when it is provided.
 
         Shape:
             see the docs in :class:`~torch.nn.Transformer`.
@@ -471,6 +461,8 @@ class TransformerEncoder(Module):
             )
         elif src_key_padding_mask is None:
             why_not_sparsity_fast_path = "src_key_padding_mask was None"
+        elif is_causal is True and mask is None:
+            why_not_sparsity_fast_path = "is_causal was specified without mask"
         # This check avoids a call to torch._nested_tensor_from_mask_left_aligned() that
         # breaks in torch.compile.
         elif do_mask_check and torch.compiler.is_compiling():
@@ -614,21 +606,15 @@ class TransformerDecoder(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-            tgt_is_causal: If specified, applies a causal mask as ``tgt mask``.
-                Default: ``None``; try to detect a causal mask.
-                Warning:
-                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
-                the causal mask. Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
-            memory_is_causal: If specified, applies a causal mask as
-                ``memory mask``.
-                Default: ``False``.
-                Warning:
-                ``memory_is_causal`` provides a hint that
-                ``memory_mask`` is the causal mask. Providing incorrect
-                hints can result in incorrect execution, including
-                forward and backward compatibility.
+            tgt_is_causal: If specified and ``tgt_mask`` is not provided,
+                applies a causal mask as ``tgt_mask`` when no
+                ``tgt_key_padding_mask`` is supplied. If ``tgt_mask`` is
+                provided, it is applied as supplied. Default: ``None``; try
+                to detect a causal mask from ``tgt_mask`` when it is provided.
+            memory_is_causal: If specified and ``memory_mask`` is not provided,
+                applies a causal mask as ``memory_mask`` when no
+                ``memory_key_padding_mask`` is supplied. If ``memory_mask`` is
+                provided, it is applied as supplied. Default: ``False``.
 
         Shape:
             see the docs in :class:`~torch.nn.Transformer`.
@@ -719,6 +705,7 @@ class TransformerEncoderLayer(Module):
         - batch_first is ``True`` and the input is batched (i.e., ``src.dim() == 3``)
         - activation is one of: ``"relu"``, ``"gelu"``, ``torch.functional.relu``, or ``torch.functional.gelu``
         - at most one of ``src_mask`` and ``src_key_padding_mask`` is passed
+        - if ``is_causal`` is ``True``, ``src_mask`` is passed
         - if src is a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_, neither ``src_mask``
           nor ``src_key_padding_mask`` is passed
         - the two ``LayerNorm`` instances have a consistent ``eps`` value (this will naturally be the case
@@ -805,13 +792,11 @@ class TransformerEncoderLayer(Module):
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
             src_key_padding_mask: the mask for the src keys per batch (optional).
-            is_causal: If specified, applies a causal mask as ``src mask``.
+            is_causal: If specified, applies a causal mask as ``src_mask`` when
+                ``src_mask`` is not provided and no ``src_key_padding_mask`` is
+                supplied. If ``src_mask`` is provided, it is applied as
+                supplied.
                 Default: ``False``.
-                Warning:
-                ``is_causal`` provides a hint that ``src_mask`` is the
-                causal mask. Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
 
         Shape:
             see the docs in :class:`~torch.nn.Transformer`.
@@ -862,6 +847,8 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "neither src_key_padding_mask nor src_mask are not supported with NestedTensor input"
         elif self.self_attn.num_heads % 2 == 1:
             why_not_sparsity_fast_path = "num_head is odd"
+        elif is_causal and src_mask is None:
+            why_not_sparsity_fast_path = "is_causal was specified without src_mask"
         elif torch.is_autocast_enabled():
             why_not_sparsity_fast_path = "autocast is enabled"
         elif any(
@@ -1099,21 +1086,14 @@ class TransformerDecoderLayer(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-            tgt_is_causal: If specified, applies a causal mask as ``tgt mask``.
-                Default: ``False``.
-                Warning:
-                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
-                the causal mask. Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
+            tgt_is_causal: If specified, applies a causal mask as
+                ``tgt_mask`` when ``tgt_mask`` is not provided and no
+                ``tgt_key_padding_mask`` is supplied. If ``tgt_mask`` is
+                provided, it is applied as supplied. Default: ``False``.
             memory_is_causal: If specified, applies a causal mask as
-                ``memory mask``.
-                Default: ``False``.
-                Warning:
-                ``memory_is_causal`` provides a hint that
-                ``memory_mask`` is the causal mask. Providing incorrect
-                hints can result in incorrect execution, including
-                forward and backward compatibility.
+                ``memory_mask`` when ``memory_mask`` is not provided and no
+                ``memory_key_padding_mask`` is supplied. If ``memory_mask`` is
+                provided, it is applied as supplied. Default: ``False``.
 
         Shape:
             see the docs in :class:`~torch.nn.Transformer`.
@@ -1214,19 +1194,9 @@ def _detect_is_causal_mask(
     """Return whether the given attention mask is causal.
 
     Warning:
-    If ``is_causal`` is not ``None``, its value will be returned as is.  If a
-    user supplies an incorrect ``is_causal`` hint,
-
-    ``is_causal=False`` when the mask is in fact a causal attention.mask
-       may lead to reduced performance relative to what would be achievable
-       with ``is_causal=True``;
-    ``is_causal=True`` when the mask is in fact not a causal attention.mask
-       may lead to incorrect and unpredictable execution - in some scenarios,
-       a causal mask may be applied based on the hint, in other execution
-       scenarios the specified mask may be used.  The choice may not appear
-       to be deterministic, in that a number of factors like alignment,
-       hardware SKU, etc influence the decision whether to use a mask or
-       rely on the hint.
+    If ``is_causal`` is not ``None``, its value will be returned as is. If
+    ``is_causal`` is ``None``, this helper may detect a supplied causal mask
+    for compatibility with callers that omit the hint.
     ``size`` if not None, check whether the mask is a causal mask of the provided size
        Otherwise, checks for any causal mask.
     """

@@ -1119,6 +1119,7 @@ class MultiheadAttention(Module):
     - ``add_bias_kv`` is ``False``
     - ``add_zero_attn`` is ``False``
     - ``kdim`` and ``vdim`` are equal to ``embed_dim``
+    - if ``is_causal`` is ``True``, an ``attn_mask`` is passed
     - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither ``key_padding_mask``
       nor ``attn_mask`` is passed
     - autocast is disabled
@@ -1301,13 +1302,11 @@ class MultiheadAttention(Module):
             average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
                 heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
                 effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
-            is_causal: If specified, applies a causal mask as attention mask.
+            is_causal: If specified, applies a causal mask as attention mask
+                when ``attn_mask`` is not provided, ``need_weights=False``,
+                and no key padding mask, bias key/value, or zero attention is
+                used. If ``attn_mask`` is provided, it is applied as supplied.
                 Default: ``False``.
-                Warning:
-                ``is_causal`` provides a hint that ``attn_mask`` is the
-                causal mask. Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
 
         Outputs:
             - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
@@ -1382,6 +1381,8 @@ class MultiheadAttention(Module):
             why_not_fast_path = "self.bias_v was not None"
         elif self.add_zero_attn:
             why_not_fast_path = "add_zero_attn was enabled"
+        elif is_causal and attn_mask is None:
+            why_not_fast_path = "is_causal was specified without attn_mask"
         elif not self._qkv_same_embed_dim:
             why_not_fast_path = "_qkv_same_embed_dim was not True"
         elif query.is_nested and (
@@ -1555,10 +1556,24 @@ class MultiheadAttention(Module):
 
             # Always expands attn_mask to 4D
             if attn_mask.dim() == 3:
+                correct_3d_size = (batch_size * self.num_heads, seq_len, seq_len)
+                if attn_mask.shape != correct_3d_size:
+                    raise RuntimeError(
+                        f"The shape of the 3D attn_mask is {attn_mask.shape}, but should be {correct_3d_size}."
+                    )
                 attn_mask_expanded = attn_mask.view(batch_size, -1, seq_len, seq_len)
-            else:  # attn_mask.dim() == 2:
+            elif attn_mask.dim() == 2:
+                correct_2d_size = (seq_len, seq_len)
+                if attn_mask.shape != correct_2d_size:
+                    raise RuntimeError(
+                        f"The shape of the 2D attn_mask is {attn_mask.shape}, but should be {correct_2d_size}."
+                    )
                 attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(
                     batch_size, self.num_heads, -1, -1
+                )
+            else:
+                raise RuntimeError(
+                    f"attn_mask's dimension {attn_mask.dim()} is not supported"
                 )
             merged_mask = attn_mask_expanded
 
