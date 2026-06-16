@@ -800,13 +800,15 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # values; since these become specialized, we replace such metadata with
     # the original values.
     # Also, set the param/buffer metadata back to the placeholders.
+    inputs_to_parameters = new_graph_signature.inputs_to_parameters
+    inputs_to_buffers = new_graph_signature.inputs_to_buffers
     for old_node, new_node in zip(old_placeholders, new_placeholders):
         if not isinstance(old_node.meta["val"], torch.Tensor):
             new_node.meta["val"] = old_node.meta["val"]
 
         if (
-            new_node.target in new_graph_signature.inputs_to_parameters
-            or new_node.target in new_graph_signature.inputs_to_buffers
+            new_node.target in inputs_to_parameters
+            or new_node.target in inputs_to_buffers
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
@@ -819,14 +821,16 @@ def _remove_unnecessary_copy_op_pass(
     """
     Removes redundant copy_ node that was introduced due to mutated buffer.
     """
+    buffers_to_mutate = new_graph_signature.buffers_to_mutate
+    parameters_to_mutate = new_graph_signature.parameters_to_mutate
     with gm._set_replace_hook(new_graph_signature.get_replace_hook()):
         for node in gm.graph.nodes:
             if node.op == "output":
                 args, _ = pytree.tree_flatten(node.args)
                 for out in args:
                     if isinstance(out, torch.fx.Node) and (
-                        out.name in new_graph_signature.buffers_to_mutate
-                        or out.name in new_graph_signature.parameters_to_mutate
+                        out.name in buffers_to_mutate
+                        or out.name in parameters_to_mutate
                     ):
                         if (
                             out.op == "call_function"
