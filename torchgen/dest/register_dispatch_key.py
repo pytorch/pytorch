@@ -438,10 +438,7 @@ class RegisterDispatchKey:
                     # 4. Fallback: Default options (context-aware)
                     options_expr = "at::TensorOptions()"
 
-            # For each return, create an empty tensor.
-            # Note: We use at::empty_like or similar based on the first input.
-            # For a more robust structured logic, we'd use meta-functions,
-            # but this follows the 'unstructured' wrapper style.
+            # Seed each output from the first input's options; the out-kernel sets size and dtype.
             for i, ret in enumerate(f.func.returns):
                 out_name = f"out{i}" if len(f.func.returns) > 1 else "out"
                 allocation_logic += (
@@ -583,6 +580,19 @@ class RegisterDispatchKey:
                     # functional, so leave it to the composite like in-tree (split_with_sizes_copy.out).
                     and not any(a.type.is_list_like() for a in g.out.func.arguments.out)
                 ):
+                    # A multi-output op mixes output dtypes (e.g. a Long index), which the
+                    # input-dtype-seeded derivation gets wrong; require structured or a functional.
+                    if (
+                        f.func.kind() is SchemaKind.functional
+                        and len(f.func.returns) > 1
+                    ):
+                        raise AssertionError(
+                            f"'{g.out.func.name}' is a multi-output op registered out-as-primary "
+                            "via its '.out' only; the derived functional would type every output "
+                            "as the input dtype, but multi-output ops mix dtypes (e.g. a Long "
+                            "index). Register it with 'structured: true' (if natively structured) "
+                            "or register the functional variant explicitly."
+                        )
                     gets_func_inplace_wrapper = True
                 else:
                     return None
