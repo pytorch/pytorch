@@ -1880,7 +1880,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
                 )
 
     new_shape = list(tensors[0].shape).copy()
-    new_shape[dim] = torch.sym_sum(sym_sum_args)
+    new_shape[dim] = torch.sym_sum(sym_sum_args)  # type: ignore[call-overload]
     return TensorMeta(
         tensors[0],
         shape=new_shape,

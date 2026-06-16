@@ -69,6 +69,7 @@ from torch.types import (
     Device,
     IntLikeType,
     Number,
+    PySymType,
     Storage,
 )
 from torch.utils._python_dispatch import TorchDispatchMode

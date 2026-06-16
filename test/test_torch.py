@@ -6836,6 +6836,11 @@ class TestTorch(TestCase):
             with self.assertRaisesRegex(expected_error, message):
                 check_fn(False, lambda: message)
 
+            # A plain string message (not wrapped in a callable) should be
+            # accepted and used directly as the error message.
+            with self.assertRaisesRegex(expected_error, 'plain string error text'):
+                check_fn(False, 'plain string error text')
+
             # Test message with tensor
             def message():
                 return torch.arange(4)
