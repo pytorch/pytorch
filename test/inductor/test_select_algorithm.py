@@ -21,7 +21,7 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.common import KernelTemplate
-from torch._inductor.ir import FixedLayout
+from torch._inductor.ir import FixedLayout, ShapeAsConstantBuffer
 from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.runtime.triton_compat import Config as TritonConfig
 from torch._inductor.select_algorithm import (
@@ -116,6 +116,14 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
                     ),
                     expected,
                 )
+
+    def test_realize_inputs_preserves_shape_constant(self):
+        import sympy
+
+        out = select_algorithm.realize_inputs(sympy.Integer(2048))
+
+        self.assertIsInstance(out, ShapeAsConstantBuffer)
+        self.assertEqual(out.expr, sympy.Integer(2048))
 
 
 class TestSelectAlgorithm(TestCase):

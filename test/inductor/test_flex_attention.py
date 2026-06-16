@@ -4724,6 +4724,102 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(decode_out.shape, (1, 2, 64, 64))
         torch.testing.assert_close(default_out, decode_out, atol=3e-3, rtol=3e-3)
 
+    def test_unbacked_flex_decoding_eligibility_falls_back(self, device):
+        from torch._inductor.kernel.flex.flex_decoding import _use_flex_decoding
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class FakeBuffer:
+            def __init__(self, size):
+                self.size = size
+
+            def get_size(self):
+                return self.size
+
+        shape_env = ShapeEnv()
+        seq_len = shape_env.create_unbacked_symint().node.expr
+        shape_env.var_to_hint_override[seq_len] = 64
+        graph = mock.Mock(sizevars=SizeVarAllocator(shape_env))
+
+        with V.set_graph_handler(graph):
+            self.assertFalse(
+                _use_flex_decoding(
+                    FakeBuffer([1, 2, seq_len, 64]),
+                    FakeBuffer([1, 1, 1, 1]),
+                    FakeBuffer([1, 2, seq_len, 64]),
+                    {},
+                    False,
+                )
+            )
+
+    def test_backward_fake_symbolic_query_key_batch_metadata(self, device):
+        from torch._dynamo.source import LocalSource
+        from torch._higher_order_ops.flex_attention import (
+            flex_attention_backward_fake_tensor_mode,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+
+        def fakeify(t, name, shape_id=None):
+            dynamic_sizes = [DimDynamic.STATIC] * t.dim()
+            shape_ids = {}
+            if shape_id is not None:
+                dynamic_sizes[0] = DimDynamic.UNBACKED
+                shape_ids[0] = shape_id
+            return fake_mode.from_tensor(
+                t,
+                source=LocalSource(name, is_input=True),
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=dynamic_sizes,
+                    shape_ids=shape_ids,
+                ),
+            )
+
+        B, H, S, D = 4, 2, 8, 16
+
+        def run(query, key, value, out, logsumexp, grad_out, grad_logsumexp):
+            with fake_mode:
+                _, grad_key, grad_value, _ = flex_attention_backward_fake_tensor_mode(
+                    query,
+                    key,
+                    value,
+                    out,
+                    logsumexp,
+                    grad_out,
+                    grad_logsumexp,
+                    None,
+                    None,
+                    (),
+                    1.0,
+                    {},
+                )
+            return grad_key, grad_value
+
+        query = fakeify(torch.empty(B, H, S, D, device=device), "query", "batch")
+        key = fakeify(torch.empty(B, H, S, D, device=device), "key", "batch")
+        value = fakeify(torch.empty(B, H, S, D, device=device), "value", "batch")
+        out = fakeify(torch.empty(B, H, S, D, device=device), "out", "batch")
+        grad_out = fakeify(torch.empty(B, H, S, D, device=device), "grad_out", "batch")
+        logsumexp = fakeify(torch.empty(B, H, S, device=device), "logsumexp", "batch")
+        grad_logsumexp = fakeify(
+            torch.empty(B, H, S, device=device), "grad_logsumexp", "batch"
+        )
+
+        grad_key, grad_value = run(
+            query, key, value, out, logsumexp, grad_out, grad_logsumexp
+        )
+
+        self.assertEqual(grad_key.shape, key.shape)
+        self.assertEqual(grad_value.shape, value.shape)
+
     @supported_platform
     @skip_on_cpu
     @skip_on_mps  # asserts Triton-specific BACKEND='TRITON_DECODE' error
@@ -5731,6 +5827,76 @@ class GraphModule(torch.nn.Module):
         torch.testing.assert_close(compiled_dk, ref_dk)
         torch.testing.assert_close(compiled_dv, ref_dv)
         self.assertEqual(compiled_buffer_grads, ref_buffer_grads)
+
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps  # backward Triton lowering
+    def test_direct_backward_inductor_supports_scalar_score_mod_buffers(self, device):
+        def score_mod(score, b, h, m, n, head_dim):
+            # Explicit HOP captures are recorded in subgraph_inps even when the
+            # score graph does not use them.
+            return score
+
+        def mask_mod(b, h, m, n):
+            return m >= n
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=2,
+            H=2,
+            Q_LEN=128,
+            KV_LEN=128,
+            device=device,
+        )
+        scale = 1.0 / 16**0.5
+        dtype = torch.float32
+        q = torch.randn((2, 2, 128, 16), dtype=dtype, device=device)
+        k = torch.randn((2, 2, 128, 16), dtype=dtype, device=device)
+        v = torch.randn((2, 2, 128, 16), dtype=dtype, device=device)
+        backward_grad = torch.randn((2, 2, 128, 16), dtype=dtype, device=device)
+        static_head_dim = q.shape[-1]
+
+        out, logsumexp = flex_attention_fwd(
+            q,
+            k,
+            v,
+            _identity,
+            block_mask,
+            scale,
+        )
+
+        @torch.compile(fullgraph=True)
+        def compiled_bw(query, key, value, fwd_out, lse, grad_out):
+            return torch.ops.higher_order.flex_attention_backward(
+                query,
+                key,
+                value,
+                fwd_out,
+                lse,
+                grad_out,
+                None,
+                score_mod,
+                None,
+                block_mask.as_tuple(),
+                scale,
+                {"BACKEND": "TRITON"},
+                (static_head_dim,),
+                (),
+            )
+
+        with torch.no_grad():
+            dq, dk, dv, _ = compiled_bw(
+                q,
+                k,
+                v,
+                out.detach(),
+                logsumexp.detach(),
+                backward_grad,
+            )
+
+        self.assertEqual(dq.shape, q.shape)
+        self.assertEqual(dk.shape, k.shape)
+        self.assertEqual(dv.shape, v.shape)
 
     @supported_platform
     def test_tensor_subclass_dispatch_order(self, device):
@@ -7355,11 +7521,11 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         block_mask = create_block_mask(mask_mod, None, None, 1024, 1024, device=device)
         flex_attention_call(*create_inputs(1024), block_mask=block_mask)
-        with self.assertRaisesRegex(ValueError, "block_mask was created for"):
+        with self.assertRaisesRegex(RuntimeError, "block_mask was created for"):
             flex_attention_call(*create_inputs(2048), block_mask=block_mask)
 
         block_mask = create_block_mask(mask_mod, None, None, 1023, 1023, device=device)
-        with self.assertRaisesRegex(ValueError, "block_mask was created for"):
+        with self.assertRaisesRegex(RuntimeError, "block_mask was created for"):
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
     @supported_platform
