@@ -166,7 +166,13 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         # registered logs are the only ones with handlers, so patch those
         for log_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(log_qname)
-            num_handlers = len(logger.handlers)
+            # Exclude pytest's capture handlers — they aren't torch-internal leaks.
+            torch_handlers = [
+                h
+                for h in logger.handlers
+                if type(h).__name__ not in ("LogCaptureHandler", "_LiveLoggingStreamHandler")
+            ]
+            num_handlers = len(torch_handlers)
             self.assertLessEqual(
                 num_handlers,
                 2,
