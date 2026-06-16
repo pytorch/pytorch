@@ -19,9 +19,15 @@ log = getArtifactLogger(__name__, "output_code")
 
 
 class CuteDSLTemplate(KernelTemplate):
-    """Template for generating CuteDSL (CUTLASS Python DSL) kernels."""
+    """Template for generating CuteDSL (CUTLASS Python DSL) kernels.
+
+    Subclasses may override ``caller_type`` to attach template-specific
+    metadata or precompile behavior while reusing the common render and
+    benchmark request construction.
+    """
 
     kernel_type: type[Any] = CuteDSLTemplateKernel
+    caller_type: type[Any] | None = None
     index_counter = itertools.count()
     all_templates: dict[str, "CuteDSLTemplate"] = {}
 
@@ -160,7 +166,8 @@ class CuteDSLTemplate(KernelTemplate):
 
                 return render_kernel, render
 
-            return CuteDSLTemplateCaller(
+            caller_type = self.caller_type or CuteDSLTemplateCaller
+            return caller_type(
                 name=kernel_name,
                 input_nodes=input_nodes,
                 layout=layout,
