@@ -1256,7 +1256,7 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         def run_kernel():
             device_interface = get_interface_for_device("cuda")
             stream = device_interface.get_raw_stream(out.device.index)
-            return kernel_func(*input_tensors, out, stream=stream)
+            return kernel_func(*input_tensors, out, *self.extra_args, stream=stream)
 
         return run_kernel
 
