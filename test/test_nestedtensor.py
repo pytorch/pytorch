@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     ops,
@@ -655,22 +656,26 @@ class TestNestedTensor(NestedTensorTestCase):
 
         test_data_ptr(lambda nt: nt.data_ptr())
 
-        if torch.cuda.is_available():
+        accelerator = torch.accelerator.current_accelerator()
+
+        if accelerator is not None:
             for non_blocking in [True, False]:
-                for cuda in [
-                    "cuda",
-                    "cuda:0" if torch.cuda.device_count() == 1 else "cuda:1",
+                for device_str in [
+                    accelerator,
+                    f"{accelerator}:0"
+                    if getattr(torch, accelerator).device_count() == 1
+                    else f"{accelerator}:1",
                 ]:
-                    nt2 = random_nt(cuda, torch.float32, ntensors, (4, 4))
+                    nt2 = random_nt(device_str, torch.float32, ntensors, (4, 4))
                     test_copy_behavior(nt2, non_blocking)
                     self.assertEqual(
-                        nt2.device, nt2.to(cuda, non_blocking=non_blocking).device
+                        nt2.device, nt2.to(device_str, non_blocking=non_blocking).device
                     )
                     self.assertEqual(
                         nt.device, nt2.to("cpu", non_blocking=non_blocking).device
                     )
                     self.assertEqual(
-                        nt2.device, nt.to(cuda, non_blocking=non_blocking).device
+                        nt2.device, nt.to(device_str, non_blocking=non_blocking).device
                     )
                     self.assertIs(
                         torch.int32,
@@ -703,11 +708,15 @@ class TestNestedTensor(NestedTensorTestCase):
             lambda: nt_error.copy_(nt),
         )
 
-        if torch.cuda.is_available():
-            nt = random_nt(torch.device("cuda"), torch.float32, ntensors, (4, 4))
+        accelerator = torch.accelerator.current_accelerator()
+
+        if accelerator is not None:
+            nt = random_nt(torch.device(accelerator), torch.float32, ntensors, (4, 4))
             nt_copy = torch.empty_like(nt, device=torch.device("cpu"))
             nt_copy.copy_(nt, non_blocking=True)
-            torch.cuda.current_stream(torch.cuda.current_device()).synchronize()
+            getattr(torch, accelerator).current_stream(
+                getattr(torch, accelerator).current_device()
+            ).synchronize()
             for nt_ub, nt_copy_ub in zip(nt.unbind(), nt_copy):
                 self.assertEqual(nt_ub, nt_copy_ub)
 
@@ -1813,7 +1822,6 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         out = nt1 - nt2
         self.assertEqual(ref, out)
 
-    @onlyCUDA
     @dtypes(torch.float, torch.float16)
     @torch.inference_mode()
     @parametrize("embedding_dim", [8, 128, 256, 384])
@@ -2317,7 +2325,6 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         else:
             self.assertEqual(actual, expect)
 
-    @onlyCUDA
     @dtypes(torch.float, torch.double, torch.float16, torch.bfloat16)
     @tf32_on_and_off(0.005)
     def test_bmm_cuda(self, device, dtype):
@@ -3059,10 +3066,14 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         self.assertEqual(nt.device, nt_empty.device)
         self.assertEqual(nt.layout, nt_empty.layout)
 
-        if torch.cuda.is_available():
+        accelerator = torch.accelerator.current_accelerator()
+
+        if accelerator is not None:
             if device == "cpu":
-                nt_cuda = torch.empty_like(nt, device="cuda")
-                self.assertEqual(torch.device("cuda").type, nt_cuda.device.type)
+                nt_cuda = torch.empty_like(nt, device=accelerator.type)
+                self.assertEqual(
+                    torch.device(accelerator.type).type, nt_cuda.device.type
+                )
             else:
                 nt_cpu = torch.empty_like(nt, device="cpu")
                 self.assertEqual(torch.device("cpu").type, nt_cpu.device.type)
@@ -4689,12 +4700,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         self.assertEqual(res_dense, res_nt.values())
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32)
     def test_record_stream(self, device, dtype):
         def _create_nt():
-            values = torch.ones(1024, 4 * 1024, device="cuda")
-            offsets = torch.tensor([0, 500, 1024], device="cuda", dtype=torch.int64)
+            values = torch.ones(1024, 4 * 1024, device=device)
+            offsets = torch.tensor([0, 500, 1024], device=device, dtype=torch.int64)
             lengths = offsets.diff()
             nt = torch.nested.nested_tensor_from_jagged(values, offsets, lengths)
             data_ptrs = {
@@ -4706,12 +4717,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         def fn(record_stream):
             nt, data_ptrs = _create_nt()
-            s = torch.cuda.Stream()
+            s = torch.Stream(device=device)
 
-            with torch.cuda.stream(s):
+            with torch.stream(s):
                 # emulate doing something long via sleep
                 per_ms = 2e7
-                torch.cuda._sleep(int(per_ms * 100))
+                getattr(torch, torch.device(device).type)._sleep(int(per_ms * 100))
                 if record_stream:
                     nt.record_stream(s)
             return data_ptrs
@@ -4721,7 +4732,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt, nt_data_ptrs = _create_nt()
         self.assertEqual(data_ptrs, nt_data_ptrs)
         del nt
-        torch.cuda.synchronize()
+        torch.synchronize(device)
 
         # expect memory to be preserved (no reuse) when record_stream() is run
         data_ptrs = fn(record_stream=True)
@@ -6206,7 +6217,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             )
 
         # error case: components on multiple devices
-        if "cuda" in device:
+        if device != "cpu":
             with self.assertRaisesRegex(
                 RuntimeError,
                 "When constructing a nested tensor, all tensors in list must be on the same device",
@@ -6246,7 +6257,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             )
 
     @dtypes(torch.double, torch.half)
-    @onlyCUDA
     def test_device_dtype_transfer_updates_offsets(self, device, dtype):
         for tensor_list in self._get_example_tensor_lists():
             orig_device = torch.device("cpu")
@@ -6554,15 +6564,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
             # only test changing dtype / device from CUDA -> CPU because CUDA might not be
             # available when running this test for CPU
-            change_dtype_device_settings = (
-                [False, True] if "cuda" in device else [False]
-            )
+            change_dtype_device_settings = [False, True] if device != "cpu" else [False]
             for change_dtype_device in change_dtype_device_settings:
                 if change_dtype_device:
                     new_dtype = (
                         torch.float64 if func is not torch.randint_like else torch.int64
                     )
-                    new_device = "cpu" if "cuda" in device else device
+                    new_device = "cpu"
                     new_layout = torch.strided
                     for extra_kwargs in extra_kwarg_sets:
                         extra_kwargs.update(
@@ -6725,20 +6733,21 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 [
                     sys.executable,
                     "-c",
-                    """\
+                    f"""\
 import torch
-offsets = torch.tensor([0, 2, 5, 7], device='cuda')
-lengths = torch.tensor([2, 2, 2], device='cuda')
+offsets = torch.tensor([0, 2, 5, 7], device='{device}')
+lengths = torch.tensor([2, 2, 2], device='{device}')
 indices = [
-    torch.tensor([0, 1, 2], device='cuda'),
-    torch.tensor([0, 2, 1], device='cuda'),
-    torch.tensor([0, 0, 0], device='cuda'),
+    torch.tensor([0, 1, 2], device='{device}'),
+    torch.tensor([0, 2, 1], device='{device}'),
+    torch.tensor([0, 0, 0], device='{device}'),
 ]
 a = torch.nested.nested_tensor_from_jagged(
-    torch.zeros(7, 3, device='cuda'), offsets, lengths
+    torch.zeros(7, 3, device='{device}'), offsets, lengths
 )
 a[indices] = 1.0
-torch.cuda.synchronize()
+if '{device}' != 'cpu':
+    getattr(torch, torch.device('{device}').type).synchronize()
 """,
                 ]
             )
@@ -7141,7 +7150,6 @@ torch.cuda.synchronize()
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @xfailIfWindows
-    @onlyCUDA
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
@@ -7267,7 +7275,6 @@ torch.cuda.synchronize()
         output_dense.sum().backward()
         torch._dynamo.disable(self.assertEqual)(query.grad, query_dense.grad)
 
-    @onlyCUDA
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Platform doesn't support flash or mem-efficient attention",
@@ -7327,7 +7334,6 @@ torch.cuda.synchronize()
     @decorateIf(xfailIfWindows, lambda params: params["dtype"] == torch.float32)
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @onlyCUDA
     # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
     @skipIfRocm
     @dtypes(
@@ -7359,7 +7365,6 @@ torch.cuda.synchronize()
         "Platform doesn't support flash or mem-efficient attention",
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @onlyCUDA
     # flash_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
     @skipIfRocm
     @skipIfTorchDynamo()
@@ -7383,7 +7388,7 @@ torch.cuda.synchronize()
         x32 = values32.clone()
         x16 = values16.clone()
 
-        with torch.autocast(device_type="cuda", dtype=torch.float16):
+        with torch.autocast(device_type=device, dtype=torch.float16):
             out_dense_eager = fn_dense(x32, x16)
             out_dense_compiled = torch.compile(fn_dense)(x32, x16)
             out_nt_eager = fn_nt(values32, values16, offsets)
@@ -7409,7 +7414,7 @@ torch.cuda.synchronize()
         v32_nt_eager, v16_nt_eager = get_values()
         v32_nt_compile, v16_nt_compile = get_values()
 
-        with torch.autocast(device_type="cuda", dtype=torch.float16):
+        with torch.autocast(device_type=device, dtype=torch.float16):
             loss_dense_eager = fn_dense(v32_dense_eager, v16_dense_eager).sum()
             loss_dense_compile = torch.compile(fn_dense)(
                 v32_dense_compile, v16_dense_compile
@@ -7443,7 +7448,6 @@ torch.cuda.synchronize()
         "Platform doesn't support flash or mem-efficient attention",
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @onlyCUDA
     @skipIfTorchDynamo()
     def test_sdpa_flop_counter(self, device):
         from torch.utils.flop_counter import FlopCounterMode
@@ -7671,7 +7675,6 @@ torch.cuda.synchronize()
         self.assertIsNone(nt.grad)
         self.assertIsNone(nt._values.grad_fn)
 
-    @onlyCUDA
     @dtypes(torch.float64, torch.float32, torch.half)
     @parametrize(
         "contiguity",
@@ -8144,7 +8147,7 @@ torch.cuda.synchronize()
         )
 
         # NB: Fusion isn't supported on CPU.
-        self.assertEqual("cuda" in device, not fallback_op_calls_present)
+        self.assertEqual(device != "cpu", not fallback_op_calls_present)
 
         for i in range(len(generated_code)):
             # Examine buffer construction lines in the generated code to determine
@@ -8153,7 +8156,7 @@ torch.cuda.synchronize()
             buffer_constructions = [
                 line.strip()
                 for line in generated_code[i].split("\n")
-                if "empty_strided_cuda(" in line
+                if f"empty_strided_{device}(" in line
             ]
 
             buffer_dims = [
@@ -8162,7 +8165,7 @@ torch.cuda.synchronize()
                 for t in buffer_constructions
             ]
 
-            if "cuda" in device:
+            if device != "cpu":
                 self.assertFalse(any(d == 3 for d in buffer_dims))
 
     @dtypes(torch.float32)
@@ -9335,10 +9338,10 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
 
 
 instantiate_parametrized_tests(TestNestedTensor)
-instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
-instantiate_device_type_tests(TestNestedTensorAutograd, globals())
-instantiate_device_type_tests(TestNestedTensorSubclass, globals())
-instantiate_device_type_tests(TestNestedTensorOpInfo, globals())
+instantiate_device_type_tests(TestNestedTensorDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestNestedTensorAutograd, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestNestedTensorSubclass, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestNestedTensorOpInfo, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
