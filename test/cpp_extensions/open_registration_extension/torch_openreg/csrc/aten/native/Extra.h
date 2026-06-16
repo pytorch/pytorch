@@ -75,4 +75,11 @@ at::Tensor& abs_out(const at::Tensor& self, at::Tensor& out);
 void abs_kernel(at::TensorIteratorBase& iter);
 at::Tensor custom_abs(at::Tensor x);
 
+at::Tensor quantized_copy_from(
+    const at::Tensor& self,
+    const at::Tensor& dst,
+    bool non_blocking);
+
+at::Tensor int_repr_quantized_openreg(const at::Tensor& self);
+
 } // namespace at::native::openreg

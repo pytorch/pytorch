@@ -5,6 +5,13 @@
 
 #include <torch/library.h>
 
+namespace at::native::openreg {
+at::Tensor quantized_copy_from(
+    const at::Tensor& self,
+    const at::Tensor& dst,
+    bool non_blocking);
+} // namespace at::native::openreg
+
 namespace at::openreg {
 
 namespace {
@@ -113,6 +120,20 @@ void wrapper_cpu_fallback(
 }
 // LITERALINCLUDE END: FALLBACK WRAPPER
 
+void wrapper_quantized_cpu_fallback(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack) {
+  at::native::cpu_fallback(
+      op, stack, /*error_on_views=*/false, c10::DispatchKey::QuantizedCPU);
+}
+
+at::Tensor wrapper_quantized_copy_from(
+    const at::Tensor& self,
+    const at::Tensor& dst,
+    bool non_blocking) {
+  return at::native::openreg::quantized_copy_from(self, dst, non_blocking);
+}
+
 } // namespace
 
 // LITERALINCLUDE START: TORCH_LIBRARY_IMPL DEFAULT
@@ -137,12 +158,30 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
 }
 // LITERALINCLUDE END: TORCH_LIBRARY_IMPL DEFAULT
 
+TORCH_LIBRARY_IMPL(aten, QuantizedPrivateUse1, m) {
+  m.impl("as_strided", wrapper_as_strided);
+  m.impl("_reshape_alias", wrapper__reshape_alias);
+  m.impl("_copy_from", wrapper_quantized_copy_from);
+  m.impl("view", wrapper_view);
+  m.impl("resize_", wrapper_resize_);
+  m.impl("set_.source_Tensor", wrapper_set_source_Tensor_);
+  m.impl("set_.source_Storage", wrapper_set_source_Storage_);
+  m.impl(
+      "set_.source_Storage_storage_offset",
+      wrapper_set_source_Storage_storage_offsetset_);
+}
+
 // LITERALINCLUDE START: FALLBACK GLOBAL
 TORCH_LIBRARY_IMPL(_, PrivateUse1, m) {
   m.fallback(
       torch::CppFunction::makeFromBoxedFunction<&wrapper_cpu_fallback>());
 }
 // LITERALINCLUDE END: FALLBACK GLOBAL
+
+TORCH_LIBRARY_IMPL(_, QuantizedPrivateUse1, m) {
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<
+             &wrapper_quantized_cpu_fallback>());
+}
 
 // LITERALINCLUDE START: FALLBACK SINGLE
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {

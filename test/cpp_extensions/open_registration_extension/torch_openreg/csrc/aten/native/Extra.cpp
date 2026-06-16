@@ -224,4 +224,29 @@ at::Tensor custom_abs(at::Tensor x) {
   return at::abs(x);
 }
 
+at::Tensor quantized_copy_from(
+    const at::Tensor& self,
+    const at::Tensor& dst,
+    bool non_blocking) {
+  MemoryGuard guard(self, dst);
+  auto nbytes = self.nbytes();
+  if (nbytes > 0) {
+    std::memcpy(dst.data_ptr(), self.data_ptr(), nbytes);
+  }
+  return dst;
+}
+
+at::Tensor int_repr_quantized_openreg(const at::Tensor& self) {
+  auto dst = at::empty(
+      self.sizes(),
+      self.options().dtype(c10::toUnderlying(self.scalar_type())),
+      self.suggest_memory_format());
+  MemoryGuard guard(self, dst);
+  auto nbytes = self.nbytes();
+  if (nbytes > 0) {
+    std::memcpy(dst.data_ptr(), self.data_ptr(), nbytes);
+  }
+  return dst;
+}
+
 } // namespace at::native::openreg

@@ -2,8 +2,11 @@
 
 #include <ATen/native/CPUFallback.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/ops/_empty_affine_quantized_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor_native.h>
 #include <ATen/ops/dequantize_native.h>
+#include <ATen/ops/q_scale_native.h>
+#include <ATen/ops/q_zero_point_native.h>
 
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/library.h>
@@ -206,6 +209,10 @@ TORCH_LIBRARY_FRAGMENT(openreg, m) {
 
 TORCH_LIBRARY_IMPL(aten, QuantizedPrivateUse1, m) {
   m.impl("dequantize.self", at::native::dequantize_quantized);
+  m.impl("_empty_affine_quantized", at::native::empty_affine_quantized);
+  m.impl("q_scale", at::native::q_scale_quant);
+  m.impl("q_zero_point", at::native::q_zero_point_quant);
+  m.impl("int_repr", at::native::openreg::int_repr_quantized_openreg);
 }
 
 TORCH_LIBRARY_IMPL(openreg, AutogradPrivateUse1, m) {
