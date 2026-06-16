@@ -4412,7 +4412,7 @@ def _registered_extension_types():
 
 
 # Registry to store all custom serialization implementations.
-# The registry maps a operation to its serialization function (a callable), in their own
+# The registry maps an operation to its serialization function (a callable), in their own
 # namespace to avoid conflicts.
 # Serialization: Op type --> custom handler.
 # De-serialization: Namespace --> custom handler.

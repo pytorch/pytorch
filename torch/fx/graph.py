@@ -2474,7 +2474,7 @@ class Graph:
         # When generating Python code, we need to make sure to name things
         # appropriately. In particular:
         # - All names should be unique, to avoid weird shadowing bugs.
-        # - These names need to be consistent, e.g. a object should always be
+        # - These names need to be consistent, e.g. an object should always be
         #   referenced by the same name.
         #
         # To do this, we create a new namespace just for this source. All names

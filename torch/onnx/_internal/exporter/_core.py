@@ -271,7 +271,7 @@ def _set_shape_type(
 
         value.shape = ir.Shape(dims)
     elif isinstance(meta_val, (int, torch.SymInt)):
-        # aten::sym_size output is a int, not a tensor, which stands
+        # aten::sym_size output is an int, not a tensor, which stands
         # for the size of one dim. We treat it as a scalar.
         value.dtype = ir.DataType.INT64
         value.shape = ir.Shape([])
