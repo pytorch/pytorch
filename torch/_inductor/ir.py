@@ -8410,7 +8410,6 @@ class UserDefinedTritonKernel(ExternKernel):
             reset_to_zero_args,
             self.grid,
             epilogue_fusion,
-            self.launch_kwargs,
         )
         named_args = {
             k: self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
@@ -8497,7 +8496,6 @@ class UserDefinedTritonKernel(ExternKernel):
         grid: Any,
         tma_descriptor_metadata: dict[str, Any],
         kernel_args: dict[str, Any],
-        launch_kwargs: tuple[str, ...],
     ) -> None:
         inputs: list[IRNode] = []
         kwargs: dict[str, IRNode] = {}
@@ -8529,7 +8527,6 @@ class UserDefinedTritonKernel(ExternKernel):
         )
         self.kernel_idx = kernel_idx
         self.grid = grid
-        self.launch_kwargs = launch_kwargs
 
         kernel, configs, _, _ = self.get_kernel_and_metadata()
 
