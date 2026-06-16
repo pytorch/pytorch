@@ -41,6 +41,17 @@ from .utils import strict_zip
 zip = strict_zip
 
 
+def _maybe_suppress_shape_guards() -> contextlib.AbstractContextManager[None]:
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is not None:
+        if tracing_context.fake_mode is None:
+            raise AssertionError("tracing_context.fake_mode must not be None")
+        shape_env = tracing_context.fake_mode.shape_env
+        if shape_env is not None:
+            return shape_env.suppress_guards()
+    return contextlib.nullcontext()
+
+
 def remove_dupe_metadata(
     m: ViewAndMutationMeta,
     keep_arg_mask: list[bool],
@@ -436,10 +447,11 @@ def _storage_overlap_partition(
             if root_i != root_j:
                 parents[root_j] = root_i
 
-        for pos, i in enumerate(indices):
-            for j in indices[pos + 1 :]:
-                if _storage_overlaps(tensors[i], tensors[j]):
-                    union(i, j)
+        with _maybe_suppress_shape_guards():
+            for pos, i in enumerate(indices):
+                for j in indices[pos + 1 :]:
+                    if _storage_overlaps(tensors[i], tensors[j]):
+                        union(i, j)
 
         components: dict[int, list[int]] = {}
         for i in indices:
@@ -480,9 +492,7 @@ def add_input_mutation_storage_overlap_partition_guard(
     if len(tensor_indices) <= 1:
         return
 
-    mutated_tensor_indices = [
-        i for i in tensor_indices if input_info[i].mutates_data
-    ]
+    mutated_tensor_indices = [i for i in tensor_indices if input_info[i].mutates_data]
     if not mutated_tensor_indices:
         return
 
