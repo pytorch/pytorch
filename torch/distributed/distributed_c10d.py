@@ -144,6 +144,7 @@ __all__ = [
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
+_NCCL2_AVAILABLE = True
 _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
 _XCCL_AVAILABLE = True
@@ -219,6 +220,14 @@ try:
     __all__ += ["ProcessGroupNCCL"]
 except ImportError:
     _NCCL_AVAILABLE = False
+
+try:
+    from torch._C._distributed_c10d import ProcessGroupNCCL2
+
+    ProcessGroupNCCL2.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupNCCL2"]
+except ImportError:
+    _NCCL2_AVAILABLE = False
 
 try:
     from torch._C._distributed_c10d import _ProcessGroupWrapper, ProcessGroupGloo
@@ -408,6 +417,35 @@ class Backend(str):  # noqa: SLOT000
             Backend.backend_capability[name.lower()] = devices
 
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
+
+
+if _NCCL_AVAILABLE and _NCCL2_AVAILABLE:
+
+    def _create_nccl2_backend(
+        dist_backend_opts: _DistributedBackendOptions, pg_options=None
+    ):
+        if pg_options is None:
+            pg_options = ProcessGroupNCCL.Options()
+        elif not isinstance(pg_options, ProcessGroupNCCL.Options):
+            raise AssertionError(
+                "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
+            )
+
+        pg_options._timeout = dist_backend_opts.timeout
+        pg_options.group_name = GroupName(dist_backend_opts.group_id)
+        pg_options.global_ranks_in_group = dist_backend_opts.global_ranks_in_group
+        backend = ProcessGroupNCCL2(
+            dist_backend_opts.store,
+            dist_backend_opts.group_rank,
+            dist_backend_opts.group_size,
+            pg_options,
+        )
+        backend._set_sequence_number_for_group()
+        return backend
+
+    Backend.register_backend(
+        "nccl2", _create_nccl2_backend, extended_api=True, devices=["cuda"]
+    )
 
 
 class BackendConfig:

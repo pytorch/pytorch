@@ -844,6 +844,18 @@ class ProcessGroupNCCL(Backend):
     @staticmethod
     def get_runtime_nccl_version(self) -> tuple[int, int, int]: ...
 
+class ProcessGroupNCCL2(Backend):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: ProcessGroupNCCL.Options,
+    ) -> None: ...
+    def comm_split_count(self) -> int: ...
+    @property
+    def options(self) -> ProcessGroupNCCL.Options: ...  # type: ignore[override]
+
 class ProcessGroupUCC(Backend):
     def __init__(
         self,

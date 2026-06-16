@@ -34,6 +34,7 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl/NCCLXStub.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL2.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #endif
@@ -4366,6 +4367,27 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           py::arg("rank"),
           py::arg("size"),
           py::arg("options") = ::c10d::ProcessGroupNCCL::Options::create());
+
+  intrusive_ptr_class_<::c10d::ProcessGroupNCCL2>(
+      module, "ProcessGroupNCCL2", backend)
+      .def(
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size,
+                      c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>
+                          options) {
+            return c10::make_intrusive<::c10d::ProcessGroupNCCL2>(
+                store, rank, size, std::move(options));
+          }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("options") = ::c10d::ProcessGroupNCCL::Options::create())
+      .def_property_readonly(
+          "options",
+          &::c10d::ProcessGroupNCCL2::getOptions,
+          R"(Return the options used to create this ProcessGroupNCCL2 instance.)")
+      .def("comm_split_count", &::c10d::ProcessGroupNCCL2::getCommSplitCounter);
 #endif
 
   auto pythonCallbackWork =
