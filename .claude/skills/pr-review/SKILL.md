@@ -124,6 +124,7 @@ A single line of code can have deep cross-cutting implications: a missing device
 7. **Match the immediate context** — Read how similar features are already implemented in the same file. Pattern mismatches within a file are always wrong.
 8. **Assume competence** — The author knows PyTorch; explain only non-obvious context.
 9. **No repetition** — Each observation appears in exactly one section of the review output.
+10. **Keep device portability** — Most code is shared across accelerators (CUDA, XPU, ROCm, MPS). Report CUDA-specific code (`torch.cuda.*`, `device="cuda"`, `CUDACodeCache`, hardcoded `cuda` in expected-string assertions, CUDA-only test gating) on device-agnostic paths unless it is behind an explicit device guard.
 
 ### Using sub-agents
 
