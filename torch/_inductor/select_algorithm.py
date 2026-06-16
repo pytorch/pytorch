@@ -1140,20 +1140,37 @@ class TritonTemplateKernel(TritonKernel):
             dim_order = list(range(ndim))
 
         if self.meta.get("HOST_SIDE_TMA", False):
-            arg_name = self.args.input_buffers.get(node.get_name(), input_name)
-            # Resolve dim_order to concrete shape/strides from the IR node at
-            # codegen time (same as the device-side path below); the launcher
-            # builds the descriptor over absolute dims and never re-derives
-            # layout from the runtime tensor. dim_order is not serialized.
-            desc: dict[str, Any] = {
-                "block_shape": [int(b) for b in block_shape],
-                "shape": [self.size(input_name, d) for d in dim_order],
-                "strides": [self.stride(input_name, d) for d in dim_order],
-            }
-            self.host_tma_descriptor_args[arg_name] = desc
-            return f"{desc_name} = {input_name}"
+            buf_name = node.get_name()
+            if input_name is not None:
+                arg_name = self.args.input_buffers.get(buf_name, input_name)
+                # Resolve dim_order to concrete shape/strides from the IR node at
+                # codegen time (same as the device-side path below); the launcher
+                # builds the descriptor over absolute dims and never re-derives
+                # layout from the runtime tensor. dim_order is not serialized.
+                desc: dict[str, Any] = {
+                    "block_shape": [int(b) for b in block_shape],
+                    "shape": [self.size(input_name, d) for d in dim_order],
+                    "strides": [self.stride(input_name, d) for d in dim_order],
+                }
+                self.host_tma_descriptor_args[arg_name] = desc
+                return f"{desc_name} = {input_name}"
+            elif self.tma_store:
+                # Output descriptor: only register when TMA store is enabled,
+                # otherwise store_output uses pointer-based tl.store. Output is
+                # natural-order; the launcher infers shape/strides via
+                # from_tensor (dim_order is not serialized to the launcher).
+                arg_name = self.args.output_buffers.get(buf_name, "out_ptr0")
+                out_desc: dict[str, Any] = {
+                    "block_shape": [int(b) for b in block_shape],
+                }
+                self.host_tma_descriptor_args[arg_name] = out_desc
+            return ""
 
-        base_name = input_name if input_name is not None else "output"
+        if input_name is None:
+            # Device-side output: store_output handles its own descriptor
+            return ""
+
+        base_name = input_name
         stride_exprs = ", ".join(self.stride(input_name, d) for d in dim_order)
         size_exprs = ", ".join(self.size(input_name, d) for d in dim_order)
         block_str = ", ".join(str(b) for b in block_shape)

@@ -19,6 +19,9 @@
         [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
         [0, 1] if B_ROW_MAJOR else [1, 0]
     )}}
+    {{tma_descriptor("out_desc", None,
+        [BLOCK_M, BLOCK_N // EPILOGUE_SUBTILE]
+    )}}
 
     # tile_id_c is used in the epilogue to break the dependency between
     # the prologue and the epilogue

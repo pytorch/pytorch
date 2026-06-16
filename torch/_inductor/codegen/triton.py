@@ -4114,6 +4114,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and self.range_trees[-1].is_loop
             and indexing.has_rindex()
         ) or indexing.can_lift:
+            # Host-side TMA: if the buffer is already registered for host-side
+            # descriptor creation, use it directly instead of creating a
+            # device-side descriptor.
+            if (
+                indexing.can_lift
+                and var in self.host_tma_descriptor_args
+                and isinstance(indexing, TensorDescriptorOptions)
+            ):
+                return var, other
+
             if indexing.can_lift and var in self.prologue_cache:
                 # Check for epilogue subtiling to reuse the same
                 # tensor descriptor.
