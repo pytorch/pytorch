@@ -2225,10 +2225,12 @@ test_operator_microbenchmark() {
     #_log_opbench_rocm_scaled_mm_debug "$op"
     $TASKSET python -m "pt.${op}_test" --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}_compile${suffix}.json" \
-      --benchmark-name "PyTorch operator microbenchmark" --use-compile
+      --benchmark-name "PyTorch operator microbenchmark" --use-compile \
+      2>"${TEST_REPORTS_DIR}/operator_microbenchmark_${op}_compile${suffix}.stderr.log"
     $TASKSET python -m "pt.${op}_test" --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}${suffix}.json" \
-      --benchmark-name "PyTorch operator microbenchmark"
+      --benchmark-name "PyTorch operator microbenchmark" \
+      2>"${TEST_REPORTS_DIR}/operator_microbenchmark_${op}${suffix}.stderr.log"
   done
 }
 
