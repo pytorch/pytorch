@@ -574,7 +574,7 @@ class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
         self.assertTrue(t.is_shared())
 
 
-instantiate_device_type_tests(TestMultiprocessingDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestMultiprocessingDeviceType, globals())
 
 
 @unittest.skipIf(

@@ -1007,7 +1007,7 @@ def track_tensor_tree(
             set_meta(proxy, e)
             e.proxy = proxy
         else:
-            # intentionally pass on primitives
+            # intentionally pass on unsupported primitives
             pass
 
     wrap_with_proxy(inner_res, proxy_res, constant)
@@ -1751,6 +1751,14 @@ def wrap_key(
             if not isinstance(m, ProxyTorchDispatchMode):
                 raise AssertionError(f"Expected ProxyTorchDispatchMode, got {type(m)}")
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
+            # `wrap_key` is the make_fx input-placeholder path. Keep scalar
+            # metadata here instead of teaching recursive output tracking to
+            # treat arbitrary primitive leaves as proxy-trackable values.
+            for input_value, proxy in zip(flat_tensors, flat_proxies):
+                if isinstance(input_value, (int, float, bool)) and isinstance(
+                    proxy, fx.Proxy
+                ):
+                    set_meta(proxy, input_value)
 
         if getattr(tracer, "proxy_module_inputs", False):
             tensors = [  # type: ignore[assignment, var-annotated]
@@ -2169,6 +2177,11 @@ class DecompositionInterpreter(fx.Interpreter):
         out = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         proxy = fx.Proxy(self.new_graph.placeholder(target), self.tracer)
         track_tensor_tree(out, proxy, constant=None, tracer=self.tracer)
+        # Primitive scalar placeholders are real graph inputs. Record their
+        # value on the placeholder itself without making recursive output
+        # tracking treat all primitive leaves as proxy-trackable values.
+        if isinstance(out, (int, float, bool)):
+            set_meta(proxy, out)
         # TODO handle case where the first character of target is '*'
         return out
 
@@ -3179,6 +3192,39 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     )
     if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
-            if not isinstance(out_proxy, Proxy):
-                raise AssertionError(f"Expected Proxy, got {out_proxy}")
-            out_proxy.node.meta["unbacked_bindings"] = symbol_to_path
+            # `symbol_to_path` is keyed by the fresh unbacked symbol; each path
+            # is relative to the *whole* output pytree (`out`). Route each
+            # binding to the proxy that owns it. If `out_proxy` is already a
+            # Proxy, it owns the whole output and keeps the original path.
+            bindings_by_proxy: dict[Proxy, dict[sympy.Symbol, pytree.KeyPath]] = {}
+            for symbol, path in symbol_to_path.items():
+                proxy: _NestedProxys = out_proxy
+                local_path = path
+                # `out` and `out_proxy` are structurally congruent, so the
+                # leading container keys index identically into both. Consume
+                # them off `out_proxy` until we reach the owning Proxy leaf; the
+                # remaining suffix (e.g. `.size()[0]`, or an InnerTensorKey for
+                # a wrapper subclass) is the tensor-local accessor that the
+                # per-node consumer resolves against that node's own value.
+                while not isinstance(proxy, Proxy) and local_path:
+                    try:
+                        proxy = local_path[0].get(proxy)
+                    except (IndexError, KeyError, AttributeError) as e:
+                        raise AssertionError(
+                            f"unbacked_bindings path {pytree.keystr(path)} does "
+                            f"not index into the proxy pytree {out_proxy}"
+                        ) from e
+                    local_path = local_path[1:]
+
+                if not isinstance(proxy, Proxy):
+                    raise AssertionError(
+                        f"Expected Proxy at binding path {pytree.keystr(path)}, "
+                        f"got {type(proxy)}"
+                    )
+
+                bindings_by_proxy.setdefault(proxy, {})[symbol] = local_path
+
+            # Merge rather than overwrite: multiple symbols (e.g. two unbacked
+            # dims on one tensor) can route to the same node.
+            for proxy, bindings in bindings_by_proxy.items():
+                proxy.node.meta.setdefault("unbacked_bindings", {}).update(bindings)
