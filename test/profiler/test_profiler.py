@@ -2738,7 +2738,11 @@ class TestProfiler(TestCase):
     def test_profiler_time_scale(self):
         MARGIN_ERROR = 0.5
         SEC_TO_US = 1000 * 1000
-        WAIT_TIME = 10
+        # IMPORTANT: For reasons that are not yet understood, having a long idle
+        # profiling window will make later CUPTI activity records (in other tests)
+        # arrive with invalid timestamps, causing them to be dropped as out-of-range.
+        # Empirically, WAIT_TIME should be kept <= 6.
+        WAIT_TIME = 5
         with profile() as p:
             with torch.profiler.record_function("test_span"):
                 for _ in range(WAIT_TIME):
