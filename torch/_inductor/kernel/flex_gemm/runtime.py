@@ -11,6 +11,10 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 
 GemmConfigKey: TypeAlias = tuple[tuple[str, Any], ...]
 
+# swap_ab transposes the dispatched GEMM, so a row broadcast becomes a col
+# broadcast (and vice versa) while tile broadcasts only transpose their data.
+_SWAPPED_ARG_KIND = {"row": "col", "col": "row", "tile": "tile"}
+
 
 def inductor_quack_cache_dir() -> str:
     """Return the Inductor-owned QuACK cache root for generated FlexGEMM."""
@@ -137,15 +141,34 @@ def dispatch_gemm_act(
     config,
     device_capacity_override: tuple[int, int] | None = None,
 ) -> None:
-    """Dispatch one dense FlexGEMM call to the vendored QuACK GEMM kernel."""
+    """Dispatch one dense FlexGEMM call to the vendored QuACK GEMM kernel.
+
+    ``config.swap_ab`` dispatches the transposed problem (only the tile schedule
+    changes, not numerics): it swaps the A/B operands, writes through transposed
+    ``out``/``C`` views, and swaps the row/col broadcast roles of captured aux
+    tensors so each still aligns with the transposed accumulator.
+    """
     from torch._vendor.quack.gemm_act import gemm_act as gemm_act_dispatch
 
+    # QuACK consumes A as (l, m, k) and B as (l, n, k); b is (k, n) so b.mT is (n, k).
+    quack_a, quack_b = a, b.mT
+    quack_out, quack_c = out, C
+    if config.swap_ab:
+        quack_a, quack_b = quack_b, quack_a
+        quack_out = out.mT
+        quack_c = None if C is None else C.mT
+        row_args, col_args = col_args, row_args
+        tile_args = tuple(tile.mT for tile in tile_args)
+        epilogue_arg_kinds = tuple(
+            _SWAPPED_ARG_KIND[kind] for kind in epilogue_arg_kinds
+        )
+
     gemm_act_dispatch(
-        a.unsqueeze(0),
-        b.mT.unsqueeze(0),
+        quack_a.unsqueeze(0),
+        quack_b.unsqueeze(0),
         None,  # D
-        None if C is None else C.unsqueeze(0),
-        out.unsqueeze(0),
+        None if quack_c is None else quack_c.unsqueeze(0),
+        quack_out.unsqueeze(0),
         None,  # tile_count_semaphore
         None,  # cu_seqlens_m
         config.tile_m,

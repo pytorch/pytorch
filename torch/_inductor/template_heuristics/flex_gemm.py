@@ -140,10 +140,7 @@ def candidate_gemm_configs_for_device(device: torch.device):
         (
             config
             for config in quack_gemm_config.get_all_configs()
-            if config.device_capacity == device_capacity
-            and not config.swap_ab
-            and config.cluster_k == 1
-            and not config.use_tma_gather
+            if config.device_capacity == device_capacity and not config.use_tma_gather
         ),
         key=lambda config: (
             priority_map.get(gemm_config_key(config), len(priority_map)),
