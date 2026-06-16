@@ -426,14 +426,6 @@ check whether the process group has already been initialized use {func}`torch.di
 .. autofunction:: get_pg_count
 ```
 
-Each process group is created with a timeout (see the `timeout` argument to
-{func}`init_process_group` and {func}`new_group`) that bounds how long collectives
-wait before failing. {func}`set_timeout` changes this timeout at runtime for an
-already-initialized group, applying the new value to all of the group's backends.
-This is useful, for example, to temporarily extend the timeout around an operation
-that is expected to be slow, or to shorten it to fail fast. The NCCL and Gloo
-backends support this; backends such as MPI and UCC do not and will raise.
-
 ```{eval-rst}
 .. autofunction:: set_timeout
 ```
