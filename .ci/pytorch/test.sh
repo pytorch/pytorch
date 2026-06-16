@@ -1151,6 +1151,74 @@ test_dynamo_benchmark() {
   fi
 }
 
+
+test_inductor_nhwc_confirm() {
+  # gfx950 (MI350) confirmation: does channels_last + MIOpen NHWC remove the bf16
+  # conv transpose tax and speed up conv models? Each model is run baseline (NCHW)
+  # vs fix (channels_last + PYTORCH_MIOPEN_SUGGEST_NHWC=1), for inference and
+  # training. demucs is a negative control (memory-bound; expect ~no change).
+  local tb_models="vgg16 resnet50 mobilenet_v2 dcgan demucs"
+  local timm_list="inception_v3"
+  local out
+  out="$(pwd)/test/test-reports"
+  mkdir -p "$out"
+
+  run_one() {  # gate suite model tag extra-flags...
+    local gate="$1"; local suite="$2"; local model="$3"; local tag="$4"; shift 4
+    PYTORCH_MIOPEN_SUGGEST_NHWC="$gate" python "benchmarks/dynamo/${suite}.py" \
+      --device cuda --performance --inductor --only "$model" "$@" \
+      --output "$out/nhwc_${tag}_${suite}_${model}.csv" || true
+  }
+
+  for m in $tb_models; do
+    run_one 0 torchbench "$m" inf_base   --inference --bfloat16
+    run_one 1 torchbench "$m" inf_fix    --inference --bfloat16 --channels-last
+    run_one 0 torchbench "$m" train_base --training  --amp
+    run_one 1 torchbench "$m" train_fix  --training  --amp --channels-last
+  done
+  for m in $timm_list; do
+    run_one 0 timm_models "$m" inf_base   --inference --bfloat16
+    run_one 1 timm_models "$m" inf_fix    --inference --bfloat16 --channels-last
+    run_one 0 timm_models "$m" train_base --training  --amp
+    run_one 1 timm_models "$m" train_fix  --training  --amp --channels-last
+  done
+
+  echo "=== NHWC confirm: baseline vs fix (channels_last + MIOpen NHWC) ==="
+  ls -la "$out"/nhwc_*.csv || true
+  python3 - "$out" <<'PYEOF'
+import csv, glob, os, sys
+d = sys.argv[1]
+def read(f):
+    try:
+        r = list(csv.DictReader(open(f)))
+        if not r: return None
+        row = r[0]
+        return float(row.get("speedup", "nan")), float(row.get("abs_latency", "nan"))
+    except Exception:
+        return None
+data = {}
+for f in glob.glob(os.path.join(d, "nhwc_*.csv")):
+    b = os.path.basename(f)[:-4]          # nhwc_<mode>_<base|fix>_<suite>_<model>
+    parts = b.split("_")
+    mode, bf = parts[1], parts[2]
+    key = b.split("_%s_" % bf, 1)[1]      # suite_model
+    data.setdefault((mode, key), {})[bf] = read(f)
+hdr = "%-6s %-26s %9s %9s %9s %9s %9s %9s" % (
+    "mode", "model", "base_spd", "fix_spd", "spd_gain", "base_lat", "fix_lat", "lat_gain")
+print(hdr); print("-" * len(hdr))
+for (mode, key) in sorted(data):
+    bb = data[(mode, key)].get("base"); ff = data[(mode, key)].get("fix")
+    if not bb or not ff:
+        print("%-6s %-26s (missing base or fix)" % (mode, key)); continue
+    bs, bl = bb; fs, fl = ff
+    sg = fs / bs if bs else float("nan")
+    lg = bl / fl if fl else float("nan")
+    print("%-6s %-26s %9.3f %9.3f %8.2fx %9.2f %9.2f %8.2fx" % (mode, key, bs, fs, sg, bl, fl, lg))
+print()
+print("spd_gain = fix_speedup/base_speedup (>1 = fix gives more inductor speedup over eager)")
+print("lat_gain = base_lat/fix_lat (>1 = fix is faster). demucs is the control: expect ~1.0")
+PYEOF
+}
 test_inductor_torchbench_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -2243,6 +2311,12 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
   test_operator_microbenchmark
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
+elif [[ "${TEST_CONFIG}" == *nhwc_confirm* ]]; then
+  install_torchvision
+  install_torchaudio
+  setup_torch_trace
+  PYTHONPATH=/torchbench test_inductor_nhwc_confirm
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   install_torchcomms
   setup_torch_trace
