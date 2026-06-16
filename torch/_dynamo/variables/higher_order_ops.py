@@ -2399,8 +2399,13 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from . import ListVariable
 
-        self.supports_input_mutation = not torch.is_grad_enabled()
-        self.supports_aliasing = not torch.is_grad_enabled()
+        # torch.export may run with grad mode enabled while still needing the
+        # inference-style cond mutation/aliasing checks.
+        allow_inference_patterns = (
+            not torch.is_grad_enabled() or torch.compiler.is_exporting()
+        )
+        self.supports_input_mutation = allow_inference_patterns
+        self.supports_aliasing = allow_inference_patterns
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
