@@ -30,7 +30,6 @@ from torch.types import (
     _size,
     Device,
     Number,
-    PySymType,
 )
 
 ${all_directive}
