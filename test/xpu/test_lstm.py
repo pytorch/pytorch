@@ -2,12 +2,12 @@
 
 import torch
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    dtypesIfXPU,
     dtypes,
+    dtypesIfXPU,
+    instantiate_device_type_tests,
 )
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import run_tests, parametrize
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestLstmXpu(NNTestCase):
@@ -25,10 +25,17 @@ class TestLstmXpu(NNTestCase):
         seq_len = 10
         num_directions = 2 if bidirectional else 1
 
-        lstm = torch.nn.LSTM(
-            input_size, hidden_size, num_layers=num_layers,
-            bidirectional=bidirectional, batch_first=batch_first,
-        ).to(device, dtype).eval()
+        lstm = (
+            torch.nn.LSTM(
+                input_size,
+                hidden_size,
+                num_layers=num_layers,
+                bidirectional=bidirectional,
+                batch_first=batch_first,
+            )
+            .to(device, dtype)
+            .eval()
+        )
 
         if batch_first:
             x = torch.randn(batch, seq_len, input_size, device=device, dtype=dtype)
@@ -36,12 +43,18 @@ class TestLstmXpu(NNTestCase):
             x = torch.randn(seq_len, batch, input_size, device=device, dtype=dtype)
 
         h0 = torch.randn(
-            num_layers * num_directions, batch, hidden_size,
-            device=device, dtype=dtype,
+            num_layers * num_directions,
+            batch,
+            hidden_size,
+            device=device,
+            dtype=dtype,
         )
         c0 = torch.randn(
-            num_layers * num_directions, batch, hidden_size,
-            device=device, dtype=dtype,
+            num_layers * num_directions,
+            batch,
+            hidden_size,
+            device=device,
+            dtype=dtype,
         )
 
         with torch.no_grad():
@@ -106,11 +119,7 @@ class TestLstmXpu(NNTestCase):
             torch.use_deterministic_algorithms(False)
 
 
-
-
-instantiate_device_type_tests(
-    TestLstmXpu, globals(), only_for="xpu", allow_xpu=True
-)
+instantiate_device_type_tests(TestLstmXpu, globals(), only_for="xpu", allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
