@@ -88,7 +88,6 @@ class _DeconstructedSymType:
 
     @staticmethod
     def from_sym_type(value: PySymType) -> _DeconstructedSymType:
-        # pyrefly: ignore [bad-argument-type]
         return _DeconstructedSymType(type(value), value.node)
 
     def extract(self, shape_env: ShapeEnv) -> PySymType:
@@ -166,9 +165,8 @@ class _PySymInputStub:
         elif isinstance(self.value, _InputBackref) or isinstance(
             other.value, _InputBackref
         ):
-            return self.value == other.value  # type: ignore[bad-return]
+            return self.value == other.value
         else:
-            # pyrefly: ignore [bad-argument-type]
             return self.value.node._value_eq(other.value.node)
 
     def __hash__(self) -> int:
