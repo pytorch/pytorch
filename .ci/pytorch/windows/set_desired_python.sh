@@ -112,4 +112,11 @@ fi
 # it to PATH preemptively is harmless and matches the legacy ordering in
 # setup_build.bat.
 export PATH="$PYDIR/Lib/site-packages/cmake/data/bin:$PYDIR/Scripts:$PYDIR:$PATH"
-echo "DESIRED_PYTHON=$DESIRED_PYTHON installed at $PYDIR"
+
+# Hand the chosen interpreter to the build wrapper. A free-threaded install
+# ships both python.exe and python3.14t.exe under $PYDIR, so a bare `python`
+# resolves to the regular one and would build a cp314 (not cp314t) wheel that
+# the free-threaded test job rejects. Downstream build steps must use this exe
+# so the wheel's ABI tag matches DESIRED_PYTHON.
+export DESIRED_PYTHON_EXE="$PYDIR/$PYTHON_EXE_NAME"
+echo "DESIRED_PYTHON=$DESIRED_PYTHON installed at $PYDIR (exe: $DESIRED_PYTHON_EXE)"
