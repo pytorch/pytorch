@@ -314,6 +314,8 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             options = kwargs.get("options", {})
             captured_options.append(options)
 
+            if kwargs.get("donate_graph_module") is not True:
+                raise AssertionError("regional_inductor should donate submodule GMs")
             # Verify config is set as expected from explicit options
             if not inductor_config.max_autotune:
                 raise AssertionError("max_autotune should be True")
