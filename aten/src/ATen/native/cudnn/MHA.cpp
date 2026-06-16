@@ -3,11 +3,15 @@
 #include <ATen/cuda/CUDAConfig.h>
 
 #if AT_CUDNN_ENABLED()
-#include <cudnn_frontend.h>
+#include <ATen/cudnn/cudnn-wrapper.h>
+#if defined(__has_include) && __has_include(<cudnn_frontend_version.h>)
+#include <cudnn_frontend_version.h>
+#endif
 #endif
 
-#if defined(USE_ROCM) || !AT_CUDNN_ENABLED() ||         \
-    (defined(CUDNN_VERSION) && CUDNN_VERSION < 8900) || \
+#if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || !defined(CUDNN_VERSION) || \
+    (defined(CUDNN_VERSION) && CUDNN_VERSION < 8900) ||                    \
+    !defined(CUDNN_FRONTEND_VERSION) ||                                    \
     (defined(CUDNN_FRONTEND_VERSION) && CUDNN_FRONTEND_VERSION < 10100)
 namespace at {
 namespace native {
@@ -122,7 +126,10 @@ void run_cudnn_SDP_bprop_nestedtensor(
 } // namespace native
 } // namespace at
 
-#else // AT_CUDNN_ENABLED && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8900
+#else // AT_CUDNN_ENABLED && CUDNN_VERSION >= 8900 && CUDNN_FRONTEND_VERSION >=
+      // 10100
+#include <cudnn_frontend.h>
+
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
