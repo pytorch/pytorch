@@ -486,6 +486,51 @@ supported:
             output_error,
         )
 
+    # Codegen-outcome matrix for out-as-primary across op classes: which registration generates
+    # vs raises. Runtime dtype correctness (whether the generated code produces the right dtype) is
+    # out of scope here -- it needs the compile+run coverage tracked by the torch_openreg_test_only
+    # TODO; this only proves the structural skeleton.
+    def test_out_as_primary_codegen_matrix(self) -> None:
+        head = "backend: PrivateUse1\ncpp_namespace: at::priv1::native\n"
+        oap = "use_out_as_primary: true\n"
+
+        def generates(yaml_str: str) -> None:
+            _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
+            self.assert_success_from_gen_backend_stubs(yaml_str)
+
+        def raises(yaml_str: str, needle: str) -> None:
+            _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
+            self.assertIn(needle, self.get_errors_from_gen_backend_stubs(yaml_str))
+
+        # (out_name, functional_name, natively_structured, multi_output)
+        cases = [
+            ("div.out", "div.Tensor", True, False),
+            ("isin.Tensor_Tensor_out", "isin.Tensor_Tensor", True, False),
+            ("bucketize.Tensor_out", "bucketize.Tensor", False, False),
+            ("sort.values_stable", "sort.stable", True, True),
+            ("_ctc_loss.out", "_ctc_loss", False, True),
+        ]
+        for out, func, structured, multi in cases:
+            with self.subTest(op=out):
+                # Default external (functional primary) and use_out_as_primary + functional
+                # registered both always generate.
+                generates(f"{head}supported:\n- {func}")
+                generates(f"{head}{oap}supported:\n- {func}\n- {out}")
+                # use_out_as_primary + structured: true generates iff the op is natively structured.
+                structured_yaml = (
+                    f"{head}{oap}supported:\n- {out}:\n    structured: true"
+                )
+                if structured:
+                    generates(structured_yaml)
+                else:
+                    raises(structured_yaml, "is not defined as a structured operator")
+                # use_out_as_primary with only the out (naive derive) generates iff single-output.
+                naive_yaml = f"{head}{oap}supported:\n- {out}"
+                if multi:
+                    raises(naive_yaml, "is a multi-output op registered out-as-primary")
+                else:
+                    generates(naive_yaml)
+
     # structured kernels are out-primary; structured: true without use_out_as_primary would
     # silently emit a plain non-structured out kernel (no meta reuse, no functional), so reject.
     def test_structured_requires_use_out_as_primary(self) -> None:
