@@ -43,6 +43,20 @@ ParsedExternalYaml = namedtuple(
 _SUPPORTED_OP_OPTION_KEYS = frozenset({"structured", "define_meta", "device_guard"})
 
 
+def _require_bool_option(
+    op_name: str, opts: dict[str, object], key: str, default: bool
+) -> bool:
+    val = opts.get(key, default)
+    if not isinstance(val, bool):
+        # A quoted YAML scalar like "false" parses to a truthy str, not a bool; reject it
+        # rather than silently treat the op as structured/guarded.
+        raise AssertionError(
+            f"Operator '{op_name}' option '{key}' must be a boolean (true/false), "
+            f"but got {type(val).__name__}: {val!r}."
+        )
+    return val
+
+
 def parse_backend_yaml(
     backend_yaml_path: str,
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
@@ -166,15 +180,31 @@ def parse_backend_yaml(
                     )
                 _op, opts = next(iter(op.items()))
                 opts = opts or {}
+                if not isinstance(opts, dict):
+                    raise AssertionError(
+                        f"Operator '{_op}' options must be a mapping of option keys to "
+                        f"booleans, but got {type(opts).__name__}: {opts!r}."
+                    )
                 unknown = set(opts) - _SUPPORTED_OP_OPTION_KEYS
                 if unknown:
                     raise AssertionError(
                         f"Operator '{_op}' has unknown option keys {sorted(unknown)}. "
                         f"Supported option keys: {sorted(_SUPPORTED_OP_OPTION_KEYS)}."
                     )
-                structured = opts.get("structured", False)
-                define_meta = opts.get("define_meta", False)
-                device_guard = opts.get("device_guard", use_device_guard)
+                structured = _require_bool_option(_op, opts, "structured", False)
+                define_meta = _require_bool_option(_op, opts, "define_meta", False)
+                device_guard = _require_bool_option(
+                    _op, opts, "device_guard", use_device_guard
+                )
+                if device_guard and not use_device_guard:
+                    # Every emit site ANDs the per-op device_guard with the backend-level flag, so
+                    # a per-op True under a False backend flag is silently dropped; reject it.
+                    raise AssertionError(
+                        f"Operator '{_op}' sets 'device_guard: True' but the backend sets "
+                        "'device_guard: False'. A per-op device_guard can only disable the "
+                        "backend-level guard, not enable it; set the backend-level "
+                        "device_guard: True and disable it per-op where unwanted."
+                    )
                 if define_meta and not structured:
                     raise AssertionError(
                         f"Operator '{_op}' has 'define_meta: True' but 'structured: False'. "
