@@ -351,6 +351,42 @@ class TestFX(JitTestCase):
         x, y = torch.rand(1), torch.rand(1)
         self.assertEqual(torch.sin(x + y), gm(x, y))
 
+    def test_boxed_arg_indices_codegen(self):
+        def multi_boxed_call(left, passthrough, right):
+            return left[0] + left[1] + passthrough + right[0]
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        c = graph.placeholder("c")
+        d = graph.placeholder("d")
+        out = graph.call_function(multi_boxed_call, ([a, b], c, [d]))
+        out.meta["boxed_arg_indices"] = (0, 2)
+        graph.output(out)
+        gm = GraphModule(torch.nn.Module(), graph)
+
+        self.assertEqual(gm(1, 2, 3, 4), 10)
+        self.assertIn("multi_boxed_call_boxed_arg_0 = [a, b]", gm.code)
+        self.assertIn("multi_boxed_call_boxed_arg_2 = [d];  a = b = d = None", gm.code)
+        self.assertRegex(
+            gm.code,
+            r"multi_boxed_call\(multi_boxed_call_boxed_arg_0, c, multi_boxed_call_boxed_arg_2\)",
+        )
+        boxed_arg_cleanup = "multi_boxed_call_boxed_arg_0 = multi_boxed_call_boxed_arg_2 = None"
+        self.assertIn(boxed_arg_cleanup, gm.code)
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        out = graph.call_function(multi_boxed_call, ([a, b], a, [b]))
+        out.meta["boxed_arg_indices"] = (0, 2)
+        graph.output(out)
+        gm = GraphModule(torch.nn.Module(), graph)
+
+        self.assertEqual(gm(1, 2), 6)
+        self.assertIn("multi_boxed_call_boxed_arg_2 = [b];  b = None", gm.code)
+        self.assertNotIn("a = b = None", gm.code)
+
     def test_args_kwargs(self):
         class T(torch.nn.Module):
             def forward(self, *args, **kwargs):
