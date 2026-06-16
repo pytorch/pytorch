@@ -5067,6 +5067,13 @@ def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
                 make_tensor((N * 2, N * 2), device=device, dtype=dtype,
                             requires_grad=requires_grad, low=-3, high=3),
                 approximate=approximate)
+    # gelu(+inf) should be +inf, not NaN (see issue #187293)
+    if not requires_grad:
+        for approximate in ['none', 'tanh']:
+            yield SampleInput(
+                torch.tensor([float('inf'), float('-inf'), float('nan'), 1.0],
+                             device=device, dtype=dtype),
+                approximate=approximate)
 
 
 def error_inputs_gelu(op, device, **kwargs):

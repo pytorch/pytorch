@@ -34,8 +34,12 @@ void GeluCUDAKernelImpl(TensorIteratorBase& it, GeluType approximate) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, it.dtype(), "GeluCUDAKernelImpl", [&]() {
       gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
         using opmath_t = at::opmath_type<scalar_t>;
+        auto x_op = static_cast<opmath_t>(x);
+        if (::isinf(x_op) && x_op > opmath_t(0)) {
+          return x_op;
+        }
         constexpr opmath_t kAlpha = M_SQRT1_2;
-        return static_cast<opmath_t>(x) * opmath_t(0.5) * (opmath_t(1) + ::erf(static_cast<opmath_t>(x) * kAlpha));
+        return x_op * opmath_t(0.5) * (opmath_t(1) + ::erf(x_op * kAlpha));
       });
     });
   }
