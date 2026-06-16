@@ -2065,6 +2065,13 @@ class ObjectVariable(VariableTracker):
     def python_type(self) -> type[object]:
         return object
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
 
 class DebuggingVariable(VariableTracker):
     """
