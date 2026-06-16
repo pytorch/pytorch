@@ -1,10 +1,29 @@
 import torch
 import torch.fx as fx
-from functorch import make_fx
+try:
+    # Newer PyTorch exposes make_fx under torch.func
+    from torch.func import make_fx
+except Exception:
+    # Fallback for older packaging
+    from functorch import make_fx
 from torch._functorch.compile_utils import fx_graph_cse
 from torch.profiler import profile, ProfilerActivity
 
+
+# This benchmark requires CUDA
+if not torch.cuda.is_available():
+    raise RuntimeError("CUDA is required to run this benchmark script")
+
+
 def profile_it(f, inp):
+    """Profile function `f` on `inp` and return the average device time per iteration in microseconds.
+
+    Improvements over the original:
+    - Warm up the CUDA context and kernels to avoid measuring one-time setup costs.
+    - Synchronize after warm-up and after each measured iteration to ensure we capture GPU execution time.
+    - Increase iteration count for more stable averages.
+    - Use a compatibility fallback for profiler timing attributes.
+    """
     # 1. Warm-up to initialize CUDA context and internal buffers
     for _ in range(10):
         _ = f(inp)
@@ -15,39 +34,137 @@ def profile_it(f, inp):
     with profile(activities=[ProfilerActivity.CUDA], record_shapes=False) as prof:
         for _ in range(itr):
             f(inp)
-            torch.cuda.synchronize() 
+            # Ensure the GPU work finishes before proceeding to the next iteration
+            torch.cuda.synchronize()
 
     timing = prof.key_averages()
-    # FIXED: Accessing device_time_total to accumulate total GPU processing time
-    cuda_time_total = sum(e.device_time_total for e in timing)
+
+    # Compatibility fallback for profiler time attribute names across PyTorch versions
+    def _dev_time(e):
+        # device_time_total is preferred; cuda_time_total used historically
+        return getattr(e, "device_time_total", getattr(e, "cuda_time_total", None))
+
+    times = [_dev_time(e) for e in timing]
+    if any(t is None for t in times):
+        # If the profiler events don't expose the expected fields, fail early with a helpful message
+        raise RuntimeError(
+            "Profiler timing attributes not found on events (expected device_time_total or cuda_time_total)"
+        )
+
+    cuda_time_total = sum(times)
+    # Return average per-iteration time in microseconds (profiler reports in microseconds)
     return cuda_time_total / itr
+
 
 def profile_function(name, f, inp):
     fx_g = make_fx(f)(inp)
+
+    # Apply common-subexpression-elimination (CSE) to the fx graph
     new_g_graph = fx_graph_cse(fx_g.graph)
     new_g = fx.GraphModule(fx_g, new_g_graph)
-    
+
+    # Do not benchmark against the scripted version because script already does some CSE
+    # script_f = torch.jit.script(fx_g)
+    # script_g = torch.jit.script(new_g)
+    # avg_cuda_time_f = profile_it(script_f, inp)
+    # avg_cuda_time_g = profile_it(script_g, inp)
+
     avg_cuda_time_f = profile_it(fx_g, inp)
     avg_cuda_time_g = profile_it(new_g, inp)
     num_node_decrease = len(fx_g.graph.nodes) - len(new_g.graph.nodes)
 
-    # Output results in a clear table format
-    print(f"{name:<15}, {avg_cuda_time_f/1e3:>12.2f}, {avg_cuda_time_g/1e3:>12.2f}, {num_node_decrease:>10}, {len(fx_g.graph.nodes):>10}")
+    # Print results in milliseconds with a clear header elsewhere
+    print(
+        f"{name:<15} {avg_cuda_time_f/1e3:12.3f} {avg_cuda_time_g/1e3:12.3f} {num_node_decrease:10d} {len(fx_g.graph.nodes):10d}"
+    )
 
-# --- Execution ---
-print(f"{'Function':<15}, {'Original(us)':>12}, {'CSE(us)':>12}, {'Nodes Red.':>10}, {'Total Nodes':>10}")
-print("-" * 75)
 
-g_gpu = torch.Generator(device="cuda")
-g_gpu.manual_seed(2147483647)
-inp = torch.randn(2**20, device="cuda", generator=g_gpu)
+if __name__ == "__main__":
+    # --- Execution ---
+    print(
+        f"{'Function':<15} {'Original(ms)':>12} {'CSE(ms)':>12} {'Nodes Red.':>10} {'Total Nodes':>10}"
+    )
+    print("-" * 75)
 
-# Tests
-profile_function("f1", lambda x: x.cos().cos(), inp)
-profile_function("fsum", lambda x: x.sum() + x.sum() + x.sum() + x.sum(), inp)
-profile_function("fconcat", lambda x: torch.cat((x, x)) + torch.cat((x, x)), inp)
-profile_function("fsum2", lambda x: (lambda a: [a := a + x.sum() for _ in range(30)][-1])(x.sum()), inp)
-profile_function("fsummulti", lambda x: (lambda a: [a := (a + x.sum()) * x.sum() for _ in range(3)][-1])(0), inp)
-profile_function("fsummulti2", lambda x: (lambda a: [a := (a + x.sum()) * x.sum() for _ in range(30)][-1])(0), inp)
-profile_function("fcos", lambda x: (lambda a: [a := a + x.cos() for _ in range(3)][-1])(0), inp)
-profile_function("fcos2", lambda x: (lambda a: [a := a + x.cos() for _ in range(30)][-1])(0), inp)
+    g_gpu = torch.Generator(device="cuda")
+    g_gpu.manual_seed(2147483647)
+    inp = torch.randn(2**20, device="cuda", generator=g_gpu)
+
+
+    def f1(x):
+        return x.cos().cos()
+
+
+    profile_function("f1", f1, inp)
+
+
+    def fsum(x):
+        a = x.sum()
+        b = x.sum()
+        c = x.sum()
+        d = x.sum()
+        return a + b + c + d
+
+
+    profile_function("fsum", fsum, inp)
+
+
+    def fconcat(x):
+        a = torch.cat((x, x))
+        b = torch.cat((x, x))
+        return a + b
+
+
+    profile_function("fconcat", fconcat, inp)
+
+
+    def fsum2(x):
+        a = x.sum()
+        for _ in range(30):
+            a = a + x.sum()
+        return a
+
+
+    profile_function("fsum2", fsum2, inp)
+
+
+    def fsummulti(x):
+        a = 0
+        for _ in range(3):
+            a = a + x.sum()
+            a = a * x.sum()
+        return a
+
+
+    profile_function("fsummulti", fsummulti, inp)
+
+
+    def fsummulti2(x):
+        a = 0
+        for _ in range(30):
+            a = a + x.sum()
+            a = a * x.sum()
+        return a
+
+
+    profile_function("fsummulti2", fsummulti2, inp)
+
+
+    def fcos(x):
+        a = 0
+        for _ in range(3):
+            a = a + x.cos()
+        return a
+
+
+    profile_function("fcos", fcos, inp)
+
+
+    def fcos2(x):
+        a = 0
+        for _ in range(30):
+            a = a + x.cos()
+        return a
+
+
+    profile_function("fcos2", fcos2, inp)
