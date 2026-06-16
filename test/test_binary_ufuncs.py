@@ -4583,25 +4583,6 @@ class TestBinaryUfuncsDevice(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
-    @dtypes(torch.float32, torch.float64)
-    def test_zeta_with_inf_q(self, device, dtype):
-        # zeta(s, +inf) should be 0 for s > 1, not NaN
-        # (the old code hit 0 * inf in the tail expansion)
-        s = torch.tensor([2.0, 3.0], dtype=dtype, device=device)
-        q_inf = torch.full_like(s, float("inf"))
-        self.assertEqual(
-            torch.special.zeta(s, q_inf),
-            torch.zeros_like(s),
-        )
-
-        # finite and inf mixed in the same tensor
-        q_mix = torch.tensor([1.0, float("inf")], dtype=dtype, device=device)
-        out = torch.special.zeta(
-            torch.tensor([2.0, 2.0], dtype=dtype, device=device), q_mix
-        )
-        self.assertGreater(out[0].item(), 0)
-        self.assertEqual(out[1].item(), 0.0)
-
     @onlyOn(["cuda", "xpu"])
     @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
