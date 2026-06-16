@@ -408,6 +408,54 @@ supported:
             """Operator 'mul.out' has 'define_meta: True' but 'structured: False'. Custom meta functions require a structured kernel.""",
         )
 
+    # A quoted YAML scalar parses to a truthy str (not a bool), which would silently be treated
+    # as structured; per-op option values must be real booleans.
+    def test_per_op_option_non_bool(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+supported:
+- mul.out:
+    structured: 'false'"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(
+            output_error,
+            """Operator 'mul.out' option 'structured' must be a boolean (true/false), but got str: 'false'.""",
+        )
+
+    # The per-op value must be an option mapping, not a list (a common mis-indentation).
+    def test_per_op_options_non_dict(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+supported:
+- mul.out:
+  - structured"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(
+            output_error,
+            """Operator 'mul.out' options must be a mapping of option keys to booleans, but got list: ['structured'].""",
+        )
+
+    # A per-op device_guard can only narrow the backend-level flag (every emit site ANDs them),
+    # so device_guard: true under a false backend flag would be silently dropped; reject it.
+    def test_per_op_device_guard_enable_under_false_backend(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: false
+supported:
+- div.out:
+    device_guard: true"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(
+            output_error,
+            """Operator 'div.out' sets 'device_guard: True' but the backend sets 'device_guard: False'. A per-op device_guard can only disable the backend-level guard, not enable it; set the backend-level device_guard: True and disable it per-op where unwanted.""",
+        )
+
     # structured kernels are out-primary; structured: true without use_out_as_primary would
     # silently emit a plain non-structured out kernel (no meta reuse, no functional), so reject.
     def test_structured_requires_use_out_as_primary(self) -> None:
