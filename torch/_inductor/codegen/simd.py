@@ -44,10 +44,7 @@ if TYPE_CHECKING:
     from ..ir import IRNode
 
 from ..ops_handler import WrapperHandler
-from ..optimize_indexing import (
-    convert_index_expr_to_value_expr,
-    indexing_dtype_strength_reduction,
-)
+from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.coordinate_descent_tuner import CoordescTuner
 from ..runtime.hints import DeviceProperties, InductorMeta
 from ..runtime.runtime_utils import (
@@ -966,9 +963,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(V.graph.sizevars.statically_known_leq(1, s) for s in remaining), (
-            f"over-allocated iteration space: remaining={remaining}, groups may be smaller than node ranges"
-        )
+        if not all(V.graph.sizevars.statically_known_leq(1, s) for s in remaining):
+            raise AssertionError(
+                f"over-allocated iteration space: remaining={remaining}, groups may be smaller than node ranges"
+            )
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
