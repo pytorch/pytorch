@@ -1,7 +1,7 @@
 (torch.compiler_complex_number_support)=
 
 # Complex Number Support in `torch.compile`
-PyTorch, as of version 2.11, has experimental opt-in support for compilation of complex-valued
+PyTorch, as of version 2.13, has experimental opt-in support for compilation of complex-valued
 tensors. The following code shows an example of how to use the complex number support.
 
 ```python
