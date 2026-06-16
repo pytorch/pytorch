@@ -1267,9 +1267,8 @@ def set_default_device(device: "Device") -> None:
 
     Args:
         device (:class:`torch.device`, str, int, or None): the device to set as
-            default, or ``None`` to clear the default device. An integer is
-            interpreted as an index for the current accelerator, which must be
-            available.
+            default, or ``None`` to clear the override. An integer is
+            interpreted as an index for the current accelerator.
 
     Example::
 
