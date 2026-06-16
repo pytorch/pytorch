@@ -1438,17 +1438,21 @@ def layer_norm_bwd_single_dim_strategy(
     # mean = args_schema[3], rstd = args_schema[4]
     weight_meta = args_schema[5]
     bias_meta = args_schema[6]
+    output_mask = args_schema[7]
+    compute_d_input = output_mask[0]
+    compute_d_weight = weight_meta is not None and output_mask[1]
+    compute_d_bias = bias_meta is not None and output_mask[2]
 
     axis = len(input_meta.shape) - len(normalize_to_torch_size(normalized_shape))
 
     strategies: list[list[Placement | _ShardingPlaceholder | None]] = []
     for dim in range(axis):
         # outputs: [d_input, d_weight, d_bias] — always 3 per schema
-        # d_weight/d_bias use None when weight/bias are None
+        # Masked-off outputs use None even if the corresponding input exists.
         rule: list[Placement | _ShardingPlaceholder | None] = [
-            _ShardingPlaceholder(dim),  # d_input
-            Partial("sum") if weight_meta is not None else None,  # d_weight
-            Partial("sum") if bias_meta is not None else None,  # d_bias
+            _ShardingPlaceholder(dim) if compute_d_input else None,
+            Partial("sum") if compute_d_weight else None,
+            Partial("sum") if compute_d_bias else None,
         ]
         # inputs: [grad_out, input, mean, rstd, weight?, bias?]
         rule.extend(
@@ -1481,17 +1485,20 @@ def rms_norm_bwd_single_dim_strategy(
     normalized_shape = args_schema[2]
     # rstd = args_schema[3]
     weight_meta = args_schema[4]
+    output_mask = args_schema[5]
+    compute_d_input = output_mask[0]
+    compute_d_weight = weight_meta is not None and output_mask[1]
 
     axis = len(input_meta.shape) - len(normalize_to_torch_size(normalized_shape))
 
     strategies: list[list[Placement | _ShardingPlaceholder | None]] = []
     for dim in range(axis):
         # outputs: [d_input, d_weight] — always 2 per schema
-        # d_weight uses None when weight is None
+        # Masked-off outputs use None even if the corresponding input exists.
         # inputs: [grad_out, input, rstd, weight?]
         rule: list[Placement | _ShardingPlaceholder | None] = [
-            _ShardingPlaceholder(dim),  # d_input
-            Partial("sum") if weight_meta is not None else None,  # d_weight
+            _ShardingPlaceholder(dim) if compute_d_input else None,
+            Partial("sum") if compute_d_weight else None,
             _ShardingPlaceholder(dim),  # grad_out
             _ShardingPlaceholder(dim),  # input
             _ShardingPlaceholder(dim),  # rstd
@@ -1915,9 +1922,19 @@ def grid_sampler_backward_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
-) -> list[list[Placement | _ShardingPlaceholder]]:
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
     # grid_sampler_{2,3}d_backward: 2 outputs (grad_input, grad_grid) + 3 inputs = 5 placements, batch-only
-    return [[_ShardingPlaceholder(0)] * 5]
+    # The native implementation only honors output_mask[0]; grad_grid is always computed.
+    output_mask = args_schema[6]
+    return [
+        [
+            _ShardingPlaceholder(0) if output_mask[0] else None,
+            _ShardingPlaceholder(0),
+            _ShardingPlaceholder(0),  # grad_output
+            _ShardingPlaceholder(0),  # input
+            _ShardingPlaceholder(0),  # grid
+        ]
+    ]
 
 
 def _adjust_group_norm_scalars(
@@ -2010,15 +2027,16 @@ def batch_norm_backward_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
-) -> list[list[Placement | _ShardingPlaceholder]]:
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
     # Backward reduces over batch + spatial dims, orthogonal to the channel dim,
     # so channel sharding commutes with the op (same principle as forward).
     # Tensors are [N,C,*] -> Shard(1) or [C] -> Shard(0).
+    output_mask = args_schema[9]
     num_tensor_inputs = sum(isinstance(a, TensorMeta) for a in args_schema)
-    rule: list[Placement | _ShardingPlaceholder] = [
-        _ShardingPlaceholder(1),  # grad_input [N,C,*]
-        _ShardingPlaceholder(0),  # grad_weight [C]
-        _ShardingPlaceholder(0),  # grad_bias [C]
+    rule: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(1) if output_mask[0] else None,  # grad_input [N,C,*]
+        _ShardingPlaceholder(0) if output_mask[1] else None,  # grad_weight [C]
+        _ShardingPlaceholder(0) if output_mask[2] else None,  # grad_bias [C]
         _ShardingPlaceholder(1),  # grad_out [N,C,*]
         _ShardingPlaceholder(1),  # input [N,C,*]
     ]
