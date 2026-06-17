@@ -970,6 +970,63 @@ class TestSqAssItem(torch._dynamo.test_case.TestCase):
 instantiate_parametrized_tests(TestSqAssItem)
 
 
+class _IndexObj:
+    def __init__(self, n):
+        self.n = int(n)
+
+    def __index__(self):
+        return self.n
+
+
+class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
+    # range() and range subscript apply __index__ (PyNumber_Index) to their
+    # arguments and slice members.
+
+    def test_range_args_with_index(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return list(range(_IndexObj(2), _IndexObj(6), _IndexObj(2)))
+
+        self.assertEqual(fn(), [2, 4])
+
+    def test_range_slice_with_index(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return range(10)[: _IndexObj(5)]
+
+        self.assertEqual(fn(), range(5))
+
+    def test_range_index_raises(self):
+        class IX:
+            def __index__(self):
+                raise RuntimeError("boom")
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            try:
+                range(IX())
+                return "no_error"
+            except RuntimeError:
+                return "runtime_error"
+
+        self.assertEqual(fn(), "runtime_error")
+
+    def test_range_index_non_int(self):
+        class IN:
+            def __index__(self):
+                return "not a number"  # noqa: PLE0305
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            try:
+                range(IN())
+                return "no_error"
+            except TypeError:
+                return "type_error"
+
+        self.assertEqual(fn(), "type_error")
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

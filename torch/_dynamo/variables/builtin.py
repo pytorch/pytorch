@@ -70,7 +70,6 @@ from ..utils import (
     dict_methods,
     extract_fake_example_value,
     get_fake_value,
-    guard_if_dyn,
     is_tensor_getset_descriptor,
     istype,
     numpy_operator_wrapper,
@@ -2001,20 +2000,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         tx: "InstructionTranslatorBase",
         *args: VariableTracker,
         **kwargs: VariableTracker,
-    ) -> VariableTracker | None:
+    ) -> VariableTracker:
         if kwargs:
             raise_type_error(tx, "range() takes no keyword arguments")
         if len(args) == 0:
             raise_type_error(tx, "range expected at least 1 argument, got 0")
         if len(args) > 3:
             raise_type_error(tx, f"range expected at most 3 arguments, got {len(args)}")
-        if check_unspec_or_constant_args(args, {}):
-            return variables.RangeVariable(list(args))
-        elif self._dynamic_args(*args):
-            args = tuple(VariableTracker.build(tx, guard_if_dyn(arg)) for arg in args)
-            return variables.RangeVariable(list(args))
-        # None no-ops this handler and lets the driving function proceed
-        return None
+        args = tuple(VariableTracker.build(tx, arg.nb_index_impl(tx)) for arg in args)
+        return variables.RangeVariable(list(args))
 
     def _dynamic_args(self, *args: VariableTracker, **kwargs: VariableTracker) -> bool:
         return any(isinstance(x, SymNodeVariable) for x in args) or any(
