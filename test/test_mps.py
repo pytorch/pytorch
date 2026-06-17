@@ -1755,8 +1755,6 @@ class TestMPS(TestCaseMPS):
         helper(input_shape=(3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(10, 3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(1, 77, 77), batch1_shape=(8, 77, 64), batch2_shape=(8, 64, 77))
-        # Size-0 dims must match CPU instead of asserting, see
-        # https://github.com/pytorch/pytorch/issues/187399
         helper(input_shape=(2, 0, 1), batch1_shape=(2, 0, 3), batch2_shape=(2, 3, 1), beta=0.5, alpha=100)
         helper(input_shape=(2, 3, 5), batch1_shape=(2, 3, 0), batch2_shape=(2, 0, 5), beta=0.8)
         helper(input_shape=(2, 3, 5), batch1_shape=(2, 3, 0), batch2_shape=(2, 0, 5), beta=0)
