@@ -410,80 +410,17 @@ class RegisterDispatchKey:
             out_args_bindings[:-num_out_args] if num_out_args > 0 else out_args_bindings
         )
 
-        # Setup logic for functional vs inplace
-        # Functional: Need to create 'out' tensors
-        # Inplace: 'out' is just 'self'
-        allocation_logic = ""
-        call_args = []
-
-        if k is SchemaKind.functional:
-            args = f.func.arguments
-            options_expr = ""
-
-            # 1. Highest Precedence: Explicit Factory Options
-            if args.tensor_options is not None:
-                to = args.tensor_options
-                options_expr = (
-                    f"at::TensorOptions().dtype({to.dtype.name})"
-                    f".layout({to.layout.name}).device({to.device.name})"
-                    f".pinned_memory({to.pin_memory.name})"
-                )
-            # 2. Second Precedence: The 'self' argument
-            elif (
-                args.self_arg is not None
-                and args.self_arg.argument.type.is_tensor_like()
-            ):
-                template = args.self_arg.argument
-                if template.type.is_nullable():
-                    options_expr = f"{template.name}.has_value() ? {template.name}->options() : at::TensorOptions()"
-                else:
-                    options_expr = f"{template.name}.options()"
-            # 3. Third Precedence: Any other tensor in the arguments
-            else:
-                tensor_template = next(
-                    (a for a in args.flat_non_out if a.type.is_tensor_like()), None
-                )
-                if tensor_template is not None:
-                    if tensor_template.type.is_nullable():
-                        options_expr = f"{tensor_template.name}.has_value() ? {tensor_template.name}->options() : at::TensorOptions()"
-                    else:
-                        options_expr = f"{tensor_template.name}.options()"
-                else:
-                    # 4. Fallback: Default options (context-aware)
-                    options_expr = "at::TensorOptions()"
-
-            # Seed each output from the first input's options; the out-kernel sets size and dtype.
-            for i, ret in enumerate(f.func.returns):
-                out_name = f"out{i}" if len(f.func.returns) > 1 else "out"
-                allocation_logic += (
-                    f"  auto {out_name} = at::empty({{0}}, {options_expr});\n"
-                )
-
-            # Translate arguments from functional signature to 'out' signature
-            # We must append the newly created 'out' tensors to the call
-            translated_args = [
-                e.expr for e in translate(sig.arguments(), out_goal_bindings)
-            ]
-            out_names = [
-                f"out{i}" if len(f.func.returns) > 1 else "out"
-                for i in range(len(f.func.returns))
-            ]
-            call_args = translated_args + out_names
-            return_statement = (
-                f"return {out_names[0]};"
-                if len(out_names) == 1
-                else f"return std::make_tuple({', '.join(out_names)});"
-            )
-
-        elif k is SchemaKind.inplace:
-            # Inplace just passes 'self' into the 'out' argument slot
-            call_args = [e.expr for e in translate(sig.arguments(), out_goal_bindings)]
-            # Usually self is the first arg in 'out' variants
-            call_args.append(f.func.arguments.self_arg.argument.name)
-            return_statement = f"return {f.func.arguments.self_arg.argument.name};"
-
-        else:
+        # Only the inplace variant is derived here: its output is 'self', so the dtype is correct
+        # by construction. The functional variant never reaches this method -- gen_unstructured
+        # either defers it to the in-tree CompositeExplicitAutogradNonFunctional kernel (for
+        # natively-structured ops) or rejects it (no native meta to compute the output dtype).
+        if k is not SchemaKind.inplace:
             return None
+        # Inplace passes 'self' into the 'out' argument slot.
+        call_args = [e.expr for e in translate(sig.arguments(), out_goal_bindings)]
+        # Usually self is the first arg in 'out' variants.
+        call_args.append(f.func.arguments.self_arg.argument.name)
+        return_statement = f"return {f.func.arguments.self_arg.argument.name};"
 
         # Determine the kernel name for the 'out' variant
         out_meta = self.backend_index.get_kernel(g.out)
@@ -497,17 +434,12 @@ class RegisterDispatchKey:
                 f"{out_meta.cpp_namespace}::{self.class_method_name}::{out_meta.kernel}"
             )
 
-        # Guard like gen_unstructured (only the out wrapper was guarded before): pick the device
-        # from the first tensor-like arg, self_arg -> out -> flat_positional.
+        # Guard like gen_unstructured: pick the device from the first tensor-like arg,
+        # out -> flat_positional (self is already part of flat_positional).
         device_guard = "// DeviceGuard omitted"
         if f.device_guard and self.backend_index.device_guard and out_meta.device_guard:
-            self_arg = (
-                [f.func.arguments.self_arg.argument]
-                if f.func.arguments.self_arg is not None
-                else []
-            )
             candidate_args = itertools.chain(
-                self_arg, f.func.arguments.out, f.func.arguments.flat_positional
+                f.func.arguments.out, f.func.arguments.flat_positional
             )
             device_of = next(
                 (a.name for a in candidate_args if a.type.is_tensor_like()), None
@@ -520,7 +452,6 @@ class RegisterDispatchKey:
         return f"""\
 {sig.defn()} {{
   {device_guard}
-{allocation_logic}
   {impl_name}({", ".join(call_args)});
   {return_statement}
 }}
@@ -595,18 +526,45 @@ class RegisterDispatchKey:
                     # functional, so leave it to the composite like in-tree (split_with_sizes_copy.out).
                     and not any(a.type.is_list_like() for a in g.out.func.arguments.out)
                 ):
-                    # A multi-output op mixes output dtypes (e.g. a Long index), which the
-                    # input-dtype-seeded derivation gets wrong; require structured or a functional.
-                    if (
-                        f.func.kind() is SchemaKind.functional
-                        and len(f.func.returns) > 1
-                    ):
+                    # The inplace variant is always safe to derive (its output is self, so the
+                    # dtype is correct by construction) and is generated below. The functional
+                    # variant needs the output dtype up front, which the input-seeded derive
+                    # (at::empty({0}, self.options())) only gets right when the output dtype equals
+                    # the input dtype -- which we cannot prove here. Handle it explicitly:
+                    if f.func.kind() is SchemaKind.functional:
+                        if g.structured and len(f.func.returns) == 1:
+                            # Natively structured single-output op: do NOT derive the functional
+                            # here. The in-tree CompositeExplicitAutogradNonFunctional kernel
+                            # already provides it correctly -- it runs op.meta() (which computes the
+                            # true output dtype, e.g. isin -> Bool, or a promoting div -> the
+                            # promoted type) and then at::<op>_outf(), which redispatches to this
+                            # backend's out kernel. PrivateUse1 inherits that dispatch key (see
+                            # non_functional_backend_dispatch_keyset), so returning None defers to
+                            # it instead of the dtype-unsafe input-seeded derive -- this also keeps
+                            # the Meta/FakeTensor (torch.compile) and eager dtypes in agreement,
+                            # since both then come from the op's meta. Register 'structured: true'
+                            # only when supplying a custom meta/impl.
+                            return None
+                        if len(f.func.returns) > 1:
+                            # Multi-output ops mix output dtypes (e.g. a Long index), which the
+                            # input-seeded derive gets wrong.
+                            raise AssertionError(
+                                f"'{g.out.func.name}' is a multi-output op registered out-as-primary "
+                                "via its '.out' only; the derived functional would type every output "
+                                "as the input dtype, but multi-output ops mix dtypes (e.g. a Long "
+                                "index). Register it with 'structured: true' (if natively structured) "
+                                "or register the functional variant explicitly."
+                            )
+                        # A non-structured single-output op has no native meta to compute the output
+                        # dtype, so a dtype-changing op (e.g. bucketize -> Long) would be silently
+                        # mistyped; require the functional to be registered explicitly.
                         raise AssertionError(
-                            f"'{g.out.func.name}' is a multi-output op registered out-as-primary "
-                            "via its '.out' only; the derived functional would type every output "
-                            "as the input dtype, but multi-output ops mix dtypes (e.g. a Long "
-                            "index). Register it with 'structured: true' (if natively structured) "
-                            "or register the functional variant explicitly."
+                            f"'{g.out.func.name}' is a non-structured op registered out-as-primary "
+                            "via its '.out' only; the derived functional would type its output as "
+                            "the input dtype, which is wrong for a dtype-changing op (e.g. "
+                            "bucketize -> Long) and cannot be checked here. Register the functional "
+                            "variant explicitly, since there is no native meta to derive the "
+                            "output dtype from."
                         )
                     gets_func_inplace_wrapper = True
                 else:
