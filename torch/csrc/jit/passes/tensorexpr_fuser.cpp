@@ -1012,7 +1012,7 @@ class TensorExprFuser {
         return false;
       }
       // non_blocking only applies in cross-device conversion, which we bail on
-      // copy arg only applies if op is a no-op, which we dont start fusion
+      // copy arg only applies if op is a no-op, which we don't start fusion
       // group from memory format is separately handled in NNC output
 
       // all non-Tensor arguments must be constant

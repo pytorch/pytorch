@@ -787,6 +787,10 @@ class AutogradCompilerInstance:
             # Weird quantity so it's easy to grep
             return torch.zeros([0, 123456789])
 
+    def allocate_dummy_like(self, x: torch.Tensor) -> torch.Tensor:
+        with disable_proxy_modes_tracing():
+            return torch.empty_like(x)
+
     def bind_function(
         self,
         fn_name: str,
@@ -847,18 +851,37 @@ class AutogradCompilerInstance:
         return result
 
     def accumulate_grad(
-        self, variable: torch.Tensor, grad: torch.Tensor, has_post_hooks: bool
-    ) -> None:
-        self.fx_tracer.create_proxy(
+        self,
+        variable: torch.Tensor,
+        variable_grad: torch.Tensor | None,
+        grad: torch.Tensor | bool,
+        has_post_hooks: bool | None = None,
+    ) -> torch.Tensor | None:
+        old_call = has_post_hooks is None
+        if has_post_hooks is None:
+            # Backward compatibility for extensions built before current grad
+            # became an explicit capture argument.
+            has_post_hooks = bool(grad)
+            grad = variable_grad  # type: ignore[assignment]
+            variable_grad = variable.grad
+
+        proxy_out = self.fx_tracer.create_proxy(
             "call_function",
             call_accumulate_grad,
             args=(
                 self.to_proxy(variable),
+                self.to_proxy(variable_grad),
                 self.to_proxy(grad),
                 has_post_hooks,
             ),
             kwargs={},
         )
+        result = self.allocate_dummy_like(variable)
+        self.bind_objects_to_proxies([result], [proxy_out])
+        variable.grad = result
+        if old_call:
+            return None
+        return result
 
     def proxy_call_hook(
         self, hook: Callable[..., Any], *args: Any, **kwargs: Any
@@ -970,7 +993,7 @@ class AutogradCompilerInstance:
     # Eager autograd backward implements scalars as 0-dim tensors, see DivBackward0::other_.
     # When compiled autograd traces those nodes, it lifts the scalar tensors, resulting in a graph
     # with some cpu 0-dim tensor inputs. To prevent the entire graph from skipping cudagraph, we move the
-    # scalars tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
+    # scalar tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
     def move_graph_nodes_to_cuda(self, graph: torch.fx.Graph) -> list[int]:
         to_move: dict[int, torch.fx.Node] = {}
         has_cuda_inputs = False
@@ -1260,13 +1283,22 @@ class AutogradCompilerInstance:
         for node in self.fx_tracer.graph.find_nodes(
             op="call_function", target=call_accumulate_grad
         ):
-            param_node, grad_node = node.args[0], node.args[1]
+            param_node, variable_grad_node, grad_node = (
+                node.args[0],
+                node.args[1],
+                node.args[2],
+            )
             getitem_node = None
-            if grad_node.target is operator.getitem:
+            if (
+                isinstance(grad_node, torch.fx.Node)
+                and grad_node.target is operator.getitem
+            ):
                 getitem_node = grad_node
                 grad_node = getitem_node.args[0]
 
-            arg = max([param_node, grad_node])  # last arg
+            arg = max(
+                self.get_all_nodes([param_node, variable_grad_node, grad_node])
+            )  # last arg
             if arg is not node.prev and not self.is_placeholder(arg):
                 arg.append(node)
                 if getitem_node is not None:

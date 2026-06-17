@@ -3,6 +3,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/mkl/Sparse.h>
@@ -157,7 +158,7 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
     crow_indices.dim(), " dimensional tensors, respectively.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
-  set_output_raw_strided(0, {col_indices.dim() + 1, col_indices.numel()}, {}, options, {});
+  set_output_raw_strided(0, {col_indices.dim() + 1, col_indices.numel()}, {}, options);
 }
 
 } // namespace meta
@@ -1403,7 +1404,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
 
   int64_t nnz = self._nnz();
   if (nnz == 0) {
-    return std::make_tuple(out, arg_out);
+    return std::make_tuple(std::move(out), std::move(arg_out));
   }
 
   // only need to calculate the out args

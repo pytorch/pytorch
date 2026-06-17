@@ -64,11 +64,16 @@ changes. Instead, if the PR is large, explain the order to review changes
 (e.g., the logical progression), or if it's short just omit the bullet list
 entirely.
 
-Disclose that the PR was authored with an AI assistant. Do this informally in
-the commit body (e.g., "Authored by Claude." or a similar attribution for
-whichever assistant was used). NEVER add a `Co-authored-by:` trailer
-attributing the AI assistant, as it interferes with the Linux Foundation CLA
-bot.
+The commit message should be clear, informative, and have a Test Plan section
+that describes how you tested the change. If you are fixing a bug, the commit
+message must explain the root cause of the bug and how the fix works.
+If there were multiple potential paths you could have taken, please call them
+out succinctly and justify the one you took.
+
+When describing the testing strategy in a commit message, include the literal
+commands that were run in fenced Markdown code blocks.
+
+Disclose that the PR was authored with an AI assistant.
 
 When the user asks you to amend a commit, check whether the commit message
 still accurately describes the changes. If it doesn't and the commit is not a
@@ -102,7 +107,10 @@ Rules for working with ghstack:
   burning unnecessary CI. Use a full `ghstack` when you're intentionally
   updating CI for the whole stack.
 - **Preserve metadata trailers.** When editing a commit message, never delete
-  `Pull-Request:` or `ghstack-source-id:` trailers. If you modified the commit
+  `Pull-Request:` or `ghstack-source-id:` trailers. Always re-read them from
+  HEAD each time you compose an amend — never reuse a saved/cached message
+  body, since `ghstack` rewrites `ghstack-source-id` on every push and a
+  stale trailer will clobber HEAD's current one. If you modified the commit
   message, run `ghstack -u` afterwards to push the updated PR description.
 - **Never push directly.** Do not `git push` to branches, and never directly
   modify the `gh/USERNAME/N` branches — ghstack manages those.
@@ -131,12 +139,24 @@ Follow these rules for all code changes in this repository:
 - Assume the reader has familiarity with PyTorch. They may not be the expert
   on the code that is being read, but they should have some experience in the
   area.
+- Splitting code across multiple lines (due to ruff’s column limit rule) is less
+  readable than having code on a single line. When the linter splits your
+  code across multiple lines, please try to put it back on a single line by
+  changing variable names or by using helper local variables. For tests that assert
+  against a golden string, keep just the golden string on one line instead of
+  splitting it across multiple lines and opt-out of the ruff column limit rule
+  via `noqa: B950`.
 - ASCII only in newly added code comments. Do not introduce Unicode characters
   (e.g., smart quotes, em dashes, arrows, non-ASCII letters) in new comments.
   Leave preexisting Unicode in untouched comments alone; only enforce this for
   comments you are adding or rewriting.
 
 If uncertain, choose the simpler, more concise implementation.
+
+# cuda.bindings Error Checking
+
+Use `torch.cuda._utils._check_cuda_bindings` to error-check `cuda.bindings`
+runtime calls. Do not write inline error-checking helpers.
 
 # Dynamo Config
 

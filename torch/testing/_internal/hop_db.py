@@ -1,13 +1,13 @@
 # mypy: ignore-errors
 
 import functools
-import unittest
 
 import torch
 from functorch.experimental.control_flow import map
 from torch._higher_order_ops.flex_attention import (
     flex_attention as flex_attention_hop,
 )
+from torch._higher_order_ops.flex_gemm import flex_gemm
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     create_block_mask,
@@ -15,9 +15,8 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import make_tensor
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
-from torch.testing._internal.common_device_type import onlyCUDA
-from torch.testing._internal.common_dtype import all_types_and, custom_types
-from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
+from torch.testing._internal.common_dtype import all_types_and, custom_types, empty_types
+from torch.testing._internal.opinfo.core import OpInfo, SampleInput
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 from torch._higher_order_ops import InvokeQuant, invoke_quant_packed
 from torch._higher_order_ops.register_hook import register_hook_op
@@ -65,6 +64,14 @@ def triple_nested_map(xs, y0, y1):
         return map(f1, xs, y0, y1)
 
     return map(f0, xs, y0, y1)
+
+
+def cuda_only_dtypes(*dtypes):
+    return {
+        "dtypes": empty_types(),
+        "dtypesIfCUDA": custom_types(*dtypes),
+        "dtypesIfXPU": empty_types(),
+    }
 
 
 # PLEASE DON'T ADD ANYTHING NEW TO THIS LIST,
@@ -297,6 +304,20 @@ def simple_flex_attention_backward(
     )
 
 
+def sample_inputs_flex_gemm(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+    yield SampleInput(make_arg(2, 3, low=0.1, high=2), make_arg(3, 4, low=0.1, high=2))
+
+
+def simple_flex_gemm(a, b):
+    def epilogue_fn(acc):
+        return (acc + 1).relu()
+
+    return flex_gemm(torch.mm, (a, b), epilogue_fn)
+
+
 def sample_inputs_while_loop(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=False
@@ -524,15 +545,6 @@ hop_db = [
         check_inplace_batched_forward_grad=False,
         supports_autograd=True,
         # "torch.compile with aot_autograd does not currently support double backward."
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        ),
-        # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
     ),
     OpInfo(
@@ -594,28 +606,19 @@ hop_db = [
         variant_test_name="simple",
         op=flex_attention,
         sample_inputs_func=sample_inputs_flex_attention,
-        dtypes=custom_types(torch.float16, torch.float32),
+        **cuda_only_dtypes(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        ),
-        decorators=[onlyCUDA],
     ),
     OpInfo(
         name="flex_attention_backward",
         variant_test_name="simple",
         op=simple_flex_attention_backward,
         sample_inputs_func=sample_inputs_flex_attention_backward,
-        dtypes=custom_types(torch.float16, torch.float32),
+        **cuda_only_dtypes(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -623,22 +626,13 @@ hop_db = [
         check_inplace_batched_forward_grad=False,
         supports_autograd=False,
         supports_gradgrad=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        ),
-        decorators=[onlyCUDA],
     ),
     OpInfo(
         name="flex_attention_backward",
         variant_test_name="explicit_buffers",
         op=simple_flex_attention_backward,
         sample_inputs_func=sample_inputs_flex_attention_backward_explicit_buffers,
-        dtypes=custom_types(torch.float16, torch.float32),
+        **cuda_only_dtypes(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -646,41 +640,36 @@ hop_db = [
         check_inplace_batched_forward_grad=False,
         supports_autograd=False,
         supports_gradgrad=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        ),
-        decorators=[onlyCUDA],
+    ),
+    OpInfo(
+        name="flex_gemm",
+        variant_test_name="simple",
+        op=simple_flex_gemm,
+        sample_inputs_func=sample_inputs_flex_gemm,
+        dtypes=custom_types(torch.float32),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=False,
+        supports_gradgrad=False,
     ),
     OpInfo(
         name="local_map_hop",
         variant_test_name="simple",
         op=simple_local_map_hop,
         sample_inputs_func=sample_inputs_local_map_hop,
-        dtypes=custom_types(torch.float16, torch.float32),
+        **(
+            cuda_only_dtypes(torch.float16, torch.float32)
+            if torch.distributed.is_available()
+            else {"dtypes": empty_types()}
+        ),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        ),
-        decorators=[
-            onlyCUDA,
-            unittest.skipIf(
-                not torch.distributed.is_available(), "requires distributed build"
-            ),
-        ],
     ),
     OpInfo(
         name="register_hook",
@@ -694,32 +683,18 @@ hop_db = [
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
         supports_autograd=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCompiledAutogradOpInfo",
-                "test_hops_in_bwd",
-            ),
-        ),
     ),
     OpInfo(
         name="inline_asm_elementwise",
         variant_test_name="simple",
         op=simple_inline_asm,
         sample_inputs_func=sample_inputs_inline_asm,
-        dtypes=custom_types(torch.float32),
+        **cuda_only_dtypes(torch.float32),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
         supports_autograd=False,
-        decorators=[onlyCUDA],
     ),
 ]

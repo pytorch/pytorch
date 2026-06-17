@@ -1,5 +1,6 @@
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKey.h>
+#include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -16,6 +17,7 @@
 #endif // AT_PER_OPERATOR_HEADERS
 #include <ATen/Parallel.h>
 #include <torch/csrc/shim_conversion_utils.h>
+#include <torch/csrc/shim_exception_state.h>
 #include <torch/csrc/stable/c/shim.h>
 
 AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
@@ -115,6 +117,17 @@ static StableIValue from_ivalue(
       return torch::stable::detail::_from(
           ivalue.toMemoryFormat(), extension_build_version);
     }
+    case c10::TypeKind::GeneratorType: {
+      // Steal the Generator out of the IValue (an about-to-be-destroyed
+      // temporary at every call site) to avoid a refcount bump, mirroring the
+      // TensorType case above.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      c10::IValue& mutable_ivalue = const_cast<c10::IValue&>(ivalue);
+      AtenGeneratorHandle generator =
+          torch::aot_inductor::generator_pointer_to_generator_handle(
+              new at::Generator(std::move(mutable_ivalue).toGenerator()));
+      return torch::stable::detail::_from(generator, extension_build_version);
+    }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
 
@@ -134,8 +147,11 @@ static StableIValue from_ivalue(
         return torch::stable::detail::_from(
             std::nullopt, extension_build_version);
       }
-      StableIValue* sivp = new StableIValue(
-          from_ivalue(inner_type, ivalue, extension_build_version));
+      const StableIValue value =
+          from_ivalue(inner_type, ivalue, extension_build_version);
+      StableIValue* sivp = nullptr;
+      TORCH_ERROR_CODE_CHECK(torch_new_stable_ivalue(&sivp));
+      *sivp = value;
       return torch::stable::detail::_from(sivp, extension_build_version);
     }
     case c10::TypeKind::ListType: {
@@ -174,11 +190,13 @@ static c10::IValue to_ivalue(
     uint64_t extension_build_version) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
-      auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
-          torch::stable::detail::_to<AtenTensorHandle>(
-              stable_ivalue, extension_build_version));
-      return (c10::IValue(*torch::aot_inductor::tensor_handle_to_tensor_pointer(
-          ret_raiiath.get())));
+      // unique_ptr frees the owning handle; we move the Tensor into the IValue
+      // (stealing its TensorImpl ref) instead of copying it.
+      std::unique_ptr<at::Tensor> tensor(
+          torch::aot_inductor::tensor_handle_to_tensor_pointer(
+              torch::stable::detail::_to<AtenTensorHandle>(
+                  stable_ivalue, extension_build_version)));
+      return c10::IValue(std::move(*tensor));
     }
     case c10::TypeKind::IntType: {
       return c10::IValue(torch::stable::detail::_to<int64_t>(
@@ -225,6 +243,15 @@ static c10::IValue to_ivalue(
       return c10::IValue(torch::stable::detail::_to<c10::MemoryFormat>(
           stable_ivalue, extension_build_version));
     }
+    case c10::TypeKind::GeneratorType: {
+      // unique_ptr frees the owning handle; we move the Generator into the
+      // IValue (stealing its GeneratorImpl ref) instead of copying it.
+      std::unique_ptr<at::Generator> generator(
+          torch::aot_inductor::generator_handle_to_generator_pointer(
+              torch::stable::detail::_to<AtenGeneratorHandle>(
+                  stable_ivalue, extension_build_version)));
+      return c10::IValue(std::move(*generator));
+    }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
 
@@ -244,10 +271,10 @@ static c10::IValue to_ivalue(
           torch::stable::detail::_from(std::nullopt, extension_build_version)) {
         return c10::IValue();
       }
-      auto sivp = torch::stable::detail::_to<StableIValue*>(
+      StableIValue* sivp = torch::stable::detail::_to<StableIValue*>(
           stable_ivalue, extension_build_version);
       auto ival = to_ivalue(inner_type, *sivp, extension_build_version);
-      delete sivp;
+      TORCH_ERROR_CODE_CHECK(torch_delete_stable_ivalue(sivp));
       return ival;
     }
     case c10::TypeKind::ListType: {
@@ -751,4 +778,77 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
     reinterpret_cast<torch::Library*>(self)->set_python_module(
         pymodule, context);
   });
+}
+
+AOTITorchError torch_new_stable_ivalue(StableIValue** ret_value) {
+  // Check if ret_value can be dereferenced, if not it is a failure.
+  if (ret_value == nullptr) {
+    return AOTI_TORCH_FAILURE;
+  }
+  // Ensure the ret_value is set to a nullptr in case the allocation fails.
+  *ret_value = nullptr;
+
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_value = new StableIValue(0); });
+}
+
+AOTITorchError torch_delete_stable_ivalue(StableIValue* value) {
+  if (value == nullptr) {
+    // Freeing a nullptr is invalid.
+    return AOTI_TORCH_FAILURE;
+  } else {
+    delete value;
+    return AOTI_TORCH_SUCCESS;
+  }
+}
+
+AOTITorchError torch_stream_native_handle(
+    StreamHandle stream,
+    void** ret_native_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Stream* stream_ptr = reinterpret_cast<c10::Stream*>(stream);
+    *ret_native_handle = stream_ptr->native_handle();
+  });
+}
+
+AOTITorchError torch_new_generator_handle(
+    AtenGeneratorHandle self,
+    AtenGeneratorHandle* ret_new_generator) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Generator* generator =
+        torch::aot_inductor::generator_handle_to_generator_pointer(self);
+    *ret_new_generator =
+        torch::aot_inductor::generator_pointer_to_generator_handle(
+            new at::Generator(*generator));
+  });
+}
+
+AOTITorchError torch_delete_generator(AtenGeneratorHandle generator) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    delete torch::aot_inductor::generator_handle_to_generator_pointer(
+        generator);
+  });
+}
+
+AOTITorchError torch_generator_get_device(
+    AtenGeneratorHandle generator,
+    int32_t* ret_device_type,
+    int32_t* ret_device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Device device =
+        torch::aot_inductor::generator_handle_to_generator_pointer(generator)
+            ->device();
+    *ret_device_type = static_cast<int32_t>(device.type());
+    *ret_device_index = static_cast<int16_t>(device.index());
+  });
+}
+
+AOTI_TORCH_EXPORT const char* torch_exception_get_what() {
+  return torch::csrc::shim::details ::get_torch_exception_what().c_str();
+}
+
+AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace() {
+  return torch::csrc::shim::details ::
+      get_torch_exception_what_without_backtrace()
+          .c_str();
 }

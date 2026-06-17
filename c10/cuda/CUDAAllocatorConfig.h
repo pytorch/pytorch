@@ -196,7 +196,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parseGraphCaptureRecordStreamReuse(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
-  double parsePerProcessMemoryFraction(
+  size_t parsePerProcessMemoryFraction(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
   size_t parsePinnedFreeCatchAll(

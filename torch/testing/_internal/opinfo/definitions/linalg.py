@@ -34,13 +34,13 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
     IS_ARM64,
-    IS_CPU_CAPABILITY_SVE256,
     IS_LINUX,
-    MACOS_VERSION,
+    IS_WINDOWS,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
     TEST_WITH_ROCM,
+    TEST_WITH_TORCHINDUCTOR,
     TEST_XPU,
 )
 from torch.testing._internal.opinfo.core import (
@@ -1325,8 +1325,6 @@ op_db: list[OpInfo] = [
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
             ),
-            # The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1443,8 +1441,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1482,8 +1478,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1522,7 +1516,25 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.bfloat16, torch.float16),
             ),
-            skipCUDAIfRocm,  # regression in ROCm 6.4
+            # regression in ROCm 6.4; f32, f64 re-enabled to validate fix
+            DecorateInfo(
+                unittest.skip("Skipped on ROCm (regression in ROCm 6.4)"),
+                device_type="cuda",
+                dtypes=(torch.complex64, torch.complex128),
+                active_if=TEST_WITH_ROCM,
+            ),
+            # ROCm: second-order autograd through vmap (vmap(vjp(vjp(...)))) on
+            # linalg.householder_product accumulates an f32 precision difference
+            # that exceeds the default tolerance. Other functorch transforms for
+            # this op (vjp/vmapvjp/jvp/etc.) only generate f32 variants and pass.
+            DecorateInfo(
+                unittest.skip("ROCm: 2nd-order vmap(vjp(vjp)) precision accumulation"),
+                "TestOperators",
+                "test_vmapvjpvjp",
+                device_type="cuda",
+                dtypes=(torch.float32,),
+                active_if=TEST_WITH_ROCM,
+            ),
         ],
     ),
     OpInfo(
@@ -1547,6 +1559,15 @@ op_db: list[OpInfo] = [
         skips=(
             # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # https://github.com/pytorch/pytorch/issues/76962
+            DecorateInfo(
+                unittest.skip("Flaky on Linux CUDA"),
+                "TestDecomp",
+                "test_comprehensive",
+                device_type="cuda",
+                dtypes=(torch.complex64, torch.complex128),
+                active_if=IS_LINUX,
+            ),
         ),
     ),
     OpInfo(
@@ -1601,16 +1622,15 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: The operator 'aten::linalg_lstsq.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # https://github.com/pytorch/pytorch/issues/95412
             # see https://github.com/pytorch/pytorch/issues/177249
             DecorateInfo(
-                unittest.expectedFailure,
+                unittest.skip,
                 "TestJit",
                 "test_variant_consistency_jit",
                 device_type="cpu",
                 dtypes=[torch.complex64],
-                active_if=IS_LINUX and IS_ARM64 and not IS_CPU_CAPABILITY_SVE256,
+                active_if=IS_LINUX or IS_WINDOWS,
             ),
         ),
     ),
@@ -1641,8 +1661,6 @@ op_db: list[OpInfo] = [
                 "TestOperatorSignatures",
                 "test_get_torch_func_signature_exhaustive",
             ),
-            # Exception: The operator 'aten::linalg_lstsq.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1678,15 +1696,6 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_eager",
                 device_type="mps",
                 dtypes=(torch.complex64,),
-            ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=(torch.float32,),
-                active_if=MACOS_VERSION < 26.0,
             ),
         ),
         sample_inputs_func=sample_inputs_linalg_matrix_power,
@@ -1728,16 +1737,20 @@ op_db: list[OpInfo] = [
                 device_type="cpu",
                 dtypes=(torch.long,),
             ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=(torch.float32,),
-                active_if=MACOS_VERSION < 26.0,
-            ),
         ),
+        decorators=[
+            # https://github.com/pytorch/pytorch/issues/184350
+            # DTensor lowers a multi_dot chain with a Shard contraction dim
+            # into a per-rank partial sum, then all-reduces. The summation
+            # order differs from the single reference matmul, and in float32
+            # the drift can exceed the default tolerance for some inputs.
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-5, rtol=2.4e-6)}),
+                "TestDTensorOps",
+                "test_dtensor_op_db",
+                dtypes=(torch.float32,),
+            ),
+        ],
     ),
     # NB: linalg.norm has two variants so that different skips can be used for different sample inputs
     OpInfo(
@@ -1770,40 +1783,6 @@ op_db: list[OpInfo] = [
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
             ),
-            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
         ),
     ),
     OpInfo(
@@ -1834,40 +1813,6 @@ op_db: list[OpInfo] = [
                 unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"
             ),
             DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
-            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
         ),
     ),
     OpInfo(
@@ -1896,28 +1841,6 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
-            ),
-            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
             ),
         ),
     ),
@@ -2094,6 +2017,14 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
+            ),
+            # https://github.com/pytorch/pytorch/issues/137684
+            DecorateInfo(
+                unittest.skip,
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
+                dtypes=(torch.float32,),
             ),
         ),
     ),
@@ -2386,25 +2317,6 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 dtypes=[torch.complex64, torch.float32],
             ),
-            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-            ),
         ),
     ),
     OpInfo(
@@ -2429,25 +2341,6 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="mps",
                 dtypes=[torch.float32],
-            ),
-            # NotImplementedError: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
             ),
         ),
     ),
@@ -2564,34 +2457,8 @@ op_db: list[OpInfo] = [
                 "test_fn_fwgrad_bwgrad",
                 device_type="cuda",
             ),
-            # NotImplementedError: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
             DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_requires_grad_error",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-            ),
-            # see https://github.com/pytorch/pytorch/issues/177264
-            DecorateInfo(
-                unittest.expectedFailure,
+                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-04)}),
                 "TestEagerFusionOpInfo",
                 "test_aot_autograd_symbolic_exhaustive",
                 device_type="cpu",
@@ -2665,8 +2532,6 @@ op_db: list[OpInfo] = [
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
             ),
-            # The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -2694,6 +2559,21 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
+            ),
+            # The test is flaky on AMX with Inductor
+            DecorateInfo(
+                unittest.skip,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=(
+                    TEST_WITH_TORCHINDUCTOR
+                    and isinstance(
+                        torch._inductor.cpu_vec_isa.pick_vec_isa(),
+                        torch._inductor.cpu_vec_isa.VecAMX,
+                    )
+                ),
             ),
         ),
     ),
@@ -2736,6 +2616,21 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
+            ),
+            # The test is flaky on AMX with Inductor
+            DecorateInfo(
+                unittest.skip,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=(
+                    TEST_WITH_TORCHINDUCTOR
+                    and isinstance(
+                        torch._inductor.cpu_vec_isa.pick_vec_isa(),
+                        torch._inductor.cpu_vec_isa.VecAMX,
+                    )
+                ),
             ),
         ),
     ),
@@ -2782,23 +2677,6 @@ python_ref_db: list[OpInfo] = [
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
         op_db=op_db,
-        skips=(
-            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float32, torch.complex64),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float32, torch.complex64),
-            ),
-        ),
     ),
     PythonRefInfo(
         "_refs.linalg.norm",
@@ -2808,23 +2686,6 @@ python_ref_db: list[OpInfo] = [
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
         op_db=op_db,
-        skips=(
-            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float32, torch.complex64),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float32, torch.complex64),
-            ),
-        ),
     ),
     PythonRefInfo(
         "_refs.linalg.svd",
@@ -2837,20 +2698,5 @@ python_ref_db: list[OpInfo] = [
         torch_opinfo_name="linalg.svdvals",
         supports_out=True,
         op_db=op_db,
-        skips=(
-            # The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-            ),
-        ),
     ),
 ]

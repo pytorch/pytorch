@@ -108,7 +108,7 @@ __all__ = [
 
 
 def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
-    # No need to check that two args are not the same, since expr is pr-optimized but we do it anyway.
+    # No need to check that two args are not the same, since expr is pre-optimized but we do it anyway.
     return (
         isinstance(expr, sympy.Expr)
         and expr.is_Add
@@ -571,8 +571,8 @@ class CeilToInt(sympy.Function):
             return sympy.Integer(math.ceil(float(number)))
 
     def _ccode(self, printer) -> str:
-        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
-        return f"ceil({number})"
+        number = printer._print(self.args[0])
+        return f"(int64_t)(ceil({number}))"
 
 
 class FloorToInt(sympy.Function):
@@ -582,12 +582,16 @@ class FloorToInt(sympy.Function):
     def eval(cls, number):
         if number in (sympy.oo, int_oo):
             return int_oo
-        if number in (-sympy.oo, int_oo):
+        if number in (-sympy.oo, -int_oo):
             return -int_oo
         if isinstance(number, sympy.Integer):
             return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
+
+    def _ccode(self, printer) -> str:
+        number = printer._print(self.args[0])
+        return f"(int64_t)(floor({number}))"
 
 
 class CeilDiv(sympy.Function):
@@ -611,9 +615,9 @@ class LShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        if shift < 0:
+        if shift.is_negative:
             raise ValueError("negative shift count")
-        return base * 2**shift
+        return base * PowByNatural(sympy.Integer(2), shift)
 
 
 class RShift(sympy.Function):
@@ -621,9 +625,9 @@ class RShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        if shift < 0:
+        if shift.is_negative:
             raise ValueError("negative shift count")
-        return FloorDiv(base, 2**shift)
+        return FloorDiv(base, PowByNatural(sympy.Integer(2), shift))
 
 
 class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
@@ -671,6 +675,37 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
 
         obj.unique_summations_symbols = unique_summations_symbols
         return obj
+
+    @classmethod
+    def _collapse_known_multiplicative_terms(cls, values):
+        if len(values) != 2:
+            return None
+
+        a, b = values
+        a_coeff, a_term = a.as_coeff_Mul()
+        b_coeff, b_term = b.as_coeff_Mul()
+        if a_term != b_term:
+            return None
+
+        if not (a_coeff.is_comparable and b_coeff.is_comparable):
+            return None
+
+        if a_coeff == b_coeff:
+            return a
+
+        if a_term.is_nonnegative:
+            a_is_smaller = a_coeff < b_coeff
+        elif a_term.is_nonpositive:
+            a_is_smaller = a_coeff > b_coeff
+        else:
+            return None
+
+        if cls is Min:
+            return a if a_is_smaller else b
+        if cls is Max:
+            return b if a_is_smaller else a
+
+        raise AssertionError(f"impossible {cls}")
 
     @classmethod
     def _satisfy_unique_summations_symbols(
@@ -942,6 +977,9 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
 
         # Special cases when there is only one symbolic value
         if num_value is None:
+            collapsed_value = cls._collapse_known_multiplicative_terms(other_values)
+            if collapsed_value is not None:
+                return {collapsed_value}
             return other_values
 
         if len(other_values) == 0:
@@ -1264,6 +1302,10 @@ class TruncToInt(sympy.Function):
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.trunc(float(number)))
 
+    def _ccode(self, printer) -> str:
+        number = printer._print(self.args[0])
+        return f"(int64_t)(trunc({number}))"
+
 
 # This is float -> int
 class RoundToInt(sympy.Function):
@@ -1321,6 +1363,10 @@ class ToFloat(sympy.Function):
             return sympy.oo
         if number is -int_oo:
             return -sympy.oo
+
+    def _ccode(self, printer) -> str:
+        number = printer._print(self.args[0])
+        return f"(double)({number})"
 
 
 class Identity(sympy.Function):

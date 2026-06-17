@@ -99,6 +99,11 @@ dead_code_elimination = None
 # never be False by default. At the moment, only export will need it.
 replay_side_effects = True
 
+# Generate Python code strings for compiled graph calls.
+# When enabled, the generated Python code will be stored in output_pycode.
+# [@compile_ignored: debug]
+generate_pycode = False
+
 # Configure side effect warning level
 # If `info` (default): allow side effects and log to TORCH_LOGS="side_effects" and tlparse
 # If `silent`, we allow side effects, no logs are made.
@@ -168,6 +173,10 @@ use_lazy_graph_module = (
 # NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
 # see [Note - on the state of mark_dynamic]
 assume_static_by_default = True
+
+# Internal: Shape specification patched during tracing by enter_exit_hooks.
+# Set via torch.compile(shapes_spec=...), not directly by users.
+_shapes_spec = None
 
 # This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
 # with assume_static_by_default=True.
@@ -249,7 +258,7 @@ prepare_freezing = os.environ.get("TORCHDYNAMO_PREPARE_FREEZING", "0") == "1"
 # NOTE this has been deprecated, it does nothing now.
 traceable_tensor_subclasses: set[type[Any]] = set()
 
-# If a tensor subclass is put into this set, Dynamo will model its instasnces in
+# If a tensor subclass is put into this set, Dynamo will model its instances in
 # a very conservative and limited way (most likely causing lots of graph breaks
 # if one apply tensor ops on these instances). This is useful if you encounter
 # internal compiler errors from Dynamo which are caused by tensor subclasses,
@@ -611,7 +620,8 @@ issue_3_13_0_warning = True
 # traced FX graph is empty when RETURN_* is traced.
 allow_empty_graphs = False
 
-# Used for testing - forces all top-level functions to be nested when traced with Dynamo
+# Used for testing - forces all top-level functions to be nested when traced with Dynamo.
+# There are slight differences between this config and wrap_top_frame.
 debug_force_nested_calls = False
 
 # Used for testing - forces a graph break when a function
@@ -872,7 +882,7 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
 )
 
 # Does not graph break on torch.autograd._profiler_enabled if set to True. We
-# want this flag to be True by default, but there is an unsolbed bug that causes
+# want this flag to be True by default, but there is an unsolved bug that causes
 # distributed jobs to timeout with Kineto profiler when this is set to True.
 constant_fold_autograd_profiler_enabled = False
 

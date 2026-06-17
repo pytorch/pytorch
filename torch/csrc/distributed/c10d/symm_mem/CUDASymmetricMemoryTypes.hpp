@@ -9,6 +9,8 @@
 
 #if defined(USE_ROCM)
 #include <hip/hip_runtime_api.h>
+#elif defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#include <cuda.h>
 #endif
 
 namespace c10d::symmetric_memory {

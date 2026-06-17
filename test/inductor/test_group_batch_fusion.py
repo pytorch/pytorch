@@ -7,6 +7,7 @@ import torch
 import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
+from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
@@ -565,6 +566,43 @@ class TestGroupBatchFusion(TestCase):
 
     @requires_gpu()
     @torch._inductor.config.patch(
+        pre_grad_fusion_options={"batch_linear_lhs": {}},
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_fusion_nn_linear_inlined(self):
+        # Same shape pattern as test_batch_linear_lhs_fusion, but the linears
+        # are produced through nn.Linear modules. Dynamo inlines those to
+        # torch._C._nn.linear, which the upstream matcher used to miss.
+        class M(torch.nn.Module):
+            def __init__(self, z, n, has_bias):
+                super().__init__()
+                self.linears = torch.nn.ModuleList(
+                    [torch.nn.Linear(z, z - i % 5, bias=has_bias) for i in range(n)]
+                )
+
+            def forward(self, x):
+                x = x + 1.2
+                outs = [lin(x) for lin in self.linears]
+                return torch.sigmoid(torch.cat(outs, dim=1))
+
+        z, n = 10, 10
+        for has_bias in [True, False]:
+            counters.clear()
+            module = M(z, n, has_bias).to(GPU_TYPE)
+            input = [torch.randn(20, z, device=GPU_TYPE)]
+            traced = torch.compile(module)
+            ref = module(*input)
+            res = traced(*input)
+            self.compare_pred(module, traced, input)
+            self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+            ref.sum().backward()
+            res.sum().backward()
+            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            counters.clear()
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_linear": {}},
         post_grad_fusion_options={},
     )
@@ -735,6 +773,106 @@ class TestGroupBatchFusion(TestCase):
         traced(*input)
         self.assertEqual(counters["inductor"]["normalization_pass"], 1)
         self.assertEqual(counters["inductor"]["batch_dropout"], 1)
+        counters.clear()
+
+    @unittest.skipUnless(
+        torch.xpu.is_available(),
+        "batch_linear_lhs auto-enable is XPU-only for now",
+    )
+    def test_xpu_auto_enable_batch_linear_lhs(self):
+        # Verify that batch_linear_lhs fusion is auto-enabled when example inputs
+        # contain XPU tensors, driven by the "devices" key in the default
+        # config.pre_grad_fusion_options.
+        default_options = config.pre_grad_fusion_options
+        self.assertIn("batch_linear_lhs", default_options)
+        self.assertEqual(default_options["batch_linear_lhs"]["devices"], ("xpu",))
+        z = 10
+        for has_bias in [True, False]:
+            orig_fusion_options = dict(config.pre_grad_fusion_options)
+            counters.clear()
+            module = MyModule4(z, "xpu", has_bias)
+            input = [torch.randn(20, z, device="xpu")]
+            traced = torch.compile(module)
+            ref = module(*input)
+            res = traced(*input)
+            self.compare_pred(module, traced, input)
+            self.assertGreater(counters["inductor"]["batch_linear_lhs"], 0)
+            self.assertEqual(ref, res)
+            ref.sum().backward()
+            res.sum().backward()
+            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            self.assertEqual(
+                orig_fusion_options,
+                dict(config.pre_grad_fusion_options),
+                "config.pre_grad_fusion_options should not be mutated by auto-enable",
+            )
+            counters.clear()
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": (GPU_TYPE,), "min_fuse_set_size": 2},
+        },
+    )
+    def test_predispatch_device_aware_batch_linear_lhs(self):
+        # Verify that the predispatch path (_run_pre_dispatch_passes) routes
+        # through _resolve_pre_grad_fusion_options and applies device filtering.
+        # The default config has devices=("xpu",) which was previously bypassed
+        # in the predispatch path (review #181854#issuecomment-4705071437).
+        # This test uses devices=(GPU_TYPE,) to confirm the wrapper closure
+        # correctly resolves and filters fusion options.
+        z = 10
+        module = MyModule4(z, GPU_TYPE, has_bias=True)
+        input = [torch.randn(20, z, device=GPU_TYPE)]
+
+        counters.clear()
+        traced = torch.compile(module, fullgraph=True)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertGreater(
+            counters["inductor"]["batch_linear_lhs"],
+            0,
+            "batch_linear_lhs should fire in predispatch mode when devices match GPU_TYPE",
+        )
+        self.assertEqual(ref, res)
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @torch._inductor.config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"min_fuse_set_size": 2},
+        },
+    )
+    def test_predispatch_cpu_device_agnostic_batch_linear_lhs(self):
+        # Verify that the predispatch path correctly enables batch_linear_lhs
+        # when no "devices" key is present (user explicitly opts in).
+        # This test runs on CPU so it can be verified in local dev without GPU.
+        z = 10
+        module = MyModule4(z, "cpu", has_bias=True)
+        input = [torch.randn(20, z, device="cpu")]
+
+        counters.clear()
+        traced = torch.compile(module, fullgraph=True)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertGreater(
+            counters["inductor"]["batch_linear_lhs"],
+            0,
+            "batch_linear_lhs should fire in predispatch mode when no devices key restricts it",
+        )
+        self.assertEqual(ref, res)
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
 

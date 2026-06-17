@@ -3,7 +3,6 @@ import abc
 import copy
 import logging
 import operator
-import re
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -16,6 +15,7 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_value
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
@@ -81,7 +81,7 @@ def _disable_interpreter():
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
 # This installs empty Modules where none exist yet if they are subpaths of target
 def _assign_attr(
-    from_obj: torch.Tensor | torch.ScriptObject | torch.nn.Module,
+    from_obj: Any,
     to_module: torch.nn.Module,
     target: str,
     attr_kind: _AttrKind,
@@ -100,11 +100,19 @@ def _assign_attr(
         for to_module in to_modules:
             if not hasattr(to_module, item):
                 setattr(to_module, item, torch.nn.Module())
-            ts.update(
-                t_call  # type: ignore[misc]
-                for k, t_call in to_module._modules.items()
-                if _is_call_name(k, item)
-            )
+            if item in to_module._modules:
+                module = to_module._modules[item]
+                if module is not None:
+                    ts.add(module)
+            i = 1
+            while True:
+                variant = f"{item}@{i}"
+                if variant not in to_module._modules:
+                    break
+                module = to_module._modules[variant]
+                if module is not None:
+                    ts.add(module)
+                i += 1
         to_modules = ts
 
     for to_module in to_modules:
@@ -131,9 +139,9 @@ def _assign_attr(
                     torch.Tensor,
                     torch.ScriptObject,
                 ),
-            ):
+            ) and not is_opaque_value(from_obj):
                 raise AssertionError(
-                    f"expected torch.Tensor or torch.ScriptObject for CONSTANT attr_kind, got {type(from_obj)}"
+                    f"expected torch.Tensor, torch.ScriptObject, or opaque type for CONSTANT attr_kind, got {type(from_obj)}"
                 )
             setattr(to_module, field, from_obj)
         elif attr_kind == _AttrKind.MODULE:
@@ -620,7 +628,7 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
             if len(flat_args) != signature.in_spec.num_leaves:
                 raise TypeError(
                     f"Flat args adaption failed, number of args mismatch "
-                    f"Adatped: {len(flat_args)} \n"
+                    f"Adapted: {len(flat_args)} \n"
                     f"Exported module: {signature.in_spec.num_leaves}"
                 )
             return flat_args
@@ -1087,11 +1095,6 @@ def _call_name(base: str, n: int) -> str:
     # Given n >= 0, generate call names to a submodule `base` of the form
     # `base`, `base@1`, `base@2`, etc.
     return base if n == 1 else f"{base}@{n - 1}"
-
-
-def _is_call_name(call_name: str, base: str) -> bool:
-    # Recognize when call_name = _call_name(base, n) for some n >= 0.
-    return re.match(re.escape(base) + r"(@\d+)?$", call_name) is not None
 
 
 class _ModuleFrame:

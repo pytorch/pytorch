@@ -87,7 +87,7 @@ class CausalBias(torch.Tensor):
     """
     A bias representing causal attention patterns. For an overview of the bias structure, see the :class:`CausalVariant` enum.
 
-    This class is used for defining causal (triangular) attention biases. For construing the bias, there exist
+    This class is used for defining causal (triangular) attention biases. For constructing the bias, there exist
     two factory functions: :func:`causal_upper_left` and :func:`causal_lower_right`.
 
     Example:
@@ -309,7 +309,7 @@ def causal_upper_left(*size) -> CausalBias:
     """
     Creates an upper-left triangular causal bias.
 
-    This function generates a upper-left triangular matrix to represent causal attention bias with a
+    This function generates an upper-left triangular matrix to represent causal attention bias with a
     diagonal offset set so that the inclusive values are aligned to the upper left corner of the matrix.
     This equivalent to the `is_causal=True` argument in `scaled_dot_product_attention`.
 

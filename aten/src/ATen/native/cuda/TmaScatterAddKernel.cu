@@ -1,6 +1,7 @@
-// TMA-based scatter_add using cp.reduce.async.bulk (sm_90+)
-// Separated into its own file to avoid include conflicts between
-// <cuda/ptx> and PyTorch headers (Loops.cuh etc).
+// TMA-based scatter_add using cp.reduce.async.bulk (sm_90+, CUDA 12.8+)
+// Uses inline PTX rather than cuda::ptx wrappers to avoid CCCL version
+// compatibility issues across different CUDA toolkit versions.
+// Requires CUDA 12.8+ for cp.async.bulk.shared::cta.global (PTX ISA 8.7).
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/ceil_div.h>
@@ -9,13 +10,99 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
-#if !defined(USE_ROCM)
-#include <cuda/ptx>
-#endif
-
-// Must use ::cuda::ptx because inside namespace at::native,
-// unqualified cuda:: resolves to the sibling at::cuda namespace.
 namespace at::native {
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && \
+    defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+
+namespace tma {
+
+__device__ __forceinline__ void mbar_init(uint64_t* mbar, uint32_t count) {
+    uint64_t addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(addr) : "l"(reinterpret_cast<uint64_t>(mbar)));
+    asm volatile("mbarrier.init.shared::cta.b64 [%0], %1;" : : "l"(addr), "r"(count) : "memory");
+}
+
+__device__ __forceinline__ void mbar_expect_tx(uint64_t* mbar, uint32_t bytes) {
+    uint64_t addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(addr) : "l"(reinterpret_cast<uint64_t>(mbar)));
+    asm volatile("mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], %1;"
+        : : "l"(addr), "r"(bytes) : "memory");
+}
+
+__device__ __forceinline__ bool mbar_try_wait_parity(uint64_t* mbar, uint32_t phase_parity) {
+    uint64_t addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(addr) : "l"(reinterpret_cast<uint64_t>(mbar)));
+    uint32_t wait_complete;
+    asm volatile(
+        "{\n"
+        ".reg .pred p;\n"
+        "mbarrier.try_wait.parity.shared::cta.b64 p, [%1], %2;\n"
+        "selp.b32 %0, 1, 0, p;\n"
+        "}\n"
+        : "=r"(wait_complete) : "l"(addr), "r"(phase_parity) : "memory");
+    return static_cast<bool>(wait_complete);
+}
+
+__device__ __forceinline__ void bulk_load(void* smem_dst, const void* global_src,
+                                           uint32_t size, uint64_t* mbar) {
+    uint64_t dst_addr, mbar_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(dst_addr) : "l"(reinterpret_cast<uint64_t>(smem_dst)));
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(mbar_addr) : "l"(reinterpret_cast<uint64_t>(mbar)));
+    asm volatile("cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes [%0], [%1], %2, [%3];"
+        : : "l"(dst_addr), "l"(global_src), "r"(size), "l"(mbar_addr) : "memory");
+}
+
+template <typename scalar_t>
+__device__ __forceinline__ void bulk_reduce_add(void* global_dst, const void* smem_src, uint32_t size);
+
+template <>
+__device__ __forceinline__ void bulk_reduce_add<float>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.add.f32 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+template <>
+__device__ __forceinline__ void bulk_reduce_add<double>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.add.f64 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+template <>
+__device__ __forceinline__ void bulk_reduce_add<c10::Half>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.add.noftz.f16 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+template <>
+__device__ __forceinline__ void bulk_reduce_add<c10::BFloat16>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.add.noftz.bf16 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+__device__ __forceinline__ void commit_group() {
+    asm volatile("cp.async.bulk.commit_group;" ::: "memory");
+}
+
+__device__ __forceinline__ void wait_group_lt1() {
+    asm volatile("cp.async.bulk.wait_group 1;" ::: "memory");
+}
+
+__device__ __forceinline__ void wait_group_lt0() {
+    asm volatile("cp.async.bulk.wait_group 0;" ::: "memory");
+}
+
+} // namespace tma
+
+#endif // !USE_ROCM && __CUDA_ARCH__ >= 900
 
 template <typename scalar_t, typename index_t>
 __global__ void tma_scatter_add_kernel(
@@ -25,11 +112,12 @@ __global__ void tma_scatter_add_kernel(
     int num_ind, int D, int64_t self_dim_size,
     int64_t self_stride, int64_t src_stride,
     int entries_per_block, int chunk_elems) {
-#if !defined(USE_ROCM) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-    namespace ptx = ::cuda::ptx;
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && \
+    defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 
     extern __shared__ char smem_raw[];
 
+    // One warp per entry: lane 0 issues TMA commands, __syncwarp() synchronizes.
     constexpr int threads_per_entry = C10_WARP_SIZE;
     int entry_in_block = threadIdx.x / threads_per_entry;
     int lane = threadIdx.x - entry_in_block * threads_per_entry;
@@ -47,8 +135,8 @@ __global__ void tma_scatter_add_kernel(
     uint64_t* mbars[2] = {mbar0, mbar1};
 
     if (lane == 0) {
-        ptx::mbarrier_init(mbar0, 1u);
-        ptx::mbarrier_init(mbar1, 1u);
+        tma::mbar_init(mbar0, 1u);
+        tma::mbar_init(mbar1, 1u);
     }
     __syncwarp();
 
@@ -73,37 +161,26 @@ __global__ void tma_scatter_add_kernel(
             uint32_t cur_bytes = cur_elems * sizeof(scalar_t);
 
             if (phase >= 2 && lane == 0) {
-                ptx::cp_async_bulk_wait_group(ptx::n32_t<1>{});
+                tma::wait_group_lt1();
             }
             __syncwarp();
 
             if (lane == 0) {
-                ptx::mbarrier_arrive_expect_tx(
-                    ptx::sem_release, ptx::scope_cta, ptx::space_shared,
-                    mbars[cur], cur_bytes);
-                ptx::cp_async_bulk(
-                    ptx::space_shared, ptx::space_global,
-                    buf0 + cur * chunk_elems, src_entry + off, cur_bytes, mbars[cur]);
+                tma::mbar_expect_tx(mbars[cur], cur_bytes);
+                tma::bulk_load(buf0 + cur * chunk_elems, src_entry + off, cur_bytes, mbars[cur]);
             }
-            while (!ptx::mbarrier_try_wait_parity(
+            while (!tma::mbar_try_wait_parity(
                 mbars[cur], static_cast<uint32_t>(mbar_phase[cur] & 1))) {}
             mbar_phase[cur]++;
 
             if (lane == 0) {
-                using cuda_type = std::conditional_t<
-                    std::is_same_v<scalar_t, c10::Half>, __half,
-                    std::conditional_t<std::is_same_v<scalar_t, c10::BFloat16>, __nv_bfloat16, scalar_t>>;
-                ptx::cp_reduce_async_bulk(
-                    ptx::space_global, ptx::space_shared, ptx::op_add,
-                    reinterpret_cast<cuda_type*>(dst_entry + off),
-                    reinterpret_cast<cuda_type*>(buf0 + cur * chunk_elems),
-                    cur_bytes);
-                ptx::cp_async_bulk_commit_group();
+                tma::bulk_reduce_add<scalar_t>(dst_entry + off, buf0 + cur * chunk_elems, cur_bytes);
+                tma::commit_group();
             }
         }
 
         if (lane == 0) {
-            ptx::cp_async_bulk_wait_group(ptx::n32_t<0>{});
+            tma::wait_group_lt0();
         }
         __syncwarp();
     }
@@ -118,10 +195,9 @@ void tma_scatter_add_kernel_launch(
     scalar_t* self_data, const scalar_t* src_data, index_t* idx, int num_ind,
     int D, int64_t self_dim_size,
     int64_t self_stride_bytes, int64_t src_stride_bytes) {
-#if !defined(USE_ROCM)
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
     constexpr int max_threads = 256;
     // One warp per entry: lane 0 issues TMA commands, __syncwarp() synchronizes.
-    // Correctness depends on this being exactly one warp.
     constexpr int threads_per_entry = C10_WARP_SIZE;
     int chunk_elems = std::min(D, static_cast<int>(512 / sizeof(scalar_t)));
     int num_chunks = at::ceil_div(D, chunk_elems);
@@ -152,7 +228,7 @@ void tma_scatter_add_kernel_launch(
         entries_per_block, chunk_elems);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
-    TORCH_CHECK(false, "TMA scatter_add not supported on ROCm");
+    TORCH_CHECK(false, "TMA scatter_add requires CUDA 12.8+ and NVIDIA GPU");
 #endif
 }
 

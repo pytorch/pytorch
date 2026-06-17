@@ -18,6 +18,12 @@ EXCLUDE_PATTERNS = (
     "torch/csrc/stable/",
     "torch/csrc/inductor/aoti_torch/c/",
     "torch/csrc/inductor/aoti_torch/generated/",
+    # Third-party headers: not part of the torch stable API surface, and
+    # wrapping them creates an incremental-build cycle because the install
+    # step un-wraps them on every build (source content differs from the
+    # wrapped destination), forcing dependents to rebuild.
+    "pybind11/",
+    "sleef.h",
 )
 
 WRAP_MARKER = "#if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)"

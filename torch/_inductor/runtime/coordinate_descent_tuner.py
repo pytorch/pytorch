@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING
 from torch.utils._ordered_set import OrderedSet
 
 from ..utils import get_max_numwarps
-from .hints import TRITON_MAX_BLOCK
+from .hints import (
+    native_matmul_block_numel,
+    native_matmul_persistent_rblock,
+    TRITON_MAX_BLOCK,
+    TRITON_MAX_TENSOR_NUMEL,
+)
 from .runtime_utils import red_text, triton_config_to_hashable
 
 
@@ -66,7 +71,8 @@ class CoordescTuner:
         # This is because 3d tl.dot is slow and so we want to tile y and x only.
         # tl.dot also does not support size smaller than 16; we put this restriction.
         self.is_native_matmul = is_native_matmul
-        assert not (self.is_mm and self.is_native_matmul)
+        if self.is_mm and self.is_native_matmul:
+            raise AssertionError("is_mm and is_native_matmul are mutually exclusive")
         self.is_mix_order_reduction = is_mix_order_reduction
         self.cached_benchmark_results = {}
         self.name = name
@@ -164,6 +170,14 @@ class CoordescTuner:
         return False
 
     def value_too_small(self, name: str, val: int) -> bool:
+        min_block = None
+        if name == "XBLOCK":
+            min_block = self.inductor_meta.get("min_xblock")
+        elif name == "R0_BLOCK":
+            min_block = self.inductor_meta.get("min_rblock")
+        if min_block is not None and val < min_block:
+            return True
+
         # In native matmul, block size should be >= 16 for tl.dot
         if self.is_native_matmul:
             if name in ["YBLOCK", "XBLOCK", "R0_BLOCK"]:
@@ -185,7 +199,8 @@ class CoordescTuner:
             # while NUM_STAGES=1 is worse than NUM_STAGES=3
             radius = max(radius, 2)
 
-        assert radius >= 1
+        if radius < 1:
+            raise AssertionError(f"radius must be >= 1, got {radius}")
 
         def update(cur_val, inc=True):
             if name in ["num_stages", "NUM_STAGES"]:
@@ -232,6 +247,19 @@ class CoordescTuner:
             xblock = config.kwargs["XBLOCK"]
             split_size = config.kwargs["RSPLIT_SIZE"]
             return xblock <= split_size
+        if self.is_native_matmul:
+            r0_block = None
+            if "R0_BLOCK" not in config.kwargs:
+                r0_block = self.inductor_meta.get("native_matmul_persistent_rblock")
+                if r0_block is None and self.size_hints is not None:
+                    r0_block_hint = self.size_hints.get("r0_")
+                    if r0_block_hint is not None:
+                        r0_block = native_matmul_persistent_rblock(r0_block_hint)
+            if (
+                native_matmul_block_numel(config.kwargs, r0_block=r0_block)
+                > TRITON_MAX_TENSOR_NUMEL
+            ):
+                return False
         return True
 
     def get_all_tuning_directions(
@@ -259,7 +287,10 @@ class CoordescTuner:
 
         configs = []
         for choice in itertools.product(*candidate_values_list):
-            assert len(choice) == len(effective_fields)
+            if len(choice) != len(effective_fields):
+                raise AssertionError(
+                    f"Expected {len(effective_fields)} values, got {len(choice)}"
+                )
             candidate = copy.deepcopy(config)
             for new_val, field in zip(choice, effective_fields):
                 set_field(candidate, field, new_val)
@@ -330,7 +361,8 @@ class CoordescTuner:
         iterating ``tunable_fields`` against arbitrary configs must
         filter empty fields up front; ``autotune`` does."""
         cur_val = get_field(config, field)
-        assert cur_val is not None, f"field {field!r} not present on config"
+        if cur_val is None:
+            raise AssertionError(f"field {field!r} not present on config")
         neighbours = []
         for next_val in self.get_neighbour_values(field, cur_val):
             candidate = copy.deepcopy(config)

@@ -102,7 +102,7 @@ std::optional<Value*> tryInsertConstant(
   } else if (val.isDevice()) {
     std::stringstream ss;
     ss << val.toDevice();
-    n->s_(attr::value, ss.str());
+    n->s_(attr::value, std::move(ss).str());
     n->output()->setType(DeviceObjType::get());
   } else if (val.isGenerator()) {
     auto generator = val.toGenerator();

@@ -174,6 +174,7 @@ struct _cuda_scatter_gather_internal_kernel {
         auto self_stride_bytes = index_stride * element_size;
         auto src_stride_bytes = iter.strides(1)[1];
         if (iter.numel() == 0) return;
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
         if (at::cuda::getCurrentDeviceProperties()->major >= 9) {
           at::native::tma_scatter_add_kernel_launch<scalar_t, index_t>(
               reinterpret_cast<scalar_t*>(self_ptr),
@@ -183,6 +184,7 @@ struct _cuda_scatter_gather_internal_kernel {
               self_stride_bytes, src_stride_bytes);
           return;
         }
+#endif
         at::native::vectorized_scatter_add_kernel_launch<alignment, scalar_t, index_t>(
             reinterpret_cast<scalar_t*>(self_ptr),
             reinterpret_cast<const scalar_t*>(src_ptr),
@@ -264,8 +266,8 @@ struct cuda_scatter_gather_base_kernel {
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       iter.dtype(),
       "cuda_scatter_gather_base_kernel_func", [&] {
-        using dtype = typename std::conditional<cast_to_opaque,
-          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+        using dtype = std::conditional_t<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>;
 
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
           _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
@@ -324,8 +326,8 @@ struct cuda_scatter_gather_base_kernel {
           self.qscheme() == kPerTensorAffine,
           "Only per_tensor quantized quantized tensors are supported by gather.")
       AT_DISPATCH_QINT_TYPES(iter.dtype(), "gather_quant_cuda", [&] {
-        using dtype = typename std::conditional<cast_to_opaque,
-            OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+        using dtype = std::conditional_t<cast_to_opaque,
+            OpaqueType<sizeof(scalar_t)>, scalar_t>;
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
           _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
             iter, index_size, index_stride, self.numel(), f
@@ -337,8 +339,8 @@ struct cuda_scatter_gather_base_kernel {
           iter.dtype(),
           "gather_cuda",
           AT_WRAP([&] {
-            using dtype = typename std::conditional<cast_to_opaque,
-                OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+            using dtype = std::conditional_t<cast_to_opaque,
+                OpaqueType<sizeof(scalar_t)>, scalar_t>;
             AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
               _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
                 iter, index_size, index_stride, self.numel(), f
@@ -349,6 +351,7 @@ struct cuda_scatter_gather_base_kernel {
           AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
           AT_EXPAND(AT_FLOAT8_TYPES),
           kComplexHalf,
+          kBComplex32,
           kHalf,
           kBool,
           kBFloat16);
@@ -403,8 +406,8 @@ struct cuda_scatter_gather_base_kernel {
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.dtype(),
       "cuda_scatter_gather_base_kernel_func", [&] {
-        using dtype = typename std::conditional<cast_to_opaque,
-          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+        using dtype = std::conditional_t<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>;
 
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
           _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
@@ -492,8 +495,8 @@ struct cuda_scatter_fill_base_kernel {
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       iter.dtype(),
       "cuda_scatter_fill_base_kernel_func", [&] {
-        using dtype = typename std::conditional<cast_to_opaque,
-          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+        using dtype = std::conditional_t<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>;
 
         auto src_scalar_val = src.to<scalar_t>();
         auto src_val = *(dtype*)&src_scalar_val;
@@ -537,8 +540,8 @@ struct cuda_scatter_fill_base_kernel {
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.dtype(),
       "cuda_scatter_fill_base_kernel_reduce_multiply", [&] {
-        using dtype = typename std::conditional<cast_to_opaque,
-          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+        using dtype = std::conditional_t<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>;
 
         auto src_scalar_val = src.to<scalar_t>();
         auto src_val = *(dtype*)&src_scalar_val;

@@ -23,7 +23,7 @@ exclude_patterns = [
     'test/generated_type_hints_smoketest.py',
     'test/test_torchfuzz_repros.py',
     # CPython tests
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     # Tests from the NumPy test suite
     'test/torch_np/numpy_test/**/*.py',
     'third_party/**',
@@ -67,6 +67,7 @@ include_patterns = [
     'aten/src/ATen/native/**/Foreach*.*',
     'aten/src/ATen/native/cuda/fused*.*',
     'aten/src/ATen/native/cuda/Fused*.cu',
+    'aten/src/ATen/native/cuda/group_norm_kernel.cu',
     'aten/src/ATen/native/cudnn/*.h',
     'aten/src/ATen/native/cudnn/*.cpp',
     'aten/src/ATen/native/mkldnn/xpu/**/*.h',
@@ -176,10 +177,6 @@ include_patterns = [
     'torch/csrc/**/*.cpp',
     'torch/csrc/jit/serialization/*.h',
     'torch/csrc/jit/serialization/*.cpp',
-    'torch/nativert/*.h',
-    'torch/nativert/*.cpp',
-    'torch/nativert/**/*.h',
-    'torch/nativert/**/*.cpp',
     'torch/headeronly/**/*.h',
 ]
 exclude_patterns = [
@@ -187,12 +184,10 @@ exclude_patterns = [
     # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
     # CUDA files are also excluded.
     '**/fb/**',
-    '**/generated/**',
     '**/*pb.h',
     '**/*inl.h',
     'aten/src/ATen/cpu/FlushDenormal.cpp',
     'aten/src/ATen/cpu/vml.h',
-    'aten/src/ATen/CPUFixedAllocator.h',
     # interned_strings.h includes the generated aten_interned_strings.h which
     # #errors under TORCH_ASSERT_ONLY_METHOD_OPERATORS. The .cpp file #undefs
     # the macro before including the header, but clang-tidy lints the .h
@@ -215,7 +210,6 @@ exclude_patterns = [
     'c10/test/**/*.h',
     'c10/test/**/*.cpp',
     'third_party/**/*',
-    'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*.cu',
     'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
@@ -223,7 +217,6 @@ exclude_patterns = [
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
-    'torch/csrc/utils/generated_serialization_types.h',
     'torch/csrc/utils/pythoncapi_compat.h',
     'torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h',
 ]
@@ -403,7 +396,7 @@ exclude_patterns=[
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     '**/*.png',
     '**/*.gz',
     '**/*.patch',
@@ -994,7 +987,7 @@ include_patterns = [
 exclude_patterns = [
     'test/run_test.py',
     '**/fb/**',
-    'test/dynamo/cpython/3.13/**',
+    'test/cpython/**',
     'test/quantization/**',  # should be run through test/test_quantization.py
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
@@ -1182,7 +1175,7 @@ exclude_patterns = [
     'fb/**',
     '**/fb/**',
     'third_party/**',
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
@@ -1215,7 +1208,7 @@ exclude_patterns = [
     'caffe2/**/*.pyi',
     'fb/**',
     '**/fb/**',
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     'third_party/**/*.py',
     'third_party/**/*.pyi',
     'torch/_vendor/**',
@@ -1564,7 +1557,7 @@ exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
     'torch/_vendor/**',
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     'test/test_torchfuzz_repros.py',
     'scripts/**',
     'third_party/**',
@@ -1598,7 +1591,7 @@ include_patterns = [
     'test/**/*.py',
 ]
 exclude_patterns = [
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     'test/test_torchfuzz_repros.py',
     'test/torch_np/numpy_test/**',
     'third_party/**',
@@ -1805,7 +1798,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     # CPython tests
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
 ]
 
 # 'header_only_linter' reports on properly testing header-only APIs.
@@ -1859,6 +1852,30 @@ include_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/stable_shim_usage_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'SYMPY_MINMAX'
+include_patterns = [
+    'torch/_inductor/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=sympy\.(Min|Max)',
+    '--line-allowlist-pattern=isinstance|\.has\(|@allow-raw-sympy-minmax',
+    '--linter-name=SYMPY_MINMAX',
+    '--error-name=raw sympy.Min/Max in Inductor',
+    """--error-description=\
+        Use torch.utils._sympy.functions.Min/Max instead of \
+        sympy.Min/Max in Inductor. The builtin sympy.Min/Max \
+        trigger expensive is-connected simplification. \
+        isinstance/has checks on sympy.Min/Max are allowed. \
+        If you have a legitimate need for the raw sympy version, \
+        add @allow-raw-sympy-minmax to the line.\
+    """,
     '--',
     '@{{PATHSFILE}}'
 ]

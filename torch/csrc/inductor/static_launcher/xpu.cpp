@@ -32,7 +32,7 @@
     if (status != ZE_RESULT_SUCCESS) {                                    \
       std::stringstream ss;                                               \
       ss << "L0 runtime error: " << std::hex << std::uppercase << status; \
-      throw std::runtime_error(ss.str());                                 \
+      throw std::runtime_error(std::move(ss).str());                      \
     }                                                                     \
   }
 
@@ -267,7 +267,7 @@ sycl::kernel* loadKernel(
   std::ifstream IFS(filePath, std::ios::binary);
   std::ostringstream OSS;
   OSS << IFS.rdbuf();
-  std::string data(OSS.str());
+  std::string data(std::move(OSS).str());
   auto mod = _createModule(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 
@@ -573,11 +573,7 @@ bool StaticXpuLauncher_init(PyObject* module) {
     }
     Py_DECREF(static_method);
   }
-  Py_INCREF(&StaticXpuLauncherType);
-  if (PyModule_AddObject(
-          module, "_StaticXpuLauncher", (PyObject*)&StaticXpuLauncherType) <
-      0) {
-    Py_DECREF(&StaticXpuLauncherType);
+  if (PyModule_AddType(module, &StaticXpuLauncherType) < 0) {
     return false;
   }
   return true;

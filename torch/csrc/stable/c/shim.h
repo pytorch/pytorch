@@ -220,7 +220,6 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
     const char* schema,
     const int32_t* tags,
     int32_t num_tags);
-
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
 /**
@@ -233,6 +232,57 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
     TorchLibraryHandle self,
     const char* pymodule,
     const char* context);
+
+/// Retrieve a pointer to the string that holds the most recent exception's
+/// message and backtrace that occurred in the calling thread. This pointer is a
+/// borrowed pointer and is invalidated when the next exception occurs or the
+/// calling thread is shutdown. This may be the same as the less detailed
+/// torch_exception_get_what_without_backtrace() in case more information is not
+/// available.
+AOTI_TORCH_EXPORT const char* torch_exception_get_what();
+
+/// Retrieve a pointer to the string that holds the most recent exception's
+/// message that occurred in the calling thread. This pointer is a borrowed
+/// pointer and is invalidated when the next exception occurs or the calling
+/// thread is shutdown.
+AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace();
+
+// Allocates an StableIValue on the heap, returns an owning pointer.
+// This allocation must be deleted with torch_delete_stable_ivalue or
+// by passing it to a dispatch call which frees it internally.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_stable_ivalue(StableIValue** ret_value);
+
+// Frees an StableIValue that was created by torch_new_stable_ivalue.
+// Deleting a nullptr is invalid and returns failure, allocations must
+// only be deleted once.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_stable_ivalue(StableIValue* value);
+
+/// Retrieves the underlying Stream's backend-specific non-owning stream handle
+/// (e.g. `cudaStream_t` for CUDA). Returns a void* that can be `static_cast`ed
+/// accordingly.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_stream_native_handle(StreamHandle stream, void** ret_native_handle);
+
+// Returns a new owning AtenGeneratorHandle that shares the underlying RNG state
+// with `self` (the copy bumps the GeneratorImpl refcount). The callee owns the
+// result and must free it with torch_delete_generator.
+AOTI_TORCH_EXPORT AOTITorchError torch_new_generator_handle(
+    AtenGeneratorHandle self,
+    AtenGeneratorHandle* ret_new_generator);
+
+// Frees an owning AtenGeneratorHandle previously returned by
+// torch_new_generator_handle (or otherwise handed off with ownership).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_generator(AtenGeneratorHandle generator);
+
+// Returns the generator's device as (device_type, device_index). device_type
+// uses the same encoding as the aoti_torch_device_type_*() getters.
+AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
+    AtenGeneratorHandle generator,
+    int32_t* ret_device_type,
+    int32_t* ret_device_index);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 

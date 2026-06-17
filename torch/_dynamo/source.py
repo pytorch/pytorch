@@ -159,11 +159,28 @@ class LocalSource(Source):
     # or `co_freevars`.
     is_derefed_cell_contents: bool = False
 
+    # Whether this local is the function's varargs (``*args``) parameter.
+    # Set from ``co_flags & CO_VARARGS`` at frame-entry time. Element accesses
+    # like ``args[N]`` produce a ``GetItemSource`` whose base has this flag.
+    # Useful for distinguishing ``*args`` from a regular list-typed input.
+    # ``repr=False`` so the vast majority of locals (which are not varargs) do
+    # not get a noisy ``is_varargs=False`` in every debug string.
+    is_varargs: bool = dataclasses.field(default=False, repr=False)
+
+    # Whether this local is the function's varkw (``**kwargs``) parameter.
+    # Set from ``co_flags & CO_VARKEYWORDS`` at frame-entry time. Element
+    # accesses like ``kwargs["k"]`` produce a ``DictGetItemSource`` whose base
+    # has this flag. ``repr=False`` for the same reason as ``is_varargs``.
+    is_varkw: bool = dataclasses.field(default=False, repr=False)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_derefed_cell_contents:
             codegen.load_deref(self.local_name)
         else:
             codegen.append_output(codegen.create_load(self.local_name))
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return self.local_name
 
     @property
     def guard_source(self) -> GuardSource:
@@ -234,6 +251,9 @@ class GlobalSource(Source):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load_global(self.global_name, add=True))
 
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return self.global_name
+
     @property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
@@ -298,6 +318,13 @@ class AttrSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.member))
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        base = self.base.reconstruct_pycode(codegen)
+        if self.member.isidentifier():
+            return f"{base}.{self.member}"
+        else:
+            return f"getattr({base}, {self.member!r})"
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -828,6 +855,14 @@ class DictGetItemSource(ChainedSource):
             codegen.append_output(codegen.create_load_const(self.index))
         codegen.append_output(create_binary_subscr())
 
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        base = self.base.reconstruct_pycode(codegen)
+        if isinstance(self.index, ConstDictKeySource):
+            index = self.index.reconstruct_pycode(codegen)
+        else:
+            index = repr(self.index)
+        return f"{base}[{index}]"
+
     @functools.cached_property
     def _name_template(self) -> str:
         if isinstance(self.index, ConstDictKeySource):
@@ -999,6 +1034,9 @@ class OptimizerSource(ChainedSource):
 class NNModuleSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return self.base.reconstruct_pycode(codegen)
 
     @functools.cached_property
     def guard_source(self) -> GuardSource:

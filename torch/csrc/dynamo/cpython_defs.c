@@ -12,7 +12,7 @@
 #undef Py_BUILD_CORE
 #endif
 
-#if IS_PYTHON_3_15_PLUS
+#if IS_PYTHON_3_16_PLUS
 
 const uint8_t* THP_PyOpcode_Caches = NULL;
 int THP_PyOpcode_Caches_size = 0;
@@ -55,7 +55,7 @@ void init_THPCaches() {}
 // As a simple way to reduce the impact of ABI changes on the CPython side, this
 // check forces us to manually re-check that the function didn't change on the
 // next major version
-#if IS_PYTHON_3_15_PLUS
+#if IS_PYTHON_3_16_PLUS
 #error \
     "Please ensure that the functions below still match the CPython implementation for 3.15"
 #endif

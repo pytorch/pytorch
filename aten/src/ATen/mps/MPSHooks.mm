@@ -106,6 +106,10 @@ size_t MPSHooks::getRecommendedMaxMemory() const {
   return at::mps::getIMPSAllocator()->getRecommendedMaxMemory();
 }
 
+size_t MPSHooks::getMaxBufferLength() const {
+  return [MPSDevice::getInstance()->device() maxBufferLength];
+}
+
 void MPSHooks::setMemoryFraction(double ratio) const {
   at::mps::getIMPSAllocator()->setHighWatermarkRatio(ratio);
 }

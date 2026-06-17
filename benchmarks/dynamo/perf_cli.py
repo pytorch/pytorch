@@ -52,8 +52,8 @@ WORKFLOWS = {
         "name": "inductor-perf-nightly-rocm-mi300",
         "id": 197925166,
     },
-    "rocm-mi355": {
-        "name": "inductor-perf-nightly-rocm-mi355",
+    "rocm-mi350": {
+        "name": "inductor-perf-nightly-rocm-mi350",
         "id": 197925165,
     },
     "x86": {
@@ -87,7 +87,7 @@ REPO = "pytorch/pytorch"
 # Regex to parse test job names like:
 # "cuda13.0-py3.10-gcc11-sm80 / test (inductor_huggingface_perf, 1, 5, linux.aws.a100)"
 JOB_RE = re.compile(
-    r"test \((?P<config>[^,]+),\s*(?P<shard>\d+),\s*(?P<num_shards>\d+),\s*(?P<runner>[^)]+)\)"
+    r"(?P<job_name>test(?:-osdc)?) \((?P<config>[^,]+),\s*(?P<shard>\d+),\s*(?P<num_shards>\d+),\s*(?P<runner>[^)]+)\)"
 )
 
 PERF_CONFIGS = re.compile(r"inductor_(huggingface|timm|torchbench)_perf")
@@ -309,6 +309,7 @@ def get_perf_jobs(jobs: list[dict]) -> list[dict]:
                 "runner": m.group("runner"),
                 "job_id": job["databaseId"],
                 "name": job["name"],
+                "job_prefix": m.group("job_name"),
             }
         )
     return perf_jobs
@@ -320,7 +321,10 @@ def s3_artifact_url(run_id: int, attempt: int, job: dict) -> str:
     num_shards = job["num_shards"]
     runner = job["runner"]
     job_id = job["job_id"]
-    filename = f"test-reports-test-{config}-{shard}-{num_shards}-{runner}_{job_id}.zip"
+    job_prefix = job.get("job_prefix", "test")
+    filename = (
+        f"test-reports-{job_prefix}-{config}-{shard}-{num_shards}-{runner}_{job_id}.zip"
+    )
     return f"{S3_URL}/{REPO}/{run_id}/{attempt}/artifact/{filename}"
 
 
@@ -1506,7 +1510,8 @@ def cmd_prepare_repro(args):
     if "timm_models" in suites:
         print("# ── Timm ──")
         print(
-            f"pip install git+https://github.com/huggingface/pytorch-image-models@{timm_pin}"
+            "pip install --no-deps "
+            f"git+https://github.com/huggingface/pytorch-image-models@{timm_pin}"
         )
         print()
 

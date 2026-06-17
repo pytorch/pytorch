@@ -167,8 +167,7 @@ PyObject* THPCppFunction_metadata(PyObject* self, void* _unused) {
           reinterpret_cast<THPCppFunction*>(self)->cdata->metadata())
           ->dict();
 
-  Py_XINCREF(metadata);
-  return metadata;
+  return Py_XNewRef(metadata);
 }
 
 PyObject* THPCppFunction_requires_grad(PyObject* self, void* unused) {
@@ -358,8 +357,7 @@ PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
   }
 
   PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
-  Py_INCREF(handle);
-  return handle;
+  return Py_NewRef(handle);
 }
 
 // This is almost a copy of the function above except post -> pre
@@ -381,8 +379,7 @@ PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
   }
 
   PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
-  Py_INCREF(handle);
-  return handle;
+  return Py_NewRef(handle);
 }
 
 } // namespace torch::autograd

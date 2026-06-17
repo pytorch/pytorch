@@ -68,6 +68,16 @@ class TORCH_API AOTIModelContainerRunner {
 
   std::vector<std::string> get_call_spec();
 
+  // Returns the torchbind custom-class constants embedded in the loaded
+  // model. The IValue payloads alias the live entries inside the proxy
+  // executor: downcasting to a CustomClassHolder subclass and mutating
+  // its state will affect subsequent run() invocations. Returns empty when
+  // the model has no torchbind constants.
+  std::unordered_map<std::string, c10::IValue> get_custom_objs() const {
+    return proxy_executor_ ? proxy_executor_->get_custom_objs()
+                           : std::unordered_map<std::string, c10::IValue>{};
+  }
+
  protected:
   AOTIModelContainerRunner(
       const std::string& model_so_path,
@@ -119,6 +129,7 @@ class TORCH_API AOTIModelContainerRunner {
       get_constants_blob_size_func_{nullptr};
   decltype(&AOTInductorModelUpdateConstantsFromBlob)
       update_constants_from_blob_func_{nullptr};
+  decltype(&AOTInductorGetLastError) get_last_error_func_{nullptr};
 
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 

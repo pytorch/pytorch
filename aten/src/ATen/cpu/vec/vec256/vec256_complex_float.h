@@ -161,33 +161,24 @@ class Vectorized<c10::complex<float>> {
   static Vectorized<c10::complex<float>> loadu(
       const void* ptr,
       int64_t count = size()) {
-    if (count == size())
+    if (count >= size())
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
-
-    __at_align__ float tmp_values[2 * size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(2 * size())) {
-      tmp_values[i] = 0.0;
-    }
-    std::memcpy(
-        tmp_values,
-        reinterpret_cast<const float*>(ptr),
-        std::min<int64_t>(count, size()) * sizeof(c10::complex<float>));
-    return _mm256_load_ps(tmp_values);
+    // Masked load: each complex element occupies two float lanes; mask the
+    // first 2*count float lanes in, zero the rest.
+    const __m256i mask = _mm256_cmpgt_epi32(
+        _mm256_set1_epi32(static_cast<int32_t>(2 * count)),
+        _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+    return _mm256_maskload_ps(reinterpret_cast<const float*>(ptr), mask);
   }
   void store(void* ptr, int count = size()) const {
-    if (count == size()) {
+    if (count >= size()) {
       _mm256_storeu_ps(reinterpret_cast<float*>(ptr), values);
     } else if (count > 0) {
-      float tmp_values[2 * size()];
-      _mm256_storeu_ps(reinterpret_cast<float*>(tmp_values), values);
-      std::memcpy(
-          ptr,
-          tmp_values,
-          std::min<int64_t>(count, size()) * sizeof(c10::complex<float>));
+      // Masked store: each complex element occupies two float lanes.
+      const __m256i mask = _mm256_cmpgt_epi32(
+          _mm256_set1_epi32(static_cast<int32_t>(2 * count)),
+          _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+      _mm256_maskstore_ps(reinterpret_cast<float*>(ptr), mask, values);
     }
   }
   const c10::complex<float>& operator[](int idx) const = delete;

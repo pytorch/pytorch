@@ -10,6 +10,7 @@
 #endif
 
 #include <c10/util/CallOnce.h>
+#include <c10/util/hash.h>
 
 using PrimitiveCacheKey = std::tuple<
     double, // input_scale
@@ -467,9 +468,33 @@ at::Tensor _qconv_prepack_onednn(
 #define ONEDNN_FP8_QCONV_SUPPORTED
 #endif
 
+struct QlinearForwardCacheKey {
+  int64_t weight_addr;
+  int64_t M;
+
+  bool operator==(const QlinearForwardCacheKey& other) const {
+    return weight_addr == other.weight_addr && M == other.M;
+  }
+};
+
+struct QlinearForwardCacheKeyHash {
+  size_t operator()(const QlinearForwardCacheKey& key) const {
+    const size_t addr_hash = std::hash<int64_t>{}(key.weight_addr);
+    const size_t m_hash = std::hash<int64_t>{}(key.M);
+    return c10::hash_combine(addr_hash, m_hash);
+  }
+};
+
 struct QlinearForwardParams {
+  int64_t K{-1};
+  int64_t N{-1};
+  c10::ScalarType out_dtype{c10::ScalarType::Undefined};
+  std::vector<int64_t> output_size;
   dnnl::matmul primitive;
   ideep::exec_args args;
+  ideep::tensor src;
+  ideep::tensor dst;
+  std::optional<ideep::tensor> src1;
   ideep::tensor packed_weight;
   ideep::tensor weight_scales;
   std::optional<ideep::tensor> src_scale;
@@ -480,8 +505,13 @@ struct QlinearForwardParams {
   ideep::tensor scratchpad;
 
   void init_args() {
+    args.insert({DNNL_ARG_SRC, src});
     args.insert({DNNL_ARG_WEIGHTS, packed_weight});
+    args.insert({DNNL_ARG_DST, dst});
     args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+    if (src1.has_value()) {
+      args.insert({DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src1.value()});
+    }
     if (bias.has_value()) {
       args.insert({DNNL_ARG_BIAS, bias.value()});
     }

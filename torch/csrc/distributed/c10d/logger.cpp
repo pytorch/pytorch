@@ -220,7 +220,7 @@ void Logger::set_construction_data_and_log(
     for (const auto& strItem : ddp_logging_data_->strs_map) {
       ddpLoggingDataInfo << strItem.first << ": " << strItem.second << '\n';
     }
-    LOG(INFO) << initInfo << ddpLoggingDataInfo.str();
+    LOG(INFO) << initInfo << std::move(ddpLoggingDataInfo).str();
   }
 
   at::LogPyTorchDDPUsage(*ddp_logging_data_);

@@ -166,7 +166,7 @@ EOF
 
     # we want the patch version of 7.2 instead
     if [[ $(ver $ROCM_VERSION) -eq $(ver 7.2) ]]; then
-        ROCM_VERSION="${ROCM_VERSION}.1"
+        ROCM_VERSION="${ROCM_VERSION}.3"
     fi
 
     # Default url values
@@ -241,7 +241,8 @@ EOF
         rm -rf HIP clr
     fi
 
-    pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
+    # Note: rocm-composable-kernel (ck4inductor) is now built as a wheel
+    # alongside PyTorch in .ci/pytorch/build.sh and installed at test time
 
     # Write environment file (sourced by CI scripts and interactive shells)
     cat > /etc/rocm_env.sh << ROCM_ENV

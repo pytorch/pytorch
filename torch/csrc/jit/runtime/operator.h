@@ -267,8 +267,8 @@ TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
 TORCH_API std::vector<std::shared_ptr<Operator>> getAllSortedOperatorsFor(
     Symbol name);
 
-// given a operator with an overload name, find the specific operator related to
-// it, may return nullptr if no operator exists.
+// given an operator with an overload name, find the specific operator related
+// to it, may return nullptr if no operator exists.
 TORCH_API std::shared_ptr<Operator> findOperatorFor(
     const c10::OperatorName& full_name);
 

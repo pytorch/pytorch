@@ -364,7 +364,12 @@ class TestPythonRegistration(TestCase):
                 with self.assertRaisesRegex(
                     RuntimeError, "already a kernel registered from python"
                 ):
-                    my_lib2.impl(torch.ops.aten.mul.Tensor, my_mul, "ZeroTensor")
+                    my_lib2.impl(
+                        torch.ops.aten.mul.Tensor,
+                        my_mul,
+                        "ZeroTensor",
+                        allow_override=False,
+                    )
 
             # Validate that lib2 is not affected by removing lib1
             self.assertFalse(torch.mul(x, y)._is_zerotensor())
@@ -449,6 +454,46 @@ class TestPythonRegistration(TestCase):
         from torch._export.utils import _collect_all_valid_cia_ops_for_namespace
 
         _collect_all_valid_cia_ops_for_namespace(namespace)
+
+    def test_finalizer_no_getattr_into_cpp(self):
+        # Regression test: _clear_torch_ops_cache must not call __getattr__ on
+        # _OpNamespace (which invokes _jit_get_operation in C++). During
+        # interpreter shutdown the C++ runtime may be torn down, causing
+        # UnicodeDecodeError or segfaults when the finalizer fires.
+        lib = Library(self.test_ns, "DEF")  # noqa: SCOPED_LIBRARY
+        lib.define("uncached_op() -> None")
+
+        @impl(lib, "uncached_op", "")
+        def uncached_op():
+            pass
+
+        # Do NOT call torch.ops._test_python_registration.uncached_op() here,
+        # so the OpOverloadPacket is never cached on the namespace object.
+        # This simulates what happens when a library (e.g. vLLM) registers ops
+        # but some are never looked up before shutdown.
+        namespace = torch.ops._test_python_registration
+
+        # Patch __getattr__ to detect if it gets called during cache clearing.
+        original_getattr = type(namespace).__getattr__
+        getattr_called_with = []
+
+        def tracking_getattr(self, name):
+            getattr_called_with.append(name)
+            return original_getattr(self, name)
+
+        type(namespace).__getattr__ = tracking_getattr
+        try:
+            del lib
+            gc.collect()
+        finally:
+            type(namespace).__getattr__ = original_getattr
+
+        self.assertNotIn(
+            "uncached_op",
+            getattr_called_with,
+            "_clear_torch_ops_cache must not trigger __getattr__ (which calls "
+            "into C++) for ops that were never cached on the namespace",
+        )
 
     def test_register_check_mem_op_survives_gc(self):
         # Regression guard for the autorevert of #181785: inductor's
@@ -2828,7 +2873,10 @@ class TestWrapperSubclassAliasing(TestCase):
         self._test_wrapper_subclass_aliasing(op, args, kwargs)
 
     def test_wrapper_subclass_aliasing_conv2d(self, device):
-        args = (torch.randn(4, 4, 4, 4), torch.randn(4, 4, 4, 4))
+        args = (
+            torch.randn(4, 4, 4, 4, device=device),
+            torch.randn(4, 4, 4, 4, device=device),
+        )
         kwargs = {}
         # conv2d has a default arg 'int[2] strides=0',
         # which torchscript expands into 'int[2] strides=[0, 0]'
@@ -2841,12 +2889,12 @@ class TestWrapperSubclassAliasing(TestCase):
 
     def test_wrapper_subclass_aliasing_out_op(self, device):
         # Make sure that _return_and_correct_aliasing can handle kwargs w mutable tensors
-        args = (torch.ones(4), torch.ones(4))
-        kwargs = {"out": torch.empty(4)}
+        args = (torch.ones(4, device=device), torch.ones(4, device=device))
+        kwargs = {"out": torch.empty(4, device=device)}
         self._test_wrapper_subclass_aliasing(torch.ops.aten.add.out, args, kwargs)
 
     def test_wrapper_subclass_aliasing_fft_fft2(self, device):
-        args = (torch.randn(4, 4),)
+        args = (torch.randn(4, 4, device=device),)
         kwargs = {}
         # fft_fft2 has a default arg 'int[1] dim=[-2,-1]',
         # Make sure that _return_and_correct_aliasing can handle this case
