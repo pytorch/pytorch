@@ -118,8 +118,15 @@ def gen_empty_impl_names(
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
-        DispatchKey.PrivateUse1,
     ):
+        empty_impl = "at::empty"
+        empty_strided_impl = "at::empty_strided"
+    elif (
+        backend_index.dispatch_key == DispatchKey.PrivateUse1
+        and backend_index.use_out_as_primary
+    ):
+        # Only out-as-primary PrivateUse1 backends use create_out (via structured set_output);
+        # gate on use_out_as_primary so legacy PrivateUse1 backends don't emit the helpers unused.
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"
 
