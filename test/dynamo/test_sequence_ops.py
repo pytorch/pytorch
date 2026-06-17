@@ -256,6 +256,70 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         # Result respects maxlen of 3
         self.assertEqual(list(d), [2, 3, 4])
 
+    # --- deque re-init (deque.__init__) ---
+
+    @make_dynamo_test
+    def test_deque_reinit_clears_and_extends(self):
+        d = collections.deque(range(-5, 0))
+        d.__init__(range(3))
+        self.assertEqual(list(d), [0, 1, 2])
+
+    @make_dynamo_test
+    def test_deque_reinit_resets_maxlen(self):
+        d = collections.deque([1, 2], maxlen=2)
+        d.__init__(range(4))
+        # No maxlen passed -> maxlen reset to None, all items kept
+        self.assertEqual(d.maxlen, None)
+        self.assertEqual(list(d), [0, 1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_reinit_with_maxlen(self):
+        d = collections.deque([1, 2])
+        d.__init__(range(5), 3)
+        self.assertEqual(d.maxlen, 3)
+        self.assertEqual(list(d), [2, 3, 4])
+
+    @make_dynamo_test
+    def test_deque_reinit_empty(self):
+        d = collections.deque([1, 2, 3])
+        d.__init__()
+        self.assertEqual(list(d), [])
+
+    @make_dynamo_test
+    def test_deque_reinit_negative_maxlen(self):
+        d = collections.deque([1, 2])
+        with self.assertRaises(ValueError):
+            d.__init__(range(3), -1)
+
+    @make_dynamo_test
+    def test_deque_reinit_float_maxlen(self):
+        d = collections.deque([1, 2])
+        with self.assertRaises(TypeError):
+            d.__init__(maxlen=2.0)
+
+    @make_dynamo_test
+    def test_deque_reinit_str_maxlen(self):
+        d = collections.deque([1, 2])
+        with self.assertRaises(TypeError):
+            d.__init__(maxlen="3")
+
+    @make_dynamo_test
+    def test_deque_ctor_float_maxlen(self):
+        with self.assertRaises(TypeError):
+            collections.deque([1, 2], maxlen=2.0)
+
+    @make_dynamo_test
+    def test_deque_reinit_overflow_maxlen(self):
+        d = collections.deque([1, 2])
+        with self.assertRaises(OverflowError):
+            d.__init__(maxlen=2**63)
+
+    @make_dynamo_test
+    def test_deque_ctor_bool_maxlen(self):
+        # bool is an int subclass; CPython accepts it.
+        d = collections.deque(range(5), maxlen=True)
+        self.assertEqual(list(d), [4])
+
     # --- torch.Size concatenation ---
 
     @make_dynamo_test
