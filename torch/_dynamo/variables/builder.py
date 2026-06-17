@@ -1666,17 +1666,28 @@ class VariableBuilder:
                     # We need to create an unbacked symint to replace the unbacked symbool.
                     new_symint = self.tx.output.shape_env.create_unbacked_symint()
                 else:
-                    # TODO (yidi): we need to figure out a way to propagate the guards
-                    # we accumulated when tracing the subggraph to outer shape_env. For normal symints,
-                    # this is automatically done by evaluating the guards once but this
-                    # will cause data-dependent error when we evaluate the outer unbacked symints.
-                    # The test case that triggers this graph break is test_cond_unbacked_symint_closure
-                    unimplemented(
-                        gb_type="Attempted to wrap unbacked SymInt",
-                        context="",
-                        explanation="Unbacked SymInt input is not supported yet.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
+                    shape_env = self.tx.output.shape_env
+                    if not torch.compiler._is_non_strict_tracing():
+                        # TODO: Need to enable this for Dynamo after broader
+                        # verification. See
+                        # test_raw_unbacked_symint_input_graph_breaks_outside_non_strict.
+                        unimplemented(
+                            gb_type="Attempted to wrap unbacked SymInt",
+                            context="",
+                            explanation="Unbacked SymInt input is not supported yet.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                    if value.node.shape_env is shape_env:
+                        # SymInt already belongs to this ShapeEnv; no
+                        # transfer needed, reuse it directly.
+                        new_symint = value
+                    else:
+                        new_expr = shape_env._transfer_foreign_expr_as_unbacked(
+                            value, source=source
+                        )
+                        new_symint = shape_env.create_symintnode(
+                            new_expr, hint=None, source=source
+                        )
             if new_symint is None:
                 raise AssertionError("new_symint must not be None after wrapping")
             if not isinstance(new_symint, SymInt):
@@ -1696,11 +1707,11 @@ class VariableBuilder:
                 is_tensor=False,
                 example_strong_ref=new_symint,
             )
-            # We bind the new_symint to graph input.
             sym_expr = new_symint.node.expr
-            if not isinstance(sym_expr, sympy.Symbol):
-                raise AssertionError(f"{sym_expr} is not a basic Symbol.")
-            self.tx.output.tracked_fakes.append(TrackedFake(new_symint, source, None))
+            if isinstance(sym_expr, sympy.Symbol):
+                self.tx.output.tracked_fakes.append(
+                    TrackedFake(new_symint, source, None)
+                )
 
             tracing_symint = (
                 new_symint if isinstance(value, torch.SymInt) else new_symint == 1

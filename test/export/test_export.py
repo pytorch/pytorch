@@ -7305,12 +7305,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         y2 = torch.arange(9).reshape((3, 3))
         with self.assertRaisesRegex(
             AssertionError,
-            (
-                escape("Guard failed: max(x.size()[1], y.size()[1]) == x.size()[1]")
-                if is_retracebility_test(self._testMethodName)
-                else escape(
-                    "Guard failed: max(1, x.size()[1], y.size()[1]) == x.size()[1]"
-                )
+            escape(
+                "Guard failed: torch.sym_max(1, torch.sym_max(x.size()[1], y.size()[1])) == x.size()[1]"
             ),
         ):
             # TODO: this should not error?

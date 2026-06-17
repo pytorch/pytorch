@@ -4533,7 +4533,14 @@ class CheckFunctionManager:
         # python -s test/dynamo/test_export.py -k test_export_with_symbool_inputs
         latency = 0.0
 
-        if not output_graph.skip_guards_check and not output_graph.export:
+        # Non-strict tracing can compile with fake inputs whose unbacked sizes
+        # cannot be used to evaluate guards eagerly. Keep the runtime guards,
+        # but skip this same-frame sanity check in that tracing context.
+        if (
+            not output_graph.skip_guards_check
+            and not output_graph.export
+            and not torch.compiler._is_non_strict_tracing()
+        ):
             if not self.guard_manager.check(output_graph.local_scope):
                 reasons = get_guard_fail_reason_helper(
                     self.guard_manager,

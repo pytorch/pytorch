@@ -1145,13 +1145,13 @@ class MetaConverter(Generic[_TensorT]):
                     )
                 else:
                     # FakeTensor from a different ShapeEnv.  Transfer symbols.
+                    # _transfer_foreign_expr picks the hint up via the foreign env.
                     return shape_env.transfer_symbols_from_foreign_shape_env(
                         t.size,
                         t.stride,
                         t.storage_offset,
                         src,
                         symbolic_context=symbolic_context,
-                        hint_overrides=t.dynamo_hint_overrides,
                     )
             else:
                 return (t.size, t.stride, t.storage_offset)
