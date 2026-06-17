@@ -416,26 +416,28 @@ class TestLayoutOptim(TestCase):
 
 @requires_gpu()
 class TestLayoutOptimROCmMultipliers(TestCase):
-    """Validate the gfx942 (ROCm/MI300) channels-last cost-multiplier override
-    in GraphLowering.decide_layout_opt (inference path).
+    """Validate the per-arch ROCm channels-last cost-multiplier overrides
+    (gfx942 / gfx950) in GraphLowering.decide_layout_opt (inference path).
 
     The NVIDIA-tuned defaults are
         GROUPED=1.358, DEFAULT=0.823, IN_OUT=0.725, SMALL=0.783
-    On gfx942 the override sets SMALL=1.25 and GROUPED=1.05 (DEFAULT and IN_OUT
-    are unchanged). decide_layout_opt enables channels-last layout opt iff
+    On gfx942 (MI300) channels-last regresses small/grouped convs, so the
+    override sets SMALL=1.25, GROUPED=1.05 (DEFAULT/IN_OUT unchanged). On gfx950
+    (MI350) channels-last is favorable, so GROUPED=0.629, DEFAULT=0.813,
+    IN_OUT=0.642, SMALL=0.795. decide_layout_opt enables channels-last iff
     weighted_flops <= total_flops, so the re-tuned weights flip the decision for
-    small-channel-dominated and grouped-dominated graphs while leaving
-    default-dominated graphs unchanged.
+    the affected graphs while leaving default-dominated graphs unchanged.
 
     The arch decision is driven through the cached helper
     ``torch._inductor.graph._rocm_native_device_arch_name`` and through
-    ``torch.version.hip`` so both the gfx942 and the non-gfx942 outcomes are
-    checked regardless of the real card. Graph construction still needs
-    FakeTensor conv meta on a cuda device, hence the GPU gate.
+    ``torch.version.hip`` so the gfx942, gfx950 and non-ROCm outcomes are checked
+    regardless of the real card. Graph construction still needs FakeTensor conv
+    meta on a cuda device, hence the GPU gate.
     """
 
     NON_GFX942_ARCH = "gfx90a:sramecc+:xnack-"
     GFX942_ARCH = "gfx942:sramecc+:xnack-"
+    GFX950_ARCH = "gfx950:sramecc+:xnack-"
 
     @staticmethod
     def _build_aten_gm(mod, example_input):
@@ -628,38 +630,45 @@ class TestLayoutOptimROCmMultipliers(TestCase):
             "default-conv graph should ENABLE under NVIDIA weights",
         )
 
-    # --- M4: gfx950 must equal the NVIDIA outcome (override is a no-op) -------
-    def test_gfx950_matches_nvidia_outcome(self):
-        # Reuse the small-channel graph whose decision differs between gfx942 and
-        # NVIDIA. gfx950 must follow the NVIDIA outcome (ENABLE), proving the
-        # override does not fire on MI350.
-        class SmallConvNet(nn.Module):
+    # --- M4: gfx950 has its own (favorable) weights; grouped graph flips -----
+    def test_grouped_graph_flips_decision_on_gfx950(self):
+        # Same resnext-like graph as the gfx942 grouped test (grouped ~2/3):
+        #   gfx950:  0.823*0.333 + 0.629*0.667 ~= 0.69 <= 1  => ENABLE
+        #   nvidia:  0.823*0.333 + 1.358*0.667 ~= 1.18 >  1  => SKIP
+        class GroupedFlipNet(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.c1 = nn.Conv2d(32, 32, 3)
-                self.c2 = nn.Conv2d(32, 32, 3)
-                self.c3 = nn.Conv2d(32, 32, 3)
+                self.d1 = nn.Conv2d(256, 256, 3, padding=1)
+                self.g1 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
+                self.g2 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
+                self.g3 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
+                self.g4 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
 
             def forward(self, x):
-                return self.c3(self.c2(self.c1(x)))
+                a = self.d1(x)
+                b = self.g4(self.g3(self.g2(self.g1(x))))
+                return a + b
 
-        gm = self._build_aten_gm(SmallConvNet(), torch.rand(2, 32, 28, 28))
+        gm = self._build_aten_gm(GroupedFlipNet(), torch.rand(2, 256, 32, 32))
 
-        gfx950 = "gfx950:sramecc+:xnack-"
-        gfx950_decision = self._decide(gm, gfx950)
-        nvidia_decision = self._decide(gm, self.NON_GFX942_ARCH)
-        gfx942_decision = self._decide(gm, self.GFX942_ARCH)
+        fc = self._flop_counts(gm)
+        total = sum(fc.values())
+        self.assertGreater(total, 0.0)
+        self.assertGreater(fc["grouped"] / total, 0.55)
 
-        self.assertEqual(
-            gfx950_decision,
-            nvidia_decision,
-            "gfx950 must match the NVIDIA outcome (override is a no-op)",
+        # gfx950 GROUPED=0.629 ENABLES; NVIDIA GROUPED=1.358 SKIPS.
+        self.assertTrue(
+            self._decide(gm, self.GFX950_ARCH),
+            "gfx950 GROUPED=0.629 should ENABLE this resnext-like graph",
         )
-        # Sanity: the override genuinely changes gfx942 vs gfx950 here.
-        self.assertNotEqual(
-            gfx942_decision,
-            gfx950_decision,
-            "gfx942 should differ from gfx950 on this small-conv graph",
+        self.assertFalse(
+            self._decide(gm, self.NON_GFX942_ARCH),
+            "NVIDIA GROUPED=1.358 should SKIP this resnext-like graph",
+        )
+        # non-HIP build ignores the gfx950 override too.
+        self.assertFalse(
+            self._decide(gm, self.GFX950_ARCH, hip_version=None),
+            "non-HIP build should ignore the gfx950 override",
         )
 
     # --- M3 / C1: NVIDIA (non-HIP) path is unchanged and never touches the ----

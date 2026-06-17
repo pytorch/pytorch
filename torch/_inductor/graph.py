@@ -363,23 +363,23 @@ def is_mkldnn_conv(node: Node) -> bool:
     return False
 
 
-def _conv_device_is_gfx942(conv_nodes: list[Node]) -> bool:
-    """Return True iff an aten convolution in the graph lives on a ROCm gfx942
-    (MI300) device.
+def _conv_device_arch(conv_nodes: list[Node]) -> str:
+    """Return the ROCm device arch name (e.g. "gfx942", "gfx950") of the first
+    aten convolution in the graph, or "" if it cannot be determined.
 
     Only ``aten.convolution.default`` nodes are inspected: mkldnn conv nodes use
     a ``functools.partial`` target and do not follow the (input, weight) arg
     convention, so they are skipped. The weight is read from ``args[1]`` (same
     convention as ``is_grouped`` / ``is_small_channel``).
 
-    NOTE: this picks the first cuda conv it finds, assuming a homogeneous,
-    single-arch box. Mixed multi-device graphs are not the target of this
-    heuristic. The query is wrapped defensively so that a HIP build with no
-    usable GPU never turns the layout heuristic into a hard compile failure;
-    on any failure we fall back to the NVIDIA-tuned defaults.
+    NOTE: picks the first cuda conv it finds, assuming a homogeneous, single-arch
+    box. Mixed multi-device graphs are not the target of this heuristic. The
+    query is wrapped defensively so a HIP build with no usable GPU never turns
+    the layout heuristic into a hard compile failure; on any failure we return
+    "" and fall back to the NVIDIA-tuned defaults.
     """
     if not torch.cuda.is_available():
-        return False
+        return ""
     for n in conv_nodes:
         if n.target is not torch.ops.aten.convolution.default:
             continue
@@ -388,11 +388,10 @@ def _conv_device_is_gfx942(conv_nodes: list[Node]) -> bool:
         if not isinstance(meta_val, torch.Tensor) or meta_val.device.type != "cuda":
             continue
         try:
-            arch = _rocm_native_device_arch_name(meta_val.device)
+            return _rocm_native_device_arch_name(meta_val.device)
         except Exception:
-            return False
-        return "gfx942" in arch
-    return False
+            return ""
+    return ""
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -976,22 +975,29 @@ class GraphLowering(torch.fx.Interpreter):
             IN_OUT_MULTIPLIER = 0.725
             SMALL_MULTIPLIER = 0.783
 
-            # The constants above were measured on NVIDIA. On ROCm/MI300
-            # (gfx942) the MIOpen channels-last conv path behaves differently:
-            # small-channel convs tend to regress under channels-last while
-            # grouped convs benefit less than the NVIDIA-tuned weights assume.
-            # SMALL and GROUPED are re-tuned below; they were calibrated against
-            # per-model channels-last win/loss measured on gfx942 (avoiding the
-            # phlippe_* / resnet18 regressions while keeping the
-            # resnet/densenet/vgg/resnext wins). These numbers are sensitive to
-            # the ROCm / MIOpen version. gfx950 (MI350) is intentionally left on
-            # the NVIDIA defaults (its conv path already handles NCHW), so this
-            # override is a no-op there.
-            # TODO - get different values per hardware: a per-arch table is
-            # still needed for ROCm archs other than gfx942.
-            if torch.version.hip is not None and _conv_device_is_gfx942(conv_nodes):
-                SMALL_MULTIPLIER = 1.25
-                GROUPED_MULTIPLIER = 1.05
+            # The constants above were measured on NVIDIA. ROCm CDNA archs
+            # behave differently under MIOpen's channels-last conv path, so the
+            # multipliers are re-tuned per arch:
+            #  - gfx942 (MI300): channels-last regresses small/grouped convs.
+            #    SMALL/GROUPED tuned to per-model channels-last win/loss measured
+            #    on gfx942 (avoiding phlippe_*/resnet18 regressions while keeping
+            #    the resnet/densenet/vgg/resnext wins).
+            #  - gfx950 (MI350): channels-last is broadly favorable on MIOpen.
+            #    Values are mean channels_last/contiguous bucket ratios measured
+            #    in bf16 over operator_inp_logs (torchbench+hf+timm); GROUPED is
+            #    the all-grouped mean (with the cpg<8 naive-bound layout-opt gate
+            #    the grouped convs reaching here are cpg>=8, ratio ~0.55).
+            # These numbers are sensitive to the ROCm / MIOpen version.
+            if torch.version.hip is not None:
+                _arch = _conv_device_arch(conv_nodes)
+                if "gfx942" in _arch:
+                    SMALL_MULTIPLIER = 1.25
+                    GROUPED_MULTIPLIER = 1.05
+                elif "gfx950" in _arch:
+                    GROUPED_MULTIPLIER = 0.629
+                    DEFAULT_MULTIPLIER = 0.813
+                    IN_OUT_MULTIPLIER = 0.642
+                    SMALL_MULTIPLIER = 0.795
 
             total_flops = sum(flop_counts.values())
             weighted_flops = (
