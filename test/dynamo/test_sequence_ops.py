@@ -1027,6 +1027,41 @@ class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(), "type_error")
 
 
+class TestRangeDynamicBounds(torch._dynamo.test_case.TestCase):
+    # With assume_static_by_default=False a captured range object's
+    # start/stop/step are wrapped as symbolic ints; range math must specialize
+    # them instead of assuming a plain python constant.
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_range_index_symbolic_bounds(self):
+        keys = range(10)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return keys[0]
+
+        self.assertEqual(fn(), 0)
+
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_range_slice_symbolic_bounds(self):
+        keys = range(1, 10, 2)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return keys[1:3]
+
+        self.assertEqual(fn(), range(1, 10, 2)[1:3])
+
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_range_iter_symbolic_bounds(self):
+        keys = range(5)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return list(keys)
+
+        self.assertEqual(fn(), [0, 1, 2, 3, 4])
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
