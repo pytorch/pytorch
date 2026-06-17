@@ -3461,16 +3461,17 @@ static std::string get_default_lstsq_driver(std::optional<std::string_view> driv
     static std::unordered_set<std::string_view> allowed_drivers = {
       "gels", "gelsy", "gelsd", "gelss"
     };
-    if (input.device() == at::kCPU) {
+    // CUDA supports only the 'gels' driver; CPU and MPS support all four.
+    if (input.is_cuda()) {
+      TORCH_CHECK(
+        driver_str == "gels",
+        "torch.linalg.lstsq: `driver` other than `gels` is not supported on CUDA"
+      );
+    } else { // CPU and MPS
       TORCH_CHECK(
         allowed_drivers.find(driver_str) != allowed_drivers.end(),
         "torch.linalg.lstsq: parameter `driver` should be one of "
         "(gels, gelsy, gelsd, gelss)"
-      );
-    } else { // else if (input.is_cuda())
-      TORCH_CHECK(
-        driver_str == "gels",
-        "torch.linalg.lstsq: `driver` other than `gels` is not supported on CUDA"
       );
     }
   } else {
