@@ -103,6 +103,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
 
+  pool_memory_released_ = false;
   capture_mode_ = capture_mode;
 
   // default generator is always registered
@@ -271,6 +272,32 @@ void CUDAGraph::replay() {
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
 }
 
+void CUDAGraph::release_pool_memory() {
+  TORCH_CHECK(capture_ended_,
+              "Called CUDAGraph::release_pool_memory without a preceding successful capture.");
+  TORCH_CHECK(!pool_memory_released_,
+              "Called CUDAGraph::release_pool_memory more than once.");
+
+  if (!has_graph_exec_) {
+    TORCH_INTERNAL_ASSERT(keep_graph_);
+    instantiate();
+  }
+
+  clearCublasWorkspacesForStream(capture_stream_.stream());
+  c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+  pool_memory_released_ = true;
+  // cudagraph_digraphs.py currently does not handle pinned host
+  // memory at all, so let's hold off on releasing this memory. All
+  // pinned host memory allocated during stream capture is unique
+  // anyway, so temporary host memory should be "safe" already. There
+  // are only problems when we have pinned input or output cpu
+  // tensors.
+
+  // at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
+  // host_pool_released_ = true;
+  c10::cuda::CUDACachingAllocator::emptyCache(mempool_id_);
+}
+
 void CUDAGraph::enable_debug_mode() {
   _cuda_graphs_debug = true;
 }
@@ -344,9 +371,12 @@ void CUDAGraph::reset() {
     clearCublasWorkspacesForStream(capture_stream_.stream());
 
     // notifyCaptureDestroy may throw. How should we handle this?
-    c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    if (!pool_memory_released_) {
+      c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    }
     at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
     capture_ended_ = false;
+    pool_memory_released_ = false;
   }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
@@ -367,6 +397,8 @@ void CUDAGraph::reset() {
 MempoolId_t CUDAGraph::pool() {
   TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
+  TORCH_CHECK(!pool_memory_released_,
+              "Called CUDAGraph::pool() after its private pool memory was released.");
   return mempool_id_;
 }
 

@@ -4217,6 +4217,7 @@ class DeviceCachingAllocator {
 
     // update statistics
     total_allocated_memory -= unmapped.size;
+    // I could possibly call this code myself, since I know the pool.
     StatTypes stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].decrease(unmapped.size);

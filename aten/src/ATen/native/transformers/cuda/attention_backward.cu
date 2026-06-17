@@ -483,16 +483,21 @@ _efficient_attention_backward(
   // See Note [Seed and Offset Device]
   at::PhiloxCudaState rng_engine_inputs;
   if (use_dropout) {
-    if (at::cuda::currentStreamCaptureStatus() ==
-        at::cuda::CaptureStatus::None) {
-      rng_engine_inputs = at::PhiloxCudaState(
-          *philox_seed.data_ptr<int64_t>(),
-          *philox_offset.data_ptr<int64_t>());
-    } else { // dropout + capture
+    if (philox_seed.is_cuda()) {
+      TORCH_CHECK(
+          philox_offset.is_cuda(),
+          "philox_seed and philox_offset must both be CUDA tensors");
       rng_engine_inputs = at::PhiloxCudaState(
           philox_seed.data_ptr<int64_t>(),
           philox_offset.data_ptr<int64_t>(),
           0);
+    } else {
+      TORCH_CHECK(
+          !philox_offset.is_cuda(),
+          "philox_seed and philox_offset must both be CPU tensors");
+      rng_engine_inputs = at::PhiloxCudaState(
+          *philox_seed.data_ptr<int64_t>(),
+          *philox_offset.data_ptr<int64_t>());
     }
   }
 

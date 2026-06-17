@@ -303,6 +303,8 @@ size_t getCUDABlasLtWorkspaceSize() {
 }
 
 at::DataPtr getNewWorkspace() {
+  // this should go through the filter, and thus use an allocation
+  // that doesn't die until the cuda graph dies
   return c10::cuda::CUDACachingAllocator::get()->allocate(getChosenWorkspaceSize());
 }
 
@@ -312,6 +314,7 @@ at::DataPtr getNewCUDABlasLtWorkspace() {
 
 void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
   cudaStream_t _stream = stream;
+  // handle and stream, huh
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
 
   auto& workspace = cublas_handle_stream_to_workspace();

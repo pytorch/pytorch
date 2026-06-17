@@ -40,6 +40,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     blas_library_context,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
     SM70OrLater,
     SM89OrLater,
@@ -2540,6 +2541,72 @@ torch.cuda.synchronize()
                 self.assertTrue(torch.cuda.is_current_stream_capturing())
                 self.assertTrue(s.is_capturing())
                 g.capture_end()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Efficient Attention was not built for this system",
+    )
+    def test_graph_capture_mem_eff_sdpa_forward_eager_backward(self):
+        test_script = r"""
+import torch
+import torch.nn.functional as F
+from torch.nn.attention import sdpa_kernel, SDPBackend
+
+device = "cuda"
+dtype = torch.float16
+
+def make_inputs():
+    return [
+        torch.randn(
+            2,
+            2,
+            8,
+            8,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        for _ in range(3)
+    ]
+
+def run_sdpa(q, k, v):
+    with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+        return F.scaled_dot_product_attention(q, k, v, dropout_p=0.1)
+
+s = torch.cuda.Stream()
+s.wait_stream(torch.cuda.current_stream())
+with torch.cuda.stream(s):
+    for _ in range(2):
+        q, k, v = make_inputs()
+        out = run_sdpa(q, k, v)
+        out.sum().backward()
+torch.cuda.current_stream().wait_stream(s)
+torch.cuda.synchronize()
+
+q, k, v = make_inputs()
+graph = torch.cuda.CUDAGraph()
+with torch.cuda.graph(graph):
+    out = run_sdpa(q, k, v)
+
+graph.replay()
+torch.cuda.synchronize()
+out.sum().backward()
+torch.cuda.synchronize()
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", test_script],
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(os.path.realpath(__file__)),
+        )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            msg=f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}",
+        )
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

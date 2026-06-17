@@ -11,6 +11,7 @@
 #include <limits>
 #include <optional>
 #include <stack>
+#include <vector>
 
 #if defined(USE_ROCM) || !(defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
 // this type is not defined until CUDA 12.4, but we use it as a
@@ -30,6 +31,13 @@ namespace cuda {
 // Standalone way to get a unique mempool id usable as a pool=... argument
 // to CUDAGraph::capture_begin
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
+
+TORCH_CUDA_CPP_API void apply_device_kernel_node_updates(
+    const at::Tensor& device_nodes,
+    const at::Tensor& param_offsets,
+    const at::Tensor& alloc_indices,
+    const at::Tensor& alloc_offsets,
+    const std::vector<at::Tensor>& dynamic_tensors);
 
 // Returns true if any CUDAGraph capture is currently active in this process.
 // Used by ProcessGroupNCCL's ROCm watchdog workaround to avoid calling
@@ -73,6 +81,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void capture_end();
   void instantiate();
   void replay();
+  void release_pool_memory();
   void reset();
   MempoolId_t pool();
   void enable_debug_mode();
@@ -106,6 +115,10 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   bool capture_ended_ = false;
   // Set to true in capture_end if cudaGraphInstantiate succeeded
   bool has_graph_exec_ = false;
+  // Set to true if this graph's private allocator pool was released before
+  // reset(). This is only safe for callers that have rewritten captured
+  // pointers away from the pool memory.
+  bool pool_memory_released_ = false;
 
   // the ID assigned by cuda during graph capture,
   // used to identify when a stream is participating in capture
