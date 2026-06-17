@@ -5263,6 +5263,8 @@ class SourcelessBuilder:
                 for k in ("start", "stop", "step")
             ]
             return SliceVariable(items, tx)  # pyrefly: ignore[bad-argument-type]
+        elif isinstance(value, torch.nn.parallel.distributed.DistributedDataParallel):
+            return UnspecializedNNModuleVariable(value)
         elif istype(value, object):
             return ObjectVariable(value)
         unimplemented(
