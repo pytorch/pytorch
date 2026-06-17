@@ -2,13 +2,14 @@
 
 import torch
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, xfailIfNoAcceleratorTriton
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 HAS_CUDA = torch.cuda.is_available()
 
 
+@xfailIfNoAcceleratorTriton
 class TestTorchbindAOTI(TestCase):
     """Verify that torchbind constants embedded in an AOTI .pt2 are reachable
     via AOTIModelPackageLoader.get_custom_objs() after load.
