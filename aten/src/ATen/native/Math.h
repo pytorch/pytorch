@@ -1245,14 +1245,16 @@ template <>
 template <typename T>
 inline typename std::enable_if_t<std::is_integral_v<T>, T>
 calc_gcd(T a, T b) {
-  a = abs_impl(a);
-  b = abs_impl(b);
+  // Abs the result, not the inputs: abs(INT_MIN) overflows back to INT_MIN and
+  // would poison the iteration. Remainders never exceed the input magnitudes,
+  // so the only unrepresentable result is gcd(INT_MIN, 0) == |INT_MIN|, which
+  // wraps exactly as NumPy does.
   while (a != 0) {
     T c = a;
     a = b % a;
     b = c;
   }
-  return b;
+  return abs_impl(b);
 }
 
 template <typename T>
