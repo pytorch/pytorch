@@ -67,17 +67,6 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
 
   int64_t num_indices = indices.size(0);
   int64_t num_bags = offsets.size(0);
-
-  if (offsets.size(0) > 0) {
-    auto offset_0 = offsets[0].item<int64_t>();
-    TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
-                                "in the mini-batch has to start from position 0. "
-                                "However, got ", offset_0);
-    auto offset_n = offsets[offsets.size(0) - 1].item<int64_t>();
-    TORCH_CHECK(offset_n <= num_indices, "offsets[-1] can not "
-                "be greater than input's length ", num_indices, " but got offsets[-1] of ", offset_n);
-  }
-
   if (include_last_offset) {
     TORCH_CHECK(num_bags >= 1, "include_last_offset: number of offsets should be at least 1");
     num_bags -= 1;
