@@ -323,29 +323,6 @@ def maybe_get_python_type(obj: VariableTracker) -> type:
         )
 
 
-def validate_sequence_index(
-    tx: "InstructionTranslatorBase",
-    key: VariableTracker,
-    container_name: str,
-) -> VariableTracker:
-    """_PyIndex_Check → nb_index path used by list/tuple/range/str/bytes subscript.
-
-    ref: https://github.com/python/cpython/blob/v3.13.3/Include/internal/pycore_abstract.h (_PyIndex_Check)
-    """
-    key_type = maybe_get_python_type(key)
-    if key_type not in (int, bool, slice):
-        if not type_implements_nb_index(key_type):
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    f"{container_name} indices must be integers or slices, not {key.python_type_name()}"
-                ],
-            )
-        key = key.nb_index_impl(tx)
-    return key
-
-
 def vt_mapping_size(
     tx: "InstructionTranslatorBase", obj: "VariableTracker"
 ) -> "VariableTracker":
