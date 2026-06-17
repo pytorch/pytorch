@@ -586,14 +586,17 @@ class RangeVariable(BaseListVariable):
     def python_type(self) -> type:
         return range
 
-    def start(self) -> Any:
-        return self.items[0].as_python_constant()
+    # range math needs concrete bounds; with assume_static_by_default=False a
+    # range object's start/stop/step are wrapped as symbolic ints, so specialize
+    # them (installing a guard) rather than assuming a plain constant.
+    def start(self) -> int:
+        return guard_if_dyn(self.items[0])
 
-    def stop(self) -> Any:
-        return self.items[1].as_python_constant()
+    def stop(self) -> int:
+        return guard_if_dyn(self.items[1])
 
-    def step(self) -> Any:
-        return self.items[2].as_python_constant()
+    def step(self) -> int:
+        return guard_if_dyn(self.items[2])
 
     def range_length(self) -> int:
         lo = self.start()
@@ -721,7 +724,8 @@ class RangeVariable(BaseListVariable):
     def unpack_var_sequence(
         self, tx: Optional["InstructionTranslatorBase"] = None
     ) -> list[VariableTracker]:
-        return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
+        rng = range(self.start(), self.stop(), self.step())
+        return [variables.ConstantVariable.create(x) for x in rng]
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for range objects."""
