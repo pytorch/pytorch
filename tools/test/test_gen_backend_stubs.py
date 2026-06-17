@@ -865,21 +865,18 @@ namespace {
 struct structured_minimum_out_define_meta final : public at::priv1::native::PrivateUse1NativeFunctions::structured_minimum_out {
     void set_output_raw_strided(
         int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
-        at::TensorOptions options, at::DimnameList names
+        at::TensorOptions options
     ) override {
         outputs_[output_idx] = strides.empty()
             ? at::detail::empty_meta(sizes, options.device(at::kMeta))
             : at::detail::empty_strided_meta(sizes, strides, options.device(at::kMeta));
-        if (!names.empty()) {
-            at::namedinference::propagate_names(outputs_[output_idx], names);
-        }
-        at::meta::structured_minimum::set_output_raw_strided(output_idx, sizes, strides, options, names);
+        at::meta::structured_minimum::set_output_raw_strided(output_idx, sizes, strides, options);
     }
     void set_output_strided(
         int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
-        at::TensorOptions options, at::DimnameList names
+        at::TensorOptions options
     ) override {
-        set_output_raw_strided(output_idx, sizes, strides, options, names);
+        set_output_raw_strided(output_idx, sizes, strides, options);
     }
     const at::Tensor & maybe_get_output(int64_t output_idx) override {
         return outputs_[output_idx];
@@ -916,8 +913,7 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
         self.assertNotIn("void meta(", decl)
 
     # A multi-output structured op (sort -> values, indices) must build a tuple in the generated
-    # Meta wrapper; returning a single Tensor into the tuple slot would not compile. sort is also
-    # MetaBase (not TensorIterator), which guards the set_output names signature below.
+    # Meta wrapper; returning a single Tensor into the tuple slot would not compile.
     def test_define_meta_multi_output_returns_tuple(self) -> None:
         out = self.define_meta_registrations(
             "- sort.values_stable:\n    structured: true\n    define_meta: true"
@@ -928,10 +924,10 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
             "std::move(op.outputs_[1]));",
             out,
         )
-        # Both MetaBase and TensorIteratorBase declare set_output_* with a trailing
-        # at::DimnameList names; emitting only 4 args (dropping names) for a MetaBase op fails
-        # to override the virtual and does not compile, so it must always be present.
-        self.assertIn("at::TensorOptions options, at::DimnameList names", out)
+        # set_output_* override the 4-arg base virtual (named-tensor support was removed upstream),
+        # so the generated override must be 4-arg with no DimnameList.
+        self.assertIn("at::TensorOptions options\n", out)
+        self.assertNotIn("DimnameList", out)
         # sort is MetaBase: MetaBase::set_output_raw_strided is TORCH_INTERNAL_ASSERT(false), so the
         # super-call (emitted for TensorIterator ops like minimum) must NOT appear here, otherwise
         # meta() would abort at runtime. Mirrors in-tree generate_super=structured_inherits is not None.
