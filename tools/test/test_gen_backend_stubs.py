@@ -486,6 +486,23 @@ supported:
             output_error,
         )
 
+    # A single-output non-structured op (bucketize -> Long) registered out-as-primary via its
+    # '.out' only has no native meta to derive the output dtype from, so the input-dtype-seeded
+    # functional would be silently mistyped. Reject it; the author must register the functional.
+    def test_single_output_non_structured_out_as_primary_rejected(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+supported:
+- bucketize.Tensor_out"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertIn(
+            "'bucketize.Tensor_out' is a non-structured op registered out-as-primary via its "
+            "'.out' only",
+            output_error,
+        )
+
     # Codegen-outcome matrix for out-as-primary across op classes: which registration generates
     # vs raises. Runtime dtype correctness (whether the generated code produces the right dtype) is
     # out of scope here -- it needs the compile+run coverage tracked by the torch_openreg_test_only
@@ -524,10 +541,16 @@ supported:
                     generates(structured_yaml)
                 else:
                     raises(structured_yaml, "is not defined as a structured operator")
-                # use_out_as_primary with only the out (naive derive) generates iff single-output.
+                # use_out_as_primary with only the out: a multi-output op is rejected (mixed
+                # dtypes), a non-structured single-output op is rejected (no meta to derive the
+                # output dtype, so a dtype-changing op would be mistyped), and a single-output
+                # natively-structured op defers its functional to the in-tree composite (which
+                # computes the correct dtype via meta) -- codegen succeeds either way.
                 naive_yaml = f"{head}{oap}supported:\n- {out}"
                 if multi:
                     raises(naive_yaml, "is a multi-output op registered out-as-primary")
+                elif not structured:
+                    raises(naive_yaml, "is a non-structured op registered out-as-primary")
                 else:
                     generates(naive_yaml)
 
@@ -679,25 +702,20 @@ supported:
         groups, backend_index, class_name = self._parse(supported)
         return gen_define_meta_registrations(groups, backend_index, class_name)
 
-    # use_out_as_primary: a non-structured op (div.out) generates an out wrapper
-    # that returns the impl _out call directly (note the at::priv1::native 3-level
-    # namespace), a functional wrapper that allocates an empty out and reuses it,
-    # and an inplace wrapper that feeds self into the out slot -- the old
-    # at::_copy_from_and_resize temp-copy is gone.
+    # use_out_as_primary: a structured op (div.out) generates an out wrapper that returns the
+    # impl _out call directly (note the at::priv1::native 3-level namespace) and an inplace
+    # wrapper that feeds self into the out slot -- the old at::_copy_from_and_resize temp-copy is
+    # gone. The functional is NOT derived here: div is natively structured, so it defers to the
+    # in-tree CompositeExplicitAutogradNonFunctional kernel (op.meta() + at::div_outf), which
+    # computes the correct output dtype and redispatches to this backend's div_out.
     def test_out_as_primary_wrappers(self) -> None:
         anon = self.anonymous_definitions("- div.out")
         self.assertNotIn("at::_copy_from_and_resize", anon)
+        # functional defers to the composite -- no PrivateUse1 functional wrapper is emitted
+        self.assertNotIn("wrapper_PrivateUse1_Tensor_div(", anon)
         self.assertExpectedInline(
             anon,
             """\
-at::Tensor wrapper_PrivateUse1_Tensor_div(const at::Tensor & self, const at::Tensor & other) {
-  const OptionalDeviceGuard device_guard(device_of(self));
-  auto out = at::empty({0}, self.options());
-
-  at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, out);
-  return out;
-}
-
 namespace {
 
 at::Tensor & wrapper_PrivateUse1_out_div_out(const at::Tensor & self, const at::Tensor & other, at::Tensor & out) {
@@ -712,7 +730,6 @@ at::Tensor & wrapper_PrivateUse1_out_div_out(const at::Tensor & self, const at::
 
 at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor & other) {
   const OptionalDeviceGuard device_guard(device_of(self));
-
   at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, self);
   return self;
 }
@@ -784,14 +801,6 @@ void impl(const at::Tensor & self, const at::Tensor & other, const at::Scalar & 
         self.assertExpectedInline(
             off,
             """\
-at::Tensor wrapper_PrivateUse1_Tensor_div(const at::Tensor & self, const at::Tensor & other) {
-  // DeviceGuard omitted
-  auto out = at::empty({0}, self.options());
-
-  at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, out);
-  return out;
-}
-
 namespace {
 
 at::Tensor & wrapper_PrivateUse1_out_div_out(const at::Tensor & self, const at::Tensor & other, at::Tensor & out) {
@@ -806,7 +815,6 @@ at::Tensor & wrapper_PrivateUse1_out_div_out(const at::Tensor & self, const at::
 
 at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor & other) {
   // DeviceGuard omitted
-
   at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, self);
   return self;
 }
