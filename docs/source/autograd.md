@@ -348,9 +348,23 @@ and vtune profiler based using
 
 ## Debugging and anomaly detection
 
-```{eval-rst}
-.. automodule:: torch.autograd.anomaly_mode
-```
+When an error occurs during the backward pass, it can be difficult to trace
+back to the offending forward operation. Anomaly detection helps by:
+
+- Printing the traceback of the forward operation that created the failing
+  backward function.
+- Optionally raising an error when ``NaN`` values are detected during
+  backward computation (enabled by default).
+
+This module provides two context managers:
+
+- :class:`detect_anomaly` — enable anomaly detection with optional NaN checking.
+- :class:`set_detect_anomaly` — toggle anomaly detection on or off.
+
+:::{warning}
+Anomaly detection should only be enabled during debugging, as it adds
+significant overhead to both forward and backward passes.
+:::
 
 ```{eval-rst}
 .. currentmodule:: torch.autograd.anomaly_mode
