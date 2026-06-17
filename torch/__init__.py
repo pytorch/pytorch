@@ -1592,7 +1592,9 @@ def set_default_device(device: "Device") -> None:
         :func:`torch.from_numpy` and :func:`torch.frombuffer`
 
     Args:
-        device (device or string): the device to set as default
+        device (:class:`torch.device`, str, int, or None): the device to set as
+            default, or ``None`` to clear the override. An integer is
+            interpreted as an index for the current accelerator.
 
     Example::
 
