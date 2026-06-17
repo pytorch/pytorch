@@ -326,6 +326,9 @@ void validate_scaled_mm_v2_inputs(
   const auto N = mat_b.sym_size(1);
   const bool both_fp4 = is_fp4_type(mat_a.scalar_type()) && is_fp4_type(mat_b.scalar_type());
   const auto K_unpacked = both_fp4 ? mat_a.sym_size(1) * 2 : mat_a.sym_size(1);
+  // XPU (oneDNN) uses unswizzled, unpadded blockwise scale shapes, unlike the
+  // L4-padded SWIZZLE_32_4_4 layout that CUDA expects.
+  const bool is_xpu = mat_a.is_xpu();
 
   auto sym_ceil_div = [](const c10::SymInt& a, int64_t b) {
     return (a + b - 1) / b;
@@ -386,7 +389,11 @@ void validate_scaled_mm_v2_inputs(
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
     // to keep aten-cpu free of GPU-conditional compilation. Formulas mirror
     // _scaled_mxfp8_mxfp8 and _scaled_mxfp4_mxfp4 in cuda/ScaledBlas.cpp.
-    if (at::globalContext().hasROCM()) {
+    if (is_xpu) {
+      // XPU: unpadded [M, ceil_div(K, 32)] / [N, ceil_div(K, 32)], NO_SWIZZLE.
+      expected_a_elems = M * sym_ceil_div(K_unpacked, 32);
+      expected_b_elems = N * sym_ceil_div(K_unpacked, 32);
+    } else if (at::globalContext().hasROCM()) {
       // ROCm: K_multiplier=2 doubles M and N (the non-contraction dims) for
       // packed fp4; K (= mat_a.sym_size(1)) is used raw on both sides.
       const auto K = mat_a.sym_size(1);
@@ -412,13 +419,20 @@ void validate_scaled_mm_v2_inputs(
         "For Blockwise scaling scale_b should have ", expected_b_elems,
         " elements, got: ", scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
     TORCH_CHECK_VALUE(
-        scale_a[0].is_contiguous() && scale_b[0].is_contiguous(),
+        is_xpu || (scale_a[0].is_contiguous() && scale_b[0].is_contiguous()),
         "For Blockwise scaling both scales should be contiguous");
   } else if (is_nv_1x16) {
-    const auto expected_a_elems = sym_round_up(M, 128) *
-        sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
-    const auto expected_b_elems = sym_round_up(N, 128) *
-        sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
+    c10::SymInt expected_a_elems;
+    c10::SymInt expected_b_elems;
+    if (is_xpu) {
+      expected_a_elems = M * sym_ceil_div(K_unpacked, 16);
+      expected_b_elems = N * sym_ceil_div(K_unpacked, 16);
+    } else {
+      expected_a_elems = sym_round_up(M, 128) *
+          sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
+      expected_b_elems = sym_round_up(N, 128) *
+          sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
+    }
     TORCH_CHECK_VALUE(
         scale_a.size() == 1 && scale_a[0].sym_numel() == expected_a_elems &&
             scale_a[0].scalar_type() == ScalarType::Float8_e4m3fn,
@@ -430,13 +444,20 @@ void validate_scaled_mm_v2_inputs(
         "For Blockwise scaling scale_b should have ", expected_b_elems,
         " elements, got: ", scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
     TORCH_CHECK_VALUE(
-        scale_a[0].is_contiguous() && scale_b[0].is_contiguous(),
+        is_xpu || (scale_a[0].is_contiguous() && scale_b[0].is_contiguous()),
         "For Blockwise scaling both scales should be contiguous");
   } else if (is_nv_2lvl) {
-    const auto expected_a_elems = sym_round_up(M, 128) *
-        sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
-    const auto expected_b_elems = sym_round_up(N, 128) *
-        sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
+    c10::SymInt expected_a_elems;
+    c10::SymInt expected_b_elems;
+    if (is_xpu) {
+      expected_a_elems = M * sym_ceil_div(K_unpacked, 16);
+      expected_b_elems = N * sym_ceil_div(K_unpacked, 16);
+    } else {
+      expected_a_elems = sym_round_up(M, 128) *
+          sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
+      expected_b_elems = sym_round_up(N, 128) *
+          sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
+    }
     // Split the count check from the per-element check so the error
     // message points at the actual mismatch.
     TORCH_CHECK_VALUE(
@@ -458,7 +479,7 @@ void validate_scaled_mm_v2_inputs(
         "For Blockwise scaling scale_b should have ", expected_b_elems,
         " elements, got: ", scale_b[0].sym_numel());
     TORCH_CHECK_VALUE(
-        scale_a[0].is_contiguous() && scale_b[0].is_contiguous(),
+        is_xpu || (scale_a[0].is_contiguous() && scale_b[0].is_contiguous()),
         "For Blockwise scaling both scales should be contiguous");
   } else if (!is_deepseek) {
     // Match the kernel's `find_scaled_gemm_impl` fall-through so unrecognized
@@ -481,7 +502,17 @@ void validate_scaled_mm_v2_inputs(
     const auto num_args_a = recipe_a.size();
     const auto num_args_b = recipe_b.size();
     const bool is_rocm = at::globalContext().hasROCM();
-    if (!is_rocm) {
+    if (is_xpu) {
+      // XPU consumes unswizzled scales for all MX/NVFP4 recipes.
+      TORCH_CHECK_VALUE(
+          swizzle_a.size() == num_args_a && swizzle_b.size() == num_args_b,
+          "swizzle_a/swizzle_b must match the number of scale recipes, got ",
+          swizzle_a.size(), " and ", swizzle_b.size());
+      TORCH_CHECK_VALUE(
+          swizzle_a[0] == SwizzleType::NO_SWIZZLE &&
+              swizzle_b[0] == SwizzleType::NO_SWIZZLE,
+          "For XPU MX/NVFP4 gemm, scale_a and scale_b must both be NO_SWIZZLE");
+    } else if (!is_rocm) {
       TORCH_CHECK_VALUE(
           swizzle_a.size() == num_args_a,
           "swizzle_a must have ", num_args_a, " value",
