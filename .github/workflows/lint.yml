@@ -327,6 +327,7 @@ jobs:
     uses: ./.github/workflows/_link_check.yml
     with:
       runner: ${{ needs.get-label-type.outputs.label-type }}
+      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
   doc-redirects-check:
