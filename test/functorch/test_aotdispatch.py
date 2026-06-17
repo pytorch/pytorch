@@ -3680,6 +3680,27 @@ def forward(self, primals_1, primals_2, primals_3):
     return (as_strided_scatter, add_2, view_2, unsqueeze)""",
         )
 
+    def test_input_mutation_unsqueeze_view_of_base_input(self):
+        # Regression test: when one input is the base tensor (._base is None)
+        # and another is an unsqueeze view of it, returning the base as output
+        # must be treated as alias_of_input (not is_input) in the synthetic
+        # base calling convention.
+        def f(a, b):
+            b.add_(1)
+            return a
+
+        def inp_callable(req_grad):
+            base = torch.ones(4, requires_grad=req_grad)
+            x = base.add(1)
+            return [base], [x, x.unsqueeze(0)]
+
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=False), test_mutation=True
+        )
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=True), test_mutation=True
+        )
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_synthetic_base_base_attribute_is_none(self):
         def f(a, b):
