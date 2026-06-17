@@ -324,9 +324,6 @@ DEFINE_DISPATCH(
     clamp_max_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
     isin_default_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(
-    isin_sorting_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_NO_CPU_DISPATCH(isin_sorting_stub)
 
 bool allclose(
     const Tensor& self,
@@ -995,19 +992,6 @@ TORCH_IMPL_FUNC(isin_Tensor_Tensor_out)
  bool invert,
  const Tensor& out) {
   if (elements.numel() == 0) {
-    return;
-  }
-
-  if (elements.is_mps()) {
-    out.fill_(invert);
-    if (elements.numel() <=
-        46.0 * std::pow(static_cast<double>(test_elements.numel()), 0.155)) {
-      isin_default_stub(
-          elements.device().type(), elements, test_elements, invert, out);
-    } else {
-      isin_sorting_stub(
-          elements.device().type(), elements, test_elements, invert, out);
-    }
     return;
   }
 

@@ -8,6 +8,7 @@
 #include <ATen/native/mps/kernels/TensorCompare.h>
 #include <fmt/format.h>
 #include <algorithm>
+#include <cmath>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -33,16 +34,6 @@ static void isin_default_kernel_mps(const Tensor& elements,
                                     const Tensor& test_elements,
                                     bool invert,
                                     const Tensor& out) {
-  TORCH_CHECK(elements.is_mps() && test_elements.is_mps(),
-              "Expected elements.is_mps() && test_elements.is_mps(), got ",
-              elements.device(),
-              " and ",
-              test_elements.device());
-
-  if (test_elements.numel() == 0) {
-    return;
-  }
-
   const auto common_type = at::result_type(elements, test_elements);
   const Tensor elements_contig = elements.to(common_type).contiguous();
   const Tensor test_elements_contig = test_elements.to(common_type).contiguous();
@@ -95,16 +86,6 @@ static void isin_sorting_kernel_mps(const Tensor& elements,
                                     const Tensor& test_elements,
                                     bool invert,
                                     const Tensor& out) {
-  TORCH_CHECK(elements.is_mps() && test_elements.is_mps(),
-              "Expected elements.is_mps() && test_elements.is_mps(), got ",
-              elements.device(),
-              " and ",
-              test_elements.device());
-
-  if (test_elements.numel() == 0) {
-    return;
-  }
-
   const auto common_type = at::result_type(elements, test_elements);
   const Tensor elements_contig = elements.to(common_type).contiguous();
   const Tensor test_elements_contig = test_elements.to(common_type).contiguous();
@@ -163,6 +144,32 @@ static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
   }
 }
 } // namespace mps
+
+TORCH_IMPL_FUNC(isin_Tensor_Tensor_out_mps)
+(const Tensor& elements, const Tensor& test_elements, bool /*assume_unique*/, bool invert, const Tensor& out) {
+  using namespace mps;
+  TORCH_CHECK(elements.is_mps() && test_elements.is_mps(),
+              "Expected elements.is_mps() && test_elements.is_mps(), got ",
+              elements.device(),
+              " and ",
+              test_elements.device());
+  if (elements.numel() == 0) {
+    return;
+  }
+  if (test_elements.numel() == 0) {
+    out.fill_(invert);
+    return;
+  }
+
+  // Scan parallelizes over test_elements; sort binary-searches per element.
+  // Scan wins when test_elements dominates, sort when elements dominates.
+  // Constants are empirically tuned.
+  if (elements.numel() <= 46.0 * std::pow(static_cast<double>(test_elements.numel()), 0.155)) {
+    isin_default_kernel_mps(elements, test_elements, invert, out);
+  } else {
+    isin_sorting_kernel_mps(elements, test_elements, invert, out);
+  }
+}
 
 static void where_kernel_mps(TensorIterator& iter) {
   const auto& condition = iter.input(0);
@@ -381,7 +388,5 @@ REGISTER_DISPATCH(clamp_stub, &clamp_kernel_mps)
 REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_mps)
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_mps)
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_mps)
-REGISTER_DISPATCH(isin_default_stub, &mps::isin_default_kernel_mps)
-REGISTER_DISPATCH(isin_sorting_stub, &mps::isin_sorting_kernel_mps)
 
 } // namespace at::native
