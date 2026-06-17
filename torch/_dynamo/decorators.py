@@ -1840,7 +1840,7 @@ def override_optimization_hint(x: Any, val: int) -> None:
             f"override_optimization_hint expects an unbacked symbol, "
             f"but {expr} is backed"
         )
-    shape_env.var_to_hint_override[expr] = val
+    shape_env._set_unbacked_var_to_hint_override(x, val)
 
 
 def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:
