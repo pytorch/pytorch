@@ -815,9 +815,7 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
       MPSGraphTensor* batch1Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch1);
       MPSGraphTensor* batch2Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch2);
 
-      // Intermediates for beta and alpha
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
-                                                       dataType:getMPSScalarType(input.scalar_type())];
+      // Intermediate for alpha
       MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
                                                         dataType:getMPSScalarType(batch1.scalar_type())];
 
@@ -830,18 +828,25 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
         reductionSumTensor = [mpsGraph reductionSumWithTensor:productTensor axis:0 name:@"reductionSum(batch1@batch2)"];
       }
 
-      // Intermediates for multiplying by beta and alpha
+      // Intermediate for multiplying by alpha
       MPSGraphTensor* reductionSumTimesAlphaTensor =
           [mpsGraph multiplicationWithPrimaryTensor:reductionSumTensor
                                     secondaryTensor:alphaTensor
                                                name:@"alpha*(batch1@batch2)"];
-      MPSGraphTensor* biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
-                                                                      secondaryTensor:betaTensor
-                                                                                 name:@"beta*input"];
 
-      MPSGraphTensor* outputTensor = [mpsGraph additionWithPrimaryTensor:reductionSumTimesAlphaTensor
-                                                         secondaryTensor:biasTimesBetaTensor
-                                                                    name:@"beta*input + alpha*(batch1@batch2)"];
+      // When beta == 0, input is ignored so nan/inf in it are not propagated (matches CPU/CUDA and addmm).
+      const double betaVal = beta.toDouble();
+      MPSGraphTensor* outputTensor = reductionSumTimesAlphaTensor;
+      if (betaVal != 0.0) {
+        MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:betaVal
+                                                         dataType:getMPSScalarType(input.scalar_type())];
+        MPSGraphTensor* biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
+                                                                        secondaryTensor:betaTensor
+                                                                                   name:@"beta*input"];
+        outputTensor = [mpsGraph additionWithPrimaryTensor:reductionSumTimesAlphaTensor
+                                           secondaryTensor:biasTimesBetaTensor
+                                                      name:@"beta*input + alpha*(batch1@batch2)"];
+      }
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->batch1Tensor_ = batch1Tensor;
