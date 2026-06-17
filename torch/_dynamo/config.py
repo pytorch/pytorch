@@ -923,6 +923,11 @@ inline_single_use_invoke_subgraph: bool = True
 # - False: never clear regardless of backend
 invalidate_compile_context_weakrefs: bool | None = None
 
+# Reorder and rename output graph nodes into a canonical topological order so
+# that structurally equivalent graphs (e.g., same model traced with different
+# dict iteration orders across distributed ranks) produce identical FX graphs.
+canonicalize_output_graph_node_order: bool = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403
 
