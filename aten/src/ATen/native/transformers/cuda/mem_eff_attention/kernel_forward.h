@@ -808,7 +808,11 @@ struct AttentionKernel {
             {cutlass::layout::RowMajor(p.bias_strideM)},
             // attn_bias_pointer points to matrix of size (n_queries, n_keys)
             // for the relevant batch_id and head_id
-            const_cast<scalar_t*>(p.attn_bias_ptr + query_start * p.bias_strideM + iter_key_start),
+            // `query_start` is `uint32_t`, so compute the offset in 64-bit
+            // to avoid wraparound when num_queries * num_keys > 2^32
+            const_cast<scalar_t*>(
+                p.attn_bias_ptr + int64_t(query_start) * p.bias_strideM +
+                iter_key_start),
             {problem_size_0_m, problem_size_0_n},
             thread_id());
         cutlass::TensorRef<scalar_t, cutlass::layout::RowMajor> bias_tensor_ref(
@@ -961,9 +965,12 @@ struct AttentionKernel {
 
         if (thread_i < problem_size_0_m && thread_start_j < problem_size_0_n) {
           curandStatePhilox4_32_10_t curand_state = curand_state_init;
+          // multiply in 64-bit to avoid wraparound when
+          // num_queries * num_keys > 2^32; the backward pass computes this
+          // offset with an int64_t `query_start`, so they must match
           skipahead(
               static_cast<unsigned long long>(
-                  (query_start + thread_i) * p.num_keys_absolute +
+                  int64_t(query_start + thread_i) * p.num_keys_absolute +
                   (iter_key_start + thread_start_j)),
               &curand_state);
           const float dropout_scale = 1.0 / (1.0 - p.dropout_prob);
