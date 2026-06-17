@@ -1515,17 +1515,28 @@ class ComboKernelDynamicShapesTests(TestCase):
 
     @requires_gpu_and_triton
     def test_dynamic_shapes_persistent_reduction_dynamic_rdim(self):
-        @torch.compile(dynamic=True)
         def fn(a, b):
             torch._check(a.shape[0] <= 32)
             torch._check(b.shape[0] <= 32)
             return a.sum(), b.sum()
 
-        a = torch.randn(16, device=GPU_TYPE)
-        b = torch.randn(16, device=GPU_TYPE)
-        result = fn(a, b)
-        self.assertEqual(result[0], a.sum())
-        self.assertEqual(result[1], b.sum())
+        for benchmark in (False, True):
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            a = torch.randn(16, device=GPU_TYPE)
+            b = torch.randn(16, device=GPU_TYPE)
+            with torch._inductor.config.patch("benchmark_combo_kernel", benchmark):
+                fn_c = torch.compile(fn, dynamic=True)
+                result, code = run_and_get_code(fn_c, a, b)
+                self.assertEqual(result[0], a.sum())
+                self.assertEqual(result[1], b.sum())
+                self.assertEqual(
+                    torch._inductor.metrics.generated_kernel_count,
+                    4 if benchmark else 1,
+                )
+                FileCheck().check("R0_BLOCK_0: tl.constexpr = 32").check(
+                    "R0_BLOCK_1: tl.constexpr = 32"
+                ).run(code[0])
 
 
 class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
