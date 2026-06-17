@@ -1037,6 +1037,7 @@ class SymInt(
         return self
 
     def has_hint(self) -> builtins.bool:
+        """Return True if this symbolic int has a concrete hint value."""
         return self.node.has_hint()
 
     @property
@@ -1146,6 +1147,7 @@ class SymFloat(_SymTypingMagic[builtins.float, "SymFloat", _Never]):
         return self.node.guard_float("", 0).hex()
 
     def has_hint(self) -> builtins.bool:
+        """Return True if this symbolic float has a concrete hint value."""
         return self.node.has_hint()
 
     @property
