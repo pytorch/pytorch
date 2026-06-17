@@ -29,11 +29,27 @@
 namespace at::native {
 namespace mps {
 
+// Metal kernel library (LossOps.metal). NLLParams comes from kernels/LossOps.h.
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/LossOps_metallib.h>
 #endif
+
+static constexpr uint32_t kLossKernelTgsz = 256;
+// Cap reduce threadgroup count: avoids O(N/256) barrier calls at large N
+static constexpr uint32_t kMaxReduceTGs = 256u;
+
+static void encode_reduce_partials(id<MTLComputeCommandEncoder> enc,
+                                   const Tensor& partial,
+                                   const Tensor& loss_out,
+                                   uint32_t n_tg) {
+  const std::string dt_out = scalarToMetalTypeString(loss_out);
+  auto pso = lib.getPipelineStateForFunc("loss_reduce_partials_" + dt_out);
+  [enc setComputePipelineState:pso];
+  mtl_setArgs(enc, partial, loss_out, n_tg);
+  [enc dispatchThreads:MTLSizeMake(kLossKernelTgsz, 1, 1) threadsPerThreadgroup:MTLSizeMake(kLossKernelTgsz, 1, 1)];
+}
 
 static std::string reductionToString(int64_t reduction) {
   switch (reduction) {
@@ -296,6 +312,183 @@ static inline MPSGraphTensor* divisionNoNaN(MPSGraph* mpsGraph, MPSGraphTensor* 
                          truePredicateTensor:div
                         falsePredicateTensor:[mpsGraph constantWithScalar:0.0 dataType:div.dataType]
                                         name:nil];
+}
+
+// NLLLoss
+static void nll_loss_fwd_metal(Tensor& output,
+                               Tensor& total_weight,
+                               const Tensor& input_arg,
+                               const Tensor& target_arg,
+                               const Tensor& weight,
+                               int64_t reduction,
+                               int64_t ignore_index) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(output.scalar_type()),
+                              "nll_loss for complex is not supported for MPS");
+  if (weight.defined()) {
+    TORCH_CHECK(input_arg.scalar_type() == weight.scalar_type(),
+                "expected scalar type ",
+                input_arg.scalar_type(),
+                " but found ",
+                weight.scalar_type());
+  }
+  if (c10::isIntegralType(input_arg.scalar_type(), /*includeBool=*/true)) {
+    Tensor input_f = input_arg.to(at::kFloat);
+    Tensor weight_f = weight.defined() ? weight.to(at::kFloat) : weight;
+    Tensor output_f = at::empty_like(output, output.options().dtype(at::kFloat));
+    Tensor tw_f = at::empty_like(total_weight, total_weight.options().dtype(at::kFloat));
+    nll_loss_fwd_metal(output_f, tw_f, input_f, target_arg, weight_f, reduction, ignore_index);
+    output.copy_(output_f);
+    total_weight.copy_(tw_f);
+    return;
+  }
+  auto input = input_arg.dim() == 1 ? input_arg.view({1, input_arg.size(0)}) : input_arg;
+  auto target = target_arg.dim() == 0 ? target_arg.view({1}) : target_arg;
+
+  const uint32_t N = static_cast<uint32_t>(target.numel());
+  const uint32_t C = static_cast<uint32_t>(input.size(1));
+
+  if (reduction == Reduction::None)
+    output.resize_(target_arg.sizes());
+  else
+    output.resize_({});
+  total_weight.resize_({});
+
+  // Kernels are stride-blind: force contiguous copies before dispatch.
+  input = input.contiguous();
+  const Tensor weight_c = weight.defined() ? (weight.is_contiguous() ? weight : weight.contiguous()) : weight;
+  const bool need_out_copy = !output.is_contiguous();
+  Tensor out_buf = need_out_copy ? at::empty_like(output, at::MemoryFormat::Contiguous) : output;
+
+  if (N == 0 || input.numel() == 0) {
+    reduction == Reduction::Mean ? output.fill_(std::numeric_limits<float>::quiet_NaN()) : output.zero_();
+    total_weight.zero_();
+    return;
+  }
+
+  TORCH_CHECK(input.numel() <= std::numeric_limits<uint32_t>::max(),
+              "MPS nll_loss does not support inputs with more than 2^32 elements");
+  NLLParams p{ignore_index, N, C, static_cast<uint32_t>(reduction), weight.defined() ? 1u : 0u};
+  const std::string dt = scalarToMetalTypeString(input);
+  // Kernels read target as int64 (no narrowing); convert only legacy non-Long targets
+  // to() is a no-op for Long input and contiguous() for dense targets, so the
+  // hot path stays zero-copy; strided or non-Long targets get one dense copy.
+  const Tensor tgt_i64 = target.to(at::kLong).contiguous();
+  // Use input as a valid dummy buffer when no class weights provided
+  const Tensor& wt = weight_c.defined() ? weight_c : input;
+  MPSStream* stream = getCurrentMPSStream();
+
+  if (reduction == Reduction::None) {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+        auto pso = lib.getPipelineStateForFunc("nll_loss_fwd_none_" + dt);
+        [enc setComputePipelineState:pso];
+        mtl_setArgs(enc, input, tgt_i64, wt, out_buf, p, stream->getErrorBuffer());
+        [enc dispatchThreads:MTLSizeMake(N, 1, 1) threadsPerThreadgroup:MTLSizeMake(kLossKernelTgsz, 1, 1)];
+      }
+    });
+    stream->synchronize(SyncType::COMMIT);
+    // Reference leaves total_weight at 0 for the None reduction (it is unused
+    // by the None backward, which reads per-element grad_output directly).
+    total_weight.zero_();
+  } else {
+    const uint32_t n_tg = std::min((N + kLossKernelTgsz - 1) / kLossKernelTgsz, kMaxReduceTGs);
+    Tensor partial = at::empty({static_cast<int64_t>(n_tg)}, input.options().dtype(at::kFloat));
+    Tensor wpartial = at::empty({static_cast<int64_t>(n_tg)}, input.options().dtype(at::kFloat));
+    // Weight sum always accumulated as float; copy back to total_weight (any dtype) after commit
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+        // Phase 1: per-threadgroup loss and weight sums
+        auto pso = lib.getPipelineStateForFunc("nll_loss_fwd_reduce_" + dt);
+        [enc setComputePipelineState:pso];
+        mtl_setArgs(enc, input, tgt_i64, wt, partial, wpartial, p, stream->getErrorBuffer());
+        [enc dispatchThreadgroups:MTLSizeMake(n_tg, 1, 1) threadsPerThreadgroup:MTLSizeMake(kLossKernelTgsz, 1, 1)];
+        // Phase 2a: reduce loss partials -> typed output[0]
+        encode_reduce_partials(enc, partial, out_buf, n_tg);
+        // Phase 2b: reduce weight partials -> typed total_weight[0]
+        encode_reduce_partials(enc, wpartial, total_weight, n_tg);
+        // Phase 3 (Mean only): out_buf[0] /= total_weight[0]
+        if (reduction == Reduction::Mean) {
+          auto pso3 = lib.getPipelineStateForFunc("nll_finalize_mean_" + dt);
+          [enc setComputePipelineState:pso3];
+          mtl_setArgs(enc, out_buf, total_weight);
+          [enc dispatchThreads:MTLSizeMake(1, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+        }
+      }
+    });
+    stream->synchronize(SyncType::COMMIT);
+  }
+  if (need_out_copy)
+    output.copy_(out_buf);
+}
+
+static void nll_loss_bwd_metal(Tensor& grad_input,
+                               const Tensor& grad_output,
+                               const Tensor& input_arg,
+                               const Tensor& target_arg,
+                               const Tensor& weight,
+                               int64_t reduction,
+                               int64_t ignore_index,
+                               const Tensor& total_weight) {
+  if (c10::isIntegralType(input_arg.scalar_type(), /*includeBool=*/true)) {
+    Tensor input_f = input_arg.to(at::kFloat);
+    Tensor weight_f = weight.defined() ? weight.to(at::kFloat) : weight;
+    Tensor gi_f = at::empty_like(grad_input, grad_input.options().dtype(at::kFloat));
+    nll_loss_bwd_metal(gi_f,
+                       grad_output.to(at::kFloat),
+                       input_f,
+                       target_arg,
+                       weight_f,
+                       reduction,
+                       ignore_index,
+                       total_weight.to(at::kFloat));
+    grad_input.copy_(gi_f);
+    return;
+  }
+  auto input = input_arg.dim() == 1 ? input_arg.view({1, input_arg.size(0)}) : input_arg;
+  auto target = target_arg.dim() == 0 ? target_arg.view({1}) : target_arg;
+
+  const uint32_t N = static_cast<uint32_t>(target.numel());
+  const uint32_t C = static_cast<uint32_t>(input.size(1));
+
+  grad_input.resize_as_(input_arg);
+  grad_input.zero_();
+
+  if (N == 0 || input.numel() == 0)
+    return;
+
+  // Kernel is stride-blind: force contiguous copies for input/weight,
+  // and route writes through a contiguous grad_input buffer if needed.
+  input = input.contiguous();
+  const Tensor weight_c = weight.defined() ? (weight.is_contiguous() ? weight : weight.contiguous()) : weight;
+  const bool need_gi_copy = !grad_input.is_contiguous();
+  Tensor gi = need_gi_copy ? at::empty_like(grad_input, at::MemoryFormat::Contiguous) : grad_input;
+
+  TORCH_CHECK(input.numel() <= std::numeric_limits<uint32_t>::max(),
+              "MPS nll_loss does not support inputs with more than 2^32 elements");
+  NLLParams p{ignore_index, N, C, static_cast<uint32_t>(reduction), weight_c.defined() ? 1u : 0u};
+  const std::string dt = scalarToMetalTypeString(input);
+  // to() is a no-op for Long input and contiguous() for dense targets, so the
+  // hot path stays zero-copy; strided or non-Long targets get one dense copy.
+  const Tensor tgt_i64 = target.to(at::kLong).contiguous();
+  const Tensor& wt = weight_c.defined() ? weight_c : input;
+  // grad_output may have stride-0 (expanded) layout when coming from sum().backward()
+  const Tensor grad_out_c = grad_output.is_contiguous() ? grad_output : grad_output.contiguous();
+  MPSStream* stream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("nll_loss_bwd_" + dt);
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, grad_out_c, tgt_i64, wt, gi, total_weight, p, stream->getErrorBuffer());
+      [enc dispatchThreads:MTLSizeMake(N, 1, 1) threadsPerThreadgroup:MTLSizeMake(kLossKernelTgsz, 1, 1)];
+    }
+  });
+  stream->synchronize(SyncType::COMMIT);
+  if (need_gi_copy)
+    grad_input.copy_(gi);
 }
 
 // NLLLoss
@@ -1149,8 +1342,8 @@ TORCH_IMPL_FUNC(nll_loss_backward_out_mps)
  const Tensor& grad_input) {
   const Tensor& weight = weight_opt.getTensorRef();
 
-  mps::nllnd_loss_backward_impl(
-      (Tensor&)grad_input, grad_output, self, target, weight, reduction, ignore_index, total_weight, false);
+  mps::nll_loss_bwd_metal(
+      (Tensor&)grad_input, grad_output, self, target, weight, reduction, ignore_index, total_weight);
   return;
 }
 
@@ -1164,8 +1357,7 @@ TORCH_IMPL_FUNC(nll_loss_forward_out_mps)
  const Tensor& total_weight) {
   const Tensor& weight = weight_opt.getTensorRef();
 
-  mps::nllnd_loss_forward_impl(
-      (Tensor&)output, (Tensor&)total_weight, self, target, weight, reduction, ignore_index, false);
+  mps::nll_loss_fwd_metal((Tensor&)output, (Tensor&)total_weight, self, target, weight, reduction, ignore_index);
 
   return;
 }

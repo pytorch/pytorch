@@ -10545,6 +10545,35 @@ class TestSmoothL1Loss(TestCaseMPS):
         helper((3, 3, 0))
 
 class TestNLLLoss(TestCaseMPS):
+    def test_nll_loss_metal_paths(self):
+        # Committed coverage for the native Metal nll_loss kernels the OpInfo
+        # samples are too small to reach: the backward kernel across all
+        # reductions, the weighted path, fp16/bf16, ignore_index, and the
+        # multi-threadgroup reduce (large N -> phase-2 partial merge).
+        def run(N, C, reduction, dtype, weighted, ignore=-100):
+            xc = torch.randn(N, C, dtype=torch.float32, requires_grad=True)
+            tc = torch.randint(0, C, (N,))
+            wc = torch.rand(C, dtype=torch.float32) if weighted else None
+            xm = xc.detach().to("mps", dtype).requires_grad_()
+            tm = tc.to("mps")
+            wm = None if wc is None else wc.to("mps", dtype)
+            oc = F.nll_loss(xc, tc, weight=wc, reduction=reduction, ignore_index=ignore)
+            om = F.nll_loss(xm, tm, weight=wm, reduction=reduction, ignore_index=ignore)
+            tol = dict(atol=5e-2, rtol=5e-2) if dtype != torch.float32 else {}
+            self.assertEqual(om.float(), oc, **tol)
+            g = torch.ones_like(oc)
+            oc.backward(g)
+            om.backward(g.to("mps", dtype))
+            self.assertEqual(xm.grad.float(), xc.grad, **tol)
+
+        for reduction in ("none", "mean", "sum"):
+            for dtype in (torch.float32, torch.float16, torch.bfloat16):
+                for weighted in (False, True):
+                    run(128, 10, reduction, dtype, weighted)
+        run(65536, 10, "mean", torch.float32, True)   # large N -> phase-2 merge
+        run(65536, 10, "sum", torch.float32, False)
+        run(256, 1000, "mean", torch.float32, True, ignore=7)  # ignore_index + large C
+
     def test_nll_loss_mismatched_batch(self, device='mps'):
         x = torch.randn((10, 3), requires_grad=True, device=device)
         # t should have size (10,)
