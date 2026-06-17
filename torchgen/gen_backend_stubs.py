@@ -583,19 +583,17 @@ def gen_define_meta_registrations(
         ret_expr = moved[0] if num_out == 1 else f"std::make_tuple({', '.join(moved)})"
         struct_name = f"structured_{metadata.kernel}_define_meta"
         wrapper_name = f"wrapper_Meta_define_{meta_name}"
-        # Both MetaBase and TensorIteratorBase declare set_output_* with a trailing
-        # at::DimnameList names (TensorMeta.h), so emit it unconditionally -- a 4-arg override
-        # does not match the 5-arg virtual and fails to compile for MetaBase/precompute ops.
-        # propagate_names is a no-op when names is empty (the MetaBase case).
+        # set_output_* override the 4-arg base virtual on both MetaBase and TensorIteratorBase
+        # (TensorMeta.h); emit the meta tensor directly, mirroring the in-tree structured Meta
+        # kernel (RegisterMeta.cpp).
         #
         # The super-call routes set_output to the structured base. For TensorIterator ops it does
-        # the iterator bookkeeping the native meta() relies on; MetaBase has no such logic -- its
-        # set_output_raw_strided is TORCH_INTERNAL_ASSERT(false) -- so a qualified super-call on a
-        # MetaBase op compiles but aborts at runtime. Emit it only for TensorIterator ops,
-        # mirroring in-tree register_dispatch_key (generate_super=structured_inherits is not None).
+        # the iterator bookkeeping the native meta() relies on; MetaBase's set_output_raw_strided is
+        # TORCH_INTERNAL_ASSERT(false), so a super-call on a MetaBase op aborts at runtime. Emit it
+        # only for TensorIterator ops (generate_super=structured_inherits is not None in-tree).
         super_call = (
             f"\n        at::meta::structured_{meta_name}::set_output_raw_strided("
-            "output_idx, sizes, strides, options, names);"
+            "output_idx, sizes, strides, options);"
             if g.out.structured_inherits is not None
             else ""
         )
@@ -605,20 +603,17 @@ namespace {{
 struct {struct_name} final : public {backend_struct} {{
     void set_output_raw_strided(
         int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
-        at::TensorOptions options, at::DimnameList names
+        at::TensorOptions options
     ) override {{
         outputs_[output_idx] = strides.empty()
             ? at::detail::empty_meta(sizes, options.device(at::kMeta))
-            : at::detail::empty_strided_meta(sizes, strides, options.device(at::kMeta));
-        if (!names.empty()) {{
-            at::namedinference::propagate_names(outputs_[output_idx], names);
-        }}{super_call}
+            : at::detail::empty_strided_meta(sizes, strides, options.device(at::kMeta));{super_call}
     }}
     void set_output_strided(
         int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
-        at::TensorOptions options, at::DimnameList names
+        at::TensorOptions options
     ) override {{
-        set_output_raw_strided(output_idx, sizes, strides, options, names);
+        set_output_raw_strided(output_idx, sizes, strides, options);
     }}
     const at::Tensor & maybe_get_output(int64_t output_idx) override {{
         return outputs_[output_idx];
