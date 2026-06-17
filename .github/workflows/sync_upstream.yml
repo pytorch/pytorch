@@ -1,0 +1,33 @@
+name: Sync Upstream Main
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # Runs every 6 hours. Adjust as needed.
+  workflow_dispatch: # Allows you to trigger it manually via the GitHub UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: main # Change to 'master' if your fork's default branch uses it
+          fetch-depth: 0
+
+      - name: Sync upstream changes
+        run: |
+          # Configure Git identity
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Add the official PyTorch remote
+          git remote add upstream https://github.com/pytorch/pytorch.git
+          git fetch upstream
+          
+          # Merge upstream changes into your fork's main branch cleanly
+          git checkout main
+          git merge upstream/main --ff-only || (echo "Fast-forward failed. Manual intervention needed." && exit 1)
+          
+          # Push the updated history back to your pytorch-test repo
+          git push origin main
