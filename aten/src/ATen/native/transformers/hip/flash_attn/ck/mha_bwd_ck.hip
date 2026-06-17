@@ -7,6 +7,7 @@
 #include <fmha_bwd.hpp>
 #include <mask.hpp>
 
+#include <memory>
 #include <type_traits>
 #include <utility>
 
@@ -89,6 +90,24 @@ void set_fmha_bwd_workspace_alloc([[maybe_unused]] Args &args, [[maybe_unused]] 
 {
     if constexpr(has_fmha_bwd_args_workspace_alloc<Args>::value) {
         args.workspace_alloc = std::forward<Fn>(workspace_alloc);
+    }
+}
+
+// Even in batch mode the CK backward launcher stages dq-accumulation metadata through a
+// host workspace (host_ws_size_ is padded to 4 KiB for the non-QrQtrDor pipeline), so
+// prepare_workspace_async requires a pinned-host allocator. Gate it like workspace_alloc.
+template <typename T, typename = void>
+struct has_fmha_bwd_args_pinned_host_alloc : std::false_type {};
+
+template <typename T>
+struct has_fmha_bwd_args_pinned_host_alloc<T, std::void_t<decltype(std::declval<T&>().pinned_host_alloc)>>
+    : std::true_type {};
+
+template <typename Args, typename Fn>
+void set_fmha_bwd_pinned_host_alloc([[maybe_unused]] Args &args, [[maybe_unused]] Fn &&pinned_host_alloc)
+{
+    if constexpr(has_fmha_bwd_args_pinned_host_alloc<Args>::value) {
+        args.pinned_host_alloc = std::forward<Fn>(pinned_host_alloc);
     }
 }
 
@@ -520,7 +539,18 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
                             : at::empty({static_cast<int64_t>(bytes)}, opts.dtype(at::kByte));
             return workspace.data_ptr();
         };
+        // Required even in batch mode: the launcher stages dq-accumulation metadata via a
+        // host workspace and H2D-copies it, so prepare_workspace_async needs a pinned
+        // buffer. The returned shared_ptr owns the lifetime (aiter extends it across the
+        // stream). No-op against older AITER (field absent).
+        auto pinned_host_alloc = [](size_t bytes) -> std::shared_ptr<void> {
+            auto t = std::make_shared<at::Tensor>(at::empty(
+                {static_cast<int64_t>(bytes)},
+                at::TensorOptions().dtype(at::kByte).pinned_memory(true)));
+            return std::shared_ptr<void>(t, t->data_ptr());
+        };
         set_fmha_bwd_workspace_alloc(args, workspace_alloc);
+        set_fmha_bwd_pinned_host_alloc(args, pinned_host_alloc);
 
         float t = aiter::mha_bwd(args, stream_config);
 
