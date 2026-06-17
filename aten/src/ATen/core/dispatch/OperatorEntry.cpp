@@ -389,9 +389,16 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     return {*direct_registration, "kernel"};
   }
 
+  // When a PrivateUse1 backend opts out of CEA decompositions (e.g. a proxy
+  // backend that forwards ops verbatim to a remote device), skip alias lookup
+  // for CEANF and CEA and fall through to the backend fallback instead.
+  // Direct kernel registrations (step 1) still take priority.
+  const bool skip_cea = (dispatch_key == DispatchKey::PrivateUse1 &&
+                         dispatcher.privateuse1SkipCEA());
+
   // 2.1 Use CompositeExplicitAutogradNonFunctional kernel if available.
   //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
-  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeExplicitAutogradNonFunctional)) {
+  if (!skip_cea && (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeExplicitAutogradNonFunctional))) {
     if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::CompositeExplicitAutogradNonFunctional)) {
       return {*default_backend_registration, "default backend kernel"};
     }
@@ -399,7 +406,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 
   // 2.2 Use CompositeExplicitAutograd kernel if available.
   //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
-  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeExplicitAutograd)) {
+  if (!skip_cea && (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeExplicitAutograd))) {
     if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::CompositeExplicitAutograd)) {
       return {*default_backend_registration, "default backend kernel"};
     }

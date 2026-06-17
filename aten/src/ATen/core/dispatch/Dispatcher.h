@@ -10,6 +10,7 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/util/Exception.h>
 #include <c10/util/LeftRight.h>
+#include <atomic>
 #include <condition_variable>
 #include <list>
 #include <mutex>
@@ -297,6 +298,25 @@ class TORCH_API Dispatcher final {
       std::string debug);
 
   /**
+   * Opt the PrivateUse1 backend out of CompositeExplicitAutograd (CEA)
+   * decompositions. When enabled, ops with only a CEA kernel skip alias
+   * lookup and fall through directly to the registered backend fallback.
+   *
+   * This is intended for proxy backends (e.g. remote-GPU backends) that
+   * register a single catch-all fallback kernel and need to receive every
+   * ATen op verbatim, without PyTorch silently decomposing composite ops
+   * into primitives before the backend sees them.
+   *
+   * Returns a RAII handle; destroying the handle restores the previous
+   * behavior and refreshes all affected dispatch table entries.
+   */
+  RegistrationHandleRAII setPrivateUse1SkipCEA();
+
+  bool privateuse1SkipCEA() const {
+    return privateuse1_skip_cea_.load(std::memory_order_relaxed);
+  }
+
+  /**
    * Use to register whenever we had a TORCH_LIBRARY declaration in the frontend
    * API.  These invocations are only permitted once per program, so we raise
    * an error if this is called again for the same namespace.
@@ -411,6 +431,13 @@ class TORCH_API Dispatcher final {
 
   std::array<impl::AnnotatedKernel, num_runtime_entries>
       backendFallbackKernels_;
+
+  // When true, PrivateUse1 dispatch table entries skip CEA/CEANF alias
+  // lookup and fall through to the registered backend fallback instead.
+  // Protected by guard_->mutex for writes; reads are via relaxed atomic
+  // load inside computeDispatchTableEntryWithDebug (always called under
+  // the mutex during table rebuilds).
+  std::atomic<bool> privateuse1_skip_cea_{false};
 
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
 
