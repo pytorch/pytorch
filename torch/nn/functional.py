@@ -464,7 +464,7 @@ def fractional_max_pool2d_with_indices(
         output_size: the target output size of the image of the form :math:`oH \times oW`.
                      Can be a tuple `(oH, oW)` or a single number :math:`oH` for a square image :math:`oH \times oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
-                      This has to be a number or tuple in the range (0, 1)
+                      This must be a number or tuple in the range (0, 1)
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :func:`~torch.nn.functional.max_unpool2d`.
 
@@ -578,7 +578,7 @@ def fractional_max_pool3d_with_indices(
                      Can be a tuple `(oT, oH, oW)` or a single number :math:`oH` for a cubic output
                      :math:`oH \times oH \times oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
-                      This has to be a number or tuple in the range (0, 1)
+                      This must be a number or tuple in the range (0, 1)
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :func:`~torch.nn.functional.max_unpool3d`.
 
@@ -1486,7 +1486,7 @@ def dropout(
             dropout, (input,), input, p=p, training=training, inplace=inplace
         )
     if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+        raise ValueError(f"dropout probability must be between 0 and 1, but got {p}")
     return (
         _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
     )
@@ -1507,7 +1507,7 @@ def alpha_dropout(
             alpha_dropout, (input,), input, p=p, training=training, inplace=inplace
         )
     if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+        raise ValueError(f"dropout probability must be between 0 and 1, but got {p}")
     return (
         _VF.alpha_dropout_(input, p, training)
         if inplace
@@ -1540,7 +1540,7 @@ def dropout1d(
             dropout1d, (input,), input, p=p, training=training, inplace=inplace
         )
     if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+        raise ValueError(f"dropout probability must be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (2, 3):
         raise RuntimeError(
@@ -1591,7 +1591,7 @@ def dropout2d(
             dropout2d, (input,), input, p=p, training=training, inplace=inplace
         )
     if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+        raise ValueError(f"dropout probability must be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (3, 4):
         warn_msg = (
@@ -1651,7 +1651,7 @@ def dropout3d(
             dropout3d, (input,), input, p=p, training=training, inplace=inplace
         )
     if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+        raise ValueError(f"dropout probability must be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (4, 5):
         warn_msg = (
@@ -1713,7 +1713,7 @@ def feature_alpha_dropout(
             inplace=inplace,
         )
     if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+        raise ValueError(f"dropout probability must be between 0 and 1, but got {p}")
     return (
         _VF.feature_alpha_dropout_(input, p, training)
         if inplace
@@ -2745,7 +2745,7 @@ def embedding_bag(
 
     if not weight.dim() == 2:
         raise ValueError(
-            f"weight has to be a 2D Tensor, but got Tensor of dimension {weight.dim()}"
+            f"weight must be a 2D Tensor, but got Tensor of dimension {weight.dim()}"
         )
 
     if not torch.jit.is_scripting() and input.dim() == 2 and input.is_nested:
@@ -2766,7 +2766,7 @@ def embedding_bag(
             if not torch.jit.is_scripting():
                 type_str = str(type(offsets))
             raise ValueError(
-                "if input is 2D, then offsets has to be None"
+                "if input is 2D, then offsets must be None"
                 ", as input is treated is a mini-batch of"
                 " fixed length sequences. However, found "
                 f"offsets of type {type_str}"
@@ -2780,12 +2780,14 @@ def embedding_bag(
             per_sample_weights = per_sample_weights.reshape(-1)
     elif input.dim() == 1:
         if offsets is None:
-            raise ValueError("offsets has to be a 1D Tensor but got None")
+            raise ValueError("offsets must be a 1D Tensor but got None")
         if offsets.dim() != 1:
-            raise ValueError("offsets has to be a 1D Tensor")
+            raise ValueError(
+                "offsets must be a 1D Tensor, but got Tensor with {offsets.dim()} dimensions"
+                )
     else:
         raise ValueError(
-            f"input has to be 1D or 2D Tensor, but got Tensor of dimension {input.dim()}"
+            f"input must be 1D or 2D Tensor, but got Tensor of dimension {input.dim()}"
         )
     if mode == "sum":
         mode_enum = 0
@@ -2803,7 +2805,7 @@ def embedding_bag(
             raise ValueError("max mode does not support sparse weights")
 
     else:
-        raise ValueError("mode has to be one of sum, mean or max")
+        raise ValueError("mode must be one of sum, mean or max")
 
     if max_norm is not None:
         # XXX: equivalent to
@@ -3192,7 +3194,7 @@ def nll_loss(
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
             K-dimensional loss.
         weight (Tensor, optional): A manual rescaling weight given to each
-            class. If given, has to be a Tensor of size `C`
+            class. If given, must be a Tensor of size `C`
         size_average (bool, optional): Deprecated (see :attr:`reduction`).
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When :attr:`size_average` is
@@ -3209,7 +3211,7 @@ def nll_loss(
 
         >>> # input is of size N x C = 3 x 5
         >>> input = torch.randn(3, 5, requires_grad=True)
-        >>> # each element in target has to have 0 <= value < C
+        >>> # each element in target must have 0 <= value < C
         >>> target = torch.tensor([1, 0, 4])
         >>> output = F.nll_loss(F.log_softmax(input, dim=1), target)
         >>> output.backward()
@@ -3489,7 +3491,7 @@ def cross_entropy(
         target (Tensor) : Ground truth class indices or class probabilities;
             see Shape section below for supported shapes.
         weight (Tensor, optional): a manual rescaling weight given to each
-            class. If given, has to be a Tensor of size `C`
+            class. If given, must be a Tensor of size `C`
         size_average (bool, optional): Deprecated (see :attr:`reduction`).
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When :attr:`size_average` is
@@ -4863,7 +4865,7 @@ def upsample(  # noqa: F811
         input (Tensor): the input tensor
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
-        scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
+        scale_factor (float or Tuple[float]): multiplier for spatial size. Must match input size if it is a tuple.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'`` | ``'lanczos'``. Default: ``'nearest'``
@@ -5004,7 +5006,7 @@ def interpolate(  # noqa: F811
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. If `scale_factor` is a tuple,
-            its length has to match the number of spatial dimensions; `input.dim() - 2`.
+            its length must match the number of spatial dimensions; `input.dim() - 2`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'`` | ``'lanczos'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``
@@ -5364,7 +5366,7 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
         input (Tensor): input
         size (int or Tuple[int, int] or Tuple[int, int, int]): output spatia
             size.
-        scale_factor (int): multiplier for spatial size. Has to be an integer.
+        scale_factor (int): multiplier for spatial size. Must be an integer.
 
     Note:
         {backward_reproducibility_note}
