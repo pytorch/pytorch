@@ -304,7 +304,7 @@ class TensorShelf {
 //   ProcessGroupNCCL pg(store, rank, size);
 //   std::shared_ptr<WorkNCCL> work = pg.allreduce(tensors);
 //
-//   // At this point, NCCL kernel has already by queued successfully
+//   // At this point, NCCL kernel has already been queued successfully
 //   // Now, let current stream wait for the NCCL to finish, this function is
 //   // async operation as well
 //
