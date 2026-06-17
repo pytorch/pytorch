@@ -5621,13 +5621,23 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 fwd_vt_to_bwd_node[fwd_out] = bwd_input_nodes[bwd_idx]
                 bwd_idx += 1
 
+        # These placeholders are gradients flowing into backward. Preserve
+        # already-clear names, but mark ambiguous names as gradients.
+        def ensure_grad_name(name: str) -> str:
+            if name == "grad" or name.startswith("grad_"):
+                return name
+            return f"grad_{name}"
+
         rewired_bwd_graph_inputs = []
         for fwd_graph_vt in fwd_graph_body_outputs:
             # for tensor vts that were part of a user-defined object (like in
             # the above example), we just set None for now. Later, we will use
             # these None to insert a unused placeholder.
             # type: ignore[arg-type]
-            rewired_bwd_graph_inputs.append(fwd_vt_to_bwd_node.get(fwd_graph_vt))
+            bwd_node = fwd_vt_to_bwd_node.get(fwd_graph_vt)
+            rewired_bwd_graph_inputs.append(
+                (bwd_node, ensure_grad_name(bwd_node.name) if bwd_node else None)
+            )
 
         # To address Problem (2), we must incorporate any tensors that were saved
         # (or otherwise smuggled) from the forward pass into the backward graph.
@@ -5644,7 +5654,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         extra_fwd_output_nodes = []
         for fwd_proxy, bwd_inner_proxy in bwd_freevars.items():
             # For backward, its easy, just get the node from bwd_inner_proxy
-            rewired_bwd_graph_inputs.append(bwd_inner_proxy.node)
+            rewired_bwd_graph_inputs.append((bwd_inner_proxy.node, None))
 
             # For the fwd_proxy, it could be a proxy from the outer graph, or it
             # could be an intermediate.
@@ -5673,12 +5683,32 @@ class AutogradFunctionApplyVariable(VariableTracker):
         env = {}
 
         count = itertools.count()
+        used_placeholder_targets = set()
 
-        for node in rewired_bwd_graph_inputs:
+        def unique_placeholder_target(name: str) -> str:
+            # FX de-duplicates node names, but placeholder targets become the
+            # generated Python argument names and must be unique up front.
+            if name not in used_placeholder_targets:
+                used_placeholder_targets.add(name)
+                return name
+
+            for suffix in itertools.count(1):
+                candidate = f"{name}_{suffix}"
+                if candidate not in used_placeholder_targets:
+                    used_placeholder_targets.add(candidate)
+                    return candidate
+            raise AssertionError("unreachable")
+
+        for node, new_name in rewired_bwd_graph_inputs:
             if node is None:
-                new_node = new_graph.placeholder(f"unused_{next(count)}")
+                new_node = new_graph.placeholder(
+                    unique_placeholder_target(f"unused_{next(count)}")
+                )
+            elif new_name is not None:
+                new_node = new_graph.placeholder(unique_placeholder_target(new_name))
+                new_node.meta = copy.copy(node.meta)
             else:
-                new_node = new_graph.placeholder(node.name)
+                new_node = new_graph.placeholder(unique_placeholder_target(node.name))
                 new_node.meta = copy.copy(node.meta)
             env[node] = new_node
 
