@@ -6822,6 +6822,21 @@ for dtype in (torch.int32, torch.int64):
             atol=1e-4,
         )
 
+    def test_celu_zero_alpha_raises(self):
+        # https://github.com/pytorch/pytorch/issues/183762
+        # torch.compile must raise for celu_ with alpha=0, matching eager behavior
+        # instead of silently producing NaN via division by zero.
+        def fn(x):
+            return torch.celu_(x.clone(), alpha=0.0)
+
+        x = torch.tensor([[-2.0, -0.5, 0.0], [1.0, 3.0, -4.0]], device=self.device)
+        self.assertRaisesRegex(RuntimeError, "alpha cannot be 0", lambda: fn(x))
+        self.assertRaisesRegex(
+            RuntimeError,
+            "alpha cannot be 0",
+            lambda: torch.compile(fn, backend="inductor")(x),
+        )
+
     def test_tan(self):
         def fn(x):
             return aten.tan(x) + 2, aten.tan(x + 1)
