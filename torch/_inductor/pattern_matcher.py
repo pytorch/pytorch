@@ -38,6 +38,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import heapq
 import importlib
 import inspect
 import itertools
@@ -1215,6 +1216,13 @@ class ReplacementPatternEntry(PatternEntry):
 
         added_replacement_nodes: list[torch.fx.Node] = []
 
+        insert_info = ReplacementPatternEntry._replacement_insert_node(
+            match, graph, args
+        )
+        if insert_info is None:
+            return []
+        insert_before, needs_reorder = insert_info
+
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]
             call_module = None  # type: ignore[assignment]
@@ -1282,19 +1290,6 @@ class ReplacementPatternEntry(PatternEntry):
 
         output_nodes = match.output_nodes()
 
-        if len(output_nodes) == 1:
-            last_node = output_nodes[0]
-        else:
-            if not output_nodes[0]:
-                raise AssertionError("output_nodes[0] is falsy")
-            nodes = list(output_nodes[0].graph.nodes)
-            indices = [
-                (nodes.index(n), n)
-                for n in output_nodes
-                if isinstance(n, torch.fx.Node)
-            ]
-            last_node = min(indices, key=operator.itemgetter(0))[1]
-
         def percolate_tags(
             node: torch.fx.Node,
             tag_name: str,
@@ -1315,7 +1310,7 @@ class ReplacementPatternEntry(PatternEntry):
                     arg.meta[tag_name] = tag_value
                     queue.extend(arg.all_input_nodes)
 
-        with graph.inserting_before(last_node):
+        with graph.inserting_before(insert_before):
             if not isinstance(replacement_graph, torch.fx.GraphModule):
                 raise AssertionError(
                     f"expected GraphModule, got {type(replacement_graph)}"
@@ -1441,7 +1436,188 @@ class ReplacementPatternEntry(PatternEntry):
             ):
                 graph.erase_node(node)
 
-        return [node for node in added_replacement_nodes if not node._erased]
+        live_replacement_nodes = [
+            node for node in added_replacement_nodes if not node._erased
+        ]
+        if needs_reorder:
+            ReplacementPatternEntry._move_affected_nodes_after_later_inputs(
+                graph, live_replacement_nodes
+            )
+
+        return live_replacement_nodes
+
+    @staticmethod
+    def _move_affected_nodes_after_later_inputs(
+        graph: torch.fx.Graph,
+        replacement_nodes: Sequence[torch.fx.Node],
+    ) -> None:
+        affected_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+        pending = list(replacement_nodes)
+        while pending:
+            node = pending.pop()
+            if node._erased or node.op == "output" or node in affected_nodes:
+                continue
+            affected_nodes.add(node)
+            pending.extend(
+                user for user in node.users if not user._erased and user.op != "output"
+            )
+
+        if not affected_nodes:
+            return
+
+        nodes = list(graph.nodes)
+        node_indices = {node: i for i, node in enumerate(nodes)}
+        affected_nodes = OrderedSet(
+            node for node in affected_nodes if node in node_indices
+        )
+        affected_node_set = OrderedSet(affected_nodes)
+        emitted: OrderedSet[torch.fx.Node] = OrderedSet()
+        new_order: list[torch.fx.Node] = []
+
+        affected_deps: dict[torch.fx.Node, int] = {}
+        affected_users: dict[torch.fx.Node, list[torch.fx.Node]] = defaultdict(list)
+        anchor_indices: dict[torch.fx.Node, int] = {}
+        previous_anchor_index = -1
+        previous_anchor_indices: dict[torch.fx.Node, int] = {}
+        for node in nodes:
+            if node in affected_node_set:
+                previous_anchor_indices[node] = previous_anchor_index
+            else:
+                previous_anchor_index = node_indices[node]
+
+        for node in affected_nodes:
+            deps: OrderedSet[torch.fx.Node] = OrderedSet()
+            anchor_index = previous_anchor_indices[node]
+            for input_node in node.all_input_nodes:
+                if input_node not in node_indices:
+                    continue
+                if input_node in affected_node_set:
+                    if input_node not in deps:
+                        deps.add(input_node)
+                        affected_users[input_node].append(node)
+                else:
+                    anchor_index = max(anchor_index, node_indices[input_node])
+            affected_deps[node] = len(deps)
+            anchor_indices[node] = anchor_index
+
+        ready: list[tuple[int, torch.fx.Node]] = []
+        active: OrderedSet[torch.fx.Node] = OrderedSet()
+        by_anchor = sorted(
+            affected_nodes,
+            key=lambda node: (anchor_indices[node], node_indices[node]),
+        )
+        next_by_anchor = 0
+
+        def activate_nodes_through(anchor_index: int) -> None:
+            nonlocal next_by_anchor
+            while (
+                next_by_anchor < len(by_anchor)
+                and anchor_indices[by_anchor[next_by_anchor]] <= anchor_index
+            ):
+                node = by_anchor[next_by_anchor]
+                next_by_anchor += 1
+                active.add(node)
+                if affected_deps[node] == 0:
+                    heapq.heappush(ready, (node_indices[node], node))
+
+        def emit_ready() -> None:
+            while ready:
+                _, node = heapq.heappop(ready)
+                if node in emitted:
+                    continue
+                emitted.add(node)
+                new_order.append(node)
+                for user in affected_users[node]:
+                    affected_deps[user] -= 1
+                    if affected_deps[user] == 0 and user in active:
+                        heapq.heappush(ready, (node_indices[user], user))
+
+        activate_nodes_through(-1)
+        emit_ready()
+
+        for node in nodes:
+            if node in affected_node_set:
+                continue
+            emit_ready()
+            new_order.append(node)
+            activate_nodes_through(node_indices[node])
+            emit_ready()
+
+        activate_nodes_through(len(nodes))
+        emit_ready()
+        if len(emitted) != len(affected_nodes):
+            raise AssertionError("replacement graph nodes could not be reordered")
+
+        cursor: torch.fx.Node | None = None
+        for node in new_order:
+            if node in affected_node_set and cursor is not None:
+                cursor.append(node)
+            cursor = node
+
+        node_indices = {node: i for i, node in enumerate(graph.nodes)}
+        if any(
+            node_indices[input_node] > node_indices[node]
+            for node in affected_nodes
+            if not node._erased
+            for input_node in node.all_input_nodes
+            if input_node in node_indices
+        ):
+            raise AssertionError("replacement graph nodes could not be reordered")
+
+    @staticmethod
+    def _replacement_insert_node(
+        match: Match,
+        graph: torch.fx.Graph,
+        args: Sequence[Any],
+    ) -> tuple[torch.fx.Node, bool] | None:
+        output_nodes = [n for n in match.output_nodes() if isinstance(n, torch.fx.Node)]
+        if not output_nodes:
+            return None
+
+        nodes = list(graph.nodes)
+        node_indices = {node: i for i, node in enumerate(nodes)}
+
+        input_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+
+        def collect_input_node(node: torch.fx.Node) -> torch.fx.Node:
+            if node.graph is graph:
+                input_nodes.add(node)
+            return node
+
+        torch.fx.map_arg(args, collect_input_node)
+
+        output_node_set = OrderedSet(output_nodes)
+        if output_node_set & input_nodes:
+            return None
+
+        min_output_index = min(node_indices[node] for node in output_nodes)
+        needs_reorder = any(
+            node_indices[input_node] > min_output_index
+            for input_node in input_nodes
+            if input_node in node_indices
+        )
+
+        # If a replacement input is produced from one of the outputs being
+        # replaced, then rewiring that output to the replacement would create a
+        # cycle. Otherwise we can insert at the first matched output and locally
+        # move replacement nodes after any later independent inputs they use.
+        for input_node in input_nodes:
+            seen: OrderedSet[torch.fx.Node] = OrderedSet()
+            pending = [input_node]
+            while pending:
+                node = pending.pop()
+                if node in output_node_set:
+                    return None
+                if node in seen:
+                    continue
+                seen.add(node)
+                pending.extend(
+                    input_node
+                    for input_node in node.all_input_nodes
+                    if input_node.graph is graph
+                )
+
+        return nodes[min_output_index], needs_reorder
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node) -> None:
         if match.replacement_graph is None:
@@ -1667,6 +1843,23 @@ def register_replacement(
         initial_trace_args,
     )
 
+    def normalize_args(**kwargs: Any) -> list[Any]:
+        # Flat kwargs come from the initial match; structured kwargs are restored
+        # after check_fn accepts the match.
+        if not all(name in kwargs for name in argnames_static):
+            kwargs = _unflatten_match_kwargs(kwargs, initial_arg_info)
+        structured_args = [kwargs.pop(name) for name in argnames_static]
+        args = []
+        for arg in structured_args:
+            args.extend(pytree.tree_leaves(arg))
+        for i in range(1, len(kwargs) + 1):
+            if f"tangents_{i}" not in kwargs:
+                break
+            args.append(kwargs.pop(f"tangents_{i}"))
+        if kwargs:
+            raise AssertionError(f"leftover kwargs: {kwargs!r}")
+        return args
+
     def check_fn(match: Match) -> bool:
         """
         Often shapes get burned into the pattern, so our initial match ran with
@@ -1809,6 +2002,14 @@ def register_replacement(
                 )
 
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
+                replacement_args = normalize_args(**match.kwargs)
+                if (
+                    ReplacementPatternEntry._replacement_insert_node(
+                        match, match.graph, replacement_args
+                    )
+                    is None
+                ):
+                    return False
                 # trace the pattern using the shapes from the user program
                 match.replacement_graph = trace_fn(
                     replace_fn, args, get_decomp_fn=get_decomp_fn
@@ -1823,23 +2024,6 @@ def register_replacement(
                         )
                 return True
             return False
-
-    def normalize_args(**kwargs: Any) -> list[Any]:
-        # Flat kwargs come from the initial match; structured kwargs are restored
-        # after check_fn accepts the match.
-        if not all(name in kwargs for name in argnames_static):
-            kwargs = _unflatten_match_kwargs(kwargs, initial_arg_info)
-        structured_args = [kwargs.pop(name) for name in argnames_static]
-        args = []
-        for arg in structured_args:
-            args.extend(pytree.tree_leaves(arg))
-        for i in range(1, len(kwargs) + 1):
-            if f"tangents_{i}" not in kwargs:
-                break
-            args.append(kwargs.pop(f"tangents_{i}"))
-        if kwargs:
-            raise AssertionError(f"leftover kwargs: {kwargs!r}")
-        return args
 
     if trace_fn is joint_fwd_bwd:
         # If inference mode is enabled during compilation, assume that we don't
