@@ -64,6 +64,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   DeviceIndex getCurrentDevice() const override;
 
 #ifdef USE_ROCM
+  bool isChannelsLastSupportedForMIOpenConv() const override;
   bool isGPUArch(const std::vector<std::string>& archs, DeviceIndex device_index = -1) const override;
   const std::vector<std::string>& getHipblasltPreferredArchs() const override;
   const std::vector<std::string>& getHipblasltSupportedArchs() const override;

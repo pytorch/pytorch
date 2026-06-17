@@ -383,8 +383,13 @@ inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& inpu
       input.scalar_type() != at::kDouble && weight.scalar_type() != at::kDouble;
   // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen.
   // See https://github.com/pytorch/pytorch/issues/64427.
-  // Non-static read so tests can toggle the env var at runtime.
-  enabled &= c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false);
+  // NHWC is the default on supported ROCm archs (see
+  // CUDAHooks::isChannelsLastSupportedForMIOpenConv); the env var remains an
+  // override for other archs.
+  bool suggest_nhwc =
+      c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false) ||
+      at::detail::getCUDAHooks().isChannelsLastSupportedForMIOpenConv();
+  enabled &= suggest_nhwc;
   return _conv_suggest_memory_format_impl(input, weight, enabled);
 }
 

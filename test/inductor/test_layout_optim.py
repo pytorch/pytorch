@@ -2,14 +2,18 @@
 import copy
 import os
 import random
+import unittest
+from unittest import mock
 
 import torch
 from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import tf32_off
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import skipIfXpu, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -339,6 +343,67 @@ class TestLayoutOptim(TestCase):
 
         ref = model(x, targets)
         self.assertTrue(torch.allclose(ref, loss))
+
+    @unittest.skipUnless(
+        TEST_WITH_ROCM, "ROCm-only MIOpen grouped-conv layout-opt gate"
+    )
+    def test_rocm_grouped_conv_skips_layout_opt(self):
+        """
+        ROCm-only gate in GraphLowering.decide_layout_opt: grouped convs whose
+        weight has channels-per-group < MIOPEN_XDL_MIN_CHANNELS_PER_GROUP (8)
+        fall back to a slow MIOpen naive kernel that channels_last cannot
+        accelerate, so layout optimization must be skipped for them. Plain
+        convs (groups == 1, e.g. the 3-channel RGB stem) keep using the fast
+        NHWC XDL kernel and must NOT be skipped by this gate.
+        """
+
+        def make_conv_graph(weight_shape, groups, *, transposed=False):
+            # Build an FX graph with a real aten.convolution.default node whose
+            # weight carries meta["val"] -- exactly what the gate inspects.
+            # Passing the weight as an explicit arg lets make_fx fake-trace it.
+            cpg = weight_shape[1]
+            cin = weight_shape[0] if transposed else cpg * groups
+
+            def fn(x, w):
+                return torch.ops.aten.convolution.default(
+                    x, w, None, [1, 1], [0, 0], [1, 1], transposed, [0, 0], groups
+                )
+
+            x = torch.randn(1, cin, 16, 16, device=GPU_TYPE)
+            w = torch.randn(*weight_shape, device=GPU_TYPE)
+            gm = make_fx(fn, tracing_mode="fake")(x, w)
+            # Sanity: a single conv node, far below the 300*nconv node-count
+            # heuristic, so the only thing that can flip the decision here is
+            # the ROCm gate under test.
+            convs = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.aten.convolution.default
+            ]
+            self.assertEqual(len(convs), 1)
+            return gm
+
+        # Depthwise conv: groups=32, channels-per-group=1 (< 8). The gate flips
+        # the decision: with hip it is skipped (False); without hip it would be
+        # eligible (True). Asserting both isolates the gate as the sole cause.
+        depthwise = make_conv_graph((32, 1, 3, 3), groups=32)
+        self.assertFalse(
+            GraphLowering.decide_layout_opt(depthwise, is_inference=True),
+            "depthwise grouped conv (cpg=1) should skip layout opt on ROCm",
+        )
+        with mock.patch.object(torch.version, "hip", None):
+            self.assertTrue(
+                GraphLowering.decide_layout_opt(depthwise, is_inference=True),
+                "depthwise conv is only skipped because of the ROCm gate",
+            )
+
+        # Plain conv with a 3-channel RGB stem: groups=1, so cpg is irrelevant.
+        # The gate must NOT trip (false-positive guard) and layout opt stays on.
+        plain_stem = make_conv_graph((64, 3, 3, 3), groups=1)
+        self.assertTrue(
+            GraphLowering.decide_layout_opt(plain_stem, is_inference=True),
+            "plain 3-channel conv must not be skipped by the ROCm grouped-conv gate",
+        )
 
 
 if __name__ == "__main__":

@@ -223,8 +223,15 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return 0;
   }
 
+  // Whether channels-last (NHWC) should be the default suggested memory format
+  // for MIOpen convolutions on the current device. Gpu-agnostic default is
+  // false; the CUDA/HIP hooks override this on ROCm (CDNA archs, ROCm >= 6.3).
+  virtual bool isChannelsLastSupportedForMIOpenConv() const {
+    return false;
+  }
+
 #ifdef USE_ROCM
-  virtual bool isGPUArch(const std::vector<std::string>& /*archs*/, DeviceIndex = -1 /*device_index*/) const {
+  virtual bool isGPUArch(const std::vector<std::string>& /*archs*/, DeviceIndex /*device_index*/ = -1) const {
     TORCH_CHECK(false, "Cannot check GPU arch without ATen_cuda library. ", CUDA_HELP);
   }
 

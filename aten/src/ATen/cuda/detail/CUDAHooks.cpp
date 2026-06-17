@@ -547,6 +547,30 @@ bool CUDAHooks::isGPUArch(const std::vector<std::string>& archs, DeviceIndex dev
   return false;
 }
 
+bool CUDAHooks::isChannelsLastSupportedForMIOpenConv() const {
+#if ROCM_VERSION < 60300
+  return false;
+#else
+  // Cache the device-property scan: this is on the per-conv hot path and the
+  // GPU arch is fixed for the process lifetime. Assumes a homogeneous-GPU box
+  // (all visible devices share an arch), which holds for current ROCm setups.
+  static const bool supported = [this]() {
+    // Do not enable NHWC by default on RDNA cards currently to avoid any
+    // unintended regressions while investigations are ongoing.
+    static const std::vector<std::string> unsupported_arch = {
+        "gfx1100", "gfx1101", "gfx1200", "gfx1201"};
+    const int num_gpus = getNumGPUs();
+    for (int index = 0; index < num_gpus; ++index) {
+      if (isGPUArch(unsupported_arch, index)) {
+        return false;
+      }
+    }
+    return true;
+  }();
+  return supported;
+#endif
+}
+
 const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
   static const std::vector<std::string> archs = {
     "gfx90a", "gfx942",
