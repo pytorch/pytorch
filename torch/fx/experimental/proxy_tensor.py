@@ -3100,7 +3100,10 @@ def get_proxy_mode() -> ProxyTorchDispatchMode | None:
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     if not (pre_dispatch_mode is None or mode is None):
         raise AssertionError(f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}")
-    return typing.cast("ProxyTorchDispatchMode | None", pre_dispatch_mode or mode)
+    proxy_mode = pre_dispatch_mode or mode
+    if proxy_mode is not None and not isinstance(proxy_mode, ProxyTorchDispatchMode):
+        raise AssertionError(f"Expected ProxyTorchDispatchMode, got {type(proxy_mode)}")
+    return proxy_mode
 
 
 def handle_sym_dispatch(
@@ -3186,11 +3189,10 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     #
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
-    fake_mode = typing.cast(
-        "FakeTensorMode | None",
-        torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
-    )
-    if fake_mode and fake_mode.shape_env:
+    fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+    if fake_mode is not None and not isinstance(fake_mode, FakeTensorMode):
+        raise AssertionError(f"Expected FakeTensorMode, got {type(fake_mode)}")
+    if fake_mode is not None and fake_mode.shape_env is not None:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
             # `symbol_to_path` is keyed by the fresh unbacked symbol; each path
             # is relative to the *whole* output pytree (`out`). Route each

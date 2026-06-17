@@ -490,7 +490,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn(".requires_grad", source)
-        self.assertIn(".copy_(", source)
+        self.assertIn("copy_mutated_input(orig_inputs[0], updated_inputs[0])", source)
 
 
 if __name__ == "__main__":

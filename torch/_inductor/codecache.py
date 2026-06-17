@@ -50,6 +50,7 @@ import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import SkipFrame
+from torch._dynamo.source import NumpyTensorSource
 from torch._dynamo.utils import (
     CompileEventLogger,
     counters,
@@ -631,6 +632,97 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
 
     return meta
+
+
+_STORAGE_METADATA_TARGETS = OrderedSet(
+    [
+        torch.as_strided,
+        torch.as_strided_scatter,
+        torch.diagonal_scatter,
+        torch.select_scatter,
+        torch.slice_scatter,
+        torch.ops.aten.as_strided.default,
+        torch.ops.aten.as_strided_scatter.default,
+        torch.ops.aten.diagonal_scatter.default,
+        torch.ops.aten.select_scatter.default,
+        torch.ops.aten.slice_scatter.default,
+    ]
+)
+
+
+def _needs_storage_metadata_for_cache_key(gm: torch.fx.GraphModule | None) -> bool:
+    if not isinstance(gm, torch.fx.GraphModule):
+        return False
+
+    method_targets = (
+        "as_strided",
+        "as_strided_scatter",
+        "diagonal_scatter",
+        "select_scatter",
+        "slice_scatter",
+    )
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        for node in module.graph.nodes:
+            if node.op == "call_method" and node.target in method_targets:
+                return True
+            if node.op == "call_function" and node.target in _STORAGE_METADATA_TARGETS:
+                return True
+    return False
+
+
+def _storage_metadata_for_cache_key(t: Tensor) -> tuple[object, object] | None:
+    def with_hint(value: Any) -> object:
+        if has_guarding_hint(value):
+            return guarding_hint_or_throw(value)
+        return value
+
+    tensor_metadata = extract_tensor_metadata(t)
+    storage_offset = with_hint(tensor_metadata.storage_offset)
+    storage_bytes = with_hint(tensor_metadata.storage_bytes)
+    logical_bytes = with_hint(t.numel() * t.element_size())
+    if storage_offset == 0 and storage_bytes == logical_bytes:
+        return None
+    return storage_offset, storage_bytes
+
+
+def _source_from_aot_input_desc(desc: Any):
+    from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+
+    if isinstance(desc, PlainAOTInput):
+        tracing_context = torch._guards.TracingContext.try_get()
+        sources = (
+            None
+            if tracing_context is None
+            else tracing_context.aotautograd_arg_pos_to_source
+        )
+        if sources is not None and desc.idx < len(sources):
+            return sources[desc.idx]
+    return None
+
+
+def _is_valid_storage_metadata_guard_source(source: Any) -> bool:
+    # NumpyTensorSource reconstructs through ___from_numpy(...), which can warn
+    # or produce ephemeral tensors while evaluating guards. Regular tensor
+    # guards already cover numpy shape/stride metadata.
+    return (
+        source is not None
+        and not isinstance(source, NumpyTensorSource)
+        and "___from_numpy(" not in source.name
+    )
+
+
+def _extract_storage_metadata_for_cache_key(
+    example_inputs: Sequence[InputType],
+) -> tuple[tuple[object, object] | None, ...]:
+    metadata: list[tuple[object, object] | None] = []
+    for inp in example_inputs:
+        if isinstance(inp, torch.Tensor):
+            metadata.append(_storage_metadata_for_cache_key(inp))
+        else:
+            metadata.append(None)
+    return tuple(metadata)
 
 
 # Types that pickle handles natively via GLOBAL/INST opcodes even though their
@@ -1424,6 +1516,10 @@ class FxGraphHashDetails:
             else:
                 processed_inputs.append(inp)
         self.example_inputs = processed_inputs
+        if _needs_storage_metadata_for_cache_key(gm):
+            self.input_storage_metadata = _extract_storage_metadata_for_cache_key(
+                example_inputs
+            )
         self.cache_key_tag = cconfig.cache_key_tag
 
         # Order kwargs so hashing is stable to changes in kwarg order. Although

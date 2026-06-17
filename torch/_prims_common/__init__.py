@@ -86,13 +86,16 @@ torch_function_passthrough = {
     torch.Tensor.size,
     torch.Tensor.storage_offset,
     torch.Tensor.stride,
+    torch.Tensor.untyped_storage,
     torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.element_size,
     torch.Tensor.is_sparse.__get__,  # type: ignore[attr-defined]
     torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
     torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
     torch.Tensor.is_contiguous,
+    torch._debug_has_internal_overlap,
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
@@ -2006,6 +2009,32 @@ def compute_required_storage_length(
     return 1 + storage_offset + max_offset
 
 
+def compute_storage_length(t: TensorLikeType):
+    storage_nbytes = t.untyped_storage().nbytes()
+    try:
+        return storage_nbytes // t.element_size()
+    except (RuntimeError, TypeError) as e:
+        if "is not tracked with proxy" not in str(
+            e
+        ) and "expected 2 arguments" not in str(e):
+            raise
+
+    # During make_fx tracing, storage nbytes can be a SymInt that was not created
+    # by the proxy tracer. The old logical formula is traceable and is equivalent
+    # for dense inputs, which is the case hit by auto-functionalization tracing.
+    return compute_required_storage_length(
+        t.size(), t.stride(), cast(int, t.storage_offset())
+    )
+
+
+def clone_preserve_strides_storage_length(t: TensorLikeType):
+    # Match native clone_preserve_strides: internally overlapping tensors use a
+    # logical clone instead of cloning and reinterpreting the physical storage.
+    if torch._debug_has_internal_overlap(t) == 1:
+        return t.numel()
+    return compute_storage_length(t)
+
+
 def check_in_bounds_for_storage(
     a: torch.TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
 ):
@@ -2175,9 +2204,9 @@ def layout_or_default(layout: torch.layout | None) -> torch.layout:
 
 
 def clone_preserve_strides(x):
-    needed_size = compute_required_storage_length(
-        x.size(), x.stride(), x.storage_offset()
-    )
+    if torch._debug_has_internal_overlap(x) == 1:
+        return x.clone()
+    needed_size = compute_storage_length(x)
     # Our eager implementations for *_scatter ops are all primitives w.r.t autograd,
     # so these as_strided() calls are not seen by autograd.
     # We need to mimic this behavior in our ref/prim implementations.

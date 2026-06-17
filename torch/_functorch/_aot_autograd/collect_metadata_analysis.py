@@ -21,6 +21,7 @@ from torch import Tensor
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_opaque_type
 from torch._logging import getArtifactLogger
+from torch._prims_common import compute_storage_length
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
@@ -46,6 +47,7 @@ from .functional_utils import (
     has_data_mutation,
     has_metadata_mutation,
     MetadataKey,
+    mutated_input_storage_copy_length,
     to_fun,
     ViewMetaSequence,
     was_inductor_storage_resized,
@@ -215,6 +217,15 @@ def run_functionalized_fw_and_collect_metadata(
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         with disable_above, mode, suppress_pending, disable_autocast_cache():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
+            def original_storage_len(arg: Any) -> Any | None:
+                if not isinstance(arg, Tensor):
+                    return None
+                try:
+                    return compute_storage_length(arg)
+                except TypeError:
+                    return None
+
+            original_storage_lens = [original_storage_len(arg) for arg in flat_args]
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
             flat_f_outs = f(*flat_f_args)
@@ -270,6 +281,18 @@ def run_functionalized_fw_and_collect_metadata(
             if mutates_storage_metadata:
                 mutates_data = False
 
+            mutation_requires_storage_copy = False
+            if mutates_data and isinstance(arg, Tensor):
+                arg_after = from_fun(f_arg)
+                mutation_requires_storage_copy = (
+                    mutated_input_storage_copy_length(
+                        arg,
+                        arg_after,
+                        original_storage_lens[len(input_info)],
+                    )
+                    is not None
+                )
+
             requires_grad = isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
 
             input_info.append(
@@ -281,6 +304,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_storage_metadata=mutates_storage_metadata,
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
+                    mutation_requires_storage_copy=mutation_requires_storage_copy,
                     requires_grad=requires_grad,
                     keep_input_mutations=keep_input_mutations,
                 )

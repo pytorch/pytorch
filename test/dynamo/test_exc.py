@@ -413,6 +413,7 @@ Assertions:
   ==> (== L['shape'][2] s3)
   ==> (== L['x'].size()[0] s77)
   ==> (> s77 1)
+  ==> (True)
 
 Target Expressions:
   ==> (!= (+ s3 s52 s86) s77)

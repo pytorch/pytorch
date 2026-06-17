@@ -269,6 +269,10 @@ def handle_effects(
             torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY),
         )
         if proxy_tensor_mode is not None:
+            if not isinstance(proxy_tensor_mode, ProxyTorchDispatchMode):
+                raise AssertionError(
+                    f"Expected ProxyTorchDispatchMode, got {type(proxy_tensor_mode)}"
+                )
             # If we discovered a new token during tracing, we are in backward.
             # Then we patch the graph, adding additional tangents_token as input to the joint graph.
             tracer = proxy_tensor_mode.tracer

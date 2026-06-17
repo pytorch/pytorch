@@ -17,6 +17,7 @@ import random
 import shutil
 import time
 import traceback
+from collections.abc import Sequence
 from copy import copy
 from typing import Any, TYPE_CHECKING
 from typing_extensions import override
@@ -33,8 +34,12 @@ from torch._dynamo.utils import (
     warn_once,
 )
 from torch._functorch import config
+from torch._guards import StorageMetadata, TracingContext
 from torch._inductor.codecache import (
     _ident,
+    _is_valid_storage_metadata_guard_source,
+    _needs_storage_metadata_for_cache_key,
+    _storage_metadata_for_cache_key,
     add_ephemeral_timeout_increase_for_distributed,
     AOTAUTOGRAD_CACHE_PREFIX,
     BypassFxGraphCache,
@@ -906,6 +911,45 @@ def autograd_cache_key(
                 raise
 
 
+def _add_storage_metadata_guards_for_cache_sensitive_ops(
+    mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
+    args: Sequence[Any],
+    aot_config: AOTConfig,
+) -> None:
+    def guarding_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError, RuntimeError):
+            return int(guarding_hint_or_throw(value))
+
+    gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
+    tracing_context = TracingContext.try_get()
+    if (
+        tracing_context is None
+        or not isinstance(gm, torch.fx.GraphModule)
+        or not _needs_storage_metadata_for_cache_key(gm)
+        or aot_config.aot_autograd_arg_pos_to_source is None
+    ):
+        return
+
+    for arg, source in zip(args, aot_config.aot_autograd_arg_pos_to_source):
+        if not isinstance(arg, torch.Tensor):
+            continue
+        if not _is_valid_storage_metadata_guard_source(source):
+            continue
+        storage_metadata = _storage_metadata_for_cache_key(arg)
+        if storage_metadata is None:
+            continue
+        storage_offset, storage_size = storage_metadata
+        tracing_context.guards_context.aotautograd_guards.append(
+            StorageMetadata(
+                source,
+                guarding_int(storage_size),
+                guarding_int(storage_offset),
+            )
+        )
+
+
 @contextlib.contextmanager
 def sanitize_gm_for_cache(
     gm: torch.fx.GraphModule,
@@ -1017,6 +1061,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         cache_event_time = time.time_ns()
         cache_state = None
         try:
+            _add_storage_metadata_guards_for_cache_sensitive_ops(mod, args, aot_config)
             cache_key, debug_lines = autograd_cache_key(
                 mod, args, aot_config, compiler_config_extra, act_input_paths
             )

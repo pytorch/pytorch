@@ -5014,6 +5014,229 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out)
         self.assertEqual(a_ref, a)
 
+    # https://github.com/pytorch/pytorch/issues/140171
+    def test_as_strided_on_view_input_storage_bounds(self):
+        def foo(x):
+            v = x.as_strided((10,), (1,), storage_offset=5)
+            v.add_(1)
+            return v
+
+        for start in (0, 10):
+            with self.subTest(start=start):
+                base_ref = torch.arange(20)
+                expected = foo(base_ref[start : start + 10])
+
+                base = torch.arange(20)
+                actual = torch.compile(foo, backend="aot_eager")(
+                    base[start : start + 10]
+                )
+
+                self.assertEqual(expected, actual)
+                self.assertEqual(base_ref, base)
+
+    # https://github.com/pytorch/pytorch/issues/140171
+    def test_as_strided_on_view_input_storage_bounds_inductor(self):
+        def foo(x):
+            v = x.as_strided((10,), (1,), storage_offset=5)
+            v.add_(1)
+            return v
+
+        base_ref = torch.arange(20)
+        expected = foo(base_ref[:10])
+
+        base = torch.arange(20)
+        with fresh_cache():
+            actual = torch.compile(foo)(base[:10])
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(base_ref, base)
+
+    # https://github.com/pytorch/pytorch/issues/140171
+    def test_as_strided_on_view_input_storage_size_recompile_inductor(self):
+        def foo(x):
+            v = x.as_strided((10,), (1,), storage_offset=5)
+            v.add_(1)
+            return v
+
+        with fresh_cache():
+            opt_foo = torch.compile(foo, backend="inductor")
+            cases = (
+                (20, slice(0, 10)),
+                (15, slice(0, 10)),
+                (20, slice(10, 20)),
+            )
+            for storage_size, view in cases:
+                with self.subTest(storage_size=storage_size, view=view):
+                    base_ref = torch.arange(storage_size)
+                    expected = foo(base_ref[view])
+
+                    base = torch.arange(storage_size)
+                    actual = opt_foo(base[view])
+
+                    self.assertEqual(expected, actual)
+                    self.assertEqual(base_ref, base)
+
+    # https://github.com/pytorch/pytorch/issues/140171
+    @parametrize("op", ["method", "function"])
+    @parametrize("enable_autograd_cache", [True, False])
+    def test_as_strided_storage_metadata_recompile_inductor(
+        self, op, enable_autograd_cache
+    ):
+        def foo(x):
+            if op == "method":
+                view = x.as_strided((10,), (1,), 5)
+            else:
+                view = torch.as_strided(x, (10,), (1,), 5)
+            return view * 2
+
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        with (
+            fresh_cache(),
+            torch._functorch.config.patch(enable_autograd_cache=enable_autograd_cache),
+        ):
+            opt_foo = torch.compile(foo, backend=cnt)
+            cases = (
+                (20, slice(0, 10)),
+                (20, slice(10, 20)),
+                (15, slice(0, 10)),
+            )
+            for storage_size, view in cases:
+                with self.subTest(storage_size=storage_size, view=view):
+                    base = torch.arange(storage_size)
+                    expected = foo(base[view])
+                    actual = opt_foo(base[view])
+                    self.assertEqual(expected, actual)
+
+        self.assertEqual(cnt.frame_count, len(cases))
+
+    # https://github.com/pytorch/pytorch/issues/140171
+    def test_as_strided_scatter_storage_size_recompile_inductor(self):
+        def foo(x, src):
+            return torch.as_strided_scatter(x, src, (10,), (1,), 5)
+
+        src = torch.arange(10)
+        with fresh_cache():
+            opt_foo = torch.compile(foo, backend="inductor")
+
+            base20 = torch.arange(20)
+            expected20 = foo(base20[:10], src)
+            actual20 = opt_foo(base20[:10], src)
+            self.assertEqual(expected20, actual20)
+            self.assertEqual(
+                expected20.untyped_storage().size(),
+                actual20.untyped_storage().size(),
+            )
+
+            base15 = torch.arange(15)
+            expected15 = foo(base15[:10], src)
+            actual15 = opt_foo(base15[:10], src)
+            self.assertEqual(expected15, actual15)
+            self.assertEqual(
+                expected15.untyped_storage().size(),
+                actual15.untyped_storage().size(),
+            )
+            with self.assertRaisesRegex(RuntimeError, "out of bounds"):
+                actual15.as_strided((20,), (1,), 0)
+
+    # https://github.com/pytorch/pytorch/issues/140171
+    def test_slice_scatter_on_view_input_storage_observation_inductor(self):
+        def foo(x, src):
+            y = torch.slice_scatter(x, src, 0, 5, 10)
+            return y.as_strided((15,), (1,), 0)
+
+        base = torch.arange(20)
+        src = torch.arange(5)
+        expected = foo(base[:10], src)
+
+        with fresh_cache():
+            actual = torch.compile(foo, backend="inductor")(base[:10], src)
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(
+            expected.untyped_storage().size(), actual.untyped_storage().size()
+        )
+
+    # https://github.com/pytorch/pytorch/issues/140171
+    @parametrize("op", ["slice", "select"])
+    @parametrize("dynamic", [False, True])
+    @parametrize("return_view", [False, True])
+    def test_view_scatter_returned_view_input_storage_observation_inductor(
+        self, op, dynamic, return_view
+    ):
+        def foo(x, src):
+            if op == "slice":
+                y = torch.slice_scatter(x, src, 0, 5, 10)
+            else:
+                y = torch.select_scatter(x, src, 0, 5)
+            return y[:5] if return_view else y
+
+        base = torch.arange(20)
+        src = torch.arange(5) if op == "slice" else torch.tensor(99)
+        expected = foo(base[:10], src)
+
+        with fresh_cache():
+            actual = torch.compile(foo, backend="inductor", dynamic=dynamic)(
+                base[:10], src
+            )
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(
+            expected.untyped_storage().size(), actual.untyped_storage().size()
+        )
+        self.assertEqual(
+            expected.as_strided((15,), (1,), 0),
+            actual.as_strided((15,), (1,), 0),
+        )
+
+    # https://github.com/pytorch/pytorch/issues/140171
+    def test_as_strided_mutation_with_aliased_inputs(self):
+        def foo(x, y):
+            x.as_strided((10,), (1,), storage_offset=5).add_(1)
+            y.add_(10)
+            return x, y
+
+        base_ref = torch.arange(20)
+        foo(base_ref[:10], base_ref[10:20])
+
+        base = torch.arange(20)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "encountered a mutation on a view chain of length 2, where view 1 was an as_strided",
+        ):
+            torch.compile(foo, backend="aot_eager")(base[:10], base[10:20])
+        self.assertEqual(torch.arange(20), base)
+
+    # https://github.com/pytorch/pytorch/issues/140171
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_as_strided_mutation_oob_errors(self, backend):
+        def foo(x):
+            x.as_strided((10,), (1,), storage_offset=5).add_(1)
+            return x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "storage.*out of bounds|storage.*size"
+        ):
+            torch.compile(foo, backend=backend)(torch.arange(10))
+
+    # https://github.com/pytorch/pytorch/issues/140171
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_as_strided_scatter_overlapping_input(self, backend):
+        def foo(base, src):
+            return torch.as_strided_scatter(base.expand(10), src, (5,), (1,), 0)
+
+        base = torch.tensor([0.0])
+        src = torch.arange(5.0)
+        expected = foo(base, src)
+
+        ctx = fresh_cache() if backend == "inductor" else contextlib.nullcontext()
+        with ctx:
+            actual = torch.compile(foo, backend=backend)(base, src)
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(expected.stride(), actual.stride())
+        self.assertEqual(expected.storage_offset(), actual.storage_offset())
+
     # https://github.com/pytorch/pytorch/issues/104505
     def test_as_strided_on_existing_view_banned(self):
         def foo(a):

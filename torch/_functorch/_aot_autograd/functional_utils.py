@@ -16,6 +16,7 @@ from torch import Tensor
 from torch._C import _functionalization
 from torch._logging import getArtifactLogger
 from torch._opaque_base import OpaqueBase
+from torch._prims_common import compute_storage_length
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -83,6 +84,66 @@ def from_fun(t: object) -> object:
         return t
     sync_functional_tensor(t)
     return torch._from_functional_tensor(t.elem)
+
+
+# Some view mutations can update storage locations that are not part of the
+# input tensor's logical shape, for example as_strided() on a sliced input.
+def mutated_input_storage_copy_length(
+    original_inpt: torch.Tensor,
+    updated_inpt: Any,
+    original_storage_len: Any | None = None,
+) -> int | None:
+    if not isinstance(updated_inpt, torch.Tensor):
+        return None
+    if is_traceable_wrapper_subclass(original_inpt) or is_traceable_wrapper_subclass(
+        updated_inpt
+    ):
+        return None
+    if (
+        original_inpt.layout != torch.strided
+        or updated_inpt.layout != torch.strided
+        or original_inpt.device != updated_inpt.device
+        or original_inpt.dtype != updated_inpt.dtype
+        or original_inpt.is_conj()
+        or updated_inpt.is_conj()
+        or original_inpt.is_neg()
+        or updated_inpt.is_neg()
+    ):
+        return None
+
+    updated_storage_len = compute_storage_length(updated_inpt)
+
+    # If the updated tensor uses storage past its logical shape, a normal
+    # original_inpt.copy_(updated_inpt) would miss part of the mutation.  During
+    # dynamic-shape tracing the original input's physical storage length may be
+    # unavailable to the proxy tracer and fall back to its logical size, so do
+    # not require proving the original storage length here.  Eager already had
+    # to prove the mutation's as_strided access was in bounds to create
+    # updated_inpt in the first place.
+    if updated_storage_len > updated_inpt.numel():
+        if original_storage_len is None:
+            original_storage_len = compute_storage_length(original_inpt)
+        if original_storage_len is not None and guard_or_false(
+            original_storage_len < updated_storage_len
+        ):
+            raise RuntimeError(
+                "input mutation requires storage beyond the original input "
+                f"storage size: required {updated_storage_len} elements, "
+                f"but storage has {original_storage_len} elements"
+            )
+        return updated_storage_len
+    return None
+
+
+def copy_mutated_input(original_inpt: torch.Tensor, updated_inpt: Any) -> None:
+    storage_copy_length = mutated_input_storage_copy_length(original_inpt, updated_inpt)
+    if storage_copy_length is not None:
+        original_storage = original_inpt.as_strided((storage_copy_length,), (1,), 0)
+        updated_storage = updated_inpt.as_strided((storage_copy_length,), (1,), 0)
+        original_storage.copy_(updated_storage)
+        return
+
+    original_inpt.copy_(updated_inpt)
 
 
 def is_fun(t: object) -> TypeGuard[FunctionalTensor | Tensor]:
