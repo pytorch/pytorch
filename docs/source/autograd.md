@@ -349,6 +349,23 @@ and vtune profiler based using
 ## Debugging and anomaly detection
 
 ```{eval-rst}
+.. automodule:: torch.autograd.anomaly_mode
+```
+
+```{eval-rst}
+.. currentmodule:: torch.autograd.anomaly_mode
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    detect_anomaly
+    set_detect_anomaly
+```
+
+```{eval-rst}
 .. autoclass:: detect_anomaly
 ```
 
@@ -357,14 +374,7 @@ and vtune profiler based using
 ```
 
 ```{eval-rst}
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    grad_mode.set_multithreading_enabled
-    grad_mode.enforce_grad_layout_policy
-
-
+.. currentmodule:: torch.autograd
 ```
 
 ## Autograd graph
@@ -454,10 +464,6 @@ Also see {ref}`saved-tensors-hooks-doc`.
 % This module needs to be documented. Adding here in the meantime
 
 % for tracking purposes
-
-```{eval-rst}
-.. py:module:: torch.autograd.anomaly_mode
-```
 
 ```{eval-rst}
 .. py:module:: torch.autograd.forward_ad
