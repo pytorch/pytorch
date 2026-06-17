@@ -49,10 +49,6 @@ from ...utils import load_template
 SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
 
 
-def is_tensor_ir_node(node: object) -> bool:
-    return isinstance(node, IRNode) and node.has_tensor_output()
-
-
 def _flex_kernel_options_example(kind: str) -> str:
     match kind:
         case "backward":
