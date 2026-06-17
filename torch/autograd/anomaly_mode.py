@@ -123,8 +123,8 @@ class set_detect_anomaly:
     Args:
         mode (bool): Flag whether to enable anomaly detection (``True``),
                      or disable (``False``).
-        check_nan (bool): Flag whether to raise an error when the backward
-                          generate "nan"
+        check_nan (bool, optional): Flag whether to raise an error when the backward
+                          generates "nan". Default: True.
 
     """
 
