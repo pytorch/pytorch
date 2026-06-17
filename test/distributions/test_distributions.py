@@ -1353,7 +1353,17 @@ class TestDistributions(DistributionsTestCase):
         distribution = dist_ctor(*ctor_params)
         s = distribution.sample()
         if not distribution.support.is_discrete:
-            s = s.detach().requires_grad_()
+            s = s.detach()
+            # For simplex-constrained distributions (e.g. RelaxedOneHotCategorical),
+            # samples near the boundary cause numerical Jacobian to produce nan
+            # because log_prob inverts ExpTransform via log(), and finite
+            # differencing (eps=1e-6) near zero yields log(~0) = -inf/nan.
+            # Clamp to the simplex interior (1e-4 gives ~100x margin above
+            # gradcheck eps) and renormalize.
+            if isinstance(distribution.support, constraints._Simplex):
+                s = s.clamp(min=1e-4)
+                s = s / s.sum(-1, keepdim=True)
+            s.requires_grad_()
 
         expected_shape = distribution.batch_shape + distribution.event_shape
         self.assertEqual(s.size(), expected_shape)
