@@ -711,6 +711,7 @@ std::optional<c10::ScalarType> out_dtype) {
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
   if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
     at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
+#endif //USE_ROCM_CK_GEMM
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }

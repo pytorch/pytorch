@@ -1010,6 +1010,14 @@ if(USE_ROCM)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
 
+    # composable_kernel has no gfx1250 support, so its CK GEMM/SDPA kernels fail
+    # to compile for that arch. 
+    if("gfx1250" IN_LIST PYTORCH_ROCM_ARCH)
+      message(WARNING "gfx1250 in PYTORCH_ROCM_ARCH: disabling USE_ROCM_CK_GEMM and USE_ROCM_CK_SDPA (composable_kernel lacks gfx1250 support)")
+      caffe2_update_option(USE_ROCM_CK_GEMM OFF)
+      caffe2_update_option(USE_ROCM_CK_SDPA OFF)
+    endif()
+
     if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
       message(INFO "Forcing USE_SYSTEM_NCCL to ON since it's required by using RCCL")
       caffe2_update_option(USE_SYSTEM_NCCL ON)

@@ -968,8 +968,8 @@ cmake_dependent_option(
 # gfx1250 for MSLK needs to be involved as well.
 
 IF(USE_ROCM AND ("gfx942" IN_LIST PYTORCH_ROCM_ARCH OR "gfx950" IN_LIST PYTORCH_ROCM_ARCH))
-  message(WARNING "Setting USE_FBGEMM_GENAI for gfx942/gfx950 to ON by default, doing ROCM build")
-  set(USE_FBGEMM_GENAI_DEFAULT ON)
+  message(STATUS "Setting USE_MSLK for gfx942/gfx950 to ON by default, doing ROCM build")
+  set(USE_MSLK_DEFAULT ON)
 elseif(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
   message(STATUS "Setting USE_MSLK to ON by default , doing CUDA build for SM100a")
   set(USE_MSLK_DEFAULT ON)
