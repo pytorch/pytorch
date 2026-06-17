@@ -66,6 +66,8 @@ jobs:
           export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
         fi
         export CLANG=1
+        # Cap parallelism to the pod's CPU budget; os.cpu_count() overcounts on k8s and OOMs.
+        export MAX_JOBS="$(nproc --ignore=2)"
         .github/scripts/lintrunner.sh
 
   # NOTE: mypy needs its own job because it depends on --all-files, without assessing all files it sometimes
@@ -100,6 +102,8 @@ jobs:
       script: |
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         echo "Running all other linters"
+        # Cap parallelism to the pod's CPU budget; os.cpu_count() overcounts on k8s and OOMs.
+        export MAX_JOBS="$(nproc --ignore=2)"
         if [ "$CHANGED_FILES" = '*' ]; then
           ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY --all-files" .github/scripts/lintrunner.sh
         else
