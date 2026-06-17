@@ -197,9 +197,7 @@ if __name__ == "__main__":
     from clickhouse import query_clickhouse  # type: ignore[import]
 
     results = query_clickhouse(QUERY, {})
-    measured_slow_tests = {
-        row["test_name"]: row["avg_duration_sec"] for row in results
-    }
+    measured_slow_tests = {row["test_name"]: row["avg_duration_sec"] for row in results}
     slow_tests = merge_slow_tests(read_existing_slow_tests(), measured_slow_tests)
 
     with open(SLOW_TESTS_FILE, "w") as f:
