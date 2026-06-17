@@ -248,10 +248,12 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-linter)
     PYTHON_VERSION=3.10
+    CLANG_VERSION=18
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-linter)
     PYTHON_VERSION=3.10
     CUDA_VERSION=13.0.2
+    CLANG_VERSION=18
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc15)
     ANACONDA_PYTHON_VERSION=3.10
