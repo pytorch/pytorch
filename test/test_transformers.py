@@ -2175,6 +2175,40 @@ class TestSDPAFailureModes(NNTestCase):
             # for all ones grad_output, each value position receives grad of 1 (because sum of all softmax weights per row is 1)
             self.assertTrue(torch.allclose(value.grad, torch.ones_like(value)))
 
+    @largeTensorTest("12GB", "cuda")
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
+    def test_mem_eff_attention_large_seq_len_attn_mask_index_overflow(self):
+        # When an attn_mask is given and seq_len**2 > 2**32, the kernel used to
+        # compute the per-row mask offset (query_start * bias_strideM) in
+        # 32-bit arithmetic, which wraps around and silently corrupts the
+        # output of all rows past 2**32 // seq_len.
+        device = torch.device("cuda")
+        dtype = torch.bfloat16
+
+        seq_len = 66000  # seq_len**2 > 2**32
+        head_dim = 16
+        torch.manual_seed(0)
+        make_tensor = partial(
+            torch.randn, 1, 1, seq_len, head_dim, device=device, dtype=dtype
+        )
+        query, key, value = make_tensor() * 0.1, make_tensor() * 0.1, make_tensor()
+
+        # additive causal mask: 0 on/below the diagonal, -inf above
+        attn_mask = torch.full(
+            (seq_len, seq_len), float("-inf"), device=device, dtype=dtype
+        ).triu_(1)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            ref = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, is_causal=True
+            )
+            out = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=attn_mask
+            )
+        # before the fix, all rows past 2**32 // seq_len were garbage
+        self.assertEqual(out, ref, atol=5e-3, rtol=5e-3)
+
 
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel
