@@ -305,12 +305,10 @@ def get_pw_red_splits(
     if node_numel != expected_numel:
         if none_if_not_divisible:
             return None
-        # If not allowing None return, assert as before
-        if node_numel != expected_numel:
-            raise AssertionError(
-                f"Node size {node_numel} doesn't match expected {expected_numel} "
-                f"(pointwise_numel={pointwise_numel}, red_numel={red_numel})"
-            )
+        raise AssertionError(
+            f"Node size {node_numel} doesn't match expected {expected_numel} "
+            f"(pointwise_numel={pointwise_numel}, red_numel={red_numel})"
+        )
     i = len(n._body.sizes[0]) - 1
     prod = 1
     while i >= 0:
