@@ -125,13 +125,14 @@ class TestAutograd(TestCase):
         super().tearDown()
 
     def test_ldexp_integer_exponent_grad(self):
-        # Regression for gh-#186556: grad wrt self was 0 for negative
-        # integer exponents because at::pow(2, other) ran in integer arithmetic.
+        # Regression for gh-#186556: grad wrt self was 0 for negative integer
+        # exponents because at::pow(2, other) ran in integer arithmetic.
+        # gradcheck with check_forward_ad covers both the backward (self:) and
+        # forward-mode AD (result:) formulas against numerical gradients.
         for e_val in (-2, -1, 0, 1, 3):
-            x = torch.zeros(4, dtype=torch.float32, requires_grad=True)
+            x = torch.randn(4, dtype=torch.double, requires_grad=True)
             e = torch.full((4,), e_val, dtype=torch.int32)
-            torch.ldexp(x, e).sum().backward()
-            self.assertEqual(x.grad, torch.full((4,), 2.0**e_val))
+            gradcheck(lambda s: torch.ldexp(s, e), (x,), check_forward_ad=True)
 
     def test_copy_slices_graph_task_updates(self):
         def f1(x, y):
