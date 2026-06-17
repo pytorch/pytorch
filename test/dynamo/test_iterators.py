@@ -2,7 +2,6 @@
 
 import enum
 import types
-import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -65,6 +64,55 @@ class CustomSet(set):
 class CustomSetDefaultIter(set):
     def __init__(self, iterable) -> None:
         super().__init__([10, 20, 30])
+
+
+class CustomListDefaultIter(list):
+    pass
+
+
+class WithReversed:
+    def __init__(self, data):
+        self.data = data
+
+    def __reversed__(self):
+        return iter(self.data[::-1])
+
+
+class SeqWithReversed:
+    """Has both sequence protocol AND __reversed__; __reversed__ should win."""
+
+    def __init__(self, data):
+        self.data = data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+    def __reversed__(self):
+        return iter(["custom"])
+
+
+class NotReversible:
+    pass
+
+
+class RevDict(dict):
+    def __reversed__(self):
+        return iter(["custom_key"])
+
+
+class NotReversibleNone:
+    """`__reversed__ = None` is CPython's opt-out sentinel."""
+
+    __reversed__ = None
+
+    def __len__(self):
+        return 3
+
+    def __getitem__(self, idx):
+        return idx
 
 
 class TestIterators(torch._dynamo.test_case.TestCase):
@@ -329,7 +377,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             result.append(char.upper())
         self.assertEqual("".join(result), "HELLO")
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_bytes_iteration(self):
         """Test iteration over bytes"""
@@ -346,6 +393,52 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             ord("o") * 2,
         ]
         self.assertEqual(result, expected)
+
+    def test_constant_variable_list_tp_iter(self):
+        """ConstantVariable wrapping a list value should iterate via tp_iter_impl.
+
+        ConstantVariable.create() normally redirects list to ListVariable. This
+        test bypasses __init__ to construct a ConstantVariable holding a list
+        directly, exercising the generic tp_iter_impl unpack path.
+        """
+        from torch._dynamo.variables.base import VariableTracker
+        from torch._dynamo.variables.constant import ConstantVariable
+        from torch._dynamo.variables.lists import ListIteratorVariable
+
+        cv = ConstantVariable.__new__(ConstantVariable)
+        VariableTracker.__init__(cv)
+        cv.value = [1, 2, 3]
+
+        result = cv.tp_iter_impl(None)
+        self.assertIsInstance(result, ListIteratorVariable)
+        self.assertEqual([v.as_python_constant() for v in result.items], [1, 2, 3])
+
+    def test_constant_variable_tuple_tp_iter(self):
+        """ConstantVariable wrapping a tuple value iterates via tp_iter_impl."""
+        from torch._dynamo.variables.base import VariableTracker
+        from torch._dynamo.variables.constant import ConstantVariable
+        from torch._dynamo.variables.lists import ListIteratorVariable
+
+        cv = ConstantVariable.__new__(ConstantVariable)
+        VariableTracker.__init__(cv)
+        cv.value = (10, 20, 30)
+
+        result = cv.tp_iter_impl(None)
+        self.assertIsInstance(result, ListIteratorVariable)
+        self.assertEqual([v.as_python_constant() for v in result.items], [10, 20, 30])
+
+    def test_constant_variable_non_iterable_tp_iter(self):
+        """Non-iterable ConstantVariable falls back to base unimplemented."""
+        from torch._dynamo.exc import Unsupported
+        from torch._dynamo.variables.base import VariableTracker
+        from torch._dynamo.variables.constant import ConstantVariable
+
+        cv = ConstantVariable.__new__(ConstantVariable)
+        VariableTracker.__init__(cv)
+        cv.value = 42
+
+        with self.assertRaises(Unsupported):
+            cv.tp_iter_impl(None)
 
     @make_dynamo_test
     def test_comprehensions_with_iterator(self):
@@ -399,6 +492,53 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         rev = reversed(lst).__iter__()
         result = list(rev)
         self.assertEqual(result, [5, 4, 3, 2, 1])
+
+    @make_dynamo_test
+    def test_reversed_user_defined_reversed(self):
+        """reversed() dispatches to user-defined __reversed__"""
+        self.assertEqual(list(reversed(WithReversed([1, 2, 3, 4]))), [4, 3, 2, 1])
+
+    @make_dynamo_test
+    def test_reversed_user_defined_sequence_protocol(self):
+        """reversed() on user class with __len__ + __getitem__ but no __reversed__"""
+        seq = SequenceClass([10, 20, 30, 40])
+        self.assertEqual(list(reversed(seq)), [40, 30, 20, 10])
+
+    @make_dynamo_test
+    def test_reversed_user_defined_reversed_overrides_sequence(self):
+        """User-defined __reversed__ wins over the sequence protocol fallback"""
+        self.assertEqual(list(reversed(SeqWithReversed([1, 2, 3]))), ["custom"])
+
+    @make_dynamo_test
+    def test_reversed_user_defined_not_reversible(self):
+        """User class with neither __reversed__ nor sequence protocol -> TypeError"""
+        with self.assertRaises(TypeError):
+            reversed(NotReversible())
+
+    @make_dynamo_test
+    def test_reversed_user_defined_dict_subclass(self):
+        """dict subclass with overridden __reversed__ is dispatched to"""
+        d = RevDict(a=1, b=2)
+        self.assertEqual(list(reversed(d)), ["custom_key"])
+
+    @make_dynamo_test
+    def test_reversed_range(self):
+        """reversed(range(...)) returns a reverse range_iterator"""
+        self.assertEqual(list(reversed(range(5))), [4, 3, 2, 1, 0])
+        self.assertEqual(list(reversed(range(2, 10, 3))), [8, 5, 2])
+        self.assertEqual(list(reversed(range(0))), [])
+
+    @make_dynamo_test
+    def test_reversed_mappingproxy(self):
+        """reversed() on types.MappingProxyType dispatches to dict.__reversed__"""
+        mp = types.MappingProxyType({"a": 1, "b": 2, "c": 3})
+        self.assertEqual(list(reversed(mp)), ["c", "b", "a"])
+
+    @make_dynamo_test
+    def test_reversed_none_sentinel(self):
+        """`__reversed__ = None` opts out, even when sequence protocol exists"""
+        with self.assertRaises(TypeError):
+            reversed(NotReversibleNone())
 
     @make_dynamo_test
     def test_next_with_default(self):
@@ -654,7 +794,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         result = sorted(items)
         self.assertEqual(result, [("a", 1), ("b", 2), ("c", 3)])
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_custom_list_subclass_with_custom_iter(self):
         """Test custom list subclass that overloads __iter__"""
@@ -678,6 +817,19 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         cs = CustomSet([1, 2, 3])
         result = sorted(cs.__iter__())
         self.assertEqual(result, [2, 4, 6])
+
+    @make_dynamo_test
+    def test_custom_list_subclass_with_default_iter(self):
+        """Test custom list subclass with default __iter__ (inherited from list)"""
+
+        cl = CustomListDefaultIter([1, 2, 3])
+        result = list(iter(cl))
+        self.assertEqual(result, [1, 2, 3])
+
+        result2 = []
+        for v in cl:
+            result2.append(v * 2)
+        self.assertEqual(result2, [2, 4, 6])
 
     @make_dynamo_test
     def test_custom_set_subclass_with_default_iter(self):

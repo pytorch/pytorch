@@ -50,7 +50,7 @@ import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, NoReturn, TypeVar
+from typing import Any, cast, NoReturn, TypeVar
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -134,7 +134,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .output_graph import DynamoTracerOutput, OutputGraphCommon
+from .output_graph import CodeOptions, DynamoTracerOutput, OutputGraphCommon
 from .pgo import (
     _log_size_mismatch_recompile,
     log_frame_dynamic_whitelist,
@@ -896,7 +896,7 @@ def trace_frame(
     one_graph: bool,
     speculation_log: SpeculationLog,
     instructions: list[Instruction],
-    code_options: dict[str, object],
+    code_options: CodeOptions,
     *,
     export: bool = False,
     export_constraints: Any | None = None,
@@ -1547,7 +1547,7 @@ def compile_frame(  # type: ignore[return]
     speculation_log = SpeculationLog()
 
     def transform(
-        instructions: list[Instruction], code_options: dict[str, object]
+        instructions: list[Instruction], code_options: dict[str, Any]
     ) -> DynamoTracerOutput:
         tf_mode_stack: list[torch.overrides.TorchFunctionMode] = list(
             torch_function_mode_stack_state_mgr.stack
@@ -1563,7 +1563,7 @@ def compile_frame(  # type: ignore[return]
             one_graph,
             speculation_log,
             instructions,
-            code_options,
+            cast(CodeOptions, code_options),
             export=export,
             export_constraints=export_constraints,
             frame_state=frame_state,
@@ -1669,6 +1669,14 @@ def _compile(
         code: CodeType, one_graph: bool, hooks: Hooks
     ) -> tuple[ConvertFrameReturn, DynamoTracerOutput | None]:
         with contextlib.ExitStack() as stack:
+            # Hold _is_compiling_flag True for the duration of compilation so
+            # torch.compiler.is_compiling() is observable in code that runs
+            # during the compile session but is not directly Dynamo-traced
+            # (wrapper-subclass __torch_dispatch__ invoked by AOTAutograd,
+            # make_fx invoked from a custom backend, etc.). Export sets the
+            # flag itself via _compiling_state_context, so skip there.
+            if not export:
+                stack.enter_context(torch.compiler._compile_session_context())
             stack.enter_context(
                 torch._dynamo.callback_handler.install_callbacks(
                     CallbackTrigger.DYNAMO, str(CompileContext.current_compile_id())
@@ -2143,6 +2151,7 @@ def _compile(
                     TorchRuntimeError,
                     BackendCompilerFailed,
                     AssertionError,
+                    IndexError,  # dim out-of-range from canonicalize_dim/maybe_wrap_dim
                     ConstraintViolationError,
                     GuardOnDataDependentSymNode,
                     ValidationException,

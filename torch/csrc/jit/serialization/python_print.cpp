@@ -210,7 +210,7 @@ struct PythonPrintImpl {
   //     and would appear in the same order when the expression tree is
   //     reparsed.
   // The last case can be checked
-  // because when we emit a expression tree in the parser,
+  // because when we emit an expression tree in the parser,
   // we do a left-to-right postorder traversal of the expression tree (emit
   // children, then emit op). The reverse of this is a right-to-left preorder
   // traversal of the tree. By doing a right-to-left preorder traversal of the
@@ -386,7 +386,7 @@ struct PythonPrintImpl {
       else
         ss << '_';
     }
-    return ss.str();
+    return std::move(ss).str();
   }
   // if we have to assign 'v' a name, what should it be?
   // use the debugName if it was set, otherwise generate a name.
@@ -835,7 +835,7 @@ struct PythonPrintImpl {
         printBody(graph->block());
         std::stringstream ss;
         ss << "fork(" << name << ')';
-        printOutputDefinition(node, ss.str());
+        printOutputDefinition(node, std::move(ss).str());
       } break;
       case prim::awaitable: {
         // the subgraph gets emitted as another function
@@ -849,7 +849,7 @@ struct PythonPrintImpl {
         printBody(graph->block());
         std::stringstream ss;
         ss << "awaitable(" << name << ')';
-        printOutputDefinition(node, ss.str());
+        printOutputDefinition(node, std::move(ss).str());
       } break;
       case prim::Enter: {
         const auto in = node->inputs().at(0);
@@ -969,7 +969,7 @@ struct PythonPrintImpl {
 
     std::stringstream ss;
     v.repr(ss, customFormatter);
-    stmt << ss.str();
+    stmt << std::move(ss).str();
   }
 
   void printOpName(TaggedStringStream& stmt, Symbol kind) {
@@ -1011,7 +1011,7 @@ struct PythonPrintImpl {
         std::stringstream scalars_stream;
         stmt << '^' << value->name();
         value->writeScalars(scalars_stream);
-        stmt << scalars_stream.str();
+        stmt << std::move(scalars_stream).str();
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
       case prim::Uninitialized: {
@@ -1131,7 +1131,7 @@ struct PythonPrintImpl {
           stmt << "getattr(" << useOf(obj) << ", ";
           std::stringstream field_stream;
           c10::printQuotedString(field_stream, field);
-          stmt << field_stream.str() << ')';
+          stmt << std::move(field_stream).str() << ')';
         }
       } break;
       case prim::CallFunction: {

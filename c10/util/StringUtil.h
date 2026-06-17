@@ -101,7 +101,7 @@ struct _str_wrapper final {
   static std::string call(const Args&... args) {
     std::ostringstream ss;
     _str(ss, args...);
-    return ss.str();
+    return std::move(ss).str();
   }
 };
 
@@ -165,7 +165,7 @@ struct C10_API SourceLocation {
       const char* file = __builtin_FILE(),
       const char* function = __builtin_FUNCTION(),
       const std::uint_least32_t line = __builtin_LINE()) noexcept {
-    return {function, file, line};
+    return {.function = function, .file = file, .line = line};
   }
 };
 
@@ -226,7 +226,7 @@ inline void printQuotedString(std::ostream& stmt, const std::string_view str) {
           s /= 8;
           // NOLINTNEXTLINE(*narrowing-conversions)
           buf[0] += s;
-          stmt << "\\" << buf;
+          stmt << '\\' << buf;
         }
         break;
     }

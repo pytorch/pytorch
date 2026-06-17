@@ -383,23 +383,30 @@ class DeviceTypeTestBase(TestCase):
         self._tls.rel_tol = prec
 
     @classmethod
-    def _apply_op_overrides(cls, ops):
-        if cls.op_overrides is None:
+    def _apply_op_overrides(cls, ops, test=None):
+        class_overrides = cls.op_overrides or {}
+        test_overrides = {} if test is None else getattr(test, "_op_overrides", {})
+
+        if not class_overrides and not test_overrides:
             return
 
         op_dict = {op.full_name: op for op in copy.deepcopy(ops.op_list)}
 
-        if cls.op_overrides is not None:
-            for op_name, decorators in cls.op_overrides.items():
-                for decorator in decorators:
-                    if cls.device_type == "privateuse1":
-                        decorator.device_type = torch._C._get_privateuse1_backend_name()
-                    else:
-                        decorator.device_type = cls.device_type
-                    # op_name may not be in op_dict if @ops() has restricted the
-                    # OpInfo list to a smaller set than op_overrides covers.
-                    if op_name in op_dict:
-                        op_dict[op_name].decorators += (decorator,)
+        for op_name, decorators in class_overrides.items():
+            for decorator in decorators:
+                if cls.device_type == "privateuse1":
+                    decorator.device_type = torch._C._get_privateuse1_backend_name()
+                else:
+                    decorator.device_type = cls.device_type
+                # op_name may not be in op_dict if @ops() has restricted the
+                # OpInfo list to a smaller set than op_overrides covers.
+                if op_name in op_dict:
+                    op_dict[op_name].decorators += (decorator,)
+
+        for op_name, decorators in test_overrides.items():
+            for decorator in decorators:
+                if op_name in op_dict:
+                    op_dict[op_name].decorators += (decorator,)
 
         ops.op_list = list(op_dict.values())
 
@@ -408,6 +415,15 @@ class DeviceTypeTestBase(TestCase):
     @classmethod
     def get_primary_device(cls):
         return cls.device_type
+
+    @classmethod
+    def distributed_backend(cls) -> str:
+        """
+        Default distributed backend for this device type.
+        """
+        import torch.distributed as dist
+
+        return dist.get_default_backend_for_device(cls.device_type)
 
     @classmethod
     def _get_test_exclusions(cls, test_class_name):
@@ -990,7 +1006,7 @@ def get_desired_device_type_test_bases(
 # device-specific tests (NB: this supports additional @parametrize usage).
 #
 # See note "Writing Test Templates"
-# TODO: remove "allow_xpu" option after Interl GPU support all test case instantiate by this function.
+# TODO: remove "allow_xpu" option after Intel GPU support all test case instantiate by this function.
 def instantiate_device_type_tests(
     generic_test_class,
     scope,
@@ -1133,6 +1149,71 @@ def _serialize_sample(sample_input):
     return str(sample_input)
 
 
+SkipSpec = namedtuple(
+    "SkipSpec",
+    [
+        "op_name",
+        "variant_name",
+        "device_type",
+        "dtypes",
+        "expected_failure",
+    ],
+)
+
+
+def xfail(op_name, variant_name="", *, device_type=None, dtypes=None):
+    return SkipSpec(op_name, variant_name, device_type, dtypes, True)
+
+
+def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
+    return SkipSpec(op_name, variant_name, device_type, dtypes, False)
+
+
+def skipOps(to_skip):
+    def wrapped(fn):
+        from torch.testing._internal.opinfo.core import DecorateInfo
+
+        parts = fn.__qualname__.split(".")
+        test_name = parts[-1]
+        cls_name = parts[-2] if len(parts) >= 2 else ""
+        overrides = getattr(fn, "_op_overrides", {})
+        for skip_spec in to_skip:
+            if hasattr(skip_spec, "op_name"):
+                op_name = skip_spec.op_name
+                variant_name = skip_spec.variant_name
+                device_type = skip_spec.device_type
+                dtypes = skip_spec.dtypes
+                if hasattr(skip_spec, "decorator"):
+                    decorator_callable = skip_spec.decorator
+                else:
+                    expected_failure = skip_spec.expected_failure
+                    decorator_callable = (
+                        unittest.expectedFailure
+                        if expected_failure
+                        else unittest.skip("Skipped!")
+                    )
+            else:
+                op_name, variant_name, device_type, dtypes, expected_failure = skip_spec
+                decorator_callable = (
+                    unittest.expectedFailure
+                    if expected_failure
+                    else unittest.skip("Skipped!")
+                )
+            full_name = f"{op_name}.{variant_name}" if variant_name else op_name
+            decorator = DecorateInfo(
+                decorator_callable,
+                cls_name,
+                test_name,
+                device_type=device_type,
+                dtypes=dtypes,
+            )
+            overrides.setdefault(full_name, []).append(decorator)
+        fn._op_overrides = overrides
+        return fn
+
+    return wrapped
+
+
 # Decorator that defines the OpInfos a test template should be instantiated for.
 #
 # Example usage:
@@ -1201,7 +1282,7 @@ class ops(_TestParametrizer):
         # Order matters: op_allowlist filters first, then op_overrides adds decorators
         # This ensures op_overrides only applies to ops that passed the op_allowlist filter
         device_cls._apply_op_allowlist(self)
-        device_cls._apply_op_overrides(self)
+        device_cls._apply_op_overrides(self, test)
         op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
@@ -1960,9 +2041,7 @@ def has_cusolver():
 
 
 def has_hipsolver():
-    rocm_version = _get_torch_rocm_version()
-    # hipSOLVER is disabled on ROCM < 5.3
-    return rocm_version >= (5, 3)
+    return TEST_WITH_ROCM
 
 
 # Skips a test on CUDA if cuSOLVER is not available,
@@ -2215,6 +2294,7 @@ IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED = (
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0)
 )
+IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED = torch.mps.is_available()
 flex_attention_supported_platform = unittest.skipUnless(
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
     or (
@@ -2222,8 +2302,9 @@ flex_attention_supported_platform = unittest.skipUnless(
         and not torch.xpu.is_available()
         and not torch.cuda.is_available()
     )
-    or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
-    "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
+    or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
+    or IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED,
+    "Requires CUDA and Triton, Intel GPU and triton, MPS, or CPU with avx2 and later",
 )
 if (
     torch.version.hip

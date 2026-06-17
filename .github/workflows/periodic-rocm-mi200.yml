@@ -1,3 +1,4 @@
+# Owner(s): ["module: rocm"]
 name: periodic-rocm-mi200
 
 on:
@@ -50,9 +51,9 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi210.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.mi210.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.mi210.2", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 

@@ -24,7 +24,6 @@
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
-#include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/eye.h>
 #include <ATen/ops/eye_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
@@ -303,6 +302,12 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   constexpr auto max_complex_inner_size = 2048;
   static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
   if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
+    return true;
+  }
+  // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
+  // kernels honor the output strides.
+  static const bool is_macos_26_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+  if (!output.is_contiguous() && !is_macos_26_0_or_newer) {
     return true;
   }
   // multiplicationWithPrimaryTensor: returns incorrect results if inner size exceeds 2048
@@ -810,9 +815,7 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
       MPSGraphTensor* batch1Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch1);
       MPSGraphTensor* batch2Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch2);
 
-      // Intermediates for beta and alpha
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
-                                                       dataType:getMPSScalarType(input.scalar_type())];
+      // Intermediate for alpha
       MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
                                                         dataType:getMPSScalarType(batch1.scalar_type())];
 
@@ -825,18 +828,25 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
         reductionSumTensor = [mpsGraph reductionSumWithTensor:productTensor axis:0 name:@"reductionSum(batch1@batch2)"];
       }
 
-      // Intermediates for multiplying by beta and alpha
+      // Intermediate for multiplying by alpha
       MPSGraphTensor* reductionSumTimesAlphaTensor =
           [mpsGraph multiplicationWithPrimaryTensor:reductionSumTensor
                                     secondaryTensor:alphaTensor
                                                name:@"alpha*(batch1@batch2)"];
-      MPSGraphTensor* biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
-                                                                      secondaryTensor:betaTensor
-                                                                                 name:@"beta*input"];
 
-      MPSGraphTensor* outputTensor = [mpsGraph additionWithPrimaryTensor:reductionSumTimesAlphaTensor
-                                                         secondaryTensor:biasTimesBetaTensor
-                                                                    name:@"beta*input + alpha*(batch1@batch2)"];
+      // When beta == 0, input is ignored so nan/inf in it are not propagated (matches CPU/CUDA and addmm).
+      const double betaVal = beta.toDouble();
+      MPSGraphTensor* outputTensor = reductionSumTimesAlphaTensor;
+      if (betaVal != 0.0) {
+        MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:betaVal
+                                                         dataType:getMPSScalarType(input.scalar_type())];
+        MPSGraphTensor* biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
+                                                                        secondaryTensor:betaTensor
+                                                                                   name:@"beta*input"];
+        outputTensor = [mpsGraph additionWithPrimaryTensor:reductionSumTimesAlphaTensor
+                                           secondaryTensor:biasTimesBetaTensor
+                                                      name:@"beta*input + alpha*(batch1@batch2)"];
+      }
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->batch1Tensor_ = batch1Tensor;
@@ -1121,6 +1131,13 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   }
 
   if (c10::isIntegralType(batch1.scalar_type(), true)) {
+    return do_metal_bmm(batch1, batch2, result);
+  }
+
+  // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
+  // kernel honors the output strides.
+  static const bool is_macos_26_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+  if (!result.is_contiguous() && !is_macos_26_0_or_newer) {
     return do_metal_bmm(batch1, batch2, result);
   }
 

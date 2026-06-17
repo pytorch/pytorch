@@ -48,7 +48,7 @@ def lift_subgraph_as_module(
     # in this component, creating HolderModules as necessary to match the path.
     # e.g. if in the original module there's a get_attr node fetches "conv.weight".
     # We create a HolderModule as root -> add a HolderModule named "conv" ->
-    # make "weight" a attribute of "conv" HolderModule and point to conv.weight in
+    # make "weight" an attribute of "conv" HolderModule and point to conv.weight in
     # the original module.
     submodule = HolderModule({})
     orig_to_split_fqn_mapping: dict[str, str] = {}

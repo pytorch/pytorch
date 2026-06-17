@@ -488,6 +488,34 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             (input_data, cos_cache_data, sin_cache_data, position_ids_data),
         )
 
+    def test_rotary_embedding_opcheck_3d(self):
+        # 3D input path must also match the real impl's contiguous output stride.
+        input_data = torch.rand(2, 4, 24)
+        position_ids_data = torch.randint(0, 50, (2, 4)).long()
+        sin_cache_data = torch.rand(50, 4)
+        cos_cache_data = torch.rand(50, 4)
+
+        torch.library.opcheck(
+            _impl.rotary_embedding_23,
+            (input_data, cos_cache_data, sin_cache_data, position_ids_data),
+            kwargs=dict(num_heads=3),
+        )
+
+    def test_rotary_embedding_opcheck_non_contiguous(self):
+        # Non-contiguous inputs must not break fake/real stride alignment.
+        # transpose(1, 2) on a (B, S, H, D) tensor yields the (B, H, S, D)
+        # layout the op expects, with non-contiguous strides.
+        input_data = torch.rand(2, 4, 3, 8).transpose(1, 2)
+        self.assertFalse(input_data.is_contiguous())
+        position_ids_data = torch.randint(0, 50, (2, 4)).long()
+        sin_cache_data = torch.rand(50, 4)
+        cos_cache_data = torch.rand(50, 4)
+
+        torch.library.opcheck(
+            _impl.rotary_embedding_23,
+            (input_data, cos_cache_data, sin_cache_data, position_ids_data),
+        )
+
     def test_rotary_embedding(self):
         input_data = torch.rand(2, 3, 4, 8)
         position_ids_data = torch.randint(0, 50, (2, 4)).long()

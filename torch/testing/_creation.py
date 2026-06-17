@@ -28,7 +28,7 @@ _FLOATING_8BIT_TYPES = [
     torch.float8_e4m3fnuz,
     torch.float8_e5m2fnuz,
 ]
-_COMPLEX_TYPES = [torch.complex32, torch.complex64, torch.complex128]
+_COMPLEX_TYPES = [torch.complex32, torch.bcomplex32, torch.complex64, torch.complex128]
 _BOOLEAN_OR_INTEGRAL_TYPES = [torch.bool, *_INTEGRAL_TYPES]
 _FLOATING_OR_COMPLEX_TYPES = [*_FLOATING_TYPES, *_COMPLEX_TYPES]
 

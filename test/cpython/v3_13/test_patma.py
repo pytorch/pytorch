@@ -34,6 +34,7 @@ class Point:
 
 class TestCompiler(CPythonTestCase):
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_refleaks(self):
         # Hunting for leaks using -R doesn't catch leaks in the compiler itself,
         # just the code under test. This test ensures that if there are leaks in
@@ -3509,6 +3510,7 @@ class TestTracing(CPythonTestCase):
         self.assertListEqual(self._trace(f, 1), [1, 2, 3])
         self.assertListEqual(self._trace(f, 0), [1, 2, 5, 6])
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_parser_deeply_nested_patterns(self):
         # Deeply nested patterns can cause exponential backtracking when parsing.
         # See gh-93671 for more information.

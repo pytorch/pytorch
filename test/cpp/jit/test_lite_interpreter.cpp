@@ -408,7 +408,7 @@ class TorchBindLiteInterpreterTestStruct
     ss << "Hello! Your tensor has ";
     ss << t.numel();
     ss << " elements!";
-    return ss.str();
+    return std::move(ss).str();
   }
 };
 
@@ -993,7 +993,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   extra_files["mobile_info.json"] = "{\"key\": 23}";
   module->_save_for_mobile(oss, extra_files);
 
-  std::istringstream iss(oss.str());
+  std::istringstream iss(std::move(oss).str());
   std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";
   torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);

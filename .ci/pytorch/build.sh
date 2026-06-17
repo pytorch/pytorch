@@ -13,6 +13,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # shellcheck source=./rocm_utils.sh
   source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
+  export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx1033"
 fi
 
 echo "Python version:"
@@ -161,8 +162,12 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # Enable XCCL build
   export USE_XCCL=1
   export USE_MPI=0
-  export TORCH_XPU_ARCH_LIST=pvc
   export USE_STATIC_MKL=1
+  export TORCH_XPU_ARCH_LIST=pvc
+  # Use different AOT target list for different runner tests
+  if [[ "$BUILD_ENVIRONMENT" == *client* ]]; then
+    export TORCH_XPU_ARCH_LIST=bmg
+  fi
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -258,9 +263,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
   # s390x builds currently fail when WERROR=1
+  # Release xpu build stress with WERROR=1
   # set only when building other architectures
   # or building non-XLA tests.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *xpu* ]]; then
     # TODO: Remove me and may be just focus on numpy-2.x testing
     if [[ "$ANACONDA_PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
@@ -279,6 +285,20 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     python -m build --wheel --no-isolation
   fi
   pip_install_whl "$(echo dist/*.whl)"
+
+  # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
+  # still emit a debug-rebuild plan with a -g compile and the libtorch_python
+  # relink. This guards against build-system changes (e.g. a new
+  # CONFIGURE_DEPENDS glob scheme) silently breaking the tool, which only works
+  # on a from-source build that test jobs don't have. --dry-run reads the tree
+  # without rebuilding, so it leaves the checkout clean (assert_git_not_dirty).
+  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && grep -q "csrc/Module.cpp" build/compile_commands.json; then
+    debinfo_plan="$(python tools/build_with_debinfo.py --dry-run torch/csrc/Module.cpp)"
+    echo "${debinfo_plan}"
+    grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
+    grep -q 'libtorch_python' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no libtorch_python link command"; exit 1; }
+  fi
+
   if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
     # Regression test for https://github.com/pytorch/pytorch/issues/164297
     # Torch should be importable and that's about it
@@ -303,6 +323,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
   if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchcomms* ]]; then
     install_torchcomms
+  fi
+
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *spmd_types* ]]; then
+    install_spmd_types
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then

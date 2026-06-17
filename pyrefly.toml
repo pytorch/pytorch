@@ -131,6 +131,7 @@ errors.deprecated = false # re-enable after we've fix import formatting
 permissive-ignores = true
 replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*", "networkx.*"]
 search-path = ["tools/experimental"]
+enable-fallback-search-path = true
 
 # Dynamo sub-config - note, we experiment with stricter typing here
 [[sub-config]]
@@ -170,3 +171,12 @@ bad-param-name-override = false
 unannotated-return = true
 unannotated-parameter = true
 unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/__init__.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true

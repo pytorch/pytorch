@@ -427,7 +427,7 @@ std::string Adapter::stringize() const {
   ss << "  ]" << std::endl;
   ss << '}';
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::ostream& operator<<(std::ostream& os, const Adapter& adapter) {

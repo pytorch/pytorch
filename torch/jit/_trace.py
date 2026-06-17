@@ -501,7 +501,7 @@ def _check_trace(
             if len(nondeterm_ops) > 0:
                 nondeterministic_ops_warning = "Trace had nondeterministic nodes. "
                 nondeterministic_ops_warning += (
-                    "Did you forget call .eval() on your model? Nodes:\n"
+                    "Did you forget to call .eval() on your model? Nodes:\n"
                 )
                 nondeterministic_ops_warning += "\n".join(
                     [indent(str(op)) for op in nondeterm_ops][:20]
@@ -610,7 +610,7 @@ class TracerWarning(Warning):
         warnings.filterwarnings("ignore", "torch::jit::fuser::cuda")
 
 
-# We ignore the tracer warnings coming form inside the library, because all our shape
+# We ignore the tracer warnings coming from inside the library, because all our shape
 # checks in nn will trigger them.
 TracerWarning.ignore_lib_warnings()
 torch._C._tracer_warn_use_python()

@@ -21,7 +21,7 @@ bool allow_overlapping_devices();
 std::string getSymmMemBackendCUDA();
 
 // All-gather a fixed-size byte payload through the given ProcessGroup.
-// Uses ProcessGroup::_allgather_base (NCCL allgather for a NCCL-backed PG).
+// Uses ProcessGroup::all_gather_single (NCCL allgather for a NCCL-backed PG).
 // The payload is staged through a uint8 CUDA tensor on `device_idx`; the H2D
 // and D2H copies are negligible at the sizes exchanged during rendezvous (a
 // few hundred bytes per rank). Returns a contiguous CPU tensor of
@@ -105,7 +105,7 @@ class StoreExchange {
     for (int r = 0; r < world_size; ++r) {
       std::ostringstream oss;
       oss << store_prefix_ << '/' << seq_id_ << '/' << r;
-      peer_keys.push_back(oss.str());
+      peer_keys.push_back(std::move(oss).str());
     }
     ++seq_id_;
 
@@ -137,7 +137,7 @@ class StoreExchange {
     std::ostringstream oss;
     oss << store_prefix_ << '/' << seq_id_;
     ++seq_id_;
-    store->barrier(oss.str(), world_size);
+    store->barrier(std::move(oss).str(), world_size);
   }
 
  private:

@@ -705,9 +705,27 @@ OSSProxyExecutor::OSSProxyExecutor(
           get_call_torch_bind_kernel(serialized_node);
       op_kernels_.emplace_back(std::move(op_kernel));
     } else {
-      c10::OperatorHandle op_handle =
-          c10::Dispatcher::singleton().findSchemaOrThrow(
+      c10::OperatorHandle op_handle = [&]() {
+        try {
+          return c10::Dispatcher::singleton().findSchemaOrThrow(
               opName.c_str(), overloadName.c_str());
+        } catch (const c10::Error&) {
+          if (serialized_node.contains("metadata") &&
+              serialized_node["metadata"].value(
+                  "torch_library_custom_op", "") == "1") {
+            TORCH_CHECK(
+                false,
+                "Could not find schema for ",
+                target,
+                ". Custom operators created via torch.library.custom_op cannot "
+                "be run via AOTI without Python environment. Consider using C++ "
+                "TORCH_LIBRARY APIs. See the Custom Operators Landing Page "
+                "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
+                "for more details.");
+          }
+          throw;
+        }
+      }();
       const c10::FunctionSchema& schema = op_handle.schema();
 
       const auto& schema_args = schema.arguments();

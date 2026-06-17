@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed", "module: symm_mem"]
 name: Limited CI for symmetric memory tests on B200
 
 on:

@@ -3849,7 +3849,7 @@ class TestDynamicQuantizedOps(TestCase):
         return Xq, Hq, Cq
 
     def _get_rnn_weights_and_bias(self, input_size, hidden_size, num_directions, per_channel_quant, rnn_type):
-        hidden_mult_map = {'LSTM': 4, 'LSTMCell': 4, 'GRU': 3, 'GRUCell': 3, 'RNNTanh': 2, 'RNNReLU': 2}
+        hidden_mult_map = {'LSTM': 4, 'LSTMCell': 4, 'GRU': 3, 'GRUCell': 3, 'RNNTanh': 1, 'RNNReLU': 1}
         hidden_mult = hidden_mult_map[rnn_type]
         weights1 = torch.randn(hidden_mult * hidden_size, input_size)
         weights2 = torch.randn(hidden_mult * hidden_size, hidden_size)
@@ -4902,6 +4902,18 @@ class TestQuantizedLinear(TestCase):
     def test_qlinear_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
         self._test_qlinear_pt2e_helper(qlinear, "none")
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qlinear_prepack_meta(self):
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        N, K = 16, 8
+
+        w = torch.empty(N, K, dtype=torch.int8, device="meta")
+        packed = qlinear_prepack(w, [3, K])
+        self.assertEqual(packed.shape, torch.Size([K, N]))
+        self.assertEqual(packed.dtype, torch.int8)
+        self.assertEqual(packed.device.type, "meta")
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN

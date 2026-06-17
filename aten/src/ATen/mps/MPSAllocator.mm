@@ -5,9 +5,10 @@
 #include <ATen/mps/MPSAllocator.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
+#include <c10/util/Logging.h>
 #include <c10/util/env.h>
 
-#include <iostream>
+#include <atomic>
 
 namespace at::mps {
 
@@ -18,7 +19,13 @@ namespace HeapAllocator {
 uint64_t BufferBlock::buffer_counter = 0;
 uint64_t HeapBlock::heap_counter = 0;
 
+// Set once the heap allocator singleton has been constructed (i.e. MPS/Metal is
+// actually in use). Lets the registered c10 allocator report readiness via
+// DeviceAllocator::initialized() without forcing Metal initialization.
+static std::atomic<bool> s_mps_allocator_initialized{false};
+
 void MPSHeapAllocatorImpl::init_allocator() {
+  TORCH_CHECK(m_device.hasUnifiedMemory, "MPS backend is only supported on devices with unified memory");
   init_buffer_pools();
 
   // debug verbosity flags (see DebugVerbosity enum)
@@ -30,12 +37,16 @@ void MPSHeapAllocatorImpl::init_allocator() {
       high_watermark_ratio_str ? strtod(high_watermark_ratio_str->c_str(), nullptr) : default_high_watermark_ratio;
   setHighWatermarkRatio(high_watermark_ratio);
 
-  const double default_low_watermark_ratio =
-      m_device.hasUnifiedMemory ? default_low_watermark_ratio_unified : default_low_watermark_ratio_discrete;
   static const auto low_watermark_ratio_str = c10::utils::get_env("PYTORCH_MPS_LOW_WATERMARK_RATIO");
   const double low_watermark_ratio =
       low_watermark_ratio_str ? strtod(low_watermark_ratio_str->c_str(), nullptr) : default_low_watermark_ratio;
   setLowWatermarkRatio(low_watermark_ratio);
+
+  if (m_debug_verbosity & DebugVerbosity::PROFILING) {
+    LOG(INFO) << "Initializing heap allocator on unified device memory of size " << format_size(max_device_size());
+  }
+
+  s_mps_allocator_initialized.store(true);
 }
 
 void MPSHeapAllocatorImpl::init_buffer_pools() {
@@ -76,8 +87,8 @@ void MPSHeapAllocatorImpl::setHighWatermarkRatio(double ratio) {
   m_max_total_allowed_size =
       (ratio == 0.0) ? std::numeric_limits<size_t>::max() : static_cast<size_t>(ratio * (double)max_device_size());
   if (m_debug_verbosity & DebugVerbosity::PROFILING) {
-    std::cerr << "\nHigh watermark memory allocation limit: "
-              << (ratio == 0.0 ? "unlimited" : format_size(m_max_total_allowed_size)) << "\n";
+    LOG(INFO) << "High watermark memory allocation limit: "
+              << (ratio == 0.0 ? "unlimited" : format_size(m_max_total_allowed_size));
   }
   m_high_watermark_ratio = ratio;
 }
@@ -91,8 +102,8 @@ void MPSHeapAllocatorImpl::setLowWatermarkRatio(double ratio) {
   m_low_watermark_limit =
       (ratio == 0.0) ? std::numeric_limits<size_t>::max() : static_cast<size_t>(ratio * (double)max_device_size());
   if (m_debug_verbosity & DebugVerbosity::PROFILING) {
-    std::cerr << "Low watermark memory allocation limit: "
-              << (ratio == 0.0 ? "unlimited" : format_size(m_low_watermark_limit)) << "\n";
+    LOG(INFO) << "Low watermark memory allocation limit: "
+              << (ratio == 0.0 ? "unlimited" : format_size(m_low_watermark_limit));
   }
   m_low_watermark_ratio = ratio;
 }
@@ -106,12 +117,12 @@ HeapBlock* MPSHeapAllocatorImpl::get_free_heap(AllocParams& params) {
   if (it == pool.heaps.end()) {
     heap_block = HeapBlock::createHeapBlock(params, pool.device, pool.usage);
     if (heap_block) {
-      m_total_allocated_memory += heap_block->size.total;
+      m_total_allocated_memory.increase(heap_block->size.total);
       if (m_debug_verbosity & DebugVerbosity::ALLOCATIONS) {
-        std::cerr << "\nAllocated " << ((pool.usage & UsageFlags::SHARED) ? "shared" : "private") << " heap #"
+        LOG(INFO) << "Allocated " << ((pool.usage & UsageFlags::SHARED) ? "shared" : "private") << " heap #"
                   << heap_block->heap_id << " of size " << format_size(heap_block->size.total)
                   << " (#heaps: " << (pool.heaps.size() + 1)
-                  << ", current allocated: " << format_size(current_allocated_size()) << ")\n";
+                  << ", current allocated: " << format_size(current_allocated_size()) << ")";
       }
     }
   } else {
@@ -146,13 +157,13 @@ bool MPSHeapAllocatorImpl::alloc_buffer(AllocParams& params) {
 
   if ((m_debug_verbosity & DebugVerbosity::ALLOCATIONS) &&
       (!(m_debug_verbosity & DebugVerbosity::LARGE_ONLY) || !(pool.usage & UsageFlags::SMALL))) {
-    std::cerr << "Allocated " << ((params.pool->usage & UsageFlags::SHARED) ? "shared" : "private")
+    LOG(INFO) << "Allocated " << ((params.pool->usage & UsageFlags::SHARED) ? "shared" : "private")
               << ((params.pool->usage & UsageFlags::SCALAR) ? " scalar" : "") << " buffer #"
               << params.buffer_block->buf_id << " of size " << format_size(params.size()) << " at "
               << params.buffer_block->buffer << " from heap #" << heap->heap_id
               << " (requested: " << format_size(params.requested_size)
-              << ", heap: " << format_size(heap->size.available) << ", total: " << format_size(m_total_allocated_memory)
-              << ")\n";
+              << ", heap: " << format_size(heap->size.available)
+              << ", total: " << format_size(m_total_allocated_memory.current) << ")";
   }
   return true;
 }
@@ -211,12 +222,12 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
 
   if ((m_debug_verbosity & DebugVerbosity::RECYCLES) &&
       (!(m_debug_verbosity & DebugVerbosity::LARGE_ONLY) || !(pool.usage & UsageFlags::SMALL))) {
-    std::cerr << "Reusing " << ((params.pool->usage & UsageFlags::SHARED) ? "shared" : "private")
+    LOG(INFO) << "Reusing " << ((params.pool->usage & UsageFlags::SHARED) ? "shared" : "private")
               << ((params.pool->usage & UsageFlags::SCALAR) ? " scalar" : "") << " buffer #"
               << params.buffer_block->buf_id << " of size " << format_size(params.buffer_block->size) << " at "
               << params.buffer_block->buffer << " (requested: " << format_size(params.requested_size)
               << ", use#: " << params.buffer_block->use_count + 1 << ", retain#: " << params.buffer_block->retainCount()
-              << ")\n";
+              << ")";
   }
   return true;
 }
@@ -230,7 +241,6 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   // we care about memory pressure if only we're allocating large buffers when the
   // low watermark limit has been reached
   params.has_memory_pressure = !(pool.usage & UsageFlags::SMALL) && getLowWatermarkValue() <= 0;
-  params.has_unified_memory = m_device.hasUnifiedMemory;
 
   // first, try to get a block from the existing pool.
   bool block_found = get_free_buffer(params);
@@ -264,9 +274,9 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
       TORCH_CHECK(
           false,
           "MPS backend out of memory (MPS allocated: ",
-          format_size(m_total_allocated_memory),
+          format_size(m_total_allocated_memory.current),
           ", other allocations: ",
-          format_size(current_allocated_size() - m_total_allocated_memory),
+          format_size(current_allocated_size() - m_total_allocated_memory.current),
           ", max allowed: ",
           format_size(m_max_total_allowed_size),
           "). Tried to allocate ",
@@ -277,9 +287,9 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
     } else {
       TORCH_CHECK(false,
                   "MPS backend out of memory (MPS allocated: ",
-                  format_size(m_total_allocated_memory),
+                  format_size(m_total_allocated_memory.current),
                   ", other allocations: ",
-                  format_size(current_allocated_size() - m_total_allocated_memory),
+                  format_size(current_allocated_size() - m_total_allocated_memory.current),
                   "). Tried to allocate ",
                   format_size(alloc_size),
                   " on ",
@@ -289,7 +299,7 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   }
   buffer_block->in_use = true;
   buffer_block->use_count++;
-  m_current_allocated_memory += buffer_block->size;
+  m_current_allocated_memory.increase(buffer_block->size);
 
   return buffer_block;
 }
@@ -302,8 +312,8 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   TORCH_INTERNAL_ASSERT(pool.available_buffers.insert(buffer_block).second);
   pool.available_size += buffer_block->size;
   buffer_block->shape.clear(); // reset shape
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_current_allocated_memory >= buffer_block->size);
-  m_current_allocated_memory -= buffer_block->size;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_current_allocated_memory.current >= static_cast<int64_t>(buffer_block->size));
+  m_current_allocated_memory.decrease(buffer_block->size);
   if (buffer_block->event) {
     // returns the MPSEvent back to MPSEventPool
     buffer_block->event.reset(nullptr);
@@ -333,21 +343,21 @@ bool MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove
 
   if ((m_debug_verbosity & DebugVerbosity::RELEASES) &&
       (!(m_debug_verbosity & DebugVerbosity::LARGE_ONLY) || !(pool.usage & UsageFlags::SMALL))) {
-    std::cerr << "Released buffer #" << buffer_block->buf_id << " of size " << format_size(buffer_block->size)
+    LOG(INFO) << "Released buffer #" << buffer_block->buf_id << " of size " << format_size(buffer_block->size)
               << " from heap #" << heap_block->heap_id << " (heap size: " << format_size(heap_block->size.available)
               << ", use#: " << buffer_block->use_count << ", retain#: " << retainCount
-              << ", gc#: " << buffer_block->gc_count << ")\n";
+              << ", gc#: " << buffer_block->gc_count << ")";
   }
   delete buffer_block;
 
   if (remove_empty_heap && heap_block->n_buffers == 0) {
     pool.heaps_pending_update.erase(heap_block);
-    m_total_allocated_memory -= heap_block->size.total;
+    m_total_allocated_memory.decrease(heap_block->size.total);
     retainCount = heap_block->releaseMTLHeap();
     if (m_debug_verbosity & DebugVerbosity::RELEASES) {
-      std::cerr << "Released heap #" << heap_block->heap_id << " of size " << format_size(heap_block->size.total)
+      LOG(INFO) << "Released heap #" << heap_block->heap_id << " of size " << format_size(heap_block->size.total)
                 << " (current allocated: " << format_size(current_allocated_size()) << ", retain#: " << retainCount
-                << ")\n";
+                << ")";
     }
     delete heap_block;
     return true;
@@ -379,11 +389,11 @@ void MPSHeapAllocatorImpl::release_buffers(BufferPool& pool) {
     return;
   }
   if ((m_debug_verbosity & DebugVerbosity::RELEASES)) {
-    std::cerr << "Releasing " << pool.available_buffers.size() << " buffers from "
+    LOG(INFO) << "Releasing " << pool.available_buffers.size() << " buffers from "
               << ((pool.usage & UsageFlags::SMALL) ? "small " : "large ")
               << ((pool.usage & UsageFlags::SHARED) ? "shared" : "private")
               << ((pool.usage & UsageFlags::SCALAR) ? " scalar" : "")
-              << " pool (total size: " << format_size(pool.allocated_size) << ", #buffers: " << pool.n_buffers << ")\n";
+              << " pool (total size: " << format_size(pool.allocated_size) << ", #buffers: " << pool.n_buffers << ")";
   }
   auto it = pool.available_buffers.begin();
   while (it != pool.available_buffers.end()) {
@@ -425,8 +435,10 @@ bool MPSHeapAllocatorImpl::release_available_cached_buffers(AllocParams& params)
 
 bool MPSHeapAllocatorImpl::release_cached_buffers() {
   if (m_debug_verbosity >= DebugVerbosity::PROFILING) {
-    std::cerr << "Attempting to release cached buffers (MPS allocated: " << format_size(m_total_allocated_memory)
-              << ", other allocations: " << format_size(current_allocated_size() - m_total_allocated_memory) << ")\n";
+    LOG(INFO) << "Attempting to release cached buffers (MPS allocated: "
+              << format_size(m_total_allocated_memory.current)
+              << ", other allocations: " << format_size(current_allocated_size() - m_total_allocated_memory.current)
+              << ")";
   }
   // before releasing the buffers make sure the command buffer has finished.
   // we need to release the lock temporarily as synchronizing may cause deadlock with completion handlers.
@@ -489,10 +501,10 @@ void MPSHeapAllocatorImpl::garbage_collect_cached_buffers(AllocParams& params) {
     }
   }
   if (m_debug_verbosity & DebugVerbosity::RELEASES) {
-    std::cerr << "Garbage collected " << freed_count << " buffers from large "
+    LOG(INFO) << "Garbage collected " << freed_count << " buffers from large "
               << ((pool.usage & UsageFlags::SHARED) ? "shared" : "private")
               << " pool (total reclaimed: " << format_size(gc_reclaimed)
-              << ", #buffers: " << pool.available_buffers.size() << ")\n";
+              << ", #buffers: " << pool.available_buffers.size() << ")";
   }
 }
 
@@ -728,6 +740,29 @@ ssize_t MPSHeapAllocatorImpl::getLowWatermarkValue() {
   return std::max<ssize_t>(0, (ssize_t)(m_low_watermark_limit - current_allocated_size()) / 1048576L);
 }
 
+c10::CachingDeviceAllocator::DeviceStats MPSHeapAllocatorImpl::getDeviceStats() {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  c10::CachingDeviceAllocator::DeviceStats stats;
+  // MPS does not distinguish small/large pools in these stats, so only the
+  // aggregate ("all") entry is populated.
+  constexpr auto kAggregate = static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE);
+  stats.allocated_bytes[kAggregate] = m_current_allocated_memory;
+  stats.reserved_bytes[kAggregate] = m_total_allocated_memory;
+  return stats;
+}
+
+void MPSHeapAllocatorImpl::resetAccumulatedStats() {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  m_current_allocated_memory.reset_accumulated();
+  m_total_allocated_memory.reset_accumulated();
+}
+
+void MPSHeapAllocatorImpl::resetPeakStats() {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  m_current_allocated_memory.reset_peak();
+  m_total_allocated_memory.reset_peak();
+}
+
 inline std::string MPSHeapAllocatorImpl::format_size(uint64_t size) const {
   return c10::CachingAllocator::format_size(size);
 }
@@ -745,21 +780,14 @@ HeapAllocator::MPSHeapAllocatorImpl& _getAllocImpl() {
 // MPS allocator struct to be registered with Pytorch
 struct TORCH_API MPSAllocator final : public IMPSAllocator {
  public:
-  explicit MPSAllocator(uint32_t Usage)
-      : m_has_unified_memory(_getAllocImpl().Device().hasUnifiedMemory), m_usage(Usage) {
-    if (_getAllocImpl().getDebugVerbosity()) {
-      if (!(m_usage & HeapAllocator::UsageFlags::SHARED) || m_has_unified_memory) {
-        std::cerr << "Initializing " << ((m_usage & HeapAllocator::UsageFlags::SHARED) ? "shared" : "private")
-                  << " heap allocator on " << (m_has_unified_memory ? "unified" : "discrete")
-                  << " device memory of size "
-                  << _getAllocImpl().format_size(_getAllocImpl().Device().recommendedMaxWorkingSetSize) << "\n";
-      }
-    }
-  }
+  // Construction is intentionally cheap (no Metal access) so the allocator can
+  // be registered with c10 at static-init time without forcing MPS/Metal
+  // initialization in processes that never touch the MPS device.
+  explicit MPSAllocator(uint32_t Usage) : m_usage(Usage) {}
 
-  ~MPSAllocator() override {
-    _getAllocImpl().emptyCache();
-  }
+  // No destructor: the underlying MPSHeapAllocatorImpl singleton empties its own
+  // cache in its destructor. Calling _getAllocImpl() from here at process exit
+  // would be unsafe, since that singleton may already have been destroyed.
   DeleterFnPtr raw_deleter() const override {
     return &Delete;
   }
@@ -783,11 +811,30 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   bool isSharedBuffer(const void* ptr) const override {
     return _getAllocImpl().isSharedBuffer(ptr);
   }
-  bool isSharedStorageSupported() const override {
-    return m_has_unified_memory;
+  // c10::DeviceAllocator interface
+  bool initialized() override {
+    return HeapAllocator::s_mps_allocator_initialized.load();
   }
-  void emptyCache() const override {
+  void emptyCache(c10::MempoolId_t mempool_id [[maybe_unused]] = {0, 0}) override {
     _getAllocImpl().emptyCache();
+  }
+  void recordStream(const DataPtr& ptr [[maybe_unused]], c10::Stream stream [[maybe_unused]]) override {
+    // MPS executes on a single serial stream, so there is no cross-stream
+    // dependency to track for buffer reuse.
+  }
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats(c10::DeviceIndex device [[maybe_unused]]) override {
+    return _getAllocImpl().getDeviceStats();
+  }
+  void resetAccumulatedStats(c10::DeviceIndex device [[maybe_unused]]) override {
+    _getAllocImpl().resetAccumulatedStats();
+  }
+  void resetPeakStats(c10::DeviceIndex device [[maybe_unused]]) override {
+    _getAllocImpl().resetPeakStats();
+  }
+  std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device [[maybe_unused]]) override {
+    const size_t total = _getAllocImpl().getRecommendedMaxMemory();
+    const size_t used = _getAllocImpl().getDriverAllocatedMemory();
+    return {total > used ? total - used : 0, total};
   }
   void freeInactiveBuffers() const override {
     _getAllocImpl().freeInactiveBuffers();
@@ -846,7 +893,6 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
 
  private:
-  bool m_has_unified_memory;
   uint32_t m_usage;
 
   static void Delete(void* ptr) {
@@ -862,14 +908,24 @@ MPSAllocator& _getSharedAllocator() {
   return s_mps_shared_alloc;
 }
 
+// Register the shared allocator as the c10 allocator for MPS at static-init
+// time so the generic c10::GetAllocator(MPS) / at::getDeviceAllocator(MPS) paths
+// (used by the torch.accelerator memory APIs) resolve to it. The allocator is
+// cheap to construct and does not touch Metal, so this does not force MPS
+// initialization; DeviceAllocator::initialized() reports actual readiness.
+struct MPSAllocatorRegisterer {
+  MPSAllocatorRegisterer() {
+    c10::SetAllocator(c10::DeviceType::MPS, &_getSharedAllocator());
+  }
+};
+static MPSAllocatorRegisterer s_mps_allocator_registerer;
+
 } // anonymous namespace
 
 IMPSAllocator* getIMPSAllocator() {
-  auto& sa = _getSharedAllocator();
-  if (sa.isSharedStorageSupported()) {
-    return &sa;
-  }
-  return nullptr;
+  // MPS requires unified memory (enforced in MPSHeapAllocatorImpl::init_allocator),
+  // so the shared allocator is always usable.
+  return &_getSharedAllocator();
 }
 
 // torch.is_pinned() implementation

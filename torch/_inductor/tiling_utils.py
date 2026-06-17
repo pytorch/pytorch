@@ -43,7 +43,10 @@ def solve_for_zero(expr: sympy.Expr) -> sympy.Expr | None:
     elif isinstance(expr, FloorDiv):
         return None
 
-    assert len(expr.free_symbols) == 1
+    if len(expr.free_symbols) != 1:
+        raise AssertionError(
+            f"expected exactly 1 free symbol, got {len(expr.free_symbols)}"
+        )
     free_symbol = next(iter(expr.free_symbols))
     if isinstance(expr, ModularIndexing):
         out = try_solve(sympy.Eq(expr.args[0], expr.args[2]), free_symbol)
@@ -72,7 +75,8 @@ def solve_for_tiling(expr: sympy.Expr) -> sympy.Expr | None:
     free_symbol = next(iter(expr.free_symbols))
 
     def _solve_simple_expr(expr: sympy.Expr) -> sympy.Expr | None:
-        assert not expr.has(ModularIndexing) and not expr.has(FloorDiv)
+        if expr.has(ModularIndexing) or expr.has(FloorDiv):
+            raise AssertionError("expected no ModularIndexing or FloorDiv in expr")
         if len(expr.free_symbols) != 1:
             return None
 
@@ -102,7 +106,8 @@ def solve_for_tiling(expr: sympy.Expr) -> sympy.Expr | None:
                 if out is None:
                     continue
 
-                assert out.is_constant()
+                if not out.is_constant():
+                    raise AssertionError(f"expected constant, got {out}")
                 seen = True
                 required_values.append(out)
 
@@ -273,9 +278,12 @@ def get_pw_red_splits(
             (n._body.reduce_vars, n._body.sizes[1]),
         )  # type: ignore[return-value]
 
-    assert get_hint(sympy_product(n._body.sizes[0])) == get_hint(
-        pointwise_numel * red_numel
-    )  # type: ignore[operator]
+    if get_hint(sympy_product(n._body.sizes[0])) != get_hint(
+        pointwise_numel * red_numel  # type: ignore[operator]
+    ):
+        raise AssertionError(
+            "expected pointwise sizes to match pointwise_numel * red_numel"
+        )
     i = len(n._body.sizes[0]) - 1
     prod = 1
     while i >= 0:
@@ -418,7 +426,8 @@ class NodeSplitGetter:
             except CantSplit:
                 return None
 
-            assert len(getters) == 2
+            if len(getters) != 2:
+                raise AssertionError(f"expected 2 getters, got {len(getters)}")
             pw_group_splits = splits[: len(pw)]
             # if we had to divide a variable into two to do this split,
             # then lets try the larger, induced split.
@@ -462,7 +471,11 @@ def apply_var_mapping(
     if len(iter_vars) == 0 and len(red_vars) == 0:
         return {}
 
-    assert len(new_ranges) == len(norm_pw_vars + norm_red_vars)
+    if len(new_ranges) != len(norm_pw_vars + norm_red_vars):
+        raise AssertionError(
+            f"expected len(new_ranges) == len(norm_pw_vars + norm_red_vars), "
+            f"got {len(new_ranges)} and {len(norm_pw_vars + norm_red_vars)}"
+        )
     apply_groups = []
     for group in return_getters_groups:
         apply_groups.append([g(flat_vars) for g in group])
@@ -474,8 +487,12 @@ def apply_var_mapping(
         # if the node has sizes (p0, 1) and the fused node is (p0, r0)
         # the reduction var gets filled in for split_iteration_range
         if len(group) != len(var_group):
-            assert i == 1
-            assert len(var_group) == 0
+            if i != 1:
+                raise AssertionError(f"expected i == 1, got {i}")
+            if len(var_group) != 0:
+                raise AssertionError(
+                    f"expected empty var_group, got len {len(var_group)}"
+                )
             continue
 
         iter_vars_to_flat_vars.update({v: g for g, v in zip(group, var_group)})
@@ -571,10 +588,13 @@ def extract_normalized_read_writes(
                     groups, lengths
                 )
             )
-        except torch._inductor.codegen.simd.CantSplit:
+        except torch._inductor.codegen.simd.CantSplit as e:
             # occasionally with dynamic shapes, we will be unable to prove
             # divisibility
-            assert pointwise_numel.free_symbols or red_numel.free_symbols
+            if not (pointwise_numel.free_symbols or red_numel.free_symbols):
+                raise AssertionError(
+                    "expected dynamic shapes (free symbols) when split fails"
+                ) from e
             return None
 
         var_map = apply_var_mapping(

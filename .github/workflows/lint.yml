@@ -66,6 +66,8 @@ jobs:
           export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
         fi
         export CLANG=1
+        # Cap parallelism to the pod's CPU budget; os.cpu_count() overcounts on k8s and OOMs.
+        export MAX_JOBS="$(nproc --ignore=2)"
         .github/scripts/lintrunner.sh
 
   # NOTE: mypy needs its own job because it depends on --all-files, without assessing all files it sometimes
@@ -327,6 +329,7 @@ jobs:
     uses: ./.github/workflows/_link_check.yml
     with:
       runner: ${{ needs.get-label-type.outputs.label-type }}
+      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
   doc-redirects-check:

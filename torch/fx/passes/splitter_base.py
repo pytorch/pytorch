@@ -103,7 +103,7 @@ class _SplitterSettingBase:
             action="store_true",
             help="If true then no fusion groups. Fusion group is used to "
             "enforce no non-tensor data flow between submodules. If we don't "
-            "have this constrain, setting this to false is recommended as it "
+            "have this constraint, setting this to false is recommended as it "
             "can reduce overhead.",
         )
         parser.add_argument(
@@ -445,7 +445,7 @@ def generate_inputs_for_submodules(
     deepcopy: bool = False,
 ) -> dict[str, Any]:
     """
-    Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
+    Generate inputs for targeting submodules in the given model. Note that if two submodules refer to the same obj, this
     function doesn't work.
 
     Args:

@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import instantiate_parametrized_tests
 
 if dist.is_available():
     from torch.distributed._functional_collectives import (
-        all_gather_tensor,
+        all_gather_single,
         all_to_all_single_autograd,
         wait_tensor,
     )
@@ -123,19 +123,19 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_all_gather_tensor_gather_dim_0(self):
-        """all_gather_tensor with gather_dim=0 (no _maybe_view_chunk_cat call)."""
+        """all_gather_single with gather_dim=0 (no _maybe_view_chunk_cat call)."""
 
         @torch.compile(fullgraph=True, backend="eager")
         def fn(x):
-            return all_gather_tensor(x, gather_dim=0, group=dist.group.WORLD)
+            return all_gather_single(x, gather_dim=0, group=dist.group.WORLD)
 
         x = torch.randn(4, 4)
         result = fn(x)
-        expected = all_gather_tensor(x, gather_dim=0, group=dist.group.WORLD)
+        expected = all_gather_single(x, gather_dim=0, group=dist.group.WORLD)
         self.assertEqual(result, expected)
 
     def test_all_gather_tensor_gather_dim_1_view_path(self):
-        """all_gather_tensor with gather_dim=1 triggers _maybe_view_chunk_cat view path.
+        """all_gather_single with gather_dim=1 triggers _maybe_view_chunk_cat view path.
 
         Shape [2, 4] with world_size=2: dim 0 == group_size and no dims between
         0 and gather_dim, so the view optimization applies.
@@ -143,15 +143,15 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(fullgraph=True, backend="eager")
         def fn(x):
-            return all_gather_tensor(x, gather_dim=1, group=dist.group.WORLD)
+            return all_gather_single(x, gather_dim=1, group=dist.group.WORLD)
 
         x = torch.randn(1, 4)
         result = fn(x)
-        expected = all_gather_tensor(x, gather_dim=1, group=dist.group.WORLD)
+        expected = all_gather_single(x, gather_dim=1, group=dist.group.WORLD)
         self.assertEqual(result, expected)
 
     def test_all_gather_tensor_gather_dim_2_chunk_cat_path(self):
-        """all_gather_tensor with gather_dim=2 triggers _maybe_view_chunk_cat chunk+cat path.
+        """all_gather_single with gather_dim=2 triggers _maybe_view_chunk_cat chunk+cat path.
 
         Shape [2, 3, 4] with world_size=2: dims between 0 and gather_dim=2
         include dim 1 with size 3 (not 1), so the chunk+cat fallback is used.
@@ -159,11 +159,11 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(fullgraph=True, backend="eager")
         def fn(x):
-            return all_gather_tensor(x, gather_dim=2, group=dist.group.WORLD)
+            return all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
 
         x = torch.randn(1, 3, 4)
         result = fn(x)
-        expected = all_gather_tensor(x, gather_dim=2, group=dist.group.WORLD)
+        expected = all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
         self.assertEqual(result, expected)
 
     def test_device_mesh_get_local_rank(self):

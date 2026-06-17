@@ -15,6 +15,10 @@ skip:
 
 # TODO - Figure out the reason of cold start memory spike
 batch_size:
+  # Use lower CUDA Inductor CI accuracy batch sizes where fp64 golden refs OOM
+  # at the default TIMM accuracy batch size.
+  ci_accuracy:
+    vit_base_patch14_dinov2.lvd142m: 4
   divisors:
     beit_base_patch16_224: 2
     deit_base_distilled_patch16_224: 2
@@ -60,6 +64,16 @@ scaled_compute_loss:
 require_larger_multiplier_for_smaller_tensor:
   - inception_v3
   - mobilenetv3_large_100
+  - vit_base_patch14_dinov2.lvd142m
+
+
+# Models that need torch._inductor.config.emulate_precision_casts=True to match
+# eager bf16 rounding semantics (fp16 untested). Without this, inductor
+# pointwise fusion can elide a bf16 round-trip that eager performs (e.g.
+# conv-bias-add fused across a bf16->fp32 cat boundary), producing a ~1 bf16
+# ULP forward divergence that amplifies through gradients in models with very
+# small natural gradient magnitudes (e.g. LayerScale init=1e-5).
+emulate_precision_casts:
   - vit_base_patch14_dinov2.lvd142m
 
 

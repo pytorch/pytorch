@@ -68,9 +68,9 @@ def _sycl_lib_options() -> list[str]:
 
 
 def _sycl_arch_as_compile_option() -> str:
-    arc_option_map = {"Xe12": "intel_gpu_pvc", "Xe20": "intel_gpu_bmg_g21"}
+    arc_option_map = {"Xe12": "pvc", "Xe20": "bmg-g21,bmg-g31"}
     arch = get_xpu_arch()
-    return arc_option_map.get(arch, "intel_gpu_pvc")
+    return arc_option_map.get(arch, "pvc")
 
 
 def _sycl_compiler_options() -> list[str]:
@@ -83,7 +83,7 @@ def _sycl_compiler_options() -> list[str]:
         "-std=c++20",
         "-fPIC",
         "-fsycl",
-        f"-fsycl-targets={_sycl_arch_as_compile_option()}",
+        "-fsycl-targets=spir64_gen",
         "-Xspirv-translator",
         "-spirv-ext=+SPV_INTEL_split_barrier,+SPV_INTEL_2d_block_io,+SPV_INTEL_subgroup_matrix_multiply_accumulate",
         "-fno-sycl-instrument-device-code",
@@ -91,6 +91,7 @@ def _sycl_compiler_options() -> list[str]:
         "-MD",
         "-Xs",
         (
+            f"-device {_sycl_arch_as_compile_option()} "
             "-options \"-igc_opts 'VISAOptions=-perfmodel,VectorAliasBBThreshold=100000000000,"
             "ExtraOCLOptions=-cl-intel-256-GRF-per-thread'\" "
             "-options -ze-opt-large-register-file"

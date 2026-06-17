@@ -21,7 +21,8 @@ namespace {
 void unsupportedDynamicOp(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     TORCH_CHECK(false, "vmap: We do not support batching operators that can output dynamic shape. ",
         "Attempted to vmap over ", op.schema().operator_name(), ". ",
-        "Please voice your support in https://github.com/pytorch/functorch/issues/256");
+        "Please file an issue at https://github.com/pytorch/pytorch/issues ",
+        "if you need this feature.");
 }
 #define UNSUPPORTED_DYNAMIC(op) \
     m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&unsupportedDynamicOp>());
@@ -34,9 +35,8 @@ void unsupportedLocalScalarDense(const c10::OperatorHandle& op, torch::jit::Stac
         "(3) encountering this error in PyTorch internals. ",
         "For (1): we don't support vmap over calling .item() on a Tensor, please try to ",
         "rewrite what you're doing with other operations. ",
-        "For (2): If you're doing some ",
-        "control flow instead, we don't support that yet, please shout over at ",
-        "https://github.com/pytorch/functorch/issues/257 . ",
+        "For (2): we don't support data-dependent control flow in vmap yet, ",
+        "please file an issue at https://github.com/pytorch/pytorch/issues . ",
         "For (3): please file an issue.");
 }
 
@@ -52,14 +52,14 @@ void unsupportedIsNonzero(const c10::OperatorHandle& op, torch::jit::Stack* stac
     TORCH_CHECK(false,
         "vmap: It looks like you're attempting to use a Tensor in some ",
         "data-dependent control flow. ",
-        "We don't support that yet, please shout over at ",
-        "https://github.com/pytorch/functorch/issues/257 .");
+        "We don't support that yet, please file an issue at ",
+        "https://github.com/pytorch/pytorch/issues .");
 }
 
 void unsupportedAllclose(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     TORCH_CHECK(false,
-        "vmap over torch.allclose isn't supported yet. Please voice your ",
-        "support over at github.com/pytorch/functorch/issues/275");
+        "vmap over torch.allclose isn't supported yet. Please file an issue ",
+        "at https://github.com/pytorch/pytorch/issues if you need this feature.");
 }
 }
 

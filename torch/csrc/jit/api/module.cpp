@@ -589,13 +589,13 @@ std::string Module::dump_to_str(
 
   ss << "module " << type()->name()->qualifiedName() << " {" << '\n';
   ss << "  parameters {" << '\n';
-  ss << torch::jit::jit_log_prefix("    ", parameters_ss.str());
+  ss << torch::jit::jit_log_prefix("    ", std::move(parameters_ss).str());
   ss << "  }" << '\n';
   ss << "  attributes {" << '\n';
-  ss << torch::jit::jit_log_prefix("    ", attributes_ss.str());
+  ss << torch::jit::jit_log_prefix("    ", std::move(attributes_ss).str());
   ss << "  }" << '\n';
   ss << "  methods {" << '\n';
-  ss << torch::jit::jit_log_prefix("  ", methods_ss.str());
+  ss << torch::jit::jit_log_prefix("  ", std::move(methods_ss).str());
   ss << "  }" << '\n';
   ss << "  submodules {" << '\n';
   for (const NameModule& s : named_children()) {
@@ -610,7 +610,7 @@ std::string Module::dump_to_str(
   ss << "  }" << '\n';
   ss << '}' << '\n';
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void Module::dump(

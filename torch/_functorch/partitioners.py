@@ -13,9 +13,11 @@ import os.path
 import re
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from typing import Any, TYPE_CHECKING
+
+import sympy
 
 import torch
 import torch._inductor.inductor_prims
@@ -33,22 +35,26 @@ from torch._inductor.custom_graph_pass import (
     CustomRuntimeEstimator,
 )
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import is_builtin
 from torch._logging import LazyString, trace_structured
 from torch._logging._internal import trace_log
 from torch._subclasses.fake_tensor import extract_tensor_metadata
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator, SymNode
 from torch.fx.experimental.symbolic_shapes import (
+    _get_placeholder_expr,
     find_symbol_binding_fx_nodes,
-    free_symbols,
     is_symbol_binding_fx_node,
+    is_symbolic,
     optimization_hint,
     statically_known_false,
     statically_known_true,
 )
 from torch.fx.passes import graph_drawer
+from torch.fx.traceback import _get_memory_budget_annotation
 from torch.utils._ordered_set import OrderedSet
 from torch.utils.checkpoint import CheckpointPolicy
 
@@ -74,14 +80,15 @@ from ._aot_autograd.utils import (
     _is_fwd_seed_offset,
     _is_primal,
     _is_tangent,
-    get_cuda_generator_meta_val,
+    get_default_generator,
+    get_device_rng_state,
+    supports_graphsafe_rng,
 )
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 
 if TYPE_CHECKING:
     import networkx as nx
-    import sympy
 
 
 AOT_PARTITIONER_DEBUG: bool = config.debug_partitioner
@@ -455,6 +462,46 @@ def _must_be_in_backward(node: fx.Node) -> bool:
         and node.target._schema.is_mutable
     )
     return _has_tag_is_backward(node) and is_mutable
+
+
+def _iter_input_exprs_without_replacements(val: Any) -> Iterator[sympy.Basic]:
+    # Keep this traversal in sync with symbolic_shapes._iterate_exprs.
+    if isinstance(val, py_sym_types):
+        if is_symbolic(val):
+            yield _get_placeholder_expr(val.node)
+    elif isinstance(val, SymNode):
+        yield _get_placeholder_expr(val)
+    elif isinstance(val, sympy.Basic):
+        yield val
+    elif isinstance(val, (int, float, bool, str)):
+        pass
+    elif isinstance(val, (tuple, list)):
+        for s in val:
+            yield from _iter_input_exprs_without_replacements(s)
+    elif isinstance(val, dict):
+        for s in itertools.chain(val.keys(), val.values()):
+            yield from _iter_input_exprs_without_replacements(s)
+    elif is_sparse_any(val):
+        yield from _iter_input_exprs_without_replacements(val.size())
+    elif isinstance(val, torch.Tensor):
+        yield from _iter_input_exprs_without_replacements(val.size())
+        yield from _iter_input_exprs_without_replacements(val.stride())
+        yield from _iter_input_exprs_without_replacements(val.storage_offset())
+    elif val is None:
+        pass
+    elif isinstance(val, torch.Generator) or is_opaque_value(val):
+        pass
+    elif isinstance(val, FakeScriptObject):
+        pass
+    else:
+        raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
+
+
+def _free_symbols_without_replacements(val: Any) -> OrderedSet[sympy.Symbol]:
+    symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+    for expr in _iter_input_exprs_without_replacements(val):
+        symbols.update(expr.free_symbols)
+    return symbols
 
 
 def _extract_fwd_bwd_outputs(
@@ -1103,7 +1150,9 @@ def _extract_fwd_bwd_modules(
     for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
         if "val" not in node.meta:
             continue
-        new_symbols = free_symbols(node.meta["val"]) - saved_symbols
+        new_symbols = (
+            _free_symbols_without_replacements(node.meta["val"]) - saved_symbols
+        )
         # NB: Deterministic order please!
         for s in sorted(new_symbols, key=lambda s: s.name):
             # NB: For well formed graphs, the symbol should always be present,
@@ -1505,6 +1554,19 @@ def _size_of(node: fx.Node) -> int:
             return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
+        elif isinstance(val, (torch.ScriptObject, FakeScriptObject)):
+            # A (Fake)ScriptObject may hold tensors internally, so we cannot
+            # soundly compute its size here. Only treat it as zero size when the
+            # user has explicitly opted in via this escape hatch.
+            if config.unsafe_treat_script_objects_as_zero_size:
+                return 0
+            raise RuntimeError(
+                f"Cannot compute the size of {type(val)} on node {node}. A "
+                "ScriptObject may hold tensors internally and the partitioner "
+                "has no general way to measure its memory footprint. Set "
+                "torch._functorch.config.unsafe_treat_script_objects_as_zero_size"
+                " = True to assume such objects are zero size (unsound)."
+            )
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
     if node.op == "get_attr" or (
@@ -1536,8 +1598,7 @@ def pointwise_ops() -> list[torch._ops.OpOverloadPacket]:
         if not isinstance(opoverloadpacket, torch._ops.OpOverloadPacket):
             continue
 
-        for overload in opoverloadpacket.overloads():
-            op_overload = getattr(opoverloadpacket, overload)
+        for op_overload in opoverloadpacket.op_overloads():
             if torch.Tag.pointwise in op_overload.tags:
                 # currently aot autograd uses packet not overload
                 ops.append(opoverloadpacket)
@@ -1688,14 +1749,14 @@ def apply_graphsafe_rng_functionalization(
     # functionalization. See note above [CUDA Graph Safe RNG Functionalization]
     with fw_module.graph.inserting_after(last_fwd_input):
         fwd_rng_state = fw_module.graph.placeholder(f"fwd_rng_state_{rng_count}")
-        fwd_rng_state.meta["val"] = get_cuda_generator_meta_val(device_idx)
+        fwd_rng_state.meta["val"] = get_default_generator(device).clone_state()
         last_fwd_input = fwd_rng_state
 
     # Handle backward pass
     with bw_module.graph.inserting_after(last_bwd_input):
         bwd_rng_state = bw_module.graph.placeholder(f"bwd_rng_state_{rng_count}")
         # as above, clone so that meta val generator will not contain tensors
-        bwd_rng_state.meta["val"] = get_cuda_generator_meta_val(device_idx)
+        bwd_rng_state.meta["val"] = get_default_generator(device).clone_state()
         last_bwd_input = bwd_rng_state
 
     # Update forward node
@@ -1778,7 +1839,7 @@ def functionalize_rng_ops(
 
         for candidate in candidates:
             if isinstance(candidate, torch.Tensor):
-                if candidate.device.type == "cuda":
+                if supports_graphsafe_rng(candidate.device):
                     return candidate.device
 
         return torch.device("cpu")
@@ -1790,8 +1851,8 @@ def functionalize_rng_ops(
         if fake_mode is None:
             raise AssertionError("fake_mode must not be None")
         with fake_mode:
-            if device is not None and device.type == "cuda":
-                return fake_mode.from_tensor(torch.cuda.get_rng_state())
+            if device is not None and supports_graphsafe_rng(device):
+                return fake_mode.from_tensor(get_device_rng_state(device))
             return fake_mode.from_tensor(torch.get_rng_state())
 
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
@@ -1838,16 +1899,16 @@ def functionalize_rng_ops(
     )
     # pyrefly: ignore [unbound-name]
     devices.discard(torch.device("cpu"))
-    # multiple cuda devices won't work with cudagraphs anyway,
+    # multiple graphsafe devices won't work with cudagraphs anyway,
     # fallback to non graphsafe rng checkpointing
-    multi_cuda_devices = len(devices) > 1
+    multi_graphsafe_devices = len(devices) > 1
 
     # this changes numerics, so if fallback_random is set we will not use it
     # pyrefly: ignore [unbound-name]
     ind_config = torch._inductor.config
     use_rng_graphsafe_rng_functionalization = (
         config.graphsafe_rng_functionalization
-        and not multi_cuda_devices
+        and not multi_graphsafe_devices
         and (
             not ind_config.fallback_random
             or ind_config.test_configs.graphsafe_rng_func_ignores_fallback_random
@@ -1866,7 +1927,7 @@ def functionalize_rng_ops(
         if (
             use_rng_graphsafe_rng_functionalization
             and device is not None
-            and device.type == "cuda"
+            and supports_graphsafe_rng(device)
         ):
             last_fwd_input, last_bwd_input = apply_graphsafe_rng_functionalization(
                 fw_module,
@@ -2902,6 +2963,7 @@ def get_default_op_list() -> OpTypes:
     default_recomputable_ops += [
         prims.div,
         prims.convert_element_type,
+        prims.prepare_softmax_online,
         aten.clone,
         aten._to_copy,
         aten.full_like,
@@ -3747,7 +3809,30 @@ def min_cut_rematerialization_partition(
 
     #  add the CSE pass
     if config.cse:
-        cse_graph = fx_graph_cse(fx_g)
+        # CSE runs before partitioning, so do not merge a forward-only value
+        # with a value that is also needed by the backward graph. Otherwise the
+        # partitioner may save the merged value as an extra forward output.
+        _, bwd_outputs, _, _ = _extract_fwd_bwd_outputs(
+            joint_module, num_fwd_outputs=num_fwd_outputs
+        )
+        backward_dependencies: OrderedSet[fx.Node] = OrderedSet()
+
+        backward_dependency_stack = [
+            output
+            for output in bwd_outputs
+            if output is not None and output.op != "output"
+        ]
+        while backward_dependency_stack:
+            node = backward_dependency_stack.pop()
+            if node in backward_dependencies:
+                continue
+            backward_dependencies.add(node)
+            backward_dependency_stack.extend(node.all_input_nodes)
+
+        def partition_key(node: fx.Node) -> bool:
+            return node in backward_dependencies
+
+        cse_graph = fx_graph_cse(fx_g, extra_node_key=partition_key)
         joint_module.graph = cse_graph
     joint_graph = joint_module.graph
 
@@ -3789,11 +3874,69 @@ def min_cut_rematerialization_partition(
             for user in node.users:
                 node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
 
+    # memory_budget override resolution, in increasing precedence:
+    #   1. config.activation_memory_budget (global default).
+    #   2. Legacy node.meta["memory_budget"], set by the old
+    #      `MemoryBudgetMode` / `set_memory_budget` allow_in_graph marker. First
+    #      matching node wins (preserves prior behavior); we may want to remove
+    #      this path later.
+    #   3. `torch.autograd.graph.region_activation_memory_budget(...)`, read off
+    #      node.meta["custom"] via `_get_memory_budget_annotation` and propagated
+    #      onto every annotated node via _COPY_META_FIELDS["custom"]; overrides
+    #      the legacy reader.
     memory_budget = config.activation_memory_budget
     for node in joint_graph.nodes:
         if isinstance(node.meta.get("memory_budget", None), float):
             memory_budget = node.meta["memory_budget"]
             break
+
+    # The partitioner applies a single budget per joint graph, so all annotated
+    # nodes must agree and the annotation must cover every forward op; otherwise
+    # the caller mixed budgets or annotated only part of a graph (across a graph
+    # break each graph is resolved independently). Collect both in one pass.
+    region_budgets: OrderedSet[float] = OrderedSet()
+    unannotated_fw_ops: list[fx.Node] = []
+    for node in joint_graph.nodes:
+        budget = _get_memory_budget_annotation(node)
+        if budget is not None:
+            region_budgets.add(budget)
+        elif node.op == "call_function" and node_info.is_required_fw(node):
+            unannotated_fw_ops.append(node)
+
+    # A budget must consistently cover the entire forward, including HOP bodies.
+    # Recurse into nested subgraph modules: collect their budgets (for the
+    # agreement check) and flag any unannotated call_function (for coverage). In
+    # a consistent graph every node in every body carries the budget, so an
+    # unannotated body op means the budget did not cover that HOP.
+    all_budgets: OrderedSet[float] = OrderedSet(region_budgets)
+    for _, sub in joint_module.named_modules():
+        if isinstance(sub, fx.GraphModule) and sub.graph is not joint_graph:
+            for node in sub.graph.nodes:
+                b = _get_memory_budget_annotation(node)
+                if b is not None:
+                    all_budgets.add(b)
+                elif node.op == "call_function":
+                    unannotated_fw_ops.append(node)
+    if len(all_budgets) > 1:
+        raise RuntimeError(
+            f"torch.autograd.graph.region_activation_memory_budget: "
+            f"conflicting budgets within a single joint graph (including nested "
+            f"subgraphs): {sorted(all_budgets)}. Use a graph break to separate "
+            f"regions that need different budgets."
+        )
+
+    if all_budgets:
+        if unannotated_fw_ops:
+            raise RuntimeError(
+                f"torch.autograd.graph.region_activation_memory_budget: must "
+                f"cover the entire forward of a graph (including HOP bodies), but "
+                f"{len(unannotated_fw_ops)} forward op(s) are unannotated. Wrap "
+                f"the whole forward in a single region; use a graph break to scope "
+                f"different budgets to different graphs. Note that a graph break "
+                f"inside the annotated region can also cause unannotated ops here. "
+                f"Unannotated ops: {[n.name for n in unannotated_fw_ops]}."
+            )
+        memory_budget = next(iter(all_budgets))
     saved_values = choose_saved_values_set(
         joint_graph,
         node_info,
@@ -3911,9 +4054,16 @@ def draw_graph(
         dot_graph_shape=dot_graph_shape,
     )
     x = g.get_main_dot_graph()
-    write_method = getattr(x, "write_" + ext.lstrip("."))
     fname = f"{base}{ext}"
-    if prog is None:
+    graph_format = ext.lstrip(".")
+    if graph_format in {"dot", "raw"}:
+        # pydot's write_dot() invokes Graphviz with -Tdot.  For large FX graphs
+        # that layout step can dominate compile debugging, so write raw DOT
+        # source directly for text graph dumps.
+        x.write(fname)
+    elif prog is None:
+        write_method = getattr(x, "write_" + graph_format)
         write_method(fname)
     else:
+        write_method = getattr(x, "write_" + graph_format)
         write_method(fname, prog=prog)

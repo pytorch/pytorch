@@ -225,7 +225,7 @@ necessary for pickling a module object.
 `pickle`'s format was chosen due to:
 
 * **user friendliness** - the attributes file can be loaded in Python with `pickle`
-* **size limits** - formats such as Protobuf empose size limits on total
+* **size limits** - formats such as Protobuf impose size limits on total
  message size, whereas pickle limits are on individual values (e.g. strings
  cannot be longer than 4 GB)
 * **standard format** - `pickle` is a standard Python module with a reasonably

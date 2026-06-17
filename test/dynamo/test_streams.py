@@ -15,7 +15,14 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
-from torch.testing._internal.common_utils import requires_cuda, TEST_XPU
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+    IS_WINDOWS,
+    requires_cuda,
+    TEST_WITH_ROCM,
+    TEST_XPU,
+)
 
 
 def remove_file_comment(gm_str: str) -> str:
@@ -575,12 +582,13 @@ class <lambda>(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[2, 2]", primals_2: "f32[2, 2]"):
         # Annotation: {'stream': 2}
-        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2);  primals_1 = None
-        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2)
+        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2)
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2);  mul = None
 
         # Annotation: {'stream': 1}
-        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2);  primals_2 = None
-        return (add, add_1, mul, add_1)
+        mul_1: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2);  primals_1 = None
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_1, primals_2);  primals_2 = None
+        return (add, add_1, mul_1, add_1)
 """,
         )
 
@@ -589,7 +597,7 @@ class GraphModule(torch.nn.Module):
             print_graph(bw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, mul: "f32[2, 2]", add_1: "f32[2, 2]", tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
+    def forward(self, mul_1: "f32[2, 2]", add_1: "f32[2, 2]", tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
         # Annotation: {'stream': 1}
         mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, 2)
 
@@ -604,7 +612,7 @@ class GraphModule(torch.nn.Module):
 
         # No stacktrace found for following nodes
         subgraph_record_event_default = self.subgraph_record_event_default
-        control_deps = torch.ops.higher_order.control_deps((mul, add_1, mul_2, add_3, add_2), subgraph_record_event_default, add_1, add_3, add_2);  mul = add_1 = mul_2 = add_3 = add_2 = subgraph_record_event_default = None
+        control_deps = torch.ops.higher_order.control_deps((mul_1, add_1, mul_2, add_3, add_2), subgraph_record_event_default, add_1, add_3, add_2);  mul_1 = add_1 = mul_2 = add_3 = add_2 = subgraph_record_event_default = None
 
         #
         getitem_2: "f32[2, 2]" = control_deps[3]
@@ -760,6 +768,37 @@ class <lambda>(torch.nn.Module):
         return (copy_,)
 """,
         )
+
+    @requires_cuda
+    def test_recorded_cuda_events_append_runtime_objects(self):
+        events = []
+
+        def fn(x):
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+
+            start_event.record()
+            out = torch.matmul(x, x)
+            end_event.record()
+
+            events.append(start_event)
+            events.append(end_event)
+            return out
+
+        x = torch.randn(16, 16, device="cuda")
+        expected = fn(x)
+        torch.cuda.synchronize()
+        events[0].elapsed_time(events[1])
+        events.clear()
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch.cuda.synchronize()
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(len(events), 2)
+        self.assertIsInstance(events[0], torch.Event)
+        self.assertIsInstance(events[1], torch.Event)
+        self.assertGreaterEqual(events[0].elapsed_time(events[1]), 0.0)
 
     @requires_cuda
     def test_run_opcheck_fork_join(self):
@@ -1856,6 +1895,10 @@ class GraphModule(torch.nn.Module):
                 torch.ones(2, 2, device="cuda")
             )
 
+    @unittest.skipIf(
+        IS_LINUX or IS_MACOS or TEST_WITH_ROCM or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/178155",
+    )
     @requires_cuda
     @unittest.skip("https://github.com/pytorch/pytorch/issues/177771")
     def test_cuda_event_record_on_stream(self):

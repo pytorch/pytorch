@@ -79,6 +79,10 @@ def lower_cpu(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        _,  # dq_write_order
+        _,  # dq_write_order_full
+        _,  # dq_kv_order
+        _,  # dq_kv_order_spt
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -178,7 +182,8 @@ def lower_cpu(
                 break
 
         # Get the mask node
-        assert output_node is not None
+        if output_node is None:
+            raise AssertionError("output_node must not be None")
         mask_node = output_node.args[0]
 
         size_node = [cur_qSplitSize, cur_kvSplitSize]
@@ -309,16 +314,20 @@ def lower_cpu(
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
-    assert V.graph.sizevars.evaluate_expr(
+    # In flash decoding, the partition size of doing the parallelism on KV length dim
+    PARTITION_SIZE = kernel_options.get("PARTITION_SIZE", 128)
+    if not V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
-    ), (
-        "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
-    )
-    assert V.graph.sizevars.evaluate_expr(
+    ):
+        raise AssertionError(
+            "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
+        )
+    if not V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE))
-    ), (
-        "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
-    )
+    ):
+        raise AssertionError(
+            "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
+        )
     CppFlexAttentionTemplate.add_choices(
         choices=_choices,
         input_nodes=input_nodes,
@@ -328,6 +337,7 @@ def lower_cpu(
         mask_mod=None if skip_mask_score else mask_graph_buffer,
         kv_block_size=SPARSE_KV_BLOCK_SIZE,
         q_block_size=SPARSE_Q_BLOCK_SIZE,
+        partition_size=PARTITION_SIZE,
         has_other_buffer=has_other_buffer,
         no_full_kv_block=no_full_kv_block,
         fake_buffers=fake_buffers,

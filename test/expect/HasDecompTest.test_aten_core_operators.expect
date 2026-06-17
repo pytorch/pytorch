@@ -34,6 +34,10 @@ aten::acos_
 aten::acosh
 aten::acosh.out
 aten::acosh_
+aten::adaptive_max_pool2d
+aten::adaptive_max_pool2d.out
+aten::adaptive_max_pool3d
+aten::adaptive_max_pool3d.out
 aten::add.Scalar
 aten::add.Scalar_out
 aten::add.Tensor

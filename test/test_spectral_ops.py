@@ -221,8 +221,11 @@ class TestFFT(TestCase):
                 }
 
                 y = backward(forward(x, **kwargs), **kwargs)
-                if x.dtype is torch.half and y.dtype is torch.complex32:
-                    # Since type promotion currently doesn't work with complex32
+                if (
+                    (x.dtype is torch.half and y.dtype is torch.complex32) or
+                    (x.dtype is torch.bfloat16 and y.dtype is torch.bcomplex32)
+                ):
+                    # Since type promotion currently doesn't work with [b]complex32
                     # manually promote `x` to complex32
                     x = x.to(torch.complex32)
                 # For real input, ifft(fft(x)) will convert to complex
@@ -443,7 +446,6 @@ class TestFFT(TestCase):
          allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
-        # FIXME: https://github.com/pytorch/pytorch/issues/108205
         errMsg = "dims must be unique"
         with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(0, 1, 0))

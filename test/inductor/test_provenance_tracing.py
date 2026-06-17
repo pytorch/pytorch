@@ -21,7 +21,9 @@ from torch._inductor.debug import (
     create_kernel_information_json,
     create_mapping_pre_post_grad_nodes,
     create_node_mapping_kernel_to_post_grad,
+    get_kernel_information_jsons,
     reset_inductor_kernel_provenance_debug_handle,
+    reset_provenance_globals,
 )
 from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
@@ -851,6 +853,20 @@ class TestProvenanceTracingStackTraces(TestCase):
         self.assertIsInstance(result, dict)
         self.assertEqual(len(result), 0)  # Should be empty with no provenance data
 
+    def test_reset_provenance_globals_preserves_kernel_information_jsons(self):
+        kernel_information_jsons = get_kernel_information_jsons()
+        previous = dict(kernel_information_jsons)
+        kernel_information_jsons.clear()
+        kernel_information_jsons["outer"] = {}
+        try:
+            with reset_provenance_globals():
+                self.assertEqual(get_kernel_information_jsons(), {"outer": {}})
+                get_kernel_information_jsons()["inner"] = {}
+            self.assertEqual(get_kernel_information_jsons(), {"outer": {}, "inner": {}})
+        finally:
+            get_kernel_information_jsons().clear()
+            get_kernel_information_jsons().update(previous)
+
     @unittest.skipIf(
         IS_MACOS,
         "MacOS generates different debug handles",
@@ -939,11 +955,38 @@ class ProvenanceTracingKernelContextTemplate:
         _, code = run_and_get_cpp_code(torch._inductor.aoti_compile_and_package, ep)
 
         self.assertTrue("KernelContextGuard" not in code)
+        FileCheck().check_not(
+            "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+        ).check_not("thread_local KernelContext* tls_kernel_context = nullptr;").run(
+            code
+        )
 
         with config.patch(
             {
                 "trace.provenance_tracking_level": 1,
                 "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": False,
+            }
+        ):
+            package_path, code = run_and_get_cpp_code(
+                torch._inductor.aoti_compile_and_package, ep
+            )
+
+            FileCheck().check_not(
+                "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+            ).check_not(
+                "thread_local KernelContext* tls_kernel_context = nullptr;"
+            ).check_not("KernelContextGuard").run(code)
+
+            compiled_model = torch._inductor.aoti_load_package(package_path)
+            result = compiled_model(*example_inputs)
+            self.assertEqual(result, model(*example_inputs))
+
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 1,
+                "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": True,
             }
         ):
             package_path, code = run_and_get_cpp_code(

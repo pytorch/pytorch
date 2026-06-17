@@ -280,7 +280,7 @@ class Node(_NodeBase):
     # All of the nodes that use the value produced by this Node
     # Note one user may correspond to several uses, e.g. the node for ``x + x``
     # would appear once here, but represents two uses.
-    # Is a dict to act as an "ordered set". Keys are significant, value dont-care
+    # Is a dict to act as an "ordered set". Keys are significant, value don't-care
     users: dict["Node", None]
     # Type expression representing the output value of this node.
     # This should contain the same class of Type objects that would appear

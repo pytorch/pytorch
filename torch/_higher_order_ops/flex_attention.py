@@ -736,6 +736,12 @@ def create_fw_bw_graph(
             args = [score, b, h, m, n] + list(other_buffers)
             optional_grad = [example_grad] if example_grad.requires_grad else []
             _, grads = joint(args, optional_grad)
+            if grads[0] is None:
+                raise RuntimeError(
+                    "flex_attention backward requires the output of score_mod to "
+                    "depend on score. Got a score_mod whose output does not "
+                    "require gradients with respect to score."
+                )
 
             return grads
 
@@ -835,6 +841,10 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             q_indices,
             full_q_num_blocks,
             full_q_indices,
+            dq_write_order,
+            dq_write_order_full,
+            dq_kv_order,
+            dq_kv_order_spt,
             Q_BLOCK_SIZE,
             KV_BLOCK_SIZE,
             *other_buffers,
@@ -885,6 +895,10 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                     q_indices,
                     full_q_num_blocks,
                     full_q_indices,
+                    dq_write_order,
+                    dq_write_order_full,
+                    dq_kv_order,
+                    dq_kv_order_spt,
                     Q_BLOCK_SIZE,
                     KV_BLOCK_SIZE,
                     mask_graph,
@@ -1459,10 +1473,19 @@ def flex_attention_backward_fake_tensor_mode(
     broadcasted_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
     broadcasted_grad_value = _permute_strides(broadcasted_grad_value, value.stride())
 
-    if Bq > 1 and Bkv == 1:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
+
+    # This branch chooses fake tensor metadata, including strides. Guarding is
+    # valid for backed symbolic sizes, while unbacked/data-dependent predicates
+    # conservatively fall through to the non-broadcast contract below.
+    if guard_or_false(sym_and(Bkv == 1, Bq > 1)):
         grad_key = torch.sum(broadcasted_grad_key, dim=0, keepdim=True)
         grad_value = torch.sum(broadcasted_grad_value, dim=0, keepdim=True)
     else:
+        torch._check(
+            Bq == Bkv,
+            lambda: "grad_key/grad_value batch must match key/value batch.",
+        )
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
 
