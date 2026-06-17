@@ -14368,7 +14368,7 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA: linalg_lstsq_out
+    CPU, CUDA, MPS: linalg_lstsq_out
   tags: dynamic_output_shape
 
 # torch.linalg.matmul, alias for torch.matmul
@@ -14448,7 +14448,7 @@
 - func: _linalg_eigh.eigenvalues(Tensor A, str UPLO="L", bool compute_v=True, *, Tensor(a!) eigenvalues, Tensor(b!) eigenvectors) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   structured: True
   dispatch:
-    CPU, CUDA: _linalg_eigh_out
+    CPU, CUDA, MPS: _linalg_eigh_out
 
 - func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg
@@ -14572,7 +14572,7 @@
 - func: _linalg_svd.U(Tensor A, bool full_matrices=False, bool compute_uv=True, *, str? driver=None, Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh)
   structured: True
   dispatch:
-    CPU, CUDA: _linalg_svd_out
+    CPU, CUDA, MPS: _linalg_svd_out
 
 - func: linalg_svd(Tensor A, bool full_matrices=True, *, str? driver=None) -> (Tensor U, Tensor S, Tensor Vh)
   python_module: linalg

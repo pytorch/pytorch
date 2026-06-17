@@ -11193,6 +11193,21 @@ class TestLinalgMPS(TestCaseMPS):
         m2 = torch.randn(25, device=device).to(dtype)
         self._test_addr(torch.addr, M, m1, m2, beta=0)
 
+    def test_linalg_lstsq_default_driver(self, device="mps", dtype=torch.float32):
+        # With no driver= argument MPS should match the CPU default (gelsy), whose
+        # output shapes differ from the other drivers: rank is populated while
+        # residuals and singular_values are left empty. Check all four outputs so a
+        # CPU->MPS move does not silently change them.
+        torch.manual_seed(0)
+        A = torch.randn(6, 4, dtype=dtype)
+        B = torch.randn(6, 3, dtype=dtype)
+        cpu = torch.linalg.lstsq(A, B)
+        mps = torch.linalg.lstsq(A.to(device), B.to(device))
+        self.assertEqual(mps.solution.cpu(), cpu.solution, atol=1e-4, rtol=1e-4)
+        self.assertEqual(mps.residuals.cpu(), cpu.residuals)
+        self.assertEqual(mps.rank.cpu(), cpu.rank)
+        self.assertEqual(mps.singular_values.cpu(), cpu.singular_values)
+
     def test_matrix_rank(self, device="mps", dtype=torch.float32):
         matrix_rank = torch.linalg.matrix_rank
 
@@ -11231,15 +11246,7 @@ class TestLinalgMPS(TestCaseMPS):
         shapes = (3, 13)
         batches = ((), (0, ), (4, ), (3, 5, ))
         for (shape0, shape1), batch in zip(itertools.product(shapes, reversed(shapes)), batches):
-            # escape only when NotImplementedError of downstream function is raised
-            # TODO: remove this once the required function is implemented
-            try:
-                run_test(shape0, shape1, batch)
-            except NotImplementedError as e:
-                with self.assertRaisesRegex(
-                        NotImplementedError,
-                        "The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device."):
-                    raise e
+            run_test(shape0, shape1, batch)
 
     def test_pinv(self, device="mps", dtype=torch.float32, precision=1e-4):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
@@ -11299,22 +11306,8 @@ class TestLinalgMPS(TestCaseMPS):
                       (0, 0), (3, 0, 0), ]:  # zero numel square matrices
             A = random_hermitian_pd_matrix(sizes[-1], *sizes[:-2], dtype=dtype, device=device)
             hermitian = True
-            # escape only when NotImplementedError of downstream function is raised
-            # TODO: remove this once the required function is implemented
-            try:
-                run_test_main(A, hermitian)
-            except NotImplementedError as e:
-                with self.assertRaisesRegex(
-                        NotImplementedError,
-                        "The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device."):
-                    raise e
-            try:
-                run_test_numpy(A, hermitian)
-            except NotImplementedError as e:
-                with self.assertRaisesRegex(
-                        NotImplementedError,
-                        "The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device."):
-                    raise e
+            run_test_main(A, hermitian)
+            run_test_numpy(A, hermitian)
 
     @parametrize("m", [1, 32, 64])
     @parametrize("n", [48, 64])
@@ -15129,6 +15122,47 @@ class TestConsistency(TestCaseMPS):
                 self._assert_random_op_match(mps_out, cpu_out)
                 continue
 
+            if op.name in ("linalg.svd", "svd"):
+                # Singular vectors are only defined up to a per-mode sign (gauge):
+                # MPS's Jacobi solver and CPU LAPACK pick different but equally valid
+                # signs. Compare gauge-invariantly: singular values exactly, the
+                # vector magnitudes, and the reconstruction == A. linalg.svd returns
+                # (U, S, Vh); legacy torch.svd returns (U, S, V) with V (not V^H).
+                U_m, S_m, W_m = mps_out  # W = Vh (linalg) or V (legacy)
+                U_c, S_c, W_c = cpu_out
+                self.assertEqual(S_c, S_m, atol=atol, rtol=rtol)
+                kk = S_m.shape[-1]
+                self.assertEqual(U_c[..., :kk].abs(), U_m[..., :kk].abs(), atol=atol, rtol=rtol)
+                if op.name == "linalg.svd":
+                    Vh_m, Vh_c = W_m[..., :kk, :], W_c[..., :kk, :]
+                else:
+                    Vh_m, Vh_c = W_m[..., :kk].mH, W_c[..., :kk].mH
+                self.assertEqual(Vh_c.abs(), Vh_m.abs(), atol=atol, rtol=rtol)
+                recon = (U_m[..., :kk] * S_m.unsqueeze(-2)) @ Vh_m
+                self.assertEqual(mps_sample.input, recon, atol=atol, rtol=rtol)
+                continue
+
+            if op.name in ("linalg.eigh",):
+                # Eigenvectors are gauge-ambiguous; compare gauge-invariantly:
+                # eigenvalues, Q^H Q == I, and the reconstruction Q diag(w) Q^H == A.
+                w_m, Q_m = mps_out
+                w_c, _ = cpu_out
+                self.assertEqual(w_c, w_m, atol=atol, rtol=rtol)
+                n = Q_m.shape[-1]
+                eye = torch.eye(n, dtype=Q_m.dtype, device=Q_m.device).expand_as(Q_m)
+                self.assertEqual(Q_m.mH @ Q_m, eye, atol=atol, rtol=rtol)
+                # eigh reads only the UPLO triangle; reconstruct that Hermitian matrix.
+                uplo = mps_sample.kwargs.get("UPLO", "L").strip("'\"").upper()
+                A_in = mps_sample.input
+                diag = torch.diag_embed(A_in.diagonal(dim1=-2, dim2=-1).real.to(A_in.dtype))
+                if uplo == "U":
+                    A_herm = A_in.triu(1) + A_in.triu(1).mH + diag
+                else:
+                    A_herm = A_in.tril(-1) + A_in.tril(-1).mH + diag
+                recon = (Q_m * w_m.to(Q_m.dtype).unsqueeze(-2)) @ Q_m.mH
+                self.assertEqual(A_herm, recon, atol=atol, rtol=rtol)
+                continue
+
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
@@ -15158,6 +15192,38 @@ class TestConsistency(TestCaseMPS):
 
             if op.name in self.RANDOM_OP_NAMES:
                 self._assert_random_op_match(mps_out, cpu_out)
+            elif op.name in ("linalg.svd", "svd"):
+                # Gauge-invariant forward check (see test_output_match): vectors carry
+                # an arbitrary per-mode sign; compare S exactly, |U|/|V[h]|, and recon.
+                U_m, S_m, W_m = mps_out
+                U_c, S_c, W_c = cpu_out
+                self.assertEqual(S_c, S_m, atol=atol, rtol=rtol)
+                kk = S_m.shape[-1]
+                self.assertEqual(U_c[..., :kk].abs(), U_m[..., :kk].abs(), atol=atol, rtol=rtol)
+                if op.name == "linalg.svd":
+                    Vh_m, Vh_c = W_m[..., :kk, :], W_c[..., :kk, :]
+                else:
+                    Vh_m, Vh_c = W_m[..., :kk].mH, W_c[..., :kk].mH
+                self.assertEqual(Vh_c.abs(), Vh_m.abs(), atol=atol, rtol=rtol)
+                recon = (U_m[..., :kk] * S_m.to(U_m.dtype).unsqueeze(-2)) @ Vh_m
+                self.assertEqual(mps_sample.input, recon, atol=atol, rtol=rtol)
+            elif op.name in ("linalg.eigh",):
+                # Gauge-invariant forward check (see test_output_match).
+                w_m, Q_m = mps_out
+                w_c, _ = cpu_out
+                self.assertEqual(w_c, w_m, atol=atol, rtol=rtol)
+                n = Q_m.shape[-1]
+                eye = torch.eye(n, dtype=Q_m.dtype, device=Q_m.device).expand_as(Q_m)
+                self.assertEqual(Q_m.mH @ Q_m, eye, atol=atol, rtol=rtol)
+                uplo = mps_sample.kwargs.get("UPLO", "L").strip("'\"").upper()
+                A_in = mps_sample.input
+                diag = torch.diag_embed(A_in.diagonal(dim1=-2, dim2=-1).real.to(A_in.dtype))
+                if uplo == "U":
+                    A_herm = A_in.triu(1) + A_in.triu(1).mH + diag
+                else:
+                    A_herm = A_in.tril(-1) + A_in.tril(-1).mH + diag
+                recon = (Q_m * w_m.to(Q_m.dtype).unsqueeze(-2)) @ Q_m.mH
+                self.assertEqual(A_herm, recon, atol=atol, rtol=rtol)
             else:
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
@@ -15183,6 +15249,25 @@ class TestConsistency(TestCaseMPS):
                 continue
             # rand_like does not work with certain dtypes, so cast to double and cast back
             cpu_grad_outputs = tuple(torch.rand_like(t, dtype=torch.double).to(dtype=t.dtype) for t in diff_cpu_out)
+
+            if op.name in ("linalg.svd", "svd"):
+                # Singular vectors carry an arbitrary per-mode sign/phase (gauge) that
+                # MPS's Jacobi solver fixes differently from CPU LAPACK. The gradients
+                # w.r.t. U and Vh are therefore gauge-dependent and not comparable
+                # element-wise, but the gradient w.r.t. the (gauge-invariant) singular
+                # values IS. Compare only the S-seeded input gradient: zero the U/Vh
+                # grad_outputs (output order is U, S, V[h]).
+                cpu_grad_outputs = tuple(
+                    g if i == 1 else torch.zeros_like(g)
+                    for i, g in enumerate(cpu_grad_outputs))
+
+            if op.name in ("linalg.eigh",):
+                # Only the eigenvalue gradient is gauge-invariant, so seed only it
+                # (output order is eigenvalues, eigenvectors).
+                cpu_grad_outputs = tuple(
+                    g if i == 0 else torch.zeros_like(g)
+                    for i, g in enumerate(cpu_grad_outputs))
+
             mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
 
             # Compare computed gradients with cpu given random grad_output vector
