@@ -4196,7 +4196,7 @@ class TestDistributions(DistributionsTestCase):
                         ]
                     ),
                 )
-                
+
     def test_cauchy_gumbel_icdf_boundary(self):
         # Boundary quantiles map to the (unbounded) support endpoints.
         # https://github.com/pytorch/pytorch/issues/186824
