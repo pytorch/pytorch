@@ -138,11 +138,14 @@ at::Tensor pow_backward_exponent(
     const at::Tensor& result);
 at::Tensor angle_backward(const at::Tensor& grad, const at::Tensor& self);
 template <typename T>
-at::Tensor mul_tensor_backward(const Tensor& grad, T other, ScalarType self_st);
+at::Tensor mul_tensor_backward(
+    const Tensor& grad,
+    const T& other,
+    ScalarType self_st);
 template <typename T>
 at::Tensor div_tensor_self_backward(
     const Tensor& grad,
-    T other,
+    const T& other,
     ScalarType self_st,
     const std::optional<std::string_view>& rounding_mode = std::nullopt);
 at::Tensor div_tensor_other_backward(
@@ -805,9 +808,9 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const std::optional<Tensor>& gamma,
-    c10::SymInt N,
+    const c10::SymInt& N,
     const c10::SymInt& C,
-    c10::SymInt HxW,
+    const c10::SymInt& HxW,
     int64_t group,
     double eps,
     std::array<bool, 3> grad_input_mask);
