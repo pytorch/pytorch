@@ -108,6 +108,7 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
+    _rocm_native_device_arch_name,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
@@ -359,6 +360,38 @@ def is_mkldnn_conv(node: Node) -> bool:
             ]:
                 return True
 
+    return False
+
+
+def _conv_device_is_gfx942(conv_nodes: list[Node]) -> bool:
+    """Return True iff an aten convolution in the graph lives on a ROCm gfx942
+    (MI300) device.
+
+    Only ``aten.convolution.default`` nodes are inspected: mkldnn conv nodes use
+    a ``functools.partial`` target and do not follow the (input, weight) arg
+    convention, so they are skipped. The weight is read from ``args[1]`` (same
+    convention as ``is_grouped`` / ``is_small_channel``).
+
+    NOTE: this picks the first cuda conv it finds, assuming a homogeneous,
+    single-arch box. Mixed multi-device graphs are not the target of this
+    heuristic. The query is wrapped defensively so that a HIP build with no
+    usable GPU never turns the layout heuristic into a hard compile failure;
+    on any failure we fall back to the NVIDIA-tuned defaults.
+    """
+    if not torch.cuda.is_available():
+        return False
+    for n in conv_nodes:
+        if n.target is not torch.ops.aten.convolution.default:
+            continue
+        weight = n.args[1]
+        meta_val = getattr(weight, "meta", {}).get("val")
+        if not isinstance(meta_val, torch.Tensor) or meta_val.device.type != "cuda":
+            continue
+        try:
+            arch = _rocm_native_device_arch_name(meta_val.device)
+        except Exception:
+            return False
+        return "gfx942" in arch
     return False
 
 
@@ -943,8 +976,24 @@ class GraphLowering(torch.fx.Interpreter):
             IN_OUT_MULTIPLIER = 0.725
             SMALL_MULTIPLIER = 0.783
 
+            # The constants above were measured on NVIDIA. On ROCm/MI300
+            # (gfx942) the MIOpen channels-last conv path behaves differently:
+            # small-channel convs tend to regress under channels-last while
+            # grouped convs benefit less than the NVIDIA-tuned weights assume.
+            # SMALL and GROUPED are re-tuned below; they were calibrated against
+            # per-model channels-last win/loss measured on gfx942 (avoiding the
+            # phlippe_* / resnet18 regressions while keeping the
+            # resnet/densenet/vgg/resnext wins). These numbers are sensitive to
+            # the ROCm / MIOpen version. gfx950 (MI350) is intentionally left on
+            # the NVIDIA defaults (its conv path already handles NCHW), so this
+            # override is a no-op there.
+            # TODO - get different values per hardware: a per-arch table is
+            # still needed for ROCm archs other than gfx942.
+            if torch.version.hip is not None and _conv_device_is_gfx942(conv_nodes):
+                SMALL_MULTIPLIER = 1.25
+                GROUPED_MULTIPLIER = 1.05
+
             total_flops = sum(flop_counts.values())
-            # TODO - get different values per hardware
             weighted_flops = (
                 flop_counts["grouped"] * GROUPED_MULTIPLIER
                 + flop_counts["small"] * SMALL_MULTIPLIER
