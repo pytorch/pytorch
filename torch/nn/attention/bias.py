@@ -309,7 +309,7 @@ def causal_upper_left(*size) -> CausalBias:
     """
     Creates an upper-left triangular causal bias.
 
-    This function generates a upper-left triangular matrix to represent causal attention bias with a
+    This function generates an upper-left triangular matrix to represent causal attention bias with a
     diagonal offset set so that the inclusive values are aligned to the upper left corner of the matrix.
     This equivalent to the `is_causal=True` argument in `scaled_dot_product_attention`.
 
