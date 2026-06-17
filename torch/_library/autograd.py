@@ -25,6 +25,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
     schema = op._schema
+    is_out_op = utils.is_out(op)
     has_kwarg_only_args = utils.has_kwarg_only_args(op._schema)
     num_positional_args = sum(not a.kwarg_only for a in schema.arguments)
     has_tensorlist_like_args = any(
@@ -134,7 +135,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
-        if utils.is_out(op):
+        if is_out_op:
             if _C.is_grad_enabled() and _C._any_requires_grad(
                 *args, **keyword_only_args
             ):
