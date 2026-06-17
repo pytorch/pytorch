@@ -1145,7 +1145,7 @@ def _is_static_safe_softmax_divisor(other) -> bool:
     """
     For scaled softmax of the form inp / other, the effective scale is 1 / other.
     If other is a compile-time finite scalar and abs(other) >= 1,
-    then effective scale <= 1, so dividing finite inp by other will not introduce overflow.
+    then abs(effective scale) <= 1, so dividing finite inp by other will not introduce overflow.
     """
     import math
 
@@ -1158,16 +1158,17 @@ def _is_static_safe_softmax_divisor(other) -> bool:
 
 def _is_static_safe_softmax_scale(scale) -> bool:
     """
-    Return True when the scale is a compile-time positive constant <= 1.
+    Return True when the scale is a compile-time finite non-zero scalar
+    with abs(scale) <= 1.
     For finite score, multiplying by such a scale will not introduce overflow.
     """
     import math
 
-    if isinstance(scale, (int, float)):
-        scale = float(scale)
-        return math.isfinite(scale) and 0.0 < scale <= 1.0
+    if not isinstance(scale, (int, float)):
+        return False
 
-    return False
+    scale = float(scale)
+    return math.isfinite(scale) and scale != 0.0 and abs(scale) <= 1.0
 
 
 def _other_is_broadcasted_in_dim(match):

@@ -2996,12 +2996,12 @@ class TestPatternMatcher(TestCase):
 
     @inductor_config.patch(fx_graph_cache=False)
     def test_scaled_softmax_static_safe_scale_and_divisor_skips_nonfinite_guard(self):
-        def check(fn, args):
+        def check(fn, args, *, equal_nan=False):
             torch._dynamo.reset()
             counters.clear()
             expected = fn(*args)
             actual, code = run_and_get_code(torch.compile(fn), *args)
-            torch.testing.assert_close(actual, expected)
+            torch.testing.assert_close(actual, expected, equal_nan=equal_nan)
             self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
 
             code = "\n".join(code)
@@ -3011,12 +3011,29 @@ class TestPatternMatcher(TestCase):
         def mul_softmax(x):
             return F.softmax(x * 0.125, dim=0)
 
+        def neg_mul_softmax(x):
+            return F.softmax(x * -0.125, dim=0)
+
         def div_softmax(x):
             return F.softmax(x / 8.0, dim=0)
 
+        def neg_div_softmax(x):
+            return F.softmax(x / -8.0, dim=0)
+
         torch.manual_seed(100)
-        check(mul_softmax, (torch.randn((4, 16)),))
-        check(div_softmax, (torch.randn((4, 16)),))
+
+        x = torch.randn((4, 16))
+        check(mul_softmax, (x,))
+        check(neg_mul_softmax, (x,))
+        check(div_softmax, (x,))
+        check(neg_div_softmax, (x,))
+
+        x_nonfinite = torch.randn((4, 16))
+        x_nonfinite[0, 0] = float("inf")
+        check(mul_softmax, (x_nonfinite,), equal_nan=True)
+        check(neg_mul_softmax, (x_nonfinite,), equal_nan=True)
+        check(div_softmax, (x_nonfinite,), equal_nan=True)
+        check(neg_div_softmax, (x_nonfinite,), equal_nan=True)
 
     def test_mutation_op_matching(self):
         def check(type, func_name, args, kwargs, expect=True):
