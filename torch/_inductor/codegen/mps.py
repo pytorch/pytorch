@@ -755,8 +755,8 @@ class MetalKernel(SIMDKernel):
             if not self.multistage_reduction_entry:
                 val = cast_value  # type: ignore[assignment]
             else:
-                lim_fn = "lowest" if reduction_type.endswith("max") else "max"
-                limit_val = f"::metal::numeric_limits<{src_metal_type}>::{lim_fn}()"
+                op_struct = "MaxOp" if reduction_type == "max" else "MinOp"
+                limit_val = f"::c10::metal::{op_struct}<{src_metal_type}>::identity()"
                 val = self._new_idxvar(
                     src_dtype, default_value=limit_val, is_threadgroup=False
                 )
@@ -777,8 +777,8 @@ class MetalKernel(SIMDKernel):
                 val = cast_value  # type: ignore[assignment]
                 idx_val = f"static_cast<{DTYPE_TO_METAL[dtype]}>({reduction_idx})"
             else:
-                lim_fn = "lowest" if reduction_type.endswith("max") else "max"
-                limit_val = f"::metal::numeric_limits<{src_metal_type}>::{lim_fn}()"
+                op_struct = "MaxOp" if reduction_type == "argmax" else "MinOp"
+                limit_val = f"::c10::metal::{op_struct}<{src_metal_type}>::identity()"
                 val = self._new_idxvar(
                     src_dtype, default_value=limit_val, is_threadgroup=False
                 )
@@ -786,15 +786,9 @@ class MetalKernel(SIMDKernel):
                 idx_var = next(
                     t for t in self.range_tree_nodes.values() if t.is_reduction
                 )
-                cmp_op = ">" if reduction_type == "argmax" else "<"
-                nan_suffix = (
-                    f" || ::metal::isnan({value}) "
-                    if src_dtype.is_floating_point
-                    else ""
-                )
                 self.compute.splice(f"""
-                if ({value} {cmp_op} {val}{nan_suffix}) {{
-                    {val} = {value};
+                if (::c10::metal::{op_struct}<{src_metal_type}>::replace({cast_value}, {val})) {{
+                    {val} = {cast_value};
                     {idx_val} = {idx_var.name};
                 }}
                 """)
