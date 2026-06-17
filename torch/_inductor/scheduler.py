@@ -386,7 +386,6 @@ class MixOrderReduction:
             # Don't use hint directly since hint can be non-representative.
             if not V.graph.sizevars.evaluate_expr(
                 sympy.Ge(nrow * ncol, size_thres),
-                size_oblivious=True,
                 fallback_value=False,
             ):
                 return False
@@ -396,7 +395,6 @@ class MixOrderReduction:
             # 2, we will split the reduction across the rows
             if not V.graph.sizevars.evaluate_expr(
                 sympy.Ge(nrow, ncol * 2),
-                size_oblivious=True,
                 fallback_value=False,
             ):
                 return False
@@ -404,11 +402,7 @@ class MixOrderReduction:
             # When nrow is small, ncol should also be small (due to the check
             # above). Thus the entire tensor should be well cached in L2.
             # Mix order reduction is less beneficial.
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow, 4096),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
+            if V.graph.sizevars.guard_or_true(sympy.Ge(nrow, 4096)):
                 return False
 
         # Make sure a persistent reduction will be generated

@@ -461,12 +461,11 @@ class TestPySymInt(TestCase):
         else:
             result = expand_x + expand_x
 
-        gt_op, _bt, is_size_obv = shape_env.guards[-1]
+        gt_op, _bt = shape_env.guards[-1]
         self.assertTrue(isinstance(gt_op, sympy.core.relational.StrictGreaterThan))
         self.assertTrue(str(x.shape[0]), str(gt_op.args[0]))
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
-        self.assertFalse(is_size_obv)
 
     def test_floordiv_static(self):
         shape_env = ShapeEnv()
@@ -1633,22 +1632,6 @@ class f(torch.nn.Module):
         for Tensor in legacy_ctors:
             res = Tensor(sym_args)
             self.assertEqual(res, expected, exact_dtype=False)
-
-    def test_backed_size_oblivious_01_spec(self):
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-        @torch.compile(dynamic=True, fullgraph=True)
-        def f(a, b):
-            if guard_size_oblivious(a.size(0) == 1):
-                return b * 10
-            else:
-                return b * 20
-
-        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
-            # always go to the >= 2 branch.
-            self.assertEqual(
-                f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
-            )
 
     @fresh_cache()
     def test_slice_backed_size_oblivious(self):

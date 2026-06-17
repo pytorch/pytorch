@@ -921,14 +921,14 @@ def forward(self):
 
     @torch._dynamo.config.patch(error_on_recompile=True)
     def test_mark_unbacked_hint_consistency(self):
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
 
         x = torch.randn(1)
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
         @torch.compile(backend="eager")
         def f(x):
-            if guard_size_oblivious(x.size(0) != 1):
+            if guard_or_true(x.size(0) != 1):
                 return x + 3
             else:
                 return x + 4
