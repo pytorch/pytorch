@@ -617,7 +617,15 @@ device_guard: true
 supported:
 """
 
-    def _parse(self, supported: str):
+    # Default functional-primary PrivateUse1 backend (no use_out_as_primary opt-in) -- how an
+    # external backend consumes gen_backend_stubs without the structured/out-as-primary opt-in.
+    _DEFAULT_PRIV1_HEADER = """\
+backend: PrivateUse1
+cpp_namespace: priv1::native
+supported:
+"""
+
+    def _parse(self, supported: str, header: str | None = None):
         # Parse the in-tree native_functions.yaml plus the given PrivateUse1
         # backend stub, and return (groups the backend registers a kernel for,
         # its BackendIndex, the backend class name). This is enough to invoke the
@@ -631,7 +639,7 @@ supported:
         )
         grouped = get_grouped_native_functions(parsed.native_functions)
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml") as fp:
-            fp.write(self._PRIV1_HEADER + supported)
+            fp.write((header or self._PRIV1_HEADER) + supported)
             fp.flush()
             backend_yaml = parse_backend_yaml(fp.name, grouped, parsed.backend_indices)
         backend_index = backend_yaml.backend_indices[backend_yaml.backend_key]
@@ -710,6 +718,28 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
 }
 """,
         )
+
+    # Backward-compat: a default functional-primary PrivateUse1 backend (no use_out_as_primary)
+    # must generate the same registration-helper block as without the structured/out-as-primary
+    # opt-in. create_out / maybe_create_proxy are only consumed by the structured set_output path,
+    # so they must NOT be emitted for a default backend; resize_out and check_inplace are emitted
+    # either way. The opt-in case still gets all four helpers.
+    def test_default_priv1_omits_structured_set_output_helpers(self) -> None:
+        from torchgen.dest.register_dispatch_key import gen_registration_helpers
+
+        _, default_index, _ = self._parse(
+            "- mul.Tensor\n- div.out", header=self._DEFAULT_PRIV1_HEADER
+        )
+        default = "\n".join(gen_registration_helpers(default_index))
+        self.assertNotIn("create_out", default)
+        self.assertNotIn("maybe_create_proxy", default)
+        self.assertIn("resize_out", default)
+        self.assertIn("check_inplace", default)
+
+        _, optin_index, _ = self._parse("- mul.out:\n    structured: true")
+        optin = "\n".join(gen_registration_helpers(optin_index))
+        self.assertIn("create_out", optin)
+        self.assertIn("maybe_create_proxy", optin)
 
     # structured: true reuses the native meta -- the backend struct inherits the
     # native meta parent and declares only impl().
