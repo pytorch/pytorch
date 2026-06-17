@@ -9655,6 +9655,26 @@ class TestMPS(TestCaseMPS):
         y = x / 64
         self.assertEqual(y, torch.tensor([0., 1023.9844], device="mps"))
 
+    # https://github.com/pytorch/pytorch/issues/170370
+    def test_embeddingbag_offsets_zero_check(self):
+        emb = torch.nn.EmbeddingBag(10, 3, mode="sum").to("mps")
+        with self.assertRaisesRegex(RuntimeError, "offsets\\[0\\] has to be 0"):
+            emb(torch.tensor([1, 2, 3], device="mps"), torch.tensor([1], device="mps"))
+
+    def test_embeddingbag_offsets_overflow_check(self):
+        emb = torch.nn.EmbeddingBag(10, 3, mode="sum").to("mps")
+        with self.assertRaisesRegex(RuntimeError, "can not"):
+            emb(torch.tensor([1, 2], device="mps"), torch.tensor([0, 10], device="mps"))
+
+    def test_embeddingbag_valid_offsets_match_cpu(self):
+        torch.manual_seed(0)
+        weight = torch.randn(10, 3)
+        emb_mps = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum").to("mps")
+        emb_cpu = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum")
+        r_mps = emb_mps(torch.tensor([1, 2, 3], device="mps"), torch.tensor([0], device="mps"))
+        r_cpu = emb_cpu(torch.tensor([1, 2, 3]), torch.tensor([0]))
+        self.assertEqual(r_mps.cpu(), r_cpu)
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
