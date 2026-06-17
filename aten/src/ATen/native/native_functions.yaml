@@ -6664,6 +6664,7 @@
     CPU: _s_binomial_cpu
     CUDA: _s_binomial_cuda
     XPU: _s_binomial_xpu
+    MPS: _s_binomial_mps
   tags: nondeterministic_seeded
   autogen: binomial.out
 
