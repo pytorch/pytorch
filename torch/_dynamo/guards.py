@@ -39,7 +39,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
 from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -779,13 +779,17 @@ def from_numpy(a: Any) -> torch.Tensor:
         return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
 
 
-def resolve_async_collective_tensor(a: Any) -> torch.Tensor | None:
+def resolve_async_collective_tensor(a: object) -> torch.Tensor | None:
     if type(a) is torch.Tensor:
         return a
-    module = sys.modules.get("torch.distributed._functional_collectives")
-    act_type = getattr(module, "AsyncCollectiveTensor", None)
+
+    from torch._functorch._aot_autograd.utils import (
+        get_loaded_async_collective_tensor_type,
+    )
+
+    act_type = get_loaded_async_collective_tensor_type()
     if act_type is not None and type(a) is act_type:
-        return a.elem
+        return cast(Any, a).elem
     return None
 
 
