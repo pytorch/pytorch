@@ -1145,15 +1145,21 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   // a worker thread can mutate the record queue while finalizeTrace() reads
   // and frees it.
   if (!global_callback_latch.drain()) {
-    // The drain timed out: an in-flight global callback is wedged or dead.
-    // Leave the profiler state installed rather than free it underneath a live
-    // callback, which would reintroduce the use-after-free. This leaks the
-    // session and leaves profiling unusable in this process, but is far better
-    // than hanging here or crashing later.
+    // The drain timed out: an in-flight global callback is wedged or dead, so
+    // we cannot finalize (reading the queue would race the live callback and
+    // reintroduce the use-after-free). We still pop the state and remove the
+    // global callback so a later enableProfiler() is not rejected as "already
+    // enabled". Safe with callbacks in flight: the shared_ptr keepalive keeps
+    // the state alive for one still using it, and removeCallback() is versioned
+    // (running invocations use per-thread snapshots). The session trace is
+    // lost.
     LOG(ERROR)
         << "disableProfiler timed out draining in-flight global RecordFunction "
-           "callbacks; leaving profiler state installed to avoid a "
-           "use-after-free.";
+           "callbacks; abandoning this trace. A callback thread is likely "
+           "wedged or was killed mid-callback.";
+    if (auto state_ptr = ProfilerStateBase::pop()) {
+      state_ptr->removeCallback();
+    }
     return std::make_unique<ProfilerResult>();
   }
 
