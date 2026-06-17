@@ -1499,6 +1499,7 @@ _NATIVE_DECL_DEDUPE_EXPORT_PREFIXES = (
     "TORCH_API ",
 )
 
+
 # Remove leading TORCH_* from one line (including after 'struct '). Used only for compare keys.
 def _strip_native_decl_export_prefix(line: str) -> str:
     def without_leading_export(s: str) -> str:
@@ -1513,6 +1514,7 @@ def _strip_native_decl_export_prefix(line: str) -> str:
     if s.startswith("struct "):
         return "struct " + without_leading_export(s.removeprefix("struct ").lstrip())
     return without_leading_export(s)
+
 
 # Join normalized non-empty lines so decls that differ only by TORCH_* DLL export macros share one equivalence key.
 def _decl_equivalence_key_for_dll_macros(decl: str) -> str:
@@ -1533,7 +1535,9 @@ def _merge_native_decl_variants(existing: str | None, incoming: str) -> str:
         for ln in decl.splitlines():
             t = ln.strip()
             if t:
-                return t.removeprefix("struct ").lstrip() if t.startswith("struct ") else t
+                return (
+                    t.removeprefix("struct ").lstrip() if t.startswith("struct ") else t
+                )
         return ""
 
     pair = (existing, incoming)
@@ -1575,8 +1579,10 @@ def get_ns_grouped_kernels(
                     continue
                 # Collapse decls that differ only by TORCH_* / static prefix (Windows linkage).
                 equivalence_key = _decl_equivalence_key_for_dll_macros(decl)
-                decls_merged_by_equivalence_key[equivalence_key] = _merge_native_decl_variants(
-                    decls_merged_by_equivalence_key.get(equivalence_key), decl
+                decls_merged_by_equivalence_key[equivalence_key] = (
+                    _merge_native_decl_variants(
+                        decls_merged_by_equivalence_key.get(equivalence_key), decl
+                    )
                 )
     return {
         namespace: list(merged.values())

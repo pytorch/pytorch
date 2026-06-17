@@ -10,8 +10,8 @@ from tools.autograd import gen_autograd_functions, load_derivatives
 
 from torchgen import dest
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
-from torchgen.dest.native_functions import dll_export_macro_for_kernel
 from torchgen.context import native_function_manager
+from torchgen.dest.native_functions import dll_export_macro_for_kernel
 from torchgen.gen import (
     get_native_function_declarations,
     get_native_function_schema_registrations,
@@ -338,8 +338,8 @@ _WINDOWS_DLL_LINKAGE_TAGS = {
 def _build_backend_indices_from_yaml(
     yaml_entries: list[dict],
 ) -> tuple[list[NativeFunction], dict[DispatchKey, BackendIndex]]:
-    raw_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = (
-        defaultdict(dict)
+    raw_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = defaultdict(
+        dict
     )
     native_functions: list[NativeFunction] = []
     for entry in yaml_entries:
