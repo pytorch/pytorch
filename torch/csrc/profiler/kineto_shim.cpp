@@ -56,6 +56,7 @@ const ActivityTypeMap kXpuTypes{
     // XPU_RUNTIME and XPU_DRIVER appear in both kCpuTypes and kXpuTypes.
     {libkineto::ActivityType::XPU_RUNTIME,           "XPU_RUNTIME"},
     {libkineto::ActivityType::XPU_DRIVER,            "XPU_DRIVER"},
+    {libkineto::ActivityType::OVERHEAD,              "OVERHEAD"},
 };
 
 const ActivityTypeMap kMtiaTypes{
