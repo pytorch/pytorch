@@ -161,6 +161,14 @@ def check_dictionary(filename: str) -> list[LintMessage]:
     return []
 
 
+def _default_num_workers() -> int | None:
+    # Forks one process per file batch, so respect MAX_JOBS to cap parallelism.
+    max_jobs = os.environ.get("MAX_JOBS")
+    if max_jobs and max_jobs.isdigit() and int(max_jobs) > 0:
+        return int(max_jobs)
+    return os.cpu_count()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Check files for spelling mistakes using codespell.",
@@ -172,11 +180,19 @@ def main() -> None:
         help="verbose logging",
     )
     parser.add_argument(
+        "-j",
+        "--num-workers",
+        type=int,
+        default=None,
+        help="number of parallel workers (defaults to MAX_JOBS or the CPU count)",
+    )
+    parser.add_argument(
         "filenames",
         nargs="+",
         help="paths to lint",
     )
     args = parser.parse_args()
+    num_workers = args.num_workers or _default_num_workers()
 
     logging.basicConfig(
         format="<%(processName)s:%(levelname)s> %(message)s",
@@ -189,7 +205,7 @@ def main() -> None:
     )
 
     with concurrent.futures.ProcessPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=num_workers,
     ) as executor:
         futures = {executor.submit(check_file, x): x for x in args.filenames}
         futures[executor.submit(check_dictionary, str(DICTIONARY))] = str(DICTIONARY)
