@@ -779,75 +779,10 @@ REGISTER_COUNT_NONZERO_INNER(half2);
 // input element to {0, 1} (nonzero, NaN -> 1) before the reduction.
 // =============================================================================
 
-// Reduction op functors. Each Op defines identity<T>(), combine(), and
-// threadgroup_reduce(). Identity is the "neutral" element for the op (-INF
-// for max on floats, numeric_limits<T>::lowest() for integers, etc.).
-// combine() and threadgroup_reduce() delegate to c10::metal helpers, which
-// propagate NaN for floats.
-struct MaxOp {
-  template <
-      typename T,
-      ::metal::enable_if_t<!is_floating_point_v<T>, bool> = true>
-  static inline constexpr T identity() {
-    return ::metal::numeric_limits<T>::lowest();
-  }
-  // Float identity is -INFINITY (not -FLT_MAX): max(-INF, x) = x for any
-  // finite x including -FLT_MAX, but max(-FLT_MAX, -INFINITY) would
-  // incorrectly return -FLT_MAX.
-  template <
-      typename T,
-      ::metal::enable_if_t<is_floating_point_v<T>, bool> = true>
-  static inline constexpr T identity() {
-    return T(-INFINITY);
-  }
-  template <typename T>
-  static inline T combine(T a, T b) {
-    return c10::metal::max(a, b);
-  }
-  template <typename T>
-  static inline T simd_reduce(T val) {
-    return c10::metal::simd_max(val);
-  }
-  template <typename T>
-  static inline T threadgroup_reduce(
-      threadgroup T* shared,
-      T val,
-      uint tid,
-      uint tptg) {
-    return c10::metal::threadgroup_max(shared, val, tid, tptg);
-  }
-};
-
-struct MinOp {
-  template <
-      typename T,
-      ::metal::enable_if_t<!is_floating_point_v<T>, bool> = true>
-  static inline constexpr T identity() {
-    return ::metal::numeric_limits<T>::max();
-  }
-  template <
-      typename T,
-      ::metal::enable_if_t<is_floating_point_v<T>, bool> = true>
-  static inline constexpr T identity() {
-    return T(INFINITY);
-  }
-  template <typename T>
-  static inline T combine(T a, T b) {
-    return c10::metal::min(a, b);
-  }
-  template <typename T>
-  static inline T simd_reduce(T val) {
-    return c10::metal::simd_min(val);
-  }
-  template <typename T>
-  static inline T threadgroup_reduce(
-      threadgroup T* shared,
-      T val,
-      uint tid,
-      uint tptg) {
-    return c10::metal::threadgroup_min(shared, val, tid, tptg);
-  }
-};
+// Reduction op functors MaxOp / MinOp (identity, replace, combine,
+// simd_reduce, threadgroup_reduce) live in c10/metal/reduction_utils.h so the
+// inductor MPS codegen can reuse the same identity/replace pair; both are
+// pulled in via the file-scope `using namespace c10::metal`.
 
 // Load functors decide how an input element is converted into the
 // accumulator type. IdentityLoad casts (min/max keep the value unchanged);
@@ -874,7 +809,7 @@ struct PredicateLoad {
 // runtime tptg value, which in turn lets c10::metal::threadgroup_min/max
 // constant-fold its size-vs-simdgroup_size branch.
 template <
-    typename Op,
+    template <typename> class OpFn,
     typename Load,
     typename TI,
     typename TO,
@@ -905,7 +840,8 @@ kernel void value_reduction(
   }
 
   using TA = TO;
-  const TA identity_val = Op::template identity<TA>();
+  using Op = OpFn<TA>;
+  const TA identity_val = Op::identity();
   metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++) {
     acc[j] = identity_val;
@@ -973,7 +909,7 @@ kernel void value_reduction(
 // threads split the M rows. Mirrors sum_reduction_outer; uses the same
 // (Op, Load) abstraction as value_reduction.
 template <
-    typename Op,
+    template <typename> class OpFn,
     typename Load,
     typename TI,
     typename TO,
@@ -988,6 +924,7 @@ kernel void value_reduction_outer(
     uint2 tid_tg [[thread_position_in_threadgroup]],
     uint2 tg_pos [[threadgroup_position_in_grid]]) {
   using TA = TO;
+  using Op = OpFn<TA>;
   const uint M = sizes.x;
   const uint N = sizes.y;
   const uint out_stride = sizes.z;
@@ -1001,7 +938,7 @@ kernel void value_reduction_outer(
   uint row_start = tid_tg.y * rows_per_y;
   uint row_end = min(row_start + rows_per_y, M);
 
-  const TA identity_val = Op::template identity<TA>();
+  const TA identity_val = Op::identity();
   metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++) {
     acc[j] = identity_val;
@@ -1047,7 +984,7 @@ kernel void value_reduction_outer(
 // SIMD groups per TG for occupancy. No shared memory needed since
 // simd_reduce suffices for intra-row collapse. Mirrors sum_reduction_inner.
 template <
-    typename Op,
+    template <typename> class OpFn,
     typename Load,
     typename TI,
     typename TO,
@@ -1061,6 +998,7 @@ kernel void value_reduction_inner(
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
   using TA = TO;
+  using Op = OpFn<TA>;
   const uint M = sizes.x;
   const uint N = sizes.y;
   const uint num_simd_groups = tptg / simdgroup_size;
@@ -1072,7 +1010,7 @@ kernel void value_reduction_inner(
 
   constant TI* row_ptr = input + row * N;
 
-  const TA identity_val = Op::template identity<TA>();
+  const TA identity_val = Op::identity();
   metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++) {
     acc[j] = identity_val;
