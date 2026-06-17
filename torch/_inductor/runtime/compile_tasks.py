@@ -195,13 +195,17 @@ def _worker_compile_triton(
         except ImportError:
             pass
     from torch._inductor import config
+    from torch._inductor.runtime import triton_helpers
 
     with config.patch(extra_config):
         fail = None
         try:
             start_ns = time.time_ns()
-            kernel = load_kernel()
-            kernel.precompile(warm_cache_only=True)
+            # Generated Triton modules set up the GPU driver at import time,
+            # but compile workers only need to warm the compile cache.
+            with triton_helpers.skip_gpu_driver_setup():
+                kernel = load_kernel()
+                kernel.precompile(warm_cache_only=True)
             elapsed_ns = time.time_ns() - start_ns
             kernel.prepare_for_pickle()
             # We can release this memory in the compile subprocesses:
