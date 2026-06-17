@@ -237,6 +237,7 @@ class FSDPParam:
         self.all_gather_outputs: list[torch.Tensor] = []
         self.unsharded_accumulated_grad = None
         self._param_fqn: str | None = None  # prefixed from root module
+        self._flat_param_group: Any | None = None
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
         self._post_load_hook_handle = (
@@ -1230,6 +1231,8 @@ class FSDPParam:
         # For ops like `nn.Module._apply` or `load_state_dict(assign=True)`
         # that change the sharded parameter tensor, we may need to re-pad the
         # sharded local tensor and re-save the reference.
+        if self._flat_param_group is not None:
+            self._flat_param_group._invalidate_flat_param_buffer()
         module_info = self._module_info
         new_param = getattr(module_info.module, module_info.param_name)
         if new_param is not self.sharded_param:
