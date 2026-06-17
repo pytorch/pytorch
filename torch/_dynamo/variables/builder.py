@@ -226,6 +226,7 @@ from .functions import (
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
     GetSetDescriptorVariable,
+    LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
     MethodWrapperVariable,
     SysFunctionVariable,
@@ -1832,6 +1833,24 @@ class VariableBuilder:
             )
             self.tx.output.side_effects.track_object_existing(value, result)
             return result
+        elif (
+            istype(value, types.GeneratorType)
+            and inspect.getgeneratorstate(value) == inspect.GEN_CREATED
+        ):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            code = value.gi_code
+            frame = value.gi_frame
+            if frame is None:
+                raise AssertionError("GEN_CREATED implies a live frame")
+            frame_locals = frame.f_locals
+            closure = tuple(types.CellType(frame_locals[n]) for n in code.co_freevars)
+            fn = types.FunctionType(code, frame.f_globals, closure=closure)
+            args = [
+                VariableTracker.build(self.tx, frame_locals[n])
+                for n in code.co_varnames[: code.co_argcount]
+            ]
+            genfn = LocalGeneratorFunctionVariable(VariableTracker.build(self.tx, fn))
+            return genfn.call_function(self.tx, args, {})
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
             # using PyGetSetDef. Python, on attribute lookup, can decide to
