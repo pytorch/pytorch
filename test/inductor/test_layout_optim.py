@@ -405,6 +405,53 @@ class TestLayoutOptim(TestCase):
             "plain 3-channel conv must not be skipped by the ROCm grouped-conv gate",
         )
 
+    @unittest.skipUnless(
+        TEST_WITH_ROCM, "ROCm-only MIOpen channels_last inference multipliers"
+    )
+    def test_rocm_grouped_conv_inference_favors_channels_last(self):
+        """
+        ROCm-calibrated inference multipliers in GraphLowering.decide_layout_opt:
+        grouped convs with channels-per-group >= 8 use the fast MIOpen NHWC XDL
+        kernel (measured channels_last/contiguous ~0.55 < 1), so the ROCm
+        GROUPED_MULTIPLIER (0.553) makes the FLOP-weighted heuristic favor
+        channels_last. The NVIDIA value (1.358) would skip it. cpg >= 8 convs are
+        NOT caught by the cpg<8 naive-bound gate, so the multiplier is the sole
+        cause of the decision here.
+        """
+
+        def make_conv_graph(weight_shape, groups):
+            cpg = weight_shape[1]
+            cin = cpg * groups
+
+            def fn(x, w):
+                return torch.ops.aten.convolution.default(
+                    x, w, None, [1, 1], [1, 1], [1, 1], False, [0, 0], groups
+                )
+
+            x = torch.randn(8, cin, 16, 16, device=GPU_TYPE)
+            w = torch.randn(*weight_shape, device=GPU_TYPE)
+            gm = make_fx(fn, tracing_mode="fake")(x, w)
+            convs = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.aten.convolution.default
+            ]
+            self.assertEqual(len(convs), 1)
+            return gm
+
+        # Grouped conv, channels-per-group = 16 (>= 8): not naive-bound, so the
+        # cpg<8 gate does NOT fire and the inference multiplier branch decides.
+        grouped = make_conv_graph((256, 16, 3, 3), groups=8)
+        self.assertTrue(
+            GraphLowering.decide_layout_opt(grouped, is_inference=True),
+            "cpg>=8 grouped conv should favor channels_last on ROCm (GROUPED=0.553)",
+        )
+        with mock.patch.object(torch.version, "hip", None):
+            self.assertFalse(
+                GraphLowering.decide_layout_opt(grouped, is_inference=True),
+                "with NVIDIA GROUPED=1.358 the same conv would skip channels_last",
+            )
+
 
 if __name__ == "__main__":
     if HAS_GPU:

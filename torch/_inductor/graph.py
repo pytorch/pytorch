@@ -937,13 +937,27 @@ class GraphLowering(torch.fx.Interpreter):
             # average benchmarked channels last speedup / slowdown, < 1 is speedup.
             # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/
             # To regenerate these numbers follow https://gist.github.com/eellison/55d7a6ed6f39829d68ac56f95f4df5bb
-            GROUPED_MULTIPLIER = 1.358
-            DEFAULT_MULTIPLIER = 0.823
-            IN_OUT_MULTIPLIER = 0.725
-            SMALL_MULTIPLIER = 0.783
+            if torch.version.hip:
+                # ROCm/CDNA (gfx9xx) calibration: mean channels_last/contiguous
+                # eager-forward latency ratio over the same aten.convolution input
+                # set (operator_inp_logs torchbench+hf+timm), measured in bf16
+                # (fp16/fp32 inference reuse these by extrapolation).
+                # channels_last is broadly favorable on MIOpen. "grouped" here is
+                # effectively channels-per-group >= 8: cpg < 8 grouped convs hit
+                # MIOpen's naive kernel (measured ratio ~1.36) and are already
+                # skipped by the ROCm layout-opt gate above, so they never reach
+                # this heuristic.
+                GROUPED_MULTIPLIER = 0.553
+                DEFAULT_MULTIPLIER = 0.813
+                IN_OUT_MULTIPLIER = 0.642
+                SMALL_MULTIPLIER = 0.795
+            else:
+                GROUPED_MULTIPLIER = 1.358
+                DEFAULT_MULTIPLIER = 0.823
+                IN_OUT_MULTIPLIER = 0.725
+                SMALL_MULTIPLIER = 0.783
 
             total_flops = sum(flop_counts.values())
-            # TODO - get different values per hardware
             weighted_flops = (
                 flop_counts["grouped"] * GROUPED_MULTIPLIER
                 + flop_counts["small"] * SMALL_MULTIPLIER
