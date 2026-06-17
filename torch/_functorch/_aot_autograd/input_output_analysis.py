@@ -490,8 +490,8 @@ def add_input_mutation_storage_overlap_partition_guard(
         return
 
     sources = aot_config.aot_autograd_arg_pos_to_source
-    tensor_indices = []
-    seen_sources = set()
+    tensor_indices: list[int] = []
+    seen_sources: set[Any] = set()
     for i, inpt in enumerate(fwd_inputs):
         source = sources[i]
         if not isinstance(inpt, Tensor) or source is None or source in seen_sources:
