@@ -48,6 +48,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
@@ -2925,6 +2926,70 @@ class TestDTensorCompileE2E(DTensorTestBase):
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
         output = sharded_net(replicated_inp)
         self.assertEqual(output.full_tensor(), ref_out)
+
+    @with_comms
+    @parametrize("backend", ["aot_eager", "inductor"])
+    @parametrize("dynamic", [False, True])
+    def test_compile_dtensor_output_alias_replay(self, backend, dynamic):
+        mesh = self.build_device_mesh()
+
+        def fn(x: DTensor) -> tuple[DTensor, DTensor]:
+            y = x + 1
+            aux = y[:, :1]
+            return y, aux
+
+        x_local_ref = torch.randn(2, 2, device=self.device_type, requires_grad=True)
+        x_ref = DTensor.from_local(x_local_ref, mesh, [Replicate()], run_check=False)
+        y_ref, aux_ref = fn(x_ref)
+
+        x_local = x_local_ref.detach().clone().requires_grad_(True)
+        x = DTensor.from_local(x_local, mesh, [Replicate()], run_check=False)
+        y, aux = torch.compile(fn, backend=backend, fullgraph=True, dynamic=dynamic)(x)
+
+        self.assertEqual(y.full_tensor(), y_ref.full_tensor())
+        self.assertEqual(aux.full_tensor(), aux_ref.full_tensor())
+        self.assertIsNotNone(aux.grad_fn)
+        self.assertTrue(aux.to_local()._is_view())
+        self.assertEqual(
+            StorageWeakRef(y.to_local().untyped_storage()),
+            StorageWeakRef(aux.to_local().untyped_storage()),
+        )
+
+        (y_ref.full_tensor().sum() + aux_ref.full_tensor().sum()).backward()
+        (y.full_tensor().sum() + aux.full_tensor().sum()).backward()
+        self.assertEqual(x_local_ref.grad, x_local.grad)
+
+    @with_comms
+    def test_compile_dtensor_output_alias_replay_placement_changing_view(self):
+        mesh = self.build_device_mesh()
+
+        def fn(x: DTensor) -> tuple[DTensor, DTensor]:
+            y = x + 1
+            aux = y.transpose(0, 1)
+            return y, aux
+
+        x_local_ref = torch.randn(2, 4, device=self.device_type, requires_grad=True)
+        x_ref = DTensor.from_local(x_local_ref, mesh, [Shard(0)], run_check=False)
+        y_ref, aux_ref = fn(x_ref)
+
+        x_local = x_local_ref.detach().clone().requires_grad_(True)
+        x = DTensor.from_local(x_local, mesh, [Shard(0)], run_check=False)
+        y, aux = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+
+        self.assertEqual(aux.placements, aux_ref.placements)
+        self.assertEqual(y.to_local(), y_ref.to_local())
+        self.assertEqual(aux.to_local(), aux_ref.to_local())
+        self.assertEqual(aux.full_tensor(), aux_ref.full_tensor())
+        self.assertIsNotNone(aux.grad_fn)
+        self.assertTrue(aux.to_local()._is_view())
+        self.assertEqual(
+            StorageWeakRef(y.to_local().untyped_storage()),
+            StorageWeakRef(aux.to_local().untyped_storage()),
+        )
+
+        (y_ref.full_tensor().sum() + aux_ref.full_tensor().sum()).backward()
+        (y.full_tensor().sum() + aux.full_tensor().sum()).backward()
+        self.assertEqual(x_local_ref.grad, x_local.grad)
 
     @with_comms
     def test_unbacked_illegal_views(self):

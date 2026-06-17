@@ -9,7 +9,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypeGuard
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import torch
 from torch import Tensor
@@ -25,6 +25,10 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
@@ -306,7 +310,9 @@ def gen_alias_from_base(
     aliased_base_tensor: Tensor,
     target_meta_tensor: Tensor,
     target_requires_grad: bool,
-    target_view_meta_sequence: ViewMetaSequence | None = None,
+    target_view_meta_sequence: ViewMetaSequence
+    | SubclassViewMetaSequence
+    | None = None,
     *,
     replay_views: bool,
 ) -> Tensor:
@@ -328,20 +334,41 @@ def gen_alias_from_base(
     if (
         replay_views
         and target_view_meta_sequence is not None
-        and not any(vm.has_symbolic_inputs for vm in target_view_meta_sequence.sequence)
+        and not target_view_meta_sequence.has_symbolic_inputs()
     ):
-        out = _functionalization.apply_view_meta_sequence(
-            aliased_base_tensor, target_view_meta_sequence.sequence
-        )
-        # If re-applying the ViewMeta sequence succeeded, there should be no more
-        # problems going forward. We just check we got to the target shape and
-        # patch requires_grad flag.
-        if out.shape != target_meta_tensor.shape:
-            raise AssertionError(
-                "incorrect out shape after application of ViewMeta sequence: "
-                f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
+        if isinstance(target_view_meta_sequence, SubclassViewMetaSequence):
+            representative_view_meta_sequence = (
+                target_view_meta_sequence.representative_outer_view_meta_sequence()
             )
-        return patch_requires_grad(out)
+            # Subclass replay intentionally fails closed. Falling back to the
+            # dense as_strided path can preserve the inner tensor view while
+            # silently dropping wrapper metadata carried in __tensor_flatten__
+            # ctx (for example DTensor placement metadata).
+            if representative_view_meta_sequence is None:
+                raise NotImplementedError(
+                    "AOTAutograd cannot replay aliased subclass views when wrapper "
+                    "attrs have different outer view signatures."
+                )
+
+            # Only validated outer replay is supported for subclass view
+            # reconstruction. Rebuilding the wrapper from inner views would lose
+            # wrapper-level autograd metadata like the outer view edge.
+            out = _functionalization.apply_view_meta_sequence(
+                aliased_base_tensor, representative_view_meta_sequence.sequence
+            )
+            if _view_meta_matches_tensor(
+                out, target_meta_tensor, target_view_meta_sequence
+            ):
+                return patch_requires_grad(out)
+            raise NotImplementedError(
+                "AOTAutograd cannot replay aliased subclass views when outer "
+                "replay does not reconstruct wrapper metadata."
+            )
+        else:
+            out = _replay_view_meta_sequence(
+                aliased_base_tensor, target_meta_tensor, target_view_meta_sequence
+            )
+            return patch_requires_grad(out)
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
@@ -467,9 +494,13 @@ class ViewMetaSequence:
         return f"ViewMetaSequence({types})"
 
     def __eq__(self, other: object) -> bool:
-        # If other is None, then it probably means that we weren't able to recreate
-        # the ViewMeta sequence. One example is when we update the view metadata by
-        # calling: create_synthetic_base_metadata.
+        # WARNING: __eq__(None) is a legacy wildcard used only for debug metadata
+        # comparisons. Runtime code should use identity checks instead of !=
+        # because this comparison is intentionally asymmetric.
+        #
+        # If other is None, then it probably means that we weren't able to
+        # recreate the ViewMeta sequence. One example is when we update the
+        # view metadata by calling: create_synthetic_base_metadata.
         if other is None:
             return True
 
@@ -478,6 +509,185 @@ class ViewMetaSequence:
             return NotImplemented
 
         return self.metadata == other.metadata
+
+    def has_symbolic_inputs(self) -> bool:
+        return any(vm.has_symbolic_inputs for vm in self.sequence)
+
+    def make_runtime_safe(self) -> ViewMetaSequence | None:
+        if self.has_symbolic_inputs():
+            return None
+        return self
+
+
+def _view_meta_signature(
+    view_meta_sequence: ViewMetaSequence,
+) -> tuple[tuple[type[object], tuple[object, ...]], ...]:
+    return tuple(
+        (type(view_meta), view_meta.as_tuple())
+        for view_meta in view_meta_sequence.sequence
+    )
+
+
+@dataclass
+class SubclassViewMetaSequence:
+    attrs: Mapping[str, ViewMetaSequence | SubclassViewMetaSequence]
+    metadata: MetadataKey
+
+    def __repr__(self) -> str:
+        attrs = ", ".join(f"{name}={meta!r}" for name, meta in self.attrs.items())
+        return f"SubclassViewMetaSequence({attrs})"
+
+    def __eq__(self, other: object) -> bool:
+        if other is None:
+            # Mirror the ViewMetaSequence warning above: __eq__(None) is a
+            # debug-only wildcard and runtime code should prefer identity checks.
+            # If other is None, then it probably means that we weren't able to
+            # recreate the ViewMeta sequence for one of the subclass attrs.
+            return True
+
+        if not isinstance(other, SubclassViewMetaSequence):
+            return NotImplemented
+
+        return self.metadata == other.metadata and self.attrs == other.attrs
+
+    def has_symbolic_inputs(self) -> bool:
+        return any(attr_meta.has_symbolic_inputs() for attr_meta in self.attrs.values())
+
+    def make_runtime_safe(self) -> SubclassViewMetaSequence | None:
+        # Keep subclass replay all-or-nothing at runtime: if any attr has
+        # symbolic view metadata, disable replay for the whole wrapper and
+        # fall back to the legacy reconstruction path for that output.
+        if self.has_symbolic_inputs():
+            return None
+        return self
+
+    def representative_outer_view_meta_sequence(self) -> ViewMetaSequence | None:
+        representative = None
+        representative_signature = None
+        for attr_meta in self.attrs.values():
+            candidate = (
+                attr_meta
+                if isinstance(attr_meta, ViewMetaSequence)
+                else attr_meta.representative_outer_view_meta_sequence()
+            )
+            if candidate is None:
+                continue
+
+            candidate_signature = _view_meta_signature(candidate)
+            if representative is None:
+                representative = candidate
+                representative_signature = candidate_signature
+            elif candidate_signature != representative_signature:
+                return None
+        return representative
+
+
+def _view_meta_matches_tensor(
+    out: Tensor,
+    target_meta_tensor: Tensor,
+    target_view_meta_sequence: ViewMetaSequence | SubclassViewMetaSequence,
+) -> bool:
+    # Compare against the concrete runtime target tensor here. The serialized
+    # ViewMetaSequence metadata can retain symbolic traced expressions even when
+    # replay reconstructed the right concrete runtime view.
+    if not has_same_metadata(out, target_meta_tensor):
+        return False
+
+    if isinstance(target_view_meta_sequence, ViewMetaSequence):
+        return True
+
+    if not (
+        is_traceable_wrapper_subclass(out)
+        and is_traceable_wrapper_subclass(target_meta_tensor)
+    ):
+        return False
+
+    out_wrapper_attrs, out_ctx = out.__tensor_flatten__()
+    target_wrapper_attrs, target_ctx = target_meta_tensor.__tensor_flatten__()
+    if out_wrapper_attrs != target_wrapper_attrs or out_ctx != target_ctx:
+        return False
+
+    for attr in target_wrapper_attrs:
+        out_inner = getattr(out, attr)
+        target_inner = getattr(target_meta_tensor, attr)
+        attr_meta = target_view_meta_sequence.attrs.get(attr)
+
+        if attr_meta is None:
+            match target_inner:
+                case Tensor():
+                    if not isinstance(out_inner, Tensor) or not has_same_metadata(
+                        out_inner, target_inner
+                    ):
+                        return False
+                case OpaqueBase():
+                    if out_inner != target_inner:
+                        return False
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
+            continue
+
+        if not isinstance(out_inner, Tensor):
+            raise AssertionError(f"expected Tensor for output attr {attr}")
+        if not isinstance(target_inner, Tensor):
+            raise AssertionError(f"expected Tensor for target attr {attr}")
+        if not _view_meta_matches_tensor(out_inner, target_inner, attr_meta):
+            return False
+
+    return True
+
+
+def maybe_get_output_view_meta_sequence(
+    tensor: Tensor,
+) -> ViewMetaSequence | SubclassViewMetaSequence | None:
+    if isinstance(tensor, FunctionalTensor):
+        return ViewMetaSequence(tensor)
+
+    if not is_traceable_wrapper_subclass(tensor):
+        return None
+
+    attrs, ctx = tensor.__tensor_flatten__()
+    # Subclasses that reconstruct with no flatten metadata rely on the existing
+    # outer view/autograd replay path today. Replaying only the inner tensor
+    # views loses that outer autograd metadata, so keep using the old path.
+    if ctx is None:
+        return None
+    attr_metas: dict[str, ViewMetaSequence | SubclassViewMetaSequence] = {}
+    for attr in attrs:
+        match getattr(tensor, attr):
+            case Tensor() as inner:
+                inner_meta = maybe_get_output_view_meta_sequence(inner)
+                if inner_meta is not None:
+                    attr_metas[attr] = inner_meta
+            case OpaqueBase():
+                pass
+            case unexpected:
+                raise AssertionError(
+                    f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                )
+
+    if not attr_metas:
+        return None
+
+    return SubclassViewMetaSequence(attr_metas, MetadataKey.make(tensor))
+
+
+def _replay_view_meta_sequence(
+    aliased_base_tensor: Tensor,
+    target_meta_tensor: Tensor,
+    target_view_meta_sequence: ViewMetaSequence,
+) -> Tensor:
+    out = _functionalization.apply_view_meta_sequence(
+        aliased_base_tensor, target_view_meta_sequence.sequence
+    )
+    if out.shape != target_meta_tensor.shape:
+        raise AssertionError(
+            "incorrect out shape after application of ViewMeta sequence: "
+            f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} "
+            "(expected)"
+        )
+    return out
 
 
 # new_arg and arg here are either:
