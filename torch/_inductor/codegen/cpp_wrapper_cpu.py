@@ -2265,14 +2265,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         size: str,
         stride: str,
         op_name: str,
-        dtype: torch.dtype | None = None,
     ) -> None:
         if V.graph.aot_mode and V.graph.is_const_graph:
             return
-        dtype_args = (
-            f', {self.codegen_dtype(dtype)}, "{dtype}"' if dtype is not None else ""
-        )
-        stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}"{dtype_args});'
+        stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}");'
         if V.graph.aot_mode:
             guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
             if V.graph.is_dual_wrapper_mode:

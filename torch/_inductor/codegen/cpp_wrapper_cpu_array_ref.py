@@ -120,7 +120,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         size: str,
         stride: str,
         op_name: str,
-        dtype: torch.dtype | None = None,
     ) -> None:
         # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
         # assert_size_stride would fail to compile.
