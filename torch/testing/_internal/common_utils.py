@@ -1528,8 +1528,8 @@ TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
-TEST_ONEDNN = torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()
-TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.onednn._is_onednn_acl_supported()
+TEST_ONEDNN = torch.backends.onednn.enabled and torch.backends.onednn.is_available()
+TEST_ACL = torch.backends.onednn.is_available() and torch.ops.onednn._is_onednn_acl_supported()
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
@@ -6254,18 +6254,18 @@ def scoped_load_inline(func):
 def recover_orig_fp32_precision(fn):
     @contextlib.contextmanager
     def recover():
-        old_mkldnn_conv_p = torch.backends.mkldnn.conv.fp32_precision  # type: ignore[attr-defined]
-        old_mkldnn_rnn_p = torch.backends.mkldnn.rnn.fp32_precision  # type: ignore[attr-defined]
-        old_mkldnn_matmul_p = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
+        old_onednn_conv_p = torch.backends.onednn.conv.fp32_precision  # type: ignore[attr-defined]
+        old_onednn_rnn_p = torch.backends.onednn.rnn.fp32_precision  # type: ignore[attr-defined]
+        old_onednn_matmul_p = torch.backends.onednn.matmul.fp32_precision  # type: ignore[attr-defined]
         old_cudnn_conv_p = torch.backends.cudnn.conv.fp32_precision  # type: ignore[attr-defined]
         old_cudnn_rnn_p = torch.backends.cudnn.rnn.fp32_precision  # type: ignore[attr-defined]
         old_cuda_matmul_p = torch.backends.cuda.matmul.fp32_precision
         try:
             yield
         finally:
-            torch.backends.mkldnn.conv.fp32_precision = old_mkldnn_conv_p  # type: ignore[attr-defined]
-            torch.backends.mkldnn.rnn.fp32_precision = old_mkldnn_rnn_p  # type: ignore[attr-defined]
-            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_matmul_p  # type: ignore[attr-defined]
+            torch.backends.onednn.conv.fp32_precision = old_onednn_conv_p  # type: ignore[attr-defined]
+            torch.backends.onednn.rnn.fp32_precision = old_onednn_rnn_p  # type: ignore[attr-defined]
+            torch.backends.onednn.matmul.fp32_precision = old_onednn_matmul_p  # type: ignore[attr-defined]
             torch.backends.cudnn.conv.fp32_precision = old_cudnn_conv_p  # type: ignore[attr-defined]
             torch.backends.cudnn.rnn.fp32_precision = old_cudnn_rnn_p  # type: ignore[attr-defined]
             torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
@@ -6274,7 +6274,7 @@ def recover_orig_fp32_precision(fn):
 
 
 def with_ieee_matmul_precision(f):
-    """Force matmul fp32_precision="ieee" on both CUDA and CPU/mkldnn for
+    """Force matmul fp32_precision="ieee" on both CUDA and CPU/onednn for
     the duration of the wrapped test. Save/restore across the call.
 
     "ieee" is the default, so this decorator is defensive: it insulates
@@ -6285,18 +6285,18 @@ def with_ieee_matmul_precision(f):
 
     Affects matmul only, not convolution. Tests that also need
     reduced-precision conv disabled must additionally control the
-    relevant cudnn/mkldnn conv.fp32_precision knobs.
+    relevant cudnn/onednn conv.fp32_precision knobs.
     """
     @functools.wraps(f)
     def wrapped(*args, **kwargs):
         old_cuda = torch.backends.cuda.matmul.fp32_precision
-        old_mkldnn = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
+        old_onednn = torch.backends.onednn.matmul.fp32_precision  # type: ignore[attr-defined]
         try:
             torch.backends.cuda.matmul.fp32_precision = "ieee"
-            torch.backends.mkldnn.matmul.fp32_precision = "ieee"  # type: ignore[attr-defined]
+            torch.backends.onednn.matmul.fp32_precision = "ieee"  # type: ignore[attr-defined]
             return f(*args, **kwargs)
         finally:
-            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn  # type: ignore[attr-defined]
+            torch.backends.onednn.matmul.fp32_precision = old_onednn  # type: ignore[attr-defined]
             torch.backends.cuda.matmul.fp32_precision = old_cuda
     return wrapped
 

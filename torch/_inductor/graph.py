@@ -778,8 +778,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
         if (
-            torch.backends.mkldnn.enabled  # pyrefly: ignore [unbound-name]
-            and torch.backends.mkldnn.is_available()  # pyrefly: ignore [unbound-name]
+            torch.backends.onednn.enabled  # pyrefly: ignore [unbound-name]
+            and torch.backends.onednn.is_available()  # pyrefly: ignore [unbound-name]
             and all(
                 n.args[idx].meta["val"].device.type in SUPPORTED_MKLDNN_DEVICES
                 for n in conv_nodes

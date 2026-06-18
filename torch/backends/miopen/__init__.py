@@ -33,7 +33,7 @@ def flags(
 
 # The magic here is to allow us to intercept code like this:
 #
-#   torch.backends.<miopen|mkldnn>.immediate = True
+#   torch.backends.<miopen|onednn>.immediate = True
 
 
 class MiopenModule(PropModule):

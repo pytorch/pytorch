@@ -45,7 +45,7 @@ enum class CuBLASReductionOption : uint8_t {
   DisallowReducedPrecisionAllowSplitK = 1,
   DisallowReducedPrecisionDisallowSplitK = 2,
 };
-enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
+enum class TORCH_API Float32Backend { GENERIC, CUDA, ONEDNN };
 enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
 // DEFAULT is an internal-only sentinel meaning "use legacy backend default
 // unless a parent setting overrides it". NONE means "explicitly set to
@@ -541,10 +541,10 @@ class TORCH_API Context {
   using Key = std::pair<Float32Backend, Float32Op>;
   std::unordered_map<Key, Float32Precision, c10::hash<Key>> fp32_precision = {
       {{Float32Backend::GENERIC, Float32Op::ALL}, Float32Precision::NONE},
-      {{Float32Backend::MKLDNN, Float32Op::ALL}, Float32Precision::NONE},
-      {{Float32Backend::MKLDNN, Float32Op::CONV}, Float32Precision::NONE},
-      {{Float32Backend::MKLDNN, Float32Op::RNN}, Float32Precision::NONE},
-      {{Float32Backend::MKLDNN, Float32Op::MATMUL}, Float32Precision::NONE},
+      {{Float32Backend::ONEDNN, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::ONEDNN, Float32Op::CONV}, Float32Precision::NONE},
+      {{Float32Backend::ONEDNN, Float32Op::RNN}, Float32Precision::NONE},
+      {{Float32Backend::ONEDNN, Float32Op::MATMUL}, Float32Precision::NONE},
       {{Float32Backend::CUDA, Float32Op::ALL}, Float32Precision::NONE},
       {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::DEFAULT},
       {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::DEFAULT},

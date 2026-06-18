@@ -42,8 +42,8 @@ Float32Backend str2backend(const std::string& name) {
     return Float32Backend::GENERIC;
   else if (name == "cuda")
     return Float32Backend::CUDA;
-  else if (name == "mkldnn")
-    return Float32Backend::MKLDNN;
+  else if (name == "mkldnn" || name == "onednn")
+    return Float32Backend::ONEDNN;
   TORCH_CHECK(false, "Unknown backend: ", name);
 }
 
@@ -374,10 +374,10 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
   bool invalid = float32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::TF32 &&
       float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST;
   invalid = invalid ||
-      (float32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL) == Float32Precision::BF16 &&
+      (float32Precision(Float32Backend::ONEDNN, Float32Op::MATMUL) == Float32Precision::BF16 &&
        float32_matmul_precision != at::Float32MatmulPrecision::MEDIUM);
   invalid = invalid ||
-      (float32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL) == Float32Precision::TF32 &&
+      (float32Precision(Float32Backend::ONEDNN, Float32Op::MATMUL) == Float32Precision::TF32 &&
        float32_matmul_precision != at::Float32MatmulPrecision::HIGH);
   TORCH_CHECK(
       !invalid,
@@ -435,17 +435,17 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
     if (s_ == "highest") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
       setFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL, Float32Precision::IEEE);
-      setFloat32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL, Float32Precision::IEEE);
+      setFloat32Precision(Float32Backend::ONEDNN, Float32Op::MATMUL, Float32Precision::IEEE);
       return true;
     } else if (s_ == "high") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGH;
       setFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL, Float32Precision::TF32);
-      setFloat32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL, Float32Precision::TF32);
+      setFloat32Precision(Float32Backend::ONEDNN, Float32Op::MATMUL, Float32Precision::TF32);
       return true;
     } else if (s_ == "medium") {
       float32_matmul_precision = at::Float32MatmulPrecision::MEDIUM;
       setFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL, Float32Precision::TF32);
-      setFloat32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL, Float32Precision::BF16);
+      setFloat32Precision(Float32Backend::ONEDNN, Float32Op::MATMUL, Float32Precision::BF16);
       return true;
     }
     return false;

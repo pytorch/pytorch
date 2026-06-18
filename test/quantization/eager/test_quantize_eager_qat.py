@@ -11,7 +11,7 @@ import torch.ao.nn.qat as nnqat
 import torch.ao.nn.qat.dynamic as nnqatd
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
-import torch.backends.mkldnn
+import torch.backends.onednn
 import torch.nn as nn
 import torch.testing._internal.hypothesis_utils as hu
 from torch.ao.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d

@@ -184,7 +184,7 @@ if RUN_CPU:
             "test_conv2d_binary_inplace_fusion_failed",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.onednn.is_available(),
             func_inputs=[
                 ["aoti_torch_cpu_onednn__convolution_pointwise_binary("],
                 ["aoti_torch_cpu_onednn__convolution_pointwise_binary_("],
@@ -194,7 +194,7 @@ if RUN_CPU:
             "test_conv2d_binary_inplace_fusion_pass",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.onednn.is_available(),
             func_inputs=[
                 ["aoti_torch_cpu_onednn__convolution_pointwise_binary_("],
                 ["aoti_torch_cpu_onednn__convolution_pointwise_binary("],
@@ -204,7 +204,7 @@ if RUN_CPU:
             "test_conv2d_unary",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcherGenericCPU(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.onednn.is_available(),
             slow=True,
         ),
         BaseTest("test_conv_transpose2d_packed", "cpu", test_cpu_repro.CPUReproTests()),
@@ -239,14 +239,14 @@ if RUN_CPU:
             "test_linear_binary",
             "",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            torch.backends.mkldnn.is_available()
+            torch.backends.onednn.is_available()
             and torch.ops.onednn._is_onednn_bf16_supported(),
         ),
         BaseTest(
             "test_linear_packed",
             "",
             test_cpu_repro.CPUReproTests(),
-            torch.backends.mkldnn.is_available()
+            torch.backends.onednn.is_available()
             and (
                 torch.ops.onednn._is_onednn_bf16_supported()
                 or torch.ops.onednn._is_onednn_fp16_supported()
@@ -257,7 +257,7 @@ if RUN_CPU:
                 func,
                 "",
                 test_cpu_repro.CPUReproTests(),
-                condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
+                condition=torch.backends.onednn.is_available() and not IS_WINDOWS,
             )
             for func in dir(test_cpu_repro.CPUReproTests())
             if func.startswith("test_lstm_packed_change_input_sizes")
