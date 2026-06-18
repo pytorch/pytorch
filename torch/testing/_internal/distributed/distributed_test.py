@@ -10256,6 +10256,89 @@ class DistributedTest:
 
             dist.barrier()
 
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        def test_static_graph_no_sync_gradient_accumulation(self):
+            # Regression test for static_graph=True + no_sync() gradient
+            # accumulation (regressed by #103487, reported in
+            # huggingface/accelerate#3679). Without the fix the first no_sync
+            # backward trips an expect_autograd_hooks_ assert, and once that is
+            # unblocked gradients are silently not all-reduced from iter 2 on.
+            # Distinct per-rank data makes a missing all-reduce observable
+            # (identical data would hide it: un-reduced local grad == averaged).
+            class Net(nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.lin1 = nn.Linear(10, 10)
+                    self.relu = nn.ReLU()
+                    self.lin2 = nn.Linear(10, 10)
+
+                def forward(self, x):
+                    return self.lin2(self.relu(self.lin1(x)))
+
+            if BACKEND == "nccl":
+                torch.cuda.set_device(self.rank)
+                device = torch.device("cuda", self.rank)
+            else:
+                device = torch.device("cpu")
+
+            torch.manual_seed(31415)
+            model = Net().to(device)
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank] if BACKEND == "nccl" else None,
+                static_graph=True,
+            )
+            # Reference model with the (broadcast) DDP weights on every rank, so
+            # gradients can be checked on all ranks rather than just rank 0.
+            ref_model = copy.deepcopy(ddp_model.module).to(device)
+
+            world_size = dist.get_world_size()
+            num_microbatches = 3  # 2 accumulated under no_sync + 1 syncing
+
+            def make_batch(it, mb):
+                # Distinct data per (rank, iteration, micro-batch).
+                g = torch.Generator().manual_seed(1000 * self.rank + 10 * it + mb + 1)
+                return torch.randn(4, 10, generator=g).to(device)
+
+            for it in range(3):
+                # --- DDP gradient accumulation: no_sync for all but the last. ---
+                ddp_model.zero_grad()
+                for mb in range(num_microbatches):
+                    batch = make_batch(it, mb)
+                    if mb < num_microbatches - 1:
+                        with ddp_model.no_sync():
+                            ddp_model(batch).sum().backward()
+                    else:
+                        ddp_model(batch).sum().backward()
+
+                # --- Reference: accumulate the same micro-batches locally, then
+                # all-reduce-mean across ranks (this is exactly what correct DDP
+                # gradient accumulation must produce). ---
+                ref_model.zero_grad()
+                for mb in range(num_microbatches):
+                    ref_model(make_batch(it, mb)).sum().backward()
+                ref_grads = []
+                for p in ref_model.parameters():
+                    g = p.grad.detach().clone()
+                    dist.all_reduce(g, op=dist.ReduceOp.SUM)
+                    g /= world_size
+                    ref_grads.append(g)
+
+                for (name, p_ddp), g_ref in zip(
+                    ddp_model.module.named_parameters(), ref_grads, strict=True
+                ):
+                    self.assertTrue(
+                        torch.allclose(p_ddp.grad, g_ref, atol=1e-5, rtol=1e-5),
+                        f"iter {it} param {name}: ddp grad does not match "
+                        f"all-reduced reference (missing/double all-reduce). "
+                        f"max abs diff "
+                        f"{(p_ddp.grad - g_ref).abs().max().item()}",
+                    )
+
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "gloo",
