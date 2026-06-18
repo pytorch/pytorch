@@ -148,7 +148,10 @@ class _InductorTraceProcessor:
 
     def add_to_chrome_trace(self, origin_trace):
         """Add Inductor kernel stack information to a Chrome trace."""
-        from torch._inductor.debug import get_kernel_information_jsons
+        from torch._inductor.debug import (
+            _INDUCTOR_TIMELINE_ARTIFACTS_KEY,
+            get_kernel_information_jsons,
+        )
 
         compile_linenos = get_kernel_information_jsons()
         if not compile_linenos:
@@ -156,14 +159,13 @@ class _InductorTraceProcessor:
 
         trace = origin_trace
         fusion_enabled = inductor_config.trace.provenance_tracking_fusion
-        inductor_artifacts_key = "__artifacts__"
-        artifacts_by_graph = {
-            graph_key: artifacts
-            for graph_key, graph_info in compile_linenos.items()
-            if isinstance(graph_info, dict)
-            for artifacts in (graph_info.get(inductor_artifacts_key),)
-            if isinstance(artifacts, dict)
-        }
+        artifacts_by_graph = {}
+        for graph_key, graph_info in compile_linenos.items():
+            if not isinstance(graph_info, dict):
+                continue
+            artifacts = graph_info.get(_INDUCTOR_TIMELINE_ARTIFACTS_KEY)
+            if isinstance(artifacts, dict):
+                artifacts_by_graph[graph_key] = artifacts
         if fusion_enabled and artifacts_by_graph:
             trace["pytorch_inductor_artifacts"] = artifacts_by_graph
 
@@ -279,7 +281,7 @@ class _InductorTraceProcessor:
         def _single_kernel_info_for_graph(compile_info, graph_key):
             kernel_infos = []
             for name, kernel_info in compile_info.get(graph_key, {}).items():
-                if name == inductor_artifacts_key:
+                if name == _INDUCTOR_TIMELINE_ARTIFACTS_KEY:
                     continue
                 if _stack_from_kernel_info(kernel_info) is not None:
                     kernel_infos.append((name, kernel_info))
