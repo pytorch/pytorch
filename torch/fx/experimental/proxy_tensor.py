@@ -3194,6 +3194,12 @@ def make_fx(
             f"tracing_mode must be real/fake/symbolic, got {tracing_mode}"
         )
 
+    # If ``f`` carries an ``@dynamic_spec(...)`` decorator, the attached
+    # ``ShapesSpec`` is used as ``dynamic_shapes``. Passing both raises.
+    from torch.fx.experimental.dynamic_spec import _resolve_dynamic_shapes
+
+    dynamic_shapes = _resolve_dynamic_shapes(f, dynamic_shapes)
+
     from torch._inductor import config
 
     make_fx_tracer = _MakefxTracer(
