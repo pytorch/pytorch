@@ -37,8 +37,12 @@ inline bool isAcceleratorExcluded(
     c10::DeviceType device_type,
     c10::DeviceType first_excluded,
     T... rest_excluded) {
-  return isAccelerator(device_type) && (device_type != first_excluded) &&
-      ((device_type != rest_excluded) && ...);
+  if constexpr (sizeof...(rest_excluded) > 0) {
+    return device_type != first_excluded &&
+        isAcceleratorExcluded(device_type, rest_excluded...);
+  } else {
+    return device_type != first_excluded && isAccelerator(device_type);
+  }
 }
 
 // Return the number of the device available. Note that this is *REQUIRED* to
