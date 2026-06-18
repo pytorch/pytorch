@@ -920,6 +920,7 @@ class TestCommon(TestCase):
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
     @skipXPU
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
         if TEST_WITH_TORCHDYNAMO and op.name == "_refs.clamp":
@@ -2939,6 +2940,7 @@ class TestFakeTensor(TestCase):
             skip("bmm", variant_name="triton_optimized"),
         }
     )
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
@@ -2950,6 +2952,7 @@ class TestFakeTensor(TestCase):
             skip("bmm", variant_name="triton_optimized"),
         }
     )
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
         device_type = torch.device(device).type
