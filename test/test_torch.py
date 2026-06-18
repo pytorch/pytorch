@@ -6202,6 +6202,52 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(out, expected)
 
     @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_where_scalar_overflow_matches_fill(self, device, dtype):
+        # torch.where with a Python scalar operand semantically fills the
+        # output with the scalar wherever condition is True, so it must reject
+        # scalars that do not fit in the (reduced-precision) result dtype, the
+        # same way full_like / full / fill_ do. Previously where silently cast
+        # the out-of-range scalar to +/-Inf. See gh-187429.
+        finfo = torch.finfo(dtype)
+        # Finite Python double that is out of range for `dtype` (e.g. 1.3e5 for
+        # float16, ~6.8e38 for bfloat16) -- casting it would silently overflow.
+        big = finfo.max * 2.0
+        cond = torch.tensor([True, False, True], device=device)
+        other = torch.zeros(3, dtype=dtype, device=device)
+
+        # full_like is the reference behavior we want to match.
+        with self.assertRaisesRegex(RuntimeError, "without overflow"):
+            torch.full_like(other, big)
+
+        # ScalarSelf and ScalarOther overloads: the tensor operand fixes the
+        # (reduced) result dtype, so the out-of-range scalar must be rejected.
+        for x, y in ((big, other), (other, big)):
+            with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                torch.where(cond, x, y)
+
+        if dtype == torch.float16:
+            # Integral scalars overflow the reduced dtype too, and full_like
+            # rejects them as well. (100000000 fits in int64 but not float16.)
+            with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                torch.full_like(other, 100000000)
+            with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                torch.where(cond, 100000000, other)
+
+        # In-range scalars, and the IEEE-special inf / nan values (which are
+        # representable in the reduced dtype) must still go through.
+        self.assertEqual(
+            torch.where(cond, 2.0, other),
+            torch.tensor([2.0, 0.0, 2.0], dtype=dtype, device=device),
+        )
+        for special in (float("inf"), float("-inf"), float("nan")):
+            # Mirrors torch.full_like(other, special), which does not raise.
+            torch.full_like(other, special)
+            out = torch.where(cond, special, other)
+            self.assertEqual(out.dtype, dtype)
+        self.assertTrue(torch.where(cond, finfo.max, other).isfinite().all())
+
+    @onlyNativeDeviceTypes
     @dtypes(torch.uint16, torch.uint32, torch.uint64)
     def test_eq_ne_barebones_unsigned(self, device, dtype):
         # The eq/ne kernels dispatch over uint16/uint32/uint64 via

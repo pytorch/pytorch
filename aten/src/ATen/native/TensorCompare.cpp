@@ -1,6 +1,7 @@
 #include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/TensorMeta.h>
@@ -588,6 +589,56 @@ static Device out_device(Args&... inps) {
   return at::kCPU;
 }
 
+// [Note: where scalar overflow]
+// The scalar overloads of torch.where materialize the scalar operand with
+// at::scalar_tensor, whose CPU fast path (at::detail::scalar_fill) intentionally
+// performs a *relaxed*, IEEE-conformant cast for reduced-precision floating
+// types (half / bfloat16 / float8). That matches the torch.tensor constructor,
+// which turns out-of-range values into +/-Inf rather than raising.
+//
+// `where`, however, semantically *fills* the result with the scalar wherever
+// `condition` is true, so it should mirror the strict filling family
+// (full_like / full / fill_), which reject scalars that do not fit in the
+// result dtype via c10::checked_convert. Without this guard,
+// `torch.where(cond, 1e7, fp16_tensor)` silently writes +/-Inf while
+// `torch.full_like(fp16_tensor, 1e7)` raises, an inconsistency reported in
+// https://github.com/pytorch/pytorch/issues/187429 (a regression from <=2.5.1,
+// which raised in both cases).
+static void check_where_scalar_fits_in_result_type(
+    const Scalar& value,
+    ScalarType result_type) {
+  // The relaxed scalar_fill cast above is selected by the *target* dtype, so it
+  // applies to both floating point and integral scalars whose result dtype is a
+  // reduced-precision float. A complex scalar can never promote to one of those
+  // result dtypes, so it never reaches the strict conversion below; skip it
+  // explicitly to keep the dispatch (which has no complex member) well-formed.
+  if (value.isComplex()) {
+    return;
+  }
+  switch (result_type) {
+    case kHalf:
+    case kBFloat16:
+    case kFloat8_e5m2:
+    case kFloat8_e5m2fnuz:
+    case kFloat8_e4m3fn:
+    case kFloat8_e4m3fnuz:
+    case kFloat8_e8m0fnu:
+      break;
+    default:
+      return;
+  }
+  // Scalar::to<scalar_t>() routes through c10::checked_convert, which throws
+  // "value cannot be converted to type <T> without overflow" - exactly the
+  // error full_like / full / fill_ produce for the same scalar and dtype.
+  AT_DISPATCH_V2(
+      result_type,
+      "check_where_scalar_fits_in_result_type",
+      AT_WRAP([&] { value.to<scalar_t>(); }),
+      kHalf,
+      kBFloat16,
+      AT_EXPAND(AT_FLOAT8_TYPES));
+}
+
 Tensor& where_self_out(
     const Tensor& condition,
     const Tensor& self,
@@ -648,6 +699,7 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
   auto result_type = at::native::result_type(other, self);
+  check_where_scalar_fits_in_result_type(self, result_type);
   auto self_converted =
       at::scalar_tensor(self, other.options().dtype(result_type));
   auto other_converted = other.to(result_type);
@@ -656,6 +708,7 @@ Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
 
 Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
   auto result_type = at::native::result_type(self, other);
+  check_where_scalar_fits_in_result_type(other, result_type);
   auto other_converted =
       at::scalar_tensor(other, self.options().dtype(result_type));
   auto self_converted = self.to(result_type);
@@ -664,6 +717,8 @@ Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
 
 Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
   auto result_type = at::native::result_type(self, other);
+  check_where_scalar_fits_in_result_type(self, result_type);
+  check_where_scalar_fits_in_result_type(other, result_type);
   const Tensor& other_t =
       at::scalar_tensor(other, condition.options().dtype(result_type));
   const Tensor& self_t =
