@@ -1262,6 +1262,8 @@ def aot_module_simplified(
                 raise AssertionError("compiled_fn must not be None")
             return compiled_fn(flat_args)
 
+        forward.call_boxed = forward  # type: ignore[attr-defined]
+
     else:
         # TODO: There is something deeply wrong here; compiled_fn running with
         # the boxed calling convention, but aot_module_simplified somehow
@@ -1277,6 +1279,17 @@ def aot_module_simplified(
             if compiled_fn is None:
                 raise AssertionError("compiled_fn must not be None")
             return compiled_fn(full_args)
+
+        def call_boxed(runtime_args: list[Any]) -> Any:
+            full_args = []
+            full_args.extend(params_buffers_flat)
+            full_args.extend(runtime_args)
+            runtime_args.clear()
+            if compiled_fn is None:
+                raise AssertionError("compiled_fn must not be None")
+            return compiled_fn(full_args)
+
+        forward.call_boxed = call_boxed  # type: ignore[attr-defined]
 
     # Just for convenience
     forward.zero_grad = mod.zero_grad  # type: ignore[attr-defined]

@@ -1912,8 +1912,8 @@ class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
     """Tests for _RegionScooper partitioning behavior.
 
     Uses CapabilityBasedPartitioner per region ID. Nodes with the same region ID
-    are merged as aggressively as possible (only cycles prevent merging). Nodes
-    with different region IDs are never merged.
+    only merge through supported data dependencies. Nodes with different region
+    IDs are never merged.
     """
 
     def _make_tag_node(self, g, inp, scalar, tagged):
@@ -1960,7 +1960,7 @@ class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
                 self.assertEqual(self._scoop_and_count(gm), expected)
 
     def test_parallel_branches_not_fused(self):
-        """Two adjacent independent tagged branches form 1 partition."""
+        """Two adjacent independent tagged branches form separate partitions."""
         g = torch.fx.Graph()
         x = g.placeholder("x")
         mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
@@ -1969,11 +1969,11 @@ class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
         out.meta["val"] = torch.empty(10)
         g.output(out)
         gm = torch.fx.GraphModule(torch.nn.Module(), g)
-        self.assertEqual(self._scoop_and_count(gm), 1)
+        self.assertEqual(self._scoop_and_count(gm), 2)
 
     def test_parallel_branches_with_gap_same_region(self):
         """Two independent tagged nodes separated by an untagged node but
-        sharing the same region ID are fused into 1 partition (no cycle).
+        sharing the same region ID form separate partitions.
         """
         g = torch.fx.Graph()
         x = g.placeholder("x")
@@ -1985,7 +1985,7 @@ class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
         out.meta["val"] = torch.empty(10)
         g.output(out)
         gm = torch.fx.GraphModule(torch.nn.Module(), g)
-        self.assertEqual(self._scoop_and_count(gm), 1)
+        self.assertEqual(self._scoop_and_count(gm), 2)
 
     def test_parallel_branches_with_gap_different_regions(self):
         """Two independent tagged nodes with different region IDs produce
@@ -2019,6 +2019,18 @@ class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
         g.output(mul_b)
         gm = torch.fx.GraphModule(torch.nn.Module(), g)
         self.assertEqual(self._scoop_and_count(gm), 1)
+
+    def test_dependent_through_unsupported_gap_not_merged(self):
+        """Supported nodes are not fused across an unsupported dependency."""
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        sin = g.call_function(torch.ops.aten.sin.default, (mul_a,))
+        sin.meta["val"] = torch.empty(10)
+        mul_b = self._make_tag_node(g, sin, 3.0, tagged=True)
+        g.output(mul_b)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 2)
 
     def test_different_annotations_not_merged(self):
         """Two tagged nodes with different region IDs are NOT merged,

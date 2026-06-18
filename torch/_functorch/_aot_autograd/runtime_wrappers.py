@@ -2547,6 +2547,14 @@ class SerializableCompiledFunction:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self.compiled_fn(*args, **kwargs)
 
+    def call_boxed(self, args: list[Any]) -> Any:
+        call_boxed = getattr(self.compiled_fn, "call_boxed", None)
+        if call_boxed is not None:
+            return call_boxed(args)
+        if getattr(self.compiled_fn, "_boxed_call", False):
+            return self.compiled_fn(args)
+        return self.compiled_fn(*args)
+
 
 @dataclass
 class AOTDispatchAutogradCompileSpec:

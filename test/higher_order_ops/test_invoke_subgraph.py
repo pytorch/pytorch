@@ -6,6 +6,7 @@ import re
 import unittest
 import unittest.mock as mock
 import warnings
+import weakref
 
 from parameterized import parameterized_class
 
@@ -50,6 +51,41 @@ if HAS_GPU:
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraph(TestCase):
+    def test_infer_releases_boxed_operands_before_dispatch(self):
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_infer
+
+        class Holder:
+            pass
+
+        alive_during_call = []
+
+        class BoxedSubgraph:
+            _boxed_call = True
+
+            def __call__(self, args):
+                holder_ref = weakref.ref(args[0])
+                args.clear()
+                alive_during_call.append(holder_ref() is not None)
+                return "ok"
+
+        self.assertEqual(invoke_subgraph_infer(BoxedSubgraph(), Holder()), "ok")
+        self.assertEqual(alive_during_call, [False])
+
+        class CallBoxedSubgraph:
+            _boxed_call = True
+
+            def __call__(self, args):
+                raise AssertionError("expected call_boxed")
+
+            def call_boxed(self, args):
+                holder_ref = weakref.ref(args[0])
+                args.clear()
+                alive_during_call.append(holder_ref() is not None)
+                return "ok"
+
+        self.assertEqual(invoke_subgraph_infer(CallBoxedSubgraph(), Holder()), "ok")
+        self.assertEqual(alive_during_call, [False, False])
+
     def test_simple(self):
         def gn(x, y):
             return torch.mul(x, y)

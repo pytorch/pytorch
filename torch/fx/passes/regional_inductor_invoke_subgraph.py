@@ -7,8 +7,8 @@ from torch._inductor.standalone_compile import AOTCompiledArtifact
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.regional_inductor import (
+    _boxed_dummy_wrapper,
     _disable_remat_for_regional_subcompile,
-    _dummy_wrapper,
 )
 
 
@@ -81,14 +81,13 @@ def _compile_submod(
     if not isinstance(compiled_fn, AOTCompiledArtifact):
         raise AssertionError(f"Expected AOTCompiledArtifact, got {type(compiled_fn)}")
 
-    # _dummy_wrapper is to make call_function happy
-    compiled_submod = _dummy_wrapper(compiled_fn)
+    compiled_submod = _boxed_dummy_wrapper(compiled_fn)
     for node in subgraph_users:
         with gm.graph.inserting_after(node):
             new_node = gm.graph.call_function(
                 # exclude graph nodes input args
                 compiled_submod,
-                args=node.args[2:],
+                args=(list(node.args[2:]),),
                 kwargs=node.kwargs,
             )
             new_node.meta = node.meta

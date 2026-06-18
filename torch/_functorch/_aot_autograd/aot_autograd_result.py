@@ -741,6 +741,11 @@ def deserialize_bundled_cache_entry(
     def forward(*runtime_args: Any) -> Any:
         return compiled_fn(list(runtime_args))
 
+    def call_boxed(runtime_args: list[Any]) -> Any:
+        return compiled_fn.call_boxed(runtime_args)
+
+    forward.call_boxed = call_boxed  # type: ignore[attr-defined]
+
     if not hasattr(compiled_fn, "serialize"):
         raise AssertionError("compiled_fn must have serialize attribute")
     forward.serialize = compiled_fn.serialize  # type: ignore[attr-defined]

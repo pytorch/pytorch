@@ -335,10 +335,11 @@ def invoke_subgraph_infer(
     proxy_mode = get_proxy_mode()
     if proxy_mode is None:
         # No tracing active, just call the subgraph directly
-        if getattr(subgraph, "_boxed_call", False):
-            return subgraph(list(operands))
-        else:
-            return subgraph(*operands)
+        if _should_call_boxed_subgraph(subgraph):
+            boxed_operands = list(operands)
+            del operands
+            return _call_boxed_subgraph(subgraph, boxed_operands)
+        return subgraph(*operands)
 
     from torch._dynamo.utils import get_unique_name_wrt
 
@@ -956,8 +957,10 @@ def _(subgraph, identifier, *operands):
     # Eager backends run the captured HOP with real tensors and no AOTAutograd
     # fake mode. Let regular autograd record through the subgraph in that case.
     if detect_fake_mode(operands) is None:
-        if getattr(subgraph, "_boxed_call", False):
-            return subgraph(list(operands))
+        if _should_call_boxed_subgraph(subgraph):
+            boxed_operands = list(operands)
+            del operands
+            return _call_boxed_subgraph(subgraph, boxed_operands)
         return subgraph(*operands)
 
     # Check if we have already traced the subgraph.
@@ -1000,8 +1003,10 @@ def _(debug_mode, subgraph, identifier, *operands):
     # If the HOP is dispatched from DebugMode, we should enable debug_mode
     # for the subgraph call.
     with debug_mode:
-        if getattr(subgraph, "_boxed_call", False):
-            result = subgraph(list(operands))
+        if _should_call_boxed_subgraph(subgraph):
+            boxed_operands = list(operands)
+            del operands
+            result = _call_boxed_subgraph(subgraph, boxed_operands)
         else:
             result = subgraph(*operands)
     debug_mode._handle_annotate(f"[exit InvokeSubgraph HOP] {identifier}")
@@ -1020,10 +1025,11 @@ def _(subgraph, identifier, *operands):
     if mode is not None:
         raise AssertionError("Mode should never be enabled for CPU/CUDA key")
 
-    if getattr(subgraph, "_boxed_call", False):
-        return subgraph(list(operands))
-    else:
-        return subgraph(*operands)
+    if _should_call_boxed_subgraph(subgraph):
+        boxed_operands = list(operands)
+        del operands
+        return _call_boxed_subgraph(subgraph, boxed_operands)
+    return subgraph(*operands)
 
 
 @invoke_subgraph.py_functionalize_impl
@@ -1145,8 +1151,10 @@ def _(subgraph, identifier, *operands):
     from torch._dynamo.utils import dynamo_timed
 
     with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
-        if getattr(subgraph, "_boxed_call", False):
-            return subgraph(list(operands))
+        if _should_call_boxed_subgraph(subgraph):
+            boxed_operands = list(operands)
+            del operands
+            return _call_boxed_subgraph(subgraph, boxed_operands)
         return subgraph(*operands)
 
 
@@ -1275,6 +1283,19 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     )
 
 
+def _should_call_boxed_subgraph(subgraph) -> bool:
+    return getattr(subgraph, "call_boxed", None) is not None or getattr(
+        subgraph, "_boxed_call", False
+    )
+
+
+def _call_boxed_subgraph(subgraph, boxed_operands):
+    call_boxed = getattr(subgraph, "call_boxed", None)
+    if call_boxed is not None:
+        return call_boxed(boxed_operands)
+    return subgraph(boxed_operands)
+
+
 def invoke_subgraph_inductor_compile(
     gm, example_inputs, inductor_config_patches=None, **kwargs
 ):
@@ -1326,6 +1347,14 @@ def invoke_subgraph_inductor_compile(
         full_args = []
         full_args.extend(runtime_args)
         return compiled_fn_inner(full_args)
+
+    def call_boxed(runtime_args: list[Any]):
+        full_args = []
+        full_args.extend(runtime_args)
+        runtime_args.clear()
+        return compiled_fn_inner(full_args)
+
+    forward.call_boxed = call_boxed  # type: ignore[attr-defined]
 
     # Just for convenience
     forward.zero_grad = gm.zero_grad  # type: ignore[attr-defined]

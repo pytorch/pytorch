@@ -28,6 +28,25 @@ def _dummy_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     return inner
 
 
+def _call_boxed(fn: Callable[..., _R], args: list[Any], kwargs: dict[str, Any]) -> _R:
+    boxed_args = args if type(args) is list else list(args)
+    call_boxed = getattr(fn, "call_boxed", None)
+    if call_boxed is not None and not kwargs:
+        return call_boxed(boxed_args)
+    if getattr(fn, "_boxed_call", False) and not kwargs:
+        return fn(boxed_args)
+    return fn(*args, **kwargs)
+
+
+def _boxed_dummy_wrapper(fn: Callable[..., _R]) -> Callable[..., _R]:
+    @functools.wraps(fn)
+    def inner(args: list[Any], **kwargs: Any) -> _R:
+        return _call_boxed(fn, args, kwargs)
+
+    inner._boxed_arg_indices = (0,)  # type: ignore[attr-defined]
+    return inner
+
+
 @contextlib.contextmanager
 def _disable_remat_for_regional_subcompile() -> Iterator[None]:
     # In torch.compile, regional_inductor subcompiles run after the enclosing
@@ -54,7 +73,6 @@ def _compile_submod(gm: torch.fx.GraphModule, prefix: str) -> torch.fx.GraphModu
                     )
 
             submod = getattr(gm, node.target)
-
             # Get inductor configs from annotation
             # TODO we should change partition when there are multiple differently
             # annotated regions.
@@ -105,11 +123,12 @@ def _compile_submod(gm: torch.fx.GraphModule, prefix: str) -> torch.fx.GraphModu
                 raise AssertionError(
                     f"Expected AOTCompiledArtifact, got {type(compiled_fn)}"
                 )
-            # _dummy_wrapper is to make call_function happy
-            compiled_submod = _dummy_wrapper(compiled_fn)
+            # _boxed_dummy_wrapper is to make call_function happy while keeping
+            # regional inputs under FX boxed-argument lifetime handling.
+            compiled_submod = _boxed_dummy_wrapper(compiled_fn)
             with gm.graph.inserting_after(node):
                 new_node = gm.graph.call_function(
-                    compiled_submod, args=node.args, kwargs=node.kwargs
+                    compiled_submod, args=(list(node.args),), kwargs=node.kwargs
                 )
                 new_node.meta = node.meta
                 node.replace_all_uses_with(new_node)
@@ -177,7 +196,10 @@ class _RegionScooper:
         for region_nodes in regions.values():
             support = create_op_support(_is_in_region(region_nodes))
             partitioner = CapabilityBasedPartitioner(
-                gm, support, allows_single_node_partition=True
+                gm,
+                support,
+                allows_single_node_partition=True,
+                skip_horizontal_fusion=True,
             )
             for partition in partitioner.propose_partitions():
                 all_partitions.append(partition.nodes)

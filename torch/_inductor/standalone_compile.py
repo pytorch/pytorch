@@ -344,6 +344,9 @@ class AOTCompiledArtifact(CompiledArtifact):
     def __call__(self, *args: Any) -> Any:
         return self.inner_fn(*args)
 
+    def call_boxed(self, args: list[Any]) -> Any:
+        return self.inner_fn.call_boxed(args)
+
     def save(
         self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
     ) -> None:

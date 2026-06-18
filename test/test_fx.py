@@ -387,6 +387,52 @@ class TestFX(JitTestCase):
         self.assertIn("multi_boxed_call_boxed_arg_2 = [b];  b = None", gm.code)
         self.assertNotIn("a = b = None", gm.code)
 
+    def test_boxed_dummy_wrapper_codegen_releases_inputs_before_dispatch(self):
+        from torch.fx.passes.regional_inductor import _boxed_dummy_wrapper
+
+        class Holder:
+            pass
+
+        alive_during_call = []
+
+        class CompiledCallable:
+            def __call__(self, *args):
+                raise AssertionError("expected boxed call")
+
+            def call_boxed(self, args):
+                holder_ref = weakref.ref(args[0])
+                args.clear()
+                alive_during_call.append(holder_ref() is not None)
+                return "ok"
+
+        wrapped = _boxed_dummy_wrapper(CompiledCallable())
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        out = graph.call_function(wrapped, ([x],))
+        graph.output(out)
+        gm = GraphModule(torch.nn.Module(), graph)
+
+        self.assertEqual(getattr(wrapped, "_boxed_arg_indices", None), (0,))
+        self.assertRegex(gm.code, r"_boxed_arg_0 = \[x\];  x = None")
+        self.assertEqual(gm.forward(Holder()), "ok")
+        self.assertEqual(alive_during_call, [False])
+
+    def test_boxed_dummy_wrapper_copies_immutable_list_args(self):
+        from torch.fx.passes.regional_inductor import _boxed_dummy_wrapper
+
+        test_case = self
+
+        class CompiledCallable:
+            def call_boxed(self, args):
+                test_case.assertIs(type(args), list)
+                args.clear()
+                return "ok"
+
+        wrapped = _boxed_dummy_wrapper(CompiledCallable())
+        args = immutable_list([object()])
+        self.assertEqual(wrapped(args), "ok")
+        self.assertEqual(len(args), 1)
+
     def test_args_kwargs(self):
         class T(torch.nn.Module):
             def forward(self, *args, **kwargs):
