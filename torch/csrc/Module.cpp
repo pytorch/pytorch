@@ -2918,7 +2918,8 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_ck_sdpa_available", []() {
 #ifdef USE_ROCM
-    return at::globalContext().ckSupported() && at::globalContext().hasCKSDPA();
+    return at::globalContext().ckSDPASupported() &&
+        at::globalContext().hasCKSDPA();
 #else
     return false;
 #endif
