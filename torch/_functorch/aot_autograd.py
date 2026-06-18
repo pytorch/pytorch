@@ -139,6 +139,7 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
+from ._aot_autograd.to_standalone_python import compile_to_python  # noqa: F401
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
     call_func_at_runtime_with_args,
