@@ -4724,6 +4724,164 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(decode_out.shape, (1, 2, 64, 64))
         torch.testing.assert_close(default_out, decode_out, atol=3e-3, rtol=3e-3)
 
+    def test_unbacked_flex_decoding_eligibility_falls_back(self, device):
+        from torch._inductor.kernel.flex.flex_decoding import _use_flex_decoding
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class FakeBuffer:
+            def __init__(self, size):
+                self.size = size
+
+            def get_size(self):
+                return self.size
+
+        shape_env = ShapeEnv()
+        seq_len = shape_env.create_unbacked_symint().node.expr
+        shape_env.var_to_hint_override[seq_len] = 64
+        graph = mock.Mock(sizevars=SizeVarAllocator(shape_env))
+
+        with V.set_graph_handler(graph):
+            self.assertFalse(
+                _use_flex_decoding(
+                    FakeBuffer([1, 2, seq_len, 64]),
+                    FakeBuffer([1, 1, 1, 1]),
+                    FakeBuffer([1, 2, seq_len, 64]),
+                    {},
+                    False,
+                )
+            )
+
+    def test_backward_fake_symbolic_query_key_batch_metadata(self, device):
+        from torch._dynamo.source import LocalSource
+        from torch._higher_order_ops.flex_attention import (
+            _permute_strides,
+            flex_attention_backward_fake_tensor_mode,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+
+        def fakeify(t, name, shape_id=None):
+            dynamic_sizes = [DimDynamic.STATIC] * t.dim()
+            shape_ids = {}
+            if shape_id is not None:
+                dynamic_sizes[0] = DimDynamic.UNBACKED
+                shape_ids[0] = shape_id
+            return fake_mode.from_tensor(
+                t,
+                source=LocalSource(name, is_input=True),
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=dynamic_sizes,
+                    shape_ids=shape_ids,
+                ),
+            )
+
+        B, H, S, D = 4, 2, 8, 16
+
+        def run(query, key, value, out, logsumexp, grad_out, grad_logsumexp):
+            with fake_mode:
+                _, grad_key, grad_value, _ = flex_attention_backward_fake_tensor_mode(
+                    query,
+                    key,
+                    value,
+                    out,
+                    logsumexp,
+                    grad_out,
+                    grad_logsumexp,
+                    None,
+                    None,
+                    (),
+                    1.0,
+                    {},
+                )
+            return grad_key, grad_value
+
+        def make_fake_inputs(Bq, Bkv, *, shared_batch=False, key_value_factory=None):
+            shape_id = "batch" if shared_batch else None
+            query = fakeify(torch.empty(Bq, H, S, D, device=device), "query", shape_id)
+            if key_value_factory is None:
+                key_real = torch.empty(Bkv, H, S, D, device=device)
+                value_real = torch.empty(Bkv, H, S, D, device=device)
+            else:
+                key_real = key_value_factory(Bkv)
+                value_real = key_value_factory(Bkv)
+            key = fakeify(key_real, "key", shape_id)
+            value = fakeify(value_real, "value", shape_id)
+            out = fakeify(torch.empty(Bq, H, S, D, device=device), "out", shape_id)
+            grad_out = fakeify(
+                torch.empty(Bq, H, S, D, device=device), "grad_out", shape_id
+            )
+            logsumexp = fakeify(
+                torch.empty(Bq, H, S, device=device), "logsumexp", shape_id
+            )
+            grad_logsumexp = fakeify(
+                torch.empty(Bq, H, S, device=device), "grad_logsumexp", shape_id
+            )
+            return (
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                grad_out,
+                grad_logsumexp,
+                key_real,
+                value_real,
+            )
+
+        args = make_fake_inputs(B, B, shared_batch=True)
+        grad_key, grad_value = run(*args[:7])
+
+        self.assertEqual(grad_key.shape, args[1].shape)
+        self.assertEqual(grad_value.shape, args[2].shape)
+
+        def transposed_batch_tensor(B):
+            return torch.empty(H, S, D, B, device=device).permute(3, 0, 1, 2)
+
+        args = make_fake_inputs(1, 1, key_value_factory=transposed_batch_tensor)
+        grad_key, grad_value = run(*args[:7])
+        key_real, value_real = args[7:]
+        expected_key = _permute_strides(
+            key_real.new_empty((1, H, S, D)), key_real.stride()
+        )
+        expected_value = _permute_strides(
+            value_real.new_empty((1, H, S, D)), value_real.stride()
+        )
+        self.assertEqual(grad_key.shape, args[1].shape)
+        self.assertEqual(grad_value.shape, args[2].shape)
+        self.assertEqual(grad_key.stride(), expected_key.stride())
+        self.assertEqual(grad_value.stride(), expected_value.stride())
+
+        args = make_fake_inputs(B, 1, key_value_factory=transposed_batch_tensor)
+        grad_key, grad_value = run(*args[:7])
+        key_real, value_real = args[7:]
+        expected_key = torch.sum(
+            _permute_strides(key_real.new_empty((B, H, S, D)), key_real.stride()),
+            dim=0,
+            keepdim=True,
+        )
+        expected_value = torch.sum(
+            _permute_strides(value_real.new_empty((B, H, S, D)), value_real.stride()),
+            dim=0,
+            keepdim=True,
+        )
+        self.assertEqual(grad_key.shape, args[1].shape)
+        self.assertEqual(grad_value.shape, args[2].shape)
+        self.assertEqual(grad_key.stride(), expected_key.stride())
+        self.assertEqual(grad_value.stride(), expected_value.stride())
+
+        args = make_fake_inputs(B, 2)
+        with self.assertRaisesRegex(RuntimeError, "batch must match"):
+            run(*args[:7])
+
     @supported_platform
     @skip_on_cpu
     @skip_on_mps  # asserts Triton-specific BACKEND='TRITON_DECODE' error
@@ -5731,6 +5889,193 @@ class GraphModule(torch.nn.Module):
         torch.testing.assert_close(compiled_dk, ref_dk)
         torch.testing.assert_close(compiled_dv, ref_dv)
         self.assertEqual(compiled_buffer_grads, ref_buffer_grads)
+
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps  # backward Triton lowering
+    def test_direct_backward_inductor_batch_broadcast_matches_eager(self, device):
+        def score_mod(score, b, h, m, n):
+            return score
+
+        def mask_mod(b, h, m, n):
+            return m >= n
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=4,
+            H=None,
+            Q_LEN=128,
+            KV_LEN=128,
+            device=device,
+        )
+        scale = 1.0 / 16**0.5
+        dtype = torch.float32
+        q = torch.randn((4, 2, 128, 16), dtype=dtype, device=device, requires_grad=True)
+        k = torch.randn((1, 2, 128, 16), dtype=dtype, device=device, requires_grad=True)
+        v = torch.randn((1, 2, 128, 16), dtype=dtype, device=device, requires_grad=True)
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        sdpa_partial = create_attention(score_mod, block_mask)
+        golden_out = sdpa_partial(q_gold, k_gold, v_gold)
+        ref_out = sdpa_partial(q_ref, k_ref, v_ref)
+        backward_grad = torch.randn_like(q)
+        golden_out.backward(backward_grad.to(torch.float64))
+        ref_out.backward(backward_grad)
+
+        out, logsumexp = flex_attention_fwd(
+            q,
+            k,
+            v,
+            _identity,
+            block_mask,
+            scale,
+        )
+
+        def eager_bw(query, key, value, fwd_out, lse, grad_out):
+            return torch.ops.higher_order.flex_attention_backward(
+                query,
+                key,
+                value,
+                fwd_out,
+                lse,
+                grad_out,
+                None,
+                score_mod,
+                None,
+                block_mask.as_tuple(),
+                scale,
+                {"BACKEND": "TRITON"},
+                (),
+                (),
+            )
+
+        @torch.compile(fullgraph=True)
+        def compiled_bw(query, key, value, fwd_out, lse, grad_out):
+            return eager_bw(query, key, value, fwd_out, lse, grad_out)
+
+        with torch.no_grad():
+            _, ref_dk, ref_dv, _ = eager_bw(
+                q,
+                k,
+                v,
+                out.detach(),
+                logsumexp.detach(),
+                backward_grad,
+            )
+            dq, dk, dv, _ = compiled_bw(
+                q,
+                k,
+                v,
+                out.detach(),
+                logsumexp.detach(),
+                backward_grad,
+            )
+
+        fudge_factor = 10.0
+        self._check_equal(q_gold.grad, q_ref.grad, dq, fudge_factor, "Grad_Query")
+        self._check_equal(k_gold.grad, k_ref.grad, dk, fudge_factor, "Grad_Key")
+        self._check_equal(v_gold.grad, v_ref.grad, dv, fudge_factor, "Grad_Value")
+        self.assertEqual(dk.shape, k.shape)
+        self.assertEqual(dv.shape, v.shape)
+        self.assertEqual(dk.stride(), ref_dk.stride())
+        self.assertEqual(dv.stride(), ref_dv.stride())
+
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps  # backward Triton lowering
+    def test_direct_backward_inductor_supports_scalar_mask_mod_buffers(self, device):
+        def score_mod(score, b, h, m, n):
+            return score
+
+        def base_mask_mod(b, h, m, n):
+            return m >= n
+
+        def mask_mod(b, h, m, n, shift):
+            return (m + shift) >= n
+
+        base_block_mask = create_block_mask(
+            base_mask_mod,
+            B=2,
+            H=2,
+            Q_LEN=128,
+            KV_LEN=128,
+            device=device,
+        )
+        block_mask = BlockMask.from_kv_blocks(
+            base_block_mask.kv_num_blocks,
+            base_block_mask.kv_indices,
+            base_block_mask.full_kv_num_blocks,
+            base_block_mask.full_kv_indices,
+            BLOCK_SIZE=base_block_mask.BLOCK_SIZE,
+            mask_mod=mask_mod,
+            seq_lengths=base_block_mask.seq_lengths,
+        )
+        scale = 1.0 / 16**0.5
+        dtype = torch.float32
+        q = torch.randn((2, 2, 128, 16), dtype=dtype, device=device, requires_grad=True)
+        k = torch.randn((2, 2, 128, 16), dtype=dtype, device=device, requires_grad=True)
+        v = torch.randn((2, 2, 128, 16), dtype=dtype, device=device, requires_grad=True)
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        ref_attention = create_attention(score_mod, base_block_mask)
+        golden_out = ref_attention(q_gold, k_gold, v_gold)
+        ref_out = ref_attention(q_ref, k_ref, v_ref)
+        backward_grad = torch.randn((2, 2, 128, 16), dtype=dtype, device=device)
+        golden_out.backward(backward_grad.to(torch.float64))
+        ref_out.backward(backward_grad)
+        static_shift = 0
+
+        out, logsumexp, _ = flex_attention_hop(
+            q,
+            k,
+            v,
+            _identity,
+            block_mask.as_tuple(),
+            scale,
+            {},
+            (),
+            (static_shift,),
+        )
+
+        def eager_bw(query, key, value, fwd_out, lse, grad_out):
+            return torch.ops.higher_order.flex_attention_backward(
+                query,
+                key,
+                value,
+                fwd_out,
+                lse,
+                grad_out,
+                None,
+                score_mod,
+                None,
+                block_mask.as_tuple(),
+                scale,
+                {"BACKEND": "TRITON"},
+                (),
+                (static_shift,),
+            )
+
+        @torch.compile(fullgraph=True)
+        def compiled_bw(query, key, value, fwd_out, lse, grad_out):
+            return eager_bw(query, key, value, fwd_out, lse, grad_out)
+
+        with torch.no_grad():
+            dq, dk, dv, buffer_grads = compiled_bw(
+                q,
+                k,
+                v,
+                out.detach(),
+                logsumexp.detach(),
+                backward_grad,
+            )
+
+        fudge_factor = 10.0
+        self._check_equal(q_gold.grad, q_ref.grad, dq, fudge_factor, "Grad_Query")
+        self._check_equal(k_gold.grad, k_ref.grad, dk, fudge_factor, "Grad_Key")
+        self._check_equal(v_gold.grad, v_ref.grad, dv, fudge_factor, "Grad_Value")
+        self.assertEqual(buffer_grads, ())
 
     @supported_platform
     def test_tensor_subclass_dispatch_order(self, device):
@@ -7355,11 +7700,11 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         block_mask = create_block_mask(mask_mod, None, None, 1024, 1024, device=device)
         flex_attention_call(*create_inputs(1024), block_mask=block_mask)
-        with self.assertRaisesRegex(ValueError, "block_mask was created for"):
+        with self.assertRaisesRegex(RuntimeError, "block_mask was created for"):
             flex_attention_call(*create_inputs(2048), block_mask=block_mask)
 
         block_mask = create_block_mask(mask_mod, None, None, 1023, 1023, device=device)
-        with self.assertRaisesRegex(ValueError, "block_mask was created for"):
+        with self.assertRaisesRegex(RuntimeError, "block_mask was created for"):
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
     @supported_platform
