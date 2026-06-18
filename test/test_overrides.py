@@ -160,8 +160,13 @@ class DiagonalTensor:
     def __repr__(self):
         return f"DiagonalTensor(N={self._N}, value={self._i})"
 
-    def __array__(self):
-        return self._i * np.eye(self._N)
+    def __array__(self, dtype=None, *, copy=None):
+        array = self._i * np.eye(self._N)
+        if dtype is not None:
+            array = array.astype(dtype)
+        if copy is True:
+            array = array.copy()
+        return array
 
     def tensor(self):
         return self._i * torch.eye(self._N)
