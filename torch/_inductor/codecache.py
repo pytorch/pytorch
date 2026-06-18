@@ -2964,7 +2964,7 @@ end
                 if t.numel() == 0:
                     return 0
                 if t.is_mkldnn:
-                    return torch.ops.mkldnn._nbytes(t)
+                    return torch.ops.onednn._nbytes(t)
                 return t.untyped_storage().nbytes()
 
             if (
@@ -3012,7 +3012,7 @@ end
                                 return
                             t = graph.get_original_value_of_constant(constant_names[i])
                             if t.is_mkldnn:
-                                data_ptr = torch.ops.mkldnn.data_ptr(t)
+                                data_ptr = torch.ops.onednn.data_ptr(t)
                                 ctypes.memmove(base_addr + offsets[i], data_ptr, n)
                             else:
                                 # Hold the CPU storage until memmove finishes —

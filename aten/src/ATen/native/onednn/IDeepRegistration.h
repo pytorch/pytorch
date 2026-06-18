@@ -1,7 +1,7 @@
 #pragma once
 
-namespace at::native::mkldnn{
+namespace at::native::onednn{
 void clear_computation_cache();
 
 
-} // namespace  at::native::mkldnn
+} // namespace  at::native::onednn

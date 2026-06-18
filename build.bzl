@@ -221,7 +221,7 @@ GENERATED_CPP = [
     "RegisterNestedTensorCPU_0.cpp",
     "RegisterSparseCPU_0.cpp",
     "RegisterSparseCsrCPU_0.cpp",
-    "RegisterMkldnnCPU_0.cpp",
+    "RegisterOnednnCPU_0.cpp",
     "RegisterCompositeImplicitAutograd_0.cpp",
     "RegisterCompositeImplicitAutogradNestedTensor_0.cpp",
     "RegisterZeroTensor_0.cpp",

@@ -80,7 +80,7 @@ class TestoneDNNFusion(TestCase):
                     attr = pointwise_info.attr
                     scalars = pointwise_info.scalars
                     algorithm = pointwise_info.algorithm
-                    fused = torch.ops.mkldnn._linear_pointwise(
+                    fused = torch.ops.onednn._linear_pointwise(
                         v,
                         mod.linear.weight,
                         mod.linear.bias,
@@ -113,7 +113,7 @@ class TestoneDNNFusion(TestCase):
                 other = torch.randn(4, out_feature).to(device)
                 ref = model(input, other)
                 attr = pointwise_name
-                fused = torch.ops.mkldnn._linear_pointwise(
+                fused = torch.ops.onednn._linear_pointwise(
                     input,
                     other,
                     model.linear.weight,
@@ -188,7 +188,7 @@ class TestoneDNNFusion(TestCase):
                         attr = pointwise_info.attr
                         scalars = pointwise_info.scalars
                         algorithm = pointwise_info.algorithm
-                        fused = torch.ops.mkldnn._convolution_pointwise(
+                        fused = torch.ops.onednn._convolution_pointwise(
                             x,
                             mod.conv.weight,
                             mod.conv.bias,
@@ -246,7 +246,7 @@ class TestoneDNNFusion(TestCase):
                 ref = mod(x, other)
                 unary_attr = None
                 attr = pointwise_name
-                fused = torch.ops.mkldnn._convolution_pointwise(
+                fused = torch.ops.onednn._convolution_pointwise(
                     x,
                     other,
                     mod.conv.weight,
@@ -262,7 +262,7 @@ class TestoneDNNFusion(TestCase):
                     None,
                 )
                 if attr == "add":
-                    fused_inplace = torch.ops.mkldnn._convolution_pointwise_(
+                    fused_inplace = torch.ops.onednn._convolution_pointwise_(
                         other,
                         x,
                         mod.conv.weight,

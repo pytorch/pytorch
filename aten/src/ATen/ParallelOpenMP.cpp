@@ -64,7 +64,7 @@ void set_num_threads(int nthreads) {
   TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
 #endif
 #if AT_ONEDNN_ENABLED()
-  at::native::mkldnn::clear_computation_cache();
+  at::native::onednn::clear_computation_cache();
 #endif
 }
 

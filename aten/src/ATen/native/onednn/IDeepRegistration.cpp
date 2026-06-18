@@ -20,13 +20,13 @@ static RegisterEngineAllocator cpu_alloc(
   }
 );
 
-namespace at::native::mkldnn{
+namespace at::native::onednn{
 void clear_computation_cache() {
   // Reset computation_cache for forward convolutions
   // As it also caches max number of OpenMP workers
   ideep::convolution_forward::t_store().clear();
 }
 
-} // namespace  at::native::mkldnn
+} // namespace  at::native::onednn
 
 #endif // AT_ONEDNN_ENABLED()

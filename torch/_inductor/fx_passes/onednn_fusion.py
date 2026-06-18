@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
-    mkldnn = torch.ops.mkldnn
+    onednn = torch.ops.onednn
     prims = torch.ops.prims
 
     _conv_args = [Arg() for _ in range(10)]
@@ -75,10 +75,10 @@ if torch._C._has_mkldnn:
     class CpuMkldnnDeviceOp(MkldnnDeviceOpBase):
         def get_linear_transpose_weight(self, weight_node):
             packed_weight_node = weight_node
-            if packed_weight_node.target != mkldnn._reorder_linear_weight:
+            if packed_weight_node.target != onednn._reorder_linear_weight:
                 raise AssertionError(
                     "expected packed_weight_node.target to be "
-                    "mkldnn._reorder_linear_weight, got "
+                    "onednn._reorder_linear_weight, got "
                     f"{packed_weight_node.target}"
                 )
             transpose_weight_node = packed_weight_node.args[0]
@@ -97,9 +97,9 @@ if torch._C._has_mkldnn:
             constant_args,
             input_size,
         ):
-            packed_weight_op = mkldnn._reorder_convolution_weight
+            packed_weight_op = onednn._reorder_convolution_weight
             if is_transposed:
-                packed_weight_op = mkldnn._reorder_convolution_transpose_weight
+                packed_weight_op = onednn._reorder_convolution_transpose_weight
 
             # mkldnn_reorder_conv_weight(self, padding, stride, dilation, groups, input_size)
             packed_weight_inputs = (weight,) + tuple(constant_args) + (input_size,)
@@ -125,10 +125,10 @@ if torch._C._has_mkldnn:
             # Disable MKL prepack linear in AOT mode.
             # Disable MKL prepack linear when batch_size has free symbols.
             packed_weight_op = (
-                mkldnn._reorder_linear_weight
+                onednn._reorder_linear_weight
                 if (
                     is_lp_weight
-                    or mkldnn._is_onednn_acl_supported()
+                    or onednn._is_onednn_acl_supported()
                     or V.aot_compilation
                     or has_free_symbols(batch_size)
                 )
@@ -145,12 +145,12 @@ if torch._C._has_mkldnn:
             transpose_weight_node = packed_weight_node.args[0]
             if (
                 is_lp_weight
-                or mkldnn._is_onednn_acl_supported()
+                or onednn._is_onednn_acl_supported()
                 or V.aot_compilation
                 or has_free_symbols(batch_size)
             ):
                 packed_linear_inputs += (bias, "none", [], "")
-                packed_linear_op: Callable[..., Any] = mkldnn._linear_pointwise.default
+                packed_linear_op: Callable[..., Any] = onednn._linear_pointwise.default
             else:
                 packed_linear_inputs += (transpose_weight_node, bias, batch_size)
                 packed_linear_op = torch.ops.mkl._mkl_linear
@@ -170,7 +170,7 @@ if torch._C._has_mkldnn:
         ):
             if is_transposed:
                 raise AssertionError(
-                    "'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
+                    "'onednn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
                 )
             return weight
 
@@ -192,7 +192,7 @@ if torch._C._has_mkldnn:
         2. All the GEMM nodes share the same activation.
         3. All the GEMM nodes have same weight size but different wgt node.
         """
-        computation_op = mkldnn._linear_pointwise.default
+        computation_op = onednn._linear_pointwise.default
         act = computation_nodes[0].args[0]
         wgt = computation_nodes[0].args[1]
         wgt_size = wgt.meta.get("val").size()  # type: ignore[union-attr]
@@ -213,7 +213,7 @@ if torch._C._has_mkldnn:
         TODO: Use MultiOutputPattern, current limitation is the pattern requires
         fixed number of output nodes. Extend to support Group GEMM for pattern matcher.
         """
-        computation_op = mkldnn._linear_pointwise.default
+        computation_op = onednn._linear_pointwise.default
         from ..onednn_lowerings import grouped_gemm_lowering
 
         for node in graph.find_nodes(op="call_function", target=computation_op):
@@ -259,17 +259,17 @@ if torch._C._has_mkldnn:
 
     def _conv_call(users=1):
         return CallFunction(
-            mkldnn._convolution_pointwise.default, *_conv_args, _users=users
+            onednn._convolution_pointwise.default, *_conv_args, _users=users
         )
 
     def _linear_call(users=1):
         return CallFunction(
-            mkldnn._linear_pointwise.default, *_linear_args, _users=users
+            onednn._linear_pointwise.default, *_linear_args, _users=users
         )
 
     def _conv_transpose_call(users=1):
         return CallFunction(
-            mkldnn._convolution_transpose_pointwise.default,
+            onednn._convolution_transpose_pointwise.default,
             *_conv_transpose_args,
             _users=users,
         )
@@ -621,7 +621,7 @@ if torch._C._has_mkldnn:
                     f"{computation_op}, got {computation_node.target}"
                 )
             computation_node_size = get_meta_value(computation_node).size()
-            if computation_op is mkldnn._linear_pointwise.default:
+            if computation_op is onednn._linear_pointwise.default:
                 broadcast_sizes = []
                 if len(computation_node_size) >= 2:
                     broadcast_sizes = [
@@ -878,9 +878,9 @@ if torch._C._has_mkldnn:
         return fn
 
     computation_ops = [
-        mkldnn._convolution_pointwise.default,
-        mkldnn._linear_pointwise.default,
-        mkldnn._convolution_transpose_pointwise.default,
+        onednn._convolution_pointwise.default,
+        onednn._linear_pointwise.default,
+        onednn._convolution_transpose_pointwise.default,
     ]
 
     class UnaryAttr:
@@ -964,8 +964,8 @@ if torch._C._has_mkldnn:
 
     def _register_inplace_fusion():
         binary_ops = [aten.add, ops.add]
-        inplace_fusion_op = mkldnn._convolution_pointwise_.binary
-        outplace_fusion_op = mkldnn._convolution_pointwise.binary
+        inplace_fusion_op = onednn._convolution_pointwise_.binary
+        outplace_fusion_op = onednn._convolution_pointwise.binary
         conv_call = _conv_call(users=1)
         conv_op = computation_ops[0]
         for binary_op in binary_ops:
@@ -1011,8 +1011,8 @@ if torch._C._has_mkldnn:
     def _register_binary_fusion():
         binary_ops = [aten.add, ops.add, aten.sub, ops.sub]
         fusion_ops = [
-            mkldnn._convolution_pointwise.binary,
-            mkldnn._linear_pointwise.binary,
+            onednn._convolution_pointwise.binary,
+            onednn._linear_pointwise.binary,
         ]
         _computation_user_1 = [_conv_call(users=1), _linear_call(users=1)]
         for computation_call, computation_op, fusion_op in zip(
@@ -1032,7 +1032,7 @@ if torch._C._has_mkldnn:
 
     def _register_binary_unary_fusion():
         binary_ops = [aten.add, ops.add, aten.sub, ops.sub]
-        fusion_ops = [mkldnn._convolution_pointwise.binary]
+        fusion_ops = [onednn._convolution_pointwise.binary]
         _computation_user_1 = [_conv_call(users=1)]
         for computation_call, computation_op, fusion_op in zip(
             _computation_user_1, computation_ops[:-1], fusion_ops
@@ -1067,7 +1067,7 @@ if torch._C._has_mkldnn:
             CallFunction(
                 aten.reshape.default,
                 CallFunction(
-                    mkldnn._linear_pointwise.default,
+                    onednn._linear_pointwise.default,
                     CallFunction(
                         aten.reshape.default,
                         Arg(),
@@ -1120,7 +1120,7 @@ if torch._C._has_mkldnn:
             )
 
             if can_remove_reshape:
-                repl = graph.call_function(mkldnn._linear_pointwise.default, args)
+                repl = graph.call_function(onednn._linear_pointwise.default, args)
                 repl.meta.update(reshape_2_node.meta)
                 reshape_2_node.replace_all_uses_with(repl)
                 old_linear_node = reshape_2_node.args[0]
@@ -1162,7 +1162,7 @@ if torch._C._has_mkldnn:
         @register_freezing_graph_pattern(
             CallFunction(
                 aten.add.Tensor,
-                CallFunction(mkldnn._linear_pointwise.default, *_linear_args),
+                CallFunction(onednn._linear_pointwise.default, *_linear_args),
                 Arg(),
             ),
             pass_number=2,
@@ -1175,7 +1175,7 @@ if torch._C._has_mkldnn:
             new_args = list(linear_node.args)
             new_args[2] = add_node.args[1]
             repl = graph.call_function(
-                mkldnn._linear_pointwise.default, tuple(new_args)
+                onednn._linear_pointwise.default, tuple(new_args)
             )
             repl.meta.update(add_node.meta)
             add_node.replace_all_uses_with(repl)
@@ -1227,7 +1227,7 @@ if torch._C._has_mkldnn:
         """
         conv_node = match.output_node()
         device_type = conv_node.meta.get("val").device.type
-        # The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device.
+        # The operator 'onednn::_convolution_transpose_pointwise' is not currently implemented for the XPU device.
         if match.kwargs["is_transposed"] and device_type == "xpu":
             return False
 
@@ -1326,7 +1326,7 @@ if torch._C._has_mkldnn:
         # on aarch64, use mkldnn op for fp32 as well if acl is enabled
         if (
             not compute_with_lp
-            and not mkldnn._is_onednn_acl_supported()
+            and not onednn._is_onednn_acl_supported()
             and not torch._C.has_mkl
         ):
             return False
@@ -1411,10 +1411,10 @@ if torch._C._has_mkldnn:
             input_size = conv_node.args[0].meta.get("val").shape
             with graph.inserting_before(conv_node):
                 constant_args = [args[4], args[3], args[5], args[-1]]
-                packed_conv_op = mkldnn._convolution_pointwise.default
+                packed_conv_op = onednn._convolution_pointwise.default
                 if is_transposed:
                     constant_args.insert(1, args[-2])  # output_padding
-                    packed_conv_op = mkldnn._convolution_transpose_pointwise.default
+                    packed_conv_op = onednn._convolution_transpose_pointwise.default
 
                 if not has_free_symbols(input_size):
                     packed_weight_node = mkldnn_device_op.pack_conv_weight(
@@ -1463,7 +1463,7 @@ if torch._C._has_mkldnn:
             has_biases = args[11]
             batch_first = args[13]
             with graph.inserting_before(lstm_node):
-                packed_weight_op = mkldnn._reorder_onednn_rnn_layer_weight.default
+                packed_weight_op = onednn._reorder_onednn_rnn_layer_weight.default
                 packed_weight_inputs = (
                     weight0,
                     weight1,
@@ -1585,9 +1585,9 @@ if torch._C._has_mkldnn:
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
             torch._C._nn.mkldnn_reorder_conv3d_weight,
-            mkldnn._reorder_convolution_transpose_weight,
-            mkldnn._reorder_linear_weight,
-            mkldnn._reorder_onednn_rnn_layer_weight,
+            onednn._reorder_convolution_transpose_weight,
+            onednn._reorder_linear_weight,
+            onednn._reorder_onednn_rnn_layer_weight,
         ]
         if torch._C.has_mkl:
             packed_weight_ops.append(torch.ops.mkl._mkl_reorder_linear_weight)
@@ -1613,7 +1613,7 @@ if torch._C._has_mkldnn:
         ):
             return
 
-        if not torch.ops.mkldnn._is_onednn_acl_supported():
+        if not torch.ops.onednn._is_onednn_acl_supported():
             _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()

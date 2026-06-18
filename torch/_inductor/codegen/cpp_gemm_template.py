@@ -510,7 +510,7 @@ def prune_tensors(input_nodes: list[ir.IRNode], new_input_nodes: list[ir.IRNode]
         # old weight if it has no other users. This saves memory but makes the FX graph
         # non-retraceable. To support retracing, we can add a repack node to the
         # FX graph. For example:
-        # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
+        # onednn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
         candidate_tensor_users = 0
         candidate_tensor = V.graph.constants[candidate_node.get_name()]
         for node in reversed(V.graph.graph.nodes):
