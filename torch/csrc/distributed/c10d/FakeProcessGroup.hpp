@@ -47,6 +47,12 @@ class FakeProcessGroup : public Backend {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
   }
 
+  void setTimeout(std::chrono::milliseconds /* timeout */) override {
+    // FakeProcessGroup does no real communication, so there is no timeout to
+    // configure. Override as a no-op so callers don't hit the warning the
+    // Backend base class emits for unsupported backends.
+  }
+
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) override {

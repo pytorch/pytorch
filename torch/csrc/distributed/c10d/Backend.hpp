@@ -170,11 +170,11 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support shrink"));
   }
 
-  virtual void setTimeout(std::chrono::milliseconds timeout) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ", getBackendName(), " does not support setting timeout"));
+  virtual void setTimeout(std::chrono::milliseconds /*timeout*/) {
+    TORCH_WARN(
+        "Backend ",
+        getBackendName(),
+        " does not support setting timeout; the new value is ignored");
   }
 
   // Fault Tolerance / Reconfigure API
