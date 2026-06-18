@@ -112,7 +112,6 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SYMPY_INTERP,
 )
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
 from torch.utils._indented_buffer import IndentedBuffer
 from torch.utils._ordered_set import OrderedSet
@@ -838,56 +837,20 @@ def unwrap_async_collective_tensor(x: torch.Tensor) -> torch.Tensor:
     return x
 
 
-def _storage_overlaps(a: torch.Tensor, b: torch.Tensor) -> bool:
-    return len(compute_overlapping_tensors([a, b], symbolic=False)) == 2
-
-
 def _storage_overlap_partition(
     args: list[object],
 ) -> tuple[tuple[int, ...], ...]:
-    storage_ref_to_indices: dict[StorageWeakRef, list[int]] = collections.defaultdict(
-        list
+    tensor_positions = [
+        i for i, arg in enumerate(args) if isinstance(arg, torch.Tensor)
+    ]
+    tensors = [args[i] for i in tensor_positions]
+    groups = torch._C._dynamo.guards.compute_overlapping_tensor_groups(
+        tensors, symbolic=False
     )
-    tensors: dict[int, torch.Tensor] = {}
-    for i, arg in enumerate(args):
-        if isinstance(arg, torch.Tensor):
-            storage_ref_to_indices[StorageWeakRef(arg.untyped_storage())].append(i)
-            tensors[i] = arg
-
-    overlapping_groups: list[tuple[int, ...]] = []
-    for indices in storage_ref_to_indices.values():
-        if len(indices) <= 1:
-            continue
-
-        parents = {i: i for i in indices}
-
-        def find(i: int) -> int:
-            while parents[i] != i:
-                parents[i] = parents[parents[i]]
-                i = parents[i]
-            return i
-
-        def union(i: int, j: int) -> None:
-            root_i = find(i)
-            root_j = find(j)
-            if root_i != root_j:
-                parents[root_j] = root_i
-
-        for pos, i in enumerate(indices):
-            for j in indices[pos + 1 :]:
-                if _storage_overlaps(tensors[i], tensors[j]):
-                    union(i, j)
-
-        components: dict[int, list[int]] = collections.defaultdict(list)
-        for i in indices:
-            components[find(i)].append(i)
-        overlapping_groups.extend(
-            tuple(sorted(component))
-            for component in components.values()
-            if len(component) > 1
-        )
-
-    return tuple(sorted(overlapping_groups))
+    return tuple(
+        tuple(tensor_positions[tensor_index] for tensor_index in group)
+        for group in groups
+    )
 
 
 def check_storage_overlap_partition(

@@ -43,8 +43,10 @@
 #include <chrono>
 #include <memory>
 #include <optional>
+#include <numeric>
 #include <sstream>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 
 // Uncomment next line to count instructions for guard eval.
@@ -1569,27 +1571,77 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
 }
 
 /**
- * Computes the indices of the tensors that might overlap.
+ * Computes connected groups of tensors that might overlap.
  *
- * Checks which of the given tensors have overlapping storages with ANY of
- * the other tensors.
+ * Tensors are first bucketed by storage, so distinct-storage inputs do not
+ * incur pairwise overlap checks. Within each bucket, overlapping tensors are
+ * merged into connected components.
  *
  * So, for example, if tensor 1 overlaps with tensor 2, and tensor 3 with
- * tensor 4, all of them will be in the output of this function. Even if
- * tensor 1 and 4 don't overlap.
+ * tensor 4, the output contains the groups [1, 2] and [3, 4].
  */
+template <class Meta>
+std::vector<std::vector<int64_t>> compute_overlapping_tensor_groups(
+    const std::vector<Tensor>& tensors) {
+  std::unordered_map<c10::StorageImpl*, std::vector<int64_t>>
+      storage_to_indices;
+  for (const auto i : c10::irange(tensors.size())) {
+    storage_to_indices[tensors[i]
+                           .unsafeGetTensorImpl()
+                           ->unsafe_storage()
+                           .unsafeGetStorageImpl()]
+        .push_back(i);
+  }
+
+  std::vector<int64_t> parents(tensors.size());
+  std::iota(parents.begin(), parents.end(), 0);
+
+  const auto find = [&](int64_t i) {
+    while (parents[i] != i) {
+      parents[i] = parents[parents[i]];
+      i = parents[i];
+    }
+    return i;
+  };
+
+  for (const auto& [_, indices] : storage_to_indices) {
+    for (const auto i_pos : c10::irange(indices.size())) {
+      const auto i = indices[i_pos];
+      for (const auto j_pos : c10::irange(i_pos)) {
+        const auto j = indices[j_pos];
+        if (!tensors_definitely_do_not_overlap<Meta>(tensors[i], tensors[j])) {
+          const auto root_i = find(i);
+          const auto root_j = find(j);
+          if (root_i != root_j) {
+            parents[root_j] = root_i;
+          }
+        }
+      }
+    }
+  }
+
+  std::unordered_map<int64_t, std::vector<int64_t>> components;
+  for (const auto i : c10::irange(tensors.size())) {
+    components[find(i)].push_back(i);
+  }
+
+  std::vector<std::vector<int64_t>> overlapping_groups;
+  for (auto& [_, component] : components) {
+    if (component.size() > 1) {
+      std::sort(component.begin(), component.end());
+      overlapping_groups.push_back(std::move(component));
+    }
+  }
+  std::sort(overlapping_groups.begin(), overlapping_groups.end());
+  return overlapping_groups;
+}
+
 template <class Meta>
 std::unordered_set<int64_t> compute_overlapping_tensors(
     const std::vector<Tensor>& tensors) {
   std::unordered_set<int64_t> aliased_tensor_indices;
-  for (int64_t i = 0; i < static_cast<int64_t>(tensors.size()); i++) {
-    const auto& tensor_i = tensors[i];
-    for (int64_t j = 0; j < i; j++) {
-      if (!tensors_definitely_do_not_overlap<Meta>(tensor_i, tensors[j])) {
-        aliased_tensor_indices.insert(i);
-        aliased_tensor_indices.insert(j);
-      }
-    }
+  for (const auto& group : compute_overlapping_tensor_groups<Meta>(tensors)) {
+    aliased_tensor_indices.insert(group.begin(), group.end());
   }
   return aliased_tensor_indices;
 }
@@ -8899,6 +8951,17 @@ PyObject* torch_c_dynamo_guards_init() {
           return compute_overlapping_tensors<DynamicMeta>(tensors);
         } else {
           return compute_overlapping_tensors<StaticMeta>(tensors);
+        }
+      },
+      py::arg("tensors"),
+      py::arg("symbolic") = true);
+  py_m.def(
+      "compute_overlapping_tensor_groups",
+      [](const std::vector<Tensor> tensors, bool symbolic) {
+        if (symbolic) {
+          return compute_overlapping_tensor_groups<DynamicMeta>(tensors);
+        } else {
+          return compute_overlapping_tensor_groups<StaticMeta>(tensors);
         }
       },
       py::arg("tensors"),

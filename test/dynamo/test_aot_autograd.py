@@ -1678,6 +1678,29 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             f, non_overlapping_args, expect_partition_guard=True
         )
 
+    def test_compute_overlapping_tensor_groups_buckets_storages(self):
+        first = torch.arange(12)
+        second = torch.arange(12)
+        tensors = [
+            first[:6],
+            first[3:9],
+            second[:6],
+            second[3:9],
+            torch.arange(6),
+        ]
+
+        groups = torch._C._dynamo.guards.compute_overlapping_tensor_groups(
+            tensors, symbolic=False
+        )
+
+        self.assertEqual(groups, [[0, 1], [2, 3]])
+        self.assertEqual(
+            torch._C._dynamo.guards.compute_overlapping_tensors(
+                tensors, symbolic=False
+            ),
+            {0, 1, 2, 3},
+        )
+
     def test_input_mutation_storage_overlap_recompiles(self):
         def f(x, y):
             x.mul_(2)
@@ -1750,6 +1773,31 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(len(partition_guards), 1)
         self.assertEqual(partition_guards[0].overlapping_indices, ())
         self.assertGreater(len(partition_guards[0].input_sources), 2)
+
+    def test_input_mutation_storage_overlap_with_module_buffer_recompiles(self):
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4))
+
+            def forward(self, x):
+                x.add_(1)
+                return x + self.buffer
+
+        mod = Module()
+        compiler = CompileCounterWithBackend("aot_eager")
+        opt_mod = torch.compile(mod, backend=compiler)
+
+        opt_mod(torch.zeros(4))
+        opt_out = opt_mod(mod.buffer[:])
+
+        ref_mod = Module()
+        ref_mod(torch.zeros(4))
+        ref_out = ref_mod(ref_mod.buffer[:])
+
+        self.assertEqual(opt_out, ref_out)
+        self.assertEqual(mod.buffer, ref_mod.buffer)
+        self.assertEqual(compiler.frame_count, 2)
 
     def test_inputs_overlapping_with_mutation_stress(self):
         # Stress test for StorageOverlap guard.

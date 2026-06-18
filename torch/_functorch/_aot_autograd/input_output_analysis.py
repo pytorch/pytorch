@@ -16,12 +16,14 @@ from typing import Any
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._C._dynamo.guards import compute_overlapping_tensors
+from torch._C._dynamo.guards import (
+    compute_overlapping_tensor_groups,
+    compute_overlapping_tensors,
+)
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
 from torch._guards import StorageOverlapPartition
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
-from torch.multiprocessing.reductions import StorageWeakRef
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
@@ -400,78 +402,15 @@ def compute_overlapping_inputs(
     return actual_aliased_indices
 
 
-def _has_symbolic_sizes_strides_or_offset(t: Tensor) -> bool:
-    return any(
-        isinstance(x, torch.SymInt)
-        for x in [
-            *t.shape,
-            *t.stride(),
-            t.storage_offset(),
-        ]
-    )
-
-
-def _storage_overlaps(a: Tensor, b: Tensor) -> bool:
-    return (
-        len(
-            compute_overlapping_tensors(
-                [a, b],
-                symbolic=(
-                    _has_symbolic_sizes_strides_or_offset(a)
-                    or _has_symbolic_sizes_strides_or_offset(b)
-                ),
-            )
-        )
-        == 2
-    )
-
-
 def _storage_overlap_partition(
-    args: list[Any],
+    tensors: list[Tensor],
 ) -> tuple[tuple[int, ...], ...]:
-    storage_ref_to_indices: dict[StorageWeakRef, list[int]] = {}
-    tensors: dict[int, Tensor] = {}
-    for i, arg in enumerate(args):
-        if isinstance(arg, Tensor):
-            storage_ref = StorageWeakRef(arg.untyped_storage())
-            storage_ref_to_indices.setdefault(storage_ref, []).append(i)
-            tensors[i] = arg
-
-    overlapping_groups: list[tuple[int, ...]] = []
-    for indices in storage_ref_to_indices.values():
-        if len(indices) <= 1:
-            continue
-
-        parents = {i: i for i in indices}
-
-        def find(i: int) -> int:
-            while parents[i] != i:
-                parents[i] = parents[parents[i]]
-                i = parents[i]
-            return i
-
-        def union(i: int, j: int) -> None:
-            root_i = find(i)
-            root_j = find(j)
-            if root_i != root_j:
-                parents[root_j] = root_i
-
-        with _maybe_suppress_shape_guards():
-            for pos, i in enumerate(indices):
-                for j in indices[pos + 1 :]:
-                    if _storage_overlaps(tensors[i], tensors[j]):
-                        union(i, j)
-
-        components: dict[int, list[int]] = {}
-        for i in indices:
-            components.setdefault(find(i), []).append(i)
-        overlapping_groups.extend(
-            tuple(sorted(component))
-            for component in components.values()
-            if len(component) > 1
+    symbolic = any(tensor._has_symbolic_sizes_strides for tensor in tensors)
+    with _maybe_suppress_shape_guards():
+        return tuple(
+            tuple(group)
+            for group in compute_overlapping_tensor_groups(tensors, symbolic=symbolic)
         )
-
-    return tuple(sorted(overlapping_groups))
 
 
 def add_input_mutation_storage_overlap_partition_guard(
