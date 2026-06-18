@@ -489,7 +489,7 @@ class TestShapeVarCompile(TestCase):
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
-            r"shapes_spec declared L\['n'\] as static with value 10, but while tracing we found that it was actually 42",
+            r"shapes_spec declared L\['n'\] as static with value 10, but got 42 at trace time",
         ):
             compiled(torch.randn(4), 42)
 
