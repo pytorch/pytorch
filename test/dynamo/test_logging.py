@@ -431,7 +431,7 @@ Found from :
         exitstack.close()
 
     @requires_distributed()
-    @requires_cuda_and_triton
+    @requires_gpu
     @make_logging_test(ddp_graphs=True)
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
@@ -449,10 +449,14 @@ Found from :
         os.environ["MASTER_PORT"] = str(find_free_port())
         dist.init_process_group("gloo", rank=0, world_size=1)
 
-        model = DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
+        device = f"{device_type}:0"
+        ddp_kwargs = {"bucket_cap_mb": 4}
+        if device_type == "cuda":
+            ddp_kwargs["device_ids"] = [0]
+        model = DDP(ToyModel().to(device), **ddp_kwargs)
         ddp_model = torch.compile(model, backend="inductor")
 
-        ddp_model(torch.randn(1024, 1024, device="cuda:0"))
+        ddp_model(torch.randn(1024, 1024, device=device))
 
         dist.destroy_process_group()
         self.assertEqual(len([r for r in records if "__ddp_graphs" in r.name]), 4)
@@ -1327,17 +1331,18 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",
         )
 
+    @requires_cuda_and_triton
     @make_logging_test(cudagraph_static_inputs=True)
     def test_cudagraph_static_inputs(self, records):
         @torch.compile(mode="reduce-overhead")
         def fn(x):
             return x + 1
 
-        x = torch.ones(2, 2)
+        x = torch.ones(2, 2, device=device_type)
         torch._dynamo.mark_static_address(x)
         fn(x)
         self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 4)
+        self.assertLess(len(records), 8)
 
     @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/157778
     @make_logging_test(perf_hints=True)
