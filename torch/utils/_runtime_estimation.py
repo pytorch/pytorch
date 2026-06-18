@@ -151,6 +151,8 @@ def get_transfer_time(flat_args_kwargs, flat_outs) -> float:  # type: ignore[no-
         float: The estimated memory transfer time in nanoseconds.
     """
     gpu_memory_bandwidth = get_gpu_dram_gbps()
+    if gpu_memory_bandwidth == 0:
+        return 0.0
     read_bytes = sum(
         get_num_bytes(t) for t in flat_args_kwargs if isinstance(t, torch.Tensor)
     )
