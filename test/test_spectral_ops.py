@@ -252,6 +252,21 @@ class TestFFT(TestCase):
             with self.assertRaisesRegex(RuntimeError, match):
                 f(t)
 
+    # gh-174984: an empty batch dimension with a valid signal length must
+    # return a correctly-shaped empty result, not raise an opaque backend error.
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float, torch.cfloat)
+    def test_fft_empty_batch(self, device, dtype):
+        t = torch.zeros(0, 2, 16, device=device, dtype=dtype)
+        self.assertEqual(torch.fft.fft(t, dim=-1).shape, torch.Size([0, 2, 16]))
+        self.assertEqual(torch.fft.ifft(t, dim=-1).shape, torch.Size([0, 2, 16]))
+        self.assertEqual(torch.fft.fftn(t, dim=(-2, -1)).shape, torch.Size([0, 2, 16]))
+        if dtype.is_complex:
+            # c2r path (irfft) goes through a separate entry point.
+            self.assertEqual(torch.fft.irfft(t, dim=-1).shape, torch.Size([0, 2, 30]))
+        else:
+            self.assertEqual(torch.fft.rfft(t, dim=-1).shape, torch.Size([0, 2, 9]))
+
     @onlyNativeDeviceTypes
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)

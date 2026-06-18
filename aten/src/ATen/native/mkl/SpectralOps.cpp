@@ -487,15 +487,22 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 #endif
 #endif
 
-  auto descriptor = _plan_mkl_fft(
-      input.strides(), out.strides(), signal_size, input.is_complex(),
-      out.is_complex(), normalization, forward, value_type);
+  // MKL DFTI rejects a zero-length (empty) transform with an opaque
+  // "Inconsistent configuration parameters" error. An empty batch produces a
+  // correctly-sized empty `out` above, so skip the compute. A zero-length
+  // signal dimension is already rejected at the dispatcher level
+  // (SpectralOps.cpp), so it never reaches here.
+  if (input.numel() > 0) {
+    auto descriptor = _plan_mkl_fft(
+        input.strides(), out.strides(), signal_size, input.is_complex(),
+        out.is_complex(), normalization, forward, value_type);
 
-  // run the FFT
-  if (forward) {
-    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), const_cast<void*>(input.const_data_ptr()), out.data_ptr()));
-  } else {
-    MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), const_cast<void*>(input.const_data_ptr()), out.data_ptr()));
+    // run the FFT
+    if (forward) {
+      MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), const_cast<void*>(input.const_data_ptr()), out.data_ptr()));
+    } else {
+      MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), const_cast<void*>(input.const_data_ptr()), out.data_ptr()));
+    }
   }
 
   // Inplace reshaping to original batch shape and inverting the dimension permutation
