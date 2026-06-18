@@ -1,4 +1,4 @@
-#include <torch/csrc/profiler/cupti_monitor_native.h>
+#include <torch/csrc/profiler/cupti/monitor_native.h>
 
 #include <cstdlib>
 
