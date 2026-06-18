@@ -9423,7 +9423,7 @@ quantized_lowerings.register_woq_mm_ops()
 
 from . import (
     jagged_lowerings,
-    mkldnn_lowerings,  # noqa: F401  # registers oneDNN fusion ops on import
+    onednn_lowerings,  # noqa: F401  # registers oneDNN fusion ops on import
 )
 
 

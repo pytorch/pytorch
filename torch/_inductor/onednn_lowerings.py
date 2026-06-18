@@ -241,31 +241,31 @@ def _convert_to_0d_constant(
 
 def register_onednn_fusion_ops():
     if torch._C._has_mkldnn:
-        from . import mkldnn_ir
+        from . import onednn_ir
 
         aten_mkldnn_linear_unary = ExternKernelChoice(
             torch.ops.mkldnn._linear_pointwise,
             "mkldnn::_linear_pointwise",
             has_out_variant=False,
-            kernel_creator=mkldnn_ir.LinearUnary.create,
+            kernel_creator=onednn_ir.LinearUnary.create,
         )
         aten_mkldnn_linear_binary = ExternKernelChoice(
             torch.ops.mkldnn._linear_pointwise.binary,
             "mkldnn::_linear_pointwise",
             has_out_variant=False,
-            kernel_creator=mkldnn_ir.LinearBinary.create,
+            kernel_creator=onednn_ir.LinearBinary.create,
         )
         aten_mkldnn_qlinear_unary = ExternKernelChoice(
             torch.ops.onednn.qlinear_pointwise,
             "onednn::qlinear_pointwise",
             has_out_variant=False,
-            kernel_creator=mkldnn_ir.QLinearPointwisePT2E.create,
+            kernel_creator=onednn_ir.QLinearPointwisePT2E.create,
         )
         aten_mkldnn_qlinear_binary = ExternKernelChoice(
             torch.ops.onednn.qlinear_pointwise.binary,
             "onednn::qlinear_pointwise",
             has_out_variant=False,
-            kernel_creator=mkldnn_ir.QLinearPointwiseBinaryPT2E.create,
+            kernel_creator=onednn_ir.QLinearPointwiseBinaryPT2E.create,
         )
         cpu_needs_realized_inputs: list[
             torch._ops.OpOverload | torch._ops.OpOverloadPacket
@@ -292,7 +292,7 @@ def register_onednn_fusion_ops():
             algorithm,
         ):
             return TensorBox.create(
-                mkldnn_ir.ConvolutionUnary.create(
+                onednn_ir.ConvolutionUnary.create(
                     x,
                     weight,
                     bias,
@@ -323,7 +323,7 @@ def register_onednn_fusion_ops():
             unary_algorithm,
         ):
             return TensorBox.create(
-                mkldnn_ir.ConvolutionBinary.create(
+                onednn_ir.ConvolutionBinary.create(
                     x,
                     other,
                     weight,
@@ -357,7 +357,7 @@ def register_onednn_fusion_ops():
             unary_algorithm,
         ):
             return TensorBox.create(
-                mkldnn_ir.ConvolutionBinaryInplace.create(
+                onednn_ir.ConvolutionBinaryInplace.create(
                     x,
                     other,
                     weight,
@@ -523,7 +523,7 @@ def register_onednn_fusion_ops():
             algorithm,
         ):
             return TensorBox.create(
-                mkldnn_ir.ConvolutionTransposeUnary.create(
+                onednn_ir.ConvolutionTransposeUnary.create(
                     x,
                     weight,
                     bias,
@@ -559,7 +559,7 @@ def register_onednn_fusion_ops():
         ):
             return pytree.tree_map(
                 TensorBox.create,
-                mkldnn_ir.MkldnnRnnLayer.create(
+                onednn_ir.MkldnnRnnLayer.create(
                     x,
                     w0,
                     w1,
@@ -625,7 +625,7 @@ def register_onednn_fusion_ops():
                 )
 
             return TensorBox.create(
-                mkldnn_ir.QConvPointWisePT2E.create(
+                onednn_ir.QConvPointWisePT2E.create(
                     x,
                     x_scale,
                     x_zp,
@@ -713,7 +713,7 @@ def register_onednn_fusion_ops():
                 # we will do accum dtype conversion here.
                 accum = to_dtype(accum, output_dtype)
             return TensorBox.create(
-                mkldnn_ir.QConvPointWiseBinaryPT2E.create(
+                onednn_ir.QConvPointWiseBinaryPT2E.create(
                     x,
                     x_scale,  # type: ignore[arg-type]
                     x_zp,  # type: ignore[arg-type]
@@ -1442,7 +1442,7 @@ def register_onednn_fusion_ops():
                 torch.ops.mkl._mkl_linear,
                 "mkl::_mkl_linear",
                 has_out_variant=False,
-                kernel_creator=mkldnn_ir.MKLPackedLinear.create,
+                kernel_creator=onednn_ir.MKLPackedLinear.create,
             )
             cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
 

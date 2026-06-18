@@ -181,7 +181,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             and config.max_autotune
             and "CPP" in config.max_autotune_gemm_backends
         ):
-            from .mkldnn_fusion import grouped_gemm_pass
+            from .onednn_fusion import grouped_gemm_pass
 
             grouped_gemm_pass(gm.graph)
 
@@ -807,7 +807,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
 def lazy_init(input_device: torch.device | None = None):
     if torch._C._has_mkldnn:
         from . import decompose_mem_bound_mm  # noqa: F401
-        from .mkldnn_fusion import _mkldnn_fusion_init
+        from .onednn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
     else:

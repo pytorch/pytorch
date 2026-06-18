@@ -9,7 +9,7 @@ from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols, optimization_hint
 from torch.utils._ordered_set import OrderedSet
 
-from .. import ir, mkldnn_ir
+from .. import ir, onednn_ir
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     Arg,
@@ -214,7 +214,7 @@ if torch._C._has_mkldnn:
         fixed number of output nodes. Extend to support Group GEMM for pattern matcher.
         """
         computation_op = mkldnn._linear_pointwise.default
-        from ..mkldnn_lowerings import grouped_gemm_lowering
+        from ..onednn_lowerings import grouped_gemm_lowering
 
         for node in graph.find_nodes(op="call_function", target=computation_op):
             if (
@@ -819,7 +819,7 @@ if torch._C._has_mkldnn:
                 # of previous QLinearPointwiseBinaryPT2E (the inputs[6]).
                 for op in V.graph.operations:
                     if (
-                        isinstance(op, mkldnn_ir.QLinearPointwiseBinaryPT2E)
+                        isinstance(op, onednn_ir.QLinearPointwiseBinaryPT2E)
                         and unwrap_buffer(data) == op.inputs[6]  # type: ignore[attr-defined]
                     ):
                         return True

@@ -3,7 +3,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/onednn/Common.h>
 #include <ATen/native/onednn/ConvPrepack.h>
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/OpContext.h>
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/utils/ParamUtils.h>

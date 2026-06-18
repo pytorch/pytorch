@@ -8,7 +8,7 @@ from . import config, lowering
 from .codegen.cpp_gemm_template import CppGemmTemplate, CppWoqInt4GemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .lowering import expand, register_lowering
-from .mkldnn_ir import WeightInt4PackMatmul
+from .onednn_ir import WeightInt4PackMatmul
 from .select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,

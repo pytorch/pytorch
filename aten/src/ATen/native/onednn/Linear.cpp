@@ -63,7 +63,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 
 #else // AT_MKLDNN_ENABLED
 
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
 
 namespace at::native {
