@@ -403,19 +403,20 @@ def _extract_graph_with_inputs_outputs(
     out.meta["desc"] = outputs_descs
 
     if subgraph == "backward":
-        # Name each returned gradient grad_<primal_name>, mapping via the
-        # GradAOTOutput descriptor's grad_of. A gradient shared by several inputs
-        # is named after the first. Subclass grads (SubclassGetAttrAOTOutput) have
-        # no 1-1 grad/input correspondence and are left as-is. Skip placeholder
-        # outputs: a passed-through gradient is a graph input, and renaming inputs
-        # (e.g. tangents that inductor's SDPA matcher keys on) is unsafe.
+        # Name each returned gradient grad_<primal_name> via the GradAOTOutput
+        # descriptor's grad_of. None slots (non-differentiable inputs) and
+        # passed-through placeholder gradients are skipped: renaming a backward
+        # input is unsafe (e.g. tangents that inductor's SDPA matcher keys on).
+        # The `renamed` guard keeps a gradient shared by several inputs named
+        # after the first. Subclass grads (SubclassGetAttrAOTOutput) are not
+        # GradAOTOutput (no 1-1 grad/input correspondence) and are left as-is.
         desc_to_name = {
             node.meta["desc"]: node.name
             for node in joint_graph.nodes
             if node.op == "placeholder" and node.meta.get("desc") is not None
         }
         renamed: OrderedSet[fx.Node] = OrderedSet()
-        for value, desc in zip(output_values, outputs_descs):
+        for value, desc in zip(output_values, outputs_descs, strict=True):
             if (
                 isinstance(desc, GradAOTOutput)
                 and isinstance(value, fx.Node)
