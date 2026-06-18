@@ -4,14 +4,10 @@
 PyTorch, as of version 2.13, has experimental opt-in support for compilation of complex-valued
 tensors. The following code shows an example of how to use the complex number support.
 
-```python
+```py
 import torch
 import torch._functorch.config
 
-# Enable compilation of complex-valued tensors
-torch._functorch.config.enable_complex_wrapper = True
-
-@torch.compile
 def some_function(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     c = a + b
     d = a * b
@@ -22,7 +18,9 @@ def some_function(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 a = torch.randn((5, 1), dtype=torch.complex64)
 b = torch.randn((5, 1), dtype=torch.complex64)
 
-out = some_function(a, b)
+# Enable compilation of complex-valued tensors
+with torch._functorch.config.patch(enable_complex_wrapper=True)
+    out = torch.compile(some_function)(a, b)
 ```
 
 This is implemented via the `torch._subclasses.complex_tensor.ComplexTensor` subclass, which
