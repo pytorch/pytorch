@@ -7,10 +7,12 @@ a straight-line function where all metadata (indices, attr names,
 subclass types, symint positions) is baked in at compile time.
 """
 
+import contextlib
 import functools
 import keyword
 import logging
-from collections.abc import Callable, Iterable
+import threading
+from collections.abc import Callable, Iterable, Iterator
 from typing import cast, TYPE_CHECKING
 
 import torch
@@ -24,6 +26,55 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+
+# Optional sink for the source of every runtime-wrapper function codegen'd via
+# ``_compile_and_exec_source``. When a sink is installed (see
+# ``capture_generated_sources``), each codegen'd wrapper appends a
+# ``GeneratedSource`` to it; this lets AOT-to-Python lowering compose the wrappers
+# into one standalone module. Thread-local (NOT a process global) so a concurrent
+# compile on another thread cannot splice its wrappers into this capture; absent
+# (zero overhead, no behavior change) during ordinary compilation. Mirrors the
+# threading.local used by _saved_tensor_hook_context in graph_compile.py.
+_capture_tls = threading.local()
+
+
+def _current_capture_sink() -> "list[GeneratedSource] | None":
+    return getattr(_capture_tls, "sink", None)
+
+
+class GeneratedSource:
+    """One codegen'd runtime-wrapper function: its source, the exec'd function
+    object, and the globals it closes over (which include the inner ``compiled_fn``
+    it chains to, plus any baked metadata). The function object lets a composer wire
+    cross-wrapper references by identity. Recorded by ``_compile_and_exec_source``
+    when capture is active."""
+
+    def __init__(
+        self,
+        artifact_name: str,
+        fn_name: str,
+        source: str,
+        globals_dict: dict[str, object],
+        fn: object,
+    ) -> None:
+        self.artifact_name = artifact_name
+        self.fn_name = fn_name
+        self.source = source
+        self.globals_dict = globals_dict
+        self.fn = fn
+
+
+@contextlib.contextmanager
+def capture_generated_sources(into: "list[GeneratedSource]") -> "Iterator[None]":
+    """Within this context, record every codegen'd runtime-wrapper function's source
+    into ``into`` (in codegen order). A no-op when not entered."""
+    prev = getattr(_capture_tls, "sink", None)
+    _capture_tls.sink = into
+    try:
+        yield
+    finally:
+        _capture_tls.sink = prev
 
 
 def _is_symint_placeholder(x: None | int | SymInt) -> bool:
@@ -474,6 +525,11 @@ def _compile_and_exec_source(
     fn = local_dict[fn_name]
     if wrapped_fn is not None:
         functools.update_wrapper(fn, wrapped_fn)  # type: ignore[arg-type]
+
+    sink = _current_capture_sink()
+    if sink is not None:
+        sink.append(GeneratedSource(artifact_name, fn_name, source, globals_dict, fn))
+
     return fn  # type: ignore[return-value]
 
 
