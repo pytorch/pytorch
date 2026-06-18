@@ -37,7 +37,7 @@ MPSDevice::MPSDevice() : _mtl_device(nil) {
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0; i < [devices count]; i++) {
     id<MTLDevice> device = devices[i];
-    if ([device isLowPower]) { // exclude Intel GPUs
+    if (true) { // support intel mac
       continue;
     }
     if (![device supportsFamily:MTLGPUFamilyMac2]) {
