@@ -524,7 +524,7 @@ class TestShapeVarCompile(TestCase):
         self.assertEqual(len(backend.graphs), 1)
         shape = _tensor_placeholder_shape(backend.graphs[0])
         self.assertIsInstance(shape[0], torch.SymInt)
-        self.assertGreater(len(free_unbacked_symbols(shape[0])), 0)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 1)
 
     @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
     def test_unbacked_raises_dde_on_branching(self):
@@ -1950,6 +1950,113 @@ class TestWalkSpecRaises(TestCase):
             "\"cfg['x']\", at 'cfg' the spec is TensorSpec, but "
             "the source has further access past it",
         )
+
+
+class TestDynamicSpecDecoratorCompile(TestCase):
+    """``@dynamic_spec`` auto-applied by ``torch.compile``."""
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+        torch._dynamo.reset()
+
+    def test_dynamic_spec_decorator_dict_form(self):
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        @dynamic_spec({"x": TensorSpec([ShapeVar("B"), STATIC])})
+        def fn(x):
+            return x.sum(0)
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        compiled(torch.randn(8, 3))
+        # Re-invoking at a different batch size must hit the same compiled
+        # graph (dim 0 is unbacked) -- proving the decorator was picked up.
+        compiled(torch.randn(20, 3))
+        self.assertEqual(len(backend.graphs), 1)
+        # Find the tensor placeholder.
+        tensor_phs = [
+            n
+            for n in backend.graphs[0].graph.nodes
+            if n.op == "placeholder"
+            and isinstance(n.meta.get("example_value", n.meta.get("val")), torch.Tensor)
+        ]
+        self.assertEqual(len(tensor_phs), 1)
+        val = tensor_phs[0].meta.get("example_value", tensor_phs[0].meta.get("val"))
+        self.assertEqual(len(free_unbacked_symbols(val.shape[0])), 1)
+
+    def test_dynamic_spec_decorator_on_nn_module_forward(self):
+        """``@dynamic_spec`` on ``forward`` is picked up when
+        ``torch.compile(module)`` is invoked (module path -- the resolver
+        reads from ``module.forward``, not the bound method)."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        class M(torch.nn.Module):
+            @dynamic_spec({"x": TensorSpec([ShapeVar("B"), STATIC])})
+            def forward(self, x):
+                return x.sum(0)
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(M(), backend=backend, fullgraph=True)
+        compiled(torch.randn(8, 3))
+        compiled(torch.randn(20, 3))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_dynamic_spec_decorator_with_assumptions(self):
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        B = ShapeVar("batch")
+
+        @dynamic_spec(
+            ShapesSpec(
+                ParamsSpec({"x": TensorSpec([B, STATIC])}),
+                assumptions=[B % 2 == 0],
+            )
+        )
+        def fn(x):
+            # Branching on the assumed relation: without the assumption being
+            # wired into the shape env, this would raise a DDE on the unbacked
+            # symbol. With it, the branch resolves statically at trace time.
+            if x.shape[0] % 2 == 0:
+                return x.sum(0)
+            return x.sum(0) * -1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        compiled(torch.randn(8, 3))
+        compiled(torch.randn(20, 3))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_dynamic_spec_decorator_and_explicit_kwarg_raises(self):
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        @dynamic_spec({"x": TensorSpec([ShapeVar("B"), STATIC])})
+        def fn(x):
+            return x.sum(0)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"`@dynamic_spec\(\.\.\.\)` is attached.*AND a `dynamic_shapes=`",
+        ):
+            torch.compile(
+                fn,
+                shapes_spec=ParamsSpec({"x": TensorSpec([ShapeVar("Z"), STATIC])}),
+            )(torch.randn(8, 3))
+
+    def test_dynamic_spec_stacked_decorators_raise(self):
+        """Stacking ``@dynamic_spec`` on the same function should raise --
+        silently overwriting the previously attached spec would mask user
+        error."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        with self.assertRaisesRegex(
+            ValueError, r"@dynamic_spec\(\.\.\.\) is already attached"
+        ):
+
+            @dynamic_spec({"x": TensorSpec([ShapeVar("A"), STATIC])})
+            @dynamic_spec({"x": TensorSpec([ShapeVar("B"), STATIC])})
+            def fn(x):
+                return x.sum(0)
 
 
 if __name__ == "__main__":
