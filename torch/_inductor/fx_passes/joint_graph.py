@@ -12,6 +12,7 @@ import torch
 import torch._guards
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.utils import get_gpu_type
@@ -977,6 +978,9 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
 )
 def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     """Convert bmm to mm when batch size is 1"""
+    # See Note [Preserving FlexGEMM body GEMMs].
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return
 
     def repl(a, b):
         return torch.mm(a.squeeze(0), b.squeeze(0)).unsqueeze(0)
