@@ -123,6 +123,8 @@ __global__ void embedding_backward_feature_kernel
         }
       }
     }
+    // Make sure updates are done before indices_batch is updated in the next iter.
+    __syncthreads();
   }
 }
 
