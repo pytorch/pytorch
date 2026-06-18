@@ -24,6 +24,7 @@ from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import (
     _find_non_matching_files,
     _revlist_to_prs,
+    AUTOREVERT_SHADOW_ISSUE,
     categorize_checks,
     DRCI_CHECKRUN_NAME,
     find_matching_merge_rule,
@@ -37,6 +38,7 @@ from trymerge import (
     MandatoryChecksMissingError,
     MergeRule,
     MergeRuleFailedError,
+    post_autorevert_shadow_comment,
     PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
@@ -634,6 +636,41 @@ class TestTryMerge(TestCase):
             pr.get_comment_by_id(impostor_comment_id).author_login,
             "pytorch-auto-revert",
         )
+
+    def test_autorevert_shadow_comment(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 164660)
+        app_comment_id, impostor_comment_id = 3375785595, 3377647892
+
+        # The auto-revert bot's decision is streamed to the tracking issue, always
+        # naming the PR and always posted (dry_run=False) so it is not suppressed
+        # while the revert itself runs in shadow mode.
+        with mock.patch("trymerge.gh_post_pr_comment") as mock_comment:
+            post_autorevert_shadow_comment(
+                pr, comment_id=app_comment_id, reason="flaky test"
+            )
+        mock_comment.assert_called_once_with(
+            "pytorch",
+            "pytorch",
+            AUTOREVERT_SHADOW_ISSUE,
+            "Autorevert decision: Revert PR #164660 due to flaky test",
+            dry_run=False,
+        )
+
+        # Without a reason the PR number is still present.
+        with mock.patch("trymerge.gh_post_pr_comment") as mock_comment:
+            post_autorevert_shadow_comment(pr, comment_id=app_comment_id)
+        mock_comment.assert_called_once_with(
+            "pytorch",
+            "pytorch",
+            AUTOREVERT_SHADOW_ISSUE,
+            "Autorevert decision: Revert PR #164660",
+            dry_run=False,
+        )
+
+        # Reverts not triggered by the bot are not streamed.
+        with mock.patch("trymerge.gh_post_pr_comment") as mock_comment:
+            post_autorevert_shadow_comment(pr, comment_id=impostor_comment_id)
+        mock_comment.assert_not_called()
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)

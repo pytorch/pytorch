@@ -52,6 +52,10 @@ if TYPE_CHECKING:
 # labels
 MERGE_IN_PROGRESS_LABEL = "merging"
 MERGE_COMPLETE_LABEL = "merged"
+AUTOREVERT_APP_URL = "https://github.com/apps/pytorch-auto-revert"
+# Tracking issue where the auto-revert bot streams its shadow-mode decisions so
+# the team can subscribe and troubleshoot. See pytorch/pytorch#163650.
+AUTOREVERT_SHADOW_ISSUE = 163650
 
 
 class JobCheckState(NamedTuple):
@@ -2060,7 +2064,7 @@ def validate_revert(
     # Special case GitHub Apps that don't have a repo association
     # but should be able to issue revert commands
     allowed_apps = {
-        "https://github.com/apps/pytorch-auto-revert",
+        AUTOREVERT_APP_URL,
         "https://github.com/apps/facebook-github-tools",
     }
     if comment.author_url in allowed_apps:
@@ -2170,6 +2174,31 @@ def do_revert_prs(
             gh_update_pr_state(pr.org, pr.project, pr.pr_num)
 
 
+def post_autorevert_shadow_comment(
+    pr: GitHubPR, *, comment_id: int | None = None, reason: str | None = None
+) -> None:
+    """
+    Stream auto-revert decisions to the shadow-mode tracking issue so the team can
+    subscribe and troubleshoot. Only the auto-revert bot's reverts are logged. The
+    comment is always posted (dry_run=False) so it is not suppressed while the bot
+    runs the revert in shadow mode (dry_run=True), and it always names the PR so the
+    oncall can tell which PR the decision targets.
+    """
+    revert_comment = (
+        pr.get_last_comment()
+        if comment_id is None
+        else pr.get_comment_by_id(comment_id)
+    )
+    if revert_comment.author_url != AUTOREVERT_APP_URL:
+        return
+    message = f"Autorevert decision: Revert PR #{pr.pr_num}"
+    if reason:
+        message += f" due to {reason}"
+    gh_post_pr_comment(
+        pr.org, pr.project, AUTOREVERT_SHADOW_ISSUE, message, dry_run=False
+    )
+
+
 def try_revert(
     repo: GitRepo,
     pr: GitHubPR,
@@ -2183,6 +2212,8 @@ def try_revert(
     except PostCommentError as e:
         gh_post_pr_comment(pr.org, pr.project, pr.pr_num, str(e), dry_run=dry_run)
         return
+
+    post_autorevert_shadow_comment(pr, comment_id=comment_id, reason=reason)
 
     extra_msg = f" due to {reason}" if reason is not None else ""
     extra_msg += (
