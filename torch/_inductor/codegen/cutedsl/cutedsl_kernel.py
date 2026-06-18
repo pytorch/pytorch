@@ -130,7 +130,7 @@ class CuteDSLSubgraphInfo:
     body: IndentedBuffer
     template_mask: str | None = None
     template_out: str | None = None
-    cse: CSE[Any] | None = None
+    cse: CSE[Any, str] | None = None
 
     def __post_init__(self):
         self.only_copy_if_non_none_fields = ("cse",)
