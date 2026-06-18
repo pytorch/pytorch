@@ -30,4 +30,15 @@ TORCH_API void nccl_reduce_scatter_offset(
     std::optional<at::IntArrayRef> offsets,
     std::optional<at::IntArrayRef> dst_ranks,
     const std::string& red_op);
+
+// Permute-free all-to-all: scatter shards along `scatter_dim`, gather peer
+// chunks along `gather_dim`. Supported: (scatter_dim=1, gather_dim=0) -> [rows,
+// p*lc] to [p, rows, lc]; (scatter_dim=0, gather_dim=1) -> [p*lr, cols] to [lr,
+// p, cols].
+TORCH_API void nccl_all_to_all_permute(
+    const at::Tensor& input,
+    at::Tensor& out,
+    int64_t scatter_dim,
+    int64_t gather_dim,
+    const std::string& group_name);
 } // namespace c10d::nccl_extension
