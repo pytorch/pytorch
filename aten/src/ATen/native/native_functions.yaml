@@ -3302,26 +3302,35 @@
   dispatch:
     CompositeExplicitAutograd: linear_out
 
-- func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+- func: onednn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
-    OnednnCPU: mkldnn_linear
-  autogen: mkldnn_linear.out
+    OnednnCPU: onednn_linear
+  autogen: onednn_linear.out
+
+- func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+  python_module: nn
+
+- func: onednn_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
+  dispatch:
+    OnednnCPU: onednn_linear_backward_input
+  autogen: onednn_linear_backward_input.out
 
 - func: mkldnn_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
+
+- func: onednn_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
   dispatch:
-    OnednnCPU: mkldnn_linear_backward_input
-  autogen: mkldnn_linear_backward_input.out
+    OnednnCPU: onednn_linear_backward_weights
+  autogen: onednn_linear_backward_weights.out
 
 - func: mkldnn_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
+
+- func: onednn_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
-    OnednnCPU: mkldnn_linear_backward_weights
-  autogen: mkldnn_linear_backward_weights.out
+    OnednnCPU: onednn_linear_backward
+  autogen: onednn_linear_backward.out
 
 - func: mkldnn_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  dispatch:
-    OnednnCPU: mkldnn_linear_backward
-  autogen: mkldnn_linear_backward.out
 
 - func: _cslt_compress(Tensor input) -> Tensor
   dispatch:
@@ -3838,25 +3847,33 @@
     MPS: mps_max_pool2d_backward
   autogen: max_pool2d_backward.out
 
-- func: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+- func: onednn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    OnednnCPU: mkldnn_max_pool2d
-  autogen: mkldnn_max_pool2d.out
+    OnednnCPU: onednn_max_pool2d
+  autogen: onednn_max_pool2d.out
+
+- func: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+
+- func: onednn_max_pool2d_backward(Tensor grad_output, Tensor output, Tensor input, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  dispatch:
+    OnednnCPU: onednn_max_pool2d_backward
+  autogen: onednn_max_pool2d_backward.out
 
 - func: mkldnn_max_pool2d_backward(Tensor grad_output, Tensor output, Tensor input, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+
+- func: onednn_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    OnednnCPU: mkldnn_max_pool2d_backward
-  autogen: mkldnn_max_pool2d_backward.out
+    OnednnCPU: onednn_max_pool3d
+  autogen: onednn_max_pool3d.out
 
 - func: mkldnn_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
+
+- func: onednn_max_pool3d_backward(Tensor grad_output, Tensor output, Tensor input, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    OnednnCPU: mkldnn_max_pool3d
-  autogen: mkldnn_max_pool3d.out
+    OnednnCPU: onednn_max_pool3d_backward
+  autogen: onednn_max_pool3d_backward.out
 
 - func: mkldnn_max_pool3d_backward(Tensor grad_output, Tensor output, Tensor input, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
-  dispatch:
-    OnednnCPU: mkldnn_max_pool3d_backward
-  autogen: mkldnn_max_pool3d_backward.out
 
 - func: quantized_max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
@@ -3995,21 +4012,27 @@
     MPS: mps_convolution_backward
   autogen: mps_convolution_backward.out
 
-- func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, SymInt[] padding, SymInt[] stride, SymInt[] dilation, SymInt groups) -> Tensor
+- func: onednn_convolution(Tensor self, Tensor weight, Tensor? bias, SymInt[] padding, SymInt[] stride, SymInt[] dilation, SymInt groups) -> Tensor
   dispatch:
-    CompositeExplicitAutograd: mkldnn_convolution
-  autogen: mkldnn_convolution.out
+    CompositeExplicitAutograd: onednn_convolution
+  autogen: onednn_convolution.out
+
+- func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, SymInt[] padding, SymInt[] stride, SymInt[] dilation, SymInt groups) -> Tensor
+
+- func: onednn_rnn_layer(Tensor input, Tensor weight0, Tensor weight1, Tensor weight2, Tensor weight3, Tensor hx_, Tensor cx_, bool reverse, int[] batch_sizes, int mode, int hidden_size, int num_layers, bool has_biases, bool bidirectional, bool batch_first, bool train) -> (Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: onednn_rnn_layer
+    OnednnCPU: onednn_rnn_layer
+  autogen: onednn_rnn_layer.out
 
 - func: mkldnn_rnn_layer(Tensor input, Tensor weight0, Tensor weight1, Tensor weight2, Tensor weight3, Tensor hx_, Tensor cx_, bool reverse, int[] batch_sizes, int mode, int hidden_size, int num_layers, bool has_biases, bool bidirectional, bool batch_first, bool train) -> (Tensor, Tensor, Tensor, Tensor)
+
+- func: onednn_rnn_layer_backward(Tensor input, Tensor weight1, Tensor weight2, Tensor weight3, Tensor weight4, Tensor hx_, Tensor cx_tmp, Tensor output, Tensor hy_, Tensor cy_, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, bool reverse, int mode, int hidden_size, int num_layers, bool has_biases, bool train, bool bidirectional, int[] batch_sizes, bool batch_first, Tensor workspace) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)
   dispatch:
-    CPU: mkldnn_rnn_layer
-    OnednnCPU: mkldnn_rnn_layer
-  autogen: mkldnn_rnn_layer.out
+    CPU: onednn_rnn_layer_backward
+  autogen: onednn_rnn_layer_backward.out
 
 - func: mkldnn_rnn_layer_backward(Tensor input, Tensor weight1, Tensor weight2, Tensor weight3, Tensor weight4, Tensor hx_, Tensor cx_tmp, Tensor output, Tensor hy_, Tensor cy_, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, bool reverse, int mode, int hidden_size, int num_layers, bool has_biases, bool train, bool bidirectional, int[] batch_sizes, bool batch_first, Tensor workspace) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)
-  dispatch:
-    CPU: mkldnn_rnn_layer_backward
-  autogen: mkldnn_rnn_layer_backward.out
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -4927,12 +4950,12 @@
     ZeroTensor: _reshape_alias_symint
     # We don't need to support onednn since this is handled explicitly by the reshape operator.
 
-- func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
+- func: _onednn_reshape(Tensor self, int[] shape) -> Tensor
   device_check: NoCheck
   device_guard: False
   dispatch:
-    OnednnCPU: mkldnn_reshape
-  autogen: _mkldnn_reshape.out
+    OnednnCPU: onednn_reshape
+  autogen: _onednn_reshape.out
 
 - func: reshape_as(Tensor(a) self, Tensor other) -> Tensor(a)
   variants: method
@@ -5044,13 +5067,13 @@
   dispatch:
     CPU, CUDA: _prelu_kernel
     QuantizedCPU: _prelu_kernel_quantized_cpu
-    OnednnCPU: mkldnn_prelu
+    OnednnCPU: onednn_prelu
     MPS: prelu_mps
 
 - func: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   dispatch:
     CPU, CUDA: _prelu_kernel_backward
-    OnednnCPU: mkldnn_prelu_backward
+    OnednnCPU: onednn_prelu_backward
     MPS: prelu_backward_mps
 
 - func: gelu.out(Tensor self, *, str approximate='none', Tensor(a!) out) -> Tensor(a!)
@@ -6037,11 +6060,11 @@
     CompositeExplicitAutograd: transpose
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: transpose_nested
 
-- func: _mkldnn_transpose(Tensor self, int dim0, int dim1) -> Tensor
+- func: _onednn_transpose(Tensor self, int dim0, int dim1) -> Tensor
   device_check: NoCheck
   device_guard: False
   dispatch:
-    OnednnCPU: mkldnn_transpose
+    OnednnCPU: onednn_transpose
 
 - func: transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   variants: method
@@ -6051,12 +6074,12 @@
   dispatch:
     CompositeExplicitAutograd: transpose_
 
-- func: _mkldnn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
+- func: _onednn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   device_check: NoCheck
   device_guard: False
   dispatch:
-    OnednnCPU: mkldnn_transpose_
-  autogen: _mkldnn_transpose.out
+    OnednnCPU: onednn_transpose_
+  autogen: _onednn_transpose.out
 
 - func: one_hot(Tensor self, int num_classes=-1) -> Tensor
   python_module: nn
@@ -7493,19 +7516,23 @@
     CPU: dense_to_onednn
   autogen: to_mkldnn.out
 
-- func: mkldnn_reorder_conv2d_weight(Tensor self, SymInt[2] padding=0, SymInt[2] stride=1, SymInt[2] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
+- func: onednn_reorder_conv2d_weight(Tensor self, SymInt[2] padding=0, SymInt[2] stride=1, SymInt[2] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
   variants: function
   python_module: nn
   dispatch:
-    OnednnCPU: mkldnn_reorder_conv2d_weight
-  autogen: mkldnn_reorder_conv2d_weight.out
+    OnednnCPU: onednn_reorder_conv2d_weight
+  autogen: onednn_reorder_conv2d_weight.out
+
+- func: mkldnn_reorder_conv2d_weight(Tensor self, SymInt[2] padding=0, SymInt[2] stride=1, SymInt[2] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
+
+- func: onednn_reorder_conv3d_weight(Tensor self, SymInt[3] padding=0, SymInt[3] stride=1, SymInt[3] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
+  variants: function
+  python_module: nn
+  dispatch:
+    OnednnCPU: onednn_reorder_conv3d_weight
+  autogen: onednn_reorder_conv3d_weight.out
 
 - func: mkldnn_reorder_conv3d_weight(Tensor self, SymInt[3] padding=0, SymInt[3] stride=1, SymInt[3] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
-  variants: function
-  python_module: nn
-  dispatch:
-    OnednnCPU: mkldnn_reorder_conv3d_weight
-  autogen: mkldnn_reorder_conv3d_weight.out
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 
@@ -12013,18 +12040,22 @@
   dispatch:
     CompositeImplicitAutograd: adaptive_avg_pool2d_symint
 
-- func: mkldnn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
+- func: onednn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   dispatch:
-    OnednnCPU: mkldnn_adaptive_avg_pool2d
+    OnednnCPU: onednn_adaptive_avg_pool2d
 
-- func: mkldnn_adaptive_avg_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
+- func: mkldnn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
+
+- func: onednn_adaptive_avg_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     OnednnCPU: onednn_adaptive_avg_pool2d_out
 
-- func: mkldnn_adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
+- func: onednn_adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   dispatch:
-    OnednnCPU: mkldnn_adaptive_avg_pool2d_backward
-  autogen: mkldnn_adaptive_avg_pool2d_backward.out
+    OnednnCPU: onednn_adaptive_avg_pool2d_backward
+  autogen: onednn_adaptive_avg_pool2d_backward.out
+
+- func: mkldnn_adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
 
 - func: _adaptive_avg_pool2d(Tensor self, SymInt[2] output_size) -> Tensor
   dispatch:

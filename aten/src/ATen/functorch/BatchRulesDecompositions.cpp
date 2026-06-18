@@ -393,6 +393,23 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(dropout);
   OP_DECOMPOSE(_scaled_dot_product_attention_math);
   OP_DECOMPOSE(scaled_dot_product_attention);
+
+  // Alias for mkldnn related operators
+  OP_DECOMPOSE(mkldnn_rnn_layer);
+  OP_DECOMPOSE(mkldnn_rnn_layer_backward);
+  OP_DECOMPOSE(mkldnn_linear);
+  OP_DECOMPOSE(mkldnn_linear_backward_input);
+  OP_DECOMPOSE(mkldnn_linear_backward_weights);
+  OP_DECOMPOSE(mkldnn_linear_backward);
+  OP_DECOMPOSE(mkldnn_max_pool2d);
+  OP_DECOMPOSE(mkldnn_max_pool2d_backward);
+  OP_DECOMPOSE(mkldnn_max_pool3d);
+  OP_DECOMPOSE(mkldnn_max_pool3d_backward);
+  OP_DECOMPOSE(mkldnn_adaptive_avg_pool2d);
+  OP_DECOMPOSE(mkldnn_adaptive_avg_pool2d_backward);
+  m.impl("mkldnn_convolution", native::onednn_convolution);
+  m.impl("mkldnn_reorder_conv2d_weight", native::onednn_reorder_conv2d_weight);
+  m.impl("mkldnn_reorder_conv3d_weight", native::onednn_reorder_conv3d_weight);
 }
 
 } // namespace at::functorch

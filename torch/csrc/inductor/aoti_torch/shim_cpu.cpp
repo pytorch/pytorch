@@ -8,7 +8,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/CPUFunctions.h>
 #else
-#include <ATen/ops/mkldnn_rnn_layer_cpu_dispatch.h>
+#include <ATen/ops/onednn_rnn_layer_cpu_dispatch.h>
 #endif
 #include <ATen/native/onednn/Conv.h>
 #include <ATen/native/onednn/Linear.h>
@@ -44,7 +44,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
     for (const auto i : c10::irange(unary_scalars_len_)) {
       unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
     }
-    auto tmp_result = at::native::mkldnn_convolution_pointwise_binary(
+    auto tmp_result = at::native::onednn_convolution_pointwise_binary(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(other),
         *tensor_handle_to_tensor_pointer(W),
@@ -87,7 +87,7 @@ AOTITorchError aoti_torch_cpu_onednn__convolution_pointwise_binary_(
     for (const auto i : c10::irange(unary_scalars_len_)) {
       unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
     }
-    auto tmp_result = at::native::mkldnn_convolution_pointwise_binary_(
+    auto tmp_result = at::native::onednn_convolution_pointwise_binary_(
         *tensor_handle_to_tensor_pointer(other),
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(W),
@@ -127,7 +127,7 @@ AOTITorchError aoti_torch_cpu_onednn__convolution_pointwise(
     for (const auto i : c10::irange(scalars_len_)) {
       scalars_list.emplace_back(pointer_to_optional(scalars[i]));
     }
-    auto tmp_result = at::native::mkldnn_convolution_pointwise(
+    auto tmp_result = at::native::onednn_convolution_pointwise(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(W),
         pointer_to_optional<at::Tensor>(B),
@@ -166,7 +166,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
     for (const auto i : c10::irange(scalars_len_)) {
       scalars_list.emplace_back(pointer_to_optional(scalars[i]));
     }
-    auto tmp_result = at::native::mkldnn_convolution_transpose_pointwise(
+    auto tmp_result = at::native::onednn_convolution_transpose_pointwise(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(W),
         pointer_to_optional<at::Tensor>(B),
@@ -205,7 +205,7 @@ AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
     AtenTensorHandle* ret2,
     AtenTensorHandle* ret3) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto tmp_result = at::cpu::mkldnn_rnn_layer(
+    auto tmp_result = at::cpu::onednn_rnn_layer(
         *tensor_handle_to_tensor_pointer(input),
         *tensor_handle_to_tensor_pointer(weight0),
         *tensor_handle_to_tensor_pointer(weight1),
@@ -244,7 +244,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise(
     for (const auto i : c10::irange(scalars_len_)) {
       scalars_list.emplace_back(pointer_to_optional(scalars[i]));
     }
-    auto tmp_result = at::native::mkldnn_linear_pointwise(
+    auto tmp_result = at::native::onednn_linear_pointwise(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(W),
         pointer_to_optional<at::Tensor>(B),
@@ -263,7 +263,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
     const char* attr,
     AtenTensorHandle* ret0) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto tmp_result = at::native::mkldnn_linear_pointwise_binary(
+    auto tmp_result = at::native::onednn_linear_pointwise_binary(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(other),
         *tensor_handle_to_tensor_pointer(W),
