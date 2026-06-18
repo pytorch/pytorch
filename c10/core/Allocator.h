@@ -444,7 +444,7 @@ inline std::string format_size(uint64_t size) {
     os << static_cast<double>(size) / 1073741824.0;
     os << " GiB";
   }
-  return std::move(os).str();
+  return os.str();
 }
 
 } // namespace CachingAllocator

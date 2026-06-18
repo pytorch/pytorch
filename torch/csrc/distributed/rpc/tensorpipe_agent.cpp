@@ -656,7 +656,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
                   "RPC detected that a user-function output tensor on device ",
                   device,
                   ". This device is not one of the input tensor devices: ",
-                  std::move(oss).str(),
+                  oss.str(),
                   "which is not yet supported. Please file a feature request "
                   "issue in PyTorch GitHub repo."),
               static_cast<int64_t>(messageId));

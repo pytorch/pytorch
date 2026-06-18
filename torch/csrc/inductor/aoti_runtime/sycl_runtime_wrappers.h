@@ -99,7 +99,7 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   std::ifstream IFS(filePath.c_str(), std::ios::binary);
   std::ostringstream OSS;
   OSS << IFS.rdbuf();
-  std::string data(std::move(OSS).str());
+  std::string data(OSS.str());
 
   bool isSpirv = filePath.size() >= 4 &&
       filePath.compare(filePath.size() - 4, 4, ".spv") == 0;

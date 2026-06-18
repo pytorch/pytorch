@@ -12,7 +12,7 @@ inline std::string requires_grad_leaf_error(bool requires_grad) {
            "that doesn't require differentiation use "
            "var_no_grad = var.detach().";
   }
-  return std::move(oss).str();
+  return oss.str();
 }
 
 } // namespace torch::autograd::utils
