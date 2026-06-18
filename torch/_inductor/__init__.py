@@ -9,7 +9,7 @@ from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch.fx
 
-from .standalone_compile import CompiledArtifact, DynamicShapesType  # noqa: TC001
+from .standalone_compile import compile_to_python, CompiledArtifact, DynamicShapesType
 
 
 if TYPE_CHECKING:
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compile",
+    "compile_to_python",
     "list_mode_options",
     "list_options",
     "cudagraph_mark_step_begin",
