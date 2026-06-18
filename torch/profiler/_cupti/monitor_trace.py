@@ -12,7 +12,7 @@ from typing import cast, TYPE_CHECKING
 if TYPE_CHECKING:
     import os
 
-from . import _cupti_monitor as _mon
+from . import monitor as _mon
 
 
 # Matches the value Kineto uses to round the trace base time down to a ~3-month

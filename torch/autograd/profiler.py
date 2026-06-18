@@ -1283,14 +1283,14 @@ def _maybe_cupti_monitor():
     if not _cupti_monitor_checked:
         _cupti_monitor_checked = True
         try:
-            from torch.profiler import _cupti_monitor
+            from torch.profiler._cupti import monitor as _cupti_monitor
 
             _cupti_monitor_module = _cupti_monitor
         except ModuleNotFoundError:
             pass
         except Exception:
             log.warning(
-                "Unexpected error importing torch.profiler._cupti_monitor",
+                "Unexpected error importing torch.profiler._cupti.monitor",
                 exc_info=True,
             )
     return _cupti_monitor_module
@@ -1357,7 +1357,7 @@ class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritanc
         # never compiles _maybe_cupti_monitor (it uses globals/imports).
         if not torch.jit.is_scripting():
             monitor = _maybe_cupti_monitor()
-            if monitor is not None:
+            if monitor is not None and hasattr(monitor, "push_user_annotation"):
                 self._cupti_monitor_external_id = monitor.push_user_annotation(
                     self.name
                 )
@@ -1367,7 +1367,7 @@ class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritanc
         if not torch.jit.is_scripting():
             if self._cupti_monitor_external_id is not None:
                 monitor = _maybe_cupti_monitor()
-                if monitor is not None:
+                if monitor is not None and hasattr(monitor, "pop_user_annotation"):
                     monitor.pop_user_annotation()
                 self._cupti_monitor_external_id = None
         if not self.run_callbacks_on_exit:
