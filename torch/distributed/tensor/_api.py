@@ -14,6 +14,7 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import (
     _mesh_resources,
     _register_distributed_opaque_types,
@@ -1279,6 +1280,21 @@ def distribute_module(
 # and placements to create a proper DTensor.
 
 
+@maybe_run_for_local_tensor
+def _logspace_local_tensor(
+    init_op, start, end, base, total_steps, local_steps, offset, **kwargs
+):
+    local_start = start
+    local_end = end
+    if local_steps > 0 and total_steps > 1:
+        step = (end - start) / (total_steps - 1)
+        local_start = start + offset * step
+        local_end = local_start + step * (local_steps - 1)
+    elif local_steps > 0:
+        local_end = start
+    return init_op(local_start, local_end, steps=local_steps, base=base, **kwargs)
+
+
 def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     init_op,
     size: torch.Size,
@@ -1314,20 +1330,14 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         start = kwargs.pop("start")
         end = kwargs.pop("end")
         base = kwargs.pop("base")
-        local_steps = local_shape[0]
-        local_start = start
-        local_end = end
-        if local_steps > 0 and size[0] > 1:
-            step = (end - start) / (size[0] - 1)
-            local_start = start + global_offset[0] * step
-            local_end = local_start + step * (local_steps - 1)
-        elif local_steps > 0:
-            local_end = start
-        local_tensor = init_op(
-            local_start,
-            local_end,
-            steps=local_steps,
-            base=base,
+        local_tensor = _logspace_local_tensor(
+            init_op,
+            start,
+            end,
+            base,
+            size[0],
+            local_shape[0],
+            global_offset[0],
             **kwargs,
         )
     elif init_op is torch.rand or init_op is torch.randn:
@@ -1540,6 +1550,9 @@ def logspace(
     Returns:
         A :class:`DTensor` object on each rank
     """
+    if placements is not None and any(isinstance(p, _StridedShard) for p in placements):
+        raise AssertionError("logspace does not support _StridedShard placements")
+
     torch_size = normalize_to_torch_size((steps,))
 
     return _dtensor_init_helper(

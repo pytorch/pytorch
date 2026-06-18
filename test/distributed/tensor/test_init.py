@@ -152,27 +152,28 @@ class DTensorConstructorTest(DTensorTestBase):
     @with_comms
     def test_logspace(self):
         mesh = self.build_device_mesh()
-
         steps = 8
-        dist_tensor = logspace(
-            1.0, 2.0, steps, device_mesh=mesh, placements=[Replicate()]
-        )
-        self.assertEqual(dist_tensor.size(), torch.Size([steps]))
-        self.assertEqual(dist_tensor.to_local(), torch.logspace(1.0, 2.0, steps))
 
-        dist_tensor = logspace(
-            0.0, 1.0, steps, base=2.0, device_mesh=mesh, placements=[Replicate()]
-        )
-        self.assertEqual(
-            dist_tensor.to_local(), torch.logspace(0.0, 1.0, steps, base=2.0)
-        )
+        for placements in ([Replicate()], [Shard(0)]):
+            dist_tensor = logspace(
+                1.0, 2.0, steps, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.size(), torch.Size([steps]))
+            self.assertEqual(dist_tensor.full_tensor(), torch.logspace(1.0, 2.0, steps))
 
-        dist_tensor = logspace(1.0, 2.0, 1, device_mesh=mesh, placements=[Replicate()])
-        self.assertEqual(dist_tensor.size(), torch.Size([1]))
-        self.assertEqual(dist_tensor.to_local(), torch.logspace(1.0, 2.0, 1))
+            dist_tensor = logspace(
+                0.0, 1.0, steps, base=2.0, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(
+                dist_tensor.full_tensor(), torch.logspace(0.0, 1.0, steps, base=2.0)
+            )
 
-        dist_tensor = logspace(1.0, 2.0, 0, device_mesh=mesh, placements=[Replicate()])
-        self.assertEqual(dist_tensor.size(), torch.Size([0]))
+            dist_tensor = logspace(1.0, 2.0, 1, device_mesh=mesh, placements=placements)
+            self.assertEqual(dist_tensor.size(), torch.Size([1]))
+            self.assertEqual(dist_tensor.full_tensor(), torch.logspace(1.0, 2.0, 1))
+
+            dist_tensor = logspace(1.0, 2.0, 0, device_mesh=mesh, placements=placements)
+            self.assertEqual(dist_tensor.size(), torch.Size([0]))
 
     @with_comms
     def test_zeros(self):
