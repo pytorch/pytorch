@@ -7,6 +7,7 @@ from typing import Any, TypeAlias
 import torch
 import torch._vendor.quack.gemm_config as quack_gemm_config
 from torch._inductor.runtime.cache_dir_utils import cache_dir
+from torch._prims_common import is_expandable_to
 
 
 GemmConfigKey: TypeAlias = tuple[tuple[str, Any], ...]
@@ -21,10 +22,16 @@ def inductor_quack_cache_dir() -> str:
     return os.path.join(cache_dir(), "quack")
 
 
-def check_matrix(name: str, tensor: torch.Tensor) -> None:
-    """Require a 2-D CUDA tensor for FlexGEMM runtime dispatch."""
-    if tensor.ndim != 2:
-        raise NotImplementedError(f"FlexGEMM currently supports only 2-D {name}")
+def check_matrix(
+    name: str, tensor: torch.Tensor, expected_ndim: int | None = None
+) -> None:
+    """Require a CUDA matrix operand with optional generated-op rank checking."""
+    if expected_ndim is not None and tensor.ndim != expected_ndim:
+        raise RuntimeError(
+            f"FlexGEMM expected {expected_ndim}-D {name}, got {tensor.ndim}-D"
+        )
+    if tensor.ndim not in (2, 3):
+        raise NotImplementedError(f"FlexGEMM currently supports only 2-D or 3-D {name}")
     if not tensor.is_cuda:
         raise RuntimeError(f"FlexGEMM requires CUDA {name}")
 
@@ -34,6 +41,16 @@ def check_same_device(a: torch.Tensor, b: torch.Tensor, *rest: torch.Tensor) -> 
     device = a.device
     if b.device != device or any(tensor.device != device for tensor in rest):
         raise RuntimeError("FlexGEMM inputs must be on the same device")
+
+
+def check_broadcast_shape(
+    name: str, shape: torch.Size, expected_shape: tuple[int, ...]
+) -> None:
+    """Require a tensor shape to broadcast exactly to the GEMM output shape."""
+    if not is_expandable_to(tuple(shape), expected_shape):
+        raise RuntimeError(
+            f"{name} shape must broadcast to {expected_shape}, got {tuple(shape)}"
+        )
 
 
 def check_matrix_major_layout(name: str, tensor: torch.Tensor) -> None:
@@ -55,7 +72,7 @@ def check_epilogue_arg_kinds(epilogue_arg_kinds: tuple[str, ...]) -> None:
 
 def infer_epilogue_arg_kind(a: torch.Tensor, b: torch.Tensor, arg: torch.Tensor) -> str:
     """Infer a captured epilogue tensor's broadcast kind from its shape."""
-    m, n = a.shape[0], b.shape[1]
+    m, n = a.shape[-2], b.shape[-1]
     if tuple(arg.shape) == (m, n):
         return "tile"
     if tuple(arg.shape) == (1, n):
@@ -75,7 +92,7 @@ def validate_epilogue_arg_shape(
     kind: str,
 ) -> None:
     """Require a captured epilogue tensor shape to match its declared kind."""
-    m, n = a.shape[0], b.shape[1]
+    m, n = a.shape[-2], b.shape[-1]
     expected_shapes = {
         "tile": (m, n),
         "row": (1, n),
@@ -126,6 +143,21 @@ def split_epilogue_args(
     return tuple(row_args), tuple(col_args), tuple(tile_args)
 
 
+def normalize_c(
+    C: torch.Tensor | None, expected_shape: tuple[int, ...], beta: float
+) -> torch.Tensor | None:
+    """Return the effective C tensor that QuACK should read for alpha/beta GEMMs."""
+    if C is None:
+        return None
+    check_broadcast_shape("C", C.shape, expected_shape)
+    if beta == 0:
+        return None
+    broadcast_C = torch.broadcast_to(C, expected_shape)
+    check_matrix("C", broadcast_C)
+    check_matrix_major_layout("C", broadcast_C)
+    return broadcast_C
+
+
 def dispatch_gemm_act(
     a: torch.Tensor,
     b: torch.Tensor,
@@ -163,12 +195,19 @@ def dispatch_gemm_act(
             _SWAPPED_ARG_KIND[kind] for kind in epilogue_arg_kinds
         )
 
+    # QuACK expects a leading batch dim; 2-D (non-batched) operands get one here.
+    quack_a = quack_a.unsqueeze(0) if quack_a.ndim == 2 else quack_a
+    quack_b = quack_b.unsqueeze(0) if quack_b.ndim == 2 else quack_b
+    quack_out = quack_out.unsqueeze(0) if quack_out.ndim == 2 else quack_out
+    if quack_c is not None and quack_c.ndim == 2:
+        quack_c = quack_c.unsqueeze(0)
+
     gemm_act_dispatch(
-        quack_a.unsqueeze(0),
-        quack_b.unsqueeze(0),
+        quack_a,
+        quack_b,
         None,  # D
-        None if quack_c is None else quack_c.unsqueeze(0),
-        quack_out.unsqueeze(0),
+        quack_c,
+        quack_out,
         None,  # tile_count_semaphore
         None,  # cu_seqlens_m
         config.tile_m,
@@ -205,47 +244,47 @@ def gemm_epilogue(
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
     config_key: GemmConfigKey | None = None,
+    expected_ndim: int | None = None,
     device_capacity_override: tuple[int, int] | None = None,
     quack_cache_dir: str | None = None,
 ) -> torch.Tensor:
     """Run a dense GEMM through QuACK with a CuTeDSL epilogue.
 
     Args:
-        a: Left operand with shape ``[M, K]``.
-        b: Right operand with shape ``[K, N]``.
+        a: Left operand with shape ``[M, K]`` or ``[B, M, K]``.
+        b: Right operand with shape ``[K, N]`` or ``[B, K, N]``.
         epilogue_fn: CuTeDSL epilogue callable applied to the accumulator tile.
         epilogue_key: Stable cache key component for the epilogue.
-        C: Optional bias/addend with shape ``[M, N]``.
+        C: Optional bias/addend broadcastable to the output shape.
         alpha: Scale applied to the GEMM accumulator.
         beta: Scale applied to ``C`` when ``C`` is present.
         out_dtype: Optional output dtype. Defaults to ``a.dtype``.
-        out: Optional preallocated output tensor with shape ``[M, N]``.
+        out: Optional preallocated output tensor with shape ``[M, N]`` or ``[B, M, N]``.
         epilogue_args: Optional tensor args captured by the epilogue.
         epilogue_arg_kinds: Explicit ``tile``, ``row``, or ``col`` kind per arg.
         config_key: Optional explicit QuACK config key selected by Inductor autotune.
+        expected_ndim: Optional generated-op rank contract for A and B operands.
         device_capacity_override: Parent-computed capability for compile-only workers.
         quack_cache_dir: Optional scoped cache root for Inductor-generated QuACK work.
 
     Returns:
-        Tensor with shape ``[M, N]``.
+        Tensor with shape ``[M, N]`` or ``[B, M, N]``.
     """
-    check_matrix("a", a)
-    check_matrix("b", b)
+    check_matrix("a", a, expected_ndim)
+    check_matrix("b", b, expected_ndim)
     check_matrix_major_layout("a", a)
     check_matrix_major_layout("b", b)
-    if a.shape[1] != b.shape[0]:
+    if a.ndim != b.ndim:
+        raise RuntimeError("FlexGEMM inputs must both be 2-D or both be 3-D")
+    if a.ndim == 3 and a.shape[0] != b.shape[0]:
+        raise RuntimeError("FlexGEMM batched inputs must have the same batch size")
+    if a.shape[-1] != b.shape[-2]:
         raise RuntimeError(
             f"mat1 and mat2 shapes cannot be multiplied ({a.shape} and {b.shape})"
         )
-    expected_shape = (a.shape[0], b.shape[1])
+    expected_shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
     expected_dtype = a.dtype if out_dtype is None else out_dtype
-    if C is not None:
-        check_matrix("C", C)
-        check_matrix_major_layout("C", C)
-        if tuple(C.shape) != expected_shape:
-            raise RuntimeError(
-                f"C shape must be {expected_shape}, got {tuple(C.shape)}"
-            )
+    effective_C = normalize_c(C, expected_shape, beta)
     if out is not None:
         check_matrix("out", out)
         check_matrix_major_layout("out", out)
@@ -255,7 +294,9 @@ def gemm_epilogue(
             )
         if out.dtype != expected_dtype:
             raise RuntimeError(f"out dtype must be {expected_dtype}, got {out.dtype}")
-    if epilogue_args and C is not None:
+    if a.ndim == 3 and epilogue_args:
+        raise NotImplementedError("FlexGEMM batched args are not supported yet")
+    if epilogue_args and effective_C is not None:
         # TODO: Route this through the flex frontend so validated A/B/C metadata
         # can be reused here.
         raise NotImplementedError("FlexGEMM args cannot be combined with C yet")
@@ -291,7 +332,7 @@ def gemm_epilogue(
         dispatch_gemm_act(
             a,
             b,
-            C,
+            effective_C,
             out,
             epilogue_key,
             inferred_arg_kinds,
