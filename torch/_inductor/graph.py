@@ -984,9 +984,12 @@ class GraphLowering(torch.fx.Interpreter):
             #    the resnet/densenet/vgg/resnext wins).
             #  - gfx950 (MI350): channels-last is broadly favorable on MIOpen.
             #    Values are mean channels_last/contiguous bucket ratios measured
-            #    in bf16 over operator_inp_logs (torchbench+hf+timm); GROUPED is
-            #    the all-grouped mean (with the cpg<8 naive-bound layout-opt gate
-            #    the grouped convs reaching here are cpg>=8, ratio ~0.55).
+            #    in bf16 over operator_inp_logs (torchbench+hf+timm). This branch
+            #    has no cpg gate, so GROUPED is the all-grouped mean (0.629). A
+            #    separate naive-bound gate (skips grouped convs with
+            #    channels-per-group < 8) would leave only cpg>=8 grouped convs
+            #    here, whose mean is ~0.553; 0.629 is the deliberate gate-free
+            #    (more conservative) choice.
             # These numbers are sensitive to the ROCm / MIOpen version.
             if torch.version.hip is not None:
                 _arch = _conv_device_arch(conv_nodes)
