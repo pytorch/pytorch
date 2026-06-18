@@ -26,10 +26,6 @@ def parse_older_than(s):
         month = today.month - n
         year = today.year + (month - 1) // 12
         month = (month - 1) % 12 + 1
-        # Clamp to the real length of the target month, which depends on the
-        # year: February has 28 days outside leap years, so a hardcoded 29 would
-        # build an invalid date (e.g. going back from the 31st into a non-leap
-        # February) and raise ValueError.
         day = min(today.day, calendar.monthrange(year, month)[1])
         return date(year, month, day)
     elif unit == "year":
