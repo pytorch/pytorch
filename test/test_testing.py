@@ -2481,6 +2481,7 @@ class TestImports(TestCase):
                            "torch.include",  # torch include files after install
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
                            "torch._vendor.quack",  # depends on cutlass / cuda-python
+                           "torch.profiler._cupti",  # depends on cupti-python
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac
