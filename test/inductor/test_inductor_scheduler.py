@@ -11,14 +11,17 @@ import torch._inductor.ir as ir
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites, StarDep
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
+from torch._inductor.lowering import mutate_to
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     NestedReduction,
+    NodeUser,
+    OutputNode,
     Scheduler,
 )
 from torch._inductor.sizevars import SizeVarAllocator
@@ -184,6 +187,104 @@ class TestScheduler(TestCase):
         self.assertEqual([tuple(t.shape) for t in args[0]], [(2, 3), (2, 3)])
         self.assertEqual(args[1], 1)
         self.assertEqual(kwargs, {})
+
+    def _mock_scheduler_node(
+        self,
+        name: str,
+        outputs: list[Mock] | None = None,
+        reads: list[str] | None = None,
+        side_effects: bool = False,
+    ) -> Mock:
+        node = Mock(spec=BaseSchedulerNode)
+        node.get_name.return_value = name
+        node.get_outputs.return_value = outputs or []
+        node.has_side_effects.return_value = side_effects
+
+        read_deps = OrderedSet()
+        for read_name in reads or []:
+            dep = Mock(spec=Dep)
+            dep.name = read_name
+            read_deps.add(dep)
+
+        read_writes = Mock(spec=ReadWrites)
+        read_writes.reads = read_deps
+        node.read_writes = read_writes
+        return node
+
+    def _mock_scheduler_buffer(
+        self, name: str, mutations: list[str] | None = None
+    ) -> Mock:
+        buf = Mock()
+        buf.get_name.return_value = name
+        buf.get_mutations.return_value = mutations or []
+        buf.users = []
+        return buf
+
+    def test_mutate_to_records_alias_output_mutation(self):
+        graph = Mock()
+        graph.graph_inputs = {}
+        graph.constants = {}
+        graph.mark_buffer_mutated = Mock()
+
+        with V.set_graph_handler(graph):
+            base = ir.InputBuffer(
+                name="base",
+                layout=ir.FixedLayout(torch.device("cpu"), torch.float32, [4]),
+            )
+            alias = ir.ComputedBuffer(
+                name="alias",
+                layout=ir.NonOwningLayout(ir.TensorBox.create(base)),
+                data=Mock(),
+            )
+            src = ir.ComputedBuffer(
+                name="src",
+                layout=ir.FlexibleLayout(torch.device("cpu"), torch.float32, [4]),
+                data=Mock(),
+            )
+            changed = ir.StorageBox(alias)
+
+            result = mutate_to(changed, ir.StorageBox(src), unsafe_alias=True)
+
+        self.assertIs(result, changed)
+        self.assertIs(changed.data, alias)
+        self.assertIsInstance(src.layout, ir.MutationLayoutSHOULDREMOVE)
+        self.assertEqual(src.get_mutation_names(), ["alias"])
+        graph.mark_buffer_mutated.assert_any_call("alias")
+
+    def test_dead_node_elimination_keeps_mutation_for_later_user(self):
+        scheduler = Scheduler.__new__(Scheduler)
+        mutation_buf = self._mock_scheduler_buffer("mutation", ["base"])
+        base_buf = self._mock_scheduler_buffer("base")
+        consumer_buf = self._mock_scheduler_buffer("consumer")
+
+        mutation_node = self._mock_scheduler_node("mutation_node", [mutation_buf])
+        consumer_node = self._mock_scheduler_node(
+            "consumer_node", [consumer_buf], reads=["base"]
+        )
+
+        mutation_buf.users = [NodeUser(consumer_node, is_weak=True)]
+        base_buf.users = [NodeUser(consumer_node)]
+        consumer_buf.users = [NodeUser(OutputNode(StarDep("consumer")))]
+
+        scheduler.nodes = [mutation_node, consumer_node]
+        scheduler.name_to_buf = {
+            "mutation": mutation_buf,
+            "base": base_buf,
+            "consumer": consumer_buf,
+        }
+
+        graph = Mock()
+        graph.removed_operations = OrderedSet()
+        graph.removed_buffers = OrderedSet()
+
+        with V.set_graph_handler(graph), inductor_config.patch(use_dce=True):
+            Scheduler.dead_node_elimination(scheduler)
+
+        self.assertEqual(
+            [node.get_name() for node in scheduler.nodes],
+            ["mutation_node", "consumer_node"],
+        )
+        self.assertNotIn("mutation", graph.removed_buffers)
 
     def test_fusable_read_and_write_broadcast_requires_index_equivalence(self):
         d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)

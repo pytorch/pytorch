@@ -1051,7 +1051,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
-        x_cont = ir.ExternKernel.require_contiguous_strides(x)
+        x_realized = ir.ExternKernel.realize_input(x)
+        x_cont = ir.ExternKernel.require_contiguous_strides(x_realized)
         return fallback_handler(aten.view.dtype)(x_cont, dtype)
     else:
         return TensorBox(DtypeView.create(x, dtype))
@@ -7470,11 +7471,18 @@ def mutate_to(changed, val, unsafe_alias=False):
         if not (isinstance(val, ir.StorageBox)):
             raise AssertionError("expected: isinstance(val, ir.StorageBox)")
 
-    if isinstance(changed_data, ir.StorageBox) and not (
-        changed_data.is_input_buffer()
-        # In AOTI, module parameters and buffers are not lifted as graph inputs
-        or changed_data.is_module_buffer()
-        or isinstance(changed_data.data, ir.NopKernel)
+    if (
+        isinstance(changed_data, ir.StorageBox)
+        and not (
+            isinstance(changed_data.data, ir.Buffer)
+            and changed_data.data.get_inputs_that_alias_output()
+        )
+        and not (
+            changed_data.is_input_buffer()
+            # In AOTI, module parameters and buffers are not lifted as graph inputs
+            or changed_data.is_module_buffer()
+            or isinstance(changed_data.data, ir.NopKernel)
+        )
     ):
         # Fast path, just swing the data pointer
         val.realize()
