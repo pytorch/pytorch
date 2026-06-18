@@ -267,7 +267,7 @@ sycl::kernel* loadKernel(
   std::ifstream IFS(filePath, std::ios::binary);
   std::ostringstream OSS;
   OSS << IFS.rdbuf();
-  std::string data(std::move(OSS).str());
+  std::string data(OSS.str());
   auto mod = _createModule(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 

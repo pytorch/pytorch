@@ -232,7 +232,7 @@ void AliasAnalyzer::log_state() const {
 
     ss << '\n';
 
-    return std::move(ss).str();
+    return ss.str();
   }() << std::flush;
 }
 

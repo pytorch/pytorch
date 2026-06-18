@@ -50,7 +50,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = std::move(oss).str();
+  std::string the_file = oss.str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -145,7 +145,7 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = std::move(oss).str();
+  std::string the_file = oss.str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -232,7 +232,7 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = std::move(oss).str();
+  std::string the_file = oss.str();
   const char* file_name = "output2.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -293,7 +293,7 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = std::move(oss).str();
+  std::string the_file = oss.str();
   const char* file_name = "output3.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -385,7 +385,7 @@ TEST(PytorchStreamWriterAndReader, SkipDuplicateSerializationIdRecords) {
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
   auto writer_serialization_id = writer.serializationId();
 
-  std::string the_file = std::move(oss).str();
+  std::string the_file = oss.str();
   const char* file_name = "output4.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -426,7 +426,7 @@ TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
       {"pytorch.stream.writer.metadata",
        {{"serialization_id", writer.serializationId()},
         {"file_name", "archive"},
-        {"file_size", str(std::move(oss).str().length())}}},
+        {"file_size", str(oss.str().length())}}},
       {"pytorch.stream.reader.metadata",
        {{"serialization_id", writer.serializationId()},
         {"file_name", "archive"},
@@ -503,7 +503,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoadWithAllocator) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = std::move(oss).str();
+  std::string the_file = oss.str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -578,7 +578,7 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreadsWithAllocator) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = std::move(oss).str();
+  std::string the_file = oss.str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -668,7 +668,7 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = std::move(oss).str();
+  std::string the_file = oss.str();
   std::ofstream foo(fileName, std::ios::binary);
   foo.write(the_file.c_str(), the_file.size());
   foo.close();
