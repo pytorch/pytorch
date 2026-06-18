@@ -1,11 +1,14 @@
 import torch
 import torch.fx as fx
+
+
 try:
     # Newer PyTorch exposes make_fx under torch.func
     from torch.func import make_fx
 except Exception:
     # Fallback for older packaging
     from functorch import make_fx
+
 from torch._functorch.compile_utils import fx_graph_cse
 from torch.profiler import profile, ProfilerActivity
 
@@ -75,7 +78,7 @@ def profile_function(name, f, inp):
 
     # Print results in milliseconds with a clear header elsewhere
     print(
-        f"{name:<15} {avg_cuda_time_f/1e3:12.3f} {avg_cuda_time_g/1e3:12.3f} {num_node_decrease:10d} {len(fx_g.graph.nodes):10d}"
+        f"{name:<15} {avg_cuda_time_f / 1e3:12.3f} {avg_cuda_time_g / 1e3:12.3f} {num_node_decrease:10d} {len(fx_g.graph.nodes):10d}"
     )
 
 
@@ -90,13 +93,10 @@ if __name__ == "__main__":
     g_gpu.manual_seed(2147483647)
     inp = torch.randn(2**20, device="cuda", generator=g_gpu)
 
-
     def f1(x):
         return x.cos().cos()
 
-
     profile_function("f1", f1, inp)
-
 
     def fsum(x):
         a = x.sum()
@@ -105,18 +105,14 @@ if __name__ == "__main__":
         d = x.sum()
         return a + b + c + d
 
-
     profile_function("fsum", fsum, inp)
-
 
     def fconcat(x):
         a = torch.cat((x, x))
         b = torch.cat((x, x))
         return a + b
 
-
     profile_function("fconcat", fconcat, inp)
-
 
     def fsum2(x):
         a = x.sum()
@@ -124,9 +120,7 @@ if __name__ == "__main__":
             a = a + x.sum()
         return a
 
-
     profile_function("fsum2", fsum2, inp)
-
 
     def fsummulti(x):
         a = 0
@@ -135,9 +129,7 @@ if __name__ == "__main__":
             a = a * x.sum()
         return a
 
-
     profile_function("fsummulti", fsummulti, inp)
-
 
     def fsummulti2(x):
         a = 0
@@ -146,9 +138,7 @@ if __name__ == "__main__":
             a = a * x.sum()
         return a
 
-
     profile_function("fsummulti2", fsummulti2, inp)
-
 
     def fcos(x):
         a = 0
@@ -156,15 +146,12 @@ if __name__ == "__main__":
             a = a + x.cos()
         return a
 
-
     profile_function("fcos", fcos, inp)
-
 
     def fcos2(x):
         a = 0
         for _ in range(30):
             a = a + x.cos()
         return a
-
 
     profile_function("fcos2", fcos2, inp)
