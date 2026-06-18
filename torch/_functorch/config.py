@@ -88,7 +88,7 @@ bypass_autograd_cache_key: bool = False
 
 # Whether or not to normalize placeholder names in graphs
 # from dynamo in AOTAutogradCache
-autograd_cache_normalize_inputs = True
+autograd_cache_normalize_inputs = not is_fbcode()
 
 # Enable debug mode at first invocation to check if custom ops are valid.
 # When enabled, this checks that custom operators don't violate aliasing constraints.
