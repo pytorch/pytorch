@@ -187,18 +187,27 @@ const auto log_ndtr_string = jiterator_stringify(
 ); // log_ndtr_string
 
 const auto gcd_string = jiterator_stringify(
+  template <typename T> struct make_unsigned_impl;
+  template <> struct make_unsigned_impl<unsigned char> { using type = unsigned char; };
+  template <> struct make_unsigned_impl<signed char> { using type = unsigned char; };
+  template <> struct make_unsigned_impl<short> { using type = unsigned short; };
+  template <> struct make_unsigned_impl<int> { using type = unsigned int; };
+  template <> struct make_unsigned_impl<long> { using type = unsigned long; };
+  template <> struct make_unsigned_impl<long long> { using type = unsigned long long; };
+
   template <typename T>
   T gcd(const T a_in, const T b_in) {
-    T a = abs(a_in);
-    T b = abs(b_in);
+    using U = typename make_unsigned_impl<T>::type;
+    U a = (a_in < T{0}) ? -static_cast<U>(a_in) : static_cast<U>(a_in);
+    U b = (b_in < T{0}) ? -static_cast<U>(b_in) : static_cast<U>(b_in);
 
-    while (a != T{0}) {
-      T c = a;
+    while (a != U{0}) {
+      U c = a;
       a = b % a;
       b = c;
     }
 
-    return b;
+    return static_cast<T>(b);
   }
 ); // gcd_string
 
@@ -3055,14 +3064,15 @@ const auto spherical_bessel_j0_string = jiterator_stringify(
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
-  scalar_t a = ::abs(a_in);
-  scalar_t b = ::abs(b_in);
+  using U = ::cuda::std::make_unsigned_t<scalar_t>;
+  U a = (a_in < 0) ? -static_cast<U>(a_in) : static_cast<U>(a_in);
+  U b = (b_in < 0) ? -static_cast<U>(b_in) : static_cast<U>(b_in);
   while (a != 0) {
-    scalar_t c = a;
+    U c = a;
     a = b % a;
     b = c;
   }
-  return b;
+  return static_cast<scalar_t>(b);
 }
 
 /*

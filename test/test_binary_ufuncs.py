@@ -3068,6 +3068,23 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertEqual(actual, expected)
 
     @onlyNativeDeviceTypes
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_gcd_int_min(self, device, dtype):
+        int_min = torch.iinfo(dtype).min
+        a = torch.tensor([int_min], dtype=dtype, device=device)
+        b = torch.tensor([6], dtype=dtype, device=device)
+        self.assertEqual(torch.gcd(a, b).item(), 2)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_gcd_int_min_larger_divisor(self, device, dtype):
+        int_min = torch.iinfo(dtype).min
+        quarter = int_min // 4
+        a = torch.tensor([int_min], dtype=dtype, device=device)
+        b = torch.tensor([quarter], dtype=dtype, device=device)
+        self.assertEqual(torch.gcd(a, b).item(), -quarter)
+
+    @onlyNativeDeviceTypes
     @dtypes(torch.int16, torch.int32, torch.int64)
     def test_lcm(self, device, dtype):
         # Tests lcm(0, 0), lcm(0, a) cases
