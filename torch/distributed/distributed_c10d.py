@@ -2195,7 +2195,7 @@ def _new_process_group_helper(
             if not backend_class:
                 return GroupMember.NON_GROUP_MEMBER, None
             # create new process group with accurate rank and size
-            if pg.rank() == -1 and pg.size() == -1:
+            if group_rank == -1 and group_size == -1:
                 pg = ProcessGroup(
                     backend_prefix_store,
                     backend_class.rank(),
