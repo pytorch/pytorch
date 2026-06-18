@@ -409,8 +409,8 @@ class CuptiMonitor:
     def register_callbacks(self) -> None:
         if self._callbacks_registered:
             return
-        request_addr = _PY_PROFILER._cupti_monitor_buffer_request_callback_address()
-        complete_addr = _PY_PROFILER._cupti_monitor_buffer_complete_callback_address()
+        request_addr = _PY_PROFILER._cupti_monitor.buffer_request_callback_address()
+        complete_addr = _PY_PROFILER._cupti_monitor.buffer_complete_callback_address()
         self._check(
             self._lib.cuptiActivityRegisterCallbacks(
                 ctypes.c_void_p(request_addr),
@@ -421,7 +421,7 @@ class CuptiMonitor:
         self._callbacks_registered = True
 
     def register_timestamp_callback(self) -> None:
-        callback_addr = _PY_PROFILER._cupti_approximate_time_callback_address()
+        callback_addr = _PY_PROFILER._cupti_monitor.approximate_time_callback_address()
         self._check(
             self._lib.cuptiActivityRegisterTimestampCallback(
                 ctypes.c_void_p(callback_addr)
@@ -433,8 +433,8 @@ class CuptiMonitor:
     def start(self) -> None:
         if self._started:
             raise RuntimeError("CUPTI monitor is already started")
-        _PY_PROFILER._cupti_monitor_reset_buffers()
-        _PY_PROFILER._cupti_monitor_configure_buffers(self.buffer_size)
+        _PY_PROFILER._cupti_monitor.reset_buffers()
+        _PY_PROFILER._cupti_monitor.configure_buffers(self.buffer_size)
         self.register_callbacks()
         self._time_converter = _PY_PROFILER._ApproximateClockToUnixTimeConverter()
         self.register_timestamp_callback()
@@ -488,7 +488,7 @@ class CuptiMonitor:
             self._flush_thread = None
         self._worker_stop.set()
         # Unblock the decode thread waiting in get_completed().
-        _PY_PROFILER._cupti_monitor_shutdown_buffers()
+        _PY_PROFILER._cupti_monitor.shutdown_buffers()
         if self._worker_thread is not None:
             self._worker_thread.join(timeout=5.0)
             if self._worker_thread.is_alive():
@@ -497,8 +497,8 @@ class CuptiMonitor:
         if self._worker_error is not None:
             raise RuntimeError("CUPTI monitor worker failed") from self._worker_error
         self._close_outputs()
-        self._final_allocated_buffers = _PY_PROFILER._cupti_monitor_allocated_buffers()
-        _PY_PROFILER._cupti_monitor_reset_buffers()
+        self._final_allocated_buffers = _PY_PROFILER._cupti_monitor.allocated_buffers()
+        _PY_PROFILER._cupti_monitor.reset_buffers()
         self._time_converter = None
         self._timestamp_callback = None
 
@@ -635,10 +635,10 @@ class CuptiMonitor:
                 "started": self._started,
                 "activities": list(self._enabled_activities),
                 "buffers_completed": self._buffers_completed,
-                "buffers_allocated": _PY_PROFILER._cupti_monitor_allocated_buffers()
+                "buffers_allocated": _PY_PROFILER._cupti_monitor.allocated_buffers()
                 if self._started
                 else self._final_allocated_buffers,
-                "buffers_pending": _PY_PROFILER._cupti_monitor_pending_buffers(),
+                "buffers_pending": _PY_PROFILER._cupti_monitor.pending_buffers(),
                 "valid_total_mb": self._valid_bytes / (1024 * 1024),
                 "dropped_records": self._dropped_records,
                 "raw_chunks_written": self._raw_chunk_count,
@@ -735,8 +735,8 @@ class CuptiMonitor:
         try:
             while True:
                 # Blocks with the GIL released until a buffer is ready; returns
-                # None once stop() calls _cupti_monitor_shutdown_buffers().
-                item = _PY_PROFILER._cupti_monitor_get_completed()
+                # None once stop() calls _cupti_monitor.shutdown_buffers().
+                item = _PY_PROFILER._cupti_monitor.get_completed()
                 if item is None:
                     break
                 # layout_epoch is only meaningful for the v2 user-defined
@@ -751,7 +751,7 @@ class CuptiMonitor:
                         int(ctx), int(stream_id), int(buffer_ptr), int(valid_size)
                     )
                 finally:
-                    _PY_PROFILER._cupti_monitor_return_buffer(int(buffer_ptr))
+                    _PY_PROFILER._cupti_monitor.return_buffer(int(buffer_ptr))
                     with self._processing_done:
                         self._processing_inflight -= 1
                         self._processing_done.notify_all()
@@ -763,7 +763,7 @@ class CuptiMonitor:
     def _maybe_warn_backpressure(self) -> None:
         if self._outstanding_warned:
             return
-        allocated = _PY_PROFILER._cupti_monitor_allocated_buffers()
+        allocated = _PY_PROFILER._cupti_monitor.allocated_buffers()
         if allocated >= _OUTSTANDING_WARN_THRESHOLD:
             self._outstanding_warned = True
             logger.warning(
@@ -778,7 +778,7 @@ class CuptiMonitor:
         with self._processing_done:
             while True:
                 if (
-                    _PY_PROFILER._cupti_monitor_pending_buffers() == 0
+                    _PY_PROFILER._cupti_monitor.pending_buffers() == 0
                     and self._processing_inflight == 0
                 ):
                     return
