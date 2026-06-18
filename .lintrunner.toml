@@ -251,7 +251,6 @@ exclude_patterns = [
     'c10/util/IntrusiveList.h',
     'c10/util/irange.h',
     'c10/util/llvmMathExtras.h',
-    'c10/util/MathConstants.h',
     'c10/util/NetworkFlow.cpp',
     'c10/util/order_preserving_flat_hash_map.h',
     'c10/util/overflows.h',
