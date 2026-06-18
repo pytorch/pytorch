@@ -71,7 +71,7 @@ class verbose:
         st = torch._C._verbose.onednn_set_verbose(self.level)
         if not st:
             raise AssertionError(
-                "Failed to set MKLDNN into verbose mode. Please consider to disable this verbose scope."
+                "Failed to set ONEDNN into verbose mode. Please consider to disable this verbose scope."
             )
         return self
 

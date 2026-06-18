@@ -1076,21 +1076,21 @@ static at::Tensor linear_int8_with_onednn_weight(
   using ideep::tensor;
   const int64_t dim = input.dim();
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte || input.scalar_type() == c10::ScalarType::Char || input.scalar_type() == c10::ScalarType::Float8_e4m3fn,
-      "qlinear with mkldnn tensor: data type of input should be uint8, int8 or float8_e4m3fn.");
+      "qlinear with onednn tensor: data type of input should be uint8, int8 or float8_e4m3fn.");
   TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Char || onednn_weight.scalar_type() == c10::ScalarType::Float8_e4m3fn,
-      "qlinear with mkldnn tensor: data type of weight should be int8 or float8_e4m3fn.");
+      "qlinear with onednn tensor: data type of weight should be int8 or float8_e4m3fn.");
   bool is_fp8 = false;
   if (input.scalar_type() == c10::ScalarType::Float8_e4m3fn || onednn_weight.scalar_type() == c10::ScalarType::Float8_e4m3fn) {
     TORCH_CHECK(
         input.scalar_type() == c10::ScalarType::Float8_e4m3fn && onednn_weight.scalar_type() == c10::ScalarType::Float8_e4m3fn,
-        "qlinear with mkldnn tensor: data type of input and weight should be the same for fp8, but got ",
+        "qlinear with onednn tensor: data type of input and weight should be the same for fp8, but got ",
         input.scalar_type(), " and ", onednn_weight.scalar_type());
     is_fp8 = true;
   }
 
   // Fall back to fp8 reference impl on platforms without AMX FP16 support.
   // On such platforms, `onednn_weight` is a plain (transposed) strided tensor
-  // produced by `pack_weight_to_onednn_tensor`, NOT an MKLDNN tensor.
+  // produced by `pack_weight_to_onednn_tensor`, NOT an ONEDNN tensor.
 #if defined(__powerpc__)
   if (is_fp8) {
 #else

@@ -208,7 +208,7 @@ class OnednnPrelu(torch.jit.ScriptModule):
 
 def to_mkldnn(module, dtype=torch.float):
     if dtype not in (torch.float, torch.bfloat16, torch.half):
-        raise AssertionError("MKLDNN only support float, bfloat16, and half path now")
+        raise AssertionError("ONEDNN only support float, bfloat16, and half path now")
 
 
     def m_fn(m, d):

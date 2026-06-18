@@ -1482,7 +1482,7 @@ def register_onednn_fusion_ops():
                     raise AssertionError("packed_w must be a graph constant")
                 if orig_w.get_name() not in V.graph.constants:
                     raise AssertionError("orig_w must be a graph constant")
-                # packed_w is a mkldnn tensor which we can't generate directly
+                # packed_w is a onednn tensor which we can't generate directly
                 # so we use the weights from the original tensor in autotune.
                 input_gen_fns = {
                     1: lambda x: V.graph.constants[x.get_name()],
