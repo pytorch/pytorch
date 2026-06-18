@@ -25,19 +25,18 @@
   (PyFloat_Check(object) ? PyFloat_AsDouble(object) \
        : PyLong_Check(object)                       \
        ? PyLong_AsLongLong(object)                  \
-       : (throw std::runtime_error("Could not parse real"), 0))
+       : (TORCH_CHECK(false, "Could not parse real"), 0))
 
 #define THPUtils_checkReal_INT(object) PyLong_Check(object)
 
-#define THPUtils_unpackReal_INT(object) \
-  (PyLong_Check(object)                 \
-       ? PyLong_AsLongLong(object)      \
-       : (throw std::runtime_error("Could not parse real"), 0))
+#define THPUtils_unpackReal_INT(object)             \
+  (PyLong_Check(object) ? PyLong_AsLongLong(object) \
+                        : (TORCH_CHECK(false, "Could not parse real"), 0))
 
 #define THPUtils_unpackReal_BOOL(object) \
   (PyBool_Check(object)                  \
        ? object                          \
-       : (throw std::runtime_error("Could not parse real"), Py_False))
+       : (TORCH_CHECK(false, "Could not parse real"), Py_False))
 
 #define THPUtils_unpackReal_COMPLEX(object)                                   \
   (PyComplex_Check(object)                                                    \
@@ -47,7 +46,7 @@
        ? (c10::complex<double>(PyFloat_AsDouble(object), 0))                  \
        : PyLong_Check(object)                                                 \
        ? (c10::complex<double>(PyLong_AsLongLong(object), 0))                 \
-       : (throw std::runtime_error("Could not parse real"),                   \
+       : (TORCH_CHECK(false, "Could not parse real"),                         \
           c10::complex<double>(0, 0)))
 
 #define THPBoolUtils_unpackReal(object) THPUtils_unpackReal_BOOL(object)

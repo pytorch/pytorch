@@ -30,7 +30,7 @@ void registerLayoutObject(THPLayout* thp_layout, at::Layout layout) {
 THPDtype* getTHPDtype(at::ScalarType scalarType) {
   auto dtype = dtype_registry[static_cast<int>(scalarType)];
   if (!dtype) {
-    throw std::invalid_argument("unsupported scalarType");
+    TORCH_CHECK(false, "unsupported scalarType");
   }
   return dtype;
 }
@@ -38,7 +38,7 @@ THPDtype* getTHPDtype(at::ScalarType scalarType) {
 THPLayout* getTHPLayout(at::Layout layout) {
   auto thp_layout = layout_registry[static_cast<int>(layout)];
   if (!thp_layout) {
-    throw std::invalid_argument("unsupported at::Layout");
+    TORCH_CHECK(false, "unsupported at::Layout");
   }
   return thp_layout;
 }
@@ -53,8 +53,7 @@ PyObject* createPyObject(const at::Storage& storage) {
   // data_ptr is not allowed, through methods like
   // x.untyped_storage().data_ptr()
   PyObject* obj = THPStorage_Wrap(storage);
-  if (!obj)
-    throw python_error();
+  TORCH_CHECK_PYTHON(obj);
   return obj;
 }
 

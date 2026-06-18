@@ -5,6 +5,7 @@
 
 #include <sstream>
 #include <string>
+// @allow-raw-throw
 
 namespace c10 {
 // On nvcc, C10_UNLIKELY thwarts missing return statement analysis.  In cases

@@ -1,3 +1,4 @@
+// @allow-raw-throw
 #include "cpp_c10d_extension.hpp"
 
 #include <map>

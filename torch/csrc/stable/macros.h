@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 
 #if defined(_WIN32)
 // Keep windows.h lean and stop it from defining the min()/max() macros, which
@@ -22,6 +23,7 @@
 #else
 #include <dlfcn.h>
 #endif
+// @allow-raw-throw
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 

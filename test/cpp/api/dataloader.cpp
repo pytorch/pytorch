@@ -1,3 +1,4 @@
+// @allow-raw-throw
 #include <gtest/gtest.h>
 
 #include <torch/torch.h>

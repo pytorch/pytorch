@@ -27,7 +27,7 @@ bool FunctionSchema::alias(size_t input_idx, size_t output_idx) const {
     the schema will consider these indices to be out of bounds.
 
     e.g., op(a, b, c, d) where c and d are variadic will result in
-    may_contain_alias(x, idx_of(c)) and may_contain_alias(x, idx_of(d)) to throw
+    may_contain_alias(x, idx_of(c)) and may_contain_alias(x, idx_of(d)) to raise
     an out-of-bounds exception
 
     in this case, we can apply the worst-case aliasing to the varidic

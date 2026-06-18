@@ -1,3 +1,4 @@
+// @allow-raw-throw
 #include <chrono>
 #include <filesystem>
 #include <fstream>

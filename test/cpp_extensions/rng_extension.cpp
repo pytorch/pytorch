@@ -1,3 +1,4 @@
+// @allow-raw-throw
 #include <torch/extension.h>
 #include <torch/library.h>
 #include <ATen/Generator.h>
