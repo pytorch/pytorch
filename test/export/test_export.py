@@ -620,6 +620,26 @@ class TestExport(TestCase):
         self.assertEqual(mod((new_a,), {"x": new_x}), new_a + new_x)
         self.assertTrue(mod.graph._codegen.pytree_info.is_args_kwargs)
 
+    def test_unlift_leaf_spec_is_not_args_kwargs(self):
+        from torch.export._unlift import _unlift
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.output((x,))
+        gm = torch.fx.GraphModule({}, graph)
+
+        unlifted = _unlift(
+            gm,
+            [None],
+            [None],
+            pytree.treespec_leaf(),
+            None,
+            is_args_kwargs=False,
+        )
+
+        self.assertFalse(unlifted.graph._codegen.pytree_info.is_args_kwargs)
+        self.assertEqual(unlifted(torch.ones(1)), (torch.ones(1),))
+
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
         exported_program = export(f, args, kwargs)
