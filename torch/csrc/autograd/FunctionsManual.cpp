@@ -562,10 +562,7 @@ Tensor pow_backward_self(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& exponent) {
-  auto out = pow_backward_self_raw(
-    grad,
-    self,
-    exponent);
+  auto out = pow_backward_self_raw(grad, self, exponent);
   return handle_r_to_c(self, std::move(out));
 }
 
