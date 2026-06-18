@@ -4,8 +4,10 @@ from collections.abc import Sequence
 from typing import Any
 
 import torch
+import torch.autograd.forward_ad as fwAD
 import torch.nn as nn
 from torch import Tensor
+from torch._functorch.eager_transforms import enable_inplace_requires_grad
 from torch._functorch.utils import exposed_in
 
 
@@ -260,5 +262,9 @@ def construct_stacked_leaf(
         )
     result = torch.stack(tensors)
     if all_requires_grad:
-        result = result.detach().requires_grad_()
+        tangent = fwAD.unpack_dual(result).tangent
+        with enable_inplace_requires_grad(True):
+            result = result.detach().requires_grad_()
+        if tangent is not None:
+            result = fwAD.make_dual(result, tangent)
     return result

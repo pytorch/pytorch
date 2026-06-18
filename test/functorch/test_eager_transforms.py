@@ -3901,6 +3901,34 @@ class TestComposability(TestCase):
             local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
             self.assertTrue(local_exclude_set.has(DispatchKey.Autograd))
 
+    def test_jvp_through_vmap_with_stack_module_state(self, device):
+        in_features, out_features = 3, 4
+        models = [
+            nn.Linear(in_features, out_features, bias=False, device=device),
+            nn.Linear(in_features, out_features, bias=False, device=device),
+        ]
+        with torch.device("meta"):
+            meta_head = nn.Linear(in_features, out_features, bias=False)
+
+        def fmodel(params, buffers, x):
+            return functional_call(meta_head, (params, buffers), args=(x,))
+
+        vmodel = vmap(fmodel, in_dims=(0, 0, None))
+
+        def ensemble_forward(x):
+            params, buffers = stack_module_state(models)
+            return vmodel(params, buffers, x)
+
+        x = torch.randn(in_features, device=device)
+        x_t = torch.randn(in_features, device=device)
+
+        primals, tangents = jvp(ensemble_forward, (x,), (x_t,))
+
+        expected_primals = torch.stack([m(x) for m in models])
+        expected_tangents = torch.stack([x_t @ m.weight.T for m in models])
+        self.assertEqual(primals, expected_primals)
+        self.assertEqual(tangents, expected_tangents)
+
 
 @markDynamoStrictTest
 class TestMakeFunctional(TestCase):
