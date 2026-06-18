@@ -763,7 +763,7 @@ Tensor scaled_dot_product_attention(
       if(query_device_type == DeviceType::CUDA ||
          query_device_type == DeviceType::XPU) {
         c10::SymInt og_size = query_.sym_size(-1);
-        int alignment_size = (query_device_type == DeviceType::XPU) ? 64 : 8;
+        int alignment_size = (query_device_type == DeviceType::XPU) ? 1 : 8;
         Tensor query_padded = pad_last_dim(query_, alignment_size);
         Tensor key_padded = pad_last_dim(key, alignment_size);
         Tensor value_padded = pad_last_dim(value, alignment_size);

@@ -5232,7 +5232,7 @@ class TestSDPAXpuOnly(NNTestCase):
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
         batch, num_heads, seqlen = 32, 2, 32
 
-        max_supported_head_dim = 192
+        max_supported_head_dim = 256
         q_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim)
         k_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim)
         v_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim)
