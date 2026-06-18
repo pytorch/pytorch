@@ -9,7 +9,7 @@
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/irange.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 namespace at::native::mkldnn::internal::convolution {
 
@@ -278,4 +278,4 @@ Tensor conv_run(
 
 } // namespace at::native::mkldnn::internal::convolution
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

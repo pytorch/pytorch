@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/Config.h>
-#if AT_MKLDNN_ACL_ENABLED()
+#if AT_ONEDNN_ACL_ENABLED()
 
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <arm_compute/core/Error.h>
@@ -254,4 +254,4 @@ struct PackedLinearWeightsACL : public PackedLinearWeightsOnednn {
       int64_t output_zero_point);
 };
 
-#endif // AT_MKLDNN_ACL_ENABLED()
+#endif // AT_ONEDNN_ACL_ENABLED()

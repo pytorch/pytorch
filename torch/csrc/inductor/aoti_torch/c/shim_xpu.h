@@ -46,7 +46,7 @@ aoti_torch_set_current_xpu_device(const int32_t& device_index);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_current_sycl_queue(void** ret);
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_xpu_mkldnn__convolution_pointwise_binary(
@@ -201,7 +201,7 @@ aoti_torch_xpu__qconv2d_pointwise_binary_tensor(
     const char** unary_algorithm,
     AtenTensorHandle* ret0);
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 #ifdef __cplusplus
 } // extern "C"
 #endif

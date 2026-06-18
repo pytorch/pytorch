@@ -4,7 +4,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/List.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 namespace at::native::xpu {
 C10_API Tensor convolution_pointwise(
@@ -51,4 +51,4 @@ C10_API Tensor& convolution_pointwise_binary_(
 
 } // namespace at::native::xpu
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

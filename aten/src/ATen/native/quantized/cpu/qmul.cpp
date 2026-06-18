@@ -276,7 +276,7 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
   return out;
   }
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 DEFINE_DISPATCH(qmul_tensor_cpu_stub);
 Tensor int8_mul_tensor_onednn(
     const Tensor& self, double self_scale, int64_t self_zero_point,
@@ -412,7 +412,7 @@ class QMulOnednn final {
     const Tensor other, double other_scale, int64_t other_zero_point,
     double output_scale, int64_t output_zero_point, c10::ScalarType output_dtype
   ) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
   return int8_mul_tensor_onednn(
     self, self_scale, self_zero_point,
     other, other_scale, other_zero_point,

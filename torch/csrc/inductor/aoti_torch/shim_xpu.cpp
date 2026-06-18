@@ -78,7 +78,7 @@ AOTITorchError aoti_torch_get_current_sycl_queue(void** ret) {
   });
 }
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ATen/native/onednn/xpu/Conv.h>
 #include <ATen/native/onednn/xpu/qconv.h>
 #include <ATen/native/onednn/xpu/qlinear.h>
@@ -429,4 +429,4 @@ AOTITorchError aoti_torch_xpu__qconv2d_pointwise_binary_tensor(
   });
 }
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

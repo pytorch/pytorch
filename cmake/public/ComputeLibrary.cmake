@@ -4,7 +4,7 @@
 #   must be set with the env var ACL_ROOT_DIR. This path will be checked later
 #   as part of FindACL.cmake in oneDNN.
 
-if(NOT USE_MKLDNN_ACL)
+if(NOT USE_ONEDNN_ACL)
     RETURN()
 endif()
 

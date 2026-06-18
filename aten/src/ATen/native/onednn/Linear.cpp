@@ -21,7 +21,7 @@
 #include <ATen/ops/mkldnn_linear_native.h>
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 
 namespace at::native {
@@ -61,7 +61,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 
 } // namespace at::native
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
@@ -629,4 +629,4 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

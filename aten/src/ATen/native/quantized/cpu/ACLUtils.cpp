@@ -1,6 +1,6 @@
 #include <ATen/native/quantized/cpu/ACLUtils.h>
 
-#if AT_MKLDNN_ACL_ENABLED()
+#if AT_ONEDNN_ACL_ENABLED()
 
 #include <ATen/Parallel.h>
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -356,4 +356,4 @@ PackedLinearWeightsACL::PackedLinearWeightsACL(
   weight_scale_ = orig_weight_.q_scale();
 }
 
-#endif // AT_MKLDNN_ACL_ENABLED()
+#endif // AT_ONEDNN_ACL_ENABLED()

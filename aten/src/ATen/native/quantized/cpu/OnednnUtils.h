@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/Config.h>
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
@@ -531,4 +531,4 @@ struct QlinearForwardParams {
   }
 };
 
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()

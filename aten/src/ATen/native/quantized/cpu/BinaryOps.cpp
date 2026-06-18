@@ -384,7 +384,7 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 }
 #endif // USE_XNNPACK
 
-#if AT_MKLDNN_ACL_ENABLED()
+#if AT_ONEDNN_ACL_ENABLED()
 Tensor acl_qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   TORCH_CHECK(
       qa.qscheme() == kPerTensorAffine || qa.qscheme() == kPerTensorSymmetric,
@@ -443,7 +443,7 @@ Tensor acl_qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 
   return dst;
 }
-#endif // AT_MKLDNN_ACL_ENABLED()
+#endif // AT_ONEDNN_ACL_ENABLED()
 
 template <bool ReLUFused = false>
 Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
@@ -468,13 +468,13 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 #endif // USE_PYTORCH_QNNPACK
   }
 
-#if AT_MKLDNN_ACL_ENABLED()
+#if AT_ONEDNN_ACL_ENABLED()
   if (!ReLUFused && qa.ndimension() > 0 && qa.sizes() == qb.sizes() &&
       qa.scalar_type() == qb.scalar_type() &&
       (qa.scalar_type() == kQInt8 || qa.scalar_type() == kQUInt8)) {
     return acl_qadd(qa, qb, scale, zero_point);
   }
-#endif // AT_MKLDNN_ACL_ENABLED()
+#endif // AT_ONEDNN_ACL_ENABLED()
 
   auto qc = at::_empty_affine_quantized(
       qa.sizes(),
