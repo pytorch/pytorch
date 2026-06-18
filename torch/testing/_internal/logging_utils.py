@@ -166,11 +166,11 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         # registered logs are the only ones with handlers, so patch those
         for log_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(log_qname)
-            # Exclude pytest's capture handlers — they aren't torch-internal leaks.
+            # Exclude pytest's capture handlers (all defined in _pytest.logging)
+            # — they aren't torch-internal leaks. Filter by module, not class
+            # name, to catch every handler type pytest attaches.
             torch_handlers = [
-                h
-                for h in logger.handlers
-                if type(h).__name__ not in ("LogCaptureHandler", "_LiveLoggingStreamHandler")
+                h for h in logger.handlers if type(h).__module__ != "_pytest.logging"
             ]
             num_handlers = len(torch_handlers)
             self.assertLessEqual(
@@ -181,7 +181,9 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
 
             self.assertGreater(num_handlers, 0, "All pt2 loggers should have more than zero handlers")
 
-            for handler in logger.handlers:
+            # Wrap only torch's handlers — wrapping pytest's would capture each
+            # record more than once, duplicating entries in record_list.
+            for handler in torch_handlers:
                 old_emit = handler.emit
 
                 def new_emit(record):
