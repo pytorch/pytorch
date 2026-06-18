@@ -5,6 +5,7 @@ import contextlib
 import contextvars
 import copy
 import hashlib
+import importlib
 import itertools
 import linecache
 import sys
@@ -93,6 +94,7 @@ class _EvalCacheLoader:
         globals_copy["__file__"] = key
         globals_copy["__name__"] = key
         globals_copy["__loader__"] = self
+        globals_copy["__spec__"] = importlib.machinery.ModuleSpec(key, self)  # type: ignore[bad-argument-type]
         linecache.lazycache(key, globals_copy)
 
         return key
