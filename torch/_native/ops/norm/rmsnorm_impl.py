@@ -11,6 +11,7 @@ import math
 import torch
 
 from ... import cutedsl_utils as cu
+from .norms import _required_align_bytes
 
 
 def _is_supported(input: torch.Tensor) -> bool:
@@ -74,6 +75,28 @@ def _bwd_fits_smem(input: torch.Tensor, grad_out: torch.Tensor, n: int) -> bool:
     return tile_bytes <= _smem_budget_bytes(input.device)
 
 
+# A contiguous input with a misaligned base pointer must be cloned before the
+# kernel can run (see norms._reshape_2d). The clone's extra read+write only
+# pays off once quack's bandwidth advantage over aten can absorb it: measured
+# on B200 (fwd, bf16/fp32), clone+quack wins 1.8-2.9x at 2^24 elements and
+# loses below 2^23. Misaligned inputs smaller than this fall back to aten.
+# The threshold is a perf heuristic, not a correctness bound; it has not been
+# measured on H100 (SM90), where the crossover may differ. Make it per-arch
+# if H100 measurements show a meaningfully different break-even.
+_MISALIGNED_MIN_NUMEL = 1 << 24
+
+
+def _misaligned_clone_unprofitable(t: torch.Tensor, n: int) -> bool:
+    # Only contiguous tensors hit the clone path in norms._reshape_2d;
+    # non-contiguous ones pay the reshape+contiguous materialization either
+    # way, which always lands on an aligned fresh buffer.
+    if not t.is_contiguous():
+        return False
+    if t.data_ptr() % _required_align_bytes(t, n) == 0:
+        return False
+    return t.numel() < _MISALIGNED_MIN_NUMEL
+
+
 def _n_yields_valid_cp_size(n: int, dtype: torch.dtype) -> bool:
     # quack picks vecsize = gcd(N, 128 // dtype_bits) and lowers each thread's
     # gmem->smem copy to cp.async, whose PTX cp_size only accepts 32, 64, or
@@ -129,6 +152,8 @@ def _fused_rms_norm_cond(
         return False
     if not _fwd_fits_smem(input, math.prod(normalized_shape)):
         return False
+    if _misaligned_clone_unprofitable(input, math.prod(normalized_shape)):
+        return False
     # Non-contiguous weight would require a reshape+copy that we haven't
     # measured; fall through to aten until we do.
     if weight is not None and not weight.is_contiguous():
@@ -182,6 +207,11 @@ def _fused_rms_norm_backward_cond(
     if not _n_yields_valid_cp_size(math.prod(normalized_shape), input.dtype):
         return False
     if not _bwd_fits_smem(input, grad_out, math.prod(normalized_shape)):
+        return False
+    n = math.prod(normalized_shape)
+    if _misaligned_clone_unprofitable(input, n) or _misaligned_clone_unprofitable(
+        grad_out, n
+    ):
         return False
     if weight is not None and not weight.is_contiguous():
         return False
