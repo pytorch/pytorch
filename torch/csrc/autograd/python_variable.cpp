@@ -44,7 +44,6 @@
 #include <ATen/ATen.h>
 
 #include <structmember.h>
-#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -1632,12 +1631,11 @@ py::object dispatchDTensorOp(
   // enough for now.
   const bool is_inplace_op =
       !operator_name.name.empty() && operator_name.name.back() == '_';
-  const auto& schema_arguments = op.schema().arguments();
+  // Simple analysis of function schema to determine if this is an
+  // ou variant. It might not be entirely correct, but it's good
+  // enough for now.
   const bool is_out_variant_op = !is_inplace_op &&
-      std::any_of(
-          schema_arguments.begin(),
-          schema_arguments.end(),
-          [](const c10::Argument& argument) { return argument.is_out(); });
+      operator_name.overload_name.find("out") != std::string::npos;
 
   // Fast path for default or view ops.
   const auto output_spec =
