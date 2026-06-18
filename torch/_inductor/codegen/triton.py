@@ -8023,6 +8023,7 @@ class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
     kernel_type: type[Any] = TritonKernel
+    supports_polyhedral: bool = True
     backend_features = OrderedSet(
         [
             BackendFeature.FOREACH,
