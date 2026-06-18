@@ -9,17 +9,21 @@ from sympy import I, Max, Min, Symbol, sympify
 import torch
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
-from torch._inductor.compile_fx import _get_subgraph_names
+from torch._inductor.compile_fx import _get_subgraph_names, fake_tensor_prop
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
     count_flops_fx,
     countable_fx,
     FakeTensorUpdater,
     get_fake,
+    get_storage,
+    maybe_fake_layout_constraints,
 )
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.ops import aten
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -656,6 +660,265 @@ class TestFakeTensorUpdater(TestCase):
         # tensors.
         for m in mul_nodes:
             self.assertEqual(len(m.meta["val"].size()), 4)
+
+    def test_layout_constraints(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return aten.view_as_complex.default(aten.clone.default(x))
+
+        graph = self._get_graph(fn, torch.randn(2, 3, 2))
+        updater = FakeTensorUpdater(graph)
+        clone_node = graph.graph.find_nodes(
+            op="call_function", target=aten.clone.default
+        )[0]
+        view_node = graph.graph.find_nodes(
+            op="call_function", target=aten.view_as_complex.default
+        )[0]
+
+        with graph.graph.inserting_before(view_node):
+            bad_stride_node = graph.graph.call_function(
+                aten.as_strided.default,
+                (clone_node, (2, 3, 2), (6, 1, 3)),
+            )
+        view_node.replace_input_with(clone_node, bad_stride_node)
+        graph.graph.lint()
+        graph.recompile()
+
+        with V.set_fake_mode(self._get_faketensormode(graph)):
+            num_updated = updater.incremental_update()
+
+        self.assertGreaterEqual(num_updated, 2)
+        self.assertEqual(view_node.meta["val"].stride(), (3, 1))
+
+    def test_fake_tensor_prop_layout_constraints(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        permute = graph.call_function(aten.permute.default, (x, [0, 2, 1]))
+        view_as_complex = graph.call_function(aten.view_as_complex.default, (permute,))
+        graph.output(view_as_complex)
+        gm = torch.fx.GraphModule({}, graph)
+
+        fake_tensor_prop(gm, [torch.randn(2, 2, 3)])
+
+        self.assertEqual(view_as_complex.meta["val"].stride(), (3, 1))
+        self.assertEqual(
+            len(graph.find_nodes(op="call_function", target=aten.clone.default)), 0
+        )
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        view_as_complex = graph.call_function(aten.view_as_complex.default, (x,))
+        graph.output(view_as_complex)
+        gm = torch.fx.GraphModule({}, graph)
+
+        fake_tensor_prop(gm, [torch.empty_strided((2, 1, 2), (2, 99, 1))])
+
+        self.assertEqual(view_as_complex.meta["val"].stride(), (1, 1))
+
+    def test_fake_tensor_prop_exact_stride_constraints(self):
+        @torch.library.custom_op(
+            "test_fake_tensor_prop_exact_stride_constraints::needs_exact",
+            mutates_args={},
+            tags=[torch.Tag.needs_exact_strides],
+        )
+        def needs_exact(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        @needs_exact.register_fake
+        def _(x):
+            self.assertEqual(x.stride(), (6, 2, 1))
+            return x
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        permute = graph.call_function(aten.permute.default, (x, [0, 2, 1]))
+        needs_exact_op = (
+            torch.ops.test_fake_tensor_prop_exact_stride_constraints.needs_exact.default
+        )
+        exact = graph.call_function(needs_exact_op, (permute,))
+        graph.output(exact)
+        gm = torch.fx.GraphModule({}, graph)
+        exact.meta["eager_input_vals"] = ((torch.randn(2, 3, 2),), {})
+
+        fake_tensor_prop(gm, [torch.randn(2, 2, 3)])
+
+        self.assertEqual(exact.meta["val"].stride(), (6, 2, 1))
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        exact = graph.call_function(needs_exact_op, (x,))
+        graph.output(exact)
+        gm = torch.fx.GraphModule({}, graph)
+        exact.meta["eager_input_vals"] = ((torch.randn(2, 3, 2),), {})
+
+        fake_tensor_prop(gm, [torch.randn(2, 3, 2)])
+
+        self.assertEqual(exact.meta["val"].stride(), (6, 2, 1))
+        self.assertEqual(get_storage(exact.meta["val"]), get_storage(x.meta["val"]))
+
+        @torch.library.custom_op(
+            "test_fake_tensor_prop_exact_stride_constraints::needs_exact_size1",
+            mutates_args={},
+            tags=[torch.Tag.needs_exact_strides],
+        )
+        def needs_exact_size1(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        @needs_exact_size1.register_fake
+        def _(x):
+            return x
+
+        needs_exact_size1_op = torch.ops.test_fake_tensor_prop_exact_stride_constraints.needs_exact_size1.default
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        exact = graph.call_function(needs_exact_size1_op, (x,))
+        graph.output(exact)
+        gm = torch.fx.GraphModule({}, graph)
+        exact.meta["eager_input_vals"] = (
+            (torch.empty_strided((2, 1, 3), (3, 99, 1)),),
+            {},
+        )
+
+        fake_tensor_prop(gm, [torch.empty_strided((2, 1, 3), (3, 3, 1))])
+
+        self.assertEqual(exact.meta["val"].stride(), (3, 99, 1))
+        self.assertEqual(get_storage(exact.meta["val"]), get_storage(x.meta["val"]))
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        clone_node = graph.call_function(aten.clone.default, (x,))
+        exact_node = graph.call_function(needs_exact_op, (clone_node,))
+        graph.output(exact_node)
+        graph = torch.fx.GraphModule({}, graph)
+        exact_node.meta["eager_input_vals"] = ((torch.randn(2, 3, 2),), {})
+        fake_tensor_prop(graph, [torch.randn(2, 3, 2)])
+        updater = FakeTensorUpdater(graph)
+        clone_node = graph.graph.find_nodes(
+            op="call_function", target=aten.clone.default
+        )[0]
+        exact_node = graph.graph.find_nodes(op="call_function", target=needs_exact_op)[
+            0
+        ]
+
+        with graph.graph.inserting_before(exact_node):
+            bad_stride_node = graph.graph.call_function(
+                aten.as_strided.default,
+                (clone_node, (2, 3, 2), (6, 1, 3)),
+            )
+        exact_node.replace_input_with(clone_node, bad_stride_node)
+        exact_node.meta["eager_input_vals"] = ((torch.randn(2, 3, 2),), {})
+        graph.graph.lint()
+        graph.recompile()
+
+        with V.set_fake_mode(self._get_faketensormode(graph)):
+            updater.incremental_update()
+
+        self.assertEqual(exact_node.meta["val"].stride(), (6, 2, 1))
+        self.assertIsInstance(exact_node.meta["val"], FakeTensor)
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        exact = graph.call_function(needs_exact_op, (x,))
+        graph.output(exact)
+
+        shape_env = ShapeEnv()
+        with torch._subclasses.FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+            fake_t = torch.empty_strided((u0 + u1, 1), (1, 1))
+            expected_t = torch.empty_strided((u0 + u1, 1), (99, 1))
+            x.meta["val"] = fake_t
+            exact.meta["eager_input_vals"] = ((expected_t,), {})
+
+            args, kwargs = maybe_fake_layout_constraints(exact, (fake_t,), {})
+
+        self.assertEqual(kwargs, {})
+        self.assertEqual(args[0].stride(), (99, 1))
+
+    def test_fake_tensor_prop_fixed_stride_order_constraints(self):
+        @torch.library.custom_op(
+            "test_fake_tensor_prop_fixed_stride_order_constraints::needs_fixed",
+            mutates_args={},
+            tags=[torch.Tag.needs_fixed_stride_order],
+        )
+        def needs_fixed(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        @needs_fixed.register_fake
+        def _(x):
+            return x
+
+        needs_fixed_op = torch.ops.test_fake_tensor_prop_fixed_stride_order_constraints.needs_fixed.default
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        exact = graph.call_function(needs_fixed_op, (x,))
+        graph.output(exact)
+        gm = torch.fx.GraphModule({}, graph)
+
+        fake_tensor_prop(gm, [torch.empty_strided((0, 2), (100, 1))])
+
+        self.assertEqual(exact.meta["val"].stride(), (100, 1))
+        self.assertEqual(get_storage(exact.meta["val"]), get_storage(x.meta["val"]))
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        exact = graph.call_function(needs_fixed_op, (x,))
+        graph.output(exact)
+
+        shape_env = ShapeEnv()
+        with torch._subclasses.FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+            fake_t = torch.empty_strided((u0 + u1,), (1,))
+            x.meta["val"] = fake_t
+
+            args, kwargs = maybe_fake_layout_constraints(exact, (fake_t,), {})
+
+        self.assertEqual(kwargs, {})
+        self.assertIs(args[0], fake_t)
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        exact = graph.call_function(needs_fixed_op, (x,))
+        graph.output(exact)
+
+        shape_env = ShapeEnv()
+        with torch._subclasses.FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+            fake_t = torch.empty_strided((2, 2), (u1, u0))
+            x.meta["val"] = fake_t
+
+            args, kwargs = maybe_fake_layout_constraints(exact, (fake_t,), {})
+
+        self.assertEqual(kwargs, {})
+        self.assertIs(args[0], fake_t)
+
+    def test_fake_tensor_prop_layout_constraints_invoke_subgraph(self):
+        subgraph = torch.fx.Graph()
+        sub_x = subgraph.placeholder("sub_x")
+        permute = subgraph.call_function(aten.permute.default, (sub_x, [0, 2, 1]))
+        view_as_complex = subgraph.call_function(
+            aten.view_as_complex.default, (permute,)
+        )
+        subgraph.output(view_as_complex)
+        submodule = torch.fx.GraphModule({}, subgraph)
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        submodule_node = graph.get_attr("submodule")
+        invoke_subgraph = graph.call_function(
+            torch.ops.higher_order.invoke_subgraph,
+            (submodule_node, "submodule", x),
+        )
+        graph.output(invoke_subgraph)
+        gm = torch.fx.GraphModule({"submodule": submodule}, graph)
+
+        fake_tensor_prop(gm, [torch.randn(2, 2, 3)])
+
+        self.assertEqual(view_as_complex.meta["val"].stride(), (3, 1))
+        self.assertEqual(
+            len(subgraph.find_nodes(op="call_function", target=aten.clone.default)), 0
+        )
 
     def test_fake_tensor_same_recursion(self):
         l = [1, 2, 3]
