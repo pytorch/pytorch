@@ -1506,6 +1506,14 @@ class FxGraphHashDetails:
                 ):
                     self.cudagraph_annotation = annotation
 
+            from torch._inductor.fx_passes.fuse_regions import (
+                fuse_region_annotations_cache_key,
+            )
+
+            fuse_region_annotations = fuse_region_annotations_cache_key(gm)
+            if fuse_region_annotations:
+                self.fuse_region_annotations = fuse_region_annotations
+
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()

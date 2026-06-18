@@ -926,6 +926,16 @@ class AllocateLine(MemoryPlanningLine):
             return True
         if free_line.scheduler_node_index + 1 == self.scheduler_node_index:
             return True
+        if not config.allow_buffer_reuse_across_fuse_regions:
+            scheduler = V.graph.scheduler
+            free_region = scheduler.get_fuse_region(
+                scheduler.nodes[free_line.scheduler_node_index]
+            )
+            alloc_region = scheduler.get_fuse_region(
+                scheduler.nodes[self.scheduler_node_index]
+            )
+            if free_region != alloc_region:
+                return False
         overall_peak_memory = self.wrapper.estimate_peak.overall_peak_memory
         peak_memory_in_range = self.wrapper.estimate_peak.peak_between(free_line, self)
         new_peak_memory = size + peak_memory_in_range

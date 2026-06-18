@@ -62,6 +62,7 @@ from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
+from .fuse_regions import apply_fuse_region_annotations
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
@@ -260,6 +261,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
             post_grad_custom_post_pass
         )
+
+    GraphTransformObserver(gm, "apply_fuse_region_annotations").apply_graph_pass(
+        apply_fuse_region_annotations
+    )
 
     if config.fallback_random:
         GraphTransformObserver(gm, "chain_random_ops_ordering").apply_graph_pass(

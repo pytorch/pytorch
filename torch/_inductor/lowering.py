@@ -71,6 +71,7 @@ from torch.utils._sympy.functions import (
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
+from .fx_passes.fuse_regions import FUSE_REGION
 from .ir import (
     BaseView,
     DtypeView,
@@ -8834,6 +8835,39 @@ register_lowering(
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
 def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
+    region = V.graph.current_node.meta.get(FUSE_REGION)
+    if region is not None:
+        if not isinstance(region, str):
+            raise AssertionError(f"expected fuse_region to be str, got {region}")
+
+        # Boundary inputs must be materialized before operation_len so their
+        # producer ops stay outside the annotated region.
+        for operand in operands:
+            operand_ir_nodes = [
+                operand_leaf
+                for operand_leaf in pytree.tree_leaves(operand)
+                if isinstance(operand_leaf, IRNode)
+            ]
+            for operand_ir_node in operand_ir_nodes:
+                operand_ir_node.realize()
+
+        operation_len = len(V.graph.operations)
+        placeholders = subgraph_fn.graph_module.graph.find_nodes(op="placeholder")
+        if len(placeholders) != len(operands):
+            raise AssertionError("expected placeholder count to match operands")
+
+        output = process_subgraph_nodes(subgraph_fn.graph_module, list(operands))
+        for op in V.graph.operations[operation_len:]:
+            if not hasattr(op, "annotations"):
+                continue
+            existing_region = op.annotations.get(FUSE_REGION)
+            if existing_region is not None and existing_region != region:
+                raise AssertionError(
+                    f"expected one fuse_region per op, got {existing_region} and {region}"
+                )
+            op.annotations[FUSE_REGION] = region
+        return output
+
     result = ir.InvokeSubgraph.create(subgraph_fn, *operands)
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
 
