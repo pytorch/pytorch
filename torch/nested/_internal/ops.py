@@ -194,6 +194,45 @@ def raggedness_matches(nt, size):
     )
 
 
+def raggedness_matches_by_value(a, b):
+    if a._ragged_idx != b._ragged_idx or len(a._size) != len(b._size):
+        return False
+
+    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    def _untraceable(t):
+        return isinstance(t, (FakeTensor, FunctionalTensor))
+
+    a_off, a_len = a._offsets, a._lengths
+    b_off, b_len = b._offsets, b._lengths
+    if _untraceable(a_off) or _untraceable(b_off):
+        return False
+    if (a_len is None) != (b_len is None):
+        return False
+    if a_len is not None and (_untraceable(a_len) or _untraceable(b_len)):
+        return False
+
+    for i in range(len(a._size)):
+        if i < a._ragged_idx:
+            if a._size[i] != b._size[i]:
+                return False
+        elif i > a._ragged_idx:
+            if a._size[i] != b._size[i] and a._size[i] != 1 and b._size[i] != 1:
+                return False
+
+    if a_off.device != b_off.device or a_off.shape != b_off.shape:
+        return False
+
+    # slow path only when the symbolic dims already differ
+    # one D2H sync on a tiny 1-D tensor
+    if not torch.equal(a_off, b_off):
+        return False
+    if a_len is not None and not torch.equal(a_len, b_len):
+        return False
+    return True
+
+
 def squeeze_leading_ones(t):
     # Note: [ Squeezing leading ones ]
     #
@@ -316,7 +355,7 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     if isinstance(a, NestedTensor) and isinstance(b, NestedTensor):
         # ex: (B, j0, D) + (B, j0, D)
         # ex: (B, j0, D) + (B, j0, 1)
-        if raggedness_matches(a, b._size):
+        if raggedness_matches(a, b._size) or raggedness_matches_by_value(a, b):
             return NestedTensor(
                 func(a._values, b._values, *args[2:], **kwargs), **extract_kwargs(a)
             )

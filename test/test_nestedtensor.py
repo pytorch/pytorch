@@ -4263,26 +4263,72 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
         c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
 
-        # Incorrect usage: shape check will fail if the offsets tensor are not
-        #                  the same exact tensor object
+        # Value-identical offsets from independent construction are accepted even
+        # though the offsets objects differ. See issue #187582.
         nt1 = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
         nt2 = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        self.assertIsNot(nt1.offsets(), nt2.offsets())
 
-        self.assertRaisesRegex(
-            RuntimeError,
-            "cannot call binary pointwise function .* with inputs of shapes",
-            lambda: nt1 * nt2,
-        )
+        out = nt1 * nt2
+        self.assertEqual(out.offsets(), nt1.offsets())
+        self.assertEqual(out.values(), nt1.values() * nt2.values())
 
-        # Correct usage: chain the calls using the same offsets tensor object
         def grad_test_func(a, b, c):
             nt1 = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
-            # TODO: Switch to public API that takes in (values, offsets) once it exists
             nt2, offsets = jagged_from_list([a, b, c], nt1.offsets())
             out = nt1 * nt2
             return out.values()
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
+
+    def test_binary_pointwise_same_offsets_different_objects(self, device):
+        a = torch.randn(12, 5, 32, device=device)
+        b = torch.randn(12, 5, 32, device=device)
+
+        A = torch.nested.as_nested_tensor(a, layout=torch.jagged)
+        B = torch.nested.as_nested_tensor(b, layout=torch.jagged)
+        self.assertIsNot(A.offsets(), B.offsets())
+        self.assertTrue(torch.equal(A.offsets(), B.offsets()))
+
+        for f, ref in ((torch.add, a + b), (torch.sub, a - b), (torch.mul, a * b)):
+            C = f(A, B)
+            self.assertEqual(C.offsets(), A.offsets())
+            self.assertEqual(C.values(), ref.flatten(end_dim=1))
+
+    def test_binary_pointwise_mismatched_offsets_still_raises(self, device):
+        a = torch.randn(2, 5, 32, device=device)
+        b0 = torch.randn(3, 32, device=device)
+        b1 = torch.randn(7, 32, device=device)
+        A = torch.nested.as_nested_tensor(a, layout=torch.jagged)
+        B = torch.nested.nested_tensor([b0, b1], layout=torch.jagged)
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot call binary pointwise function"
+        ):
+            A - B
+
+    def test_binary_pointwise_same_offsets_different_objects_broadcasting(self, device):
+        a = torch.randn(12, 5, 32, device=device)
+        b = torch.randn(12, 5, 1, device=device)
+
+        A = torch.nested.as_nested_tensor(a, layout=torch.jagged)
+        B = torch.nested.as_nested_tensor(b, layout=torch.jagged)
+        self.assertIsNot(A.offsets(), B.offsets())
+        self.assertTrue(torch.equal(A.offsets(), B.offsets()))
+
+        C = A + B
+        self.assertEqual(C.offsets(), A.offsets())
+        self.assertEqual(C.values(), (a + b).flatten(end_dim=1))
+
+    def test_binary_pointwise_incompatible_non_ragged_still_raises(self, device):
+        a = torch.randn(12, 5, 32, device=device)
+        b = torch.randn(12, 5, 7, device=device)
+
+        A = torch.nested.as_nested_tensor(a, layout=torch.jagged)
+        B = torch.nested.as_nested_tensor(b, layout=torch.jagged)
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot call binary pointwise function"
+        ):
+            A + B
 
     def test_binary_pointwise_transposed(self, device):
         a, b, c = (

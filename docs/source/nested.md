@@ -193,14 +193,17 @@ each other.
 >>> nt1.offsets() is nt2.offsets()
 False
 >>> nt3 = nt1 + nt2
-RuntimeError: cannot call binary pointwise function add.Tensor with inputs of shapes (2, j2, 128) and (2, j3, 128)
+>>> nt3.shape
+torch.Size([2, j1, 128])
 ```
 
-In the above example, even though the conceptual shapes of the two NJTs are the same, they don't
-share a reference to the same ``offsets`` tensor, so their shapes differ, and they are not
-compatible. We recognize that this behavior is unintuitive and are working hard to relax this
-restriction for the beta release of nested tensors. For a workaround, see the
-{ref}`Troubleshooting <ragged_structure_incompatibility>` section of this document.
+In the above example the two NJTs print different ragged symbols because each independently
+constructed ``offsets`` tensor is assigned its own symbol. In eager mode a binary op between them
+still succeeds, because when the symbols differ the op falls back to comparing the underlying
+``offsets`` for value equality and proceeds when they match. Sharing the same ``offsets`` object,
+as described in the {ref}`Troubleshooting <ragged_structure_incompatibility>` section, remains the
+way to guarantee a shared symbol, and is required under ``torch.compile`` where the offsets are not
+available for value comparison.
 
 In addition to the ``offsets`` metadata, NJTs can also compute and cache the minimum and maximum
 sequence lengths for its components, which can be useful for invoking particular kernels (e.g. SDPA).
@@ -414,9 +417,12 @@ in a future PyTorch release.
     RuntimeError: cannot call binary pointwise function add.Tensor with inputs of shapes (2, j2, 128) and (2, j3, 128)
 ```
 
-This error occurs when calling an op that operates over multiple NJTs with incompatible ragged
-structures. Currently, it is required that input NJTs have the exact same ``offsets`` constituent
-in order to have the same symbolic ragged structure symbol (e.g. ``j1``).
+This error occurs when calling an op that operates over multiple NJTs with genuinely incompatible
+ragged structures. In eager mode, two NJTs with distinct ``offsets`` objects whose values are
+identical are accepted, since the op compares the ``offsets`` by value when the ragged symbols
+differ. The error is therefore raised only when the ``offsets`` actually differ in value, or under
+``torch.compile``, where the ``offsets`` cannot be value-compared and a shared symbol is still
+required.
 
 As a workaround for this situation, it is possible to construct NJTs from the ``values`` and
 ``offsets`` components directly. With both NJTs referencing the same ``offsets`` components, they
