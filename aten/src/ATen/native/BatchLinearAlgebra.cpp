@@ -759,16 +759,16 @@ TORCH_META_FUNC(linalg_qr_piv)(
     auto Q_shape = A_shape;
     Q_shape.end()[-1] = reduced_mode ? k : m;
     auto Q_strides = at::native::batched_matrix_contiguous_strides(Q_shape, /*f-contig=*/true);
-    set_output_strided(0, Q_shape, Q_strides, A.options(), {});
+    set_output_strided(0, Q_shape, Q_strides, A.options());
   } else {
-    set_output_raw_strided(0, {0}, {}, A.options(), {});
+    set_output_raw_strided(0, {0}, {}, A.options());
   }
 
   // -------- R output --------
   auto R_shape = A_shape;
   R_shape.end()[-2] = (reduced_mode || !compute_q) ? k : m;
   auto R_strides = at::native::batched_matrix_contiguous_strides(R_shape, /*f-contig=*/true);
-  set_output_strided(1, R_shape, R_strides, A.options(), {});
+  set_output_strided(1, R_shape, R_strides, A.options());
 
   // -------- P output --------
   // Format: P is a vector of length n for each batch element.
@@ -782,7 +782,7 @@ TORCH_META_FUNC(linalg_qr_piv)(
 
   // P is always real integer type, contiguous, C (column major) ordered
   auto P_strides = at::native::batched_matrix_contiguous_strides(P_shape, /*f-contig=*/false);
-  set_output_strided( 2, P_shape, P_strides, A.options().dtype(at::kLong), {} );
+  set_output_strided( 2, P_shape, P_strides, A.options().dtype(at::kLong));
 }
 
 
