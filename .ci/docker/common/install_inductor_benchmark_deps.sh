@@ -23,15 +23,16 @@ function install_torchbench() {
   pushd torchbench
   as_jenkins git checkout "$commit"
 
-  conda_run python install.py --continue_on_fail
+  env_run python install.py --continue_on_fail
 
   echo "Print all dependencies after TorchBench is installed"
-  conda_run python -mpip freeze
+  env_run python -mpip freeze
   popd
 }
 
 # Pango is needed for weasyprint which is needed for doctr
-conda_install pango
+sudo apt-get update
+sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0
 
 # Detect CUDA version and use appropriate wheel index
 # DESIRED_CUDA is set as ENV in the Dockerfile (e.g., "13.0.2", "12.8.1")
@@ -59,11 +60,11 @@ install_timm
 # NS: It's very important to uninstall some of the system dependencies
 # Otherwise torchnbench test might start to fail with hard to detect errors
 # Especially if cudnn/nccl version are different between nightly and last release
-conda_run pip uninstall -y torch torchvision torchaudio triton torchao
+env_run pip uninstall -y torch torchvision torchaudio triton torchao
 if [[ "${DESIRED_CUDA}" == 13.* ]]; then
-  conda_run pip uninstall -y nvidia-nccl-cu13
-  conda_run pip uninstall -y nvidia-cudnn-cu13
+  env_run pip uninstall -y nvidia-nccl-cu13
+  env_run pip uninstall -y nvidia-cudnn-cu13
 else
-  conda_run pip uninstall -y nvidia-nccl-cu12
-  conda_run pip uninstall -y nvidia-cudnn-cu12
+  env_run pip uninstall -y nvidia-nccl-cu12
+  env_run pip uninstall -y nvidia-cudnn-cu12
 fi
