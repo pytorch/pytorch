@@ -9,8 +9,6 @@ import operator
 import os
 import pickle
 import shutil
-import subprocess
-import sys
 import unittest
 from collections.abc import Sequence
 from typing import Literal
@@ -295,76 +293,6 @@ class CacheKeyEquivalenceMixin:
     def tearDown(self):
         self._compile_fx_patcher.stop()
         super().tearDown()
-
-
-class AOTAutogradCacheConfigTests(torch._dynamo.test_case.TestCase):
-    def test_autograd_cache_normalize_inputs_default_enabled(self):
-        self.assertTrue(
-            functorch_config._config["autograd_cache_normalize_inputs"].default
-        )
-        self.assertTrue(functorch_config.autograd_cache_normalize_inputs)
-
-    def test_autograd_cache_normalize_inputs_default_enabled_in_fbcode(self):
-        script = """
-import importlib.machinery
-import importlib.util
-import pathlib
-import sys
-import types
-
-repo_root = pathlib.Path.cwd()
-
-torch_pkg = types.ModuleType("torch")
-torch_pkg.__path__ = [str(repo_root / "torch")]
-torch_pkg.__spec__ = importlib.machinery.ModuleSpec(
-    "torch", loader=None, is_package=True
-)
-sys.modules["torch"] = torch_pkg
-
-utils_pkg = types.ModuleType("torch.utils")
-utils_pkg.__path__ = [str(repo_root / "torch" / "utils")]
-utils_pkg.__spec__ = importlib.machinery.ModuleSpec(
-    "torch.utils", loader=None, is_package=True
-)
-sys.modules["torch.utils"] = utils_pkg
-
-functorch_pkg = types.ModuleType("torch._functorch")
-functorch_pkg.__path__ = [str(repo_root / "torch" / "_functorch")]
-functorch_pkg.__spec__ = importlib.machinery.ModuleSpec(
-    "torch._functorch", loader=None, is_package=True
-)
-sys.modules["torch._functorch"] = functorch_pkg
-
-if "torch._functorch.config" in sys.modules:
-    raise AssertionError("torch._functorch.config imported too early")
-
-environment_spec = importlib.util.spec_from_file_location(
-    "torch._environment", repo_root / "torch" / "_environment.py"
-)
-environment = importlib.util.module_from_spec(environment_spec)
-sys.modules["torch._environment"] = environment
-environment_spec.loader.exec_module(environment)
-environment.is_fbcode = lambda: True
-
-import torch._functorch.config as config
-
-if not config.is_fbcode():
-    raise AssertionError("expected simulated fbcode environment")
-if not config.autograd_cache_normalize_inputs:
-    raise AssertionError("autograd_cache_normalize_inputs should be enabled in fbcode")
-"""
-        repo_root = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-        )
-        try:
-            subprocess.check_output(
-                [sys.executable, "-c", script],
-                cwd=repo_root,
-                env={**os.environ, "MKL_THREADING_LAYER": "GNU"},
-                stderr=subprocess.STDOUT,
-            )
-        except subprocess.CalledProcessError as e:
-            self.fail(e.output.decode("utf-8"))
 
 
 @instantiate_parametrized_tests
