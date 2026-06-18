@@ -1149,19 +1149,6 @@ class FxConverter:
         call_kwargs = {
             name: self._generate_sym_node(val) for name, val in call_kwargs.items()
         }
-        backend_options = triton_meta.get("backend_options", {})
-        if backend_options:
-            # FXIR executes Triton kernels through the HOP, not the already
-            # materialized CachingAutotuner launcher. Preserve backend option
-            # values in the HOP payload so a direct FXIR run or later Inductor
-            # re-lowering re-enters Triton JIT with the same compiler options
-            # that were used during FXIR precompile/autotune.
-            for name, value in backend_options.items():
-                # If the backend option is also a kernel parameter, call_kwargs
-                # already contains the launch value reconstructed from the Triton
-                # signature/config. Keep that value and only add backend options
-                # that are not otherwise represented in the HOP payload.
-                call_kwargs.setdefault(name, value)
 
         # Store non-graphable kwargs in the side table.
         (
@@ -1177,7 +1164,6 @@ class FxConverter:
                 "grid": wrapper_grid,
                 "tma_descriptor_metadata": {},
                 "kwargs": call_kwargs,
-                "launch_kwargs": tuple(backend_options),
             },
         )
         if extra_options:
