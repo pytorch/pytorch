@@ -157,7 +157,7 @@ class TORCH_API Context {
   static bool hasMKL();
   static bool hasKleidiAI();
   static bool hasLAPACK();
-  static bool hasMKLDNN();
+  static bool hasONEDNN();
   static bool ckSupported();
   static bool hasEigenSparse();
   static bool hasMAGMA() {
@@ -243,8 +243,8 @@ class TORCH_API Context {
   // to test this instead
   bool userEnabledCuDNN() const;
   void setUserEnabledCuDNN(bool e);
-  bool userEnabledMkldnn() const;
-  void setUserEnabledMkldnn(bool e);
+  bool userEnabledOnednn() const;
+  void setuserEnabledOnednn(bool e);
   bool benchmarkCuDNN() const;
   void setBenchmarkCuDNN(bool /*b*/);
   int benchmarkLimitCuDNN() const;
@@ -253,8 +253,8 @@ class TORCH_API Context {
   void setImmediateMiopen(bool /*b*/);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool /*b*/);
-  bool deterministicMkldnn() const;
-  void setDeterministicMkldnn(bool /*b*/);
+  bool deterministicOnednn() const;
+  void setDeterministicOnednn(bool /*b*/);
   bool userEnabledNNPACK() const;
   void setUserEnabledNNPACK(bool e);
 
@@ -473,7 +473,7 @@ class TORCH_API Context {
   std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> init_;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
-  bool deterministic_mkldnn = false;
+  bool deterministic_onednn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;
@@ -504,7 +504,7 @@ class TORCH_API Context {
       CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
   bool allow_fp16_accumulation_cublas = false;
   std::optional<int32_t> sm_carveout = std::nullopt;
-  bool enabled_mkldnn = true;
+  bool enabled_onednn = true;
   bool allow_tf32_onednn = false;
   bool enabled_nnpack = true;
   CuDNNDepthwiseKernel depthwise_kernel_cudnn = CuDNNDepthwiseKernel::AUTO;
@@ -673,8 +673,8 @@ inline bool hasMAGMA() {
   return globalContext().hasMAGMA();
 }
 
-inline bool hasMKLDNN() {
-  return globalContext().hasMKLDNN();
+inline bool hasONEDNN() {
+  return globalContext().hasONEDNN();
 }
 
 inline void manual_seed(uint64_t seed) {

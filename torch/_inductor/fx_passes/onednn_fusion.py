@@ -20,8 +20,8 @@ from ..pattern_matcher import (
     MULTIPLE,
 )
 from ..utils import (
-    is_mkldnn_bf16_supported,
-    is_mkldnn_fp16_supported,
+    is_onednn_bf16_supported,
+    is_onednn_fp16_supported,
     SUPPORTED_MKLDNN_DEVICES,
 )
 from ..virtualized import ops, V
@@ -128,7 +128,7 @@ if torch._C._has_mkldnn:
                 mkldnn._reorder_linear_weight
                 if (
                     is_lp_weight
-                    or mkldnn._is_mkldnn_acl_supported()
+                    or mkldnn._is_onednn_acl_supported()
                     or V.aot_compilation
                     or has_free_symbols(batch_size)
                 )
@@ -145,7 +145,7 @@ if torch._C._has_mkldnn:
             transpose_weight_node = packed_weight_node.args[0]
             if (
                 is_lp_weight
-                or mkldnn._is_mkldnn_acl_supported()
+                or mkldnn._is_onednn_acl_supported()
                 or V.aot_compilation
                 or has_free_symbols(batch_size)
             ):
@@ -1208,13 +1208,13 @@ if torch._C._has_mkldnn:
         # Check dtype
         if any(
             lstm_node.args[POS_ARG].meta.get("val").dtype == torch.bfloat16
-            and not is_mkldnn_bf16_supported("cpu")
+            and not is_onednn_bf16_supported("cpu")
             for POS_ARG in POS_ARGS
         ):
             return False
         if any(
             lstm_node.args[POS_ARG].meta.get("val").dtype == torch.float16
-            and not is_mkldnn_fp16_supported("cpu")
+            and not is_onednn_fp16_supported("cpu")
             for POS_ARG in POS_ARGS
         ):
             return False
@@ -1250,13 +1250,13 @@ if torch._C._has_mkldnn:
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
-            if not is_mkldnn_bf16_supported(device_type):
+            if not is_onednn_bf16_supported(device_type):
                 return False
         if (
             input_meta_value.dtype == torch.float16
             or weight_meta_value.dtype == torch.float16
         ):
-            if not is_mkldnn_fp16_supported(device_type):
+            if not is_onednn_fp16_supported(device_type):
                 return False
         is_transposed = conv_node.args[-3]
         if is_transposed:
@@ -1326,7 +1326,7 @@ if torch._C._has_mkldnn:
         # on aarch64, use mkldnn op for fp32 as well if acl is enabled
         if (
             not compute_with_lp
-            and not mkldnn._is_mkldnn_acl_supported()
+            and not mkldnn._is_onednn_acl_supported()
             and not torch._C.has_mkl
         ):
             return False
@@ -1352,13 +1352,13 @@ if torch._C._has_mkldnn:
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
-            if not is_mkldnn_bf16_supported(device_type):
+            if not is_onednn_bf16_supported(device_type):
                 return False
         if (
             input_meta_value.dtype == torch.float16
             or weight_meta_value.dtype == torch.float16
         ):
-            if not is_mkldnn_fp16_supported(device_type):
+            if not is_onednn_fp16_supported(device_type):
                 return False
         return True
 
@@ -1463,7 +1463,7 @@ if torch._C._has_mkldnn:
             has_biases = args[11]
             batch_first = args[13]
             with graph.inserting_before(lstm_node):
-                packed_weight_op = mkldnn._reorder_mkldnn_rnn_layer_weight.default
+                packed_weight_op = mkldnn._reorder_onednn_rnn_layer_weight.default
                 packed_weight_inputs = (
                     weight0,
                     weight1,
@@ -1587,7 +1587,7 @@ if torch._C._has_mkldnn:
             torch._C._nn.mkldnn_reorder_conv3d_weight,
             mkldnn._reorder_convolution_transpose_weight,
             mkldnn._reorder_linear_weight,
-            mkldnn._reorder_mkldnn_rnn_layer_weight,
+            mkldnn._reorder_onednn_rnn_layer_weight,
         ]
         if torch._C.has_mkl:
             packed_weight_ops.append(torch.ops.mkl._mkl_reorder_linear_weight)
@@ -1613,7 +1613,7 @@ if torch._C._has_mkldnn:
         ):
             return
 
-        if not torch.ops.mkldnn._is_mkldnn_acl_supported():
+        if not torch.ops.mkldnn._is_onednn_acl_supported():
             _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()

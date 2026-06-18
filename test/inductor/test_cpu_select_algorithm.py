@@ -309,11 +309,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             (
                 (
                     dtype == torch.bfloat16
-                    and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                    and torch.ops.mkldnn._is_onednn_bf16_supported()
                 )
                 or (
                     dtype == torch.float16
-                    and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+                    and torch.ops.mkldnn._is_onednn_fp16_supported()
                 )
                 or (
                     dtype == torch.float32
@@ -1819,7 +1819,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         The pattern depiction doesn't mean that convert_element_type output is fed into expand_a as input,
         but simply that activation scale may be applied after an expand operation on it.
         """
-        if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_onednn_bf16_supported():
             return
         in_feature = 48
         out_feature = 64
@@ -2397,9 +2397,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         # each linear has different num of out features, thus invalid grouped gemm
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
         for dtype in dtypes:
             torch._dynamo.reset()
@@ -2450,9 +2450,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 return [linear(x) for linear in self.linears]
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
         for dtype in dtypes:
             if dtype == torch.float16 and input_3d:
@@ -2533,9 +2533,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     return res0, res1
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
         for dtype in dtypes:
             if input_3d and dtype == torch.float16:

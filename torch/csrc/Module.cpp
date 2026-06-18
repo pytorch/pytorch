@@ -1083,24 +1083,24 @@ static PyObject* THPModule_userEnabledCuDNN(
     Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setUserEnabledMkldnn(
+static PyObject* THPModule_setUserEnabledOnednn(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
-      "set_enabled_mkldnn expects a bool, "
+      "set_enabled_onednn expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setUserEnabledMkldnn(Py_IsTrue(arg));
+  at::globalContext().setuserEnabledOnednn(Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_userEnabledMkldnn(
+static PyObject* THPModule_userEnabledOnednn(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().userEnabledMkldnn())
+  if (at::globalContext().userEnabledOnednn())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -1129,24 +1129,24 @@ static PyObject* THPModule_deterministicCuDNN(
     Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setDeterministicMkldnn(
+static PyObject* THPModule_setDeterministicOnednn(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
-      "set_deterministic_mkldnn expects a bool, "
+      "set_deterministic_onednn expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setDeterministicMkldnn(Py_IsTrue(arg));
+  at::globalContext().setDeterministicOnednn(Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_deterministicMkldnn(
+static PyObject* THPModule_deterministicOnednn(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().deterministicMkldnn())
+  if (at::globalContext().deterministicOnednn())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -2030,8 +2030,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_sdp_use_cudnn", THPModule_setSDPUseCuDNN, METH_O, nullptr},
     {"_get_cudnn_enabled", THPModule_userEnabledCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O, nullptr},
-    {"_get_mkldnn_enabled", THPModule_userEnabledMkldnn, METH_NOARGS, nullptr},
-    {"_set_mkldnn_enabled", THPModule_setUserEnabledMkldnn, METH_O, nullptr},
+    {"_get_mkldnn_enabled", THPModule_userEnabledOnednn, METH_NOARGS, nullptr},
+    {"_set_mkldnn_enabled", THPModule_setUserEnabledOnednn, METH_O, nullptr},
     {"_get_cudnn_allow_tf32", THPModule_allowTF32CuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O, nullptr},
     {"_get_onednn_allow_tf32", THPModule_allowTF32OneDNN, METH_NOARGS, nullptr},
@@ -2057,11 +2057,11 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_O,
      nullptr},
     {"_get_mkldnn_deterministic",
-     THPModule_deterministicMkldnn,
+     THPModule_deterministicOnednn,
      METH_NOARGS,
      nullptr},
     {"_set_mkldnn_deterministic",
-     THPModule_setDeterministicMkldnn,
+     THPModule_setDeterministicOnednn,
      METH_O,
      nullptr},
     {"_get_deterministic_algorithms",
@@ -3079,7 +3079,7 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("_has_mps", has_mps));
   ASSERT_TRUE(set_module_attr("_has_xpu", has_xpu));
   ASSERT_TRUE(
-      set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
+      set_module_attr("_has_mkldnn", at::hasONEDNN() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr(
       "_has_mkldnn_acl", AT_ONEDNN_ACL_ENABLED() ? Py_True : Py_False));
 

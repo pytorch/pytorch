@@ -414,7 +414,7 @@ inline bool _conv_use_channels_last_impl(
   return is_channel_last(input) || is_channel_last(weight);
 }
 
-inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+inline bool onednn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
   // Disable NHWC for float64 input and for MkldnnCPU tensors.
   bool enabled = input.scalar_type() != at::kDouble && weight.scalar_type() != at::kDouble &&
       !input.is_mkldnn() && !weight.is_mkldnn();

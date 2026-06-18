@@ -595,7 +595,7 @@ at::Tensor _qconv_prepack_onednn(
   ideep::dims dims_iohw, dims_giohw;
   ideep::tag w_tag = ideep::tag::any;
   const bool with_groups = groups > 1;
-  auto w_dnnl_dtype = at::native::get_mkldnn_dtype(weight.scalar_type());
+  auto w_dnnl_dtype = at::native::get_onednn_dtype(weight.scalar_type());
   auto x_dnnl_dtype = is_fp8 ? dnnl::memory::data_type::f8_e4m3 : dnnl::memory::data_type::u8;
   w_desc = ideep::convolution_forward::expected_weights_desc(
       w_dims, w_dnnl_dtype,
@@ -624,7 +624,7 @@ at::Tensor _qconv_prepack_onednn(
   exp_wgt.set_scale(weights_scales); // Also for feed_from()
   exp_wgt.feed_from(wgt, /*transposed*/false); // expect wgt to be in [OC IC KH KW] format
 
-  auto packed_weight = at::native::new_with_itensor_mkldnn(
+  auto packed_weight = at::native::new_with_itensor_onednn(
       std::move(exp_wgt),
       c10::optTypeMetaToScalarType(weight_copy.options().dtype_opt()),
       weight_copy.options().device_opt());

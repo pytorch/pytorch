@@ -1125,7 +1125,7 @@ static at::Tensor linear_int8_with_onednn_weight(
       qlinear_forward_params_map;
   static tensor empty_tensor;
   static tensor::desc empty_tensor_desc;
-  int64_t weight_addr = at::native::data_ptr_from_mkldnn(onednn_weight);
+  int64_t weight_addr = at::native::data_ptr_from_onednn(onednn_weight);
   int64_t K = input.size(dim - 1), M = input.numel() / K, N = onednn_weight.size(1);
   const QlinearForwardCacheKey cache_key({weight_addr, M});
 #if defined(__powerpc__)
@@ -1245,7 +1245,7 @@ static at::Tensor linear_int8_with_onednn_weight(
       empty_tensor;
 
   // Regular path
-  auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
+  auto packed_weight = at::native::itensor_from_onednn(onednn_weight);
   tensor onednn_bias;
   if (with_bias) {
     at::Tensor bias_val_float = bias.value();
@@ -1257,7 +1257,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     }
   }
   // Create onednn primitive
-  auto src_dtype = at::native::get_mkldnn_dtype(input.scalar_type());
+  auto src_dtype = at::native::get_onednn_dtype(input.scalar_type());
   auto src_desc = tensor::desc(src_dims, src_dtype, ideep::format_tag::any);
   auto weights_desc = packed_weight.get_desc();
   auto dst_dtype = dst.get_data_type();

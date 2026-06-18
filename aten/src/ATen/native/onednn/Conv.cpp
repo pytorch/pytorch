@@ -122,7 +122,7 @@ static void check_shape_forward(const Tensor& input,
 }
 
 #define MKLDNNTensor(itensor, options)                                  \
-  new_with_itensor_mkldnn(                                              \
+  new_with_itensor_onednn(                                              \
       std::move(itensor),                                               \
       optTypeMetaToScalarType(options.dtype_opt()),                     \
       options.device_opt())
@@ -158,12 +158,12 @@ static void check_shape_forward(const Tensor& input,
 //  but weight/bias and grad_weight/grad_bias are always CPU tensor.
 //
 
-static bool mkldnn_conv_enabled_fpmath_mode_bf16(){
+static bool onednn_conv_enabled_fpmath_mode_bf16(){
   return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::BF16 &&
-      mkldnn_bf16_device_check();
+      onednn_bf16_device_check();
 }
 
-static bool mkldnn_conv_enabled_fpmath_mode_tf32(){
+static bool onednn_conv_enabled_fpmath_mode_tf32(){
 #if defined(__x86_64__) || defined(_M_X64)
     return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::TF32 &&
         cpuinfo_has_x86_amx_fp16();
@@ -172,7 +172,7 @@ static bool mkldnn_conv_enabled_fpmath_mode_tf32(){
 #endif
 }
 
-static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bool is_channels_last) {
+static inline at::MemoryFormat onednn_convolution_memory_format(int64_t dims, bool is_channels_last) {
    auto memory_format =  at::MemoryFormat::Contiguous;
    if (is_channels_last) {
       memory_format = dims == 4 ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::ChannelsLast3d;
@@ -193,7 +193,7 @@ static void _mkldnn_convolution_out(
     bool is_channels_last,
     const ideep::attr_t& op_attr,
     const ideep::prop_kind aprop_kind = ideep::prop_kind::forward) {
-  auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
+  auto memory_format = onednn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
   const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
@@ -259,7 +259,7 @@ static Tensor _mkldnn_convolution(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  mkldnn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution");
+  onednn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution");
 
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -269,7 +269,7 @@ static Tensor _mkldnn_convolution(
   check_shape_forward(input_t, weight_t, bias, padding_expanded, stride_expanded, dilation_expanded, groups);
 
   auto memory_format =
-      mkldnn_convolution_memory_format(input_t.ndimension(), use_channels_last);
+      onednn_convolution_memory_format(input_t.ndimension(), use_channels_last);
 
   auto output_sizes = conv_output_size(input_t.sizes(), weight_t.sizes(), padding_expanded, stride_expanded, dilation_expanded);
   auto output = at::empty({0}, input_t.options());
@@ -278,11 +278,11 @@ static Tensor _mkldnn_convolution(
     output.resize_(output_sizes, memory_format);
     y = itensor_from_tensor(output);
   }
-  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+  if (onednn_conv_enabled_fpmath_mode_bf16() &&
       input_t.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
-  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+  if (onednn_conv_enabled_fpmath_mode_tf32() &&
       input_t.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
@@ -317,7 +317,7 @@ Tensor mkldnn_convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  bool use_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
+  bool use_channels_last = onednn_conv_use_channels_last(input_t, weight_t);
   return _mkldnn_convolution(
       input_t,
       weight_t,
@@ -342,7 +342,7 @@ Tensor mkldnn_convolution_pointwise(
     std::optional<std::string_view> algorithm) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   bool use_channels_last =
-      weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+      weight_t.is_mkldnn() || onednn_conv_use_channels_last(input_t, weight_t);
   auto aprop_kind = ideep::prop_kind::forward;
   bool maybe_backward = GradMode::is_enabled() &&
       (input_t.requires_grad() || weight_t.requires_grad() ||
@@ -405,7 +405,7 @@ Tensor mkldnn_convolution_pointwise_binary(
 
   // Make sure inputs have same type(device, layout, dtype), device is cpu and
   // dtype is float, bfloat16 or half.
-  check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
+  check_onednn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
 
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -423,7 +423,7 @@ Tensor mkldnn_convolution_pointwise_binary(
   // TODO: OneDNN doesn't optimize well for groups > 1 case, it will be enabled
   // at next OneDNN release.
   bool use_channels_last =
-      weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+      weight_t.is_mkldnn() || onednn_conv_use_channels_last(input_t, weight_t);
   bool can_be_fused = groups == 1 && use_channels_last;
 
   std::string_view unary_attr_value = "none";
@@ -444,7 +444,7 @@ Tensor mkldnn_convolution_pointwise_binary(
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   if (can_be_fused) {
     auto memory_format =
-        mkldnn_convolution_memory_format(input_t.ndimension(), true);
+        onednn_convolution_memory_format(input_t.ndimension(), true);
     auto input = input_t.contiguous(memory_format);
     auto weight =
         weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
@@ -461,7 +461,7 @@ Tensor mkldnn_convolution_pointwise_binary(
       format_tag = ideep::tag::ndhwc;
     }
     auto other_desc = ideep::tensor::desc(
-        other.sizes().vec(), get_mkldnn_dtype(other.scalar_type()), format_tag);
+        other.sizes().vec(), get_onednn_dtype(other.scalar_type()), format_tag);
 
     ideep::attr_t op_attr;
     ideep::post_ops po;
@@ -472,10 +472,10 @@ Tensor mkldnn_convolution_pointwise_binary(
     op_attr.set_post_ops(po);
     auto aprop_kind = ideep::prop_kind::forward_inference;
 
-    if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
+    if (onednn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
       op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
     }
-    if (mkldnn_conv_enabled_fpmath_mode_tf32() && input_t.scalar_type() ==at::kFloat){
+    if (onednn_conv_enabled_fpmath_mode_tf32() && input_t.scalar_type() ==at::kFloat){
       op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
     }
 
@@ -588,7 +588,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
 
   // Make sure inputs have same type(device, layout, dtype), device is cpu and
   // dtype is float, bfloat16 or half.
-  check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
+  check_onednn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
@@ -603,7 +603,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
       "Add Fusion's inputs should have same shape");
   // Only calling fusion path for channels_last path and the output is contiguous tensor(channels_last).
   bool can_be_fused = (weight_t.is_mkldnn() ||
-                       mkldnn_conv_use_channels_last(input_t, weight_t)) &&
+                       onednn_conv_use_channels_last(input_t, weight_t)) &&
       (other_t.is_contiguous(at::MemoryFormat::ChannelsLast) ||
        other_t.is_contiguous(at::MemoryFormat::ChannelsLast3d));
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
@@ -616,11 +616,11 @@ Tensor& mkldnn_convolution_pointwise_binary_(
       op_attr = ideep::attr_t::fuse_sum();
     }
     auto aprop_kind = ideep::prop_kind::forward_inference;
-    if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+    if (onednn_conv_enabled_fpmath_mode_bf16() &&
         input_t.scalar_type() == at::kFloat) {
       op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
     }
-    if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+    if (onednn_conv_enabled_fpmath_mode_tf32() &&
         input_t.scalar_type() == at::kFloat) {
       op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
     }
@@ -709,12 +709,12 @@ Tensor _mkldnn_convolution_transpose(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  mkldnn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution_transpose");
+  onednn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution_transpose");
 
   std::vector<int64_t> weight_IOHW_sizes = weight_t.is_mkldnn() ? _original_deconv_weight_size(weight_t, groups) : weight_t.sizes().vec();
 
   auto memory_format =
-      mkldnn_convolution_memory_format(input_t.ndimension(), use_channels_last);
+      onednn_convolution_memory_format(input_t.ndimension(), use_channels_last);
 
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
@@ -742,10 +742,10 @@ Tensor _mkldnn_convolution_transpose(
     y = itensor_from_tensor(output);
   }
 
-  if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
+  if (onednn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
-  if (mkldnn_conv_enabled_fpmath_mode_tf32() && input_t.scalar_type() ==at::kFloat){
+  if (onednn_conv_enabled_fpmath_mode_tf32() && input_t.scalar_type() ==at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
 
@@ -829,16 +829,16 @@ Tensor mkldnn_convolution_backward_input(
 
   ideep::tensor grad_x;
   if (is_channels_last) {
-    auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
+    auto memory_format = onednn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     grad_input.resize_(input_size, memory_format);
     grad_x = itensor_from_tensor(grad_input);
   }
   ideep::attr_t op_attr = ideep::attr_t();
-  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+  if (onednn_conv_enabled_fpmath_mode_bf16() &&
       weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
-  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+  if (onednn_conv_enabled_fpmath_mode_tf32() &&
       weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
@@ -857,12 +857,12 @@ Tensor mkldnn_convolution_backward_input(
       op_attr);
 #else
       is_channels_last);
-  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+  if (onednn_conv_enabled_fpmath_mode_bf16() &&
       weight.scalar_type() == at::kFloat) {
     TORCH_WARN_ONCE(
         "Unexpected oneDNN version to support fpmath_mode_bf16, please update oneDNN version to align with pytorch main branch");
       }
-  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+  if (onednn_conv_enabled_fpmath_mode_tf32() &&
       weight.scalar_type() == at::kFloat) {
     TORCH_WARN_ONCE(
         "Unexpected oneDNN version to support fpmath_mode_tf32, please update oneDNN version to align with pytorch main branch");
@@ -893,11 +893,11 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
 
   ideep::tensor grad_w, grad_b;
   ideep::attr_t op_attr = ideep::attr_t();
-  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+  if (onednn_conv_enabled_fpmath_mode_bf16() &&
       input.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
-  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+  if (onednn_conv_enabled_fpmath_mode_tf32() &&
       input.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
@@ -935,7 +935,7 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
         mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
         bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
   } else {
-    auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
+    auto memory_format = onednn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     return std::make_tuple(
         mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
         bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
@@ -946,8 +946,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
     const Tensor& input_t, const Tensor& grad_output_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, std::array<bool,3> output_mask)
 {
-  bool is_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
-  auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
+  bool is_channels_last = onednn_conv_use_channels_last(input_t, weight_t);
+  auto memory_format = onednn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   Tensor grad_output = grad_output_t.is_mkldnn() ? grad_output_t : grad_output_t.contiguous(memory_format);
 
   Tensor input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
@@ -984,7 +984,7 @@ Tensor mkldnn_convolution_transpose_pointwise(
     std::optional<std::string_view> algorithm) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   bool use_channels_last =
-      weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+      weight_t.is_mkldnn() || onednn_conv_use_channels_last(input_t, weight_t);
   return _mkldnn_convolution_transpose(
       input_t,
       weight_t,
@@ -1014,7 +1014,7 @@ Tensor mkldnn_convolution_transpose(
     IntArrayRef dilation,
     int64_t groups)
 {
-  bool use_channels_last = mkldnn_conv_use_channels_last(input, weight);
+  bool use_channels_last = onednn_conv_use_channels_last(input, weight);
   return _mkldnn_convolution_transpose(
       input,
       weight,
@@ -1046,16 +1046,16 @@ Tensor mkldnn_convolution_transpose_backward_input(
 
   ideep::tensor grad_x;
   if (is_channels_last) {
-    auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
+    auto memory_format = onednn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     grad_input.resize_(input_size, memory_format);
     grad_x = itensor_from_tensor(grad_input);
   }
   ideep::attr_t op_attr = ideep::attr_t();
-  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+  if (onednn_conv_enabled_fpmath_mode_bf16() &&
       weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
-  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+  if (onednn_conv_enabled_fpmath_mode_tf32() &&
       weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
@@ -1097,11 +1097,11 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
 
   ideep::tensor grad_w, grad_b;
   ideep::attr_t op_attr = ideep::attr_t();
-  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+  if (onednn_conv_enabled_fpmath_mode_bf16() &&
       input.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
-  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+  if (onednn_conv_enabled_fpmath_mode_tf32() &&
       input.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
@@ -1139,7 +1139,7 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
         mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
         bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
   } else {
-    auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
+    auto memory_format = onednn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     return std::make_tuple(
         mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
         bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
@@ -1151,8 +1151,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     std::array<bool,3> output_mask)
 {
-  bool is_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
-  auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
+  bool is_channels_last = onednn_conv_use_channels_last(input_t, weight_t);
+  auto memory_format = onednn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   Tensor grad_output = grad_output_t.is_mkldnn() ? grad_output_t : grad_output_t.contiguous(memory_format);
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);

@@ -1700,7 +1700,7 @@ static at::Tensor _quantized_convolution_onednn(
   const ideep::zero_point_t dst_zero_points = ideep::zero_point_t(1, output_zero_point);
 
   // Weight
-  auto packed_weight = at::native::itensor_from_mkldnn(weight);
+  auto packed_weight = at::native::itensor_from_onednn(weight);
 
   // Bias
   ideep::tensor onednn_bias;
@@ -1729,7 +1729,7 @@ static at::Tensor _quantized_convolution_onednn(
                                    c10::MemoryFormat::ChannelsLast :
                                    c10::MemoryFormat::ChannelsLast3d);
   auto src_dims = act_contig.sizes().vec();
-  auto src_data_type = at::native::get_mkldnn_dtype(act.scalar_type());
+  auto src_data_type = at::native::get_onednn_dtype(act.scalar_type());
   auto src_desc = ideep::tensor::desc(src_dims, src_data_type,
       kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
   ideep::tensor src;
