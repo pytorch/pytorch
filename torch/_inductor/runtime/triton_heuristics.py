@@ -716,13 +716,31 @@ class CachingAutotuner(KernelInterface):
             and self.inductor_meta.get("dynamic_scale_rblock", True)
             and not self.inductor_meta.get("persistent_reduction")
             and self.heuristic_type == HeuristicType.REDUCTION
-            and self.size_hints is not None
+            # Combo kernels with per-subkernel blocks set size_hints=None but
+            # carry per-subkernel size hints in combo_grid_meta.
+            and (self.size_hints is not None or self._combo_has_reduction_subkernel)
             # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
             and device_prop.type in ["cuda", "hip"]
             and bool(device_prop.major)
             and (device_prop.major >= 8 or torch.version.hip)
             and device_prop.regs_per_multiprocessor is not None
             and device_prop.warp_size is not None
+        )
+
+    @functools.cached_property
+    def _combo_has_reduction_subkernel(self) -> bool:
+        """True for a combo kernel (per-subkernel blocks) with a non-persistent
+        reduction sub-kernel; these carry size_hints=None at the autotuner level."""
+        combo_meta = self.inductor_meta.get("combo_grid_meta")
+        if combo_meta is None or "heuristic_0" not in combo_meta:
+            return False
+        # No-bench stitched combos use a single fixed config and don't autotune;
+        # don't add scaling candidates for them.
+        if "stitched_num_warps" in combo_meta:
+            return False
+        return any(
+            combo_meta.get(f"heuristic_{i}") == "reduction"
+            for i in range(combo_meta["num_kernels"])
         )
 
     def _iter_rblock_scale_candidates(self):
@@ -745,19 +763,44 @@ class CachingAutotuner(KernelInterface):
             raise AssertionError("device_prop.warp_size is not set")
         seen_config_hashes: OrderedSet[Hashable] | None = None
         warp_size = device_prop.warp_size
+        # Combo kernels with per-subkernel blocks pass size_hints=None and carry
+        # per-subkernel xnumel_i / XBLOCK_i in combo_grid_meta. Only total_block
+        # is derived differently; reduction-block selection and the occupancy
+        # logic below are shared with the single-kernel path.
+        combo_meta = (
+            self.inductor_meta.get("combo_grid_meta")
+            if self.size_hints is None
+            else None
+        )
         for result in self.compile_results:
             triton_config = result.config
             compiled_binary = result.kernel
-            if len(self.size_hints) < 2:
-                raise AssertionError(
-                    f"Expected at least 2 size_hints, got {len(self.size_hints)}"
-                )
-            xblock = triton_config.kwargs.get("XBLOCK", 1)
+            if combo_meta is not None:
+                # Combo grid sums each sub-kernel's blocks (SequentialFlatten);
+                # xnumel_i is None for dynamic shapes, so those dims are skipped.
+                total_block = 0
+                for i in range(combo_meta["num_kernels"]):
+                    xnumel = combo_meta.get(f"xnumel_{i}")
+                    if isinstance(xnumel, int):
+                        xblock = triton_config.kwargs.get(f"XBLOCK_{i}", 1)
+                        total_block += (xnumel + xblock - 1) // xblock
+            else:
+                if len(self.size_hints) < 2:
+                    raise AssertionError(
+                        f"Expected at least 2 size_hints, got {len(self.size_hints)}"
+                    )
+                xblock = triton_config.kwargs.get("XBLOCK", 1)
+                total_block = (self.size_hints["x"] + xblock - 1) // xblock
+            # Tunable reduction blocks. Combo's per-subkernel kwargs are suffixed
+            # (R0_BLOCK_0, R1_BLOCK_0, R0_BLOCK_1, ...); persistent/pointwise
+            # sub-kernels carry no R*_BLOCK kwarg so they drop out naturally. Same
+            # rule for both paths.
             reduction_kwargs = [
                 kwarg for kwarg in triton_config.kwargs if kwarg.startswith("R")
             ]
+            if not reduction_kwargs:
+                continue
             rblocks = [triton_config.kwargs[kwarg] for kwarg in reduction_kwargs]
-            total_block = (self.size_hints["x"] + xblock - 1) // xblock
             nreg = getattr(compiled_binary, "n_regs", None)
             if nreg is None:
                 continue
@@ -811,7 +854,7 @@ class CachingAutotuner(KernelInterface):
             min_rblock = self.inductor_meta.get("min_rblock")
             if (
                 min_rblock is not None
-                and largest_rkwarg == "R0_BLOCK"
+                and largest_rkwarg.startswith("R0_BLOCK")
                 and new_rblock < min_rblock
             ):
                 continue
@@ -834,6 +877,33 @@ class CachingAutotuner(KernelInterface):
             )
             self._ensure_kernel_loaded()
             yield new_config
+
+            # Combo kernels additionally offer an all-reduction-blocks-halved
+            # candidate. A combo's register count is the max across sub-kernel
+            # branches, so a balanced combo (sub-kernels with similar register
+            # use) only drops below the occupancy limit when every branch
+            # shrinks, not just the largest.
+            if combo_meta is not None and len(reduction_kwargs) > 1:
+                all_halved = copy.deepcopy(triton_config)
+                too_small = False
+                for kwarg in reduction_kwargs:
+                    halved = triton_config.kwargs[kwarg] // 2
+                    # A block that is already 1 would halve to 0 (invalid -> Triton
+                    # compile error). Skip the candidate rather than emit a 0 block.
+                    if halved < 1 or (
+                        min_rblock is not None
+                        and kwarg.startswith("R0_BLOCK")
+                        and halved < min_rblock
+                    ):
+                        too_small = True
+                        break
+                    all_halved.kwargs[kwarg] = halved
+                if not too_small:
+                    all_hash = triton_config_to_hashable(all_halved)
+                    if all_hash not in seen_config_hashes:
+                        seen_config_hashes.add(all_hash)
+                        self._ensure_kernel_loaded()
+                        yield all_halved
 
     def _dynamic_scale_rblock(self):
         if (
