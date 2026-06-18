@@ -5739,6 +5739,12 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "torch.int32 dtype"):
             torch.lu_unpack(lu_data, lu_pivots.long())
 
+        # mismatched LU_pivots shape must be rejected, not crash (see gh-177829)
+        with self.assertRaisesRegex(ValueError, "Expected LU_pivots to have shape"):
+            torch.lu_unpack(lu_data, torch.empty(0, dtype=torch.int32, device=device))
+        with self.assertRaisesRegex(ValueError, "Expected LU_pivots to have shape"):
+            torch.lu_unpack(lu_data, lu_pivots[..., :-1])
+
         # check that once flags are unset, Nones are returned
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False)
         self.assertTrue(l.numel() == 0 and u.numel() == 0)
