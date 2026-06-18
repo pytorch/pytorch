@@ -12,7 +12,11 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch._C._distributed_c10d import _create_work_from_future
-from torch.distributed.distributed_c10d import _coalescing_manager, _get_default_group
+from torch.distributed.distributed_c10d import (
+    _coalescing_manager,
+    _get_default_group,
+    ReconfigureOptions,
+)
 from torch.futures import Future
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -314,6 +318,8 @@ class TestPyProcessGroup(TestCase):
         # dispatches back into Python; a raw C++ ProcessGroup would return the
         # base backend name ("undefined") instead.
         self.assertEqual(pg.name(), "store-pg")
+        self.assertEqual(pg.rank(), 0)
+        self.assertEqual(pg.size(), 1)
 
     def test_coalescing_manager(self):
         # The coalescing manager calls _start_coalescing / _end_coalescing, which
@@ -359,6 +365,19 @@ class TestPyProcessGroup(TestCase):
         self.assertEqual(opts.handles, ["a", "b"])
         self.assertEqual(opts.timeout, timeout)
         self.assertEqual(opts.hints, {"k": "v"})
+
+    def test_reconfigure_rejects_multiple_backends(self) -> None:
+        pg = dist.ProcessGroup(0, 1)
+        pg._register_backend(torch.device("cpu"), dist.ProcessGroup.BackendType.GLOO)
+        pg._register_backend(torch.device("cuda"), dist.ProcessGroup.BackendType.NCCL)
+
+        msg = "multiple backends"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            pg.supports_reconfigure
+        with self.assertRaisesRegex(RuntimeError, msg):
+            pg.get_reconfigure_handle()
+        with self.assertRaisesRegex(RuntimeError, msg):
+            pg.reconfigure(ReconfigureOptions())
 
     def test_window_delegation(self) -> None:
         pg = WindowProcessGroup(0, 1)
