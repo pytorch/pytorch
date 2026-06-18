@@ -147,7 +147,7 @@ inline bool is_autocast_eligible(
       return (tensor.is_cuda() || tensor.is_xla()) &&
           tensor.is_floating_point();
     case c10::DeviceType::CPU:
-      return (tensor.is_cpu() || tensor.is_mkldnn()) &&
+      return (tensor.is_cpu() || tensor.is_onednn()) &&
           tensor.is_floating_point();
     case c10::DeviceType::MTIA:
       return tensor.is_mtia() && tensor.is_floating_point();

@@ -118,9 +118,9 @@ enum class ConvBackend {
   Miopen,
   MiopenDepthwise,
   MiopenTranspose,
-  Mkldnn,
-  MkldnnTranspose,
-  MkldnnEmpty,
+  Onednn,
+  OnednnTranspose,
+  OnednnEmpty,
   NnpackSpatial,
   Overrideable,
   Slow2d,
@@ -417,7 +417,7 @@ inline bool _conv_use_channels_last_impl(
 inline bool onednn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
   // Disable NHWC for float64 input and for MkldnnCPU tensors.
   bool enabled = input.scalar_type() != at::kDouble && weight.scalar_type() != at::kDouble &&
-      !input.is_mkldnn() && !weight.is_mkldnn();
+      !input.is_onednn() && !weight.is_onednn();
   return _conv_use_channels_last_impl(input, weight, enabled, /*exact_match=*/false);
 }
 

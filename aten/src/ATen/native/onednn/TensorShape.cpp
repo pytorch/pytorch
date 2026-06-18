@@ -49,7 +49,7 @@ namespace at::native {
 
 Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(false,
-      "Currently Mkldnn tensor does not support view. Change to use reshape instead");
+      "Currently Onednn tensor does not support view. Change to use reshape instead");
 }
 
 Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {

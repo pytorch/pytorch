@@ -143,7 +143,7 @@ Tensor max_pool2d(
     return at::quantized_max_pool2d(self, kernel_size, stride, padding,
                                     dilation, ceil_mode);
   }
-  if (self.is_mkldnn()) {
+  if (self.is_onednn()) {
     return at::mkldnn_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
@@ -170,7 +170,7 @@ Tensor max_pool3d(
     return at::quantized_max_pool3d(self, kernel_size, stride, padding,
                                     dilation, ceil_mode);
   }
-  if (self.is_mkldnn()) {
+  if (self.is_onednn()) {
     return at::mkldnn_max_pool3d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
