@@ -1385,7 +1385,33 @@ class GraphLowering(torch.fx.Interpreter):
             # passthrough lowerings from .pattern_matcher
             return target(*args, **kwargs)
 
-        if target not in lowerings:
+        n = self.current_node
+
+        from torch._inductor.compiler_bisector import CompilerBisector
+
+        is_current_call_function = n.op == "call_function" and target is n.target
+        force_fallback = is_current_call_function and (
+            "should_fallback" in n.meta
+            or n.meta.get("custom", {}).get("fallback_to_eager")
+        )
+        if is_current_call_function:
+            if (
+                isinstance(target, torch._ops.OpOverload)
+                and torch._library.utils.is_builtin(target)
+                and (
+                    fallback_node_due_to_unsupported_type(n)
+                    or CompilerBisector.disable_subsystem(
+                        "inductor", "lowerings", lambda: repr(n)
+                    )
+                )
+            ):
+                force_fallback = True
+            elif isinstance(
+                target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+            ) and should_fallback_by_default(n):
+                force_fallback = True
+
+        if target not in lowerings and not force_fallback:
             if not isinstance(target, torch._ops.OpOverload):
                 raise AssertionError(f"{target} is not an OpOverload")
             base_name = target.name().split(".")[0]
@@ -1448,17 +1474,29 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
-            log.debug("  via %s", lowerings[target])  # type: ignore[index]
+            if target in lowerings:
+                log.debug("  via %s", lowerings[target])  # type: ignore[index]
+            else:
+                log.debug("  via fallback_handler")
 
-            n = self.current_node
             layout_constraints = maybe_layout_constraints(target)
+            if (
+                force_fallback
+                and layout_constraints is None
+                and isinstance(target, torch._ops.OpOverload)
+            ):
+                layout_constraints = tag_to_layout_constraint(
+                    get_layout_constraint_tag(target, with_default=True)
+                )
+
+            mutation_args = None
             if layout_constraints:
                 old_args, old_kwargs = args, kwargs
                 if layout_constraints is constrain_to_fake_tensors:
-                    # only constrain_to_fake_tensor if this exists.
-                    # otherwise, no constraints at all: the implication is
-                    # that this operator was inserted by a custom pass
-                    # so we'll give them the freedom.
+                    # Only constrain to fake tensors when eager_input_vals is present.
+                    # Ops inserted after tracing do not have those values, so untagged
+                    # custom ops keep their compiled layout unless the pass supplied a
+                    # concrete layout tag such as needs_contiguous_strides.
                     if "eager_input_vals" in n.meta:
                         fake_args, fake_kwargs = n.meta["eager_input_vals"]
 
@@ -1486,12 +1524,12 @@ class GraphLowering(torch.fx.Interpreter):
                         args, kwargs = constrain_to_fake_tensors(
                             args, kwargs, fake_args, fake_kwargs
                         )
+                        mutation_args = (old_args, old_kwargs)
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
+                    mutation_args = (old_args, old_kwargs)
 
-            if "should_fallback" in n.meta or n.meta.get("custom", {}).get(
-                "fallback_to_eager"
-            ):
+            if force_fallback:
                 out = fallback_handler(target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
@@ -1520,10 +1558,11 @@ class GraphLowering(torch.fx.Interpreter):
                             *args, **kwargs
                         )
 
-            if layout_constraints:
+            if mutation_args is not None:
                 # layout_constraints are allowed to make new copies of the inputs.
                 # if they do, and if the target is mutable, then we need to
                 # write the new values back into the original inputs.
+                old_args, old_kwargs = mutation_args
                 self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
 
             return out
@@ -1894,8 +1933,6 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             return result
 
-        from torch._inductor.compiler_bisector import CompilerBisector
-
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
 
@@ -1913,38 +1950,6 @@ class GraphLowering(torch.fx.Interpreter):
             V.set_current_node(n),
         ):
             if (
-                is_call_function
-                # this path only for built-in operators
-                and n.target
-                and isinstance(n.target, torch._ops.OpOverload)
-                and torch._library.utils.is_builtin(n.target)
-                and (
-                    fallback_node_due_to_unsupported_type(n)
-                    or CompilerBisector.disable_subsystem(
-                        "inductor", "lowerings", lambda: repr(n)
-                    )
-                )
-            ):
-                debug("fallback_handler")
-                result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args,  # type: ignore[possibly-undefined]
-                    **kwargs,  # type: ignore[possibly-undefined]
-                )
-            elif (
-                n.op == "call_function"
-                and isinstance(
-                    n.target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
-                )
-                and should_fallback_by_default(n)
-            ):
-                # this path supports fallback due to inductor lite mode. It supports
-                # both OpOverload and HOPs (e.g., triton_kernel_wrapper_functional).
-                debug("fallback_handler")
-                result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args,  # type: ignore[possibly-undefined]
-                    **kwargs,  # type: ignore[possibly-undefined]
-                )
-            elif (
                 n.op == "call_function"
                 and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
                 and config.triton_kernel_default_layout_constraint != "flexible_layout"

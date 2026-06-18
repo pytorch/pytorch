@@ -36,6 +36,207 @@ if HAS_GPU_AND_TRITON:
 
 
 class TestNeedsExactStrides(InductorTestCase):
+    @parametrize("fallback_by_default", [False, True])
+    def test_fallback_honors_layout_tag_without_eager_input_vals(
+        self, fallback_by_default
+    ):
+        class InsertCustomOp:
+            def __init__(self, op):
+                self.op = op
+                self.called = False
+
+            def __call__(self, graph):
+                self.called = True
+                output = next(n for n in graph.nodes if n.op == "output")
+                (orig,) = output.args[0]
+                with graph.inserting_before(output):
+                    new = graph.call_function(self.op, (orig,), {})
+                    new.meta = {
+                        key: value
+                        for key, value in orig.meta.items()
+                        if key != "eager_input_vals"
+                    }
+                    output.args = ((new,),)
+                graph.lint()
+
+        with torch.library._scoped_library("mylib_contiguous_strides", "DEF") as lib:
+            lib.define(
+                "check_last_dim(Tensor x) -> Tensor",
+                tags=[torch.Tag.needs_contiguous_strides],
+            )
+
+            seen_strides = []
+
+            @torch.library.impl(lib, "check_last_dim", "CompositeExplicitAutograd")
+            def _(x):
+                seen_strides.append(tuple(x.stride()))
+                if x.stride(-1) != 1 and x.size(-1) != 1:
+                    raise AssertionError(
+                        f"expected last dim contiguous, got {x.stride()}"
+                    )
+                return x.clone()
+
+            @torch.library.impl(lib, "check_last_dim", "Meta")
+            def _(x):
+                return torch.empty_like(x)
+
+            post_pass = InsertCustomOp(
+                torch.ops.mylib_contiguous_strides.check_last_dim.default
+            )
+
+            def f(x):
+                u = x.transpose(1, 2).contiguous()
+                if u.stride(-1) != 1:
+                    u = u.contiguous()
+                return u + 1
+
+            x = torch.randn(1, 8, 4)
+            expected = f(x)
+
+            from torch._inductor import config
+
+            with config.patch(
+                implicit_fallbacks=not fallback_by_default,
+                fallback_by_default=fallback_by_default,
+                post_grad_custom_post_pass=post_pass,
+            ):
+                actual = torch.compile(f, fullgraph=True)(x)
+
+            self.assertTrue(post_pass.called)
+            self.assertEqual(actual, expected)
+            self.assertEqual(seen_strides, [(32, 8, 1)])
+
+    @parametrize("fallback_by_default", [False, True])
+    def test_fallback_uses_eager_input_vals_for_default_exact_strides(
+        self, fallback_by_default
+    ):
+        class InsertCustomOp:
+            def __init__(self, op):
+                self.op = op
+                self.called = False
+
+            def __call__(self, graph):
+                self.called = True
+                output = next(n for n in graph.nodes if n.op == "output")
+                (orig,) = output.args[0]
+                with graph.inserting_before(output):
+                    new = graph.call_function(self.op, (orig,), {})
+                    new.meta = {
+                        key: value
+                        for key, value in orig.meta.items()
+                        if key != "eager_input_vals"
+                    }
+                    new.meta["eager_input_vals"] = ((orig.meta["val"],), {})
+                    output.args = ((new,),)
+                graph.lint()
+
+        with torch.library._scoped_library("mylib_exact_strides", "DEF") as lib:
+            lib.define("check_last_dim(Tensor x) -> Tensor")
+
+            seen_strides = []
+
+            @torch.library.impl(lib, "check_last_dim", "CompositeExplicitAutograd")
+            def _(x):
+                seen_strides.append(tuple(x.stride()))
+                if x.stride(-1) != 1 and x.size(-1) != 1:
+                    raise AssertionError(
+                        f"expected last dim contiguous, got {x.stride()}"
+                    )
+                return x.clone()
+
+            @torch.library.impl(lib, "check_last_dim", "Meta")
+            def _(x):
+                return torch.empty_like(x)
+
+            post_pass = InsertCustomOp(
+                torch.ops.mylib_exact_strides.check_last_dim.default
+            )
+
+            def f(x):
+                u = x.transpose(1, 2).contiguous()
+                if u.stride(-1) != 1:
+                    u = u.contiguous()
+                return u + 1
+
+            x = torch.randn(1, 8, 4)
+            expected = f(x)
+
+            from torch._inductor import config
+
+            with config.patch(
+                implicit_fallbacks=not fallback_by_default,
+                fallback_by_default=fallback_by_default,
+                post_grad_custom_post_pass=post_pass,
+            ):
+                actual = torch.compile(f, fullgraph=True)(x)
+
+            self.assertTrue(post_pass.called)
+            self.assertEqual(actual, expected)
+            self.assertEqual(seen_strides, [(32, 8, 1)])
+
+    def test_default_exact_strides_without_eager_input_vals_is_unconstrained(self):
+        class InsertCustomOp:
+            def __init__(self, op):
+                self.op = op
+                self.called = False
+
+            def __call__(self, graph):
+                self.called = True
+                output = next(n for n in graph.nodes if n.op == "output")
+                (orig,) = output.args[0]
+                with graph.inserting_before(output):
+                    new = graph.call_function(self.op, (orig,), {})
+                    new.meta = {
+                        key: value
+                        for key, value in orig.meta.items()
+                        if key != "eager_input_vals"
+                    }
+                    output.args = ((new,),)
+                graph.lint()
+
+        with torch.library._scoped_library(
+            "mylib_exact_strides_no_eager", "DEF"
+        ) as lib:
+            lib.define("check_last_dim(Tensor x) -> Tensor")
+
+            seen_strides = []
+
+            @torch.library.impl(lib, "check_last_dim", "CompositeExplicitAutograd")
+            def _(x):
+                seen_strides.append(tuple(x.stride()))
+                if x.stride(-1) != 1 and x.size(-1) != 1:
+                    raise AssertionError(
+                        f"expected last dim contiguous, got {x.stride()}"
+                    )
+                return x.clone()
+
+            @torch.library.impl(lib, "check_last_dim", "Meta")
+            def _(x):
+                return torch.empty_like(x)
+
+            post_pass = InsertCustomOp(
+                torch.ops.mylib_exact_strides_no_eager.check_last_dim.default
+            )
+
+            def f(x):
+                u = x.transpose(1, 2).contiguous()
+                if u.stride(-1) != 1:
+                    u = u.contiguous()
+                return u + 1
+
+            from torch._inductor import config
+
+            with self.assertRaisesRegex(AssertionError, "expected last dim contiguous"):
+                with config.patch(
+                    implicit_fallbacks=True,
+                    fallback_by_default=False,
+                    post_grad_custom_post_pass=post_pass,
+                ):
+                    torch.compile(f, fullgraph=True)(torch.randn(1, 8, 4))
+
+            self.assertTrue(post_pass.called)
+            self.assertEqual(seen_strides, [(32, 1, 4)])
+
     @parametrize("dtype", [torch.float, torch.float8_e8m0fnu])
     def test_custom_op(self, dtype):
         device = (
