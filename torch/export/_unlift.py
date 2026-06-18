@@ -389,7 +389,7 @@ def _get_codegen(
         # add kwarg names
         names.extend(in_spec.child(1).context)
     else:
-        names = [f"arg_{i}" for i in range(in_spec.num_children)]
+        names = [f"arg_{i}" for i in range(in_spec.num_leaves)]
 
     return _PyTreeCodeGen(
         _PyTreeInfo(
