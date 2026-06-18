@@ -40,8 +40,13 @@ if TYPE_CHECKING:
     from torch.fx import Node
     from torch.fx.node import Argument, Target
 
-from torch.fx.experimental._spec_binding import _flatten_shapes_spec
-from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+from torch.fx.experimental._spec_binding import _bind_spec_to_args
+from torch.fx.experimental.dynamic_spec import (
+    _coerce_to_shapes_spec,
+    IntermediateSpec,
+    ParamsSpec,
+    ShapesSpec,
+)
 
 
 T = TypeVar("T")
@@ -931,7 +936,28 @@ def _dynamo_graph_capture_for_export(
     def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
         # This sets the is_exporting flag when building guards.
         with _compiling_state_context():
-            flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
+            # Only a ShapesSpec/ParamsSpec object opts into the new spec API.
+            # A bare dict/tuple in export's `dynamic_shapes` is now bound to
+            # the Dim export API.
+            # TODO: inspect dictionary leaves and enable dict for ParamsSpec
+            # here too, like make_fx and compile.
+            user_spec: ShapesSpec | None = None
+            if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
+                user_spec = _coerce_to_shapes_spec(dynamic_shapes)
+            flattened_spec: ShapesSpec | None = None
+            if user_spec is not None:
+                # _bind_spec_to_args also flattens (args, kwargs) for us.
+                leaf_specs, flat_inputs, in_spec = _bind_spec_to_args(
+                    mod, args, kwargs, user_spec
+                )
+                flattened_spec = ShapesSpec(
+                    # leaf_specs is list[LeafSpec]; cast around list invariance
+                    # (ParamsSpec wants list[IntermediateSpec]).
+                    ParamsSpec({"*args": cast(list[IntermediateSpec], leaf_specs)}),
+                    assumptions=user_spec._assumptions or None,
+                )
+            else:
+                flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
             check_user_input_output(flat_inputs, UserErrorType.INVALID_INPUT)
             module_to_trace = ModuleToTrace(mod, in_spec)
             orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
@@ -959,20 +985,13 @@ def _dynamo_graph_capture_for_export(
                 install_free_tensors=torch._dynamo.config.install_free_tensors_for_export,
             )
 
-            # If `dynamic_shapes` is a ShapesSpec/ParamsSpec, auto-wrap
-            # ParamsSpec → ShapesSpec, flatten into the (args, kwargs) layout
-            # the tracer builds above, and expose it via
-            # `torch._dynamo.config._shapes_spec` for the variable builder.
-            shapes_spec_in_use = False
+            # If a user spec was supplied, re-key it to the intermediate
+            # ModuleToTrace.forward(*flat_args) layout and expose via
+            # ``torch._dynamo.config._shapes_spec`` for the variable
+            # builder.
+            shapes_spec_in_use = user_spec is not None
             shapes_spec_ctx = nullcontext()
-            if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
-                shapes_spec_in_use = True
-                user_spec = (
-                    ShapesSpec(dynamic_shapes)
-                    if isinstance(dynamic_shapes, ParamsSpec)
-                    else dynamic_shapes
-                )
-                flattened_spec = _flatten_shapes_spec(mod, args, kwargs, user_spec)
+            if flattened_spec is not None:
                 shapes_spec_ctx = torch._dynamo.config.patch(
                     _shapes_spec=flattened_spec
                 )
