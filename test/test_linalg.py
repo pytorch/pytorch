@@ -416,6 +416,21 @@ class TestLinalg(TestCase):
             if driver == 'gels' and rcond is None:
                 check_solution_correctness(a, b, sol)
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_linalg_lstsq_gelsy_jpvt_is_reset(self, device, dtype):
+        a = torch.zeros(2, 3, 3, device=device, dtype=dtype)
+        a[0] = torch.eye(3, device=device, dtype=dtype)
+        a[1, 0, 1] = 1
+        a[1, 1, 2] = 1
+
+        b = torch.ones(2, 3, 1, device=device, dtype=dtype)
+
+        result = torch.linalg.lstsq(a, b, driver='gelsy')
+        expected_rank = torch.tensor([3, 2], device=device)
+        self.assertEqual(result.rank, expected_rank)
+
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
