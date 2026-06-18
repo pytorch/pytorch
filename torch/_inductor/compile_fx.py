@@ -112,7 +112,6 @@ from torch.utils._ordered_set import OrderedSet
 from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
-from ..utils._triton import has_triton
 from . import config, distributed_autotune, metrics
 from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
@@ -2317,12 +2316,7 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
             )
         )
 
-    autotune_at_compile_time = (
-        config.triton.autotune_at_compile_time
-        if config.triton.autotune_at_compile_time is not None
-        # Default to True for AOTI. Subject to change in future.
-        else has_triton() and V.aot_compilation
-    )
+    autotune_at_compile_time = bool(config.triton.autotune_at_compile_time)
     return {
         "triton.autotune_at_compile_time": autotune_at_compile_time,
         "triton.autotune_cublasLt": not autotune_at_compile_time,
