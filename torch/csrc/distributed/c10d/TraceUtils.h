@@ -62,6 +62,7 @@ inline std::string ranksToString(const std::vector<int>& ranks) {
 }
 
 inline std::string ranksFromTrace(
+    // NOLINTNEXTLINE(readability-named-parameter)
     const std::vector<std::pair<int, std::string>>& items) {
   fmt::memory_buffer buf;
   bool first = true;
@@ -249,6 +250,7 @@ inline std::string retrieveDesyncReport(
   report += c10::str(
       "\n\t - [", myRank, "] Timeout at collective: ", thisCol, ", #", thisSeq);
 
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (!missingRanks.empty()) {
     report += analyzeMissingRanks(missingRanks);
   } else {
