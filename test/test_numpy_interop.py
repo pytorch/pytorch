@@ -514,8 +514,9 @@ class TestNumPyInterop(TestCase):
             self.assertIsInstance(wrapped, torch.Tensor)
             self.assertEqual(wrapped, torch.tensor([6, 2, 3]))
 
-        with self.assertRaises(ValueError):
-            np.array(x, dtype=np.float32, copy=False)
+        if np.lib.NumpyVersion(np.__version__) >= "2.0.0":
+            with self.assertRaises(ValueError):
+                np.array(x, dtype=np.float32, copy=False)
 
     @onlyCPU
     def test_multiplication_numpy_scalar(self, device) -> None:
