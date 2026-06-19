@@ -847,7 +847,7 @@ def _codegen_compiled_fn_invocation(
     trace_joint: bool,
     indices_of_inps_to_detach: list[int],
     disable_amp: bool,
-    is_trivial: bool = False,
+    is_trivial: bool,
 ) -> None:
     rw_lines.append("    with _first_ctx_():")
     # trace_joint is known at codegen time. Only the joint/training path needs
@@ -889,25 +889,20 @@ def _codegen_compiled_fn_invocation(
             "            if grad_enabled: torch._C._set_grad_enabled(False)"
         )
         rw_lines.append("            _on_before_call_()")
-        if is_trivial:
-            if disable_amp:
-                rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-                rw_lines.append("            with _DisableAutocast_():")
-                rw_lines.append(
-                    "                return _normalize_as_list_(_compiled_fn_(args))"
-                )
-            else:
-                rw_lines.append(
-                    "            return _normalize_as_list_(_compiled_fn_(args))"
-                )
-        elif disable_amp:
+        # The trivial fast-path skips the epilogue and returns directly; the
+        # normal path assigns to all_outs so the epilogue can run. Output
+        # normalization is inlined on both paths so the return value preserves
+        # the list contract.
+        if disable_amp:
             rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
             rw_lines.append("            with _DisableAutocast_():")
-            rw_lines.append("                all_outs = _compiled_fn_(args)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
+            indent, indent_level = "                ", 4
         else:
-            rw_lines.append("            all_outs = _compiled_fn_(args)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=3)
+            indent, indent_level = "            ", 3
+        rw_lines.append(f"{indent}all_outs = _compiled_fn_(args)")
+        _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=indent_level)
+        if is_trivial:
+            rw_lines.append(f"{indent}return all_outs")
         rw_lines.append("        finally:")
         rw_lines.append("            if grad_enabled: torch._C._set_grad_enabled(True)")
     if not is_trivial:
@@ -921,7 +916,7 @@ def _codegen_epilogue(
     runtime_epilogue: _RuntimeForwardEpilogue,
     num_mutated_runtime_inps: int,
     expected_outs: int,
-    is_trivial: bool = False,
+    is_trivial: bool,
 ) -> None:
     if is_trivial:
         return
