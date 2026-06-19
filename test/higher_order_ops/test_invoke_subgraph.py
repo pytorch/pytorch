@@ -2476,12 +2476,8 @@ class GraphModule(torch.nn.Module):
 
         class bwd_body_0(torch.nn.Module):
             def forward(self, grad_out: "f32[8, 8]", l_x_: "f32[8, 8]"):
-                _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
-
                 cos: "f32[8, 8]" = torch.cos(grad_out);  grad_out = None
                 mul: "f32[8, 8]" = l_x_ * cos;  l_x_ = cos = None
-
-                _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
                 return (mul,)
 """,
             )
