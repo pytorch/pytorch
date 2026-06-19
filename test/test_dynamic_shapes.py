@@ -4551,6 +4551,49 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(eager_result, compiled_result)
 
     @fresh_cache()
+    @skipIfTorchDynamo("test inspects inner torch.compile backend graph")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_tensor_derived_multidim_slice_bounds(self):
+        class TensorDerivedSliceBounds(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "crop_size", torch.tensor(224, dtype=torch.float32)
+                )
+
+            def forward(self, x):
+                h = torch.tensor(x.shape[2], device=x.device, dtype=torch.float32)
+                w = torch.tensor(x.shape[3], device=x.device, dtype=torch.float32)
+
+                h0 = (h - self.crop_size) / 2
+                w0 = (w - self.crop_size) / 2
+                h1 = h0 + self.crop_size
+                w1 = w0 + self.crop_size
+
+                return x[:, :, h0.long() : h1.long(), w0.long() : w1.long()]
+
+        graphs = []
+
+        def record_graph(gm, _example_inputs):
+            graphs.append(gm)
+            return gm.forward
+
+        x = torch.randn(1, 3, 224, 224)
+        mod = TensorDerivedSliceBounds().eval()
+        eager_result = mod(x)
+
+        compiled_mod = torch.compile(mod, backend=record_graph, fullgraph=True)
+        compiled_result = compiled_mod(x)
+
+        self.assertEqual(eager_result, compiled_result)
+        (getitem_node,) = (
+            node
+            for node in graphs[0].graph.nodes
+            if node.op == "call_function" and node.target is operator.getitem
+        )
+        self.assertEqual(len(getitem_node.meta["unbacked_bindings"]), 3)
+
+    @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_slice_with_tensor_indices(self):
         for d in [True, False]:

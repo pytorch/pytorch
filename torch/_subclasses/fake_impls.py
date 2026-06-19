@@ -74,6 +74,20 @@ def ordered_set(*items: _T) -> dict[_T, bool]:
     return dict.fromkeys(items, True)
 
 
+def _mark_pending_symbols_ignorable(value: object, fake_mode: FakeTensorMode) -> None:
+    """Mark pending unbacked symbols in metadata that is being replaced."""
+    shape_env = fake_mode.shape_env
+    if shape_env is None:
+        return
+
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    pending = set(shape_env.pending_fresh_unbacked_symbols)
+    for symbol in free_unbacked_symbols(value):
+        if symbol in pending:
+            shape_env.ignorable_fresh_unbacked_symbols.append(symbol)
+
+
 # This function indicates if the backend device
 # supports non-contiguous tensors
 def is_noncontiguous_supported(device: torch.device) -> bool:
@@ -736,6 +750,7 @@ def meta_select(
 
         # index is data-dependent, we do not know which index we are accessing it could be index or index+size!
         # we assign a new data-dependent symbol for the storage offset.
+        _mark_pending_symbols_ignorable((self.storage_offset(), size), fake_mode)
         new_storage_offset = fake_mode.shape_env.create_unbacked_symint()
 
     del new_size[dim]
@@ -1430,6 +1445,7 @@ def slice_forward(
     if new_size is None:
         if shape_env is None:
             raise AssertionError("Must have shape_env to create symint")
+        _mark_pending_symbols_ignorable(sizes[dim], fake_mode)
         new_size = shape_env.create_unbacked_symint()
         torch._check(new_size >= 0)
         torch._check(new_size <= sizes[dim])
@@ -1443,6 +1459,7 @@ def slice_forward(
     else:
         if shape_env is None:
             raise AssertionError("Must have shape_env to create symint")
+        _mark_pending_symbols_ignorable(self.storage_offset(), fake_mode)
         storage_offset = shape_env.create_unbacked_symint()
         torch._check(storage_offset >= 0)
 
