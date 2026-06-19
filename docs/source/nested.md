@@ -237,8 +237,8 @@ for non-nested tensors. To help us accomplish this, please consider:
 >>> nt.unbind()[0] is not a
 True
 >>> nt.unbind()[0].mul_(3)
-tensor([[ 3.6858, -3.7030, -4.4525],
-        [-2.3481,  2.0236,  0.1975]])
+tensor([[-2.9747, -1.0089, -0.8396],
+        [-7.0561, -1.7688, -1.3122]])
 >>> nt.unbind()
 (tensor([[-2.9747, -1.0089, -0.8396],
         [-7.0561, -1.7688, -1.3122]]), tensor([[-2.0969, -1.0104,  1.4841],
