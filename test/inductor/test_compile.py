@@ -116,6 +116,17 @@ class TestStandaloneInductor(TestCase):
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
+    def test_compile_fx_nested_inputs_without_lstm(self):
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                return (xs[0] + 1,)
+
+        x = torch.ones((2,))
+        gm = torch.fx.symbolic_trace(M())
+
+        actual = inductor.compile(gm, [[x]])([x])
+        self.assertEqual(actual, (x + 1,))
+
     def test_inductor_via_export1(self):
         mod = MyModule3().eval()
         inp = torch.randn(10)
