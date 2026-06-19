@@ -421,6 +421,24 @@ struct MSEOp {
   }
 };
 
+struct BCEOp {
+  // Unweighted per-element loss; fused_loss_pass1 applies the weight and pass 2
+  // folds the mean divide. Each log term clamps at -100 like the CPU kernel.
+  static inline float fwd(float a, float b, constant FusedLossParams& p) {
+    return -b * max(log(a), -100.f) - (1.f - b) * max(log(1.f - a), -100.f);
+  }
+  // dx = (x - y) / max((1 - x) * x, 1e-12) * g, matching the CPU kernel's
+  // EPSILON-clamped denominator (Loss.cpp). The host folds the mean scale and
+  // any weight into g, so p.p0 is 1 here (the fast path's norm slot).
+  static inline float bwd(
+      float a,
+      float b,
+      float g,
+      constant FusedLossParams& p) {
+    return p.p0 * (a - b) / max((1.f - a) * a, 1e-12f) * g;
+  }
+};
+
 // ============================================================================
 // Pass 1: per-threadgroup float32 partial of the (weighted) elementwise loss
 // ============================================================================
@@ -486,6 +504,7 @@ kernel void fused_loss_bwd(
     constant TI* gout [[buffer(2)]], // grad_output (0-dim when flag == 1)
     device TI* grad [[buffer(3)]], // grad_input
     constant FusedLossParams& p [[buffer(4)]],
+    constant TI* wbuf [[buffer(5)]], // weight; null buffer when has_weight == 0
     uint tid [[thread_position_in_grid]]) {
   const float g0 = p.flag ? float(gout[0]) : 0.f;
 
@@ -503,6 +522,10 @@ kernel void fused_loss_bwd(
         T4 gv = reinterpret_cast<constant const T4*>(gout)[tid];
         g4 = float4(float(gv.x), float(gv.y), float(gv.z), float(gv.w));
       }
+      if (p.has_weight) {
+        T4 w4 = reinterpret_cast<constant const T4*>(wbuf)[tid];
+        g4 *= float4(float(w4.x), float(w4.y), float(w4.z), float(w4.w));
+      }
       T4 r;
       r.x = TI(Op::bwd(float(a4.x), float(b4.x), g4.x, p));
       r.y = TI(Op::bwd(float(a4.y), float(b4.y), g4.y, p));
@@ -512,18 +535,24 @@ kernel void fused_loss_bwd(
       return;
     }
     for (uint i = base; i < p.numel; ++i) {
-      const float g = p.flag ? g0 : float(gout[i]);
+      float g = p.flag ? g0 : float(gout[i]);
+      if (p.has_weight) {
+        g *= float(wbuf[i]);
+      }
       grad[i] = TI(Op::bwd(float(in0[i]), float(in1[i]), g, p));
     }
     return;
   }
   if (tid < p.numel) {
-    const float g = p.flag ? g0 : float(gout[tid]);
+    float g = p.flag ? g0 : float(gout[tid]);
+    if (p.has_weight) {
+      g *= float(wbuf[tid]);
+    }
     grad[tid] = TI(Op::bwd(float(in0[tid]), float(in1[tid]), g, p));
   }
 }
 
-#define INSTANTIATE_FUSED_LOSS(NAME, OP, TI)                \
+#define INSTANTIATE_FUSED_LOSS_FWD(NAME, OP, TI)            \
   template [[host_name("fused_loss_pass1_" #NAME "_" #TI)]] \
   kernel void fused_loss_pass1<TI, OP>(                     \
       constant TI*,                                         \
@@ -535,16 +564,24 @@ kernel void fused_loss_bwd(
       uint,                                                 \
       uint,                                                 \
       uint,                                                 \
-      uint);                                                \
-  template [[host_name("fused_loss_bwd_" #NAME "_" #TI)]]   \
-  kernel void fused_loss_bwd<TI, OP>(                       \
-      constant TI*,                                         \
-      constant TI*,                                         \
-      constant TI*,                                         \
-      device TI*,                                           \
-      constant FusedLossParams&,                            \
+      uint)
+
+#define INSTANTIATE_FUSED_LOSS(NAME, OP, TI)              \
+  INSTANTIATE_FUSED_LOSS_FWD(NAME, OP, TI);               \
+  template [[host_name("fused_loss_bwd_" #NAME "_" #TI)]] \
+  kernel void fused_loss_bwd<TI, OP>(                     \
+      constant TI*,                                       \
+      constant TI*,                                       \
+      constant TI*,                                       \
+      device TI*,                                         \
+      constant FusedLossParams&,                          \
+      constant TI*,                                       \
       uint)
 
 INSTANTIATE_FUSED_LOSS(mse, MSEOp, float);
 INSTANTIATE_FUSED_LOSS(mse, MSEOp, half);
 INSTANTIATE_FUSED_LOSS(mse, MSEOp, bfloat);
+
+INSTANTIATE_FUSED_LOSS(bce, BCEOp, float);
+INSTANTIATE_FUSED_LOSS(bce, BCEOp, half);
+INSTANTIATE_FUSED_LOSS(bce, BCEOp, bfloat);

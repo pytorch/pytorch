@@ -48,6 +48,40 @@ struct mse_backward_scaled_functor {
   }
 };
 
+// BCE forward (reduction=None), unweighted: clamped cross-entropy per
+// element; the weighted variant multiplies by the broadcast weight. Backward
+// mirrors BCEOp::bwd in LossOps.metal (raw-x numerator, clamped denominator);
+// the host folds the mean scale and any weight into g.
+struct bce_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    const float x = float(a);
+    const float y = float(b);
+    return static_cast<T>(
+        -y * ::metal::max(::metal::log(x), -100.f) -
+        (1.f - y) * ::metal::max(::metal::log(1.f - x), -100.f));
+  }
+};
+
+struct bce_weighted_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T w) {
+    const float x = float(a);
+    const float y = float(b);
+    const float l = -y * ::metal::max(::metal::log(x), -100.f) -
+        (1.f - y) * ::metal::max(::metal::log(1.f - x), -100.f);
+    return static_cast<T>(l * float(w));
+  }
+};
+
+struct bce_backward_scaled_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T g) {
+    const float xc = ::metal::clamp(float(a), 1e-7f, 1.f - 1e-7f);
+    return static_cast<T>((float(a) - float(b)) / (xc * (1.f - xc)) * float(g));
+  }
+};
+
 struct add_alpha_functor {
   template <typename T>
   inline T operator()(const T a, const T b, const T alpha) {
@@ -638,6 +672,13 @@ REGISTER_OPMATH_TERNARY_OP(mse_backward2, bfloat, bfloat);
 REGISTER_OPMATH_TERNARY_OP(mse_backward_scaled, float, float);
 REGISTER_OPMATH_TERNARY_OP(mse_backward_scaled, half, half);
 REGISTER_OPMATH_TERNARY_OP(mse_backward_scaled, bfloat, bfloat);
+REGISTER_OPMATH_FLOAT_BINARY_OP(bce);
+REGISTER_OPMATH_TERNARY_OP(bce_weighted, float, float);
+REGISTER_OPMATH_TERNARY_OP(bce_weighted, half, half);
+REGISTER_OPMATH_TERNARY_OP(bce_weighted, bfloat, bfloat);
+REGISTER_OPMATH_TERNARY_OP(bce_backward_scaled, float, float);
+REGISTER_OPMATH_TERNARY_OP(bce_backward_scaled, half, half);
+REGISTER_OPMATH_TERNARY_OP(bce_backward_scaled, bfloat, bfloat);
 REGISTER_INTEGER_BINARY_OP(mul);
 REGISTER_FLOAT_BINARY_OP(sub);
 REGISTER_INTEGER_BINARY_OP(sub);

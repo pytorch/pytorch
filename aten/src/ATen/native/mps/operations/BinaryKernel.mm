@@ -35,7 +35,8 @@ void binary_op_kernel(const std::string func_name,
                       const Tensor& input,
                       const Tensor& other,
                       const Tensor& output,
-                      const std::optional<Scalar> alpha) {
+                      const std::optional<Scalar> alpha,
+                      std::optional<uint32_t> ilp_threshold) {
   auto new_size = at::infer_size(input.sizes(), other.sizes());
   if (!output.sizes().equals(new_size)) {
     output.resize_(new_size);
@@ -54,14 +55,15 @@ void binary_op_kernel(const std::string func_name,
                   .promote_inputs_to_common_dtype(true)
                   .build();
 
-  lib.exec_binary_kernel(iter, func_name, alpha);
+  lib.exec_binary_kernel(iter, func_name, alpha, std::nullopt, std::nullopt, ilp_threshold);
 }
 
 void ternary_op_kernel(const std::string func_name,
                        const Tensor& input,
                        const Tensor& other1,
                        const Tensor& other2,
-                       const Tensor& output) {
+                       const Tensor& output,
+                       std::optional<uint32_t> ilp_threshold) {
   // Match binary_op_kernel (and CPU's out= semantics): resize the output to
   // the broadcast shape before the empty check, so an empty out tensor is
   // filled rather than silently left empty.
@@ -93,7 +95,7 @@ void ternary_op_kernel(const std::string func_name,
                   .resize_outputs(false)
                   .build();
 
-  lib.exec_ternary_kernel(iter, func_name);
+  lib.exec_ternary_kernel(iter, func_name, ilp_threshold);
 }
 
 } // namespace mps
