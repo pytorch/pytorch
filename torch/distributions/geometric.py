@@ -117,7 +117,9 @@ class Geometric(Distribution):
     def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=None):
+        if sample_shape is None:
+            sample_shape = torch.Size()
         shape = self._extended_shape(sample_shape)
         tiny = torch.finfo(self.probs.dtype).tiny
         with torch.no_grad():

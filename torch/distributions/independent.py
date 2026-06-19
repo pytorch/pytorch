@@ -111,10 +111,14 @@ class Independent(Distribution, Generic[D]):
     def variance(self) -> Tensor:
         return self.base_dist.variance
 
-    def sample(self, sample_shape=torch.Size()) -> Tensor:
+    def sample(self, sample_shape=None) -> Tensor:
+        if sample_shape is None:
+            sample_shape = torch.Size()
         return self.base_dist.sample(sample_shape)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size | None = None) -> Tensor:
+        if sample_shape is None:
+            sample_shape = torch.Size()
         return self.base_dist.rsample(sample_shape)
 
     def log_prob(self, value):

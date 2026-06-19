@@ -235,10 +235,12 @@ class UniformQuantizationObserverBase(ObserverBase):
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=None,
         is_dynamic=False,
         **kwargs,
     ) -> None:
+        if eps is None:
+            eps = torch.finfo(torch.float32).eps
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         super().__init__(dtype=dtype, is_dynamic=is_dynamic, **kwargs)
         self.qscheme = qscheme
@@ -512,10 +514,12 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=None,
         is_dynamic=False,
         **kwargs,
     ) -> None:
+        if eps is None:
+            eps = torch.finfo(torch.float32).eps
         if not is_per_tensor(qscheme):
             raise NotImplementedError(
                 "MinMaxObserver's qscheme only support torch.per_tensor_symmetric \
@@ -638,10 +642,12 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         reduce_range=False,
         quant_min=None,
         quant_max=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=None,
         is_dynamic=False,
         **kwargs,
     ) -> None:
+        if eps is None:
+            eps = torch.finfo(torch.float32).eps
         if not is_per_tensor(qscheme):
             raise NotImplementedError(
                 f"MovingAverageMinMaxObserver's qscheme only support \
@@ -723,10 +729,12 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=None,
         is_dynamic=False,
         **kwargs,
     ) -> None:
+        if eps is None:
+            eps = torch.finfo(torch.float32).eps
         if not is_per_channel(qscheme):
             raise NotImplementedError(
                 "PerChannelMinMaxObserver's qscheme only support \
@@ -931,10 +939,12 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         reduce_range=False,
         quant_min=None,
         quant_max=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=None,
         is_dynamic=False,
         **kwargs,
     ) -> None:
+        if eps is None:
+            eps = torch.finfo(torch.float32).eps
         if not is_per_channel(qscheme):
             raise NotImplementedError(
                 "MovingAveragePerChannelMinMaxObserver's qscheme only support \
@@ -1022,10 +1032,12 @@ class HistogramObserver(UniformQuantizationObserverBase):
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=None,
         is_dynamic=False,
         **kwargs,
     ) -> None:
+        if eps is None:
+            eps = torch.finfo(torch.float32).eps
         if not is_per_tensor(qscheme):
             raise NotImplementedError(
                 "HistogramObserver's qscheme only support torch.per_tensor_symmetric \

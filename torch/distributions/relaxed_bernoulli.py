@@ -101,7 +101,9 @@ class LogitRelaxedBernoulli(Distribution):
     def param_shape(self) -> torch.Size:
         return self._param.size()
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size | None = None) -> Tensor:
+        if sample_shape is None:
+            sample_shape = torch.Size()
         shape = self._extended_shape(sample_shape)
         probs = clamp_probs(self.probs.expand(shape))
         uniforms = clamp_probs(

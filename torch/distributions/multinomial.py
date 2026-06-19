@@ -109,7 +109,9 @@ class Multinomial(Distribution):
     def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=None):
+        if sample_shape is None:
+            sample_shape = torch.Size()
         sample_shape = torch.Size(sample_shape)
         samples = self._categorical.sample(
             torch.Size((self.total_count,)) + sample_shape

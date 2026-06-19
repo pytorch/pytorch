@@ -211,7 +211,9 @@ class LowRankMultivariateNormal(Distribution):
             self._batch_shape + self._event_shape + self._event_shape
         )
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size | None = None) -> Tensor:
+        if sample_shape is None:
+            sample_shape = torch.Size()
         shape = self._extended_shape(sample_shape)
         W_shape = shape[:-1] + self.cov_factor.shape[-1:]
         eps_W = _standard_normal(W_shape, dtype=self.loc.dtype, device=self.loc.device)

@@ -140,26 +140,30 @@ class TransformedDistribution(Distribution):
     def has_rsample(self) -> bool:  # type: ignore[override]
         return self.base_dist.has_rsample
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=None):
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched. Samples first from
         base distribution and applies `transform()` for every transform in the
         list.
         """
+        if sample_shape is None:
+            sample_shape = torch.Size()
         with torch.no_grad():
             x = self.base_dist.sample(sample_shape)
             for transform in self.transforms:
                 x = transform(x)
             return x
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size | None = None) -> Tensor:
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
         are batched. Samples first from base distribution and applies
         `transform()` for every transform in the list.
         """
+        if sample_shape is None:
+            sample_shape = torch.Size()
         x = self.base_dist.rsample(sample_shape)
         for transform in self.transforms:
             x = transform(x)

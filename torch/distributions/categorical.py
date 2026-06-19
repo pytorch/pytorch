@@ -141,7 +141,9 @@ class Categorical(Distribution):
             device=self.probs.device,
         )
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=None):
+        if sample_shape is None:
+            sample_shape = torch.Size()
         if not isinstance(sample_shape, torch.Size):
             sample_shape = torch.Size(sample_shape)
         probs_2d = self.probs.reshape(-1, self._num_events)

@@ -12,8 +12,6 @@ from torch._C._distributed_c10d import (
     _create_work_from_future,
     AllgatherOptions,
     AllreduceOptions,
-    AllToAllOptions,
-    BarrierOptions,
     BroadcastOptions,
     ReduceOp,
     ReduceScatterOptions,
@@ -404,7 +402,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         input_buffer: torch.Tensor,
         output_split_sizes: list[int] | None,
         input_split_sizes: list[int] | None,
-        opts=AllToAllOptions(),
+        opts=None,
     ) -> torch.Tensor:
         coll = ProcessLocalGroup._start_coll(AllToAllBase(), self)
         res = coll.join(
@@ -414,70 +412,84 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def alltoall(self, output_tensor_list, input_tensor_list, opts=AllToAllOptions()):
+    def alltoall(self, output_tensor_list, input_tensor_list, opts=None):
         coll = ProcessLocalGroup._start_coll(AllToAll(), self)
         res = coll.join(self._rank, (output_tensor_list, input_tensor_list))
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def allreduce(self, tensor_list, opts=AllreduceOptions()):
+    def allreduce(self, tensor_list, opts=None):
+        if opts is None:
+            opts = AllreduceOptions()
         coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
         res = coll.join(self._rank, tensor_list)
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def allreduce_coalesced(self, tensor_list, opts=AllreduceOptions()):
+    def allreduce_coalesced(self, tensor_list, opts=None):
+        if opts is None:
+            opts = AllreduceOptions()
         coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
         res = coll.join(self._rank, tensor_list)
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def barrier(self, opts=BarrierOptions()):
+    def barrier(self, opts=None):
         return self.allreduce(tensor_list=[torch.ones(1)])
 
-    def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
+    def allgather(self, output_tensors, input_tensor, opts=None):
         coll = ProcessLocalGroup._start_coll(AllGather(), self)
         res = coll.join(self._rank, (output_tensors, input_tensor))
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def all_gather_single(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+    def all_gather_single(self, output_tensor, input_tensor, opts=None):
+        if opts is None:
+            opts = AllgatherOptions()
         tensor_list = list(torch.chunk(output_tensor, self._world_size))
         return self.allgather([tensor_list], [input_tensor], opts)
 
-    def broadcast(self, tensor_list, opts=BroadcastOptions()):
+    def broadcast(self, tensor_list, opts=None):
+        if opts is None:
+            opts = BroadcastOptions()
         coll = ProcessLocalGroup._start_coll(Broadcast(opts.rootRank), self)
         res = coll.join(self._rank, tensor_list)
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def scatter(self, output_tensors, input_tensors, opts=ScatterOptions()):
+    def scatter(self, output_tensors, input_tensors, opts=None):
+        if opts is None:
+            opts = ScatterOptions()
         coll = ProcessLocalGroup._start_coll(Scatter(opts.rootRank), self)
         res = coll.join(self._rank, (output_tensors, input_tensors))
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def gather(self, output_tensors, input_tensors, opts=ScatterOptions()):
+    def gather(self, output_tensors, input_tensors, opts=None):
+        if opts is None:
+            opts = ScatterOptions()
         coll = ProcessLocalGroup._start_coll(Gather(opts.rootRank), self)
         res = coll.join(self._rank, (output_tensors, input_tensors))
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):
+    def reduce_scatter(self, output_tensor, scatter_list, opts=None):
+        if opts is None:
+            opts = ReduceScatterOptions()
         coll = ProcessLocalGroup._start_coll(ReduceScatter(opts.reduceOp), self)
         res = coll.join(self._rank, (output_tensor, scatter_list))
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def reduce_scatter_single(
-        self, output_tensor, input_tensor, opts=ReduceScatterOptions()
-    ):
+    def reduce_scatter_single(self, output_tensor, input_tensor, opts=None):
+        if opts is None:
+            opts = ReduceScatterOptions()
         tensor_list = list(torch.chunk(input_tensor, self._world_size))
         return self.reduce_scatter([output_tensor], [tensor_list], opts)
 
-    def reduce_scatter_single_coalesced(
-        self, output_tensors, input_tensors, opts=ReduceScatterOptions()
-    ):
+    def reduce_scatter_single_coalesced(self, output_tensors, input_tensors, opts=None):
+        if opts is None:
+            opts = ReduceScatterOptions()
         works = [
             self.reduce_scatter_single(output_tensor, input_tensor, opts)
             for output_tensor, input_tensor in zip(
@@ -489,8 +501,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         return works[-1]
 
     def all_gather_single_coalesced(
-        self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()
+        self, output_tensor_list, input_tensor_list, opts=None
     ):
+        if opts is None:
+            opts = AllgatherOptions()
         res = None
         for o_t, i_t in zip(output_tensor_list, input_tensor_list, strict=True):
             res = self.all_gather_single(o_t, i_t)

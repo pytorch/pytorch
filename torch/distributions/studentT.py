@@ -84,7 +84,7 @@ class StudentT(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size | None = None) -> Tensor:
         # NOTE: This does not agree with scipy implementation as much as other distributions.
         # (see https://github.com/fritzo/notebooks/blob/master/debug-student-t.ipynb). Using DoubleTensor
         # parameters seems to help.
@@ -92,6 +92,8 @@ class StudentT(Distribution):
         #   X ~ Normal(0, 1)
         #   Z ~ Chi2(df)
         #   Y = X / sqrt(Z / df) ~ StudentT(df)
+        if sample_shape is None:
+            sample_shape = torch.Size()
         shape = self._extended_shape(sample_shape)
         X = _standard_normal(shape, dtype=self.df.dtype, device=self.df.device)
         Z = self._chi2.rsample(sample_shape)

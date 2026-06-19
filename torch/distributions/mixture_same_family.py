@@ -175,7 +175,9 @@ class MixtureSameFamily(Distribution):
         )  # [B, k]
         return torch.logsumexp(log_prob_x + log_mix_prob, dim=-1)  # [S, B]
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=None):
+        if sample_shape is None:
+            sample_shape = torch.Size()
         with torch.no_grad():
             sample_len = len(sample_shape)
             batch_len = len(self.batch_shape)
