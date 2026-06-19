@@ -47,14 +47,20 @@ from logging import getLogger
 from typing import Any, TypeAlias
 
 import torch
-from torch.cuda._utils import _check_cuda_bindings, _HAS_CUDA_BINDINGS
+from torch.cuda._utils import (
+    _check_cuda_bindings,
+    _check_cuda_bindings_driver,
+    _HAS_CUDA_BINDINGS,
+)
 
 
 try:
     from cuda.bindings import (  # pyrefly: ignore[missing-import]
+        driver as _cuda_driver,
         runtime as _cuda_runtime,
     )
 except ImportError:
+    _cuda_driver = None  # type: ignore[assignment]
     _cuda_runtime = None  # type: ignore[assignment]
 
 
@@ -181,6 +187,18 @@ def _get_dependent_nodes(node: Any) -> list[Any]:
     return list(dependents[:num_dependents])
 
 
+def _get_node_type(node: Any) -> Any:
+    """Return graph node type without tripping runtime bugs on newer node kinds.
+
+    The runtime ``cudaGraphNodeGetType`` can return ``cudaErrorUnknown`` (999)
+    for valid nodes whose driver type is ``CU_GRAPH_NODE_TYPE_BATCH_MEM_OP``.
+    Query via the driver API instead.
+    """
+    return _check_cuda_bindings_driver(
+        _cuda_driver.cuGraphNodeGetType(node)  # pyrefly: ignore[missing-attribute]
+    )
+
+
 def _collect_descendants(
     start_nodes: list[Any],
     *,
@@ -220,17 +238,20 @@ def _collect_descendants(
 # toolsId -> list of annotation objects.
 _kernel_annotations: defaultdict[int, list[Any]] = defaultdict(list)
 
-# Node types we annotate. Initialized lazily to avoid touching cuda.bindings
-# at import time.
+# Node types we annotate (kernels, memcpys, and batch mem ops), as driver
+# node-type enums. Initialized lazily to avoid touching cuda.bindings at import
+# time.
 _ANNOTATABLE_TYPES: set[Any] | None = None
 
 
 def _get_annotatable_types() -> set[Any]:
     global _ANNOTATABLE_TYPES
     if _ANNOTATABLE_TYPES is None:
+        node_types = _cuda_driver.CUgraphNodeType  # pyrefly: ignore[missing-attribute]
         _ANNOTATABLE_TYPES = {
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeKernel,  # pyrefly: ignore[missing-attribute]
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemcpy,  # pyrefly: ignore[missing-attribute]
+            node_types.CU_GRAPH_NODE_TYPE_KERNEL,
+            node_types.CU_GRAPH_NODE_TYPE_MEMCPY,
+            node_types.CU_GRAPH_NODE_TYPE_BATCH_MEM_OP,
         }
     return _ANNOTATABLE_TYPES
 
@@ -306,11 +327,7 @@ def mark_kernels(annotation: str | dict[str, Any]):
     annotatable = _get_annotatable_types()
     tools_ids: list[int] = []
     for node in scope_nodes.values():
-        node_type = _check_cuda_bindings(
-            _cuda_runtime.cudaGraphNodeGetType(  # pyrefly: ignore[missing-attribute]
-                node
-            )
-        )
+        node_type = _get_node_type(node)
         if node_type not in annotatable:
             continue
         tools_ids.append(
