@@ -1311,7 +1311,7 @@ std::tuple<Tensor, std::optional<int64_t>> repeat_interleave_Tensor_batch_rule(
       "repeat_interleave: the `repeats` tensor must be 1-dimensional for each "
       "batch element, but got a ", repeat_.dim() - 1, "-dimensional tensor.");
 
-  const auto out_size = output_size.value();
+  auto out_size = output_size.value();
   // Construct the gather indices without any data-dependent shapes so the rule
   // is a regular batched computation. For each batch element b:
   //   marks[b, cumsum(repeat[b])] += 1
@@ -1322,7 +1322,7 @@ std::tuple<Tensor, std::optional<int64_t>> repeat_interleave_Tensor_batch_rule(
   const auto cumsum = repeat_.cumsum(-1);
   auto marks = at::zeros_symint({batch_size, out_size + 1}, repeat_.options());
   marks = marks.scatter_add(-1, cumsum.to(at::kLong), at::ones_like(cumsum));
-  auto result = marks.narrow_symint(-1, 0, out_size).cumsum(-1);
+  auto result = marks.narrow_symint(-1, 0, std::move(out_size)).cumsum(-1);
   return std::make_tuple(std::move(result), 0);
 }
 
