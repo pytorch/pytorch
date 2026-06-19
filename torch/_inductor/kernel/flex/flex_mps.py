@@ -110,16 +110,8 @@ def lower_mps(
         )
 
     sizevars = V.graph.sizevars
-    # Kernel indexes K/V with the same b_idx as Q; no broadcast logic for Bkv=1 yet.
-    # check_equals adds a runtime guard B == Bkv; it raises AssertionError if it
-    # can prove they differ — convert to NIE so callers see the right error.
-    try:
-        sizevars.check_equals(B, Bkv)
-    except AssertionError:
-        raise NotImplementedError(
-            f"flex_attention on MPS does not yet support batch broadcasting "
-            f"between query and key/value (Bq != Bkv); got Bq={B} Bkv={Bkv}"
-        ) from None
+    if not sizevars.evaluate_expr(sympy.Eq(B, Bkv) | sympy.Eq(Bkv, 1)):
+        raise AssertionError(f"Bq and Bkv must broadcastable. Got Bq={B} and Bkv={Bkv}")
 
     SPARSE_KV_BLOCK_SIZE_val = sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE_val = sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
@@ -212,6 +204,7 @@ def lower_mps(
     # Order must match the unpack in metal_flex_attention_template's `scalar_names`.
     scalar_args = [
         B,
+        Bkv,
         Hq,
         Hkv,
         seq_len_q,
