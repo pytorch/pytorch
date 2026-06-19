@@ -2384,8 +2384,13 @@ class TestProfiler(TestCase):
 
     def test_profiler_correlation_id(self):
         """
-        We expect the correlation_id to be unique across multiple invocation of the profiler,
-        So we will reuse id_uniqueness_set.
+        We expect the correlation_id of CPU operator events to be unique across
+        multiple invocations of the profiler, so we will reuse id_uniqueness_set.
+        Only cpu_op events are checked: with CUDA available, profile() also
+        collects CUDA activities, and CUPTI's device-enumeration calls at startup
+        (cudaGetDeviceCount, etc.) are recorded as cuda_runtime events whose
+        correlation ids come from a separate counter (also starting at 1) and
+        would otherwise collide with the operator ids.
         """
         id_uniqueness_set = set()
         model = torch.nn.Sequential(
@@ -2401,7 +2406,8 @@ class TestProfiler(TestCase):
                 model(inputs)
             for event in prof.profiler.kineto_results.events():
                 corr_id = event.correlation_id()
-                if (corr_id) and event.device_type() == DeviceType.CPU:
+                is_cpu = event.device_type() == DeviceType.CPU
+                if corr_id and is_cpu and event.activity_type() == "cpu_op":
                     self.assertTrue(corr_id not in id_uniqueness_set)
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
