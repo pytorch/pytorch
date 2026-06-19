@@ -770,8 +770,13 @@ class DebugFormatter:
 
         general_properties = {
             "op_name": name,
+            # cuda_device_* keys are kept for backward compatibility with existing
+            # downstream JSON parsers; remove once downstream consumers have
+            # migrated to the generic device_* equivalents.
             "cuda_device_name": torch.cuda.get_device_name(),
             "cuda_device_count": torch.cuda.device_count(),
+            "device_name": torch.accelerator.get_device_name(),
+            "device_count": torch.accelerator.device_count(),
             "input_nodes": [build_node_info(node) for node in input_nodes],
             "autotuning_time": elapse,
             "precompile_time": precompile_elapse,

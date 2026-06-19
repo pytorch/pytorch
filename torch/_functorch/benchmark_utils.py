@@ -10,7 +10,7 @@ from typing import Any, TYPE_CHECKING
 from typing_extensions import TypeVar
 
 import torch
-from torch.profiler import profile, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity, supported_activities
 
 
 if TYPE_CHECKING:
@@ -18,6 +18,13 @@ if TYPE_CHECKING:
 
 
 _R = TypeVar("_R")
+
+_DEVICE_TO_ACTIVITY: dict[str, ProfilerActivity] = {
+    "cuda": ProfilerActivity.CUDA,
+    "xpu": ProfilerActivity.XPU,
+    "mtia": ProfilerActivity.MTIA,
+    "hpu": ProfilerActivity.HPU,
+}
 
 
 def synchronize() -> None:
@@ -46,7 +53,8 @@ def dump_chrome_trace(
     """
 
     if devices is None:
-        devices = ["cuda"]
+        acc = torch.accelerator.current_accelerator(check_available=True)
+        devices = [acc.type] if acc is not None else ["cpu"]
 
     global synchronize
     if devices != ["cpu"] and torch.accelerator.is_available():
@@ -197,7 +205,7 @@ def benchmark_utilization(
         return a.sum()
 
 
-    a = torch.rand(2**20, device="cuda")
+    a = torch.rand(2**20, device=torch.accelerator.current_accelerator())
     utilization, mm_conv_utilization = benchmark_utilization(
         f, a, "tmp", trace_file_name="tmp_chrome_trace"
     )
@@ -228,15 +236,28 @@ def benchmark_utilization(
     if optimize_ctx is None:
         optimize_ctx = contextlib.nullcontext()
 
+    acc = torch.accelerator.current_accelerator(check_available=True)
+    if acc is not None:
+        device_type = acc.type
+        device_activity = _DEVICE_TO_ACTIVITY.get(device_type, ProfilerActivity.PrivateUse1)
+        activities = (
+            [device_activity]
+            if device_activity in supported_activities()
+            else [ProfilerActivity.CPU]
+        )
+    else:
+        device_type = "cpu"
+        activities = [ProfilerActivity.CPU]
+
     chrome_trace_file_name = os.path.join(trace_folder, trace_file_name + ".json")
     total_length = dump_chrome_trace(
         f,
         input_,
         chrome_trace_file_name,
         optimize_ctx,
-        [ProfilerActivity.CUDA],
+        activities,
         num_runs=num_runs,
-        devices=["cuda"],
+        devices=[device_type],
     )
     utilization, mm_conv_utilization = compute_utilization(
         chrome_trace_file_name, total_length
