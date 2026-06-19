@@ -3395,7 +3395,9 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     sequences_size = len(sequences)
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
-    max_len = max(x.size(0) for x in sequences)
+    # Fold with sym_max (not Python max, which does pairwise `>` comparisons)
+    # so symbolic/unbacked sequence lengths don't trigger a data-dependent guard.
+    max_len = reduce(torch.sym_max, (x.size(0) for x in sequences))
     if batch_first:
         out_dims = (sequences_size, max_len)
     else:
