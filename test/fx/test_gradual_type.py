@@ -9,6 +9,7 @@ from torch.fx import GraphModule, symbolic_trace
 from torch.fx.annotate import annotate
 from torch.fx.experimental.graph_gradual_typechecker import (
     broadcast_types,
+    calculate_out_dimension,
     GraphTypeChecker,
     Refine,
 )
@@ -142,6 +143,16 @@ class AnnotationsTest(TestCase):
 
 
 class TypeCheckerTest(TestCase):
+    def test_calculate_out_dimension_asymmetric_stride(self):
+        # The width dimension (index=1) must use stride[1], not stride[0]. With
+        # an asymmetric stride the two dimensions otherwise disagree.
+        conv = torch.nn.Conv2d(3, 6, kernel_size=3, stride=(2, 3))
+        # n = 32 + 2*0 - 1*(3-1) - 1 = 29
+        # height (index=0): 29 // stride[0]=2 + 1 = 15
+        # width  (index=1): 29 // stride[1]=3 + 1 = 10
+        self.assertEqual(calculate_out_dimension(32, conv, 0), 15)
+        self.assertEqual(calculate_out_dimension(32, conv, 1), 10)
+
     def test_type_check_add_with_broadcast(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
