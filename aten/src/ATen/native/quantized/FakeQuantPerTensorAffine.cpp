@@ -4,6 +4,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/FakeQuantAffine.h>
+#include <ATen/quantized/Quantizer.h>
 
 // FakeQuantize Op for PerTensorAffine quantization scheme.
 
@@ -45,6 +46,8 @@ Tensor fake_quantize_per_tensor_affine(
     const Tensor& zero_point,
     int64_t quant_min,
     int64_t quant_max) {
+  checkPerTensorQParamTensors(
+      scale, zero_point, "fake_quantize_per_tensor_affine");
   auto res = at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
       self, scale, zero_point, at::ones(1, self.options().dtype(at::kLong)), quant_min, quant_max);
   return std::get<0>(std::move(res));
@@ -96,6 +99,8 @@ std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask_tensor_qpa
     const Tensor& fake_quant_enabled,
     int64_t quant_min,
     int64_t quant_max) {
+  checkPerTensorQParamTensors(
+      scale, zero_point, "fake_quantize_per_tensor_affine");
   TORCH_CHECK(
       quant_min <= quant_max,
       "`quant_min` should be less than or \

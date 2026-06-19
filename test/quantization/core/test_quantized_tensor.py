@@ -506,6 +506,26 @@ class TestQuantizedTensor(TestCase):
             rqr = qr.dequantize()
             self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
+    def test_quantize_per_tensor_complex_scale_raises(self):
+        x = torch.randn(2, 2)
+        scale = torch.tensor([1 + 2j])
+        zero_point = torch.tensor(0)
+        error_msg = "scale tensor must be a real floating point or integral type"
+        with self.assertRaisesRegex(ValueError, error_msg):
+            torch.quantize_per_tensor(x, scale, zero_point, torch.qint8)
+        with self.assertRaisesRegex(ValueError, error_msg):
+            torch.quantize_per_tensor(
+                [torch.randn(2), torch.randn(2)],
+                torch.tensor([1 + 2j, 0.2]),
+                torch.tensor([0, 10]),
+                torch.quint8,
+            )
+        with self.assertRaisesRegex(ValueError, error_msg):
+            torch.fake_quantize_per_tensor_affine(
+                x, scale, zero_point, 0, 255)
+        torch.quantize_per_tensor(
+            x, torch.tensor(0.1), torch.tensor(10), torch.quint8)
+
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_per_tensor_to_device(self):
         dtypes = [

@@ -230,6 +230,22 @@ TORCH_API QTensorImpl* get_qtensorimpl(const TensorBase& self);
 
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
+inline void checkPerTensorQParamTensors(
+    const Tensor& scale,
+    const Tensor& zero_point,
+    const char* op_name = "quantize_per_tensor") {
+  TORCH_CHECK_VALUE(
+      !c10::isComplexType(scale.scalar_type()),
+      op_name,
+      ": scale tensor must be a real floating point or integral type, but got ",
+      scale.scalar_type());
+  TORCH_CHECK_VALUE(
+      !c10::isComplexType(zero_point.scalar_type()),
+      op_name,
+      ": zero_point tensor must be a real floating point or integral type, but got ",
+      zero_point.scalar_type());
+}
+
 TORCH_API QuantizerPtr
 make_per_tensor_affine_quantizer(
     double scale, int64_t zero_point, ScalarType scalar_type);

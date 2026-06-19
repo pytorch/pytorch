@@ -2,6 +2,7 @@
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
 #include <ATen/native/vulkan/ops/Utils.h>
+#include <ATen/quantized/Quantizer.h>
 #include <torch/library.h>
 
 namespace at {
@@ -98,6 +99,7 @@ Tensor quantize_per_tensor_tensor_qparams(
   TORCH_CHECK(
       (scale.numel() == 1 && zero_point.numel() == 1),
       "Only 1 element expected in scale and zero_point");
+  checkPerTensorQParamTensors(scale, zero_point);
   return quantize_per_tensor(
       input_arg, scale.item().toDouble(), zero_point.item().toLong(), dtype);
 }
