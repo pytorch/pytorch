@@ -17,6 +17,7 @@ import operator
 import threading
 import time
 import traceback
+import warnings
 from collections import defaultdict
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, nullcontext
@@ -188,6 +189,32 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
     return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
 
 
+def _is_autograd_version_check_error(exc: BaseException) -> bool:
+    if not isinstance(exc, RuntimeError):
+        return False
+
+    msg = str(exc)
+    return (
+        "one of the variables needed for gradient computation has been modified" in msg
+        and "inplace operation" in msg
+        and any(
+            frame.name in ("grad", "_engine_run_backward")
+            and "torch/autograd" in frame.filename.replace("\\", "/")
+            for frame in traceback.extract_tb(exc.__traceback__)
+        )
+    )
+
+
+def _emit_recorded_warnings(recorded_warnings: list[warnings.WarningMessage]) -> None:
+    for warning in recorded_warnings:
+        warnings.warn_explicit(
+            warning.message,
+            warning.category,
+            warning.filename,
+            warning.lineno,
+        )
+
+
 def aot_stage1_graph_capture(
     aot_state: AOTState,
     orig_flat_fn: FlatFn,
@@ -239,19 +266,41 @@ def aot_stage1_graph_capture(
         # after we get the joint graph. See [Note: Selective Decomposition] for details.
         if aot_state.needs_autograd and not aot_config.pre_dispatch:
             # FYI: this being moved to trigger in export is new, seems fine!
-            with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
-                (
-                    graph,
-                    updated_flat_args,
-                    updated_flat_args_descs,
-                    maybe_subclass_meta,
-                ) = aot_dispatch_autograd_graph(
-                    flat_fn,
-                    aot_state.flat_args,
-                    aot_state.flat_args_descs,
-                    graph_capture_aot_config,
-                    fw_metadata=aot_state.fw_metadata,
-                )
+            recorded_warnings: list[warnings.WarningMessage] = []
+            try:
+                with (
+                    warnings.catch_warnings(record=True) as recorded_warnings,
+                    dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True),
+                ):
+                    (
+                        graph,
+                        updated_flat_args,
+                        updated_flat_args_descs,
+                        maybe_subclass_meta,
+                    ) = aot_dispatch_autograd_graph(
+                        flat_fn,
+                        aot_state.flat_args,
+                        aot_state.flat_args_descs,
+                        graph_capture_aot_config,
+                        fw_metadata=aot_state.fw_metadata,
+                    )
+            except Exception as exc:
+                if (
+                    not aot_config.is_export
+                    and CompileContext.try_get() is not None
+                    and _is_autograd_version_check_error(exc)
+                ):
+                    from torch._dynamo.exc import SkipFrame
+
+                    raise SkipFrame(
+                        "AOTAutograd cannot trace this backward ahead of time "
+                        "because autograd reports an in-place version-counter "
+                        "error. Skipping compilation preserves eager forward "
+                        "semantics and eager backward error timing."
+                    ) from exc
+                _emit_recorded_warnings(recorded_warnings)
+                raise
+            _emit_recorded_warnings(recorded_warnings)
         else:
             graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
                 aot_dispatch_base_graph(
