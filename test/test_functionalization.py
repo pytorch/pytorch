@@ -15,7 +15,8 @@ from torch._subclasses.functional_tensor import (
     FunctionalTensor,
     FunctionalTensorMode,
 )
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.export.decomp_utils import CustomDecompTable
+from torch.fx.experimental.proxy_tensor import get_proxy_mode, make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_utils import (
@@ -2162,6 +2163,96 @@ def forward(self, x_1):
             )
         )(x)
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
+
+    def test_python_functionalization_proxy_decomposition_table(self):
+        def f(x):
+            return torch.neg(x)
+
+        decomp_layers_seen = []
+
+        def neg_decomp(x):
+            proxy_mode = get_proxy_mode()
+            if proxy_mode is None:
+                raise AssertionError("Expected proxy mode")
+            decomp_layers_seen.append(proxy_mode.decomp_layers)
+            out = torch.zeros_like(x)
+            out.sub_(x)
+            return out
+
+        x = torch.randn(4)
+        fx_g = make_fx(
+            dispatch_functionalize(f),
+            decomposition_table={torch.ops.aten.neg.default: neg_decomp},
+        )(x)
+
+        self.assertEqual(fx_g(x), f(x))
+        self.assertEqual(decomp_layers_seen, [1])
+        ops = {node.target for node in fx_g.graph.nodes if node.op == "call_function"}
+        self.assertNotIn(torch.ops.aten.neg.default, ops)
+        self.assertIn(torch.ops.aten.sub.Tensor, ops)
+        self.assertNotIn(torch.ops.aten.sub_.Tensor, ops)
+
+    def test_python_functionalization_custom_decomposition_table_no_proxy(self):
+        def f(x):
+            return torch.neg(x)
+
+        decomp_seen = []
+
+        def neg_decomp(x):
+            decomp_seen.append(True)
+            out = torch.zeros_like(x)
+            out.sub_(x)
+            return out
+
+        decompositions = CustomDecompTable()
+        decompositions[torch.ops.aten.neg.default] = neg_decomp
+        mode = FunctionalTensorMode(decomposition_table=decompositions)
+        x = torch.randn(4)
+
+        self.assertEqual(dispatch_functionalize(f, mode)(x), f(x))
+        self.assertEqual(decomp_seen, [True])
+
+    def test_python_functionalization_skips_inductor_decomposition_table(self):
+        from torch._inductor.decomposition import decompositions as inductor_decomps
+
+        def f(x, weight, bias):
+            return torch.ops.aten.native_layer_norm.default(x, [4], weight, bias, 1e-5)[
+                0
+            ]
+
+        x = torch.randn(2, 4)
+        weight = torch.randn(4)
+        bias = torch.randn(4)
+        mode = FunctionalTensorMode(decomposition_table=inductor_decomps)
+        fx_g = make_fx(dispatch_functionalize(f, mode))(x, weight, bias)
+
+        self.assertEqual(fx_g(x, weight, bias), f(x, weight, bias))
+        ops = {node.target for node in fx_g.graph.nodes if node.op == "call_function"}
+        self.assertIn(torch.ops.aten.native_layer_norm.default, ops)
+        self.assertNotIn(torch.ops.aten.var_mean.correction, ops)
+
+    def test_export_decomposition_cast_does_not_emit_metadata_assert(self):
+        def f(x):
+            return torch.neg(x)
+
+        def neg_decomp(x):
+            x = x.to(x.dtype)
+            out = torch.zeros_like(x)
+            out.sub_(x)
+            return out
+
+        mode = FunctionalTensorMode(
+            export=True,
+            decomposition_table={torch.ops.aten.neg.default: neg_decomp},
+        )
+        x = torch.randn(4)
+        fx_g = make_fx(dispatch_functionalize(f, mode))(x)
+
+        self.assertEqual(fx_g(x), f(x))
+        ops = {node.target for node in fx_g.graph.nodes if node.op == "call_function"}
+        self.assertNotIn(torch.ops.aten._assert_tensor_metadata.default, ops)
+        self.assertIn(torch.ops.aten.sub.Tensor, ops)
+        self.assertNotIn(torch.ops.aten.sub_.Tensor, ops)
 
     def test_python_functionalization_is_conj(self):
         def f(x):
