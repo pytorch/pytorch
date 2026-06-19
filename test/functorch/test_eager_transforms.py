@@ -6,6 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import copy
+import json
 import math
 import os
 import subprocess
@@ -1208,6 +1209,7 @@ class TestGradTransform(TestCase):
         with torch.inference_mode():
             y = grad(lambda x: (x**2).sum())(x)
         self.assertEqual(y, 2 * x)
+        self.assertNotInferenceTensorAndAutogradUsable(y)
 
     def test_inference_mode_nograd_outside_grad(self, device):
         x = torch.randn(3, device=device)
@@ -1229,6 +1231,7 @@ class TestGradTransform(TestCase):
         with torch.inference_mode():
             _, y = jvp(lambda x: (x**2).sum(), (x,), (t,))
         self.assertEqual(y, (2 * x * t).sum())
+        self.assertNotInferenceTensorAndAutogradUsable(y)
 
     def test_inference_mode_outside_jacrev(self, device):
         x = torch.randn(3, device=device)
@@ -1278,6 +1281,201 @@ class TestGradTransform(TestCase):
             grad(lambda x: (x**2).sum())(torch.randn(3, device=device))
             self.assertTrue(torch.is_inference_mode_enabled())
         self.assertTrue(not torch.is_inference_mode_enabled())
+
+    def assertNotInferenceTensorAndAutogradUsable(self, tensor):
+        self.assertFalse(tensor.is_inference())
+        tensor.requires_grad_(True)
+        tensor.sum().backward()
+        self.assertEqual(tensor.grad, torch.ones_like(tensor))
+
+    @skipIfTorchDynamo("checks eager functorch TLS state directly")
+    def test_inference_mode_outside_vmap(self, device):
+        x = torch.randn(5, 3, device=device)
+        inference_mode_enabled = []
+
+        def f(x):
+            inference_mode_enabled.append(torch.is_inference_mode_enabled())
+            return x**2
+
+        with torch.inference_mode():
+            y = vmap(f)(x)
+            self.assertTrue(torch.is_inference_mode_enabled())
+
+        self.assertFalse(torch.is_inference_mode_enabled())
+        self.assertEqual(inference_mode_enabled, [False])
+        self.assertEqual(y, x**2)
+        self.assertNotInferenceTensorAndAutogradUsable(y)
+
+    @skipIfTorchDynamo("checks eager functorch TLS state directly")
+    def test_inference_mode_outside_functionalize(self, device):
+        x = torch.randn(3, device=device)
+        inference_mode_enabled = []
+
+        def f(x):
+            inference_mode_enabled.append(torch.is_inference_mode_enabled())
+            y = x.clone()
+            y.add_(1)
+            return y.sin()
+
+        with torch.inference_mode():
+            y = torch.func.functionalize(f)(x)
+            self.assertTrue(torch.is_inference_mode_enabled())
+
+        self.assertFalse(torch.is_inference_mode_enabled())
+        self.assertEqual(inference_mode_enabled, [False])
+        self.assertEqual(y, (x + 1).sin())
+        self.assertNotInferenceTensorAndAutogradUsable(y)
+
+    @skipIfTorchDynamo("checks eager inference-mode TLS state directly")
+    def test_inference_mode_vmap_preserves_autograd_connectivity(self, device):
+        x = torch.randn(5, 3, device=device, requires_grad=True)
+        inference_mode_enabled = []
+        grad_enabled = []
+
+        def f(x):
+            inference_mode_enabled.append(torch.is_inference_mode_enabled())
+            grad_enabled.append(torch.is_grad_enabled())
+            return x.sin() * 2
+
+        with torch.inference_mode():
+            prev_grad_mode = torch.is_grad_enabled()
+            torch.set_grad_enabled(True)
+            try:
+                y = vmap(f)(x)
+                self.assertTrue(torch.is_inference_mode_enabled())
+                self.assertTrue(torch.is_grad_enabled())
+            finally:
+                torch.set_grad_enabled(prev_grad_mode)
+
+        self.assertEqual(inference_mode_enabled, [False])
+        self.assertEqual(grad_enabled, [True])
+        self.assertFalse(y.is_inference())
+        self.assertTrue(y.requires_grad)
+        y.sum().backward()
+        self.assertEqual(x.grad, 2 * x.detach().cos())
+
+    @skipIfTorchDynamo("checks eager inference-mode TLS state directly")
+    def test_inference_mode_functionalize_preserves_autograd_connectivity(self, device):
+        x = torch.randn(3, device=device, requires_grad=True)
+        inference_mode_enabled = []
+        grad_enabled = []
+
+        def f(x):
+            inference_mode_enabled.append(torch.is_inference_mode_enabled())
+            grad_enabled.append(torch.is_grad_enabled())
+            y = x.sin().clone()
+            y.add_(1)
+            return y * 2
+
+        with torch.inference_mode():
+            prev_grad_mode = torch.is_grad_enabled()
+            torch.set_grad_enabled(True)
+            try:
+                y = torch.func.functionalize(f)(x)
+                self.assertTrue(torch.is_inference_mode_enabled())
+                self.assertTrue(torch.is_grad_enabled())
+            finally:
+                torch.set_grad_enabled(prev_grad_mode)
+
+        self.assertEqual(inference_mode_enabled, [False])
+        self.assertEqual(grad_enabled, [True])
+        self.assertFalse(y.is_inference())
+        self.assertTrue(y.requires_grad)
+        y.sum().backward()
+        self.assertEqual(x.grad, 2 * x.detach().cos())
+
+    def test_inference_mode_nested_vmap_functionalize(self, device):
+        x = torch.randn(5, 3, device=device)
+
+        def f(x):
+            y = x.clone()
+            y.add_(1)
+            return y.cos()
+
+        with torch.inference_mode():
+            y = torch.func.functionalize(vmap(f))(x)
+            self.assertTrue(torch.is_inference_mode_enabled())
+
+        self.assertFalse(torch.is_inference_mode_enabled())
+        self.assertEqual(y, (x + 1).cos())
+        self.assertNotInferenceTensorAndAutogradUsable(y)
+
+    def test_inference_mode_restored_after_vmap_functionalize_exception(self, device):
+        def raises(x):
+            raise RuntimeError("intentional error")
+
+        with torch.inference_mode():
+            with self.assertRaisesRegex(RuntimeError, "intentional error"):
+                vmap(raises)(torch.randn(5, 3, device=device))
+            self.assertTrue(torch.is_inference_mode_enabled())
+
+        with torch.inference_mode():
+            with self.assertRaisesRegex(RuntimeError, "intentional error"):
+                torch.func.functionalize(raises)(torch.randn(3, device=device))
+            self.assertTrue(torch.is_inference_mode_enabled())
+
+        self.assertFalse(torch.is_inference_mode_enabled())
+
+    @skipIfTorchDynamo("checks eager functorch TLS state directly")
+    def test_inference_mode_vmap_functionalize_preserves_grad_mode(self, device):
+        def f(x):
+            return x**2
+
+        with torch.inference_mode():
+            prev_grad_mode = torch.is_grad_enabled()
+            torch.set_grad_enabled(True)
+            try:
+                vmap(f)(torch.randn(5, 3, device=device))
+                self.assertTrue(torch.is_grad_enabled())
+                torch.func.functionalize(f)(torch.randn(3, device=device))
+                self.assertTrue(torch.is_grad_enabled())
+            finally:
+                torch.set_grad_enabled(prev_grad_mode)
+
+    @skipIfTorchDynamo("serializes C++ interpreter state directly")
+    def test_inference_mode_deserialize_legacy_interpreter_json(self, device):
+        ft = torch._C._functorch
+        legacy_payloads = [
+            (
+                ft.TransformType.Grad,
+                """
+                {
+                  "type": 2,
+                  "level": 1,
+                  "savedLocalDispatchKeySet": null,
+                  "is_alive": false,
+                  "meta": {
+                    "Grad": {
+                      "prevGradMode": true,
+                      "prevInferenceMode": true
+                    }
+                  }
+                }
+                """,
+            ),
+            (
+                ft.TransformType.Jvp,
+                """
+                {
+                  "type": 3,
+                  "level": 1,
+                  "savedLocalDispatchKeySet": null,
+                  "is_alive": false,
+                  "meta": {
+                    "Jvp": {
+                      "prevFwdGradMode": true,
+                      "prevInferenceMode": true
+                    }
+                  }
+                }
+                """,
+            ),
+        ]
+
+        for expected_type, payload in legacy_payloads:
+            interp = ft.CInterpreter.deserialize(payload)
+            self.assertEqual(interp.key(), expected_type)
+            self.assertTrue(json.loads(interp.serialize())["prevInferenceMode"])
 
 
 @markDynamoStrictTest

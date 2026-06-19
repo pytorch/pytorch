@@ -123,8 +123,8 @@ struct VmapInterpreterMeta {
 };
 
 struct GradInterpreterMeta {
-  explicit GradInterpreterMeta(bool prevGradMode, bool prevInferenceMode = false)
-    : prevGradMode_(prevGradMode), prevInferenceMode_(prevInferenceMode) {}
+  explicit GradInterpreterMeta(bool prevGradMode)
+    : prevGradMode_(prevGradMode) {}
   GradInterpreterMeta() = default;
   GradInterpreterMeta(const GradInterpreterMeta&) = default;
   GradInterpreterMeta(GradInterpreterMeta&&) = default;
@@ -133,23 +133,20 @@ struct GradInterpreterMeta {
   ~GradInterpreterMeta() = default;
 
   bool prevGradMode_;
-  bool prevInferenceMode_;
   template <typename T>
   friend void to_json(T& json_j, const GradInterpreterMeta& json_t) {
     json_j["prevGradMode"] = json_t.prevGradMode_;
-    json_j["prevInferenceMode"] = json_t.prevInferenceMode_;
   }
 
   template <typename T>
   friend void from_json(const T& json_j, GradInterpreterMeta& json_t) {
     json_t.prevGradMode_ = json_j["prevGradMode"];
-    json_t.prevInferenceMode_ = json_j.value("prevInferenceMode", false);
   }
 };
 
 struct JvpInterpreterMeta {
-  explicit JvpInterpreterMeta(bool prevFwdGradMode, bool prevInferenceMode = false)
-    : prevFwdGradMode_(prevFwdGradMode), prevInferenceMode_(prevInferenceMode) {}
+  explicit JvpInterpreterMeta(bool prevFwdGradMode)
+    : prevFwdGradMode_(prevFwdGradMode) {}
   JvpInterpreterMeta() = default;
   JvpInterpreterMeta(const JvpInterpreterMeta&) = default;
   JvpInterpreterMeta(JvpInterpreterMeta&&) = default;
@@ -158,17 +155,14 @@ struct JvpInterpreterMeta {
   ~JvpInterpreterMeta() = default;
 
   bool prevFwdGradMode_;
-  bool prevInferenceMode_;
   template <typename T>
   friend void to_json(T& json_j, const JvpInterpreterMeta& json_t) {
     json_j["prevFwdGradMode"] = json_t.prevFwdGradMode_;
-    json_j["prevInferenceMode"] = json_t.prevInferenceMode_;
   }
 
   template <typename T>
   friend void from_json(const T& json_j, JvpInterpreterMeta& json_t) {
     json_t.prevFwdGradMode_ = json_j["prevFwdGradMode"];
-    json_t.prevInferenceMode_ = json_j.value("prevInferenceMode", false);
   }
 };
 
@@ -205,17 +199,46 @@ typedef std::variant<
 
 struct Interpreter {
   // factory functions
-  static Interpreter Vmap(int64_t level, c10::SymInt batchSize, RandomnessType randomness) {
-    return Interpreter(TransformType::Vmap, level, VmapInterpreterMeta(std::move(batchSize), randomness));
+  static Interpreter Vmap(
+      int64_t level,
+      c10::SymInt batchSize,
+      RandomnessType randomness,
+      bool prevInferenceMode = false) {
+    return Interpreter(
+        TransformType::Vmap,
+        level,
+        VmapInterpreterMeta(std::move(batchSize), randomness),
+        prevInferenceMode);
   }
-  static Interpreter Grad(int64_t level, bool prevGradMode, bool prevInferenceMode = false) {
-    return Interpreter(TransformType::Grad, level, GradInterpreterMeta(prevGradMode, prevInferenceMode));
+  static Interpreter Grad(
+      int64_t level,
+      bool prevGradMode,
+      bool prevInferenceMode = false) {
+    return Interpreter(
+        TransformType::Grad,
+        level,
+        GradInterpreterMeta(prevGradMode),
+        prevInferenceMode);
   }
-  static Interpreter Jvp(int64_t level, bool prevFwdGradMode, bool prevInferenceMode = false) {
-    return Interpreter(TransformType::Jvp, level, JvpInterpreterMeta(prevFwdGradMode, prevInferenceMode));
+  static Interpreter Jvp(
+      int64_t level,
+      bool prevFwdGradMode,
+      bool prevInferenceMode = false) {
+    return Interpreter(
+        TransformType::Jvp,
+        level,
+        JvpInterpreterMeta(prevFwdGradMode),
+        prevInferenceMode);
   }
-  static Interpreter Functionalize(int64_t level, bool functionalizeAddBackViews) {
-    return Interpreter(TransformType::Functionalize, level, FunctionalizeInterpreterMeta(functionalizeAddBackViews));
+  static Interpreter Functionalize(
+      int64_t level,
+      bool functionalizeAddBackViews,
+      bool prevInferenceMode = false) {
+    return Interpreter(
+        TransformType::Functionalize,
+        level,
+        FunctionalizeInterpreterMeta(functionalizeAddBackViews),
+        prevInferenceMode);
   }
 
   // methods
@@ -238,6 +261,16 @@ struct Interpreter {
     TORCH_INTERNAL_ASSERT(savedLocalDispatchKeySet_.has_value());
     return *savedLocalDispatchKeySet_;
   }
+  void saveInferenceModeLocalDispatchKeySet(
+      c10::impl::LocalDispatchKeySet keyset) {
+    TORCH_INTERNAL_ASSERT(!savedInferenceModeLocalDispatchKeySet_.has_value());
+    savedInferenceModeLocalDispatchKeySet_ = keyset;
+  }
+  const c10::impl::LocalDispatchKeySet&
+  getSavedInferenceModeLocalDispatchKeySet() const {
+    TORCH_INTERNAL_ASSERT(savedInferenceModeLocalDispatchKeySet_.has_value());
+    return *savedInferenceModeLocalDispatchKeySet_;
+  }
 
   // An Interpreter is alive if we are currently inside the ongoing transform
   // for the interpreter. For example, vmap(f)(x); inside of f, the vmap's
@@ -250,6 +283,10 @@ struct Interpreter {
   }
   void set_is_alive(bool alive) {
     *is_alive_ = alive;
+  }
+
+  bool prevInferenceMode() const {
+    return prevInferenceMode_;
   }
 
   // Please don't use this
@@ -268,6 +305,7 @@ struct Interpreter {
       json_j["savedLocalDispatchKeySet"] = nlohmann::json();
     }
     json_j["is_alive"] = *json_t.is_alive_;
+    json_j["prevInferenceMode"] = json_t.prevInferenceMode_;
     std::visit([&](auto&& arg) {
         using V = std::decay_t<decltype(arg)>;
         if constexpr (std::is_same_v<V, int64_t>) {
@@ -301,6 +339,17 @@ struct Interpreter {
     }
     json_t.is_alive_ = std::make_shared<bool>(json_j["is_alive"]);
     auto meta = json_j["meta"];
+    if (json_j.contains("prevInferenceMode")) {
+      json_t.prevInferenceMode_ = json_j["prevInferenceMode"];
+    } else if (meta.contains("Grad")) {
+      json_t.prevInferenceMode_ =
+          meta["Grad"].value("prevInferenceMode", false);
+    } else if (meta.contains("Jvp")) {
+      json_t.prevInferenceMode_ =
+          meta["Jvp"].value("prevInferenceMode", false);
+    } else {
+      json_t.prevInferenceMode_ = false;
+    }
     if (meta.contains("Torch")) {
       json_t.meta_.emplace<int64_t>(meta["Torch"].template get<int64_t>());
     } else if (meta.contains("Grad")) {
@@ -325,15 +374,26 @@ struct Interpreter {
   }
 
  private:
-  explicit Interpreter(TransformType type, int64_t level, InterpreterMeta meta):
-    type_(type), level_(level), is_alive_(std::make_shared<bool>(false)), meta_(std::move(meta)) {}
+  explicit Interpreter(
+      TransformType type,
+      int64_t level,
+      InterpreterMeta meta,
+      bool prevInferenceMode = false)
+      : type_(type),
+        level_(level),
+        is_alive_(std::make_shared<bool>(false)),
+        meta_(std::move(meta)),
+        prevInferenceMode_(prevInferenceMode) {}
 
   // fields
   TransformType type_{};
   int64_t level_{};
   std::optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
+  std::optional<c10::impl::LocalDispatchKeySet>
+      savedInferenceModeLocalDispatchKeySet_;
   std::shared_ptr<bool> is_alive_;
   InterpreterMeta meta_;
+  bool prevInferenceMode_{};
 };
 
 // Applies the following for-loop:
