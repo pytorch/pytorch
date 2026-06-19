@@ -1147,7 +1147,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
                 + "Axis is converted to "
                 + str(squeeze_dim + rank)
                 + " based on input shape at export time. "
-                + "Passing an tensor of different rank in execution will be incorrect.",
+                + "Passing a tensor of different rank in execution will be incorrect.",
                 stacklevel=2,
             )
             squeeze_dim += rank
@@ -3825,7 +3825,7 @@ def unsqueeze(g: jit_utils.GraphContext, self, dim):
                 + "Axis is converted to "
                 + str(dim + rank + 1)
                 + " based on input shape at export time. "
-                + "Passing an tensor of different rank in execution will be incorrect.",
+                + "Passing a tensor of different rank in execution will be incorrect.",
                 stacklevel=2,
             )
             dim = dim + rank + 1

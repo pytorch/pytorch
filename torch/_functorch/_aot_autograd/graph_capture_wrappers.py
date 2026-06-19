@@ -1294,7 +1294,7 @@ def handle_effect_tokens_fn(
     return inner_fn, args, args_descs
 
 
-# Given a function operating on Subclass -> Subclass, returns an function that operates on Tensor -> Tensor
+# Given a function operating on Subclass -> Subclass, returns a function that operates on Tensor -> Tensor
 # Also returns:
 # - the new set of arguments to pass into this function (now that tensor subclasses have been eliminated)
 # - the updated ViewAndMutationMeta for this dense -> dense function.

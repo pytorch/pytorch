@@ -1301,7 +1301,7 @@ def _call_overload_packet_from_python(
         return ret
 
     # The following mirrors getOpWithStack.
-    # In cpp, we do a schema matching for the arguments, and call ToIValue to
+    # In cpp, we do a schema matching for the arguments, and call ToIValue
     # to check whether the arguments are valid. But need to do similar things here
     # and check the schema whether the FakeScriptObject is the corresponding fake class
     # of the actual class used in schema.

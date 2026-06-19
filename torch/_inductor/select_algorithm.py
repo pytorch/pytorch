@@ -1761,7 +1761,7 @@ class TritonTemplateKernel(TritonKernel):
     def make_load(self, name, indices, mask):
         """
         Optional helper called from template code to generate the code
-        needed to load from an tensor.
+        needed to load from a tensor.
         """
         if not isinstance(indices, (list, tuple)):
             raise AssertionError(

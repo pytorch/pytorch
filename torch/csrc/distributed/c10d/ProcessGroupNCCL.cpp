@@ -2086,7 +2086,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
   if (!terminateHeartbeatMonitorThread_.load()) {
-    // Create a error message reported from MonitorThread, so
+    // Create an error message reported from MonitorThread, so
     // we throw exception and make the whole process to be killed.
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
     // url here.
@@ -5665,7 +5665,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
     // if not in the root rank, initialize outputs as empty list
     assertEmptyOutputTensorList(invalidArgument, outputTensors);
     outputs = {};
-    // append a empty tensor to the list, we don't use it but the
+    // append an empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function
     outputs.emplace_back();
   }
@@ -5741,7 +5741,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
     // with an empty list
     assertEmptyInputTensorList(invalidArgument, inputTensors);
     inputs = {};
-    // append a empty tensor to the list, we don't use it but the
+    // append an empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function
     inputs.emplace_back();
   }
