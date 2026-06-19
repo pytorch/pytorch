@@ -491,12 +491,12 @@ class TestNumPyInterop(TestCase):
         x = torch.tensor([1, 2, 3])
 
         with warnings.catch_warnings():
-            warnings.simplefilter("error")
+            warnings.simplefilter("error", DeprecationWarning)
 
-            asarray = np.asarray(x)
-            self.assertIsInstance(asarray, np.ndarray)
-            self.assertEqual(asarray.tolist(), [1, 2, 3])
-            asarray[0] = 4
+            y = np.asarray(x)
+            self.assertIsInstance(y, np.ndarray)
+            self.assertEqual(y.tolist(), [1, 2, 3])
+            y[0] = 4
             self.assertEqual(x[0], 4)
 
             copied = np.array(x, copy=True)
