@@ -8702,7 +8702,11 @@ def native_multi_head_attention_fake(
             "_native_multi_head_attention fake implementation does not support nested tensors"
         )
 
-    if query.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    # Unbacked-safe: known-empty takes the empty path; if the size is symbolic
+    # and can't be decided, assume non-empty (the common case) instead of DDE-ing.
+    if guard_or_false(query.numel() == 0):
         return (query.new_empty(query.shape), query.new_empty(0))
 
     B = query.size(0)  # B: batch size
