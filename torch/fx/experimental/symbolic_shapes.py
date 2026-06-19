@@ -729,11 +729,29 @@ def rebind_unbacked(
                 continue
 
             # The old and new could be the same if you improperly hit the memo
-            # while retracing.  Make sure you updated FakeTensorMode.epoch
+            # while retracing.  Make sure you invalidated unbacked memos for
+            # this retrace, typically by updating FakeTensorMode.epoch.
             if raw_u0 == raw_u1:
                 raise AssertionError(f"{raw_u0} possible memo disaster")
             # Reuse the OLD symbol name
             shape_env._rename_unbacked_to(raw_u1, raw_u0)
+
+
+def _invalidate_unbacked_memos_for_replay(
+    n: torch.fx.Node, args: object, kwargs: object
+) -> None:
+    """
+    Before replaying an existing unbacked binding site, clear fake-tensor
+    unbacked memos on its inputs so the node allocates a fresh symbol for
+    rebind_unbacked instead of reusing one from an earlier replayed node.
+    """
+    if not n.meta.get("unbacked_bindings"):
+        return
+
+    from torch._subclasses.fake_tensor import invalidate_unbacked_memos
+
+    for value in pytree.tree_leaves((args, kwargs)):
+        invalidate_unbacked_memos(value)
 
 
 # NB: You could try to expand this to cover more cases by simply
@@ -8977,10 +8995,15 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         """
         from torch._guards import detect_fake_mode
 
-        result = super().run_node(n)
         fake_mode = detect_fake_mode()
         if fake_mode is None:
             raise AssertionError("fake_mode must not be None")
+
+        if n.meta.get("unbacked_bindings"):
+            args, kwargs = self.fetch_args_kwargs_from_env(n)
+            _invalidate_unbacked_memos_for_replay(n, args, kwargs)
+
+        result = super().run_node(n)
         rebind_unbacked(fake_mode.shape_env, n, result)
         return result
 

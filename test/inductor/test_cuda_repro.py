@@ -933,6 +933,22 @@ class CudaReproTests(TestCase):
         if not same(fn(a, b), fn_optimized(a, b)):
             raise AssertionError
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
+    def test_bool_mask_index_retrace_unbacked_memo(self):
+        def fn(x, w):
+            mask = torch.eye(4, dtype=torch.bool)
+            y = w[:, ~mask]
+            sym_w = (w + w.transpose(1, 2)) / 2
+            sym_y = sym_w[:, ~mask]
+            return x + y.sum() + sym_y.sum()
+
+        x = torch.randn((), device="cuda")
+        w = torch.randn(3, 4, 4, device="cuda")
+
+        actual = torch.compile(fn, fullgraph=True)(x, w)
+        self.assertEqual(actual, fn(x, w))
+
     def test_simplify_dims(self):
         def fn(a):
             return (a + 1,)

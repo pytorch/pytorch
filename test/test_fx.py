@@ -2148,6 +2148,46 @@ class TestFX(JitTestCase):
         shape_prop.ShapeProp(gm=gm, fake_mode=fake_mode).propagate(*inp)
         self.assertEqual(len(fake_mode.shape_env.pending_fresh_unbacked_symbols), 0)
 
+    def test_shape_prop_replay_repeated_bool_mask_unbacked_memo(self):
+        from torch._dynamo.utils import detect_fake_mode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x, w):
+            mask = torch.eye(4, dtype=torch.bool)
+            y = w[:, ~mask]
+            sym_w = (w + w.transpose(1, 2)) / 2
+            sym_y = sym_w[:, ~mask]
+            return x + y.sum() + sym_y.sum()
+
+        gm = make_fx(fn, tracing_mode="symbolic")(
+            torch.randn(()), torch.randn(3, 4, 4)
+        )
+        bitwise_not_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.target == torch.ops.aten.bitwise_not.default
+        ]
+        index_nodes = [
+            n for n in gm.graph.nodes if n.target == torch.ops.aten.index.Tensor
+        ]
+        self.assertEqual(len(bitwise_not_nodes), 2)
+        self.assertEqual(len(index_nodes), 2)
+        self.assertTrue(all(n.meta.get("unbacked_bindings") for n in index_nodes))
+
+        # ShapeProp is replaying a pre-existing graph.  Make both old binding
+        # sites share the same bool-mask input while preserving their distinct
+        # old unbacked bindings, matching the failing replay invariant.
+        index_nodes[1].replace_input_with(bitwise_not_nodes[1], bitwise_not_nodes[0])
+        gm.graph.erase_node(bitwise_not_nodes[1])
+        gm.recompile()
+
+        fake_inputs = [
+            node.meta["val"] for node in gm.graph.nodes if node.op == "placeholder"
+        ]
+        fake_mode = detect_fake_mode(fake_inputs)
+        shape_prop.ShapeProp(gm=gm, fake_mode=fake_mode).propagate(*fake_inputs)
+        self.assertEqual(len(fake_mode.shape_env.pending_fresh_unbacked_symbols), 0)
+
     def test_nn_module_stack(self):
         class SubModule(torch.nn.Module):
             def __init__(self) -> None:

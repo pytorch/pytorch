@@ -24,6 +24,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.fx_passes.control_dependencies import control_deps
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
+    _invalidate_unbacked_memos_for_replay,
     compute_unbacked_bindings,
     rebind_unbacked,
     statically_known_true,
@@ -628,6 +629,9 @@ class FakeTensorUpdater:
                 # values which maintain appropriate aliasing relationships.
                 if not any_output_updated and "val" in node.meta:
                     continue
+
+            if node.meta.get("unbacked_bindings"):
+                _invalidate_unbacked_memos_for_replay(node, args, kwargs)
 
             with V.fake_mode, enable_python_dispatcher():
                 new_fake_tensor = node.target(*args, **kwargs)

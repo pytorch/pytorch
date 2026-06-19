@@ -56,6 +56,7 @@ from torch._prims_common import (
     StrideType,
 )
 from torch.fx.experimental.symbolic_shapes import (
+    _invalidate_unbacked_memos_for_replay,
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
     free_symbols,
@@ -7236,6 +7237,7 @@ class ExternKernel(InputsKernel):
             enable_python_dispatcher(),
             _fallback_kernel_symbol_tracking_context(shape_env),
         ):
+            _invalidate_unbacked_memos_for_replay(V.current_node, new_args, new_kwargs)
             example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None = None
