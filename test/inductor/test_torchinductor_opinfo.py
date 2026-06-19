@@ -231,11 +231,6 @@ inductor_skips["cuda"] = {
 if not SM80OrLater:
     inductor_skips["cuda"]["bfloat16"] = {b8, f16, f32, f64, i32, i64}
 
-if TEST_WITH_ROCM:
-    # Tensors are not alike
-    inductor_skips["cuda"]["logcumsumexp"] = {f32}
-    inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
-
 inductor_skips["xpu"] = {
     "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
