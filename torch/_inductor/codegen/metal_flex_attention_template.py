@@ -242,6 +242,19 @@ def _fx_graph_to_metal(
             else:
                 code_lines.append(f"float {t} = {v};")
         elif target in (
+            torch.ops.aten.div.Tensor_mode,
+            torch.ops.aten.div.Scalar_mode,
+        ):
+            # Floor/trunc division (e.g. paged attention's kv_idx // page_size).
+            mode = args[2] if len(args) > 2 else node.kwargs.get("rounding_mode")
+            quot = f"static_cast<float>({_val(args[0])}) / static_cast<float>({_val(args[1])})"
+            if mode == "floor":
+                code_lines.append(f"float {t} = metal::floor({quot});")
+            elif mode == "trunc":
+                code_lines.append(f"float {t} = metal::trunc({quot});")
+            else:
+                code_lines.append(f"float {t} = {quot};")
+        elif target in (
             torch.ops.aten.full_like.default,
             torch.ops.aten.full.default,
         ):
@@ -326,7 +339,7 @@ def _generate_mma_shader(
                 int d = i % D_QK;
                 if (n_local < tile_size) {{
                     int n_global = tile_start + n_local;
-                    long k_off = b_idx * stride_kz + hkv_idx * stride_kh + (long)n_global * stride_kn + (long)d * stride_kk;
+                    long k_off = b_kv * stride_kz + hkv_idx * stride_kh + (long)n_global * stride_kn + (long)d * stride_kk;
                     KV_tg[n_local * D_QK + d] = K[k_off];
                 }} else {{
                     KV_tg[n_local * D_QK + d] = ({metal_dtype})0;
@@ -362,7 +375,7 @@ def _generate_mma_shader(
                 int n_local = i / D_V;
                 int d = i % D_V;
                 int n_global = tile_start + n_local;
-                long v_off = b_idx * stride_vz + hkv_idx * stride_vh + (long)n_global * stride_vn + (long)d * stride_vk;
+                long v_off = b_kv * stride_vz + hkv_idx * stride_vh + (long)n_global * stride_vn + (long)d * stride_vk;
                 KV_tg[n_local * D_V + d] = V[v_off];
             }}
             threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -423,6 +436,7 @@ kernel void flex_attn_fwd(
     int q_block = tgpos.x;
     int h_idx = tgpos.y;
     int b_idx = tgpos.z;
+    int b_kv = b_idx % (int)Bkv;
     int m_base = q_block * BLOCK_M;
     int m_idx = m_base + (int)tid;
     bool active = (m_idx < N_Q);
@@ -572,6 +586,7 @@ def _generate_metal_shader(
     # Pack scalars into one buffer to stay under Metal's 31-buffer limit.
     scalar_names = [
         "B",
+        "Bkv",
         "Hq",
         "Hkv",
         "N_Q",
@@ -674,7 +689,7 @@ def _generate_metal_shader(
                 int n_local = i / D_QK;
                 int d = i % D_QK;
                 int n_global = tile_start + n_local;
-                long k_off = b_idx * stride_kz + hkv_idx * stride_kh + (long)n_global * stride_kn + (long)d * stride_kk;
+                long k_off = b_kv * stride_kz + hkv_idx * stride_kh + (long)n_global * stride_kn + (long)d * stride_kk;
                 K_tile[n_local * D_QK + d] = K[k_off];
             }}
 
@@ -682,7 +697,7 @@ def _generate_metal_shader(
                 int n_local = i / D_V;
                 int d = i % D_V;
                 int n_global = tile_start + n_local;
-                long v_off = b_idx * stride_vz + hkv_idx * stride_vh + (long)n_global * stride_vn + (long)d * stride_vk;
+                long v_off = b_kv * stride_vz + hkv_idx * stride_vh + (long)n_global * stride_vn + (long)d * stride_vk;
                 V_tile[n_local * D_V + d] = V[v_off];
             }}
 
@@ -750,6 +765,7 @@ kernel void flex_attn_fwd(
     int q_block = tgpos.x;
     int h_idx = tgpos.y;
     int b_idx = tgpos.z;
+    int b_kv = b_idx % (int)Bkv;
     int m_idx = q_block * BLOCK_M + (int)tid;
     bool active = (m_idx < N_Q);
 
