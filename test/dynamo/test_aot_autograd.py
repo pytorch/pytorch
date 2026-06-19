@@ -1240,8 +1240,6 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 torch.compile(f, backend="aot_eager", fullgraph=True)(x)
             self.assertTrue(backward_called)
 
-    # We don't know how to catch multiple mutations to the same memory location
-    @unittest.expectedFailure
     def test_aot_autograd_expand_mutation_error(self):
         def fn(x):
             y = x.expand(3, *x.shape)

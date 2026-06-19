@@ -26,7 +26,10 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
 from torch._opaque_base import OpaqueBase
-from torch._prims_common import suggest_memory_format
+from torch._prims_common import (
+    is_non_overlapping_and_dense_or_false,
+    suggest_memory_format,
+)
 from torch._subclasses.meta_utils import (
     assert_eq,
     assert_metadata_eq,
@@ -169,6 +172,10 @@ class DynamicOutputShapeException(RuntimeError):
 @dataclass
 class DataDependentOutputException(RuntimeError):
     func: OpOverload
+
+
+class FakeTensorMemoryOverlapError(RuntimeError):
+    pass
 
 
 @dataclass
@@ -316,6 +323,267 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
 @functools.cache
 def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
     return torch._C._SchemaInfo(func._schema)
+
+
+def _guard_or_false(a: SymBool | bool) -> bool:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    return statically_known_true(a)
+
+
+def _skip_mem_overlap_check(t: Tensor) -> bool:
+    return torch._is_functional_tensor(t) or is_functorch_wrapped_tensor(t)
+
+
+def _is_non_overlapping_and_dense_or_false(t: Tensor) -> bool:
+    try:
+        return is_non_overlapping_and_dense_or_false(t)
+    except AssertionError:
+        return False
+
+
+def _has_internal_overlap(t: Tensor) -> bool:
+    if (
+        not isinstance(t, Tensor)
+        or _skip_mem_overlap_check(t)
+        or t.layout != torch.strided
+    ):
+        return False
+    if _is_non_overlapping_and_dense_or_false(t):
+        return False
+    return any(
+        _guard_or_false(size > 1) and _guard_or_false(stride == 0)
+        for size, stride in zip(t.shape, t.stride())
+    )
+
+
+def _same_storage(a: Tensor, b: Tensor) -> bool:
+    try:
+        return a.untyped_storage()._cdata == b.untyped_storage()._cdata
+    except (AttributeError, RuntimeError):
+        return False
+
+
+def _same_strides(a: Tensor, b: Tensor) -> bool:
+    a_strides = a.stride()
+    b_strides = b.stride()
+    return len(a_strides) == len(b_strides) and all(
+        _guard_or_false(a_stride == b_stride)
+        for a_stride, b_stride in zip(a_strides, b_strides)
+    )
+
+
+def _same_sizes(a: Tensor, b: Tensor) -> bool:
+    a_sizes = a.size()
+    b_sizes = b.size()
+    return len(a_sizes) == len(b_sizes) and all(
+        _guard_or_false(a_size == b_size) for a_size, b_size in zip(a_sizes, b_sizes)
+    )
+
+
+def _is_copy_same_data(self: object, src: object) -> bool:
+    return (
+        isinstance(self, Tensor)
+        and isinstance(src, Tensor)
+        and _same_storage(self, src)
+        and _guard_or_false(self.storage_offset() == src.storage_offset())
+        and _same_strides(self, src)
+        and _same_sizes(self, src)
+        and self.dtype == src.dtype
+        and self.is_conj() == src.is_conj()
+        and self.is_neg() == src.is_neg()
+    )
+
+
+def _has_partial_overlap(a: Tensor, b: Tensor) -> bool:
+    if (
+        not isinstance(a, Tensor)
+        or not isinstance(b, Tensor)
+        or _skip_mem_overlap_check(a)
+        or _skip_mem_overlap_check(b)
+        or a.layout != torch.strided
+        or b.layout != torch.strided
+        or _guard_or_false(a.numel() == 0)
+        or _guard_or_false(b.numel() == 0)
+        or not _is_non_overlapping_and_dense_or_false(a)
+        or not _is_non_overlapping_and_dense_or_false(b)
+        or not _same_storage(a, b)
+    ):
+        return False
+
+    a_begin = a.storage_offset() * a.element_size()
+    a_end = a_begin + a.numel() * a.element_size()
+    b_begin = b.storage_offset() * b.element_size()
+    b_end = b_begin + b.numel() * b.element_size()
+
+    if _guard_or_false(a_begin == b_begin) and _guard_or_false(a_end == b_end):
+        return not _same_strides(a, b)
+    return _guard_or_false(a_begin < b_end) and _guard_or_false(b_begin < a_end)
+
+
+_MUTATION_PARTIAL_OVERLAP_ARG_PAIRS = {
+    aten.copy_.default: (("self", "src"),),
+    aten.masked_fill_.Scalar: (("self", "mask"),),
+    aten.masked_fill_.Tensor: (("self", "mask"),),
+}
+
+
+_MUTATION_INTERNAL_OVERLAP_ARGS = {
+    aten.copy_.default: ("self",),
+}
+
+
+def _normalized_arg_is_mutable(schema_info: torch._C._SchemaInfo, name: str) -> bool:
+    schema_name = (
+        name if (name != "input" or schema_info.has_argument(name)) else "self"
+    )
+    return schema_info.has_argument(schema_name) and schema_info.is_mutable(schema_name)
+
+
+def _get_normalized_arg(
+    schema_info: torch._C._SchemaInfo,
+    normalized_kwargs: Mapping[str, object],
+    name: str,
+) -> object | None:
+    if name in normalized_kwargs:
+        return normalized_kwargs[name]
+
+    # normalize_function uses "input" for the self argument of some Tensor
+    # methods even when the schema calls the argument "self".
+    if name == "self" and not schema_info.has_argument("input"):
+        return normalized_kwargs.get("input")
+
+    return None
+
+
+def _raise_internal_overlap_error() -> None:
+    raise FakeTensorMemoryOverlapError(
+        "unsupported operation: more than one element of the written-to "
+        "tensor refers to a single memory location. Please clone() the "
+        "tensor before performing the operation."
+    )
+
+
+def _raise_partial_overlap_error() -> None:
+    raise FakeTensorMemoryOverlapError(
+        "unsupported operation: some elements of the input tensor "
+        "and the written-to tensor refer to a single memory "
+        "location. Please clone() the tensor before performing "
+        "the operation."
+    )
+
+
+def _check_tensors_partial_overlap(
+    output_arg: object,
+    input_arg: object,
+) -> None:
+    output_tensors = [
+        t for t in pytree.tree_leaves(output_arg) if isinstance(t, Tensor)
+    ]
+    input_tensors = [t for t in pytree.tree_leaves(input_arg) if isinstance(t, Tensor)]
+
+    for output_tensor in output_tensors:
+        for input_tensor in input_tensors:
+            if _has_partial_overlap(output_tensor, input_tensor):
+                _raise_partial_overlap_error()
+
+
+def _check_partial_overlap_arg_pairs(
+    schema_info: torch._C._SchemaInfo,
+    normalized_kwargs: Mapping[str, object],
+    arg_pairs: tuple[tuple[str, str], ...],
+) -> None:
+    for output_name, input_name in arg_pairs:
+        output_arg = _get_normalized_arg(schema_info, normalized_kwargs, output_name)
+        input_arg = _get_normalized_arg(schema_info, normalized_kwargs, input_name)
+        if output_arg is not None and input_arg is not None:
+            _check_tensors_partial_overlap(output_arg, input_arg)
+
+
+def _check_internal_overlap_args(
+    schema_info: torch._C._SchemaInfo,
+    normalized_kwargs: Mapping[str, object],
+    arg_names: tuple[str, ...],
+) -> None:
+    for name in arg_names:
+        arg = _get_normalized_arg(schema_info, normalized_kwargs, name)
+        if arg is None:
+            continue
+        for tensor in pytree.tree_leaves(arg):
+            if isinstance(tensor, Tensor) and _has_internal_overlap(tensor):
+                _raise_internal_overlap_error()
+
+
+def _check_pointwise_mutation_mem_overlap(
+    func: OpOverload,
+    schema_info: torch._C._SchemaInfo,
+    normalized_kwargs: Mapping[str, object],
+) -> None:
+    if torch.Tag.pointwise not in func.tags or (
+        torch.Tag.inplace not in func.tags and torch.Tag.out not in func.tags
+    ):
+        return
+
+    mutable_tensors: list[Tensor] = []
+    input_tensors: list[Tensor] = []
+    for name, value in normalized_kwargs.items():
+        tensors = [t for t in pytree.tree_leaves(value) if isinstance(t, Tensor)]
+        if _normalized_arg_is_mutable(schema_info, name):
+            mutable_tensors.extend(tensors)
+        else:
+            input_tensors.extend(tensors)
+
+    for output in mutable_tensors:
+        if _has_internal_overlap(output):
+            _raise_internal_overlap_error()
+
+    for output in mutable_tensors:
+        for input_tensor in input_tensors:
+            if _has_partial_overlap(output, input_tensor):
+                _raise_partial_overlap_error()
+
+
+def _check_mutation_mem_overlap(
+    func: OpOverload,
+    args: Sequence[object],
+    kwargs: Mapping[str, object],
+) -> None:
+    if not isinstance(func, torch._ops.OpOverload):
+        return
+
+    partial_overlap_arg_pairs = _MUTATION_PARTIAL_OVERLAP_ARG_PAIRS.get(func, ())
+    internal_overlap_args = _MUTATION_INTERNAL_OVERLAP_ARGS.get(func, ())
+    check_pointwise = torch.Tag.pointwise in func.tags and (
+        torch.Tag.inplace in func.tags or torch.Tag.out in func.tags
+    )
+    if (
+        not check_pointwise
+        and not partial_overlap_arg_pairs
+        and not internal_overlap_args
+    ):
+        return
+
+    schema_info = get_schema_info(func)
+    if not schema_info.is_mutable():
+        return
+
+    _, normalized_kwargs = normalize_function(  # type: ignore[misc]
+        func,
+        args=args,  # type: ignore[arg-type]
+        kwargs=kwargs,  # type: ignore[arg-type]
+        normalize_to_only_use_kwargs=True,
+    )
+
+    _check_pointwise_mutation_mem_overlap(func, schema_info, normalized_kwargs)
+    if func is aten.copy_.default and _is_copy_same_data(
+        _get_normalized_arg(schema_info, normalized_kwargs, "self"),
+        _get_normalized_arg(schema_info, normalized_kwargs, "src"),
+    ):
+        return
+    _check_internal_overlap_args(schema_info, normalized_kwargs, internal_overlap_args)
+    _check_partial_overlap_arg_pairs(
+        schema_info, normalized_kwargs, partial_overlap_arg_pairs
+    )
 
 
 # many of the decompositions registered to torch/_prims do not at the moment model
@@ -2771,6 +3039,8 @@ class FakeTensorMode(TorchDispatchMode):
         # we are falling through to running non constant tensors, any input constant that
         # is written to must be invalidated
         args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
+
+        _check_mutation_mem_overlap(func, args, kwargs)
 
         if (
             isinstance(func, torch._ops.HigherOrderOperator)

@@ -15,6 +15,9 @@ flaky_models = {
     "moondream",  # discovered in https://github.com/pytorch/pytorch/pull/159291
     # discovered in https://github.com/pytorch/pytorch/issues/161419. Its not flaky but really hard to repro, so skipping it
     "mobilenetv3_large_100",
+    # CUDA training accuracy can fail before compilation with eager_two_runs_differ.
+    "mobilenetv2_100",
+    "tf_efficientnet_b0",
     # https://github.com/pytorch/pytorch/issues/163670
     "vision_maskrcnn",
     # Old TorchBench SAM is flaky even with mask IoU checking.

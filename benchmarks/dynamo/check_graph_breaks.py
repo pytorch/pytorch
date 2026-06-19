@@ -13,6 +13,10 @@ flaky_models = {
     "detectron2_maskrcnn_r_101_c4",
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
     "detectron2_fcos_r_50_fpn",
+    # CUDA training accuracy can fail before compilation with eager_two_runs_differ,
+    # leaving a no-compile row with graph_breaks=0.
+    "mobilenetv2_100",
+    "tf_efficientnet_b0",
 }
 
 
