@@ -107,6 +107,7 @@ __all__ = [
     "gather_object",
     "get_backend_config",
     "get_backend",
+    "get_backend_impl",
     "get_default_backend_for_device",
     "get_rank",
     "get_world_size",
@@ -1520,6 +1521,64 @@ def get_backend(group: ProcessGroup | None = None) -> Backend:
         )
 
     return Backend(not_none(pg_store)[0])
+
+
+def get_backend_impl(
+    group: str | ProcessGroup | None = None,
+    device: torch.device | None = None,
+) -> torch._C._distributed_c10d.Backend:
+    r"""get_backend_impl(group=None, device=None) -> torch._C._distributed_c10d.Backend
+
+    Return the underlying backend implementation of the given process group.
+
+    This allows custom backends to expose backend-specific methods for
+    experimentation purposes.
+
+    .. warning::
+        This API bypasses ``torch.compile`` tracing and other hooks. Backend
+        methods are experimental and subject to breakage without warning.
+
+    Args:
+        group (str or ProcessGroup, optional): The process group or process
+            group name to work on. The default is the general main process
+            group. If another specific group is specified, the calling process
+            must be part of :attr:`group`.
+        device (:class:`torch.device`, optional): The device used to select a
+            backend implementation. If ``None``, this returns the bound device
+            backend or the single backend shared by the registered devices.
+            Default: ``None``.
+
+    Returns:
+        torch._C._distributed_c10d.Backend: The backend implementation for
+        the given process group and device.
+    """
+    if isinstance(group, str):
+        pg = _resolve_process_group(GroupName(group))
+    else:
+        pg = group or _get_default_group()
+
+    if _rank_not_in_group(pg):
+        raise ValueError("Invalid process group specified")
+
+    if device is not None:
+        return pg.get_backend(device)
+
+    bound_device_id = pg.bound_device_id
+    if bound_device_id is not None:
+        return pg.get_backend(bound_device_id)
+
+    devices = pg._device_types
+    if not devices:
+        return pg.get_backend(torch.device("cpu"))
+
+    backend_impl = pg.get_backend(devices[0])
+    for backend_device in devices[1:]:
+        if pg.get_backend(backend_device) is not backend_impl:
+            raise ValueError(
+                "Process group has multiple backend implementations; pass "
+                "the device argument to select one."
+            )
+    return backend_impl
 
 
 def get_default_backend_for_device(device: str | torch.device) -> str:

@@ -403,6 +403,10 @@ check whether the process group has already been initialized use {func}`torch.di
 ```
 
 ```{eval-rst}
+.. autofunction:: get_backend_impl
+```
+
+```{eval-rst}
 .. autofunction:: get_backend_config
 ```
 

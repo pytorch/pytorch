@@ -1319,10 +1319,10 @@ Example:
           py::arg("tensor"))
       .def_property_static(
           "signal_pad_size",
-          [](py::object /* self */) {
+          [](const py::object& /* self */) {
             return ::c10d::symmetric_memory::get_signal_pad_size();
           },
-          [](py::object /* self */, size_t size) {
+          [](const py::object& /* self */, size_t size) {
             ::c10d::symmetric_memory::set_signal_pad_size(size);
           })
       .def_static(
@@ -1461,7 +1461,9 @@ Example:
             group_name,
             "'");
         ::c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
-            group_name, reinterpret_cast<ncclComm_t>(comm_ptr));
+            group_name,
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            reinterpret_cast<ncclComm_t>(comm_ptr));
       },
       py::arg("group_name"),
       py::arg("comm_ptr"),
@@ -2043,14 +2045,14 @@ Example::
             }
 
             ::c10d::TCPStoreOptions opts{
-                port,
-                isServer,
-                numWorkers,
-                waitWorkers,
-                timeout,
-                multiTenant,
-                masterListenFd,
-                useLibUV};
+                .port = port,
+                .isServer = isServer,
+                .numWorkers = numWorkers,
+                .waitWorkers = waitWorkers,
+                .timeout = timeout,
+                .multiTenant = multiTenant,
+                .masterListenFd = masterListenFd,
+                .useLibUV = useLibUV};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -2945,6 +2947,16 @@ communication mechanism.
               py::arg("backend") =
                   std::optional<c10::intrusive_ptr<::c10d::Backend>>(),
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_backend",
+              [](const py::object& self, const c10::Device& device) {
+                return self.attr("_get_backend")(device);
+              },
+              py::arg("device"),
+              R"(Return the underlying backend implementation for this process group and device.
+
+This API bypasses torch.compile tracing and other hooks. Backend methods are
+experimental and subject to breakage without warning.)")
           .def(
               "_get_backend",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
