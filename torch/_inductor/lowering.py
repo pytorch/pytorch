@@ -8419,7 +8419,60 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.log2)
-register_pointwise_numeric(aten.nextafter)
+
+register_op_dtype_propagation_rules(
+    "nextafter",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    override_return_dtype=None,
+)
+
+
+@register_lowering(
+    aten.nextafter,
+    broadcast=True,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+)
+@register_lowering(prims.nextafter, type_promotion_kind=None)
+def nextafter(self, other):
+    dtype = self.get_dtype()
+    if not dtype.is_floating_point:
+        return fallback_handler(aten.nextafter.default)(self, other)
+
+    device = None
+    for inp in (self, other):
+        inp_device = inp.get_device()
+        if inp_device is not None and is_gpu(inp_device.type):
+            device = inp_device
+            break
+    if device is None:
+        device = self.get_device()
+
+    if dtype in (torch.float16, torch.bfloat16) and not is_triton(device):
+        return fallback_handler(aten.nextafter.default)(self, other)
+
+    self_loader = self.make_loader()
+    other_loader = other.make_loader()
+    ranges = self.get_size()
+
+    def inner_fn(index):
+        x = self_loader(index)
+        y = other_loader(index)
+        if dtype in (torch.float16, torch.bfloat16):
+            # Triton loads low precision floats as fp32 by default. nextafter
+            # must step in the result dtype, so restore the fp16/bf16 value
+            # before the bit-level Triton helper runs.
+            x = ops.to_dtype(x, dtype, use_compute_types=False)
+            y = ops.to_dtype(y, dtype, use_compute_types=False)
+            return ops.to_dtype(ops.nextafter(x, y), dtype)
+        return ops.nextafter(x, y)
+
+    return Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=ranges,
+    )
+
 
 from .codegen.common import BackendFeature, pointwise_overrides_data
 

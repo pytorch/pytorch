@@ -158,6 +158,43 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_nextafter_low_precision(self, dtype):
+        def fn(x, y):
+            return torch.nextafter(x, y)
+
+        x_base = torch.tensor(
+            [
+                [-0.0, 0.0, 1.0, -1.0],
+                [float("inf"), -float("inf"), 2.0, -2.0],
+                [0.0, -0.0, 1.0, -1.0],
+            ],
+            dtype=dtype,
+        )
+        y_base = torch.tensor(
+            [
+                [0.0, -1.0, 0.0, 0.0],
+                [0.0, 0.0, float("inf"), -float("inf")],
+                [1.0, -1.0, float("nan"), float("nan")],
+            ],
+            dtype=dtype,
+        )
+        x = x_base.t()
+        y = y_base.t()
+
+        self.assertFalse(x.is_contiguous())
+        self.assertFalse(y.is_contiguous())
+
+        expected = fn(x, y)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+
+        self.assertEqual(torch.isnan(actual), torch.isnan(expected))
+        non_nan = ~torch.isnan(expected)
+        self.assertEqual(
+            actual[non_nan].view(torch.int16),
+            expected[non_nan].view(torch.int16),
+        )
+
     def _check_conv_stride_constraints(self, formats):
         for fmt in formats:
             # TorchDispatch doesn't work in our cuda invocation for some reason

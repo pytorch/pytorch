@@ -2068,10 +2068,9 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.ldexp({x}, {n}.to(tl.int32))"
 
     @staticmethod
-    @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def nextafter(x, y):
-        return f"libdevice.nextafter({x}, {y})"
+        return f"triton_helpers.nextafter({x}, {y})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]

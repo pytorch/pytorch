@@ -192,6 +192,31 @@ def maximum(a, b):
 
 
 @triton.jit
+def nextafter(x, y):
+    if not is_floating(x) or x.dtype.primitive_bitwidth != 16:
+        return libdevice.nextafter(x, y)
+
+    idtype: tl.constexpr = tl.core.get_int_dtype(
+        x.dtype.primitive_bitwidth, signed=False
+    )
+    ix = x.to(idtype, bitcast=True)
+    iy = y.to(idtype, bitcast=True)
+    sign_mask: tl.constexpr = 1 << (x.dtype.primitive_bitwidth - 1)
+
+    x_is_zero = (ix & (sign_mask - 1)) == 0
+    x_is_pos = (ix & sign_mask) == 0
+    step_up = (y > x) == x_is_pos
+    stepped = ix + tl.where(step_up, 1, -1).to(idtype)
+    zero_step = (iy & sign_mask) | 1
+
+    result = (
+        tl.where(x_is_zero, zero_step, stepped).to(idtype).to(x.dtype, bitcast=True)
+    )
+    result = tl.where(x == y, y, result)
+    return tl.where((x != x) | (y != y), x + y, result)
+
+
+@triton.jit
 def min2(a, dim):
     return tl.reduce(a, dim, minimum)
 

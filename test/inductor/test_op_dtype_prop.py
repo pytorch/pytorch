@@ -159,7 +159,6 @@ class TestCase(InductorTestCase):
             "exp2",
             "abs",
             "hypot",
-            "nextafter",
         ]:
             # These ops do not support float16 and bfloat16.
             supported_dtypes = OpDtypeSupport.supported_dtypes[op_name]
