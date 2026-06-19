@@ -1708,8 +1708,8 @@ def set_timeout(timeout: timedelta, group: ProcessGroup | None = None) -> None:
     :func:`init_process_group` or :func:`new_group`). The new timeout is
     forwarded to every backend registered with :attr:`group` -- for example both
     the Gloo and NCCL backends of a group spanning CPU and CUDA devices. Backends
-    that do not support changing their timeout (such as MPI and UCC) raise a
-    ``RuntimeError``.
+    that do not support changing their timeout (such as MPI and UCC) emit a
+    warning and leave their timeout unchanged.
 
     Args:
         timeout (timedelta): Timeout to set for operations executed against the
@@ -1727,8 +1727,6 @@ def set_timeout(timeout: timedelta, group: ProcessGroup | None = None) -> None:
 
     Raises:
         ValueError: If the calling process is not part of :attr:`group`.
-        RuntimeError: If a backend of :attr:`group` does not support changing its
-            timeout (for example MPI or UCC).
 
     Returns:
         None
