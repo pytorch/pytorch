@@ -23,7 +23,12 @@ def _bmm_outer_product_impl(
 ) -> torch.Tensor:
     from .triton_kernels import bmm_outer_product
 
-    return bmm_outer_product(a, b)
+    device = a.get_device()
+    if device == torch.cuda.current_device():
+        return bmm_outer_product(a, b)
+
+    with torch.cuda.device(device):
+        return bmm_outer_product(a, b)
 
 
 def _bmm_outer_product_cond(
@@ -37,6 +42,7 @@ def _bmm_outer_product_cond(
     if (
         a.is_cuda
         and b.is_cuda
+        and a.device == b.device
         and _is_outer_product(a, b)
         and not (a_is_cow or b_is_cow)
     ):
