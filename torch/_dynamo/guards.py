@@ -52,7 +52,6 @@ from torch._C._dynamo.guards import (
     check_type_id,
     ClosureGuardAccessor,
     CodeGuardAccessor,
-    compute_overlapping_tensors,
     dict_version,
     DictGetItemGuardAccessor,
     DictGuardManager,
@@ -840,10 +839,12 @@ def unwrap_async_collective_tensor(x: torch.Tensor) -> torch.Tensor:
 def _storage_overlap_partition(
     args: list[object],
 ) -> tuple[tuple[int, ...], ...]:
-    tensor_positions = [
-        i for i, arg in enumerate(args) if isinstance(arg, torch.Tensor)
-    ]
-    tensors = [args[i] for i in tensor_positions]
+    tensor_positions: list[int] = []
+    tensors: list[torch.Tensor] = []
+    for i, arg in enumerate(args):
+        if isinstance(arg, torch.Tensor):
+            tensor_positions.append(i)
+            tensors.append(arg)
     groups = torch._C._dynamo.guards.compute_overlapping_tensor_groups(
         tensors, symbolic=False
     )
