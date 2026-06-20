@@ -1025,6 +1025,16 @@
       ]
     }
   ],
+  "GB7446": [
+    {
+      "Gb_type": "Tensor replacement in existing Python list",
+      "Context": "replacing a tensor in a pre-existing list with another tensor",
+      "Explanation": "Dynamo replays existing Python list mutations after a compiled graph returns. When an assignment replaces a tensor in a pre-existing list slot with another tensor, replay can keep the old and new tensors alive together longer than eager execution and increase peak memory, so Dynamo graph breaks before the mutation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0071": [
     {
       "Gb_type": "Inline attempt with __self__",

@@ -52,7 +52,13 @@ from ..utils import (
     unpack_and_apply_fn,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    MutationType,
+    ValueMutationExisting,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
@@ -91,6 +97,49 @@ def pylist_checkexact(obj: VariableTracker) -> bool:
 
 def pyslice_check(obj: VariableTracker) -> bool:
     return issubclass(obj.python_type(), slice)
+
+
+def _contains_tensor_variable(value: Any) -> bool:
+    if value is None:
+        return False
+
+    result = False
+
+    def visit(var: VariableTracker) -> None:
+        nonlocal result
+        if var.is_tensor():
+            result = True
+
+    VariableTracker.visit(visit, value)
+    return result
+
+
+def _raise_if_replacing_tensor_in_existing_list(
+    tx: "InstructionTranslatorBase",
+    mutation_type: MutationType | None,
+    old_value: Any,
+    new_value: Any,
+) -> None:
+    if tx.export or tx.is_tracing_resume_prologue:
+        return
+    if (
+        isinstance(mutation_type, ValueMutationExisting)
+        and _contains_tensor_variable(old_value)
+        and _contains_tensor_variable(new_value)
+    ):
+        unimplemented(
+            gb_type="Tensor replacement in existing Python list",
+            context="replacing a tensor in a pre-existing list with another tensor",
+            explanation=(
+                "Dynamo replays existing Python list mutations after a compiled "
+                "graph returns. When an assignment replaces a tensor in a "
+                "pre-existing list slot with another tensor, replay can keep the "
+                "old and new tensors alive together longer than eager execution "
+                "and increase peak memory, so Dynamo graph breaks before the "
+                "mutation."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
 
 class BaseListVariable(VariableTracker):
@@ -994,12 +1043,16 @@ class CommonListMethodsVariable(BaseListVariable):
 
             if len(args):
                 idx = args[0].as_python_constant()
-                if idx >= len(self.items):
+                if idx >= len(self.items) or idx < -len(self.items):
                     raise_observed_exception(
                         IndexError, tx, args=["pop index out of range"]
                     )
+                if idx < 0:
+                    idx += len(self.items)
+            else:
+                idx = len(self.items) - 1
             tx.output.side_effects.mutation(self)
-            return self.items.pop(*[a.as_python_constant() for a in args])
+            return self.items.pop(idx)
         elif name == "clear" and self.is_mutable():
             if args or kwargs:
                 raise_args_mismatch(
@@ -1212,11 +1265,14 @@ class ListVariable(CommonListMethodsVariable):
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             if len(args) == 0:
+                tx.output.side_effects.mutation(self)
+                self.items.clear()
                 return ConstantVariable.create(None)
             elif len(args) == 1:
                 (arg,) = args
+                new_items = unpack_iterable(tx, arg)
                 tx.output.side_effects.mutation(self)
-                self.items[:] = unpack_iterable(tx, arg)
+                self.items[:] = new_items
                 return ConstantVariable.create(None)
 
         return super().call_method(tx, name, args, kwargs)
@@ -1254,6 +1310,10 @@ class ListVariable(CommonListMethodsVariable):
         if not (0 <= idx < len(self.items)):
             raise_observed_exception(
                 IndexError, tx, args=["list assignment index out of range"]
+            )
+        if value is not None:
+            _raise_if_replacing_tensor_in_existing_list(
+                tx, self.mutation_type, self.items[idx], value
             )
         try:
             if value is None:
@@ -1308,6 +1368,7 @@ class ListVariable(CommonListMethodsVariable):
                     raise_type_error(tx, "must assign iterable to extended slice")
 
                 value_unpack = unpack_iterable(tx, value)
+                old_items = self.items[key_as_const]
                 try:
                     self.items[key_as_const] = value_unpack
                 except ValueError as exc:
@@ -1316,6 +1377,9 @@ class ListVariable(CommonListMethodsVariable):
                         tx,
                         args=list(exc.args),
                     )
+                _raise_if_replacing_tensor_in_existing_list(
+                    tx, self.mutation_type, old_items, value_unpack
+                )
                 tx.output.side_effects.mutation(self)
         else:
             raise_type_error(
