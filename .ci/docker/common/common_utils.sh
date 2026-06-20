@@ -27,23 +27,12 @@ conda_install_through_forge() {
   as_jenkins conda install -c conda-forge -q -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION" $*
 }
 
-# env_run/pip_install run a command in the active Python environment. On
-# conda images (rocm/xpu) that means the named conda env; on venv images
-# (ubuntu) the venv is already on PATH, so just run directly.
-env_run() {
-  if command -v conda >/dev/null 2>&1; then
-    as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION --no-capture-output $*
-  else
-    as_jenkins $*
-  fi
+conda_run() {
+  as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION --no-capture-output $*
 }
 
 pip_install() {
-  if command -v conda >/dev/null 2>&1; then
-    as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION pip install --progress-bar off $*
-  else
-    as_jenkins pip install --progress-bar off $*
-  fi
+  as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION pip install --progress-bar off $*
 }
 
 get_pinned_commit() {
