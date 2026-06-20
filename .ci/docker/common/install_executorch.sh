@@ -30,15 +30,8 @@ install_buck2() {
 
 install_conda_dependencies() {
   pushd executorch/.ci/docker
-  if command -v conda >/dev/null 2>&1; then
-    # Install conda dependencies like flatbuffer
-    conda_install --file conda-env-ci.txt
-  else
-    # venv image: install the conda-env-ci.txt equivalents from apt + pip
-    sudo apt-get update
-    sudo apt-get install -y libuv1-dev libomp-dev pkg-config
-    pip_install cmake==3.31.2 ninja==1.10.2
-  fi
+  # Install conda dependencies like flatbuffer
+  conda_install --file conda-env-ci.txt
   popd
 }
 
@@ -48,7 +41,7 @@ install_pip_dependencies() {
 
   # A workaround, ExecuTorch has moved to numpy 2.0 which is not compatible with the current
   # numba and scipy version used in PyTorch CI
-  env_run pip uninstall -y numba scipy
+  conda_run pip uninstall -y numba scipy
   # Yaspin is needed for running CI test (get_benchmark_analysis_data.py)
   pip_install yaspin==3.1.0
 
