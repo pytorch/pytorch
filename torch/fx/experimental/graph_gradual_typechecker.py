@@ -397,7 +397,7 @@ def calculate_out_dimension(d_in: Any, module_instance: Any, index: int) -> Any:
     elif isinstance(d_in, DIMENSION_TYPES):
         n = d_in + 2 * padding[index] - dilation[index] * (kernel_size[index] - 1) - 1
 
-        return (n // stride[0]) + 1
+        return (n // stride[index]) + 1
 
     else:
         raise TypeError(

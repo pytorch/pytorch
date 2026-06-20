@@ -9,6 +9,7 @@ from torch.fx import GraphModule, symbolic_trace
 from torch.fx.annotate import annotate
 from torch.fx.experimental.graph_gradual_typechecker import (
     broadcast_types,
+    calculate_out_dimension,
     GraphTypeChecker,
     Refine,
 )
@@ -449,6 +450,17 @@ class TypeCheckerTest(TestCase):
         tc = GraphTypeChecker({}, traced)
         with self.assertRaises(TypeError):
             tc.type_check()
+
+    def test_calculate_out_dimension_asymmetric_stride(self):
+        # Regression: calculate_out_dimension indexed stride with a hardcoded 0,
+        # so an asymmetric stride computed the wrong width even though padding,
+        # kernel_size and dilation were already indexed per dimension.
+        conv = torch.nn.Conv2d(3, 6, kernel_size=3, stride=(2, 3))
+        # n = d_in + 2*padding - dilation*(kernel - 1) - 1 = 32 + 0 - 2 - 1 = 29
+        # height (index 0, stride 2): 29 // 2 + 1 = 15
+        # width  (index 1, stride 3): 29 // 3 + 1 = 10  (was 15 using stride[0])
+        self.assertEqual(calculate_out_dimension(32, conv, 0), 15)
+        self.assertEqual(calculate_out_dimension(32, conv, 1), 10)
 
     def test_type_check_conv2D(self):
         class BasicBlock(torch.nn.Module):
