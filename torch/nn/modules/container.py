@@ -545,6 +545,14 @@ class ModuleDict(Module):
 
     _modules: dict[str, Module]  # type: ignore[assignment]
 
+    if TYPE_CHECKING:
+        # ModuleDict stores only submodules, so attribute access always resolves
+        # to a Module. Narrow the inherited ``Module.__getattr__`` return type
+        # (``Union[Tensor, Module]``) to ``Module`` for type checkers. This is a
+        # typing-only override with no runtime effect.
+        def __getattr__(self, name: str) -> Module:
+            return self._modules[name]
+
     def __init__(self, modules: Mapping[str, Module] | None = None) -> None:
         super().__init__()
         if modules is not None:
