@@ -15,15 +15,6 @@ devices = (torch.device("cpu"), torch.device("cuda:0"))
 
 
 class TestComplexTensor(TestCase):
-    @dtypes(*complex_types())
-    def test_to_list(self, device, dtype):
-        # test that the complex float tensor has expected values and
-        # there's no garbage value in the resultant list
-        self.assertEqual(
-            torch.zeros((2, 2), device=device, dtype=dtype).tolist(),
-            [[0j, 0j], [0j, 0j]],
-        )
-
     @dtypes(torch.float32, torch.float64, torch.float16)
     def test_dtype_inference(self, device, dtype):
         # issue: https://github.com/pytorch/pytorch/issues/36834

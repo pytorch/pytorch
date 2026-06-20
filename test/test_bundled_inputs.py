@@ -24,6 +24,10 @@ def save_and_load(sm):
 
 
 class TestBundledInputs(TestCase):
+    def test_introdemo_added(self):
+        # TEMPORARY demo for the test-diff CI comment. DELETE before landing.
+        self.assertTrue(True)
+
     def test_single_tensors(self):
         class SingleTensorModel(torch.nn.Module):
             def forward(self, arg):
