@@ -3163,6 +3163,14 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
   // from svd_cusolver to this function. We should then make sure that this function
   // never errors out.
   at::_linalg_check_errors(info, "linalg.svd", /*is_matrix*/A.dim() == 2);
+
+  // LAPACK's dgesdd with jobz='N' (the compute_uv=false path used by svdvals) does
+  // not propagate NaN from the input to the singular values, while jobz='S'/'A'
+  // (compute_uv=true) does so accidentally via the U/Vh computation.  Ensure any
+  // NaN in A surfaces in S so that svdvals() does not silently swallow bad input.
+  if (!compute_uv) {
+    S.masked_fill_(A.isnan().flatten(-2, -1).any(-1, /*keepdim=*/true), NAN);
+  }
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&>

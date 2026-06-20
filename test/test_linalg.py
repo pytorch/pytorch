@@ -3021,6 +3021,29 @@ class TestLinalg(TestCase):
                 self.assertEqual(S_s, S)
 
     @skipCPUIfNoLapack
+    @dtypes(torch.float64, torch.complex128)
+    def test_svdvals_nan_propagation(self, device, dtype):
+        # gh-187759: svdvals must propagate NaN from input to singular values.
+        # LAPACK dgesdd with jobz='N' silently discards NaN; we fix it in the
+        # ATen wrapper so svdvals() is consistent with svd().S.
+        A = torch.zeros(2, 2, dtype=dtype, device=device)
+        A[0, 0] = float('nan')
+
+        S = torch.linalg.svdvals(A)
+        self.assertTrue(S.isnan().any(), f"Expected NaN in svdvals output, got {S}")
+        # svdvals() must agree with svd().S on whether NaN is present.
+        self.assertEqual(S.isnan().any(), torch.linalg.svd(A).S.isnan().any())
+
+        # Batched: only matrices with NaN input should yield NaN singular values.
+        B = torch.zeros(3, 2, 2, dtype=dtype, device=device)
+        B[0, 0, 0] = float('nan')
+        B[2, 1, 1] = float('nan')
+        S_b = torch.linalg.svdvals(B)
+        self.assertTrue(S_b[0].isnan().any(), f"Batch[0] expected NaN, got {S_b[0]}")
+        self.assertFalse(S_b[1].isnan().any(), f"Batch[1] expected no NaN, got {S_b[1]}")
+        self.assertTrue(S_b[2].isnan().any(), f"Batch[2] expected NaN, got {S_b[2]}")
+
+    @skipCPUIfNoLapack
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
