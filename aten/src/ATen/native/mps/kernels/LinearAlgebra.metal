@@ -996,12 +996,12 @@ kernel void linalg_qr_householder(
       const auto val = static_cast<opmath_t>(r_ik);
       norm_sq = fma(val, val, norm_sq);
     }
-    const auto norm = ::metal::precise::sqrt(
+    const auto norm = precise::sqrt(
         c10::metal::threadgroup_sum(scratch, norm_sq, tid, group_size));
 
     // scale norm_eps by matrix dimension to handle accumulated error
-    const auto norm_eps = ::metal::numeric_limits<opmath_t>::epsilon() * m;
-    const auto tau_eps = ::metal::numeric_limits<opmath_t>::epsilon();
+    const auto norm_eps = numeric_limits<opmath_t>::epsilon() * m;
+    constexpr auto tau_eps = numeric_limits<opmath_t>::epsilon();
 
     // Step 2: compute Householder vector and tau
     if (tid == 0) {
@@ -1292,8 +1292,6 @@ kernel void svd_jacobi(
     uint3 tg_pos [[threadgroup_position_in_grid]],
     uint simd_lane [[thread_index_in_simdgroup]],
     uint simd_group [[simdgroup_index_in_threadgroup]]) {
-  using opmath_t = c10::metal::opmath_t<T>;
-
   const uint32_t tid = thread_pos.x;
   const uint32_t group_size = tpg.x;
   const uint32_t m = params.m;
@@ -1328,10 +1326,10 @@ kernel void svd_jacobi(
   }
   threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
 
-  const float eps = ::metal::numeric_limits<float>::epsilon();
+  constexpr auto eps = numeric_limits<float>::epsilon();
   // Concurrent SIMD-groups flag "I rotated"; a plain flag races, so use an
   // atomic.
-  threadgroup ::metal::atomic_uint any_rotation;
+  threadgroup atomic_uint any_rotation;
 
   // Round-robin tournament pairing (closed-form circle method): pad to even ne;
   // each sweep is ne-1 rounds of ne/2 disjoint pairs; index >= n is phantom.
@@ -1341,8 +1339,7 @@ kernel void svd_jacobi(
   uint32_t sweep = 0;
   for (; sweep < params.max_sweeps; ++sweep) {
     if (tid == 0) {
-      ::metal::atomic_store_explicit(
-          &any_rotation, 0u, ::metal::memory_order_relaxed);
+      atomic_store_explicit(&any_rotation, 0u, memory_order_relaxed);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -1378,20 +1375,19 @@ kernel void svd_jacobi(
         if (!act) {
           continue;
         }
-        float apq_abs = ::metal::precise::sqrt(svd_abs2(apq_acc));
-        float off = ::metal::precise::sqrt(app * aqq);
+        float apq_abs = precise::sqrt(svd_abs2(apq_acc));
+        float off = precise::sqrt(app * aqq);
         if (off < eps || apq_abs <= params.tol * off) {
           continue;
         }
         if (simd_lane == 0) {
-          ::metal::atomic_store_explicit(
-              &any_rotation, 1u, ::metal::memory_order_relaxed);
+          atomic_store_explicit(&any_rotation, 1u, memory_order_relaxed);
         }
         T phi = (apq_abs > 0) ? (apq_acc * (1.0f / apq_abs)) : svd_one(T(0));
         float tau = (aqq - app) / (2 * apq_abs);
         float t = (tau >= 0 ? 1.0f : -1.0f) /
-            (::metal::fabs(tau) + ::metal::precise::sqrt(1 + tau * tau));
-        float c = 1 / ::metal::precise::sqrt(1 + t * t);
+            (fabs(tau) + precise::sqrt(1 + tau * tau));
+        float c = 1 / precise::sqrt(1 + t * t);
         float s = c * t;
         T cphi = svd_conj(phi);
         for (uint32_t i = simd_lane; i < m; i += kSimd) {
@@ -1429,12 +1425,10 @@ kernel void svd_jacobi(
     }
 
     threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
-    threadgroup uint32_t do_break;
+    threadgroup uint32_t do_break = 0;
     if (tid == 0) {
-      do_break = (::metal::atomic_load_explicit(
-                      &any_rotation, ::metal::memory_order_relaxed) == 0u)
-          ? 1u
-          : 0u;
+      do_break =
+          atomic_load_explicit(&any_rotation, memory_order_relaxed) == 0u;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (do_break) {
@@ -1451,7 +1445,7 @@ kernel void svd_jacobi(
     for (uint32_t i = simd_lane; i < m; i += kSimd) {
       norm_sq += svd_abs2(colj[i]);
     }
-    float sigma = ::metal::precise::sqrt(c10::metal::simd_sum(norm_sq));
+    float sigma = precise::sqrt(c10::metal::simd_sum(norm_sq));
     if (simd_lane == 0) {
       sig[j] = sigma;
       ord[j] = j;
@@ -1602,7 +1596,7 @@ kernel void eigh_jacobi(
   threadgroup uint32_t pbuf[48], qbuf[48];
   // Concurrent SIMD-groups flag "I rotated"; a plain flag races, so use an
   // atomic.
-  threadgroup ::metal::atomic_uint any_rotation;
+  threadgroup atomic_uint any_rotation;
 
   const uint32_t ne = n + (n & 1u);
   const uint32_t n_pairs = ne / 2;
@@ -1613,8 +1607,7 @@ kernel void eigh_jacobi(
   uint32_t sweep = 0;
   for (; sweep < params.max_sweeps; ++sweep) {
     if (tid == 0) {
-      ::metal::atomic_store_explicit(
-          &any_rotation, 0u, ::metal::memory_order_relaxed);
+      atomic_store_explicit(&any_rotation, 0u, memory_order_relaxed);
     }
     {
       float ld = 0.0f;
@@ -1623,9 +1616,9 @@ kernel void eigh_jacobi(
         uint32_t row = i % n, col = i / n;
         float a2 = svd_abs2(Atg[i]);
         if (row == col) {
-          ld = ::metal::max(ld, a2);
+          ld = max(ld, a2);
         } else {
-          lo = ::metal::max(lo, a2);
+          lo = max(lo, a2);
         }
       }
       ld = c10::metal::simd_max(ld);
@@ -1639,10 +1632,10 @@ kernel void eigh_jacobi(
     float g2 = 0.0f;
     float o2 = 0.0f;
     for (uint32_t s = 0; s < num_sg; ++s) {
-      g2 = ::metal::max(g2, red_diag[s]);
-      o2 = ::metal::max(o2, red_off[s]);
+      g2 = max(g2, red_diag[s]);
+      o2 = max(o2, red_off[s]);
     }
-    const float gscale = ::metal::precise::sqrt(g2);
+    const float gscale = precise::sqrt(g2);
     if (o2 <= params.tol * params.tol * g2) {
       break;
     }
@@ -1668,22 +1661,21 @@ kernel void eigh_jacobi(
         float app = svd_real_part(Atg[p * n + p]);
         float aqq = svd_real_part(Atg[q * n + q]);
         T apq = Atg[q * n + p];
-        float apq_abs = ::metal::precise::sqrt(svd_abs2(apq));
-        float off = ::metal::precise::sqrt(::metal::fabs(app * aqq));
+        float apq_abs = precise::sqrt(svd_abs2(apq));
+        float off = precise::sqrt(::metal::fabs(app * aqq));
         float c = 1.0f;
         T s = T(0);
-        float thresh = ::metal::max(params.tol * off, params.tol * gscale);
+        float thresh = max(params.tol * off, params.tol * gscale);
         bool rotate = apq_abs > thresh + 1e-30f;
         if (rotate) {
           if (simd_lane == 0) {
-            ::metal::atomic_store_explicit(
-                &any_rotation, 1u, ::metal::memory_order_relaxed);
+            atomic_store_explicit(&any_rotation, 1u, memory_order_relaxed);
           }
           T phi = apq * (1.0f / apq_abs);
           float tau = (aqq - app) / (2.0f * apq_abs);
           float t = (tau >= 0 ? 1.0f : -1.0f) /
-              (::metal::fabs(tau) + ::metal::precise::sqrt(1.0f + tau * tau));
-          c = 1.0f / ::metal::precise::sqrt(1.0f + t * t);
+              (fabs(tau) + precise::sqrt(1.0f + tau * tau));
+          c = 1.0f / precise::sqrt(1.0f + t * t);
           float sreal = c * t;
           s = svd_mul(phi, svd_from_real(T(0), sreal));
         }
@@ -1732,8 +1724,7 @@ kernel void eigh_jacobi(
       }
       threadgroup_barrier(mem_flags::mem_threadgroup);
     }
-    if (::metal::atomic_load_explicit(
-            &any_rotation, ::metal::memory_order_relaxed) == 0u) {
+    if (atomic_load_explicit(&any_rotation, memory_order_relaxed) == 0u) {
       break;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
