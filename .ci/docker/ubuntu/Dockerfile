@@ -29,23 +29,19 @@ ARG KATEX
 COPY ./common/install_docs_reqs.sh install_docs_reqs.sh
 RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
-# Install python (via deadsnakes) into a venv and the CI requirements
-ARG PYTHON_VERSION
+# Install conda and other packages (e.g., numpy, pytest)
+ARG ANACONDA_PYTHON_VERSION
 ARG PYTHON_FREETHREADED
 ARG DOCS
-ENV PYTHON_VERSION=$PYTHON_VERSION
+ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PYTHON_FREETHREADED=$PYTHON_FREETHREADED
+ENV PATH=/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 ENV DOCS=$DOCS
-ENV VENV_PATH=/opt/python-${PYTHON_VERSION}-venv
-ENV VIRTUAL_ENV=${VENV_PATH}
-ENV PATH=${VENV_PATH}/bin:$PATH
-COPY requirements-ci.txt requirements-docs.txt /opt/
-COPY ./common/install_python.sh install_python.sh
+COPY requirements-ci.txt requirements-docs.txt /opt/conda/
+COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_python.sh && rm install_python.sh /opt/requirements-ci.txt /opt/requirements-docs.txt
-# Installed as jenkins (via pip_install) so the venv stays writable for the
-# test-time reinstall, and with --no-deps to avoid pulling torch in here.
-RUN bash -c "source ./common_utils.sh && pip_install --no-deps spmd-types==0.2.1" && rm common_utils.sh
+COPY ./common/install_magma_conda.sh install_magma_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -65,12 +61,6 @@ COPY ./common/install_cusparselt.sh install_cusparselt.sh
 RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl* install_cusparselt.sh
 ENV DESIRED_CUDA=${CUDA_VERSION}
 ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
-
-# Install MAGMA into the CUDA toolkit dir (was previously pulled in via conda)
-COPY ./common/install_magma.sh install_magma.sh
-RUN if [ -n "${CUDA_VERSION}" ]; then bash ./install_magma.sh $(echo ${CUDA_VERSION} | cut -f1-2 -d'.'); fi
-RUN rm -f install_magma.sh
-ENV MAGMA_HOME=/usr/local/cuda/magma
 # No effect if cuda not installed
 ENV USE_SYSTEM_NCCL=1
 ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
@@ -109,7 +99,7 @@ RUN bash ./install_triton.sh
 
 FROM base AS final
 COPY --from=triton-builder /opt/triton /opt/triton
-RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins ${VENV_PATH}; fi
+RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
 RUN rm -rf /opt/triton
 
 ARG EXECUTORCH
