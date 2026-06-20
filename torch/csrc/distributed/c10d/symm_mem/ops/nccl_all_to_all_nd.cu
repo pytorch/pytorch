@@ -7,6 +7,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/ops/symm_mem_copy.cuh>
 
 // Permute-free all-to-all for Ulysses-style sequence parallelism.
 //
@@ -26,42 +27,6 @@ namespace c10d::nccl_extension {
 using namespace c10d::symmetric_memory;
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-
-namespace {
-
-// Caller must ensure 16-byte aligned addresses and nbytes divisible by 16.
-__device__ inline void copy_bytes_vec16_aligned(
-    const char* src,
-    char* dst,
-    size_t nbytes,
-    size_t tid,
-    size_t stride) {
-  const size_t n_vec = nbytes / 16;
-  constexpr int kUnroll = 4;
-  size_t vec_idx = tid;
-  for (; vec_idx + static_cast<size_t>(kUnroll - 1) * stride < n_vec;
-       vec_idx += static_cast<size_t>(kUnroll) * stride) {
-    at::native::memory::Vec<16> chunk[kUnroll];
-#pragma unroll 4
-    for (int u = 0; u < kUnroll; ++u) {
-      const size_t i = vec_idx + static_cast<size_t>(u) * stride;
-      chunk[u] = at::native::memory::ld_vec<16>(src + i * 16);
-    }
-#pragma unroll 4
-    for (int u = 0; u < kUnroll; ++u) {
-      const size_t i = vec_idx + static_cast<size_t>(u) * stride;
-      at::native::memory::st_vec<16>(dst + i * 16, chunk[u]);
-    }
-  }
-  for (; vec_idx < n_vec; vec_idx += stride) {
-    const char* src_ptr = src + vec_idx * 16;
-    char* dst_ptr = dst + vec_idx * 16;
-    auto v = at::native::memory::ld_vec<16>(src_ptr);
-    at::native::memory::st_vec<16>(dst_ptr, v);
-  }
-}
-
-} // namespace
 
 constexpr int A2A_MAX_SLOTS = 64;           // max group size (p)
 constexpr int A2A_MAX_CTAS_PER_SLOT = 16;   // max CTAs assigned to one slot's rows
