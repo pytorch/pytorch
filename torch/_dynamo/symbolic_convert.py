@@ -189,12 +189,7 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-from .variables.object_protocol import (
-    generic_bool,
-    generic_contains,
-    generic_getiter,
-    virtual_iterator_next,
-)
+from .variables.object_protocol import generic_bool, generic_contains, generic_getiter
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -2463,23 +2458,16 @@ class InstructionTranslatorBase(
         self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def FOR_ITER(self, inst: Instruction) -> None:
+        # in 3.15+, make sure TOS remains a null
         if sys.version_info >= (3, 15):
-            null_or_idx = self.pop()
-            it = self.pop().realize()
-            self.push(it)
-            self.push(null_or_idx)
-        else:
-            it = self.pop().realize()
-            self.push(it)
+            null = self.pop()
+        it = self.pop().realize()
+        self.push(it)
+        if sys.version_info >= (3, 15):
+            self.push(null)
         try:
-            if sys.version_info >= (3, 15):
-                val, next_ = virtual_iterator_next(self, it, null_or_idx)
-                self.pop()
-                self.push(next_)
-                self.push(val)
-            else:
-                val = it.next_variable(self)
-                self.push(val)
+            val = it.next_variable(self)
+            self.push(val)
         except (
             StopIteration,
             exc.ObservedUserStopIteration,
@@ -3006,16 +2994,15 @@ class InstructionTranslatorBase(
             self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
 
     def GET_ITER(self, inst: Instruction) -> None:
+        # This is intentionally different from cpython 3.15+.  Cpython creates virtual iterators for certain types
+        # (i.e. lists/tuples), represented on the stack by the iterable + an integer index.  Other types call the
+        # builtin iter and are represented by iterator + null.  We could mimic this in dynamo, but it becomes
+        # problematic for resuming from graph breaks in list comprehensions.  Cpython uses tagged ints (not PyObject) to
+        # represent the index, and we can only restore boxed ints, which creates an invalid stack state.  So instead of
+        # trying, we just always create a true iterator.
+        self.push(generic_getiter(self, self.pop()))
         if sys.version_info >= (3, 15):
-            obj = self.pop()
-            if isinstance(obj, (ListVariable, TupleVariable)):
-                self.push(obj)
-                self.push(VariableTracker.build(self, 0))
-            else:
-                self.call_function(VariableTracker.build(self, iter), [obj], {})
-                self.push(NullVariable())
-        else:
-            self.call_function(VariableTracker.build(self, iter), [self.pop()], {})
+            self.push(NullVariable())
 
     @break_graph_if_unsupported(
         push=True,
@@ -4767,6 +4754,8 @@ class InstructionTranslatorBase(
     def END_SEND(self, inst: Instruction) -> None:
         tos = self.pop()
         self.pop()
+        if sys.version_info >= (3, 15):
+            self.pop()
         self.push(tos)
 
     # 3.13 opcodes
@@ -6364,27 +6353,16 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             raise AssertionError("expected len(self.stack) >= 2 to be true")
         val = self.pop()
         if sys.version_info >= (3, 15):
-            null_or_index = self.pop()
-        receiver = self.stack[-1]
-        if (
-            isinstance(receiver, (IteratorVariable, LocalGeneratorObjectVariable))
-            or (
-                isinstance(receiver, UserDefinedObjectVariable)
-                and isinstance(receiver.value, collections.abc.Iterator)
-            )
-            or (
-                sys.version_info >= (3, 15)
-                and isinstance(receiver, (ListVariable, TupleVariable))
-            )
+            receiver = self.stack[-2]
+        else:
+            receiver = self.stack[-1]
+        if isinstance(receiver, (IteratorVariable, LocalGeneratorObjectVariable)) or (
+            isinstance(receiver, UserDefinedObjectVariable)
+            and isinstance(receiver.value, collections.abc.Iterator)
         ):
             if val.is_constant_none():
                 try:
-                    if sys.version_info >= (3, 15):
-                        val, next_idx = virtual_iterator_next(
-                            self, receiver, null_or_index
-                        )
-                    else:
-                        val = receiver.next_variable(self)  # type: ignore[arg-type]
+                    val = receiver.next_variable(self)  # type: ignore[arg-type]
                 except (
                     StopIteration,
                     exc.ObservedUserStopIteration,
@@ -6401,8 +6379,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                     self.push(val)
                     self.jump(inst)
                 else:
-                    if sys.version_info >= (3, 15):
-                        self.push(next_idx)
                     self.push(val)
             else:
                 # invoke send
