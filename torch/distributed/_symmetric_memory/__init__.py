@@ -2282,6 +2282,75 @@ def reduce_scatter_offset(
         )
 
 
+def all_gather_offset(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    group: str,
+    split_sizes: list[int],
+    split_offsets: list[int] | None = None,
+) -> None:
+    r"""
+    all_gather_offset(input, out, group, split_sizes, split_offsets=None) -> None
+
+    All-gather a rank-local bucket of parameter shards held in a symmetric
+    memory buffer into a *parameter-contiguous* output, fusing the gather with
+    the copy-out reorder that FSDP2 would otherwise perform with
+    ``split_with_sizes_copy``.
+
+    ``input`` is a 1-D symmetric tensor holding this rank's shards of ``N``
+    parameters laid out back-to-back: parameter ``i`` occupies
+    ``input[split_offsets[i] : split_offsets[i] + split_sizes[i]]``.
+
+    In the output, each parameter is stored contiguously across ranks (rather
+    than the standard rank-major all-gather layout).  For parameter ``i`` and
+    source rank ``r``, the gathered region is::
+
+        out[off * W + r * size : off * W + (r + 1) * size]
+
+    where ``off = split_offsets[i]``, ``size = split_sizes[i]`` and ``W`` is the
+    group size.  Every rank produces the full output (standard all-gather
+    semantics).
+
+    ``out`` must be a symmetric-memory tensor: each rank writes its own shard
+    into ``out`` on every rank.  When ``out`` has multicast support, the write
+    uses NVLink SHARP (multimem) -- each shard is written once and the switch
+    replicates it to every rank; otherwise each rank pushes its shard directly
+    into every peer's ``out`` over LSA.  ``input`` is read locally and need not
+    be a symmetric-memory tensor.
+
+    All per-parameter offsets and shard sizes must be 16-byte aligned.
+
+    Args:
+        input (Tensor): 1-D contiguous tensor holding this rank's shards.
+        out (Tensor): 1-D contiguous output tensor of numel
+            ``sum(split_sizes) * world_size``, with the same dtype as ``input``,
+            allocated via symmetric memory.
+        group (str): The name of the ``ProcessGroup`` to perform the operation on.
+        split_sizes (list[int]): Per-rank shard size of each parameter, length N.
+        split_offsets (list[int] | None): Start offset of each parameter within
+            ``input``, length N.  If not provided, defaults to the exclusive
+            prefix sum of ``split_sizes`` (a packed bucket).
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> # Each rank holds its shards of two parameters in a packed bucket.
+        >>> split_sizes = [s0, s1]
+        >>> inp = symm_mem.empty(s0 + s1, dtype=torch.bfloat16, device="cuda")
+        >>> symm_mem.rendezvous(inp, group=group_name)
+        >>> out = symm_mem.empty((s0 + s1) * world_size, dtype=torch.bfloat16, device="cuda")
+        >>> symm_mem.rendezvous(out, group=group_name)
+        >>> symm_mem.all_gather_offset(inp, out, group_name, split_sizes)
+    """
+    backend = get_backend(input.device)
+    if backend == "NCCL":
+        torch.ops.symm_mem.nccl_all_gather_offset(
+            input, out, group, split_sizes, split_offsets
+        )
+    else:
+        raise NotImplementedError(f"all_gather_offset: unsupported backend: {backend}")
+
+
 def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
     r"""
     is_symm_mem_tensor(tensor) -> bool
@@ -2358,4 +2427,5 @@ __all__ = [
     "get_mem_pool",
     "reduce_scatter_offset",
     "all_to_all_nd",
+    "all_gather_offset",
 ]
