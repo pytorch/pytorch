@@ -1292,6 +1292,28 @@ class TestVmapAPI(TestCase):
         ):
             torch.func.vmap(foo)(torch.randn(3, 3))
 
+    def test_vmap_out_dims_negative_one_independent_output(self):
+        t = torch.randn(2, 3)
+        t_scalar = torch.randn([])
+
+        def f_dep(x):
+            return x
+
+        def f_ind(x):
+            return t
+
+        def f_ind_scalar(x):
+            return t_scalar
+
+        res_dep_neg1 = vmap(f_dep, in_dims=0, out_dims=-1)(t)
+        self.assertEqual(res_dep_neg1.shape, torch.Size([3, 2]))
+
+        res_ind_neg1 = vmap(f_ind, in_dims=0, out_dims=-1)(torch.zeros(1))
+        self.assertEqual(res_ind_neg1.shape, torch.Size([2, 3, 1]))
+
+        res_ind_scalar_neg1 = vmap(f_ind_scalar, in_dims=0, out_dims=-1)(torch.zeros(5))
+        self.assertEqual(res_ind_scalar_neg1.shape, torch.Size([5]))
+
 
 def slice_inputs(inputs, bdims, i):
     result = []
