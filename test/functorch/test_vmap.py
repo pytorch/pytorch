@@ -2922,9 +2922,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         # https://github.com/pytorch/pytorch/issues/135424
         # Vmapping over the `repeats` tensor requires `output_size` because the
         # output length (the sum of `repeats`) is data-dependent.
-        repeats = torch.tensor(
-            [[4, 0, 8], [2, 2, 8], [4, 2, 6], [2, 4, 6], [0, 4, 8]]
-        )
+        repeats = torch.tensor([[4, 0, 8], [2, 2, 8], [4, 2, 6], [2, 4, 6], [0, 4, 8]])
         output_size = 12  # every row sums to 12
 
         # repeat_interleave.Tensor: the base overload returning gather indices.
