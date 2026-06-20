@@ -171,8 +171,10 @@ def _all_fqn_strings(annotations) -> list:
     out = []
     for ann_list in annotations.values():
         for ann in ann_list:
-            if isinstance(ann, dict) and "str" in ann:
-                out.append(ann["str"])
+            if isinstance(ann, dict):
+                fqn = ann.get("str") or ann.get("module_name")
+                if fqn:
+                    out.append(fqn)
     return out
 
 
@@ -354,7 +356,7 @@ class TestCudagraphFqnAnnotations(TestCase):
 
     def test_save_annotations_and_join_trace(self):
         """End-to-end save -> annotate workflow: save_kernel_annotations writes the
-        annotations JSON, the profiler writes the Chrome trace JSON, and
+        annotations pickle, the profiler writes the Chrome trace JSON, and
         _annotate_cuda_graph_trace.annotate_trace joins the two on the cuda graph
         node id -- producing (kernel name, graph node id, fqn) rows."""
         from torch.cuda._annotate_cuda_graph_trace import annotate_trace
@@ -374,11 +376,13 @@ class TestCudagraphFqnAnnotations(TestCase):
                 compiled(x)
                 torch.cuda.synchronize()
 
-        # Artifact 1: annotations JSON written by the public save API.
-        with TemporaryFileName(suffix=".json") as ann_path:
+        # Artifact 1: annotations pickle written by the public save API.
+        import pickle
+
+        with TemporaryFileName(suffix=".pkl") as ann_path:
             save_kernel_annotations(ann_path)
-            with open(ann_path) as f:
-                annotations = {int(k): v for k, v in json.load(f).items()}
+            with open(ann_path, "rb") as f:
+                annotations = pickle.load(f)
 
         # Artifact 2: Chrome trace JSON (kernel events carry "graph node id").
         with TemporaryFileName(suffix=".json") as trace_path:
