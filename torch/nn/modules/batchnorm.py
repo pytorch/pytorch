@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import warnings
 from typing import Any
 
 import torch
@@ -924,6 +925,25 @@ class SyncBatchNorm(_BatchNorm):
         """
         module_output = module
         if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            # Only the types below round-trip faithfully; everything else is
+            # rebuilt as a bare SyncBatchNorm carrying just the BatchNorm
+            # attributes. A lazy BN that has already initialized has swapped its
+            # __class__ to BatchNorm{1,2,3}d, so it is matched here.
+            if type(module) not in (
+                torch.nn.BatchNorm1d,
+                torch.nn.BatchNorm2d,
+                torch.nn.BatchNorm3d,
+                torch.nn.SyncBatchNorm,
+            ):
+                warnings.warn(
+                    f"convert_sync_batchnorm rebuilds {type(module).__name__} as a "
+                    "plain SyncBatchNorm and only copies the BatchNorm attributes. "
+                    "Anything else the type carries (an overridden forward, child "
+                    "modules, uninitialized lazy parameters) is dropped, which may "
+                    "silently change the model's output. Provide a custom "
+                    "conversion if that behavior must be preserved.",
+                    stacklevel=2,
+                )
             module_output = torch.nn.SyncBatchNorm(
                 module.num_features,
                 module.eps,
