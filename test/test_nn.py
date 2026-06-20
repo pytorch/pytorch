@@ -7959,6 +7959,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     expected_neg_inf,
                 )
 
+    def test_lp_pool_zero_norm_type(self):
+        cases = [
+            (F.lp_pool1d, torch.randn(1, 1, 4), 2, 1),
+            (F.lp_pool2d, torch.randn(1, 1, 4, 4), 2, 1),
+            (F.lp_pool3d, torch.randn(1, 1, 4, 4, 4), 2, 1),
+        ]
+        for lp_pool, inp, kernel_size, stride in cases:
+            with self.subTest(lp_pool=lp_pool.__name__):
+                with self.assertRaisesRegex(
+                    ValueError, "norm_type must be non-zero"
+                ):
+                    lp_pool(inp, 0, kernel_size, stride)
+
     def test_pickle_module_no_weights_only_warning(self):
         with warnings.catch_warnings(record=True) as w:
             pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
