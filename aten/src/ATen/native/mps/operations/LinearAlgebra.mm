@@ -18,6 +18,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_cholesky_solve_helper_native.h>
+#include <ATen/ops/_compute_linear_combination_native.h>
 #include <ATen/ops/_linalg_eigh.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
 #include <ATen/ops/addbmm_native.h>
@@ -26,6 +27,7 @@
 #include <ATen/ops/all.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/eye.h>
 #include <ATen/ops/eye_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
@@ -2167,6 +2169,45 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
 
 TORCH_IMPL_FUNC(linalg_qr_out_mps)(const Tensor& A, c10::string_view mode, const Tensor& Q, const Tensor& R) {
   mps::linalg_qr_out_impl_mps(A, Q, R, mode);
+}
+
+// MPS implementation of _compute_linear_combination.
+// Computes: output[i, ...] = sum_j(coefficients[i, j] * input[j, ...])
+// This helper is used internally by linalg.matrix_exp to evaluate the
+// Taylor/scaling-and-squaring polynomials. It is expressed purely as a matmul
+// so it relies only on ops MPS already supports (no eig/SVD/solve).
+Tensor _compute_linear_combination_mps(const Tensor& input, const Tensor& coefficients) {
+  // Match the CPU/CUDA validation from FunctionOfAMatrixUtils.
+  TORCH_CHECK(input.dim() >= 1, "_compute_linear_combination_mps: input must have at least 1 dimension");
+  TORCH_CHECK(coefficients.dim() == 2, "_compute_linear_combination_mps: coefficients must be 2D (I, J)");
+
+  const auto J = input.size(0);
+  TORCH_CHECK(coefficients.size(1) == J,
+              "_compute_linear_combination_mps: coefficients.size(1) must match input.size(0), but got ",
+              coefficients.size(1), " and ", J);
+
+  const auto I = coefficients.size(0);
+
+  // Flatten all non-leading dimensions of input into a single dimension N.
+  auto input_2d = input.reshape({J, -1});
+
+  // Allocate output in the same dtype/device as input to avoid autocast side effects.
+  auto output_2d = at::empty({I, input_2d.size(1)}, input.options());
+
+  // Use matmul_out (instead of einsum) to avoid AutocastMPS behavior.
+  at::matmul_out(output_2d, coefficients.to(input.dtype()), input_2d);
+
+  // Restore the original "..." shape, replacing the leading dimension with I.
+  auto output_sizes = input.sizes().vec();
+  output_sizes[0] = I;
+  return output_2d.reshape(output_sizes);
+}
+
+Tensor& _compute_linear_combination_out_mps(const Tensor& input, const Tensor& coefficients, Tensor& output) {
+  auto result = _compute_linear_combination_mps(input, coefficients);
+  output.resize_(result.sizes());
+  output.copy_(result);
+  return output;
 }
 
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)

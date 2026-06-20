@@ -2500,6 +2500,47 @@ class TestMPS(TestCaseMPS):
             X_mps_t = torch.linalg.solve(A_mps.mT, b_mps, left=left)
             self.assertEqual(X_cpu_t, X_mps_t)
 
+    def test_matrix_exp(self):
+        # torch.linalg.matrix_exp / torch.matrix_exp on MPS, validated against CPU.
+        # Covers real and complex dtypes, several sizes, and batched inputs.
+        def run(shape, dtype):
+            # matrix_exp (Taylor / scaling-and-squaring) carries a few extra fp32
+            # matmul ulps vs CPU, like matrix_power; use the same relaxed tol.
+            atol, rtol = 1e-4, 1e-5
+            A_cpu = torch.randn(*shape, dtype=dtype, device="cpu")
+            A_mps = A_cpu.to("mps")
+            self.assertEqual(torch.linalg.matrix_exp(A_cpu), torch.linalg.matrix_exp(A_mps),
+                             atol=atol, rtol=rtol)
+            # the aten alias should route to the same kernel
+            self.assertEqual(torch.matrix_exp(A_cpu), torch.matrix_exp(A_mps),
+                             atol=atol, rtol=rtol)
+
+        for dtype in [torch.float32, torch.complex64]:
+            for shape in [(1, 1), (2, 2), (5, 5), (16, 16), (32, 32),
+                          (4, 8, 8), (2, 3, 5, 5)]:
+                run(shape, dtype)
+
+        # exp(0) == I exactly
+        Z = torch.zeros(4, 4, device="mps")
+        self.assertEqual(torch.matrix_exp(Z), torch.eye(4, device="mps"))
+
+        # skew-Hermitian -iH must exponentiate to a unitary matrix
+        H = torch.randn(8, 8, dtype=torch.complex64, device="mps")
+        H = H + H.conj().mT
+        U = torch.matrix_exp(-1j * H)
+        eye = torch.eye(8, dtype=torch.complex64, device="mps")
+        self.assertEqual(U.conj().mT @ U, eye)
+
+    def test_matrix_exp_backward(self):
+        # autograd parity with CPU (MPS has no float64, so compare grads in float32).
+        A_cpu = torch.randn(6, 6, dtype=torch.float32, requires_grad=True)
+        A_mps = A_cpu.detach().to("mps").requires_grad_(True)
+        torch.linalg.matrix_exp(A_cpu).pow(2).sum().backward()
+        torch.linalg.matrix_exp(A_mps).pow(2).sum().backward()
+        # backward is the Frechet derivative (augmented matrix_exp); a touch
+        # looser than forward, consistent with the op's matrix_power-like fp32 tol.
+        self.assertEqual(A_cpu.grad, A_mps.grad, atol=1e-3, rtol=1e-5)
+
     def test_linalg_det(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
 
@@ -15030,6 +15071,11 @@ class TestConsistency(TestCaseMPS):
                 return (1e-4, 1e-5)
             if op.name == "linalg.matrix_power":
                 return (1e-3, 1e-5)
+            if op.name == "matrix_exp":
+                # Taylor / scaling-and-squaring accumulates a few extra fp32 ulps
+                # of matmul rounding vs CPU, like matrix_power. Backward (Frechet
+                # derivative) is correspondingly looser.
+                return (1e-3, 1e-5)
         if dtype == torch.float16:
             if op.name == "rsub":
                 return (2e-3, 2e-3)
@@ -15040,6 +15086,9 @@ class TestConsistency(TestCaseMPS):
         if dtype == torch.complex64:
             if op.name == "mv":
                 return (2e-5, 1e-5)
+            if op.name == "matrix_exp":
+                # high-magnitude complex exp values carry a few extra fp32 ulps
+                return (1e-3, 3e-5)
         return (None, None)
 
     # Used for accept mode only
