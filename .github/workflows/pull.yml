@@ -225,6 +225,70 @@ jobs:
   # preview can go up as soon as the docs finish, without waiting for the rest
   # of this workflow to conclude.
 
+  test-diff:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' test-diff ') }}
+    name: test-diff
+    uses: ./.github/workflows/_test-diff.yml
+    needs:
+      - linux-jammy-py3_10-gcc11-build
+      - get-label-type
+      - job-filter
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      # All six registry platforms are validated: cpu/cuda/rocm against pytest
+      # --collect-only, mps on a real Mac, xpu on real Intel-GPU (linux.idc.xpu).
+      platforms: "linux-cpu,linux-cuda-sm80,linux-cuda-sm90,linux-rocm,macos-mps,linux-xpu"
+    secrets: inherit
+
+  # On-demand pre-land testing of the comment pipeline: post the test-diff comment
+  # directly from the PR branch, instead of the post-land path in test-diff-comment.yml
+  # (workflow_run only ever runs the default-branch copy, so branch changes to the
+  # comment code can't otherwise be exercised before landing). Opt in by putting
+  # `[ci-test-diff-comment]` in the PR description -- for ghstack, in the commit message,
+  # which becomes the PR body and lands as a record that this was tested on-branch.
+  # Same-repo only; forks lack the write token needed to comment.
+  test-diff-comment-on-branch:
+    name: test-diff-comment (on-branch)
+    needs:
+      - test-diff
+      - linux-jammy-py3_10-gcc11-build
+      - get-label-type
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && contains(github.event.pull_request.body, '[ci-test-diff-comment]') }}
+    # ARC container job (the classic EC2 pool is not provisioned in ARC mode); the build
+    # image just needs python3 -- post_comment is urllib-only and imports no torch.
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64"
+    container:
+      image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
+    permissions:
+      pull-requests: write
+      contents: read
+      actions: read
+    steps:
+      # ARC containers leave GITHUB_WORKSPACE owned by the runner uid, so a bare
+      # checkout's `git init` hits "Permission denied"; setup-linux does this for the
+      # other ARC jobs. 777 lets both the container uid and the GH cleanup hook write.
+      - name: Fix workspace permissions (ARC)
+        shell: bash
+        run: sudo chmod -R 777 "$GITHUB_WORKSPACE"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: test-diff-result
+      - name: Post sticky comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -f test-diff-result.json ]; then
+            python3 -m tools.testing.introspection.post_comment test-diff-result.json
+          else
+            echo "no test-diff-result.json artifact; nothing to post"
+          fi
+
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.10-gcc11-no-ops (build only)                         ║
   # ╠══════════════════════════════════════════════════════════════════════╣

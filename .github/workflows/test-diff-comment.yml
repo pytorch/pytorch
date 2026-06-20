@@ -1,0 +1,55 @@
+name: test-diff-comment
+
+# Privileged comment stage of the "tests added/removed" PR comment. Triggered by the
+# `pull` workflow finishing; it downloads the JSON the compute job (_test-diff.yml)
+# uploaded and posts/updates a sticky comment. It runs NO PR code (it renders the data
+# artifact with code checked out from the default branch), which is why it can safely
+# hold pull-requests: write even for fork PRs.
+
+on:
+  workflow_run:
+    workflows: ["pull"]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  actions: read
+  contents: read
+
+concurrency:
+  # Serialize comment writes per PR head; don't cancel (we want the latest to land).
+  group: test-diff-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  comment:
+    # Run on `completed` (not only success): `pull` has cancel-in-progress, and the
+    # compute job's artifact may exist even when the overall run was cancelled.
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Check out the default branch (NOT the PR head) so the renderer is trusted code.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download test-diff result
+        id: dl
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: test-diff-result
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Render and upsert sticky comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -f test-diff-result.json ]; then
+            python3 -m tools.testing.introspection.post_comment test-diff-result.json
+          else
+            echo "no test-diff-result.json artifact; nothing to post"
+          fi

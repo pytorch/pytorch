@@ -1,0 +1,110 @@
+name: test-diff
+
+# Compute stage of the "tests added/removed" PR comment (behavior 1 of testintro).
+# Reuses an existing build artifact (no extra build), runs the diff across platforms
+# inside the build container, and uploads the result as a GHA artifact. It posts
+# nothing; the privileged comment is done by test-diff-comment.yml (workflow_run), so
+# no PR-code execution ever holds write permissions.
+#
+# Runs on the OSDC/ARC runner fleet that the `pull` workflow's build/test jobs use: a
+# container job on an ARC runner, mirroring _linux-test.yml's `test-osdc`. The classic
+# (EC2) runner pool is not provisioned in ARC mode, so a `runs-on: linux.4xlarge` job
+# would hang in "waiting for a runner".
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Build artifact / environment to reuse (e.g. linux-jammy-py3.10-gcc11).
+      docker-image:
+        required: true
+        type: string
+        description: Docker image to run in (the build's image).
+      runner_prefix:
+        required: false
+        type: string
+        default: ""
+      runner:
+        required: false
+        type: string
+        default: "l-x86iavx512-8-64"
+        description: ARC runner label (without prefix) to run on.
+      s3-bucket:
+        required: false
+        type: string
+        default: "gha-artifacts"
+      platforms:
+        required: false
+        type: string
+        default: ""
+        description: "Comma-separated testintro platform names (default: all)."
+
+jobs:
+  test-diff:
+    # Only meaningful for PRs; the fleet only runs on fork PRs once a maintainer adds a
+    # ciflow label (trusted context), same as every other build/test job here.
+    if: github.repository_owner == 'pytorch' && github.event_name == 'pull_request'
+    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runner }}
+    container:
+      image: ${{ inputs.docker-image }}
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          use-arc: true
+          # testintro creates git worktrees of base/head and reads test-file blobs at
+          # both refs; a treeless clone would lazy-fetch per blob and hang. A normal
+          # checkout is full-history (fetch-depth 0), so merge-base + blob reads stay
+          # local.
+          checkout-mode: normal
+          submodules: 'false'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        id: aws-creds
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+          # The max duration enforced by the server side
+          role-duration-seconds: 18000
+
+      - name: Download build artifacts
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        with:
+          name: ${{ inputs.build-environment }}
+          s3-bucket: ${{ inputs.s3-bucket }}
+          use-gha: ${{ steps.aws-creds.outcome != 'success' }}
+
+      - name: Compute test diff
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          TESTINTRO_PLATFORMS: ${{ inputs.platforms }}
+          TESTINTRO_OUTPUT: test-diff-result.json
+          TESTINTRO_CACHE: ${{ runner.temp }}/testintro-cache
+        run: |
+          set -ex
+          git config --global --add safe.directory '*'
+          # ci_run is the parent process and imports no torch; the wheel torch is
+          # imported only by collector worker subprocesses (launched by path).
+          pip install "$(echo dist/*.whl)[opt-einsum]"
+          python -m tools.testing.introspection.ci_run
+
+      - name: Upload test-diff result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: test-diff-result
+          path: test-diff-result.json
+          if-no-files-found: ignore
+          retention-days: 14
