@@ -2553,13 +2553,8 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
         # this func fails on fake tensors in __torch_dispatch__
         return x
 
-    def is_pinned_cpu_tensor(x: torch.Tensor) -> bool:
-        return x.device.type == "cpu" and x.is_pinned()
-
     def torch_clone(x: torch.Tensor) -> torch.Tensor:
         y = torch.clone(x)
-        if is_pinned_cpu_tensor(x):
-            y = y.pin_memory()
         if x.is_leaf:
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
@@ -2606,10 +2601,7 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
             result = torch.empty_quantized((needed_size + 32,), x)
         else:
             result = torch.empty(
-                needed_size + 32,
-                dtype=dtype or x.dtype,
-                device=x.device,
-                pin_memory=is_pinned_cpu_tensor(x),
+                needed_size + 32, dtype=dtype or x.dtype, device=x.device
             )
         cache_line_offset = (
             (x.data_ptr() - result.data_ptr()) % 32

@@ -45,7 +45,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     OpDTypes,
     ops,
-    PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -5958,108 +5957,6 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                 "test_faketensor": "SUCCESS",
             },
         )
-
-    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
-    @unittest.skipIf(
-        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
-    )
-    def test_opcheck_preserves_pinned_memory_for_schema_check(self):
-        lib = self.lib()
-        lib.define("requires_pinned(Tensor x) -> Tensor")
-        op = self.ns().requires_pinned.default
-
-        def requires_pinned_impl(x):
-            if not x.is_pinned():
-                raise RuntimeError("expected pinned input")
-            return x.clone()
-
-        lib.impl("requires_pinned", requires_pinned_impl, "CPU")
-
-        x = torch.arange(12, dtype=torch.float32, pin_memory=True).view(3, 4)
-        torch.library.opcheck(op, (x,), test_utils="test_schema")
-
-    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
-    @unittest.skipIf(
-        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
-    )
-    def test_opcheck_preserves_pinned_memory_by_default(self):
-        @torch.library.custom_op(
-            f"{self.test_ns}::requires_pinned_default", mutates_args=()
-        )
-        def requires_pinned_default(x: torch.Tensor) -> torch.Tensor:
-            if not x.is_pinned():
-                raise RuntimeError("expected pinned input")
-            return x + 1
-
-        @requires_pinned_default.register_fake
-        def _(x):
-            return torch.empty_like(x)
-
-        x = torch.arange(12, dtype=torch.float32, pin_memory=True).view(3, 4)
-        result = torch.library.opcheck(requires_pinned_default, (x,))
-
-        self.assertEqual(
-            result,
-            {
-                "test_schema": "SUCCESS",
-                "test_autograd_registration": "SUCCESS",
-                "test_faketensor": "SUCCESS",
-                "test_aot_dispatch_dynamic": "SUCCESS",
-            },
-        )
-
-    @skipIfTorchDynamo("recursive dynamo")
-    def test_safe_aot_autograd_check_checks_gradients_for_non_leaf_inputs(self):
-        original_assert_close = torch.testing.assert_close
-        gradient_asserts = []
-
-        def assert_close(actual, expected, *args, **kwargs):
-            if isinstance(actual, tuple) and isinstance(expected, tuple):
-                gradient_asserts.append((actual, expected))
-            return original_assert_close(actual, expected, *args, **kwargs)
-
-        leaf = torch.randn(3, requires_grad=True)
-        non_leaf = leaf * 2
-        with patch("torch.testing.assert_close", assert_close):
-            optests.generate_tests.safe_aot_autograd_check(
-                torch.ops.aten.sin.default,
-                (non_leaf,),
-                {},
-                dynamic=True,
-            )
-
-        self.assertEqual(len(gradient_asserts), 1)
-
-    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
-    @unittest.skipIf(
-        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
-    )
-    def test_safe_schema_check_copy_inputs_preserves_pinned_memory_and_copies(self):
-        lib = self.lib()
-        lib.define("check_and_mutate(Tensor(a!) x) -> ()")
-        op = self.ns().check_and_mutate.default
-        seen_inputs = []
-
-        def check_and_mutate_impl(x):
-            seen_inputs.append((x.is_pinned(), x.data_ptr(), x.stride()))
-            x.add_(1)
-
-        lib.impl("check_and_mutate", check_and_mutate_impl, "CPU")
-
-        x = torch.zeros(4, 6, pin_memory=True)[:, ::2]
-        optests.generate_tests.safe_schema_check(op, (x,), {}, copy_inputs=True)
-
-        self.assertEqual(x, torch.zeros_like(x))
-        self.assertEqual(len(seen_inputs), 1)
-        self.assertTrue(seen_inputs[-1][0])
-        self.assertNotEqual(seen_inputs[-1][1], x.data_ptr())
-        self.assertEqual(seen_inputs[-1][2], x.stride())
-
-        optests.generate_tests.safe_schema_check(op, (x,), {}, copy_inputs=False)
-
-        self.assertEqual(x, torch.ones_like(x))
-        self.assertEqual(len(seen_inputs), 2)
-        self.assertEqual(seen_inputs[-1][1], x.data_ptr())
 
     def test_opcheck_customopdef(self):
         sample_inputs = [
