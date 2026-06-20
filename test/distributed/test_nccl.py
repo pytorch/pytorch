@@ -813,7 +813,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     # both float (4B) and bfloat16 (2B), as the kernel requires.  `out` is a
     # symmetric tensor; the multimem (NVLink SHARP) path is used when multicast
     # is available, otherwise the LSA push fallback (e.g. NCCL_NVLS_ENABLE=0).
-    @parametrize("split_sizes", [[64], [32, 96], [16, 48, 32]])
+    # [16384, 32] mixes a large shard (split across CTAs -- data parallel) with
+    # a tiny one (single CTA), exercising the adaptive launch geometry.
+    @parametrize("split_sizes", [[64], [32, 96], [16, 48, 32], [16384, 32]])
     @parametrize("explicit_offsets", [False, True])
     @parametrize("dtype", [torch.float, torch.bfloat16])
     def test_all_gather_offset(self, split_sizes, explicit_offsets, dtype):
