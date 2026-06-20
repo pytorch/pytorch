@@ -42,4 +42,5 @@ output compared to non-checkpointed passes is never guaranteed.
 .. autoclass:: GraphExecGroup
 .. autofunction:: set_checkpoint_early_stop
 .. autofunction:: set_device_states
+.. autofunction:: register_class_for_ac
 ```

@@ -2,14 +2,12 @@
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import itertools
 import platform
 import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from copy import deepcopy
 from typing import *  # noqa: F403
 from typing_extensions import Self
 import enum
@@ -41,6 +39,7 @@ __all__ = [
     "create_selective_checkpoint_contexts",
     "SAC_IGNORED_OPS",
     "GraphExecGroup",
+    "register_class_for_ac",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -816,6 +815,10 @@ class _Holder:
 
 
 class _CheckpointFrame:
+    # Maps classes to functions that apply a given function to contained
+    # Tensor and SavedTensor instances.
+    _FUNCTION_APPLIERS_FOR_CUSTOM_CLASSES = {}
+
     def __init__(self, recompute_fn, early_stop, unpack_error_cb, metadata_fn) -> None:
         self.recompute_fn = recompute_fn
         self.saved_args: List[Any] = []
@@ -840,48 +843,44 @@ class _CheckpointFrame:
         self.x_metadatas = []
         self.forward_completed = False
         self.ignore_saved_mismatch = False
+    
+    @classmethod
+    def _register_class_for_ac(cls_self, cls, fn) -> None:
+        """Register a custom class for Activation Checkpointing.
 
-    _EXCLUDED_SEQUENCE_TYPES = (str, bytes, bytearray, range)
-
-    def _tree_map(self, fn, target_type, obj):
-        """Apply given function to a target type, supporting nested combinations of Mappings,
-        Sequences and dataclasses. 
+        Args:
+            cls: The class to register.
+            fn: A function applier with signature ``fn(apply_fn, obj)``.
+                It should return an object equivalent to ``obj``, with
+                ``apply_fn`` applied to every contained ``Tensor`` or
+                ``SavedTensor`` instance.
         """
-        if isinstance(obj, target_type):
+        cls_self._FUNCTION_APPLIERS_FOR_CUSTOM_CLASSES[cls] = fn
+
+    def _apply_to_input(self, fn, obj):
+        """Apply ``fn`` to Tensor and SavedTensor instances.
+
+        ``fn`` is applied directly to Tensor and SavedTensor objects, or
+        via a registered function applier for custom classes registered
+        using ``_CheckpointFrame._register_class_for_ac``.
+        Other objects are returned unchanged, i.e. as references to the original.
+        """
+        if isinstance(obj, (torch.Tensor, SavedTensor)):
             return fn(obj)
         
-        _cls = type(obj)
-        if isinstance(obj, Mapping):
-            mapped = {k: self._tree_map(fn, target_type, v) for k, v in obj.items()}
-            if isinstance(obj, defaultdict):
-                mapped.default_factory = obj.default_factory
-            return _cls(mapped)
-        
-        if dataclasses.is_dataclass(obj):
-            return _cls(**{
-                f.name: self._tree_map(fn, target_type, getattr(obj, f.name))
-                for f in dataclasses.fields(obj)
-            })
-        
-        if isinstance(obj, Sequence) and not isinstance(obj, self._EXCLUDED_SEQUENCE_TYPES):
-            mapped = [self._tree_map(fn, target_type, v) for v in obj]
-            
-            # NamedTuple
-            if isinstance(obj, tuple) and hasattr(obj, "_fields"):
-                return _cls(*mapped)
-            return _cls(mapped)
-
-        # In the case where the object does not fall into any explicitly handled types,
-        # keep the contents as-is, but make a deepcopy in case it is mutable
-        return deepcopy(obj)
+        custom_applier = self._FUNCTION_APPLIERS_FOR_CUSTOM_CLASSES.get(type(obj))
+        if custom_applier is not None:
+            return custom_applier(fn, obj)
+        else:
+            return obj
 
     def save_inputs(self, *args):
         fn = lambda x: _make_saved_tensor(x, is_output=False)
-        self.saved_args = list(self._tree_map(fn, torch.Tensor, args))
+        self.saved_args = [self._apply_to_input(fn, arg) for arg in args]
 
     def get_inputs(self) -> List[Any]:
         fn = lambda x: x.unpack()
-        return list(self._tree_map(fn, SavedTensor, self.saved_args))
+        return [self._apply_to_input(fn, arg) for arg in self.saved_args]
 
     def check_recomputed_tensors_match(self, gid) -> None:
         if self.ignore_saved_mismatch:
@@ -952,6 +951,63 @@ class _CheckpointFrame:
                 f"{mismatched_tensors}.\n"
                 f"{_debug_tip_msg}"
             )
+
+
+def register_class_for_ac(cls, fn):
+    r"""Register a custom class for Activation Checkpointing.
+
+    Activation Checkpointing only processes ``Tensor`` and
+    ``SavedTensor`` objects directly. This function allows registering an
+    exact class type together with a function applier that defines how
+    to apply a function to any ``Tensor`` or ``SavedTensor`` instances
+    contained within objects of that class.
+
+    Registration uses exact type matching (``type(obj)``), not
+    ``isinstance``. Subclasses are therefore not handled automatically
+    and must be registered separately if needed.
+
+    Args:
+        cls: The class to register.
+        fn: A function applier with signature ``fn(apply_fn, obj)``.
+            It should return an object equivalent to ``obj``, with
+            ``apply_fn`` applied to every contained ``Tensor`` or
+            ``SavedTensor`` instance.
+
+    Example:
+        Enable activation checkpointing for tensors inside dictionaries
+
+        >>> # xdoctest: +SKIP("stub")
+        >>> from torch._C._autograd import SavedTensor
+        >>>
+        >>> def dict_applier(apply_fn, obj):
+        ...     return {
+        ...         k: apply_fn(v)
+        ...         if isinstance(v, (torch.Tensor, SavedTensor))
+        ...         else v
+        ...         for k, v in obj.items()
+        ...     }
+        ...
+        >>> register_class_for_ac(dict, dict_applier)
+
+        Enable activation checkpointing for tensors inside custom dataclasses
+
+        >>> # xdoctest: +SKIP("stub")
+        >>> from dataclasses import dataclass
+        >>>
+        >>> @dataclass
+        ... class TensorWithName:
+        ...     tensor: torch.Tensor
+        ...     name: str
+        ...
+        >>> def tensor_with_name_applier(apply_fn, obj):
+        ...     return TensorWithName(
+        ...         tensor=apply_fn(obj.tensor),
+        ...         name=obj.name,
+        ...     )
+        ...
+        >>> register_class_for_ac(TensorWithName, tensor_with_name_applier)
+    """
+    _CheckpointFrame._register_class_for_ac(cls, fn)
 
 
 _debug_tip_msg = """
