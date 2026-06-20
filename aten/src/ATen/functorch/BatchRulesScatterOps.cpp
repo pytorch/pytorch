@@ -1319,9 +1319,13 @@ std::tuple<Tensor, std::optional<int64_t>> repeat_interleave_Tensor_batch_rule(
   // which yields index i repeated repeat[b, i] times, e.g.
   //   repeat = [4, 0, 8] -> [0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2].
   const auto batch_size = repeat_.sym_size(0);
-  const auto cumsum = repeat_.cumsum(-1);
-  auto marks = at::zeros_symint({batch_size, out_size + 1}, repeat_.options());
-  marks = marks.scatter_add(-1, cumsum.to(at::kLong), at::ones_like(cumsum));
+  // Accumulate in int64 to avoid overflowing `repeat_`'s dtype for large
+  // outputs, and to keep the gather indices in the dtype repeat_interleave
+  // is expected to return.
+  const auto cumsum = repeat_.cumsum(-1, at::kLong);
+  auto marks = at::zeros_symint(
+      {batch_size, out_size + 1}, repeat_.options().dtype(at::kLong));
+  marks = marks.scatter_add(-1, cumsum, at::ones_like(cumsum));
   auto result = marks.narrow_symint(-1, 0, std::move(out_size)).cumsum(-1);
   return std::make_tuple(std::move(result), 0);
 }
