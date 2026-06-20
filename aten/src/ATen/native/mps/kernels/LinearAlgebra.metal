@@ -8,6 +8,7 @@
 
 using namespace metal;
 constant uint TILE_DIM = 16;
+constant uint COMPLEX_LU_PANEL = 8;
 
 template <typename T>
 inline c10::metal::opmath_t<T> matmul_inner(
@@ -120,6 +121,350 @@ kernel void matmul(
         static_cast<T>(sum);
   }
 }
+
+// Lightweight complex LU factorization with partial pivoting, one thread per
+// matrix. This wins for tiny matrices because it maximizes batch parallelism and
+// avoids threadgroup synchronization overhead. `info` stores the first 1-indexed
+// zero pivot.
+template <typename T>
+kernel void complex_lu_factor_serial(
+    device T* LU [[buffer(0)]],
+    device int* pivots [[buffer(1)]],
+    device int* info [[buffer(2)]],
+    constant uint3& mnB [[buffer(3)]],
+    uint b [[thread_position_in_grid]]) {
+  const uint m = mnB.x;
+  const uint n = mnB.y;
+  const uint B = mnB.z;
+  if (b >= B) {
+    return;
+  }
+  const uint ks = m < n ? m : n;
+  device T* M = LU + static_cast<ulong>(b) * m * n;
+  device int* piv = pivots + static_cast<ulong>(b) * ks;
+  device int* info_b = info + b;
+  *info_b = 0;
+
+  for (uint k = 0; k < ks; ++k) {
+    float maxv = -1.0f;
+    uint p = k;
+    for (uint i = k; i < m; ++i) {
+      T v = M[i * n + k];
+      float a = static_cast<float>(v.x) * static_cast<float>(v.x) +
+          static_cast<float>(v.y) * static_cast<float>(v.y);
+      if (a > maxv) {
+        maxv = a;
+        p = i;
+      }
+    }
+    piv[k] = static_cast<int>(p + 1);
+    const bool pivot_nonzero = maxv > 0.0f;
+    if (!pivot_nonzero && *info_b == 0) {
+      *info_b = static_cast<int>(k + 1);
+    }
+
+    if (p != k) {
+      for (uint j = 0; j < n; ++j) {
+        T tmp = M[k * n + j];
+        M[k * n + j] = M[p * n + j];
+        M[p * n + j] = tmp;
+      }
+    }
+
+    if (pivot_nonzero) {
+      T diag = M[k * n + k];
+      for (uint i = k + 1; i < m; ++i) {
+        T f = c10::metal::div(M[i * n + k], diag);
+        M[i * n + k] = f;
+        for (uint j = k + 1; j < n; ++j) {
+          M[i * n + j] = M[i * n + j] - c10::metal::mul(f, M[k * n + j]);
+        }
+      }
+    }
+  }
+}
+
+template [[host_name("complex_lu_factor_serial_float2")]]
+kernel void complex_lu_factor_serial<float2>(
+    device float2* LU [[buffer(0)]],
+    device int* pivots [[buffer(1)]],
+    device int* info [[buffer(2)]],
+    constant uint3& mnB [[buffer(3)]],
+    uint b [[thread_position_in_grid]]);
+
+// Unblocked complex LU factorization with partial pivoting, one threadgroup per
+// matrix in the batch. This is faster for small/medium matrices because it keeps
+// every pivot step simple and exposes the whole trailing update to the
+// threadgroup immediately.
+template <typename T>
+kernel void complex_lu_factor_threadgroup(
+    device T* LU [[buffer(0)]],
+    device int* pivots [[buffer(1)]],
+    device int* info [[buffer(2)]],
+    constant uint3& mnB [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint b [[threadgroup_position_in_grid]]) {
+  const uint m = mnB.x;
+  const uint n = mnB.y;
+  const uint B = mnB.z;
+  if (b >= B) {
+    return;
+  }
+  const uint ks = m < n ? m : n;
+  device T* M = LU + static_cast<ulong>(b) * m * n;
+  device int* piv = pivots + static_cast<ulong>(b) * ks;
+  device int* info_b = info + b;
+
+  threadgroup float pivot_vals[1024];
+  threadgroup uint pivot_rows[1024];
+  threadgroup uint pivot_row;
+  threadgroup bool pivot_nonzero;
+
+  if (tid == 0) {
+    *info_b = 0;
+  }
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+
+  for (uint k = 0; k < ks; ++k) {
+    float maxv = -1.0f;
+    uint p = k;
+    for (uint i = k + tid; i < m; i += tptg) {
+      T v = M[i * n + k];
+      float a = static_cast<float>(v.x) * static_cast<float>(v.x) +
+          static_cast<float>(v.y) * static_cast<float>(v.y);
+      if (a > maxv) {
+        maxv = a;
+        p = i;
+      }
+    }
+    pivot_vals[tid] = maxv;
+    pivot_rows[tid] = p;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint stride = tptg >> 1; stride > 0; stride >>= 1) {
+      if (tid < stride) {
+        float other = pivot_vals[tid + stride];
+        if (other > pivot_vals[tid]) {
+          pivot_vals[tid] = other;
+          pivot_rows[tid] = pivot_rows[tid + stride];
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+
+    if (tid == 0) {
+      pivot_row = pivot_rows[0];
+      pivot_nonzero = pivot_vals[0] > 0.0f;
+      piv[k] = static_cast<int>(pivot_row + 1);
+      if (!pivot_nonzero && *info_b == 0) {
+        *info_b = static_cast<int>(k + 1);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+
+    p = pivot_row;
+    if (p != k) {
+      for (uint j = tid; j < n; j += tptg) {
+        T tmp = M[k * n + j];
+        M[k * n + j] = M[p * n + j];
+        M[p * n + j] = tmp;
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+
+    if (pivot_nonzero) {
+      T diag = M[k * n + k];
+      for (uint i = k + 1 + tid; i < m; i += tptg) {
+        M[i * n + k] = c10::metal::div(M[i * n + k], diag);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+
+    if (pivot_nonzero) {
+      const uint rows = m - k - 1;
+      const uint cols = n - k - 1;
+      const uint total = rows * cols;
+      for (uint idx = tid; idx < total; idx += tptg) {
+        const uint i = k + 1 + idx / cols;
+        const uint j = k + 1 + idx % cols;
+        M[i * n + j] =
+            M[i * n + j] - c10::metal::mul(M[i * n + k], M[k * n + j]);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+  }
+}
+
+template [[host_name("complex_lu_factor_threadgroup_float2")]]
+kernel void complex_lu_factor_threadgroup<float2>(
+    device float2* LU [[buffer(0)]],
+    device int* pivots [[buffer(1)]],
+    device int* info [[buffer(2)]],
+    constant uint3& mnB [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint b [[threadgroup_position_in_grid]]);
+
+// Blocked complex LU factorization with partial pivoting, one threadgroup per matrix in
+// the batch. MPS has no complex LU kernel (Apple's MPSMatrixDecompositionLU is
+// float-only); this uses a small blocked right-looking LU: factor a panel with
+// tournament-style pivot reductions, solve the block row, then apply a rank-nb
+// trailing update. `LU` is preloaded with a contiguous copy of A and overwritten
+// with the packed factors; `pivots` are 1-indexed (LAPACK convention), and
+// `info` stores the first 1-indexed zero pivot.
+template <typename T>
+kernel void complex_lu_factor_blocked_threadgroup(
+    device T* LU [[buffer(0)]],
+    device int* pivots [[buffer(1)]],
+    device int* info [[buffer(2)]],
+    constant uint3& mnB [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint b [[threadgroup_position_in_grid]]) {
+  const uint m = mnB.x;
+  const uint n = mnB.y;
+  const uint B = mnB.z;
+  if (b >= B) {
+    return;
+  }
+  const uint ks = m < n ? m : n;
+  device T* M = LU + static_cast<ulong>(b) * m * n;
+  device int* piv = pivots + static_cast<ulong>(b) * ks;
+  device int* info_b = info + b;
+
+  threadgroup float pivot_vals[1024];
+  threadgroup uint pivot_rows[1024];
+  threadgroup uint pivot_row;
+  threadgroup bool pivot_nonzero;
+
+  if (tid == 0) {
+    *info_b = 0;
+  }
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+
+  for (uint k0 = 0; k0 < ks; k0 += COMPLEX_LU_PANEL) {
+    const uint jb = (ks - k0) < COMPLEX_LU_PANEL ? (ks - k0) : COMPLEX_LU_PANEL;
+
+    // Factor the active panel. Each pivot search is a two-stage tournament:
+    // every thread scans a strided row subset, then the threadgroup reduces the
+    // per-thread winners to the final partial-pivot row.
+    for (uint s = 0; s < jb; ++s) {
+      const uint k = k0 + s;
+      float maxv = -1.0f;
+      uint p = k;
+      for (uint i = k + tid; i < m; i += tptg) {
+        T v = M[i * n + k];
+        float a = static_cast<float>(v.x) * static_cast<float>(v.x) +
+            static_cast<float>(v.y) * static_cast<float>(v.y);
+        if (a > maxv) {
+          maxv = a;
+          p = i;
+        }
+      }
+      pivot_vals[tid] = maxv;
+      pivot_rows[tid] = p;
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+
+      for (uint stride = tptg >> 1; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+          float other = pivot_vals[tid + stride];
+          if (other > pivot_vals[tid]) {
+            pivot_vals[tid] = other;
+            pivot_rows[tid] = pivot_rows[tid + stride];
+          }
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      }
+
+      if (tid == 0) {
+        pivot_row = pivot_rows[0];
+        pivot_nonzero = pivot_vals[0] > 0.0f;
+        piv[k] = static_cast<int>(pivot_row + 1);
+        if (!pivot_nonzero && *info_b == 0) {
+          *info_b = static_cast<int>(k + 1);
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+
+      p = pivot_row;
+      if (p != k) {
+        for (uint j = tid; j < n; j += tptg) {
+          T tmp = M[k * n + j];
+          M[k * n + j] = M[p * n + j];
+          M[p * n + j] = tmp;
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_device);
+
+      if (pivot_nonzero) {
+        T diag = M[k * n + k];
+        for (uint i = k + 1 + tid; i < m; i += tptg) {
+          M[i * n + k] = c10::metal::div(M[i * n + k], diag);
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_device);
+
+      if (pivot_nonzero && s + 1 < jb) {
+        const uint rows = m - k - 1;
+        const uint cols = jb - s - 1;
+        const uint total = rows * cols;
+        for (uint idx = tid; idx < total; idx += tptg) {
+          const uint i = k + 1 + idx / cols;
+          const uint j = k + 1 + idx % cols;
+          M[i * n + j] =
+              M[i * n + j] - c10::metal::mul(M[i * n + k], M[k * n + j]);
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_device);
+    }
+
+    const uint trailing_col = k0 + jb;
+    if (trailing_col < n) {
+      // Solve L11 * U12 = A12. Rows are sequential inside the small panel, while
+      // columns are parallelized across the threadgroup.
+      for (uint s = 0; s < jb; ++s) {
+        const uint row = k0 + s;
+        for (uint j = trailing_col + tid; j < n; j += tptg) {
+          T acc = M[row * n + j];
+          for (uint t = 0; t < s; ++t) {
+            acc = acc -
+                c10::metal::mul(M[row * n + k0 + t], M[(k0 + t) * n + j]);
+          }
+          M[row * n + j] = acc;
+        }
+        threadgroup_barrier(mem_flags::mem_device);
+      }
+
+      if (trailing_col < m) {
+        const uint rows = m - trailing_col;
+        const uint cols = n - trailing_col;
+        const uint total = rows * cols;
+        for (uint idx = tid; idx < total; idx += tptg) {
+          const uint i = trailing_col + idx / cols;
+          const uint j = trailing_col + idx % cols;
+          T acc = M[i * n + j];
+          for (uint s = 0; s < jb; ++s) {
+            acc = acc -
+                c10::metal::mul(M[i * n + k0 + s], M[(k0 + s) * n + j]);
+          }
+          M[i * n + j] = acc;
+        }
+        threadgroup_barrier(mem_flags::mem_device);
+      }
+    }
+  }
+}
+
+template [[host_name("complex_lu_factor_blocked_threadgroup_float2")]]
+kernel void complex_lu_factor_blocked_threadgroup<float2>(
+    device float2* LU [[buffer(0)]],
+    device int* pivots [[buffer(1)]],
+    device int* info [[buffer(2)]],
+    constant uint3& mnB [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint b [[threadgroup_position_in_grid]]);
 
 template <typename T>
 kernel void addmm(

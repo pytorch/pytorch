@@ -18,6 +18,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_cholesky_solve_helper_native.h>
+#include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_eigh.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
 #include <ATen/ops/addbmm_native.h>
@@ -369,6 +370,66 @@ void map_mps_decomposition_error_code_to_blas(const Tensor& status) {
 
 } // anonymous namespace
 
+// Metal-kernel complex LU factorization. Tiny matrices use one thread per matrix
+// to maximize batch parallelism; small/medium matrices use one unblocked
+// cooperative threadgroup per matrix; larger matrices switch to a blocked panel
+// kernel that performs tournament-style pivot reductions and rank-nb trailing
+// updates.
+static void complex_lu_factor_metal_impl(const Tensor& A,
+                                         const Tensor& LU,
+                                         const Tensor& pivots,
+                                         const Tensor& info) {
+  using namespace mps;
+  const auto m = A.size(-2);
+  const auto n = A.size(-1);
+  const auto ks = std::min(m, n);
+
+  std::vector<int64_t> batch_sizes(A.sizes().begin(), A.sizes().end() - 2);
+  resize_output(info, batch_sizes);
+  info.zero_();
+  auto piv_sizes = batch_sizes;
+  piv_sizes.push_back(ks);
+  resize_output(pivots, piv_sizes);
+  resize_output(LU, A.sizes());
+  LU.copy_(A);
+  if (A.numel() == 0) {
+    return;
+  }
+
+  // Contiguous (B, m, n) / (B, ks) views; the kernel writes through to LU/pivots/info.
+  Tensor LUf = LU.reshape({-1, m, n});
+  Tensor pivf = pivots.reshape({-1, ks});
+  Tensor infof = info.reshape({-1});
+  const auto B = static_cast<uint32_t>(LUf.size(0));
+  std::array<uint32_t, 3> mnB = {static_cast<uint32_t>(m), static_cast<uint32_t>(n), B};
+
+  const auto max_dim = std::max(m, n);
+  const bool use_serial_tiny_kernel = max_dim <= 8;
+  const bool use_blocked_threadgroup_kernel = max_dim >= 128;
+
+  auto stream = getCurrentMPSStream();
+  const char* kernel_name = use_serial_tiny_kernel
+      ? "complex_lu_factor_serial_float2"
+      : (use_blocked_threadgroup_kernel ? "complex_lu_factor_blocked_threadgroup_float2"
+                                        : "complex_lu_factor_threadgroup_float2");
+  auto pso = lib.getPipelineStateForFunc(kernel_name);
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, LUf, pivf, infof, mnB);
+      if (use_serial_tiny_kernel) {
+        const uint32_t tg = std::min<uint32_t>(B, 256u);
+        [computeEncoder dispatchThreads:MTLSizeMake(B, 1, 1)
+                 threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+      } else {
+        [computeEncoder dispatchThreadgroups:MTLSizeMake(B, 1, 1)
+                       threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+      }
+    }
+  });
+}
+
 static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool pivot,
                                              const Tensor& LU,
@@ -376,6 +437,17 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              const Tensor& info,
                                              bool check_errors) {
   using namespace mps;
+
+  if (A.is_complex()) {
+    TORCH_CHECK(A.scalar_type() == kComplexFloat && LU.scalar_type() == kComplexFloat,
+                "linalg.lu_factor(): MPS only supports complex64 for complex inputs.");
+    TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
+    complex_lu_factor_metal_impl(A, LU, pivots, info);
+    if (check_errors) {
+      at::_linalg_check_errors(info, "torch.linalg.lu_factor_ex", A.dim() == 2);
+    }
+    return;
+  }
 
   TORCH_CHECK(A.scalar_type() == kFloat && LU.scalar_type() == kFloat,
               "linalg.lu_factor(): MPS doesn't support complex types.");

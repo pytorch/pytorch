@@ -2500,6 +2500,44 @@ class TestMPS(TestCaseMPS):
             X_mps_t = torch.linalg.solve(A_mps.mT, b_mps, left=left)
             self.assertEqual(X_cpu_t, X_mps_t)
 
+    def test_complex_linalg_det(self):
+        # Complex det / slogdet on MPS, enabled by native complex LU in Metal.
+        # MPSMatrixDecompositionLU is float-only, so complex inputs use a custom
+        # Metal kernel behind linalg_lu_factor_ex_out_mps.
+        torch.manual_seed(0)
+        for shape in [(5, 5), (1, 1), (4, 4, 4), (2, 3, 6, 6)]:
+            A_cpu = torch.randn(*shape, dtype=torch.complex64)
+            A_mps = A_cpu.to("mps")
+            self.assertEqual(torch.linalg.det(A_cpu), torch.linalg.det(A_mps),
+                             atol=1e-4, rtol=1e-4)
+            s_cpu, l_cpu = torch.linalg.slogdet(A_cpu)
+            s_mps, l_mps = torch.linalg.slogdet(A_mps)
+            self.assertEqual(s_cpu, s_mps, atol=1e-5, rtol=1e-5)
+            self.assertEqual(l_cpu, l_mps, atol=1e-5, rtol=1e-5)
+
+        # complex lu_factor produces a valid factorization. Pivot choices may be
+        # backend-specific, so validate the reconstruction rather than raw LU.
+        A = torch.randn(6, 6, dtype=torch.complex64, device="mps")
+        LU, piv = torch.linalg.lu_factor(A)
+        P, L, U = torch.lu_unpack(LU, piv)
+        self.assertEqual(P @ L @ U, A.cpu(), atol=1e-5, rtol=1e-5)
+
+        # Singular semantics must match CPU-facing contracts: det is zero,
+        # slogdet is (0, -inf), lu_factor_ex reports info, and check_errors
+        # raises through the usual linalg error path.
+        Z = torch.zeros(3, 3, dtype=torch.complex64, device="mps")
+        self.assertEqual(torch.linalg.det(Z), torch.zeros((), dtype=torch.complex64, device="mps"))
+        sign, logabsdet = torch.linalg.slogdet(Z)
+        self.assertEqual(sign, torch.zeros((), dtype=torch.complex64, device="mps"))
+        self.assertEqual(logabsdet, torch.full((), -float("inf"), device="mps"))
+        LU, pivots, info = torch.linalg.lu_factor_ex(Z, check_errors=False)
+        self.assertEqual(info, torch.ones((), dtype=torch.int32, device="mps"))
+        self.assertTrue(bool(torch.isfinite(LU).all().item()))
+        with self.assertRaisesRegex(RuntimeError, "division by zero"):
+            torch.linalg.lu_factor_ex(Z, check_errors=True)
+        with self.assertRaisesRegex(RuntimeError, "division by zero"):
+            torch.linalg.lu_factor(Z)
+
     def test_linalg_det(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
 
