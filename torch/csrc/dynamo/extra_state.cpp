@@ -14,6 +14,26 @@
 
 Py_ssize_t extra_index = -1;
 
+namespace {
+
+ExtraState* get_live_extra_state_from_guard_manager(
+    const py::object& guard_manager_ref) {
+  py::object guard_manager = guard_manager_ref();
+  if (guard_manager.is_none() || !py::hasattr(guard_manager, "extra_state")) {
+    throw std::runtime_error(
+        "guard lookup stats are unavailable: guard manager is gone");
+  }
+
+  py::object extra_state = guard_manager.attr("extra_state");
+  if (extra_state.is_none()) {
+    throw std::runtime_error(
+        "guard lookup stats are unavailable: extra_state was cleared");
+  }
+  return extra_state.cast<ExtraState*>();
+}
+
+} // namespace
+
 CacheEntry* ExtraState::get_first_entry() {
   if (this->cache_entry_list.empty()) {
     return nullptr;
@@ -22,7 +42,68 @@ CacheEntry* ExtraState::get_first_entry() {
 }
 
 ExtraState::ExtraState(PyCodeObject* orig_code_arg)
-    : orig_code(orig_code_arg) {}
+    : orig_code(orig_code_arg),
+      last_success_receipt(torch::dynamo::create_guard_last_success_receipt()) {
+}
+
+py::dict ExtraState::get_guard_lookup_stats() const {
+  py::dict stats;
+  stats["actual_partial_receipt_created"] =
+      this->last_success_receipt != nullptr;
+  stats["actual_partial_enabled"] = this->last_success_receipt != nullptr &&
+          this->last_success_receipt->actual_partial_state ==
+              torch::dynamo::GuardPartialMemoState::Enabled
+      ? 1
+      : 0;
+  stats["actual_partial_candidate"] = this->last_success_receipt == nullptr
+      ? 0
+      : this->last_success_receipt->actual_partial_stability_tokens.size();
+  stats["actual_partial_token_count"] = this->last_success_receipt == nullptr
+      ? 0
+      : this->last_success_receipt->actual_partial_tokens.size();
+  stats["actual_partial_shadow_passes"] = this->last_success_receipt == nullptr
+      ? 0
+      : this->last_success_receipt->actual_partial_shadow_passes;
+  stats["actual_partial_hit"] = this->last_success_receipt == nullptr
+      ? 0
+      : this->last_success_receipt->actual_partial_hit;
+  stats["actual_partial_miss"] = this->last_success_receipt == nullptr
+      ? 0
+      : this->last_success_receipt->actual_partial_miss;
+  stats["slow_guard_fallback"] = this->last_success_receipt == nullptr
+      ? 0
+      : this->last_success_receipt->slow_guard_fallback;
+  py::dict actual_partial_disabled_reasons;
+  if (this->last_success_receipt != nullptr) {
+    for (const auto& item :
+         this->last_success_receipt->actual_partial_disabled_reasons) {
+      actual_partial_disabled_reasons[py::str(item.first)] = item.second;
+    }
+  }
+  stats["actual_partial_disabled_reasons"] = actual_partial_disabled_reasons;
+  return stats;
+}
+
+void ExtraState::reset_guard_lookup_stats() {
+  if (this->last_success_receipt == nullptr) {
+    this->last_success_receipt =
+        torch::dynamo::create_guard_last_success_receipt();
+    return;
+  }
+  this->last_success_receipt->actual_partial_shadow_passes = 0;
+  this->last_success_receipt->actual_partial_hit = 0;
+  this->last_success_receipt->actual_partial_miss = 0;
+  this->last_success_receipt->slow_guard_fallback = 0;
+  this->last_success_receipt->actual_partial_disabled_reasons.clear();
+  this->last_success_receipt->actual_partial_entry_key = nullptr;
+  this->last_success_receipt->actual_partial_root_key = nullptr;
+  this->last_success_receipt->actual_partial_self_object = nullptr;
+  this->last_success_receipt->actual_partial_self_type = nullptr;
+  this->last_success_receipt->actual_partial_state =
+      torch::dynamo::GuardPartialMemoState::Training;
+  this->last_success_receipt->actual_partial_stability_tokens.clear();
+  this->last_success_receipt->actual_partial_tokens.clear();
+}
 
 void ExtraState::move_to_front(CacheEntry* cache_entry) {
   CHECK(cache_entry->_owner == this);
@@ -58,6 +139,7 @@ void ExtraState::invalidate(
   CHECK(cache_entry->_owner == this);
   CHECK(!this->cache_entry_list.empty());
   CHECK(cache_entry == &*cache_entry->_owner_loc);
+  reset_guard_lookup_stats();
   cache_entry->invalidate(std::move(deleted_guard_manager));
   // Move the cache entry to the end of the list because these will always
   // return False.
@@ -148,13 +230,13 @@ void lookup(
 
     if (valid) {
       try {
-        if (is_skip_guard_eval_unsafe) {
-          valid = torch::dynamo::run_root_guard_manager(
-              cache_entry.diff_guard_root_mgr, f_locals);
-        } else {
-          valid = torch::dynamo::run_root_guard_manager(
-              cache_entry.root_mgr, f_locals);
-        }
+        valid = torch::dynamo::run_root_guard_manager_with_last_success_receipt(
+            extra_state->last_success_receipt.get(),
+            &cache_entry,
+            is_skip_guard_eval_unsafe ? cache_entry.diff_guard_root_mgr
+                                      : cache_entry.root_mgr,
+            f_locals,
+            is_skip_guard_eval_unsafe);
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
           py::handle guard_error_hook_handle(guard_error_hook);
@@ -203,6 +285,20 @@ CacheEntry* create_cache_entry(
       py::cast(*new_iter, py::return_value_policy::reference);
   guard_manager.attr("extra_state") =
       py::cast(extra_state, py::return_value_policy::reference);
+  py::object guard_manager_ref =
+      py::module::import("weakref").attr("ref")(guard_manager);
+  guard_manager.attr("reset_guard_lookup_stats") =
+      py::cpp_function([guard_manager_ref]() {
+        ExtraState* live_extra_state =
+            get_live_extra_state_from_guard_manager(guard_manager_ref);
+        live_extra_state->reset_guard_lookup_stats();
+      });
+  guard_manager.attr("get_guard_lookup_stats") =
+      py::cpp_function([guard_manager_ref]() {
+        ExtraState* live_extra_state =
+            get_live_extra_state_from_guard_manager(guard_manager_ref);
+        return live_extra_state->get_guard_lookup_stats();
+      });
   return &*new_iter;
 }
 

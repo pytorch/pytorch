@@ -6,6 +6,7 @@
 
 #ifdef __cplusplus
 
+#include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
@@ -55,10 +56,13 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   std::list<CacheEntry> cache_entry_list;
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
+  std::unique_ptr<torch::dynamo::GuardLastSuccessReceipt> last_success_receipt;
   // Actions to apply to all frames with this code object
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
 
   ExtraState(PyCodeObject* orig_code_arg);
+  py::dict get_guard_lookup_stats() const;
+  void reset_guard_lookup_stats();
   CacheEntry* get_first_entry();
   void move_to_front(CacheEntry* cache_entry);
   void move_to_back(CacheEntry* cache_entry);
