@@ -807,6 +807,81 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 29), "nccl_all_gather_offset requires nccl 2.29")
+    @skip_if_lt_x_gpu(2)
+    # Shard sizes are multiples of 8 so every slice stays 16-byte aligned for
+    # both float (4B) and bfloat16 (2B), as the kernel requires.  `out` is a
+    # symmetric tensor; the multimem (NVLink SHARP) path is used when multicast
+    # is available, otherwise the LSA push fallback (e.g. NCCL_NVLS_ENABLE=0).
+    @parametrize("split_sizes", [[64], [32, 96], [16, 48, 32]])
+    @parametrize("explicit_offsets", [False, True])
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    def test_all_gather_offset(self, split_sizes, explicit_offsets, dtype):
+        """all_gather_offset: gather each rank's parameter shards into a
+        parameter-contiguous symmetric output, fusing the copy-out reorder.
+        Covers both the default (derived) and an explicitly-passed
+        split_offsets, and multiple dtypes."""
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        n_params = len(split_sizes)
+        offsets = []
+        acc = 0
+        for sz in split_sizes:
+            offsets.append(acc)
+            acc += sz
+        numel = acc
+
+        # Distinct per-(rank, param) constant, kept small so it is exactly
+        # representable in bfloat16.
+        def value(rank, i):
+            return float((i + 1) * 10 + (rank + 1))
+
+        inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        for i in range(n_params):
+            inp[offsets[i] : offsets[i] + split_sizes[i]] = value(self.rank, i)
+        symm_mem.rendezvous(inp, group=group_name)
+
+        out = symm_mem.empty(
+            numel * self.world_size, dtype=dtype, device=self.device
+        ).fill_(0)
+        symm_mem.rendezvous(out, group=group_name)
+        symm_mem.all_gather_offset(
+            inp,
+            out,
+            group_name,
+            split_sizes,
+            split_offsets=offsets if explicit_offsets else None,
+        )
+        torch.cuda.synchronize()
+
+        # Parameter i occupies out[off*W : (off+size)*W], with source rank r
+        # at sub-offset r*size.
+        for i in range(n_params):
+            base = offsets[i] * self.world_size
+            for r in range(self.world_size):
+                region = out[
+                    base + r * split_sizes[i] : base + (r + 1) * split_sizes[i]
+                ]
+                self.assertEqual(
+                    region,
+                    torch.full_like(region, value(r, i)),
+                    msg=f"rank {self.rank}: param {i} from src rank {r} mismatch",
+                )
+
+        # Source buffer must be unmodified.
+        for i in range(n_params):
+            src_slice = inp[offsets[i] : offsets[i] + split_sizes[i]]
+            self.assertEqual(
+                src_slice,
+                torch.full_like(src_slice, value(self.rank, i)),
+                msg=f"rank {self.rank}: source param {i} should be unchanged",
+            )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
     @skip_if_lt_x_gpu(2)
     def test_put_wait_signal(self):
