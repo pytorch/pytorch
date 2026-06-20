@@ -967,6 +967,12 @@ class Softplus(Module):
     For numerical stability the implementation reverts to the linear function
     when :math:`input \times \beta > threshold`.
 
+    For reduced-precision floating-point dtypes (e.g. ``torch.float16``),
+    intermediate computations may be performed in higher precision and the
+    result is then converted back to the output dtype. If the result exceeds
+    the representable range of the output dtype, the conversion may overflow
+    and produce ``inf``.
+
     Args:
         beta: the :math:`\beta` value for the Softplus formulation. Default: 1
         threshold: values above this revert to a linear function. Default: 20
