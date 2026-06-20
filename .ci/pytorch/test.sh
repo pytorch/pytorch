@@ -670,12 +670,7 @@ test_inductor_aoti_cpp() {
     # We need to hipify before building again
     python3 tools/amd_build/build_amd.py
   fi
-  if [[ "$BUILD_ENVIRONMENT" == *sm86* ]]; then
-    # TODO: Replace me completely, as one should not use conda libstdc++, nor need special path to TORCH_LIB
-    TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="/opt/conda/envs/py_3.10/lib:${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}")
-  else
-    TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
-  fi
+  TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
   /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
 }
