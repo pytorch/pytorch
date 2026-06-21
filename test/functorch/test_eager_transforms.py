@@ -76,6 +76,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
@@ -1491,9 +1492,10 @@ class TestAutogradFunction(TestCase):
         grad(f)(x)
         self.assertEqual(names, ["FooBarGeneratedBackward"])
 
-    @skipIfTorchDynamo(
-        "set_data inside grad(f) is not traceable; the dispatch-key invariant only matters in eager"
-    )
+    # set_data inside grad(f) is not traceable; the dispatch-key invariant only
+    # matters in eager. xfail (not skip) so this flips to a failure and tells us
+    # to remove the marker if dynamo ever starts tracing the write.
+    @xfailIfTorchDynamo
     def test_set_data_does_not_propagate_functorch_keys(self, device):
         # set_data used to copy FuncTorchGradWrapper onto a plain destination,
         # which then triggered an unchecked TensorWrapper cast. The return is
