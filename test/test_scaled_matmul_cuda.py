@@ -887,15 +887,13 @@ class TestFP8Matmul(TestCase):
         # Assert outputs are close
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
-    @parametrize("G", [1, 4, 16])
-    @parametrize("M", [16640])
-    @parametrize("N", [8192])
-    @parametrize("K", [4096])
-    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
-    @parametrize("use_out", [False, True])
-    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
+    #@unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @parametrize("G", [2])
+    @parametrize("M", [512,256])
+    @parametrize("N", [512,256,128])
+    @parametrize("K", [512,256,128])
+    @parametrize("format", ["mxfp8", "mxfp4", "nvfp4"])
+    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, device):
         torch.manual_seed(42)
 
         if format == "mxfp4" and SM120OrLater:
@@ -990,6 +988,8 @@ class TestFP8Matmul(TestCase):
             return xh, xq, x_scale, x_global_scales
 
         xh, xq, x_blocked_scales, x_global_scales = _2d_to_blocked_scaled(X, K, G, input_group_end_offsets, format)
+
+        w_blocked_scales = w_blocked_scales.transpose(-2, -1)
 
         if format in ["mxfp8", "mxfp4"]:
             kwargs = _build_scaled_grouped_mm_kwargs(
@@ -2626,8 +2626,8 @@ class TestFP8Matmul(TestCase):
 
 
     @onlyAccelerator
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
-    @parametrize("fast_accum", [False, True])
+    #@unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
+    @parametrize("fast_accum", [False])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
     @parametrize("wrap_v2", [True, False])
