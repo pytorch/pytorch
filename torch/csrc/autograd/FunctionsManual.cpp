@@ -5367,10 +5367,16 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
 Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
   auto self_pi = self * M_PI;
   auto self_squared_pi = self * self * M_PI;
-  auto out = grad *
-      ((self_pi * self_pi.cos() - self_pi.sin()) / self_squared_pi).conj();
+  // Safe denom prevents NaN from entering the autograd graph at x=0;
+  // at::where alone does not block it from poisoning higher-order grads.
+  auto safe_denom = at::where(
+      self_squared_pi == 0.0, at::ones_like(self_squared_pi), self_squared_pi);
+  auto out =
+      grad * ((self_pi * self_pi.cos() - self_pi.sin()) / safe_denom).conj();
+  // Use -pi^2*x/3 (first Taylor term of sinc') as the x=0 branch so that
+  // autograd can trace through it and recover sinc''(0) = -pi^2/3 correctly.
   return at::where(
-      self_squared_pi == 0.0, at::scalar_tensor(0.0, grad.options()), out);
+      self_squared_pi == 0.0, grad * (-self_pi * M_PI / 3.0).conj(), out);
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p
