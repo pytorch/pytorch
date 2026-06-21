@@ -37,6 +37,7 @@
 #include <ATen/ops/linalg_qr.h>
 #include <ATen/ops/linalg_qr_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
+#include <ATen/ops/linalg_eigh.h>
 #include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/lu_unpack.h>
@@ -46,6 +47,7 @@
 #include <ATen/ops/orgqr_native.h>
 #include <ATen/ops/real.h>
 #include <ATen/ops/slice.h>
+#include <ATen/ops/sort.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/triangular_solve_native.h>
 #include <ATen/ops/where.h>
@@ -1539,16 +1541,23 @@ static void svd_kernel_mps(const Tensor& A,
   const int64_t tg_limit = static_cast<int64_t>([MPSDevice::getInstance()->device() maxThreadgroupMemoryLength]);
   const int64_t v_staging_bytes = k * k * elem_size;
   const bool stage_v = compute_uv && (staging_bytes + v_staging_bytes <= tg_limit);
+  constexpr int64_t kMaxJacobiCols = 96;
+  const bool too_wide = (k > kMaxJacobiCols);
   const bool too_large = (staging_bytes > tg_limit);
-  const bool too_small = (batch * m * n < 8192);
 
-  if (too_large || too_small) {
+  if (too_large || too_wide) {
     if (too_large) {
       TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
                       staging_bytes,
                       " > ",
                       tg_limit,
                       " bytes); falling back to CPU.");
+    } else {
+      TORCH_WARN_ONCE("linalg.svd: matrix has too many columns for the MPS Jacobi kernel (",
+                      k,
+                      " > ",
+                      kMaxJacobiCols,
+                      "); falling back to CPU.");
     }
     auto [U_cpu, S_cpu, Vh_cpu] = at::linalg_svd(A.to(at::kCPU), full_matrices, driver);
     if (compute_uv) {
@@ -1560,74 +1569,31 @@ static void svd_kernel_mps(const Tensor& A,
   }
 
   const bool transposed = m < n;
-  // Kernel needs rows >= cols. For m<n run it on A^H: SVD(A^H)=(V,S,U^H), and
-  // params.transposed tells the kernel to swap left/right into the right outputs.
+  // Work with rows >= cols. For m<n run on A^H, then swap left/right vectors
+  // back into the original outputs.
   const int64_t wm = transposed ? n : m;
   Tensor in = (transposed ? A.mH() : A).contiguous().reshape({batch, wm, k});
 
-  auto opts = A.options();
-  const bool S_direct = S.is_contiguous() && S.scalar_type() == c10::toRealValueType(A.scalar_type());
-  const bool info_direct = info.is_contiguous() && info.scalar_type() == kInt;
-  Tensor S_k =
-      S_direct ? S.reshape({batch, k}) : at::empty({batch, k}, opts.dtype(c10::toRealValueType(A.scalar_type())));
-  // Device-memory accumulator only when V is not staged; tiny placeholder otherwise.
-  Tensor Vacc_k = stage_v ? at::empty({1}, opts) : at::empty({batch, k, k}, opts);
-  Tensor info_b = info_direct ? info.reshape({batch}) : at::empty({batch}, opts.dtype(kInt));
-  // svdvals: U/Vh empty, so bind scratch for the kernel's (still-run) U writeback.
-  Tensor U_scratch, Vh_scratch;
-  if (!compute_uv) {
-    U_scratch = at::empty({batch, wm, wm}, opts);
-    Vh_scratch = at::empty({batch, wm, wm}, opts);
-  }
+  Tensor gram = at::matmul(in.mH(), in);
+  auto [evals_asc, V_asc] = at::linalg_eigh(gram, "U");
+  auto [evals, order] = at::sort(evals_asc, /*dim=*/-1, /*descending=*/true);
+  Tensor gather_index = order.unsqueeze(-2).expand(V_asc.sizes());
+  Tensor V = V_asc.gather(/*dim=*/-1, gather_index);
+  Tensor S_calc = evals.clamp_min(0).sqrt();
+  const_cast<Tensor&>(S).copy_(S_calc.reshape(S.sizes()));
 
-  // Kernel writes straight into the column-major U/Vh outputs (first k cols/rows;
-  // full_matrices fills the rest below).
-  const int64_t u_ld = compute_uv ? U.size(-2) : wm;
-  const int64_t u_bs = compute_uv ? U.size(-2) * U.size(-1) : wm * wm;
-  const int64_t v_ld = compute_uv ? Vh.size(-2) : wm;
-  const int64_t v_bs = compute_uv ? Vh.size(-2) * Vh.size(-1) : wm * wm;
-
-  SvdParams params{static_cast<uint32_t>(wm),
-                   static_cast<uint32_t>(k),
-                   /*max_sweeps=*/30u,
-                   static_cast<uint32_t>(compute_uv ? 1 : 0),
-                   /*tol=*/1e-6f,
-                   static_cast<uint32_t>(u_ld),
-                   static_cast<uint32_t>(u_bs),
-                   static_cast<uint32_t>(v_ld),
-                   static_cast<uint32_t>(v_bs),
-                   static_cast<uint32_t>(transposed ? 1 : 0),
-                   static_cast<uint32_t>(stage_v ? 1 : 0)};
-
-  MPSStream* stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(fmt::format("svd_jacobi_{}", scalarToMetalTypeString(A)));
-      getMPSProfiler().beginProfileKernel(pso, "svd_jacobi", {A});
-      [enc setComputePipelineState:pso];
-      Tensor Ubind = compute_uv ? U : U_scratch;
-      Tensor Vbind = compute_uv ? Vh : Vh_scratch;
-      mtl_setArgs(enc, in, Ubind, S_k, Vbind, Vacc_k, info_b, params);
-      [enc setThreadgroupMemoryLength:wm * k * elem_size atIndex:0];
-      [enc setThreadgroupMemoryLength:(stage_v ? k * k * elem_size : elem_size) atIndex:1];
-      // One threadgroup per batch matrix; cap at 32 SIMD-groups (1024 threads).
-      const NSUInteger simd = 32;
-      const NSUInteger kMaxSimdGroups = 32;
-      const NSUInteger maxThreads = pso.maxTotalThreadsPerThreadgroup;
-      const NSUInteger nPairs = (k + 1) / 2;
-      const NSUInteger wantSG = std::min<NSUInteger>(std::max<NSUInteger>(nPairs, 1), kMaxSimdGroups);
-      NSUInteger tgs = std::min<NSUInteger>(maxThreads, wantSG * simd);
-      [enc dispatchThreads:MTLSizeMake(tgs * batch, 1, 1) threadsPerThreadgroup:MTLSizeMake(tgs, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso);
+  if (compute_uv) {
+    Tensor safe = S_calc.clamp_min(1e-12).to(A.dtype()).unsqueeze(-2);
+    Tensor U_reduced = at::matmul(in, V).div(safe);
+    if (transposed) {
+      const_cast<Tensor&>(U).copy_(V.reshape(U.sizes()));
+      auto Vh_reduced = const_cast<Tensor&>(Vh).narrow(-2, 0, k);
+      Vh_reduced.copy_(U_reduced.mH().reshape(Vh_reduced.sizes()));
+    } else {
+      auto U_reduced_out = const_cast<Tensor&>(U).narrow(-1, 0, k);
+      U_reduced_out.copy_(U_reduced.reshape(U_reduced_out.sizes()));
+      const_cast<Tensor&>(Vh).copy_(V.mH().reshape(Vh.sizes()));
     }
-  });
-
-  if (!S_direct) {
-    const_cast<Tensor&>(S).copy_(S_k.reshape(S.sizes()));
-  }
-  if (!info_direct) {
-    const_cast<Tensor&>(info).copy_(info_b.reshape(info.sizes()));
   }
 
   if (compute_uv && full_matrices && (m != k || n != k)) {

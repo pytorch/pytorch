@@ -11205,6 +11205,88 @@ class TestLinalgMPS(TestCaseMPS):
         m2 = torch.randn(25, device=device).to(dtype)
         self._test_addr(torch.addr, M, m1, m2, beta=0)
 
+    def _assert_svd_matches_cpu(self, A, *, full_matrices):
+        U, S, Vh = torch.linalg.svd(A, full_matrices=full_matrices)
+        _, S_cpu, _ = torch.linalg.svd(A.cpu(), full_matrices=full_matrices)
+
+        k = S.shape[-1]
+        recon = (U[..., :k] * S.to(U.dtype).unsqueeze(-2)) @ Vh[..., :k, :]
+        self.assertEqual(A, recon, atol=1e-4, rtol=1e-4)
+        self.assertEqual(S_cpu, S.cpu(), atol=1e-4, rtol=1e-4)
+
+        svdvals = torch.linalg.svdvals(A)
+        self.assertEqual(S, svdvals, atol=1e-4, rtol=1e-4)
+
+    def test_linalg_svd_no_generic_mps_fallback(self, device="mps"):
+        torch.manual_seed(0)
+        A = torch.randn(128, 64, device=device)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self._assert_svd_matches_cpu(A, full_matrices=False)
+
+        generic_fallback_warnings = [
+            str(w.message) for w in caught
+            if "not currently supported on the MPS backend" in str(w.message)
+        ]
+        self.assertEqual(generic_fallback_warnings, [])
+
+    def test_linalg_svd_shapes_and_dtypes(self, device="mps"):
+        torch.manual_seed(0)
+        cases = (
+            ((2, 3), torch.float32),
+            ((128, 64), torch.float32),
+            ((64, 128), torch.float32),
+            ((2, 96, 48), torch.float32),
+            ((64, 32), torch.complex64),
+        )
+
+        for shape, dtype in cases:
+            real = torch.randn(*shape, device=device)
+            if dtype.is_complex:
+                A = real.to(dtype) + 1j * torch.randn(*shape, device=device)
+            else:
+                A = real.to(dtype)
+            self._assert_svd_matches_cpu(A, full_matrices=False)
+
+        self._assert_svd_matches_cpu(torch.randn(128, 64, device=device), full_matrices=True)
+
+    def test_linalg_svd_lowrank_regression(self, device="mps"):
+        torch.manual_seed(0)
+        vertices = torch.randn(1024, 3, device=device)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _, S, V = torch.pca_lowrank(vertices, q=2)
+
+        self.assertEqual(S.device.type, "mps")
+        self.assertEqual(V.device.type, "mps")
+        generic_fallback_warnings = [
+            str(w.message) for w in caught
+            if "not currently supported on the MPS backend" in str(w.message)
+        ]
+        self.assertEqual(generic_fallback_warnings, [])
+
+    def test_linalg_svd_local_fallback_boundary(self, device="mps"):
+        torch.manual_seed(0)
+        A = torch.randn(128, 128, device=device)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            S = torch.linalg.svdvals(A)
+
+        self.assertEqual(S.cpu(), torch.linalg.svdvals(A.cpu()), atol=1e-4, rtol=1e-4)
+        messages = [str(w.message) for w in caught]
+        self.assertFalse(any("not currently supported on the MPS backend" in message for message in messages))
+
+    def test_linalg_svd_mps_rejects_unsupported_options(self, device="mps"):
+        A = torch.randn(128, 64, device=device)
+        with self.assertRaisesRegex(RuntimeError, "driver="):
+            torch.linalg.svd(A, driver="gesvd")
+
+        with self.assertRaisesRegex(TypeError, "float64"):
+            A.cpu().double().to(device)
+
     def test_linalg_lstsq_default_driver(self, device="mps", dtype=torch.float32):
         # With no driver= argument MPS should match the CPU default (gelsy), whose
         # output shapes differ from the other drivers: rank is populated while
@@ -14986,6 +15068,9 @@ class TestConsistency(TestCaseMPS):
     def _compute_tolerances(self, op, dtype):
         if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype in [torch.float32, torch.complex64]:
             return (1e-4, 3e-5)
+
+        if op.name == "linalg.svdvals" and dtype == torch.complex64:
+            return (2e-5, 1e-5)
 
         if op.name in self.FP16_LOW_PRECISION_LIST and dtype in [torch.float16, torch.bfloat16]:
             return (2e-2, 1e-2) if dtype == torch.float16 else (5e-2, 5e-2)
