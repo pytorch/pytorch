@@ -239,7 +239,9 @@ def benchmark_utilization(
     acc = torch.accelerator.current_accelerator(check_available=True)
     if acc is not None:
         device_type = acc.type
-        device_activity = _DEVICE_TO_ACTIVITY.get(device_type, ProfilerActivity.PrivateUse1)
+        device_activity = _DEVICE_TO_ACTIVITY.get(
+            device_type, ProfilerActivity.PrivateUse1
+        )
         activities = (
             [device_activity]
             if device_activity in supported_activities()
