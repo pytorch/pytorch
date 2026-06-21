@@ -5490,6 +5490,20 @@ class InstructionTranslatorBase(
         linecache.lazycache(f_code.co_filename, f_globals)
 
 
+# Builtins that can observe the entire locals namespace without producing
+# a LOAD_FAST for each name (e.g. locals(), vars(d), exec(s), eval(s)).
+# If any of these is referenced via LOAD_GLOBAL, livevars_analysis would
+# under-approximate which locals are observable and we must keep them all.
+_LOCALS_EXPOSING_GLOBALS = frozenset({"locals", "vars", "exec", "eval"})
+
+
+def _function_exposes_locals(instructions: list[Instruction]) -> bool:
+    for inst in instructions:
+        if inst.opname == "LOAD_GLOBAL" and inst.argval in _LOCALS_EXPOSING_GLOBALS:
+            return True
+    return False
+
+
 class InstructionTranslator(InstructionTranslatorBase):
     @staticmethod
     def current_tx() -> InstructionTranslator:
@@ -5596,9 +5610,27 @@ class InstructionTranslator(InstructionTranslatorBase):
             if f_code.co_flags & CO_VARKEYWORDS:
                 varkw_name = f_code.co_varnames[_vararg_idx]
 
+            # Skip inputs never read anywhere in the function: they cannot
+            # affect the graph or any resume suffix, so guards on them are
+            # wasteful. Export mode must keep all locals because realize_all()
+            # below needs them.
+            if export or _function_exposes_locals(self.instructions):
+                function_live_names: set[str] | None = None
+            else:
+                function_live_names = livevars_analysis(
+                    self.instructions, self.instructions[0]
+                )
+
             dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
+                    if (
+                        function_live_names is not None
+                        and name not in function_live_names
+                        and name != varargs_name
+                        and name != varkw_name
+                    ):
+                        continue
                     local_dynamism = None
                     if dynamism:
                         local_dynamism = frozenset(dynamism.get(name, {}).items())
