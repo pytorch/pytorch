@@ -2265,7 +2265,15 @@ class CppKernel(Kernel):
             return
 
         indirect = free_symbol_is_type(expr, SymT.TMP)
-        if indirect:
+        # When the load is masked, indirect_assert references the load mask in
+        # the generated assert.  If the mask was CSE'd into the compute buffer
+        # (and not loads), placing the assert in loads would be a forward
+        # reference to an undeclared variable, so emit it in compute instead.
+        mask = self._load_mask
+        mask_in_compute = isinstance(mask, CppCSEVariable) and not re.search(
+            rf"\b{re.escape(mask.name)}\b", self.loads.getvalue()
+        )
+        if indirect or mask_in_compute:
             # indexing in compute
             csevar = ops.index_expr(expr, torch.int64).value
             buffer = V.kernel.compute
