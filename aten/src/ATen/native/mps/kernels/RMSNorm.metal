@@ -69,12 +69,16 @@ template <typename T>
   out += gid * size_t(axis_size) + lid * N_READS;
   if (lid * N_READS + N_READS <= axis_size) {
     for (int i = 0; i < N_READS; i++) {
-      out[i] = w[w_stride * i] * static_cast<T>(x[i] * local_inv_mean[0]);
+      out[i] = static_cast<T>(
+          (static_cast<float>(x[i]) * local_inv_mean[0]) *
+          static_cast<float>(w[w_stride * i]));
     }
   } else {
     for (int i = 0; i < N_READS; i++) {
       if ((lid * N_READS + i) < axis_size) {
-        out[i] = w[w_stride * i] * static_cast<T>(x[i] * local_inv_mean[0]);
+        out[i] = static_cast<T>(
+            (static_cast<float>(x[i]) * local_inv_mean[0]) *
+            static_cast<float>(w[w_stride * i]));
       }
     }
   }
@@ -142,14 +146,16 @@ template <typename T>
   for (uint r = 0; r < axis_size; r += lsize * N_READS) {
     if (r + lid * N_READS + N_READS <= axis_size) {
       for (int i = 0; i < N_READS; i++) {
-        out[r + i] = w[w_stride * (i + r)] *
-            static_cast<T>(x[r + i] * local_inv_mean[0]);
+        out[r + i] = static_cast<T>(
+            (static_cast<float>(x[r + i]) * local_inv_mean[0]) *
+            static_cast<float>(w[w_stride * (i + r)]));
       }
     } else {
       for (int i = 0; i < N_READS; i++) {
         if ((r + lid * N_READS + i) < axis_size) {
-          out[r + i] = w[w_stride * (i + r)] *
-              static_cast<T>(x[r + i] * local_inv_mean[0]);
+          out[r + i] = static_cast<T>(
+              (static_cast<float>(x[r + i]) * local_inv_mean[0]) *
+              static_cast<float>(w[w_stride * (i + r)]));
         }
       }
     }
