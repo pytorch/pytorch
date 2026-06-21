@@ -938,6 +938,11 @@ class FlopCounterMode:
 class _FlopCounterMode(TorchDispatchMode):
     supports_higher_order_operators = True
 
+    @classmethod
+    def ignore_compile_internals(cls) -> bool:
+        # flex_attention calls torch.compile internally before invoking its HOP.
+        return True
+
     def __init__(self, counter: FlopCounterMode) -> None:
         self.counter = counter
 
@@ -1019,8 +1024,12 @@ class _FlopCounterMode(TorchDispatchMode):
             # It doesn't matter which one we return since true_fn and false_fn return
             # output with the same structure.
             return true_out
-        else:
-            return NotImplemented
+
+        if func in self.counter.flop_registry:
+            out = func(*args, **kwargs)
+            return self.counter._count_flops(func, out, args, kwargs)
+
+        return NotImplemented
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}

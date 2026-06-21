@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 import functools
 import unittest
+import warnings
 
 import torch
 import torch.nn.functional as F
@@ -13,7 +14,10 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
-from torch.testing._internal.common_device_type import e4m3_type
+from torch.testing._internal.common_device_type import (
+    e4m3_type,
+    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
@@ -909,6 +913,41 @@ class TestFlopCounter(TestCase):
         self.assertEqual(called, 1)
         self.assertExpectedInline(get_total_flops(mode), """9001""")
 
+    def test_registered_hop(self):
+        from torch._ops import _higher_order_ops, HigherOrderOperator
+        from torch.utils.flop_counter import flop_registry, register_flop_formula
+
+        class TestFlopCounterHOP(HigherOrderOperator):
+            def __init__(self) -> None:
+                super().__init__("test_flop_counter_hop")
+
+            def __call__(self, x):
+                return super().__call__(x)
+
+        hop = TestFlopCounterHOP()
+        self.addCleanup(_higher_order_ops.pop, hop.name(), None)
+        self.addCleanup(flop_registry.pop, hop, None)
+
+        @hop.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
+        def hop_impl(x):
+            return x.sin()
+
+        @hop.py_impl(torch._C.DispatchKey.Autograd)
+        def hop_autograd_impl(x):
+            with torch._C._AutoDispatchBelowAutograd():
+                return hop(x)
+
+        @register_flop_formula(hop, get_raw=True)
+        def hop_flop(x, *, out_val=None):
+            return x.numel()
+
+        x = torch.randn(4, 5)
+        with FlopCounterMode() as mode:
+            out = hop(x)
+
+        torch.testing.assert_close(out, x.sin())
+        self.assertExpectedInline(get_total_flops(mode), """20""")
+
     @requires_cuda_and_triton
     def test_flop_counter_custom_triton_manual_decomp(self):
         import triton
@@ -1343,6 +1382,33 @@ class TestFlexAttentionEstimation(TestCase):
 
         est_ms = estimate_roofline_runtime_ms(fwd)
         self.assertGreater(est_ms, 0.0)
+
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+        "requires CUDA with Triton and flex_attention support",
+    )
+    def test_flex_attention_flop_counter_runtime(self):
+        from torch.nn.attention.flex_attention import flex_attention
+
+        query = torch.randn(1, 1, 16, 8, device="cuda", dtype=torch.float16)
+        key = torch.randn(1, 1, 16, 8, device="cuda", dtype=torch.float16)
+        value = torch.randn(1, 1, 16, 8, device="cuda", dtype=torch.float16)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="flex_attention called without torch.compile"
+            )
+            with FlopCounterMode() as mode:
+                out = flex_attention(query, key, value)
+
+        expected_flops = sdpa_flop_count(query.shape, key.shape, value.shape)
+        self.assertEqual(out.shape, query.shape)
+        self.assertExpectedInline(str(mode.get_total_flops()), """8192""")
+        self.assertEqual(mode.get_total_flops(), expected_flops)
+        self.assertEqual(
+            mode.get_flop_counts()["Global"][torch.ops.higher_order.flex_attention],
+            expected_flops,
+        )
 
     def test_sparsity_hint_annotate_propagates(self):
         """fx_traceback.annotate propagates sparsity_hint to flex_attention node."""
