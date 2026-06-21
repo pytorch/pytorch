@@ -681,8 +681,8 @@ def _multi_tensor_adam(
         if not torch.compiler.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
                 device_state_steps,
-                    torch.tensor(1, device="cpu", dtype=device_state_steps[0].dtype),
-                    alpha=1,
+                torch.tensor(1, device="cpu", dtype=device_state_steps[0].dtype),
+                alpha=1,
             )
         else:
             torch._foreach_add_(device_state_steps, 1)

@@ -373,8 +373,8 @@ def _multi_tensor_adamax(
         if not torch.compiler.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps,
-                    torch.tensor(1, device="cpu", dtype=grouped_state_steps[0].dtype),
-                    alpha=1,
+                torch.tensor(1, device="cpu", dtype=grouped_state_steps[0].dtype),
+                alpha=1,
             )
         else:
             torch._foreach_add_(grouped_state_steps, 1)
