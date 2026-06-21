@@ -749,6 +749,8 @@ class SymPyValueRangeAnalysis:
 
         if 0 in y:
             return ValueRanges.unknown_int()
+        if x.lower >= 0 and y.lower > 0 and x.upper < y.lower:
+            return x
         elif y.is_singleton():
             y_val = abs(y.lower)
             # If it wraps, we need to take the whole interval

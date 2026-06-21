@@ -437,6 +437,14 @@ class TestValueRanges(TestCase):
                 self.assertIn(r, ref_r)
 
 
+    def test_mod_nonnegative_dividend_smaller_than_positive_divisor(self):
+        r = ValueRangeAnalysis.mod(ValueRanges(1, 1), ValueRanges(2, int_oo))
+        self.assertEqual(r, ValueRanges(1, 1))
+
+        r = ValueRangeAnalysis.mod(ValueRanges(0, 1), ValueRanges(2, int_oo))
+        self.assertEqual(r, ValueRanges(0, 1))
+
+
     def test_python_mod(self):
         """Test python_mod value range analysis."""
         # Test with positive divisor

@@ -2626,6 +2626,56 @@ def _maybe_evaluate_static_worker(
     if out.is_singleton():
         return out.lower
 
+    if not unbacked_only and cast(sympy.Basic, expr).has(FloorDiv):
+        nonnegative_shape_env = {}
+        nonnegative_range_env = {}
+        for idx, sinfo in enumerate(symbol_info):
+            k, vr, val, is_size_like = sinfo
+            if isinstance(val, SingletonInt):
+                continue
+            if vr is None:
+                raise AssertionError(f"vr must not be None for symbol {k}")
+            if size_oblivious and is_size_like:
+                lower = max(2, vr.lower)
+                upper = min(2**48, vr.upper)
+                if upper > lower:
+                    upper = upper - 1
+                if lower <= upper:
+                    vr = ValueRanges(lower, upper)
+            else:
+                lower = vr.lower
+            if lower is -int_oo or not vr.is_int:
+                nonnegative_range_env[k] = vr
+                continue
+
+            s = sympy.Symbol(
+                f"evaluate_static_shape_nonnegative_{idx}",
+                nonnegative=True,
+                integer=True,
+            )
+            offset = int(lower)
+            nonnegative_shape_env[k] = s + offset
+            nonnegative_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
+
+        try:
+            # pyrefly: ignore [missing-attribute]
+            nonnegative_expr = expr.xreplace(nonnegative_shape_env)
+        except RecursionError:
+            log.warning(
+                "RecursionError in sympy.xreplace(%s, %s)",
+                expr,
+                nonnegative_shape_env,
+            )
+            return None
+
+        nonnegative_expr = canonicalize_bool_expr(safe_expand(nonnegative_expr))
+        if nonnegative_expr.is_number:
+            return nonnegative_expr
+
+        out = bound_sympy(nonnegative_expr, nonnegative_range_env)
+        if out.is_singleton():
+            return out.lower
+
     return new_expr if unbacked_only else None
 
 
@@ -7464,6 +7514,7 @@ class ShapeEnv:
                 # divisions simplified away
                 if new_pows.issubset(pows) and new_rationals.issubset(rationals):
                     expr = new_expr
+        expr = self._maybe_rewrite_mod_one_guard(expr)
         return expr
 
     # TODO: overload for allow_none literal
@@ -7871,6 +7922,28 @@ class ShapeEnv:
         self.divisible.add(expr)
         self._update_version_counter()
 
+    def _maybe_rewrite_mod_one_guard(self, expr: _SympyT) -> _SympyT:
+        if not isinstance(expr, (sympy.Eq, sympy.Ne)):
+            return expr
+
+        mod_expr: sympy.Expr | None = None
+        if expr.rhs == 0 and isinstance(expr.lhs, (Mod, PythonMod)):
+            mod_expr = expr.lhs
+        elif expr.lhs == 0 and isinstance(expr.rhs, (Mod, PythonMod)):
+            mod_expr = expr.rhs
+
+        if mod_expr is None or mod_expr.args[0] != 1:
+            return expr
+
+        divisor = mod_expr.args[1]
+        divisor_range = self.bound_sympy(divisor)
+        if not divisor_range.is_int or divisor_range.lower < 1:
+            return expr
+
+        if isinstance(expr, sympy.Ne):
+            return sympy.Ge(divisor, 2, evaluate=False)  # type: ignore[return-value]
+        return sympy.Eq(divisor, 1, evaluate=False)  # type: ignore[return-value]
+
     @_lru_cache
     @record_shapeenv_event()
     def _find(self, a: sympy.Symbol) -> sympy.Expr:
@@ -7910,6 +7983,10 @@ class ShapeEnv:
                 self._maybe_guard_rel(arg)
             return
         elif not isinstance(expr, sympy.Rel):
+            return
+
+        expr = self._maybe_rewrite_mod_one_guard(expr)
+        if not isinstance(expr, sympy.Rel):
             return
 
         # A good example of what goes wrong if you don't do this is
