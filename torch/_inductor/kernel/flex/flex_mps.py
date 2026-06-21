@@ -61,11 +61,7 @@ def lower_mps(
             "Mixed dtypes for query, key, value not supported on MPS"
         )
 
-    if kernel_options.get("OUTPUT_LOGSUMEXP", False):
-        raise NotImplementedError(
-            "flex_attention backward (return_lse=True) is not yet supported on MPS. "
-            "Use torch.no_grad() or torch.inference_mode() for inference."
-        )
+    write_lse = bool(kernel_options.get("OUTPUT_LOGSUMEXP", False))
     if kernel_options.get("OUTPUT_MAX", False):
         raise NotImplementedError(
             "flex_attention on MPS does not yet support returning max scores "
@@ -168,6 +164,7 @@ def lower_mps(
         scale=scale_val,
         score_captured=score_meta,
         mask_captured=mask_meta,
+        write_lse=write_lse,
     )
 
     out_size = [B, Hq, seq_len_q, v_head_dim]
@@ -234,21 +231,26 @@ def lower_mps(
         B,
     )
 
-    node = MetalFlexAttentionNode(
-        layout=layout,
-        inputs=realized_inputs,
-        shader_source=shader_source,
-        scalar_args=scalar_args,
-        grid=grid,
-        block_m=BLOCK_M,
-    )
-
     lse_shape = [B, Hq, seq_len_q]
     logsumexp = empty_strided(
         lse_shape, None, dtype=torch.float32, device=query.get_device()
     )
     max_scores = empty_strided(
         lse_shape, None, dtype=torch.float32, device=query.get_device()
+    )
+    node_inputs = realized_inputs
+    if write_lse:
+        logsumexp.realize()
+        node_inputs = [*realized_inputs, logsumexp]
+
+    node = MetalFlexAttentionNode(
+        layout=layout,
+        inputs=node_inputs,
+        shader_source=shader_source,
+        scalar_args=scalar_args,
+        grid=grid,
+        block_m=BLOCK_M,
+        mutates_lse=write_lse,
     )
 
     return (TensorBox.create(node), logsumexp, max_scores)

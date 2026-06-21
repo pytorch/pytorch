@@ -315,6 +315,8 @@ def _generate_mma_shader(
     mask_code,
     has_full_blocks,
     scale,
+    lse_param="",
+    lse_write_code="",
 ):
     """Generate Metal shader using simdgroup_matrix for Q@K^T."""
 
@@ -427,7 +429,7 @@ kernel void flex_attn_fwd(
     constant {metal_dtype}* V [[buffer(3)]],
     constant int* kv_num_blocks [[buffer(4)]],
     constant int* kv_indices [[buffer(5)]],
-{full_kv_params}{captured_params}{scalar_params_str},
+{full_kv_params}{captured_params}{lse_param}{scalar_params_str},
     uint3 tgpos [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]
 ) {{
@@ -500,7 +502,7 @@ kernel void flex_attn_fwd(
 
     shader += f"""
     if (active) {{
-        if (row_sum == 0.0f) row_sum = 1.0f;
+{lse_write_code}        if (row_sum == 0.0f) row_sum = 1.0f;
         long out_base = b_idx * stride_oz + h_idx * stride_oh + (long)m_idx * stride_om;
         for (int d = 0; d < D_V; d++)
             out[out_base + (long)d * stride_ok] = {metal_dtype}(o_acc[d] / row_sum);
@@ -521,6 +523,7 @@ def _generate_metal_shader(
     scale: float,
     score_captured: Sequence[tuple] = (),
     mask_captured: Sequence[tuple] = (),
+    write_lse: bool = False,
 ) -> str:
     """Generate the complete Metal shader source for flex attention.
 
@@ -630,6 +633,19 @@ def _generate_metal_shader(
             "full_kv_idx_stride_q",
             "full_kv_idx_stride_b",
         ]
+    lse_param = ""
+    lse_write_code = ""
+    if write_lse:
+        lse_param = f"    device float* lse [[buffer({buf_idx})]],\n"
+        buf_idx += 1
+        lse_write_code = (
+            "        lse[(long)b_idx * (Hq * N_Q)"
+            " + (long)h_idx * N_Q + (long)m_idx]"
+            " = (row_sum > 0.0f)"
+            " ? (row_max + metal::precise::log(row_sum)) * 1.44269504088896340736f"
+            " : -INFINITY;\n"
+        )
+
     scalar_params_str = f"    constant long* _params [[buffer({buf_idx})]]"
 
     score_code = _compile_subgraph_to_metal(
@@ -667,6 +683,8 @@ def _generate_metal_shader(
             mask_code,
             has_full_blocks,
             scale,
+            lse_param=lse_param,
+            lse_write_code=lse_write_code,
         )
 
     # Fallback: per-thread dot product with cooperative K/V tiling.
@@ -756,7 +774,7 @@ kernel void flex_attn_fwd(
     constant {metal_dtype}* V [[buffer(3)]],
     constant int* kv_num_blocks [[buffer(4)]],
     constant int* kv_indices [[buffer(5)]],
-{full_kv_params}{captured_params}{scalar_params_str},
+{full_kv_params}{captured_params}{lse_param}{scalar_params_str},
     uint3 tgpos [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]
 ) {{
@@ -820,7 +838,7 @@ kernel void flex_attn_fwd(
 
     shader += f"""
     if (active) {{
-        if (row_sum == 0.0f) row_sum = 1.0f;
+{lse_write_code}        if (row_sum == 0.0f) row_sum = 1.0f;
         long out_base = b_idx * stride_oz + h_idx * stride_oh + (long)m_idx * stride_om;
         for (int d = 0; d < D_V; d++) {{
             out[out_base + (long)d * stride_ok] = {metal_dtype}(o_acc[d] / row_sum);
@@ -842,6 +860,7 @@ class MetalFlexAttentionNode(ir.ExternKernelAlloc):
         scalar_args: list[Any],
         grid: tuple[Any, ...],
         block_m: int,
+        mutates_lse: bool = False,
     ):
         super().__init__(
             layout=layout,
@@ -852,6 +871,12 @@ class MetalFlexAttentionNode(ir.ExternKernelAlloc):
         self.scalar_args = scalar_args
         self.grid = grid
         self.block_m = block_m
+        if mutates_lse:
+            lse_buf = self.inputs[-1]
+            self.mutation_outputs = [
+                # pyrefly: ignore [bad-argument-type]
+                ir.MutationOutput(ir.NoneLayout(device=layout.device), lse_buf, self)
+            ]
 
     def codegen(self, wrapper) -> None:
         wrapper.add_import_once(
