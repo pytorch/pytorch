@@ -79,9 +79,37 @@ Examine call sites when the right type isn't obvious from the function body.
   Python version, and from `typing_extensions` only when you need a newer feature
   (e.g., `Self` and `override` if supporting < 3.11/3.12, or PEP 696 `default=` for
   `TypeVar` / `ParamSpec`). Don't blanket-import from `typing_extensions`.
-- Always parameterize `Callable` — `Callable[..., Any]` when the signature is
-  genuinely unknown, never bare `Callable`. (See ParamSpec below for the
-  signature-preserving wrapper case.)
+- Always parameterize `Callable` (never bare `Callable`). Prefer
+  `Callable[..., object]`; reach for `Callable[..., Any]` only when a caller
+  genuinely consumes the dynamic return — if the result is just passed through
+  (or the callable isn't even invoked), `object` is stricter and equally
+  correct. (See ParamSpec below for the signature-preserving wrapper case.)
+- Give any module-local global you **introduce** a leading underscore —
+  `TypeVar`/`ParamSpec` (matching the string arg: `_T = TypeVar("_T")`,
+  `_P = ParamSpec("_P")`, `_R = TypeVar("_R")`), `TypeAlias`es, helper constants,
+  and sentinels alike. This is the prevailing torch convention for non-public
+  names (`_P` outnumbers `P` ~6:1 in the tree). Exceptions (leave un-underscored):
+  a name imported by other modules, listed in `__all__`, or used as a runtime
+  token (e.g. an annotation-string dispatch marker). Applies only to names you
+  add — do **not** rename pre-existing globals; that's an unrelated refactor
+  outside this skill's scope.
+- A boolean predicate — `is_*`/`has_*` name, takes a broad type (often `object`),
+  returns `bool` — usually wants `TypeGuard[X]` (or `TypeIs[X]`, which also
+  narrows the negative branch). `TypeGuard` is in `typing` (>= 3.10, so import
+  from there); `TypeIs` only entered `typing` in 3.13, so import it from
+  `typing_extensions` (>= 4.10) to stay 3.10-compatible. An `issubclass`-style
+  helper taking `klass: type[_T]` should return `TypeGuard[type[_T]]`. Prefer an
+  explicit `isinstance(x, type)` guard over `try/except TypeError` around
+  `issubclass()` — clearer, and it lets the checker narrow.
+- When a return type is *derived from* a parameter — passthroughs/identity
+  functions, "return one of these args" helpers, decorators, registries keyed by
+  type — reach for a `TypeVar` (or, for a callable arg whose signature flows
+  through, `Callable[_P, _R]` with `ParamSpec`/`TypeVar`) rather than widening to
+  `object`/`Any`. "Output type == some input type" is exactly what a `TypeVar`
+  encodes; `object` in / `object` out discards it. Caveat: if the function
+  *transforms* the value so the output type differs from the input (e.g. converts
+  an array to an int), a single `TypeVar` is wrong — name the actual domain type
+  instead.
 - Class attributes assigned in `__init__` should get a class-level annotation so pyrefly can see them.
 - Break import cycles with `if TYPE_CHECKING:` — annotation-only imports go inside the
   guard, and use `from __future__ import annotations` (or string forward refs) so
@@ -110,6 +138,11 @@ Examine call sites when the right type isn't obvious from the function body.
      category, but only after rungs 1–3 fail. Be able to articulate why each
      earlier rung doesn't fit (e.g., "union exceeds 8 types", "no observable
      common bound", "callers genuinely never narrow").
+- Be especially wary of `object`/`Any` in **return** position — a function
+  usually knows more about what it produces than its callers do. A wide return is
+  right only at a genuine boundary (it returns its input unchanged, or the value
+  is handler/caller-defined); if the body builds a known shape, name it (a domain
+  alias or union beats `object`).
 - Read at least three call sites before deciding a parameter must be `Any` —
   don't pattern-match "looks dynamic" on the first try.
 - Narrow-scope `# pyrefly: ignore[...]` (on a non-target category) is reserved
@@ -119,6 +152,11 @@ Examine call sites when the right type isn't obvious from the function body.
   # pyrefly: ignore[attr-defined]
   result = getattr(obj, dynamic_name)()
   ```
+- When an inline `# pyrefly: ignore[...]` would push a line past the length
+  limit, put it on the line immediately above the flagged line rather than
+  reaching for `# fmt: skip` to keep it inline — pyrefly honors a previous-line
+  ignore. (Exception: the backward-compat carve-out below, where it must sit on
+  the `def` line.)
 
 #### Backward compatibility (the one exception to never-suppress)
 
@@ -150,11 +188,11 @@ wrapper prepends or appends args.
 from collections.abc import Callable
 from typing import ParamSpec, TypeVar
 
-P = ParamSpec("P")
-R = TypeVar("R")
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
-def log_calls(fn: Callable[P, R]) -> Callable[P, R]:
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+def log_calls(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         return fn(*args, **kwargs)
     return wrapper
 ```
@@ -163,6 +201,10 @@ def log_calls(fn: Callable[P, R]) -> Callable[P, R]:
 
 Re-run `pyrefly check`. New annotations often surface `bad-return` errors where the
 function actually returns an incompatible type — fix those. Repeat until clean.
+
+Tightening a shared helper (e.g. adding a `TypeGuard` or a precise return) can
+make pre-existing `# pyrefly: ignore` comments in its callers unused. Re-check and
+delete now-dead suppressions and any stale explanatory comments — don't leave them.
 
 ### Step 6: Lint
 

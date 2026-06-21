@@ -1,8 +1,8 @@
-# mypy: ignore-errors
-
 """Assorted utilities, which do not need anything other than torch and stdlib."""
 
 import operator
+from collections.abc import Iterable, Sequence, Sized
+from typing import TypeGuard
 
 import torch
 
@@ -10,8 +10,10 @@ from . import _dtypes_impl
 
 
 # https://github.com/numpy/numpy/blob/v1.23.0/numpy/distutils/misc_util.py#L497-L504
-def is_sequence(seq):
+def is_sequence(seq: object) -> TypeGuard[Sized]:
     if isinstance(seq, str):
+        return False
+    if not isinstance(seq, Sized):
         return False
     try:
         len(seq)
@@ -28,14 +30,14 @@ class UFuncTypeError(TypeError, RuntimeError):
     pass
 
 
-def cast_if_needed(tensor, dtype):
+def cast_if_needed(tensor: torch.Tensor, dtype: torch.dtype | None) -> torch.Tensor:
     # NB: no casting if dtype=None
     if dtype is not None and tensor.dtype != dtype:
         tensor = tensor.to(dtype)
     return tensor
 
 
-def cast_int_to_float(x):
+def cast_int_to_float(x: torch.Tensor) -> torch.Tensor:
     # cast integers and bools to the default float dtype
     if _dtypes_impl._category(x.dtype) < 2:
         x = x.to(_dtypes_impl.default_dtypes().float_dtype)
@@ -43,7 +45,7 @@ def cast_int_to_float(x):
 
 
 # a replica of the version in ./numpy/numpy/core/src/multiarray/common.h
-def normalize_axis_index(ax, ndim, argname=None):
+def normalize_axis_index(ax: int, ndim: int, argname: str | None = None) -> int:
     if not (-ndim <= ax < ndim):
         raise AxisError(f"axis {ax} is out of bounds for array of dimension {ndim}")
     if ax < 0:
@@ -52,7 +54,12 @@ def normalize_axis_index(ax, ndim, argname=None):
 
 
 # from https://github.com/numpy/numpy/blob/main/numpy/core/numeric.py#L1378
-def normalize_axis_tuple(axis, ndim, argname=None, allow_duplicate=False):
+def normalize_axis_tuple(
+    axis: int | Iterable[int],
+    ndim: int,
+    argname: str | None = None,
+    allow_duplicate: bool = False,
+) -> tuple[int, ...]:
     """
     Normalizes an axis argument into a tuple of non-negative integer axes.
 
@@ -82,41 +89,51 @@ def normalize_axis_tuple(axis, ndim, argname=None, allow_duplicate=False):
         The normalized axis index, such that `0 <= normalized_axis < ndim`
     """
     # Optimization to speed-up the most common cases.
-    if type(axis) not in (tuple, list):
+    axes: Iterable[int]
+    if isinstance(axis, (tuple, list)):
+        axes = axis
+    else:
+        # operator.index handles the scalar shorthand (int and __index__-like
+        # objects); a TypeError means axis is already an iterable of ints.
         try:
-            axis = [operator.index(axis)]
+            axes = [operator.index(axis)]  # pyrefly: ignore[bad-argument-type]
         except TypeError:
-            pass
+            axes = axis  # pyrefly: ignore[bad-assignment]
     # Going via an iterator directly is slower than via list comprehension.
-    axis = tuple(normalize_axis_index(ax, ndim, argname) for ax in axis)
-    if not allow_duplicate and len(set(map(int, axis))) != len(axis):
+    result = tuple(normalize_axis_index(ax, ndim, argname) for ax in axes)
+    if not allow_duplicate and len(set(map(int, result))) != len(result):
         if argname:
             raise ValueError(f"repeated axis in `{argname}` argument")
         else:
             raise ValueError("repeated axis")
-    return axis
+    return result
 
 
-def allow_only_single_axis(axis):
+def allow_only_single_axis(axis: int | tuple[int, ...] | None) -> int | None:
     if axis is None:
+        return axis
+    if isinstance(axis, int):
         return axis
     if len(axis) != 1:
         raise NotImplementedError("does not handle tuple axis")
     return axis[0]
 
 
-def expand_shape(arr_shape, axis):
+def expand_shape(
+    arr_shape: Sequence[int], axis: int | tuple[int, ...] | list[int]
+) -> list[int]:
     # taken from numpy 1.23.x, expand_dims function
-    if type(axis) not in (list, tuple):
-        axis = (axis,)
-    out_ndim = len(axis) + len(arr_shape)
-    axis = normalize_axis_tuple(axis, out_ndim)
+    axis_seq = axis if isinstance(axis, (list, tuple)) else (axis,)
+    out_ndim = len(axis_seq) + len(arr_shape)
+    normalized = normalize_axis_tuple(axis_seq, out_ndim)
     shape_it = iter(arr_shape)
-    shape = [1 if ax in axis else next(shape_it) for ax in range(out_ndim)]
+    shape = [1 if ax in normalized else next(shape_it) for ax in range(out_ndim)]
     return shape
 
 
-def apply_keepdims(tensor, axis, ndim):
+def apply_keepdims(
+    tensor: torch.Tensor, axis: int | tuple[int, ...] | None, ndim: int
+) -> torch.Tensor:
     if axis is None:
         # tensor was a scalar
         shape = (1,) * ndim
@@ -127,7 +144,9 @@ def apply_keepdims(tensor, axis, ndim):
     return tensor
 
 
-def axis_none_flatten(*tensors, axis=None):
+def axis_none_flatten(
+    *tensors: torch.Tensor, axis: int | None = None
+) -> tuple[tuple[torch.Tensor, ...], int]:
     """Flatten the arrays if axis is None."""
     if axis is None:
         tensors = tuple(ar.flatten() for ar in tensors)
@@ -136,7 +155,9 @@ def axis_none_flatten(*tensors, axis=None):
         return tensors, axis
 
 
-def typecast_tensor(t, target_dtype, casting):
+def typecast_tensor(
+    t: torch.Tensor, target_dtype: torch.dtype, casting: str
+) -> torch.Tensor:
     """Dtype-cast tensor to target_dtype.
 
     Parameters
@@ -168,11 +189,13 @@ def typecast_tensor(t, target_dtype, casting):
     return cast_if_needed(t, target_dtype)
 
 
-def typecast_tensors(tensors, target_dtype, casting):
+def typecast_tensors(
+    tensors: Sequence[torch.Tensor], target_dtype: torch.dtype, casting: str
+) -> tuple[torch.Tensor, ...]:
     return tuple(typecast_tensor(t, target_dtype, casting) for t in tensors)
 
 
-def _try_convert_to_tensor(obj):
+def _try_convert_to_tensor(obj: object) -> torch.Tensor:
     try:
         tensor = torch.as_tensor(obj)
     except Exception as e:
@@ -181,7 +204,12 @@ def _try_convert_to_tensor(obj):
     return tensor
 
 
-def _coerce_to_tensor(obj, dtype=None, copy=False, ndmin=0):
+def _coerce_to_tensor(
+    obj: object,
+    dtype: torch.dtype | None = None,
+    copy: bool = False,
+    ndmin: int = 0,
+) -> torch.Tensor:
     """The core logic of the array(...) function.
 
     Parameters
@@ -243,7 +271,7 @@ def _coerce_to_tensor(obj, dtype=None, copy=False, ndmin=0):
     return tensor
 
 
-def ndarrays_to_tensors(*inputs):
+def ndarrays_to_tensors(*inputs: object) -> object:
     """Convert all ndarrays from `inputs` to tensors. (other things are intact)"""
     from ._ndarray import ndarray
 
