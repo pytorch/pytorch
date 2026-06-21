@@ -43,9 +43,15 @@ def profile_it(f, inp):
     timing = prof.key_averages()
 
     # Compatibility fallback for profiler time attribute names across PyTorch versions
+    # Branch on device_time_total first and only touch cuda_time_total in the fallback path
+    # to keep the output clean and avoid FutureWarning
     def _dev_time(e):
-        # device_time_total is preferred; cuda_time_total used historically
-        return getattr(e, "device_time_total", getattr(e, "cuda_time_total", None))
+        if hasattr(e, "device_time_total"):
+            return e.device_time_total
+        elif hasattr(e, "cuda_time_total"):
+            return e.cuda_time_total
+        else:
+            return None
 
     times = [_dev_time(e) for e in timing]
     if any(t is None for t in times):
