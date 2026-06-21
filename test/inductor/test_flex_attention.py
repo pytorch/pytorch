@@ -5027,7 +5027,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @expected_not_implemented_on_mps
     def test_force_write_lse(self, device):
         dtype = torch.float32
         make_tensor = functools.partial(
