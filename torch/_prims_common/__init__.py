@@ -71,6 +71,18 @@ DeviceLikeType: TypeAlias = str | torch.device | int
 Tensor = torch.Tensor
 
 
+class _DeviceMismatchError(RuntimeError):
+    """Same-device check failure with structured device metadata."""
+
+    def __init__(self, device: torch.device, expected_device: torch.device) -> None:
+        self.device = device
+        self.expected_device = expected_device
+        super().__init__(
+            f"Tensor on device {device} is not on the expected device "
+            f"{expected_device}!"
+        )
+
+
 torch_function_passthrough = {
     torch.device,
     torch.sym_not,
@@ -921,14 +933,7 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
                 device = arg.device
 
             if device != arg.device:
-                msg = (
-                    "Tensor on device "
-                    + str(arg.device)
-                    + " is not on the expected device "
-                    + str(device)
-                    + "!"
-                )
-                raise RuntimeError(msg)
+                raise _DeviceMismatchError(arg.device, device)
         else:
             msg = (
                 "Unexpected type when checking for same device, " + str(type(arg)) + "!"

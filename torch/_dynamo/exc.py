@@ -202,9 +202,15 @@ class SkipFrame(TorchDynamoException):
 
 
 class TorchRuntimeError(TorchDynamoException):
-    def __init__(self, msg: str, real_stack: StackSummary | None = None) -> None:
+    def __init__(
+        self,
+        msg: str,
+        real_stack: StackSummary | None = None,
+        inner_exception: BaseException | None = None,
+    ) -> None:
         super().__init__(msg)
         self.msg = msg
+        self.inner_exception = inner_exception
         self.real_stack = (
             real_stack
             if real_stack is not None
