@@ -98,19 +98,16 @@ def _clean_stack_name(stack_name: str) -> str:
     """
     Clean up FX node's nn_module_stack metadata string to a dot-separated path.
 
-    L['self'] is replaced with L as a fixed anchor for the root of the network.
-
     Examples:
         Input: "L['self']._modules['layers']['0']._modules['attention']"
-        Output: "L.layers.0.attention"
+        Output: "layers.0.attention"
 
         Input: "L['self'].networks.1.conv"
-        Output: "L.networks.1.conv"
+        Output: "networks.1.conv"
     """
     cleaned = re.sub(r"^L\['self'\]\.?", "", stack_name)
     parts = re.findall(r"\['([^']+)'\]", cleaned)
-    suffix = ".".join(parts) if parts else cleaned
-    return f"L.{suffix}" if suffix else "L"
+    return ".".join(parts) if parts else cleaned
 
 
 def _is_root(stack: str) -> bool:
@@ -212,7 +209,7 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
                 continue
             module_names.add(fqn)
 
-    result = " + ".join(module_names) if module_names else None
+    result = " + ".join(f"L.{fqn}" for fqn in module_names) if module_names else None
     log.debug("get_fused_kernel_module_fqn: result=%s", result)
     return result
 
