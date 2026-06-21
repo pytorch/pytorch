@@ -5,7 +5,7 @@ import operator
 from collections import abc as container_abcs, OrderedDict
 from itertools import chain, islice
 from typing import Any, overload, TYPE_CHECKING, TypeVar
-from typing_extensions import deprecated, Self
+from typing_extensions import deprecated, override, Self
 
 import torch
 from torch._jit_internal import _copy_to_script_wrapper
@@ -548,8 +548,10 @@ class ModuleDict(Module):
     if TYPE_CHECKING:
         # ModuleDict stores only submodules, so attribute access always resolves
         # to a Module. Narrow the inherited ``Module.__getattr__`` return type
-        # (``Union[Tensor, Module]``) to ``Module`` for type checkers. This is a
-        # typing-only override with no runtime effect.
+        # (``Union[Tensor, Module]``) to ``Module`` for type checkers. Kept under
+        # ``TYPE_CHECKING`` so it stays a typing-only override with no runtime
+        # effect (``__getattr__`` is hot and we do not want to add a real call).
+        @override
         def __getattr__(self, name: str) -> Module:
             return self._modules[name]
 
